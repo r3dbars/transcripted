@@ -7,6 +7,8 @@ import AppKit
 class FloatingPanelController: NSWindowController {
     private var transcription: Transcription
     private var audio: Audio
+    private var floatingPanelView: FloatingPanelView?
+    private var bannerState: BannerState!
 
     init(transcription: Transcription, audio: Audio) {
         self.transcription = transcription
@@ -37,12 +39,59 @@ class FloatingPanelController: NSWindowController {
             window.setFrameOrigin(NSPoint(x: x, y: y))
         }
 
-        let view = FloatingPanelView(transcription: transcription, audio: audio)
+        // Create banner state
+        bannerState = BannerState(controller: self)
+
+        let view = FloatingPanelView(transcription: transcription, audio: audio, bannerState: bannerState)
+        self.floatingPanelView = view
         window.contentView = NSHostingView(rootView: view)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) not implemented")
+    }
+
+    // MARK: - Microphone Banner Methods
+
+    func showMicrophoneBanner() {
+        print("🔔 FloatingPanelController.showMicrophoneBanner() called")
+        floatingPanelView?.showMicrophoneBanner()
+    }
+
+    func expandForBanner(bannerHeight: CGFloat) {
+        guard let window = window else { return }
+
+        let currentFrame = window.frame
+        let newFrame = NSRect(
+            x: currentFrame.origin.x,
+            y: currentFrame.origin.y - bannerHeight, // Move down to keep top-right position
+            width: currentFrame.width,
+            height: currentFrame.height + bannerHeight
+        )
+
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.3
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.animator().setFrame(newFrame, display: true)
+        })
+    }
+
+    func collapseFromBanner(bannerHeight: CGFloat) {
+        guard let window = window else { return }
+
+        let currentFrame = window.frame
+        let newFrame = NSRect(
+            x: currentFrame.origin.x,
+            y: currentFrame.origin.y + bannerHeight,
+            width: currentFrame.width,
+            height: currentFrame.height - bannerHeight
+        )
+
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            window.animator().setFrame(newFrame, display: true)
+        })
     }
 }
 
@@ -53,10 +102,22 @@ class FloatingPanel: NSPanel {
 
 // MARK: - SwiftUI View
 
+// MARK: - Banner State Manager
+@available(macOS 26.0, *)
+class BannerState: ObservableObject {
+    @Published var showMicBanner = false
+    weak var controller: FloatingPanelController?
+
+    init(controller: FloatingPanelController) {
+        self.controller = controller
+    }
+}
+
 @available(macOS 26.0, *)
 struct FloatingPanelView: View {
     @ObservedObject var transcription: Transcription
     @ObservedObject var audio: Audio
+    @ObservedObject var bannerState: BannerState
 
     @State private var showCopiedCheckmark = false
     @State private var showReadyMessage = false
@@ -66,12 +127,24 @@ struct FloatingPanelView: View {
     @State private var isRecordButtonHovered = false
     @State private var isCopyButtonHovered = false
     @State private var isFileButtonHovered = false
+    @State private var bannerAutoHideTask: Task<Void, Never>?
 
     private let windowHeight: CGFloat = 45
     private let windowWidth: CGFloat = 170
+    private let bannerHeight: CGFloat = 38
 
     var body: some View {
         VStack(spacing: 0) {
+            // Microphone detection banner (conditional)
+            if bannerState.showMicBanner {
+                microphoneBannerView
+                    .frame(height: bannerHeight)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .top).combined(with: .opacity),
+                        removal: .move(edge: .top).combined(with: .opacity)
+                    ))
+            }
+
             HStack(spacing: 2) {
                 // Record/Stop button - changes color based on state
                 Button(action: { audio.isRecording ? audio.stop() : audio.start() }) {
@@ -176,7 +249,7 @@ struct FloatingPanelView: View {
             }
         )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .frame(width: windowWidth, height: windowHeight)
+        .frame(width: windowWidth, height: bannerState.showMicBanner ? windowHeight + bannerHeight : windowHeight)
         .overlay(errorOverlay)
         .onChange(of: transcription.isProcessing) { _, newValue in
             if newValue {
@@ -191,6 +264,86 @@ struct FloatingPanelView: View {
                 }
             }
         }
+        .onChange(of: bannerState.showMicBanner) { _, newValue in
+            handleBannerStateChange(newValue)
+        }
+    }
+
+    // MARK: - Microphone Banner View
+
+    private var microphoneBannerView: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "mic.circle.fill")
+                .font(.system(size: 16))
+                .foregroundColor(.green)
+
+            Text("Mic detected - Record?")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.white.opacity(0.9))
+                .lineLimit(1)
+
+            Spacer()
+
+            Button(action: dismissBanner) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9))
+                    .foregroundColor(.white.opacity(0.6))
+            }
+            .buttonStyle(PlainButtonStyle())
+            .help("Dismiss")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.08))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            startRecordingFromBanner()
+        }
+    }
+
+    // MARK: - Microphone Banner Methods
+
+    func showMicrophoneBanner() {
+        print("📱 FloatingPanelView.showMicrophoneBanner() called")
+        withAnimation(.easeOut(duration: 0.3)) {
+            bannerState.showMicBanner = true
+        }
+    }
+
+    private func handleBannerStateChange(_ show: Bool) {
+        print("🔄 Banner state changed: \(show)")
+        if show {
+            bannerState.controller?.expandForBanner(bannerHeight: bannerHeight)
+            scheduleAutoHideBanner()
+        } else {
+            bannerState.controller?.collapseFromBanner(bannerHeight: bannerHeight)
+            bannerAutoHideTask?.cancel()
+        }
+    }
+
+    private func scheduleAutoHideBanner() {
+        bannerAutoHideTask?.cancel()
+        bannerAutoHideTask = Task {
+            try? await Task.sleep(nanoseconds: 6_000_000_000) // 6 seconds
+            if !Task.isCancelled {
+                await MainActor.run {
+                    withAnimation(.easeIn(duration: 0.25)) {
+                        bannerState.showMicBanner = false
+                    }
+                }
+            }
+        }
+    }
+
+    private func dismissBanner() {
+        withAnimation(.easeIn(duration: 0.25)) {
+            bannerState.showMicBanner = false
+        }
+    }
+
+    private func startRecordingFromBanner() {
+        dismissBanner()
+        audio.start()
     }
 
     private var errorOverlay: some View {

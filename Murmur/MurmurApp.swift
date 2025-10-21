@@ -59,8 +59,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         floatingPanel?.showWindow(nil)
 
-        // Initialize microphone monitor for call detection
-        microphoneMonitor = MicrophoneMonitor(audio: audio!)
+        // Initialize microphone monitor with floating panel
+        microphoneMonitor = MicrophoneMonitor(
+            audio: audio!,
+            floatingPanel: floatingPanel
+        )
 
         requestPermissions()
 
