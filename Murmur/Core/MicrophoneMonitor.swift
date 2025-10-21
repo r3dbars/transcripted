@@ -8,7 +8,7 @@ class MicrophoneMonitor: NSObject {
     private weak var floatingPanel: FloatingPanelController?
     private var monitoredDevices: [AudioDeviceID] = []
     private var debounceTimer: Timer?
-    private let debounceDelay: TimeInterval = 2.0 // Wait 2 seconds before showing notification
+    private let debounceDelay: TimeInterval = 5.0 // Wait 5 seconds before showing notification
 
     init(audio: Audio, floatingPanel: FloatingPanelController?) {
         self.audio = audio

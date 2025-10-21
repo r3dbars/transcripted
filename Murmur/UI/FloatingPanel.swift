@@ -55,6 +55,12 @@ class FloatingPanelController: NSWindowController {
 
     func showMicrophoneBanner() {
         print("🔔 FloatingPanelController.showMicrophoneBanner() called")
+
+        // Play notification sound
+        if let sound = NSSound(named: "Glass") {
+            sound.play()
+        }
+
         floatingPanelView?.showMicrophoneBanner()
     }
 
@@ -62,9 +68,11 @@ class FloatingPanelController: NSWindowController {
         guard let window = window else { return }
 
         let currentFrame = window.frame
+        print("📐 Expanding from position: x=\(currentFrame.origin.x), y=\(currentFrame.origin.y)")
+
         let newFrame = NSRect(
             x: currentFrame.origin.x,
-            y: currentFrame.origin.y - bannerHeight, // Move down to keep top-right position
+            y: currentFrame.origin.y, // Keep same position - window expands upward
             width: currentFrame.width,
             height: currentFrame.height + bannerHeight
         )
@@ -74,6 +82,8 @@ class FloatingPanelController: NSWindowController {
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().setFrame(newFrame, display: true)
         })
+
+        print("📐 Expanded to position: x=\(newFrame.origin.x), y=\(newFrame.origin.y)")
     }
 
     func collapseFromBanner(bannerHeight: CGFloat) {
@@ -82,7 +92,7 @@ class FloatingPanelController: NSWindowController {
         let currentFrame = window.frame
         let newFrame = NSRect(
             x: currentFrame.origin.x,
-            y: currentFrame.origin.y + bannerHeight,
+            y: currentFrame.origin.y, // Keep same position
             width: currentFrame.width,
             height: currentFrame.height - bannerHeight
         )
@@ -128,6 +138,9 @@ struct FloatingPanelView: View {
     @State private var isCopyButtonHovered = false
     @State private var isFileButtonHovered = false
     @State private var bannerAutoHideTask: Task<Void, Never>?
+    @State private var isBannerHovered = false
+    @State private var pulseAnimation = false
+    @State private var bannerText = "Meeting detected"
 
     private let windowHeight: CGFloat = 45
     private let windowWidth: CGFloat = 170
@@ -274,13 +287,16 @@ struct FloatingPanelView: View {
     private var microphoneBannerView: some View {
         HStack(spacing: 8) {
             Image(systemName: "mic.circle.fill")
-                .font(.system(size: 16))
+                .font(.system(size: 20))
                 .foregroundColor(.green)
+                .scaleEffect(pulseAnimation ? 1.1 : 1.0)
+                .opacity(pulseAnimation ? 0.8 : 1.0)
 
-            Text("Mic detected - Record?")
+            Text(bannerText)
                 .font(.system(size: 10, weight: .medium))
                 .foregroundColor(.white.opacity(0.9))
                 .lineLimit(1)
+                .animation(.easeInOut(duration: 0.25), value: bannerText)
 
             Spacer()
 
@@ -294,10 +310,43 @@ struct FloatingPanelView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Color.white.opacity(0.08))
+        .background(
+            Color.white.opacity(isBannerHovered ? 0.12 : 0.08)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 0)
+                .stroke(
+                    Color.green.opacity(pulseAnimation ? 0.6 : 0.3),
+                    lineWidth: 1
+                )
+        )
+        .shadow(
+            color: Color.green.opacity(pulseAnimation ? 0.4 : 0.2),
+            radius: pulseAnimation ? 8 : 4,
+            x: 0,
+            y: 0
+        )
         .contentShape(Rectangle())
         .onTapGesture {
             startRecordingFromBanner()
+        }
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isBannerHovered = hovering
+                bannerText = hovering ? "Tap to record" : "Meeting detected"
+            }
+        }
+        .onAppear {
+            // Reset text to default
+            bannerText = "Meeting detected"
+
+            // Start pulse animation
+            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
+                pulseAnimation = true
+            }
+        }
+        .onDisappear {
+            pulseAnimation = false
         }
     }
 
@@ -324,7 +373,7 @@ struct FloatingPanelView: View {
     private func scheduleAutoHideBanner() {
         bannerAutoHideTask?.cancel()
         bannerAutoHideTask = Task {
-            try? await Task.sleep(nanoseconds: 6_000_000_000) // 6 seconds
+            try? await Task.sleep(nanoseconds: 12_000_000_000) // 12 seconds
             if !Task.isCancelled {
                 await MainActor.run {
                     withAnimation(.easeIn(duration: 0.25)) {
