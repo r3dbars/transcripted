@@ -24,6 +24,7 @@
 		A1000048 /* TranscriptSaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000049 /* TranscriptSaver.swift */; };
 		BFB5DC939F5C42A08A776239 /* SpeechModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 071AA82B22B24B3FAA39D522 /* SpeechModelManager.swift */; };
 		252872256B7C40EEB55AFBCD /* SpeechModelPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DD1ECFC05FB4476AC557DA7 /* SpeechModelPromptView.swift */; };
+		7899250F3B5C40D98B0869FF /* CallDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0F53C43185B46518FD83B34 /* CallDetector.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -47,6 +48,7 @@
 		A1000049 /* TranscriptSaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSaver.swift; sourceTree = "<group>"; };
 		071AA82B22B24B3FAA39D522 /* SpeechModelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechModelManager.swift; sourceTree = "<group>"; };
 		2DD1ECFC05FB4476AC557DA7 /* SpeechModelPromptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechModelPromptView.swift; sourceTree = "<group>"; };
+		E0F53C43185B46518FD83B34 /* CallDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallDetector.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -106,6 +108,7 @@
 				A1000004 /* Transcription.swift */,
 				A1000006 /* Audio.swift */,
 				A1000014 /* Clipboard.swift */,
+				E0F53C43185B46518FD83B34 /* CallDetector.swift */,
 				071AA82B22B24B3FAA39D522 /* SpeechModelManager.swift */,
 				A1000041 /* CoreAudioUtils.swift */,
 				A1000043 /* AudioRecordingPermission.swift */,
@@ -215,6 +218,7 @@
 				A1000044 /* SystemAudioCapture.swift in Sources */,
 				A1000046 /* AudioMixer.swift in Sources */,
 				A1000048 /* TranscriptSaver.swift in Sources */,
+				7899250F3B5C40D98B0869FF /* CallDetector.swift in Sources */,
 				BFB5DC939F5C42A08A776239 /* SpeechModelManager.swift in Sources */,
 				252872256B7C40EEB55AFBCD /* SpeechModelPromptView.swift in Sources */,
 				9A38EB6C64FA4649AB5C1FB9 /* AudioDebugMonitor.swift in Sources */,
