@@ -1,41 +1,25 @@
 import Foundation
 import CoreAudio
 import AppKit
-import UserNotifications
 
 @available(macOS 26.0, *)
-class MicrophoneMonitor: NSObject, UNUserNotificationCenterDelegate {
+class MicrophoneMonitor: NSObject {
     private var audio: Audio?
+    private weak var floatingPanel: FloatingPanelController?
     private var monitoredDevices: [AudioDeviceID] = []
     private var debounceTimer: Timer?
     private let debounceDelay: TimeInterval = 2.0 // Wait 2 seconds before showing notification
 
-    init(audio: Audio) {
+    init(audio: Audio, floatingPanel: FloatingPanelController?) {
         self.audio = audio
+        self.floatingPanel = floatingPanel
         super.init()
 
-        setupNotifications()
         startMonitoring()
     }
 
     deinit {
         stopMonitoring()
-    }
-
-    private func setupNotifications() {
-        let center = UNUserNotificationCenter.current()
-        center.delegate = self
-
-        // Request notification permission
-        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
-            if let error = error {
-                print("❌ Notification permission error: \(error)")
-            } else if granted {
-                print("✓ Notification permission granted")
-            } else {
-                print("⚠️ Notification permission denied by user")
-            }
-        }
     }
 
     private func startMonitoring() {
@@ -252,52 +236,8 @@ class MicrophoneMonitor: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func showNotification(deviceName: String) {
-        let content = UNMutableNotificationContent()
-        content.title = "Microphone Detected"
-        content.body = "Start recording this call?"
-        content.sound = .default
-        content.categoryIdentifier = "MICROPHONE_DETECTED"
-
-        let request = UNNotificationRequest(
-            identifier: UUID().uuidString,
-            content: content,
-            trigger: nil // Show immediately
-        )
-
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error = error {
-                print("❌ Failed to show notification: \(error)")
-            } else {
-                print("✓ Notification shown")
-            }
-        }
-    }
-
-    // MARK: - UNUserNotificationCenterDelegate
-
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse,
-        withCompletionHandler completionHandler: @escaping () -> Void
-    ) {
-        // User clicked the notification - start recording
-        if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
-            DispatchQueue.main.async { [weak self] in
-                print("📝 User clicked notification - starting recording")
-                self?.audio?.start()
-            }
-        }
-
-        completionHandler()
-    }
-
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-        // Show notification even when app is active
-        completionHandler([.banner, .sound])
+        print("✓ Showing microphone banner for: \(deviceName)")
+        floatingPanel?.showMicrophoneBanner()
     }
 }
 

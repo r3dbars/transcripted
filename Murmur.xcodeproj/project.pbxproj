@@ -134,8 +134,7 @@
 				A1000008 /* FloatingPanel.swift */,
 				A1000010 /* Settings.swift */,
 				3AC3085CA8F8493F850F7786 /* SpeechModelPromptView.swift */,
-				2DD1ECFC05FB4476AC557DA7 /* SpeechModelPromptView.swift */,
-			);
+				2DD1ECFC05FB4476AC557DA7 /* SpeechModelPromptView.swift */,	);
 			path = UI;
 			sourceTree = "<group>";
 		};
