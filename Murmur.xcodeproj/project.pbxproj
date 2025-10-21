@@ -25,6 +25,9 @@
 		BFB5DC939F5C42A08A776239 /* SpeechModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 071AA82B22B24B3FAA39D522 /* SpeechModelManager.swift */; };
 		252872256B7C40EEB55AFBCD /* SpeechModelPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DD1ECFC05FB4476AC557DA7 /* SpeechModelPromptView.swift */; };
 		7899250F3B5C40D98B0869FF /* CallDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0F53C43185B46518FD83B34 /* CallDetector.swift */; };
+		3EDA4C78AECA49588374E1EC /* SpeechModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9480FD8220B4861B7915674 /* SpeechModelManager.swift */; };
+		60CAAC36E24B42DA9FB659BF /* SpeechModelPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AC3085CA8F8493F850F7786 /* SpeechModelPromptView.swift */; };
+		4F298A74CDB24B018F87110E /* MicrophoneMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F60CE8024254E6EA1071092 /* MicrophoneMonitor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -49,6 +52,9 @@
 		071AA82B22B24B3FAA39D522 /* SpeechModelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechModelManager.swift; sourceTree = "<group>"; };
 		2DD1ECFC05FB4476AC557DA7 /* SpeechModelPromptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechModelPromptView.swift; sourceTree = "<group>"; };
 		E0F53C43185B46518FD83B34 /* CallDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallDetector.swift; sourceTree = "<group>"; };
+		C9480FD8220B4861B7915674 /* SpeechModelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechModelManager.swift; sourceTree = "<group>"; };
+		3AC3085CA8F8493F850F7786 /* SpeechModelPromptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechModelPromptView.swift; sourceTree = "<group>"; };
+		8F60CE8024254E6EA1071092 /* MicrophoneMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicrophoneMonitor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -108,6 +114,7 @@
 				A1000004 /* Transcription.swift */,
 				A1000006 /* Audio.swift */,
 				A1000014 /* Clipboard.swift */,
+				C9480FD8220B4861B7915674 /* SpeechModelManager.swift */,
 				E0F53C43185B46518FD83B34 /* CallDetector.swift */,
 				071AA82B22B24B3FAA39D522 /* SpeechModelManager.swift */,
 				A1000041 /* CoreAudioUtils.swift */,
@@ -116,7 +123,8 @@
 				A1000047 /* AudioMixer.swift */,
 				A1000049 /* TranscriptSaver.swift */,
 				0D9F47D4DCDFC24C60A63C24 /* BufferConverter.swift */,
-			);
+		
+				8F60CE8024254E6EA1071092 /* MicrophoneMonitor.swift */,	);
 			path = Core;
 			sourceTree = "<group>";
 		};
@@ -125,6 +133,7 @@
 			children = (
 				A1000008 /* FloatingPanel.swift */,
 				A1000010 /* Settings.swift */,
+				3AC3085CA8F8493F850F7786 /* SpeechModelPromptView.swift */,
 				2DD1ECFC05FB4476AC557DA7 /* SpeechModelPromptView.swift */,
 			);
 			path = UI;
@@ -218,13 +227,16 @@
 				A1000044 /* SystemAudioCapture.swift in Sources */,
 				A1000046 /* AudioMixer.swift in Sources */,
 				A1000048 /* TranscriptSaver.swift in Sources */,
+				3EDA4C78AECA49588374E1EC /* SpeechModelManager.swift in Sources */,
+				60CAAC36E24B42DA9FB659BF /* SpeechModelPromptView.swift in Sources */,
 				7899250F3B5C40D98B0869FF /* CallDetector.swift in Sources */,
 				BFB5DC939F5C42A08A776239 /* SpeechModelManager.swift in Sources */,
 				252872256B7C40EEB55AFBCD /* SpeechModelPromptView.swift in Sources */,
 				9A38EB6C64FA4649AB5C1FB9 /* AudioDebugMonitor.swift in Sources */,
 				9C5C9E9D68B74865A95887C9 /* DebugWindow.swift in Sources */,
 				637F91A38778E5EE9798E744 /* BufferConverter.swift in Sources */,
-			);
+		
+				4F298A74CDB24B018F87110E /* MicrophoneMonitor.swift in Sources */,	);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */

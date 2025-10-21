@@ -24,7 +24,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var debugWindow: NSWindow?
     var modelPromptWindow: NSWindow?
     var modelManager: SpeechModelManager?
-    var callDetector: CallDetector?
+    var microphoneMonitor: MicrophoneMonitor?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -59,8 +59,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         floatingPanel?.showWindow(nil)
 
-        // Initialize call detector for meeting notifications
-        callDetector = CallDetector(audio: audio!)
+        // Initialize microphone monitor for call detection
+        microphoneMonitor = MicrophoneMonitor(audio: audio!)
 
         requestPermissions()
 
