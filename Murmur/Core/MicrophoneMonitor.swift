@@ -188,21 +188,21 @@ class MicrophoneMonitor: NSObject {
         if isRunning {
             print("🎤 Microphone activated: \(deviceName)")
 
-            // Only show notification if not already recording
-            guard audio?.isRecording == false else {
-                print("⚠️ Already recording, skipping notification")
+            // Only show notification if not already recording or processing
+            guard audio?.isBusy == false else {
+                print("⚠️ App is busy (recording or processing), skipping notification")
                 return
             }
 
             // Debounce: Wait a bit to avoid false positives from brief mic usage
             debounceTimer?.invalidate()
             debounceTimer = Timer.scheduledTimer(withTimeInterval: debounceDelay, repeats: false) { [weak self] _ in
-                // Check again if mic is still active and we're not recording
+                // Check again if mic is still active and we're not busy
                 if self?.isDeviceRunning(deviceID: deviceID) == true,
-                   self?.audio?.isRecording == false {
+                   self?.audio?.isBusy == false {
                     self?.showNotification(deviceName: deviceName)
                 } else {
-                    print("⚠️ Mic stopped before debounce timer, skipping notification")
+                    print("⚠️ Mic stopped or app became busy before debounce timer, skipping notification")
                 }
             }
         } else {

@@ -279,6 +279,30 @@ class Transcription: ObservableObject {
         }
     }
 
+    /// Prepare for next recording session
+    /// Lighter reset that clears session data while preserving configuration
+    func resetForNextRecording() {
+        // Clean up any lingering transcription resources
+        recognizerTask?.cancel()
+        recognizerTask = nil
+        inputBuilder?.finish()
+        inputBuilder = nil
+        transcriber = nil
+        analyzer = nil
+        bufferConverter = nil
+        accumulatedFinalText = ""
+        audioFile = nil
+        recordingStartTime = nil
+
+        // Clear UI state on main thread
+        DispatchQueue.main.async {
+            self.error = nil
+            self.isProcessing = false
+            self.isProcessingSystemAudio = false
+            // Keep currentText and lastSavedFileURL so user can still access previous transcript
+        }
+    }
+
     /// Copy a buffer for async processing
     private func copyBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
         guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameCapacity) else {

@@ -43,6 +43,11 @@ class Audio: ObservableObject {
     // Optimal audio format from SpeechAnalyzer (queried once at startup)
     private var optimalAudioFormat: AVAudioFormat?
 
+    /// Returns true if the app is busy (recording or processing transcription)
+    var isBusy: Bool {
+        return isRecording || transcription.isProcessing
+    }
+
     init(transcription: Transcription) {
         self.transcription = transcription
         self.audioMixer = AudioMixer()
@@ -181,6 +186,18 @@ class Audio: ObservableObject {
 
     func start() {
         guard !isRecording else { return }
+
+        // Prevent starting new recording while still processing previous one
+        if transcription.isProcessing {
+            monitor.log("Cannot start recording: still processing previous transcript", level: .warning)
+            Task { @MainActor in
+                transcription.error = "Still processing previous recording..."
+                // Clear error after 3 seconds
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                transcription.error = nil
+            }
+            return
+        }
 
         monitor.reset()
         monitor.log("Starting audio capture", level: .info)
@@ -399,8 +416,13 @@ class Audio: ObservableObject {
             }
 
             // Install tap on microphone - write to file for post-processing
+            // CRITICAL: Remove any existing tap first to avoid "tap already exists" crash
+            inputNode.removeTap(onBus: 0)
+
+            // CRITICAL: Use nil format to let AVAudioEngine use the native hardware format
+            // This avoids format mismatches when system audio tap claims different rates
             var frameCount = 0
-            inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] micBuffer, _ in
+            inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] micBuffer, _ in
                 guard let self = self else { return }
 
                 // Debug: Log first buffer to confirm mic is capturing
@@ -516,7 +538,9 @@ class Audio: ObservableObject {
 
         // Convert system audio from 48kHz → 16kHz, then transcribe both files
         if let micURL = micAudioFileURL, let sysURL = systemAudioFileURL {
-            Task {
+            Task { [weak self] in
+                guard let self = self else { return }
+
                 do {
                     monitor.log("Converting system audio 48kHz → 16kHz...", level: .info)
 
@@ -532,9 +556,32 @@ class Audio: ObservableObject {
                         recordingDuration: duration,
                         processingStartTime: processingStartTime
                     )
+
+                    // Reset transcription state for next recording session
+                    monitor.log("✅ Transcription complete, ready for next session", level: .success)
+                    transcription.resetForNextRecording()
+
+                    // Clear audio file URLs
+                    await MainActor.run {
+                        self.micAudioFileURL = nil
+                        self.systemAudioFileURL = nil
+                    }
                 } catch {
-                    monitor.log("❌ Post-conversion failed: \(error.localizedDescription)", level: .error)
-                    // Audio files preserved for retry
+                    monitor.log("❌ Transcription failed: \(error.localizedDescription)", level: .error)
+
+                    // Set error message for user
+                    await MainActor.run {
+                        transcription.error = "Transcription failed: \(error.localizedDescription)"
+                    }
+
+                    // Reset state even on error so app can recover
+                    transcription.resetForNextRecording()
+
+                    // Clear audio file URLs
+                    await MainActor.run {
+                        self.micAudioFileURL = nil
+                        self.systemAudioFileURL = nil
+                    }
                 }
             }
         }

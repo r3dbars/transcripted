@@ -124,12 +124,21 @@ class SystemAudioCapture: ObservableObject {
             throw "Tap stream description not available"
         }
 
+        // CRITICAL FIX: CoreAudio tap lies about sample rate
+        // It claims 96kHz but actual hardware delivers 48kHz
+        // Force the stream description to 48kHz to match reality
+        let actualSampleRate = 48000.0
+        if streamDescription.mSampleRate != actualSampleRate {
+            AudioDebugMonitor.shared.log("⚠️ Correcting tap sample rate from \(streamDescription.mSampleRate)Hz to \(actualSampleRate)Hz", level: .warning)
+            streamDescription.mSampleRate = actualSampleRate
+        }
+
         guard let format = AVAudioFormat(streamDescription: &streamDescription) else {
             throw "Failed to create AVAudioFormat from tap description"
         }
 
         // 🔍 DIAGNOSTIC: Log what AVAudioFormat interprets
-        print("🔍 AVAudioFormat created from tap:")
+        print("🔍 AVAudioFormat created from tap (corrected):")
         print("   sampleRate: \(format.sampleRate)")
         print("   channelCount: \(format.channelCount)")
         print("   commonFormat: \(format.commonFormat.rawValue)")
