@@ -7,9 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		637F91A38778E5EE9798E744 /* BufferConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D9F47D4DCDFC24C60A63C24 /* BufferConverter.swift */; };
-		9A38EB6C64FA4649AB5C1FB9 /* AudioDebugMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5093C6922A65470CACD1B329 /* AudioDebugMonitor.swift */; };
-		9C5C9E9D68B74865A95887C9 /* DebugWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1949877207034DD6B88F57F7 /* DebugWindow.swift */; };
 		A1000001 /* MurmurApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002 /* MurmurApp.swift */; };
 		A1000003 /* Transcription.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000004 /* Transcription.swift */; };
 		A1000005 /* Audio.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000006 /* Audio.swift */; };
@@ -20,16 +17,11 @@
 		A1000040 /* CoreAudioUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000041 /* CoreAudioUtils.swift */; };
 		A1000042 /* AudioRecordingPermission.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000043 /* AudioRecordingPermission.swift */; };
 		A1000044 /* SystemAudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000045 /* SystemAudioCapture.swift */; };
-		A1000046 /* AudioMixer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000047 /* AudioMixer.swift */; };
 		A1000048 /* TranscriptSaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000049 /* TranscriptSaver.swift */; };
-		BFB5DC939F5C42A08A776239 /* SpeechModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 071AA82B22B24B3FAA39D522 /* SpeechModelManager.swift */; };
-		252872256B7C40EEB55AFBCD /* SpeechModelPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DD1ECFC05FB4476AC557DA7 /* SpeechModelPromptView.swift */; };
+		A1000050 /* TranscriptionTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000051 /* TranscriptionTaskManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		0D9F47D4DCDFC24C60A63C24 /* BufferConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BufferConverter.swift; sourceTree = "<group>"; };
-		1949877207034DD6B88F57F7 /* DebugWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugWindow.swift; sourceTree = "<group>"; };
-		5093C6922A65470CACD1B329 /* AudioDebugMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDebugMonitor.swift; sourceTree = "<group>"; };
 		A1000002 /* MurmurApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MurmurApp.swift; sourceTree = "<group>"; };
 		A1000004 /* Transcription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcription.swift; sourceTree = "<group>"; };
 		A1000006 /* Audio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Audio.swift; sourceTree = "<group>"; };
@@ -43,10 +35,8 @@
 		A1000041 /* CoreAudioUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioUtils.swift; sourceTree = "<group>"; };
 		A1000043 /* AudioRecordingPermission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecordingPermission.swift; sourceTree = "<group>"; };
 		A1000045 /* SystemAudioCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemAudioCapture.swift; sourceTree = "<group>"; };
-		A1000047 /* AudioMixer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMixer.swift; sourceTree = "<group>"; };
 		A1000049 /* TranscriptSaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSaver.swift; sourceTree = "<group>"; };
-		071AA82B22B24B3FAA39D522 /* SpeechModelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechModelManager.swift; sourceTree = "<group>"; };
-		2DD1ECFC05FB4476AC557DA7 /* SpeechModelPromptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechModelPromptView.swift; sourceTree = "<group>"; };
+		A1000051 /* TranscriptionTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTaskManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -60,22 +50,11 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		51D7CCA7710A407DA2EF5B26 /* Debug */ = {
-			isa = PBXGroup;
-			children = (
-				5093C6922A65470CACD1B329 /* AudioDebugMonitor.swift */,
-				1949877207034DD6B88F57F7 /* DebugWindow.swift */,
-			);
-			name = Debug;
-			path = Murmur/Debug;
-			sourceTree = "<group>";
-		};
 		A1000021 = {
 			isa = PBXGroup;
 			children = (
 				A1000022 /* Murmur */,
 				A1000023 /* Products */,
-				51D7CCA7710A407DA2EF5B26 /* Debug */,
 			);
 			sourceTree = "<group>";
 		};
@@ -104,15 +83,13 @@
 			isa = PBXGroup;
 			children = (
 				A1000004 /* Transcription.swift */,
+				A1000051 /* TranscriptionTaskManager.swift */,
 				A1000006 /* Audio.swift */,
 				A1000014 /* Clipboard.swift */,
-				071AA82B22B24B3FAA39D522 /* SpeechModelManager.swift */,
 				A1000041 /* CoreAudioUtils.swift */,
 				A1000043 /* AudioRecordingPermission.swift */,
 				A1000045 /* SystemAudioCapture.swift */,
-				A1000047 /* AudioMixer.swift */,
 				A1000049 /* TranscriptSaver.swift */,
-				0D9F47D4DCDFC24C60A63C24 /* BufferConverter.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -122,7 +99,6 @@
 			children = (
 				A1000008 /* FloatingPanel.swift */,
 				A1000010 /* Settings.swift */,
-				2DD1ECFC05FB4476AC557DA7 /* SpeechModelPromptView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -206,6 +182,7 @@
 			files = (
 				A1000001 /* MurmurApp.swift in Sources */,
 				A1000003 /* Transcription.swift in Sources */,
+				A1000050 /* TranscriptionTaskManager.swift in Sources */,
 				A1000005 /* Audio.swift in Sources */,
 				A1000007 /* FloatingPanel.swift in Sources */,
 				A1000009 /* Settings.swift in Sources */,
@@ -213,13 +190,7 @@
 				A1000040 /* CoreAudioUtils.swift in Sources */,
 				A1000042 /* AudioRecordingPermission.swift in Sources */,
 				A1000044 /* SystemAudioCapture.swift in Sources */,
-				A1000046 /* AudioMixer.swift in Sources */,
 				A1000048 /* TranscriptSaver.swift in Sources */,
-				BFB5DC939F5C42A08A776239 /* SpeechModelManager.swift in Sources */,
-				252872256B7C40EEB55AFBCD /* SpeechModelPromptView.swift in Sources */,
-				9A38EB6C64FA4649AB5C1FB9 /* AudioDebugMonitor.swift in Sources */,
-				9C5C9E9D68B74865A95887C9 /* DebugWindow.swift in Sources */,
-				637F91A38778E5EE9798E744 /* BufferConverter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

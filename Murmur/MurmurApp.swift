@@ -18,16 +18,14 @@ struct MurmurApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var floatingPanel: FloatingPanelController?
-    var transcription: Transcription?
+    var taskManager: TranscriptionTaskManager?
     var audio: Audio?
     var settingsWindow: NSWindow?
-    var debugWindow: NSWindow?
-    var modelPromptWindow: NSWindow?
-    var modelManager: SpeechModelManager?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
+        // Setup menu bar
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem?.button {
             button.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Murmur")
@@ -38,32 +36,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Show/Hide Window", action: #selector(toggleWindow), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Debug Console...", action: #selector(openDebugConsole), keyEquivalent: "d"))
         menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit Murmur", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem?.menu = menu
 
-        // Initialize model manager
-        modelManager = SpeechModelManager()
+        // Initialize task manager and audio
+        taskManager = TranscriptionTaskManager()
+        audio = Audio()
 
-        transcription = Transcription()
-        transcription?.modelManager = modelManager  // Link model manager
+        // Wire up recording completion callback
+        audio?.onRecordingComplete = { [weak self] micURL, systemURL in
+            self?.handleRecordingComplete(micURL: micURL, systemURL: systemURL)
+        }
 
-        audio = Audio(transcription: transcription!)
-
+        // Create floating panel
         floatingPanel = FloatingPanelController(
-            transcription: transcription!,
+            taskManager: taskManager!,
             audio: audio!
         )
         floatingPanel?.showWindow(nil)
 
+        // Request permissions
         requestPermissions()
-
-        // Check speech model availability after a short delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.checkSpeechModel()
-        }
     }
 
     @objc func statusBarClicked() {
@@ -76,22 +71,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func toggleRecording() {
-        if audio?.isRecording == true {
-            audio?.stop()
-        } else {
-            audio?.start()
-        }
-    }
-
     @objc func openSettings() {
         if settingsWindow == nil {
-            guard let modelManager = modelManager else { return }
-            let view = SettingsView(modelManager: modelManager)
+            let view = SettingsView()
             let controller = NSHostingController(rootView: view)
 
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 450, height: 500),
+                contentRect: NSRect(x: 0, y: 0, width: 450, height: 400),
                 styleMask: [.titled, .closable],
                 backing: .buffered,
                 defer: false
@@ -108,30 +94,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    @objc func openDebugConsole() {
-        if debugWindow == nil {
-            let view = DebugWindow()
-            let controller = NSHostingController(rootView: view)
-
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 700, height: 800),
-                styleMask: [.titled, .closable, .resizable],
-                backing: .buffered,
-                defer: false
-            )
-            window.contentViewController = controller
-            window.title = "Murmur Debug Console"
-            window.center()
-            window.isReleasedWhenClosed = false
-
-            debugWindow = window
-        }
-
-        debugWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
     func requestPermissions() {
+        // Request speech recognition permission
         SFSpeechRecognizer.requestAuthorization { status in
             if status != .authorized {
                 print("❌ Speech recognition permission denied")
@@ -140,45 +104,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Note: System audio capture permission is requested automatically
-        // when attempting to create the audio tap (via NSAudioCaptureUsageDescription)
         print("ℹ️ System audio permission will be requested on first capture attempt")
     }
 
-    func checkSpeechModel() {
-        guard let modelManager = modelManager else { return }
-
-        Task {
-            await modelManager.checkModelAvailability()
-
-            // Show prompt if needed
-            await MainActor.run {
-                if modelManager.shouldShowModelPrompt {
-                    self.showModelPrompt()
-                }
-            }
+    /// Handle recording completion - trigger transcription
+    func handleRecordingComplete(micURL: URL?, systemURL: URL?) {
+        guard let micURL = micURL else {
+            print("❌ No mic audio file available")
+            return
         }
-    }
 
-    func showModelPrompt() {
-        guard let modelManager = modelManager else { return }
+        print("📝 Recording complete - starting transcription")
 
-        let view = SpeechModelPromptView(modelManager: modelManager)
-        let controller = NSHostingController(rootView: view)
+        // Get output folder from settings
+        let outputFolder: URL
+        if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
+           !customPath.isEmpty {
+            outputFolder = URL(fileURLWithPath: customPath)
+        } else {
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            outputFolder = documentsPath.appendingPathComponent("Murmur Transcripts")
+        }
 
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 550),
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
+        // Create output folder if it doesn't exist
+        try? FileManager.default.createDirectory(at: outputFolder, withIntermediateDirectories: true)
+
+        // Start transcription in background using task manager
+        taskManager?.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: outputFolder
         )
-        window.contentViewController = controller
-        window.title = "Enhanced Privacy"
-        window.center()
-        window.isReleasedWhenClosed = true
-
-        modelPromptWindow = window
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
     }
 }
