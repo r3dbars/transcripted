@@ -45,11 +45,14 @@ class SystemAudioCapture: ObservableObject {
     func stop() {
         guard isCapturing else { return }
 
-        cleanup()
-
         DispatchQueue.main.async {
             self.isCapturing = false
         }
+
+        // Let audio pipeline settle before destroying devices
+        Thread.sleep(forTimeInterval: 0.5)
+
+        cleanup()
     }
 
     // MARK: - Private Methods
@@ -101,16 +104,6 @@ class SystemAudioCapture: ObservableObject {
         // Read the tap's audio format
         self.tapStreamDescription = try tapID.readAudioTapStreamBasicDescription()
 
-        // 🔍 DIAGNOSTIC: Log RAW tap stream description
-        print("🔍 TAP RAW AudioStreamBasicDescription:")
-        print("   mSampleRate: \(tapStreamDescription!.mSampleRate)")
-        print("   mChannelsPerFrame: \(tapStreamDescription!.mChannelsPerFrame)")
-        print("   mBitsPerChannel: \(tapStreamDescription!.mBitsPerChannel)")
-        print("   mBytesPerFrame: \(tapStreamDescription!.mBytesPerFrame)")
-        print("   mBytesPerPacket: \(tapStreamDescription!.mBytesPerPacket)")
-        print("   mFramesPerPacket: \(tapStreamDescription!.mFramesPerPacket)")
-        print("   mFormatFlags: \(tapStreamDescription!.mFormatFlags)")
-
         // Create aggregate device
         aggregateDeviceID = .unknown
         err = AudioHardwareCreateAggregateDevice(description as CFDictionary, &aggregateDeviceID)
@@ -127,14 +120,6 @@ class SystemAudioCapture: ObservableObject {
         guard let format = AVAudioFormat(streamDescription: &streamDescription) else {
             throw "Failed to create AVAudioFormat from tap description"
         }
-
-        // 🔍 DIAGNOSTIC: Log what AVAudioFormat interprets
-        print("🔍 AVAudioFormat created from tap:")
-        print("   sampleRate: \(format.sampleRate)")
-        print("   channelCount: \(format.channelCount)")
-        print("   commonFormat: \(format.commonFormat.rawValue)")
-        print("   settings: \(format.settings)")
-        print("   isInterleaved: \(format.isInterleaved)")
 
         // Create I/O proc to receive audio buffers
         var err = AudioDeviceCreateIOProcIDWithBlock(&deviceProcID, aggregateDeviceID, queue) { [weak self] inNow, inInputData, inInputTime, outOutputData, inOutputTime in
@@ -164,6 +149,20 @@ class SystemAudioCapture: ObservableObject {
     }
 
     private func cleanup() {
+        print("🧹 Cleaning up system audio capture...")
+
+        // FIRST: Destroy the tap (releases references to aggregate device)
+        if processTapID.isValid {
+            let result = AudioHardwareDestroyProcessTap(processTapID)
+            if result == noErr {
+                print("✓ Process tap destroyed")
+            } else {
+                print("⚠️ Failed to destroy process tap: \(result)")
+            }
+            processTapID = .unknown
+        }
+
+        // THEN: Stop and destroy the aggregate device
         if aggregateDeviceID.isValid {
             _ = AudioDeviceStop(aggregateDeviceID, deviceProcID)
 
@@ -172,16 +171,17 @@ class SystemAudioCapture: ObservableObject {
                 self.deviceProcID = nil
             }
 
-            _ = AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
+            let result = AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
+            if result == noErr {
+                print("✓ Aggregate device destroyed")
+            } else {
+                print("⚠️ Failed to destroy aggregate device: \(result)")
+            }
             aggregateDeviceID = .unknown
         }
 
-        if processTapID.isValid {
-            _ = AudioHardwareDestroyProcessTap(processTapID)
-            self.processTapID = .unknown
-        }
-
         bufferCallback = nil
+        print("✓ System audio cleanup complete")
     }
 
     deinit {

@@ -152,9 +152,8 @@ class TranscriptSaver {
 
         let totalWords = segments.reduce(0) { $0 + $1.text.split(separator: " ").count }
 
-        // Extract unique speakers for YAML
-        let speakers = Set(segments.map { $0.source.lowercased().replacingOccurrences(of: " ", with: "_") })
-        let speakerList = speakers.sorted().map { "  - \($0)" }.joined(separator: "\n")
+        // Extract unique speakers for YAML (unused for now, but kept for future enhancements)
+        _ = Set(segments.map { $0.source.lowercased().replacingOccurrences(of: " ", with: "_") })
 
         // Format timestamp for YAML and metadata
         let timeFormatter = DateFormatter()

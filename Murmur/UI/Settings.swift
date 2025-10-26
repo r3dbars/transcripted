@@ -4,7 +4,6 @@ import AVFoundation
 
 @available(macOS 26.0, *)
 struct SettingsView: View {
-    @ObservedObject var modelManager: SpeechModelManager
     @AppStorage("transcriptSaveLocation") private var saveLocation: String = ""
     @AppStorage("selectedMicrophoneID") private var selectedMicrophoneID: String = ""
     @Environment(\.dismiss) private var dismiss
@@ -46,37 +45,6 @@ struct SettingsView: View {
             .cornerRadius(8)
             .onAppear(perform: loadMicrophones)
 
-            // Transcription Engine
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Transcription Engine")
-                    .font(.system(size: 14, weight: .medium))
-
-                HStack(spacing: 12) {
-                    Image(systemName: modelManager.isOnDeviceAvailable ? "shield.lefthalf.filled" : "cloud.fill")
-                        .font(.system(size: 24))
-                        .foregroundColor(modelManager.isOnDeviceAvailable ? .green : .blue)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(modelManager.isOnDeviceAvailable ? "On-Device (Private)" : "Cloud-Based")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text(modelManager.isOnDeviceAvailable ? "Audio never leaves your Mac" : "Processed by Apple's servers")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                if !modelManager.isOnDeviceAvailable {
-                    Button("Download On-Device Model...") {
-                        modelManager.openDictationSettings()
-                    }
-                    .buttonStyle(.bordered)
-                    .padding(.top, 4)
-                }
-            }
-            .padding()
-            .background(Color.gray.opacity(0.1))
-            .cornerRadius(8)
-
             // Transcript Storage
             VStack(alignment: .leading, spacing: 8) {
                 Text("Transcript Storage")
@@ -114,12 +82,17 @@ struct SettingsView: View {
             }
             .keyboardShortcut(.defaultAction)
         }
-        .frame(width: 450, height: 500)
+        .frame(width: 450, height: 400)
         .padding()
     }
 
     private func loadMicrophones() {
-        availableMicrophones = AVCaptureDevice.devices(for: .audio)
+        let discoverySession = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInMicrophone, .externalUnknown],
+            mediaType: .audio,
+            position: .unspecified
+        )
+        availableMicrophones = discoverySession.devices
     }
 
     private var displayPath: String {
