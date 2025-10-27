@@ -16,6 +16,11 @@ class SystemAudioCapture: ObservableObject {
     private let queue = DispatchQueue(label: "SystemAudioCapture", qos: .userInitiated)
     private var bufferCallback: ((AVAudioPCMBuffer) -> Void)?
 
+    // Device change watchdog
+    private var lastBufferTime: Date = Date()
+    private var watchdogTimer: Timer?
+    private var audioFile: AVAudioFile?
+
     init() {}
 
     /// Starts capturing system audio and calls the callback with each buffer
@@ -33,6 +38,7 @@ class SystemAudioCapture: ObservableObject {
 
             DispatchQueue.main.async {
                 self.isCapturing = true
+                self.startWatchdog()
             }
         } catch {
             let errMsg = "Failed to start system audio capture: \(error.localizedDescription)"
@@ -41,12 +47,18 @@ class SystemAudioCapture: ObservableObject {
         }
     }
 
+    /// Sets the audio file reference for writing (called from Audio.swift)
+    func setAudioFile(_ file: AVAudioFile?) {
+        self.audioFile = file
+    }
+
     /// Stops capturing system audio
     func stop() {
         guard isCapturing else { return }
 
         DispatchQueue.main.async {
             self.isCapturing = false
+            self.stopWatchdog()
         }
 
         // Let audio pipeline settle before destroying devices
@@ -130,6 +142,9 @@ class SystemAudioCapture: ObservableObject {
                     throw "Failed to create PCM buffer"
                 }
 
+                // Update watchdog timestamp
+                self.lastBufferTime = Date()
+
                 // Send buffer to callback
                 bufferCallback(buffer)
             } catch {
@@ -184,7 +199,69 @@ class SystemAudioCapture: ObservableObject {
         print("✓ System audio cleanup complete")
     }
 
+    private func startWatchdog() {
+        lastBufferTime = Date()
+        watchdogTimer?.invalidate()
+        watchdogTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            guard let self = self, self.isCapturing else { return }
+
+            let timeSinceLastBuffer = Date().timeIntervalSince(self.lastBufferTime)
+
+            if timeSinceLastBuffer > 3.0 {
+                // System audio stopped → output device likely changed
+                print("⚠️ System audio output device disconnected or changed, attempting recovery...")
+                self.recoverFromOutputChange()
+            }
+        }
+    }
+
+    private func stopWatchdog() {
+        watchdogTimer?.invalidate()
+        watchdogTimer = nil
+    }
+
+    private func recoverFromOutputChange() {
+        print("🔄 Recovering from system audio output change...")
+
+        // Store current callback
+        guard let callback = self.bufferCallback else {
+            print("❌ No buffer callback available for recovery")
+            return
+        }
+
+        // Cleanup old devices
+        cleanup()
+
+        // Attempt to recreate tap with new default output
+        do {
+            try setupSystemAudioTap()
+            try startAudioDevice()
+
+            lastBufferTime = Date() // Reset watchdog
+            print("✅ System audio device recovery complete, capturing continues")
+
+            DispatchQueue.main.async {
+                self.errorMessage = "Switched to default output"
+
+                // Clear error after 3 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    if self.errorMessage == "Switched to default output" {
+                        self.errorMessage = nil
+                    }
+                }
+            }
+        } catch {
+            print("❌ Failed to recover from output change: \(error.localizedDescription)")
+            DispatchQueue.main.async {
+                self.errorMessage = "System audio unavailable"
+                self.isCapturing = false
+                self.stopWatchdog()
+            }
+        }
+    }
+
     deinit {
+        stopWatchdog()
         cleanup()
     }
 }

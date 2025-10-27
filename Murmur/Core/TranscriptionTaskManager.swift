@@ -91,3 +91,4 @@ class TranscriptionTaskManager: ObservableObject {
         activeCount = 0
     }
 }
+
