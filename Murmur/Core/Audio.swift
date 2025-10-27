@@ -21,6 +21,10 @@ class Audio: ObservableObject {
     private var startTime: Date?
     private var timer: Timer?
 
+    // Device change watchdog
+    private var lastBufferTime: Date = Date()
+    private var watchdogTimer: Timer?
+
     // System audio capture
     private var systemAudioCapture: Any? // SystemAudioCapture (macOS 14.2+)
 
@@ -39,54 +43,9 @@ class Audio: ObservableObject {
 
     private func setup() {
         engine = AVAudioEngine()
-
-        // Configure selected microphone if user has chosen one
-        if let selectedDeviceID = UserDefaults.standard.string(forKey: "selectedMicrophoneID"),
-           !selectedDeviceID.isEmpty {
-            var propertyAddress = AudioObjectPropertyAddress(
-                mSelector: kAudioHardwarePropertyDevices,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain
-            )
-
-            var dataSize = UInt32(0)
-            var status = AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &dataSize)
-
-            if status == noErr {
-                let deviceCount = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
-                var audioDevices = [AudioDeviceID](repeating: 0, count: deviceCount)
-                status = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &dataSize, &audioDevices)
-
-                if status == noErr {
-                    for audioDeviceID in audioDevices {
-                        var uidAddress = AudioObjectPropertyAddress(
-                            mSelector: kAudioDevicePropertyDeviceUID,
-                            mScope: kAudioObjectPropertyScopeGlobal,
-                            mElement: kAudioObjectPropertyElementMain
-                        )
-                        var uidSize = UInt32(MemoryLayout<CFString>.size)
-                        var uid: Unmanaged<CFString>?
-
-                        if AudioObjectGetPropertyData(audioDeviceID, &uidAddress, 0, nil, &uidSize, &uid) == noErr,
-                           let uidValue = uid?.takeUnretainedValue() as String? {
-                            if uidValue == selectedDeviceID {
-                                if let inputNode = engine?.inputNode {
-                                    do {
-                                        try inputNode.auAudioUnit.setDeviceID(audioDeviceID)
-                                        print("✓ Using selected microphone (ID: \(audioDeviceID))")
-                                    } catch {
-                                        print("⚠️ Failed to set device: \(error.localizedDescription)")
-                                    }
-                                }
-                                break
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         inputNode = engine?.inputNode
+
+        print("ℹ️ Using system default microphone")
 
         // Request microphone permission
         AVCaptureDevice.requestAccess(for: .audio) { granted in
@@ -130,59 +89,18 @@ class Audio: ObservableObject {
             throw NSError(domain: "Audio", code: 1, userInfo: [NSLocalizedDescriptionKey: "Engine not initialized"])
         }
 
-        // Re-apply selected microphone before starting
-        if let selectedDeviceID = UserDefaults.standard.string(forKey: "selectedMicrophoneID"),
-           !selectedDeviceID.isEmpty {
-            var propertyAddress = AudioObjectPropertyAddress(
-                mSelector: kAudioHardwarePropertyDevices,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain
-            )
+        // Use system default microphone (whatever macOS has configured)
+        // CRITICAL: Must use inputFormat(forBus: 1) to get ACTUAL hardware format
+        // outputFormat(forBus: 0) returns the converter format, not hardware format
+        let hardwareFormat = inputNode.inputFormat(forBus: 1)
+        print("🎤 Hardware format: \(hardwareFormat.sampleRate)Hz, \(hardwareFormat.channelCount)ch")
 
-            var dataSize = UInt32(0)
-            var status = AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &dataSize)
-
-            if status == noErr {
-                let deviceCount = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
-                var audioDevices = [AudioDeviceID](repeating: 0, count: deviceCount)
-                status = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &dataSize, &audioDevices)
-
-                if status == noErr {
-                    for audioDeviceID in audioDevices {
-                        var uidAddress = AudioObjectPropertyAddress(
-                            mSelector: kAudioDevicePropertyDeviceUID,
-                            mScope: kAudioObjectPropertyScopeGlobal,
-                            mElement: kAudioObjectPropertyElementMain
-                        )
-                        var uidSize = UInt32(MemoryLayout<CFString>.size)
-                        var uid: Unmanaged<CFString>?
-
-                        if AudioObjectGetPropertyData(audioDeviceID, &uidAddress, 0, nil, &uidSize, &uid) == noErr,
-                           let uidValue = uid?.takeUnretainedValue() as String? {
-                            if uidValue == selectedDeviceID {
-                                do {
-                                    try inputNode.auAudioUnit.setDeviceID(audioDeviceID)
-                                    print("🎤 Set microphone device ID: \(audioDeviceID)")
-                                } catch {
-                                    print("⚠️ Failed to set device: \(error.localizedDescription)")
-                                }
-                                break
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Prepare engine to refresh input node format after device change
-        engine.prepare()
-
-        let recordingFormat = inputNode.outputFormat(forBus: 0)
-        print("🎤 Recording format: \(recordingFormat.sampleRate)Hz, \(recordingFormat.channelCount)ch")
-
-        guard recordingFormat.sampleRate > 0 && recordingFormat.channelCount > 0 else {
+        guard hardwareFormat.sampleRate > 0 && hardwareFormat.channelCount > 0 else {
             throw NSError(domain: "Audio", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid input format"])
         }
+
+        // Use the HARDWARE format for the tap (critical for Bluetooth devices)
+        let recordingFormat = hardwareFormat
 
         // Start system audio capture
         if let capture = systemAudioCapture as? SystemAudioCapture {
@@ -293,6 +211,9 @@ class Audio: ObservableObject {
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
             guard let strongSelf = self else { return }
 
+            // Update watchdog timestamp
+            strongSelf.lastBufferTime = Date()
+
             // Calculate audio level for visualizer
             strongSelf.calculateLevel(buffer: buffer)
 
@@ -315,6 +236,7 @@ class Audio: ObservableObject {
             self.startTime = Date()
             self.recordingDuration = 0.0
             self.startTimer()
+            self.startWatchdog()
             NSSound(named: "Tink")?.play()
         }
     }
@@ -357,6 +279,7 @@ class Audio: ObservableObject {
             self.isRecording = false
             self.audioLevel = 0.0
             self.stopTimer()
+            self.stopWatchdog()
             NSSound(named: "Pop")?.play()
 
             // Notify that recording is complete with file URLs
@@ -378,6 +301,128 @@ class Audio: ObservableObject {
         timer?.invalidate()
         timer = nil
         recordingDuration = 0.0
+    }
+
+    private func startWatchdog() {
+        lastBufferTime = Date()
+        watchdogTimer?.invalidate()
+        watchdogTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            guard let self = self, self.isRecording else { return }
+
+            let timeSinceLastBuffer = Date().timeIntervalSince(self.lastBufferTime)
+
+            if timeSinceLastBuffer > 3.0 {
+                // Audio stopped → device likely changed
+                print("⚠️ Mic audio device disconnected or changed, switching to default...")
+                self.recoverFromDeviceChange()
+            }
+        }
+    }
+
+    private func stopWatchdog() {
+        watchdogTimer?.invalidate()
+        watchdogTimer = nil
+    }
+
+    private func recoverFromDeviceChange() {
+        guard let engine = engine, let inputNode = inputNode else { return }
+
+        print("🔄 Recovering from device change...")
+
+        // Stop engine (but keep recording flag true)
+        inputNode.removeTap(onBus: 0)
+        engine.stop()
+
+        // Reset to system default (ignore UserDefaults preference during recovery)
+        engine.reset()
+        self.inputNode = engine.inputNode
+
+        // Get new device format
+        guard let newInputNode = self.inputNode else {
+            print("❌ Failed to get input node after reset")
+            return
+        }
+
+        // Get ACTUAL hardware format (not converter format)
+        let recordingFormat = newInputNode.inputFormat(forBus: 1)
+        print("🎤 Switched to default device: \(recordingFormat.sampleRate)Hz, \(recordingFormat.channelCount)ch")
+
+        // Check if we need to create a new file due to format change
+        if let currentFile = micAudioFile,
+           recordingFormat.sampleRate != currentFile.processingFormat.sampleRate {
+            print("⚠️ Sample rate changed, closing old file and creating new segment")
+            micAudioFile = nil
+
+            // Create new file segment
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let timestamp = formatTimestamp(Date())
+            let fileURL = documentsPath.appendingPathComponent("meeting_\(timestamp)_mic_recovery.wav")
+
+            do {
+                micAudioFile = try AVAudioFile(
+                    forWriting: fileURL,
+                    settings: recordingFormat.settings,
+                    commonFormat: recordingFormat.commonFormat,
+                    interleaved: recordingFormat.isInterleaved
+                )
+                print("✅ Created recovery audio file: \(fileURL.lastPathComponent)")
+
+                // Update file URL reference
+                DispatchQueue.main.async {
+                    self.micAudioFileURL = fileURL
+                }
+            } catch {
+                print("❌ Failed to create recovery audio file: \(error.localizedDescription)")
+                return
+            }
+        }
+
+        // Reinstall tap
+        newInputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
+            guard let self = self else { return }
+
+            // Update watchdog timestamp
+            self.lastBufferTime = Date()
+
+            // Calculate audio level for visualizer
+            self.calculateLevel(buffer: buffer)
+
+            // Write to audio file
+            if let audioFile = self.micAudioFile {
+                self.micAudioFileQueue.async {
+                    do {
+                        try audioFile.write(from: buffer)
+                    } catch {
+                        print("❌ Mic audio write failed: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+
+        // Restart engine
+        do {
+            try engine.start()
+            lastBufferTime = Date() // Reset watchdog
+
+            DispatchQueue.main.async {
+                self.error = "Switched to default mic"
+
+                // Clear error after 3 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    if self.error == "Switched to default mic" {
+                        self.error = nil
+                    }
+                }
+            }
+
+            print("✅ Device recovery complete, recording continues")
+        } catch {
+            print("❌ Failed to restart engine: \(error.localizedDescription)")
+            DispatchQueue.main.async {
+                self.error = "Failed to recover from device change"
+                self.stop()
+            }
+        }
     }
 
     private func calculateLevel(buffer: AVAudioPCMBuffer) {

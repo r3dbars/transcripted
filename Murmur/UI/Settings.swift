@@ -5,10 +5,7 @@ import AVFoundation
 @available(macOS 26.0, *)
 struct SettingsView: View {
     @AppStorage("transcriptSaveLocation") private var saveLocation: String = ""
-    @AppStorage("selectedMicrophoneID") private var selectedMicrophoneID: String = ""
     @Environment(\.dismiss) private var dismiss
-
-    @State private var availableMicrophones: [AVCaptureDevice] = []
 
     var body: some View {
         VStack(spacing: 20) {
@@ -17,33 +14,6 @@ struct SettingsView: View {
                 .padding(.top, 16)
 
             Divider()
-
-            // Microphone Selection
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Audio Input")
-                    .font(.system(size: 14, weight: .medium))
-
-                Text("Microphone:")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-
-                Picker("", selection: $selectedMicrophoneID) {
-                    Text("System Default").tag("")
-                    ForEach(availableMicrophones, id: \.uniqueID) { device in
-                        Text(device.localizedName).tag(device.uniqueID)
-                    }
-                }
-                .labelsHidden()
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Text("Changes take effect on next recording.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-            }
-            .padding()
-            .background(Color.gray.opacity(0.1))
-            .cornerRadius(8)
-            .onAppear(perform: loadMicrophones)
 
             // Transcript Storage
             VStack(alignment: .leading, spacing: 8) {
@@ -82,17 +52,8 @@ struct SettingsView: View {
             }
             .keyboardShortcut(.defaultAction)
         }
-        .frame(width: 450, height: 400)
+        .frame(width: 500, height: 300)
         .padding()
-    }
-
-    private func loadMicrophones() {
-        let discoverySession = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInMicrophone, .externalUnknown],
-            mediaType: .audio,
-            position: .unspecified
-        )
-        availableMicrophones = discoverySession.devices
     }
 
     private var displayPath: String {
