@@ -40,6 +40,7 @@
 		A1000304 /* AssemblyAIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000314 /* AssemblyAIService.swift */; };
 		A1000400 /* AudioPreprocessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000401 /* AudioPreprocessor.swift */; };
 		A1000600 /* ActionItemReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000601 /* ActionItemReviewView.swift */; };
+		A1000700 /* ServiceResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000701 /* ServiceResult.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -79,6 +80,7 @@
 		A1000314 /* AssemblyAIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssemblyAIService.swift; sourceTree = "<group>"; };
 		A1000401 /* AudioPreprocessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPreprocessor.swift; sourceTree = "<group>"; };
 		A1000601 /* ActionItemReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionItemReviewView.swift; sourceTree = "<group>"; };
+		A1000701 /* ServiceResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceResult.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -141,6 +143,7 @@
 				A1000310 /* ActionItemExtractor.swift */,
 				A1000311 /* DateParser.swift */,
 				A1000401 /* AudioPreprocessor.swift */,
+				A1000701 /* ServiceResult.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -315,6 +318,7 @@
 				A1000304 /* AssemblyAIService.swift in Sources */,
 				A1000400 /* AudioPreprocessor.swift in Sources */,
 				A1000600 /* ActionItemReviewView.swift in Sources */,
+				A1000700 /* ServiceResult.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -118,6 +118,9 @@ class TranscriptionTaskManager: ObservableObject {
     @Published var actionItemsAddedCount: Int = 0
     @Published var showActionItemsAdded: Bool = false
 
+    // Phase 2: Track full task creation result for error visibility
+    @Published var lastTaskCreationResult: TaskCreationResult?
+
     // Action item review state - holds items pending user review
     @Published var pendingReview: PendingActionItemsReview? = nil
     @Published var isSubmittingReview: Bool = false
@@ -472,6 +475,7 @@ class TranscriptionTaskManager: ObservableObject {
     }
 
     /// Internal implementation for submitting selected items
+    /// Phase 2: Now handles TaskCreationResult for proper error visibility
     private func submitSelectedItemsInternal() async {
         guard let review = await MainActor.run(body: { self.pendingReview }) else { return }
 
@@ -488,38 +492,70 @@ class TranscriptionTaskManager: ObservableObject {
 
         // Send to configured task service (Reminders or Todoist)
         let taskServiceSetting = UserDefaults.standard.string(forKey: "taskService") ?? "reminders"
-        let createdCount: Int
+        let result: TaskCreationResult
 
         if taskServiceSetting == "todoist" {
             // Use Todoist
             let todoist = TodoistService()
-            createdCount = await todoist.createTasks(from: selectedItems)
-            print("✅ Sent \(createdCount) action items to Todoist")
+            result = await todoist.createTasks(from: selectedItems)
+            print("✅ Todoist result: \(result.summary)")
         } else {
             // Use Apple Reminders (default)
             let reminders = RemindersService()
             guard await reminders.requestAccess() else {
                 print("⚠️ Reminders access denied")
+                // Phase 2: Create a proper failure result for visibility
+                let failure = TaskCreationFailure(
+                    taskTitle: "All tasks",
+                    errorMessage: "Reminders access denied",
+                    isRecoverable: false,
+                    recoveryHint: "Enable Reminders access in System Settings → Privacy & Security → Reminders"
+                )
                 await MainActor.run {
                     self.isSubmittingReview = false
                     self.pendingReview = nil
-                    self.displayStatus = .transcriptSaved
-                    self.scheduleStatusReset()
+                    self.lastTaskCreationResult = .failed(failures: [failure])
+                    self.displayStatus = .failed(message: "Reminders access denied")
+                    self.scheduleStatusReset(delay: 15)  // Keep error visible longer
                 }
                 return
             }
-            createdCount = await reminders.createReminders(from: selectedItems)
-            print("✅ Sent \(createdCount) action items to Reminders")
+            result = await reminders.createReminders(from: selectedItems)
+            print("✅ Reminders result: \(result.summary)")
         }
 
-        // Update status and trigger in-app notification
+        // Phase 2: Handle all result cases - success, partial, and failure
         await MainActor.run {
             self.isSubmittingReview = false
             self.pendingReview = nil
-            self.actionItemsAddedCount = createdCount
-            self.showActionItemsAdded = true
-            self.displayStatus = .completed(taskCount: createdCount)
-            self.scheduleStatusReset()
+            self.lastTaskCreationResult = result
+            self.actionItemsAddedCount = result.successCount
+
+            if result.allSucceeded {
+                // All tasks created successfully
+                self.showActionItemsAdded = true
+                self.displayStatus = .completed(taskCount: result.successCount)
+                self.scheduleStatusReset()
+            } else if result.partialSuccess {
+                // Some tasks created, some failed - show success but also track failures
+                self.showActionItemsAdded = true
+                self.displayStatus = .completed(taskCount: result.successCount)
+                // Log failures for debugging
+                print("⚠️ \(result.failureCount) tasks failed:")
+                for failure in result.failures {
+                    print("   - \(failure.taskTitle): \(failure.errorMessage)")
+                }
+                self.scheduleStatusReset()
+            } else if result.allFailed {
+                // All tasks failed
+                let errorMessage = result.failures.first?.errorMessage ?? "Failed to create tasks"
+                self.displayStatus = .failed(message: errorMessage)
+                self.scheduleStatusReset(delay: 15)  // Keep error visible longer
+            } else {
+                // Empty result (shouldn't happen but handle gracefully)
+                self.displayStatus = .transcriptSaved
+                self.scheduleStatusReset()
+            }
         }
     }
 

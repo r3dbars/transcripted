@@ -37,9 +37,14 @@ class RemindersService {
     }
 
     /// Create reminders from extracted action items
-    /// - Returns: Number of reminders created
-    func createReminders(from items: [ActionItem]) async -> Int {
-        var created = 0
+    /// - Returns: TaskCreationResult with success/failure details (Phase 2 enhancement)
+    func createReminders(from items: [ActionItem]) async -> TaskCreationResult {
+        guard !items.isEmpty else {
+            return .empty
+        }
+
+        var successCount = 0
+        var failures: [TaskCreationFailure] = []
 
         for item in items {
             do {
@@ -61,15 +66,26 @@ class RemindersService {
                     priority: priority
                 )
 
-                created += 1
+                successCount += 1
                 print("✓ Created reminder: \(title)")
 
             } catch {
+                let failure = TaskCreationFailure(
+                    taskTitle: item.task,
+                    errorMessage: error.localizedDescription,
+                    isRecoverable: true,
+                    recoveryHint: "Check Reminders permissions in System Settings"
+                )
+                failures.append(failure)
                 print("⚠️ Failed to create reminder for '\(item.task)': \(error.localizedDescription)")
             }
         }
 
-        return created
+        return TaskCreationResult(
+            successCount: successCount,
+            failureCount: failures.count,
+            failures: failures
+        )
     }
 
     /// Map priority string to EventKit priority value

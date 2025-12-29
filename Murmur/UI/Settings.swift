@@ -738,10 +738,10 @@ extension SettingsView {
 
             await MainActor.run { actionItemsTestStatus = "Creating \(result.actionItems.count) tasks..." }
 
-            let count: Int
+            let taskResult: TaskCreationResult
             if taskService == "todoist" {
                 let todoist = TodoistService()
-                count = await todoist.createTasks(from: result.actionItems)
+                taskResult = await todoist.createTasks(from: result.actionItems)
             } else {
                 let reminders = RemindersService()
                 guard await reminders.requestAccess() else {
@@ -751,13 +751,22 @@ extension SettingsView {
                     }
                     return
                 }
-                count = await reminders.createReminders(from: result.actionItems)
+                taskResult = await reminders.createReminders(from: result.actionItems)
             }
 
-            print("✅ Created \(count)/\(result.actionItems.count) tasks")
+            print("✅ Created \(taskResult.successCount)/\(result.actionItems.count) tasks")
 
             await MainActor.run {
-                actionItemsTestStatus = "✓ Created \(count)/\(result.actionItems.count) tasks"
+                if taskResult.allSucceeded {
+                    actionItemsTestStatus = "✓ Created \(taskResult.successCount) tasks"
+                } else if taskResult.partialSuccess {
+                    actionItemsTestStatus = "⚠️ Created \(taskResult.successCount)/\(taskResult.totalAttempted) tasks (\(taskResult.failureCount) failed)"
+                } else if taskResult.allFailed {
+                    let firstError = taskResult.failures.first?.errorMessage ?? "Unknown error"
+                    actionItemsTestStatus = "❌ Failed to create tasks: \(firstError)"
+                } else {
+                    actionItemsTestStatus = "No tasks to create"
+                }
                 isTestingActionItems = false
             }
 
