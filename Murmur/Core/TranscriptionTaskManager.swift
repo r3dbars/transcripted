@@ -134,6 +134,9 @@ class TranscriptionTaskManager: ObservableObject {
     // Reference to failed transcription manager
     private let failedTranscriptionManager: FailedTranscriptionManager
 
+    // PHASE 6: Failed action item extraction manager with retry queue
+    let failedActionItemManager = FailedActionItemManager()
+
     init(failedTranscriptionManager: FailedTranscriptionManager) {
         self.failedTranscriptionManager = failedTranscriptionManager
     }
@@ -342,6 +345,90 @@ class TranscriptionTaskManager: ObservableObject {
         }
     }
 
+    // MARK: - Retry Failed Action Item Extraction (Phase 6)
+
+    /// Retry a failed action item extraction by its ID
+    func retryFailedActionItemExtraction(failedId: UUID) async -> Bool {
+        guard let failed = await MainActor.run(body: { failedActionItemManager.failedExtractions.first(where: { $0.id == failedId }) }) else {
+            print("❌ Failed action item extraction not found: \(failedId)")
+            return false
+        }
+
+        // Verify transcript file still exists
+        guard failed.transcriptExists() else {
+            print("❌ Transcript file no longer exists for failed extraction: \(failedId)")
+            await MainActor.run {
+                failedActionItemManager.removeFailedExtraction(id: failedId)
+            }
+            return false
+        }
+
+        print("🔄 Retrying action item extraction: \(failed.transcriptFilename)")
+
+        // Increment retry count (handles backoff timing)
+        await MainActor.run {
+            failedActionItemManager.incrementRetryCount(id: failedId)
+        }
+
+        do {
+            // Read transcript content
+            let content = try String(contentsOf: failed.transcriptURL, encoding: .utf8)
+            let apiKey = UserDefaults.standard.string(forKey: "geminiAPIKey") ?? ""
+
+            guard !apiKey.isEmpty else {
+                throw ActionItemExtractionError.noAPIKey
+            }
+
+            // Extract action items using Gemini
+            let result = try await ActionItemExtractor.extract(from: content, apiKey: apiKey)
+
+            if result.actionItems.isEmpty {
+                print("ℹ️ Retry successful but no action items found")
+                await MainActor.run {
+                    failedActionItemManager.removeFailedExtraction(id: failedId)
+                }
+                return true
+            }
+
+            // Store items for user review
+            await MainActor.run {
+                self.pendingReview = PendingActionItemsReview(
+                    items: result.actionItems.map { SelectableActionItem(item: $0) },
+                    meetingTitle: result.meetingTitle,
+                    meetingSummary: result.meetingSummary
+                )
+                self.displayStatus = .pendingReview(itemCount: result.actionItems.count)
+                failedActionItemManager.removeFailedExtraction(id: failedId)
+            }
+
+            print("✅ Retry successful: \(result.actionItems.count) action items ready for review")
+            return true
+
+        } catch {
+            print("❌ Action item extraction retry failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Retry all failed action item extractions that are ready (backoff elapsed)
+    func retryAllReadyActionItemExtractions() async -> (succeeded: Int, failed: Int) {
+        let ready = await MainActor.run { failedActionItemManager.extractionsReadyForRetry }
+        var succeeded = 0
+        var failed = 0
+
+        for extraction in ready {
+            let success = await retryFailedActionItemExtraction(failedId: extraction.id)
+            if success {
+                succeeded += 1
+            } else {
+                failed += 1
+            }
+        }
+
+        print("📋 Retry batch complete: \(succeeded) succeeded, \(failed) failed")
+        return (succeeded, failed)
+    }
+
     private func handleTaskCompletion(taskId: UUID) {
         // Remove from active tasks
         activeTasks.removeValue(forKey: taskId)
@@ -462,7 +549,16 @@ class TranscriptionTaskManager: ObservableObject {
 
         } catch {
             print("❌ Action item extraction failed: \(error.localizedDescription)")
-            // Still show transcript saved on error
+
+            // PHASE 6: Track failure for retry
+            await MainActor.run {
+                self.failedActionItemManager.addFailedExtraction(
+                    transcriptURL: transcriptURL,
+                    error: error
+                )
+            }
+
+            // Still show transcript saved on error (transcript exists, just extraction failed)
             await MainActor.run {
                 self.displayStatus = .transcriptSaved
                 self.scheduleStatusReset()
