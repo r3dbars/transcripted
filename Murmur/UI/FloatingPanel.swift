@@ -22,7 +22,8 @@ class PillStateManager: ObservableObject {
 
     /// Flag to prevent rapid state changes during animations
     @Published private(set) var isTransitioning = false
-    private let transitionCooldown: TimeInterval = 0.35
+    /// PHASE 4 FIX: Use unified timing from DesignTokens to prevent animation/cooldown mismatch
+    private let transitionCooldown: TimeInterval = PillAnimationTiming.cooldownDuration
 
     // MARK: - Timeout Recovery (Phase 1 Bug Fix)
 
@@ -1538,6 +1539,13 @@ struct FloatingPanelView: View {
                 // Unlock panel when review ends
                 dockingManager.isLocked = false
             }
+        }
+        // PHASE 4 FIX: Clear celebrations immediately when state changes
+        // Prevents lingering overlays from previous states
+        .onChange(of: pillStateManager.state) { _, _ in
+            showRecordingStoppedCelebration = false
+            showTranscriptSavedCelebration = false
+            showActionItemsCelebration = false
         }
     }
 
