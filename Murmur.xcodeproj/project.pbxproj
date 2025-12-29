@@ -7,7 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A1000001 /* MurmurApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002 /* MurmurApp.swift */; };
+		177299A5CC91824348F205F7 /* TodoistService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 957699D9D32FB594FDC17C0C /* TodoistService.swift */; };
+		A1000500 /* TranscriptUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000501 /* TranscriptUtils.swift */; };
+		A1000001 /* TranscriptedApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002 /* TranscriptedApp.swift */; };
 		A1000003 /* Transcription.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000004 /* Transcription.swift */; };
 		A1000005 /* Audio.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000006 /* Audio.swift */; };
 		A1000007 /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000008 /* FloatingPanel.swift */; };
@@ -15,14 +17,34 @@
 		A1000013 /* Clipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000014 /* Clipboard.swift */; };
 		A1000015 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000016 /* Assets.xcassets */; };
 		A1000040 /* CoreAudioUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000041 /* CoreAudioUtils.swift */; };
-		A1000042 /* AudioRecordingPermission.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000043 /* AudioRecordingPermission.swift */; };
 		A1000044 /* SystemAudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000045 /* SystemAudioCapture.swift */; };
 		A1000048 /* TranscriptSaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000049 /* TranscriptSaver.swift */; };
 		A1000050 /* TranscriptionTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000051 /* TranscriptionTaskManager.swift */; };
+		A1000052 /* RecordingValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000053 /* RecordingValidator.swift */; };
+		A1000054 /* FailedTranscription.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000055 /* FailedTranscription.swift */; };
+		A1000056 /* FailedTranscriptionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000057 /* FailedTranscriptionManager.swift */; };
+		A1000058 /* FailedTranscriptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000059 /* FailedTranscriptionsView.swift */; };
+		A1000100 /* OnboardingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000101 /* OnboardingState.swift */; };
+		A1000102 /* OnboardingWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000103 /* OnboardingWindow.swift */; };
+		A1000104 /* OnboardingContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000105 /* OnboardingContainerView.swift */; };
+		A1000106 /* WelcomeStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000107 /* WelcomeStep.swift */; };
+		A1000110 /* HowItWorksStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000111 /* HowItWorksStep.swift */; };
+		A1000112 /* PermissionsStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000113 /* PermissionsStep.swift */; };
+		A1000116 /* ReadyStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000117 /* ReadyStep.swift */; };
+		A1000200 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000201 /* DesignTokens.swift */; };
+		A1000202 /* PremiumComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000203 /* PremiumComponents.swift */; };
+		A1000204 /* ParticleExplosionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000205 /* ParticleExplosionView.swift */; };
+		A1000300 /* ActionItemExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000310 /* ActionItemExtractor.swift */; };
+		A1000301 /* DateParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000311 /* DateParser.swift */; };
+		A1000302 /* RemindersService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000312 /* RemindersService.swift */; };
+		A1000304 /* AssemblyAIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000314 /* AssemblyAIService.swift */; };
+		A1000400 /* AudioPreprocessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000401 /* AudioPreprocessor.swift */; };
+		A1000600 /* ActionItemReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000601 /* ActionItemReviewView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		A1000002 /* MurmurApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MurmurApp.swift; sourceTree = "<group>"; };
+		957699D9D32FB594FDC17C0C /* TodoistService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TodoistService.swift; sourceTree = "<group>"; };
+		A1000002 /* TranscriptedApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptedApp.swift; sourceTree = "<group>"; };
 		A1000004 /* Transcription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcription.swift; sourceTree = "<group>"; };
 		A1000006 /* Audio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Audio.swift; sourceTree = "<group>"; };
 		A1000008 /* FloatingPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanel.swift; sourceTree = "<group>"; };
@@ -31,12 +53,32 @@
 		A1000016 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000017 /* Murmur.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Murmur.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1000018 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A1000019 /* Murmur.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Murmur.entitlements; sourceTree = "<group>"; };
+		A1000019 /* Transcripted.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Transcripted.entitlements; sourceTree = "<group>"; };
 		A1000041 /* CoreAudioUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioUtils.swift; sourceTree = "<group>"; };
-		A1000043 /* AudioRecordingPermission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecordingPermission.swift; sourceTree = "<group>"; };
+		A1000501 /* TranscriptUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptUtils.swift; sourceTree = "<group>"; };
 		A1000045 /* SystemAudioCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemAudioCapture.swift; sourceTree = "<group>"; };
 		A1000049 /* TranscriptSaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSaver.swift; sourceTree = "<group>"; };
 		A1000051 /* TranscriptionTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTaskManager.swift; sourceTree = "<group>"; };
+		A1000053 /* RecordingValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingValidator.swift; sourceTree = "<group>"; };
+		A1000055 /* FailedTranscription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailedTranscription.swift; sourceTree = "<group>"; };
+		A1000057 /* FailedTranscriptionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailedTranscriptionManager.swift; sourceTree = "<group>"; };
+		A1000059 /* FailedTranscriptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailedTranscriptionsView.swift; sourceTree = "<group>"; };
+		A1000101 /* OnboardingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingState.swift; sourceTree = "<group>"; };
+		A1000103 /* OnboardingWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingWindow.swift; sourceTree = "<group>"; };
+		A1000105 /* OnboardingContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingContainerView.swift; sourceTree = "<group>"; };
+		A1000107 /* WelcomeStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeStep.swift; sourceTree = "<group>"; };
+		A1000111 /* HowItWorksStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HowItWorksStep.swift; sourceTree = "<group>"; };
+		A1000113 /* PermissionsStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsStep.swift; sourceTree = "<group>"; };
+		A1000117 /* ReadyStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadyStep.swift; sourceTree = "<group>"; };
+		A1000201 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
+		A1000203 /* PremiumComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumComponents.swift; sourceTree = "<group>"; };
+		A1000205 /* ParticleExplosionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParticleExplosionView.swift; sourceTree = "<group>"; };
+		A1000310 /* ActionItemExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionItemExtractor.swift; sourceTree = "<group>"; };
+		A1000311 /* DateParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParser.swift; sourceTree = "<group>"; };
+		A1000312 /* RemindersService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemindersService.swift; sourceTree = "<group>"; };
+		A1000314 /* AssemblyAIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssemblyAIService.swift; sourceTree = "<group>"; };
+		A1000401 /* AudioPreprocessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPreprocessor.swift; sourceTree = "<group>"; };
+		A1000601 /* ActionItemReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionItemReviewView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -61,12 +103,15 @@
 		A1000022 /* Murmur */ = {
 			isa = PBXGroup;
 			children = (
-				A1000002 /* MurmurApp.swift */,
+				A1000002 /* TranscriptedApp.swift */,
 				A1000024 /* Core */,
+				A1000320 /* Services */,
 				A1000025 /* UI */,
+				A1000210 /* Design */,
+				A1000120 /* Onboarding */,
 				A1000027 /* Resources */,
 				A1000018 /* Info.plist */,
-				A1000019 /* Murmur.entitlements */,
+				A1000019 /* Transcripted.entitlements */,
 			);
 			path = Murmur;
 			sourceTree = "<group>";
@@ -87,9 +132,15 @@
 				A1000006 /* Audio.swift */,
 				A1000014 /* Clipboard.swift */,
 				A1000041 /* CoreAudioUtils.swift */,
-				A1000043 /* AudioRecordingPermission.swift */,
 				A1000045 /* SystemAudioCapture.swift */,
 				A1000049 /* TranscriptSaver.swift */,
+				A1000501 /* TranscriptUtils.swift */,
+				A1000053 /* RecordingValidator.swift */,
+				A1000055 /* FailedTranscription.swift */,
+				A1000057 /* FailedTranscriptionManager.swift */,
+				A1000310 /* ActionItemExtractor.swift */,
+				A1000311 /* DateParser.swift */,
+				A1000401 /* AudioPreprocessor.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -99,6 +150,8 @@
 			children = (
 				A1000008 /* FloatingPanel.swift */,
 				A1000010 /* Settings.swift */,
+				A1000059 /* FailedTranscriptionsView.swift */,
+				A1000601 /* ActionItemReviewView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -109,6 +162,56 @@
 				A1000016 /* Assets.xcassets */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		A1000120 /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				A1000101 /* OnboardingState.swift */,
+				A1000103 /* OnboardingWindow.swift */,
+				A1000105 /* OnboardingContainerView.swift */,
+				A1000121 /* Steps */,
+				A1000220 /* Animations */,
+			);
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		A1000121 /* Steps */ = {
+			isa = PBXGroup;
+			children = (
+				A1000107 /* WelcomeStep.swift */,
+				A1000111 /* HowItWorksStep.swift */,
+				A1000113 /* PermissionsStep.swift */,
+				A1000117 /* ReadyStep.swift */,
+			);
+			path = Steps;
+			sourceTree = "<group>";
+		};
+		A1000210 /* Design */ = {
+			isa = PBXGroup;
+			children = (
+				A1000201 /* DesignTokens.swift */,
+				A1000203 /* PremiumComponents.swift */,
+			);
+			path = Design;
+			sourceTree = "<group>";
+		};
+		A1000220 /* Animations */ = {
+			isa = PBXGroup;
+			children = (
+				A1000205 /* ParticleExplosionView.swift */,
+			);
+			path = Animations;
+			sourceTree = "<group>";
+		};
+		A1000320 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				A1000312 /* RemindersService.swift */,
+				957699D9D32FB594FDC17C0C /* TodoistService.swift */,
+				A1000314 /* AssemblyAIService.swift */,
+			);
+			path = Services;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -180,7 +283,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A1000001 /* MurmurApp.swift in Sources */,
+				A1000001 /* TranscriptedApp.swift in Sources */,
 				A1000003 /* Transcription.swift in Sources */,
 				A1000050 /* TranscriptionTaskManager.swift in Sources */,
 				A1000005 /* Audio.swift in Sources */,
@@ -188,9 +291,30 @@
 				A1000009 /* Settings.swift in Sources */,
 				A1000013 /* Clipboard.swift in Sources */,
 				A1000040 /* CoreAudioUtils.swift in Sources */,
-				A1000042 /* AudioRecordingPermission.swift in Sources */,
 				A1000044 /* SystemAudioCapture.swift in Sources */,
 				A1000048 /* TranscriptSaver.swift in Sources */,
+				A1000500 /* TranscriptUtils.swift in Sources */,
+				A1000052 /* RecordingValidator.swift in Sources */,
+				A1000054 /* FailedTranscription.swift in Sources */,
+				A1000056 /* FailedTranscriptionManager.swift in Sources */,
+				A1000058 /* FailedTranscriptionsView.swift in Sources */,
+				A1000100 /* OnboardingState.swift in Sources */,
+				A1000102 /* OnboardingWindow.swift in Sources */,
+				A1000104 /* OnboardingContainerView.swift in Sources */,
+				A1000106 /* WelcomeStep.swift in Sources */,
+				A1000110 /* HowItWorksStep.swift in Sources */,
+				A1000112 /* PermissionsStep.swift in Sources */,
+				A1000116 /* ReadyStep.swift in Sources */,
+				A1000200 /* DesignTokens.swift in Sources */,
+				A1000202 /* PremiumComponents.swift in Sources */,
+				A1000204 /* ParticleExplosionView.swift in Sources */,
+				A1000300 /* ActionItemExtractor.swift in Sources */,
+				A1000301 /* DateParser.swift in Sources */,
+				A1000302 /* RemindersService.swift in Sources */,
+				177299A5CC91824348F205F7 /* TodoistService.swift in Sources */,
+				A1000304 /* AssemblyAIService.swift in Sources */,
+				A1000400 /* AudioPreprocessor.swift in Sources */,
+				A1000600 /* ActionItemReviewView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -321,7 +445,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Murmur/Murmur.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Murmur/Transcripted.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -339,8 +463,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.murmur.app;
-				PRODUCT_NAME = Murmur;
+				PRODUCT_BUNDLE_IDENTIFIER = com.transcripted.app;
+				PRODUCT_NAME = Transcripted;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -351,7 +475,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Murmur/Murmur.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Murmur/Transcripted.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -369,8 +493,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.murmur.app;
-				PRODUCT_NAME = Murmur;
+				PRODUCT_BUNDLE_IDENTIFIER = com.transcripted.app;
+				PRODUCT_NAME = Transcripted;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};

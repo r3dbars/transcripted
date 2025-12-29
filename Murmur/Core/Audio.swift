@@ -12,6 +12,12 @@ class Audio: ObservableObject {
     @Published var systemAudioLevelHistory: [Float] = Array(repeating: 0.0, count: 15)
     @Published var error: String?
 
+    // Silence detection for "Still Recording?" prompt
+    @Published var silenceDuration: TimeInterval = 0.0  // How long we've been in silence
+    @Published var isSilent: Bool = false  // True when audio below threshold
+    private let silenceThreshold: Float = 0.02  // Audio level below this = silence
+    private var lastNonSilentTime: Date?
+
     // Audio file URLs - returned when recording stops
     @Published var micAudioFileURL: URL?
     @Published var systemAudioFileURL: URL?
@@ -33,6 +39,13 @@ class Audio: ObservableObject {
     private var micAudioFile: AVAudioFile?
     private let systemAudioFileQueue = DispatchQueue(label: "SystemAudioFileWrite", qos: .utility)
     private let micAudioFileQueue = DispatchQueue(label: "MicAudioFileWrite", qos: .utility)
+
+    // Audio format conversion (multi-channel to mono)
+    private var monoOutputFormat: AVAudioFormat?
+    private var inputChannelCount: AVAudioChannelCount = 1
+
+    // Throttle system audio visualizer updates (skip every other callback)
+    private var systemLevelUpdateCounter: Int = 0
 
     // Callback for when recording completes
     var onRecordingComplete: ((URL?, URL?) -> Void)?
@@ -66,9 +79,18 @@ class Audio: ObservableObject {
             return
         }
 
+        // Pre-flight validation checks
+        let validationResult = RecordingValidator.validateRecordingConditions()
+        guard validationResult.isValid else {
+            print("❌ Pre-flight check failed: \(validationResult.errorMessage ?? "Unknown error")")
+            error = validationResult.errorMessage
+            return
+        }
+
         // Set flag immediately to prevent concurrent starts
         isRecording = true
         error = nil
+        resetSilenceTracking()  // Start fresh silence tracking
         print("📝 Starting audio capture")
 
         Task {
@@ -182,7 +204,7 @@ class Audio: ObservableObject {
             }
         }
 
-        // Create mic audio file at native format
+        // Create mic audio file - ALWAYS save as mono for Speech framework compatibility
         do {
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             let timestamp = formatTimestamp(Date())
@@ -192,14 +214,31 @@ class Audio: ObservableObject {
                 self.micAudioFileURL = fileURL
             }
 
-            // Save at native recording format (usually 48kHz)
+            // Always create mono output format at the hardware sample rate
+            guard let monoFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: recordingFormat.sampleRate,
+                channels: 1,
+                interleaved: true
+            ) else {
+                throw NSError(domain: "Audio", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create mono format"])
+            }
+            self.monoOutputFormat = monoFormat
+
+            // Track channel count for manual downmix
+            self.inputChannelCount = recordingFormat.channelCount
+            if recordingFormat.channelCount > 1 {
+                print("🔄 Will manually downmix \(recordingFormat.channelCount)ch → mono")
+            }
+
+            // Save as mono WAV file
             micAudioFile = try AVAudioFile(
                 forWriting: fileURL,
-                settings: recordingFormat.settings,
-                commonFormat: recordingFormat.commonFormat,
-                interleaved: recordingFormat.isInterleaved
+                settings: monoFormat.settings,
+                commonFormat: monoFormat.commonFormat,
+                interleaved: monoFormat.isInterleaved
             )
-            print("✅ Mic audio: Saving at native \(recordingFormat.sampleRate)Hz")
+            print("✅ Mic audio: Saving as mono at \(recordingFormat.sampleRate)Hz")
         } catch {
             throw NSError(domain: "Audio", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create mic audio file: \(error.localizedDescription)"])
         }
@@ -207,24 +246,35 @@ class Audio: ObservableObject {
         // Remove any existing tap (safety check)
         inputNode.removeTap(onBus: 0)
 
-        // Install tap on microphone - write directly to file
+        // Install tap on microphone
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
             guard let strongSelf = self else { return }
 
             // Update watchdog timestamp
             strongSelf.lastBufferTime = Date()
 
-            // Calculate audio level for visualizer
+            // Calculate audio level for visualizer (use original buffer)
             strongSelf.calculateLevel(buffer: buffer)
 
-            // Write directly to file (no conversion)
-            if let audioFile = strongSelf.micAudioFile {
-                strongSelf.micAudioFileQueue.async {
-                    do {
+            // Convert to mono if needed, then write to file
+            strongSelf.micAudioFileQueue.async {
+                guard let audioFile = strongSelf.micAudioFile,
+                      let monoFormat = strongSelf.monoOutputFormat else { return }
+
+                do {
+                    if strongSelf.inputChannelCount > 1 {
+                        // Manual downmix: average all channels to mono
+                        guard let monoBuffer = strongSelf.manualDownmix(buffer: buffer, to: monoFormat) else {
+                            print("❌ Failed to downmix buffer")
+                            return
+                        }
+                        try audioFile.write(from: monoBuffer)
+                    } else {
+                        // Already mono, write directly
                         try audioFile.write(from: buffer)
-                    } catch {
-                        print("❌ Mic audio write failed: \(error.localizedDescription)")
                     }
+                } catch {
+                    print("❌ Mic audio write failed: \(error.localizedDescription)")
                 }
             }
         }
@@ -353,17 +403,35 @@ class Audio: ObservableObject {
             print("⚠️ Sample rate changed, closing old file and creating new segment")
             micAudioFile = nil
 
-            // Create new file segment
+            // Create new file segment as mono
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             let timestamp = formatTimestamp(Date())
             let fileURL = documentsPath.appendingPathComponent("meeting_\(timestamp)_mic_recovery.wav")
 
             do {
+                // Always create mono format
+                guard let monoFormat = AVAudioFormat(
+                    commonFormat: .pcmFormatFloat32,
+                    sampleRate: recordingFormat.sampleRate,
+                    channels: 1,
+                    interleaved: true
+                ) else {
+                    print("❌ Failed to create mono format for recovery")
+                    return
+                }
+                self.monoOutputFormat = monoFormat
+
+                // Track channel count for manual downmix
+                self.inputChannelCount = recordingFormat.channelCount
+                if recordingFormat.channelCount > 1 {
+                    print("🔄 Recovery: Will manually downmix \(recordingFormat.channelCount)ch → mono")
+                }
+
                 micAudioFile = try AVAudioFile(
                     forWriting: fileURL,
-                    settings: recordingFormat.settings,
-                    commonFormat: recordingFormat.commonFormat,
-                    interleaved: recordingFormat.isInterleaved
+                    settings: monoFormat.settings,
+                    commonFormat: monoFormat.commonFormat,
+                    interleaved: monoFormat.isInterleaved
                 )
                 print("✅ Created recovery audio file: \(fileURL.lastPathComponent)")
 
@@ -387,14 +455,25 @@ class Audio: ObservableObject {
             // Calculate audio level for visualizer
             self.calculateLevel(buffer: buffer)
 
-            // Write to audio file
-            if let audioFile = self.micAudioFile {
-                self.micAudioFileQueue.async {
-                    do {
+            // Convert to mono if needed, then write to file
+            self.micAudioFileQueue.async {
+                guard let audioFile = self.micAudioFile,
+                      let monoFormat = self.monoOutputFormat else { return }
+
+                do {
+                    if self.inputChannelCount > 1 {
+                        // Manual downmix: average all channels to mono
+                        guard let monoBuffer = self.manualDownmix(buffer: buffer, to: monoFormat) else {
+                            print("❌ Failed to downmix buffer")
+                            return
+                        }
+                        try audioFile.write(from: monoBuffer)
+                    } else {
+                        // Already mono, write directly
                         try audioFile.write(from: buffer)
-                    } catch {
-                        print("❌ Mic audio write failed: \(error.localizedDescription)")
                     }
+                } catch {
+                    print("❌ Mic audio write failed: \(error.localizedDescription)")
                 }
             }
         }
@@ -425,6 +504,48 @@ class Audio: ObservableObject {
         }
     }
 
+    /// Manually downmix multi-channel audio to mono by averaging all channels
+    private func manualDownmix(buffer: AVAudioPCMBuffer, to monoFormat: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let frameCount = buffer.frameLength
+        let channelCount = Int(buffer.format.channelCount)
+
+        guard channelCount > 0, frameCount > 0 else { return nil }
+
+        guard let monoBuffer = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: frameCount) else {
+            return nil
+        }
+        monoBuffer.frameLength = frameCount
+
+        guard let monoData = monoBuffer.floatChannelData?[0] else { return nil }
+
+        // Check if buffer is interleaved or non-interleaved
+        if buffer.format.isInterleaved {
+            // Interleaved: samples are [L0, R0, C0, S0, L1, R1, C1, S1, ...]
+            guard let interleavedData = buffer.floatChannelData?[0] else { return nil }
+
+            for frame in 0..<Int(frameCount) {
+                var sum: Float = 0
+                for channel in 0..<channelCount {
+                    sum += interleavedData[frame * channelCount + channel]
+                }
+                monoData[frame] = sum / Float(channelCount)
+            }
+        } else {
+            // Non-interleaved: each channel is a separate array
+            guard let channelData = buffer.floatChannelData else { return nil }
+
+            for frame in 0..<Int(frameCount) {
+                var sum: Float = 0
+                for channel in 0..<channelCount {
+                    sum += channelData[channel][frame]
+                }
+                monoData[frame] = sum / Float(channelCount)
+            }
+        }
+
+        return monoBuffer
+    }
+
     private func calculateLevel(buffer: AVAudioPCMBuffer) {
         guard let data = buffer.floatChannelData else { return }
 
@@ -447,10 +568,47 @@ class Audio: ObservableObject {
             self.audioLevel = level
             self.audioLevelHistory.removeFirst()
             self.audioLevelHistory.append(level)
+
+            // Silence detection - track how long we've been below threshold
+            self.updateSilenceTracking(currentLevel: level)
         }
     }
 
+    /// Updates silence tracking based on current audio level
+    private func updateSilenceTracking(currentLevel: Float) {
+        let now = Date()
+
+        if currentLevel > silenceThreshold {
+            // Audio detected - reset silence tracking
+            lastNonSilentTime = now
+            isSilent = false
+            silenceDuration = 0
+        } else {
+            // Below threshold - we're in silence
+            isSilent = true
+            if let lastActive = lastNonSilentTime {
+                silenceDuration = now.timeIntervalSince(lastActive)
+            } else {
+                // First time detecting silence, start tracking
+                lastNonSilentTime = now
+                silenceDuration = 0
+            }
+        }
+    }
+
+    /// Reset silence tracking (call when recording starts)
+    func resetSilenceTracking() {
+        lastNonSilentTime = Date()
+        silenceDuration = 0
+        isSilent = false
+    }
+
     private func calculateSystemLevel(buffer: AVAudioPCMBuffer) {
+        // Throttle updates: only update every 4th callback (~2x faster than mic instead of ~8x)
+        systemLevelUpdateCounter += 1
+        guard systemLevelUpdateCounter >= 4 else { return }
+        systemLevelUpdateCounter = 0
+
         guard let data = buffer.floatChannelData else { return }
 
         let channelData = data.pointee

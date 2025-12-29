@@ -1,0 +1,190 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+**Transcripted** is a native macOS application that automatically records, transcribes, and organizes voice conversations from meetings and calls. The app supports both on-device transcription (Apple Speech framework) and cloud transcription services (Deepgram, AssemblyAI). It extracts action items from transcripts using Gemini AI and sends them to Apple Reminders or Todoist.
+
+## Build & Run Commands
+
+```bash
+# Open in Xcode (primary development method)
+open Murmur.xcodeproj
+
+# Build from command line
+xcodebuild -project Murmur.xcodeproj -scheme Transcripted -configuration Debug build
+
+# Build for release
+xcodebuild -project Murmur.xcodeproj -scheme Transcripted -configuration Release build
+
+# Clean build
+xcodebuild -project Murmur.xcodeproj -scheme Transcripted clean
+```
+
+**Requirements:**
+- macOS 14.2+ (Sonoma) - required for system audio capture APIs
+- Xcode 15+
+- Swift 5.9+
+
+## Architecture
+
+### Core Audio Pipeline
+
+```
+Murmur/Core/Audio.swift              → Microphone capture via AVAudioEngine
+                                     → Writes to WAV file in real-time
+                                     → Monitors audio levels for silence detection
+
+Murmur/Core/SystemAudioCapture.swift → System-wide audio via CoreAudio process taps
+                                     → Creates aggregate device with tap
+                                     → Captures all system audio including meeting apps
+
+Murmur/Core/Transcription.swift      → Apple SFSpeechRecognizer (on-device)
+                                     → Processes 45-second chunks (API limit)
+                                     → Groups into sentences based on punctuation/pauses
+
+Murmur/Core/TranscriptSaver.swift    → Outputs markdown with YAML frontmatter
+                                     → Saves to ~/Documents/Transcripted/
+```
+
+### Transcription Providers
+
+The app supports three transcription engines (configurable in Settings):
+
+| Provider | Type | Features |
+|----------|------|----------|
+| Apple | On-device | 100% private, no internet, identifies speakers by audio source only |
+| Deepgram | Cloud | Speaker diarization, sentiment, entities, topics, intents, summaries |
+| AssemblyAI | Cloud | Speaker diarization, sentiment, chapters, entity detection |
+
+**Services:**
+- `Murmur/Services/DeepgramService.swift` - Nova-2 model, exponential retry (2s, 4s, 8s)
+- `Murmur/Services/AssemblyAIService.swift` - Upload-poll architecture, 30min timeout
+
+### State Management
+
+```
+TranscriptedApp.swift (AppDelegate)
+├── Audio                    → Recording state, audio levels
+├── TranscriptionTaskManager → Background transcription queue, progress tracking
+├── FailedTranscriptionManager → Retry queue with persistent storage
+├── RecordingValidator       → Pre-recording system checks
+└── FloatingPanelController  → UI coordination
+```
+
+### Action Item Pipeline
+
+When enabled, transcripts are processed for action items:
+```
+Murmur/Core/ActionItemExtractor.swift → Sends transcript to Gemini 2.0 Flash Lite API
+                                      → Extracts tasks, owners, priorities, due dates
+
+Murmur/Core/DateParser.swift          → Parses natural language dates ("next Friday", "EOW")
+                                      → Uses NSDataDetector + custom fallbacks
+
+Murmur/Services/RemindersService.swift → Creates EKReminders from extracted action items
+Murmur/Services/TodoistService.swift   → Alternative: sends tasks to Todoist via API
+```
+
+### UI Components
+
+- **FloatingPanelController** (`Murmur/UI/FloatingPanel.swift`) - NSWindowController managing the edge-docked panel
+- **EdgeDockingManager** - Monitors mouse position, handles expand/collapse animations
+- **FloatingPanelView** - SwiftUI view with record button, visualizers, status
+- **SettingsView** (`Murmur/UI/Settings.swift`) - Tabbed settings (Recording, AI Features, Advanced)
+- **FailedTranscriptionsView** - UI for retry queue management
+
+### Onboarding Flow
+
+Six-step onboarding managed by `Murmur/Onboarding/OnboardingState.swift`:
+1. Welcome → 2. Value Proposition → 3. How It Works → 4. Permissions → 5. Demo → 6. Ready
+
+Permissions requested: Microphone + Speech Recognition (required), Screen Recording (for system audio), Reminders (optional)
+
+## Design System
+
+Defined in `Murmur/Design/DesignTokens.swift`:
+- **Panel theme**: Dark charcoal (`panelCharcoal`, `panelCharcoalElevated`)
+- **Recording accent**: Coral red (`recordingCoral` #FF6B6B)
+- **Text**: `panelTextPrimary`, `panelTextSecondary`, `panelTextMuted`
+- **Onboarding theme**: Warm cream with terracotta accents
+- **Animation presets**: `.elegant` (0.5s), `.refined`, `.snappy`
+
+## Data Flow
+
+1. **Recording starts** → `RecordingValidator.validateRecordingConditions()` checks disk space, permissions, devices
+2. **Audio capture** → `Audio.start()` + `SystemAudioCapture.start()` write WAV files
+3. **Recording stops** → `onRecordingComplete` callback triggers
+4. **Transcription queued** → `TranscriptionTaskManager.startTranscription()`
+5. **On failure** → `FailedTranscriptionManager.addFailedTranscription()` persists to `~/Documents/Transcripted/failed_transcriptions.json`
+6. **On success** → `TranscriptSaver.save()` writes markdown, audio files deleted
+7. **Action items** → Extracted via Gemini API, sent to Reminders or Todoist
+
+## Configuration
+
+User settings stored in `UserDefaults`:
+
+| Key | Description |
+|-----|-------------|
+| `transcriptSaveLocation` | Custom output folder path |
+| `transcriptionProvider` | "apple", "deepgram", or "assemblyai" |
+| `deepgramAPIKey` | Deepgram API key (if using Deepgram) |
+| `assemblyaiAPIKey` | AssemblyAI API key (if using AssemblyAI) |
+| `geminiAPIKey` | API key for action item extraction |
+| `taskService` | "reminders" or "todoist" |
+| `todoistAPIKey` | Todoist API key (if using Todoist) |
+| `userName` | User's name for action item attribution |
+| `hasCompletedOnboarding` | Onboarding completion flag |
+
+## Debug Features
+
+In DEBUG builds, the menu bar includes "Reset Onboarding (Debug)" to test the onboarding flow.
+
+To test failed transcription retry:
+```swift
+// In TranscriptionTaskManager.startTranscription(), uncomment:
+// throw NSError(domain: "TestError", code: 999, ...)
+```
+
+## Important Implementation Notes
+
+### macOS Version Annotations
+The app uses `@available(macOS 26.0, *)` annotations throughout, targeting macOS 14.2+ due to:
+- `AudioHardwareCreateProcessTap` API for system audio
+- `SpeechAnalyzer` with `.audioTimeRange` attribute options
+
+### Audio Format Handling
+- Mic audio: Uses hardware format from `inputNode.inputFormat(forBus: 1)` (NOT `outputFormat`)
+- System audio: Native 48kHz (tap claims 96kHz but actual rate is 48kHz)
+- Transcription: Converts to Int16 format required by Speech framework
+
+### Transcript Format
+Output is markdown with YAML frontmatter:
+```yaml
+---
+date: YYYY-MM-DD
+time: HH:mm:ss
+duration: "MM:SS"
+processing_time: "X.Xs"
+word_count: N
+---
+```
+Timeline entries: `[MM:SS] [Mic/SysAudio/Speaker X] Text`
+
+### Cloud Service Retry Logic
+- **Deepgram**: Automatic retry with exponential backoff (2s, 4s, 8s) for status codes 408, 429, 500-504
+- **AssemblyAI**: Polls every 3 seconds, 30-minute timeout for processing
+
+## File Organization
+
+```
+Murmur/
+├── Core/              # Audio, transcription, clipboard, validators
+├── Design/            # DesignTokens, PremiumComponents
+├── Onboarding/        # Steps/, Animations/, OnboardingState
+├── Services/          # RemindersService, TodoistService, DeepgramService, AssemblyAIService
+├── UI/                # FloatingPanel, Settings, FailedTranscriptionsView
+├── TranscriptedApp.swift   # App entry point (AppDelegate pattern)
+└── Transcripted.entitlements
+```
