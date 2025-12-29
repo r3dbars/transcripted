@@ -94,7 +94,7 @@ class SystemAudioCapture: ObservableObject {
         // Create aggregate device with the tap
         let aggregateUID = UUID().uuidString
         let description: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "Murmur-SystemTap",
+            kAudioAggregateDeviceNameKey: "Transcripted-SystemTap",
             kAudioAggregateDeviceUIDKey: aggregateUID,
             kAudioAggregateDeviceMainSubDeviceKey: outputUID,
             kAudioAggregateDeviceIsPrivateKey: true,

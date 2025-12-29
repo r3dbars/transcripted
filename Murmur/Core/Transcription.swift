@@ -1,11 +1,50 @@
 import Foundation
-import Speech
 @preconcurrency import AVFoundation
 
-struct TimestampedSegment {
-    let timestamp: TimeInterval
-    let source: String  // "Mic" or "System Audio"
-    let text: String
+/// Maps AssemblyAI speaker labels (A, B, C) to identified names from Gemini
+struct SpeakerMapping {
+    let speakerId: String           // "A", "B", "C", "D", etc.
+    var identifiedName: String?     // "John Smith" or nil if unidentified
+    var confidence: String?         // "high" or "medium"
+
+    /// Display name: uses identified name if available, otherwise "Speaker A/B/C"
+    var displayName: String {
+        if let name = identifiedName {
+            return confidence == "medium" ? "\(name)?" : name
+        }
+        return "Speaker \(speakerId)"
+    }
+
+    init(speakerId: String, identifiedName: String? = nil, confidence: String? = nil) {
+        self.speakerId = speakerId
+        self.identifiedName = identifiedName
+        self.confidence = confidence
+    }
+}
+
+/// Combined result from AssemblyAI transcription of both mic and system audio
+/// Preserves all rich data (summary, sentiment, entities, chapters) for comprehensive markdown output
+struct CombinedAssemblyAIResult {
+    let micResult: AssemblyAITranscriptionResult?
+    let systemResult: AssemblyAITranscriptionResult?
+    let duration: TimeInterval
+    let processingTime: TimeInterval
+
+    /// All unique speaker IDs detected across both audio sources
+    var allSpeakerIds: Set<String> {
+        var ids = Set<String>()
+        if let mic = micResult {
+            for utterance in mic.utterances {
+                ids.insert(utterance.speaker)
+            }
+        }
+        if let sys = systemResult {
+            for utterance in sys.utterances {
+                ids.insert(utterance.speaker)
+            }
+        }
+        return ids
+    }
 }
 
 @available(macOS 26.0, *)
@@ -17,91 +56,145 @@ class Transcription: ObservableObject {
 
     init() {}
 
-    /// Main entry point: Transcribe both audio files and save to markdown
+    /// Main entry point: Transcribe both audio files and save to markdown using AssemblyAI
     /// - Parameters:
     ///   - micURL: Mic audio file URL
     ///   - systemURL: System audio file URL (optional)
     ///   - outputFolder: Folder to save markdown transcript
+    ///   - onProgress: Optional callback for progress updates (0.0 to 1.0) - Goal-Gradient Effect
     /// - Returns: URL of saved markdown file
-    func transcribeMeetingFiles(micURL: URL, systemURL: URL?, outputFolder: URL) async throws -> URL {
+    func transcribeMeetingFiles(
+        micURL: URL,
+        systemURL: URL?,
+        outputFolder: URL,
+        onProgress: ((Double) -> Void)? = nil
+    ) async throws -> URL {
+        return try await transcribeWithAssemblyAI(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: outputFolder,
+            onProgress: onProgress
+        )
+    }
+
+    /// Transcribe audio files and return intermediate result WITHOUT saving to disk
+    /// This allows speaker identification with Gemini before saving the final transcript
+    /// - Parameters:
+    ///   - micURL: Mic audio file URL
+    ///   - systemURL: System audio file URL (optional)
+    ///   - onProgress: Optional callback for progress updates (0.0 to 1.0)
+    /// - Returns: CombinedAssemblyAIResult with all rich data for further processing
+    func transcribeToIntermediateResult(
+        micURL: URL,
+        systemURL: URL?,
+        onProgress: ((Double) -> Void)? = nil
+    ) async throws -> CombinedAssemblyAIResult {
+        let apiKey = UserDefaults.standard.string(forKey: "assemblyaiAPIKey") ?? ""
+        guard !apiKey.isEmpty else {
+            throw NSError(domain: "Transcription", code: 100, userInfo: [
+                NSLocalizedDescriptionKey: "AssemblyAI API key not configured. Please add your API key in Settings."
+            ])
+        }
+
         await MainActor.run {
             self.isProcessing = true
             self.error = nil
-            self.processingStatus = "Starting transcription..."
+            self.processingStatus = "Preparing audio..."
         }
 
         let processingStartTime = Date()
+        let hasSystemAudio = systemURL != nil
+        var tempFilesToCleanup: [URL] = []
 
         do {
-            // Calculate recording duration from audio file
+            // Get recording duration from original file
             let micFile = try AVAudioFile(forReading: micURL)
             let duration = Double(micFile.length) / micFile.processingFormat.sampleRate
 
+            onProgress?(0.0)
+
+            // Preprocess mic audio
             await MainActor.run {
-                self.processingStatus = "Transcribing microphone..."
+                self.processingStatus = "Optimizing mic audio for upload..."
+            }
+            let optimizedMicURL = try await AudioPreprocessor.prepareForCloudTranscription(audioURL: micURL)
+            if optimizedMicURL != micURL {
+                tempFilesToCleanup.append(optimizedMicURL)
             }
 
-            // Transcribe mic audio with timestamps
-            let micSegments = try await transcribeAudioFileWithTimestamps(fileURL: micURL)
+            onProgress?(0.10)
 
-            var systemSegments: [TimestampedSegment] = []
+            // Preprocess system audio if present
+            var optimizedSystemURL: URL? = nil
             if let systemURL = systemURL {
                 await MainActor.run {
-                    self.processingStatus = "Transcribing system audio..."
+                    self.processingStatus = "Optimizing system audio for upload..."
                 }
-                systemSegments = try await transcribeAudioFileWithTimestamps(fileURL: systemURL)
+                optimizedSystemURL = try await AudioPreprocessor.prepareForCloudTranscription(audioURL: systemURL)
+                if optimizedSystemURL != systemURL {
+                    tempFilesToCleanup.append(optimizedSystemURL!)
+                }
             }
 
-            await MainActor.run {
-                self.processingStatus = "Merging transcripts..."
+            onProgress?(0.15)
+
+            // Transcribe mic audio - PRESERVE FULL RESULT
+            let micResult = try await AssemblyAIService.transcribe(
+                audioURL: optimizedMicURL,
+                apiKey: apiKey,
+                onStatusUpdate: { status in
+                    Task { @MainActor in
+                        self.processingStatus = "Mic: \(status.rawValue)"
+                    }
+                }
+            )
+
+            onProgress?(hasSystemAudio ? 0.50 : 0.85)
+
+            // Transcribe system audio (if present) - PRESERVE FULL RESULT
+            var systemResult: AssemblyAITranscriptionResult? = nil
+            if let optimizedSystemURL = optimizedSystemURL {
+                systemResult = try await AssemblyAIService.transcribe(
+                    audioURL: optimizedSystemURL,
+                    apiKey: apiKey,
+                    onStatusUpdate: { status in
+                        Task { @MainActor in
+                            self.processingStatus = "System: \(status.rawValue)"
+                        }
+                    }
+                )
+                onProgress?(0.85)
             }
 
-            // Label sources
-            let labeledMicSegments = micSegments.map {
-                TimestampedSegment(timestamp: $0.timestamp, source: "Mic", text: $0.text)
-            }
-            let labeledSystemSegments = systemSegments.map {
-                TimestampedSegment(timestamp: $0.timestamp, source: "System Audio", text: $0.text)
+            // Cleanup temp preprocessed files
+            for tempURL in tempFilesToCleanup {
+                AudioPreprocessor.cleanup(tempURL: tempURL)
             }
 
-            // Merge and sort by timestamp
-            let allSegments = (labeledMicSegments + labeledSystemSegments).sorted { $0.timestamp < $1.timestamp }
-
-            // Calculate processing time
             let processingTime = Date().timeIntervalSince(processingStartTime)
 
             await MainActor.run {
-                self.processingStatus = "Saving transcript..."
+                self.processingStatus = "Transcription complete, preparing for speaker identification..."
             }
 
-            // Save to markdown
-            guard let fileURL = TranscriptSaver.save(
-                segments: allSegments,
+            onProgress?(0.90)
+
+            // Return intermediate result for further processing (speaker ID, then save)
+            return CombinedAssemblyAIResult(
+                micResult: micResult,
+                systemResult: systemResult,
                 duration: duration,
-                processingTime: processingTime,
-                directory: outputFolder
-            ) else {
-                throw NSError(domain: "Transcription", code: 1, userInfo: [
-                    NSLocalizedDescriptionKey: "Failed to save transcript"
-                ])
-            }
-
-            await MainActor.run {
-                self.lastSavedFileURL = fileURL
-                self.isProcessing = false
-                self.processingStatus = "Complete!"
-            }
-
-            print("✅ Transcript saved: \(fileURL.lastPathComponent)")
-
-            // Cleanup audio files after successful transcription
-            cleanupAudioFiles(micURL: micURL, systemURL: systemURL)
-
-            return fileURL
+                processingTime: processingTime
+            )
 
         } catch {
+            // Cleanup temp files on failure
+            for tempURL in tempFilesToCleanup {
+                AudioPreprocessor.cleanup(tempURL: tempURL)
+            }
+
             await MainActor.run {
-                self.error = "Transcription failed: \(error.localizedDescription)"
+                self.error = "AssemblyAI transcription failed: \(error.localizedDescription)"
                 self.isProcessing = false
                 self.processingStatus = ""
             }
@@ -109,201 +202,162 @@ class Transcription: ObservableObject {
         }
     }
 
-    /// Transcribe audio file and extract timestamps per segment
-    private func transcribeAudioFileWithTimestamps(fileURL: URL) async throws -> [TimestampedSegment] {
-        let audioFile = try AVAudioFile(forReading: fileURL)
-        let fileFormat = audioFile.processingFormat
-
-        print("📝 Transcribing: \(fileURL.lastPathComponent)")
-
-        // Create transcriber with timestamp support
-        let transcriber = SpeechTranscriber(
-            locale: Locale(identifier: "en-US"),
-            transcriptionOptions: [],  // System uses best available
-            reportingOptions: [],  // No volatile for file processing
-            attributeOptions: [.audioTimeRange]  // Enable timing info
-        )
-
-        let analyzer = SpeechAnalyzer(modules: [transcriber])
-
-        // Query required format
-        guard let requiredFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
-            throw NSError(domain: "Transcription", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "Failed to get required audio format"
+    /// Transcribe using AssemblyAI's cloud API with speaker diarization
+    private func transcribeWithAssemblyAI(micURL: URL, systemURL: URL?, outputFolder: URL, onProgress: ((Double) -> Void)? = nil) async throws -> URL {
+        let apiKey = UserDefaults.standard.string(forKey: "assemblyaiAPIKey") ?? ""
+        guard !apiKey.isEmpty else {
+            throw NSError(domain: "Transcription", code: 100, userInfo: [
+                NSLocalizedDescriptionKey: "AssemblyAI API key not configured. Please add your API key in Settings."
             ])
         }
 
-        // Force Int16 format (transcriber requires it)
-        guard let targetFormat = AVAudioFormat(
-            commonFormat: .pcmFormatInt16,
-            sampleRate: requiredFormat.sampleRate,
-            channels: requiredFormat.channelCount,
-            interleaved: true
-        ) else {
-            throw NSError(domain: "Transcription", code: 2, userInfo: [
-                NSLocalizedDescriptionKey: "Failed to create target format"
-            ])
+        await MainActor.run {
+            self.isProcessing = true
+            self.error = nil
+            self.processingStatus = "Preparing audio..."
         }
 
-        let (inputSequence, inputBuilder) = AsyncStream<AnalyzerInput>.makeStream()
+        let processingStartTime = Date()
+        let hasSystemAudio = systemURL != nil
 
-        try await analyzer.start(inputSequence: inputSequence)
+        // Track temp files for cleanup
+        var tempFilesToCleanup: [URL] = []
 
-        // Collect results with timestamp extraction
-        let resultTask = Task<[TimestampedSegment], Error> {
-            var segments: [TimestampedSegment] = []
+        do {
+            // Get recording duration from original file
+            let micFile = try AVAudioFile(forReading: micURL)
+            let duration = Double(micFile.length) / micFile.processingFormat.sampleRate
 
-            for try await result in transcriber.results {
-                if result.isFinal {
-                    var wordSegments: [(timestamp: TimeInterval, text: String)] = []
+            // Progress: 0%
+            onProgress?(0.0)
 
-                    // Extract timestamps from AttributedString runs
-                    for run in result.text.runs {
-                        if let timeRange = run.attributes.audioTimeRange {
-                            let startTime = CMTimeGetSeconds(timeRange.start)
-                            let text = String(result.text.characters[run.range])
-                            wordSegments.append((timestamp: startTime, text: text.trimmingCharacters(in: .whitespacesAndNewlines)))
+            // Preprocess mic audio (downsample for faster upload - AssemblyAI handles various formats but smaller is faster)
+            await MainActor.run {
+                self.processingStatus = "Optimizing mic audio for upload..."
+            }
+            let optimizedMicURL = try await AudioPreprocessor.prepareForCloudTranscription(audioURL: micURL)
+            if optimizedMicURL != micURL {
+                tempFilesToCleanup.append(optimizedMicURL)
+            }
+
+            // Progress: 10%
+            onProgress?(0.10)
+
+            // Preprocess system audio if present
+            var optimizedSystemURL: URL? = nil
+            if let systemURL = systemURL {
+                await MainActor.run {
+                    self.processingStatus = "Optimizing system audio for upload..."
+                }
+                optimizedSystemURL = try await AudioPreprocessor.prepareForCloudTranscription(audioURL: systemURL)
+                if optimizedSystemURL != systemURL {
+                    tempFilesToCleanup.append(optimizedSystemURL!)
+                }
+            }
+
+            // Progress: 15%
+            onProgress?(0.15)
+
+            // Transcribe mic audio with status updates - PRESERVE FULL RESULT
+            let micResult = try await AssemblyAIService.transcribe(
+                audioURL: optimizedMicURL,
+                apiKey: apiKey,
+                onStatusUpdate: { status in
+                    Task { @MainActor in
+                        self.processingStatus = "Mic: \(status.rawValue)"
+                    }
+                }
+            )
+
+            // Progress: 50% if system audio, 85% if no system audio
+            onProgress?(hasSystemAudio ? 0.50 : 0.85)
+
+            // Transcribe system audio (if present) - PRESERVE FULL RESULT
+            var systemResult: AssemblyAITranscriptionResult? = nil
+            if let optimizedSystemURL = optimizedSystemURL {
+                systemResult = try await AssemblyAIService.transcribe(
+                    audioURL: optimizedSystemURL,
+                    apiKey: apiKey,
+                    onStatusUpdate: { status in
+                        Task { @MainActor in
+                            self.processingStatus = "System: \(status.rawValue)"
                         }
                     }
+                )
 
-                    if !wordSegments.isEmpty {
-                        // Group words into sentences
-                        let groupedSegments = self.groupWordsIntoSentences(wordSegments)
-                        segments.append(contentsOf: groupedSegments)
-                    } else {
-                        // Fallback if no timing data
-                        let fullText = String(result.text.characters)
-                        if !fullText.isEmpty {
-                            segments.append(TimestampedSegment(
-                                timestamp: 0.0,
-                                source: "",
-                                text: fullText
-                            ))
-                        }
-                    }
-                }
+                // Progress: 85%
+                onProgress?(0.85)
             }
 
-            return segments
-        }
-
-        // Process file in chunks (45-second chunks to avoid 60-second API limit)
-        let chunkDurationSeconds = 45.0
-        let chunkFrameCount = AVAudioFrameCount(fileFormat.sampleRate * chunkDurationSeconds)
-        let totalFrames = AVAudioFrameCount(audioFile.length)
-
-        // Create converter if format doesn't match
-        var converter: AVAudioConverter? = nil
-        if !(fileFormat.commonFormat == targetFormat.commonFormat &&
-             fileFormat.sampleRate == targetFormat.sampleRate &&
-             fileFormat.channelCount == targetFormat.channelCount) {
-            guard let conv = AVAudioConverter(from: fileFormat, to: targetFormat) else {
-                throw NSError(domain: "Transcription", code: 3, userInfo: [
-                    NSLocalizedDescriptionKey: "Failed to create audio converter"
-                ])
+            // Cleanup temp preprocessed files
+            for tempURL in tempFilesToCleanup {
+                AudioPreprocessor.cleanup(tempURL: tempURL)
             }
-            conv.sampleRateConverterQuality = .max
-            conv.dither = true
-            converter = conv
-        }
 
-        var framesProcessed: AVAudioFrameCount = 0
+            await MainActor.run {
+                self.processingStatus = "Merging transcripts..."
+            }
 
-        while framesProcessed < totalFrames {
-            let framesToRead = min(chunkFrameCount, totalFrames - framesProcessed)
+            // Progress: 90%
+            onProgress?(0.90)
 
-            guard let chunkBuffer = AVAudioPCMBuffer(pcmFormat: fileFormat, frameCapacity: framesToRead) else {
-                throw NSError(domain: "Transcription", code: 4, userInfo: [
-                    NSLocalizedDescriptionKey: "Failed to create buffer"
+            // Calculate processing time
+            let processingTime = Date().timeIntervalSince(processingStartTime)
+
+            // Create combined result with ALL rich data (summary, sentiment, entities, chapters)
+            let combinedResult = CombinedAssemblyAIResult(
+                micResult: micResult,
+                systemResult: systemResult,
+                duration: duration,
+                processingTime: processingTime
+            )
+
+            await MainActor.run {
+                self.processingStatus = "Saving rich transcript..."
+            }
+
+            // Progress: 95%
+            onProgress?(0.95)
+
+            // Save to markdown with full AssemblyAI features (summary, sentiment, entities, chapters, inline annotations)
+            guard let fileURL = TranscriptSaver.saveRichAssemblyAITranscript(
+                combinedResult,
+                directory: outputFolder
+            ) else {
+                throw NSError(domain: "Transcription", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "Failed to save transcript"
                 ])
             }
 
-            try audioFile.read(into: chunkBuffer, frameCount: framesToRead)
+            // Progress: 100%
+            onProgress?(1.0)
 
-            let finalBuffer: AVAudioPCMBuffer
-            if let converter = converter {
-                // Convert chunk
-                let ratio = targetFormat.sampleRate / fileFormat.sampleRate
-                let capacity = AVAudioFrameCount(Double(chunkBuffer.frameLength) * ratio) + 1
-
-                guard let convertedBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else {
-                    throw NSError(domain: "Transcription", code: 5, userInfo: [
-                        NSLocalizedDescriptionKey: "Failed to create conversion buffer"
-                    ])
-                }
-
-                var error: NSError?
-                let inputBuffer = chunkBuffer // Capture to avoid Sendable warning
-                let status = converter.convert(to: convertedBuffer, error: &error) { _, outStatus in
-                    outStatus.pointee = .haveData
-                    return inputBuffer
-                }
-
-                if let error = error { throw error }
-                if status == .error {
-                    throw NSError(domain: "Transcription", code: 6, userInfo: [
-                        NSLocalizedDescriptionKey: "Audio conversion failed"
-                    ])
-                }
-
-                finalBuffer = convertedBuffer
-            } else {
-                finalBuffer = chunkBuffer
+            await MainActor.run {
+                self.lastSavedFileURL = fileURL
+                self.isProcessing = false
+                self.processingStatus = "Complete!"
             }
 
-            let input = AnalyzerInput(buffer: finalBuffer)
-            inputBuilder.yield(input)
+            print("✅ Transcript saved (AssemblyAI): \(fileURL.lastPathComponent)")
 
-            framesProcessed += framesToRead
-        }
+            // Cleanup audio files after successful transcription
+            cleanupAudioFiles(micURL: micURL, systemURL: systemURL)
 
-        inputBuilder.finish()
-        try await analyzer.finalizeAndFinishThroughEndOfInput()
+            return fileURL
 
-        let finalSegments = try await resultTask.value
-        print("✓ Transcription complete: \(finalSegments.count) segments")
-
-        return finalSegments
-    }
-
-    /// Group word-level timestamps into sentence-level segments
-    private func groupWordsIntoSentences(_ words: [(timestamp: TimeInterval, text: String)]) -> [TimestampedSegment] {
-        guard !words.isEmpty else { return [] }
-
-        var sentences: [TimestampedSegment] = []
-        var currentWords: [String] = []
-        var sentenceStartTime: TimeInterval = words[0].timestamp
-
-        let sentenceEnders: Set<Character> = [".", "!", "?"]
-        let pauseThreshold: TimeInterval = 1.0  // 1 second pause indicates new sentence
-
-        for (index, word) in words.enumerated() {
-            currentWords.append(word.text)
-
-            let endsWithPunctuation = word.text.last.map { sentenceEnders.contains($0) } ?? false
-            let hasLongPauseAfter = index < words.count - 1 && (words[index + 1].timestamp - word.timestamp > pauseThreshold)
-            let isLastWord = index == words.count - 1
-
-            // End sentence if: punctuation, long pause, or last word
-            if endsWithPunctuation || hasLongPauseAfter || isLastWord {
-                let sentenceText = currentWords.joined(separator: " ")
-                if !sentenceText.isEmpty {
-                    sentences.append(TimestampedSegment(
-                        timestamp: sentenceStartTime,
-                        source: "",
-                        text: sentenceText
-                    ))
-                }
-
-                // Start new sentence
-                currentWords = []
-                if index < words.count - 1 {
-                    sentenceStartTime = words[index + 1].timestamp
-                }
+        } catch {
+            // Cleanup temp preprocessed files on failure
+            for tempURL in tempFilesToCleanup {
+                AudioPreprocessor.cleanup(tempURL: tempURL)
             }
-        }
 
-        return sentences
+            await MainActor.run {
+                self.error = "AssemblyAI transcription failed: \(error.localizedDescription)"
+                self.isProcessing = false
+                self.processingStatus = ""
+            }
+            throw error
+        }
     }
 
     /// Cleanup audio files after successful transcription
