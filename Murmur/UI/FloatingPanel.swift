@@ -24,6 +24,15 @@ class PillStateManager: ObservableObject {
     @Published private(set) var isTransitioning = false
     private let transitionCooldown: TimeInterval = 0.35
 
+    // MARK: - Timeout Recovery (Phase 1 Bug Fix)
+
+    /// Timestamp when current transition started (for timeout recovery)
+    private var transitionStartTime: Date?
+
+    /// Maximum time a transition can be "in progress" before force-reset
+    /// 2 seconds is long enough for any animation but catches stuck states quickly
+    private let transitionTimeout: TimeInterval = 2.0
+
     // MARK: - Computed Dimensions
 
     var pillWidth: CGFloat {
@@ -62,23 +71,42 @@ class PillStateManager: ObservableObject {
 
     // MARK: - State Transitions
 
-    /// Transition to a new state with animation protection
+    /// Transition to a new state with animation protection and timeout recovery
     func transition(to newState: PillState) {
-        // Don't transition if locked (e.g., during review)
-        guard !isLocked || newState == .idle else { return }
+        // PHASE 1 FIX: Timeout recovery - if stuck in transition for > 2s, force reset
+        if isTransitioning,
+           let startTime = transitionStartTime,
+           Date().timeIntervalSince(startTime) > transitionTimeout {
+            print("[PillState] ⚠️ Force-resetting stuck transition (was \(state) for \(String(format: "%.1f", Date().timeIntervalSince(startTime)))s)")
+            isTransitioning = false
+            transitionStartTime = nil
+        }
+
+        // Don't transition if locked (e.g., during review) - UNLESS transitioning to idle (emergency escape)
+        guard !isLocked || newState == .idle else {
+            print("[PillState] Blocked transition to \(newState) - pill is locked")
+            return
+        }
 
         // Don't transition if already in that state
         guard state != newState else { return }
 
         // Don't allow transitions during cooldown (unless unlocking from review)
-        guard !isTransitioning || (isLocked && newState == .idle) else { return }
+        guard !isTransitioning || (isLocked && newState == .idle) else {
+            print("[PillState] Blocked transition to \(newState) - cooldown active")
+            return
+        }
 
+        let previousState = state
         isTransitioning = true
+        transitionStartTime = Date()
         state = newState
+        print("[PillState] Transition: \(previousState) → \(newState)")
 
         // Reset transition flag after cooldown
         DispatchQueue.main.asyncAfter(deadline: .now() + transitionCooldown) { [weak self] in
             self?.isTransitioning = false
+            self?.transitionStartTime = nil
         }
     }
 
@@ -93,6 +121,18 @@ class PillStateManager: ObservableObject {
         if transitionToIdle {
             transition(to: .idle)
         }
+    }
+
+    // MARK: - Emergency Recovery (Phase 1 Bug Fix)
+
+    /// Force unlock and reset all state flags - use only for emergency recovery
+    /// This bypasses all guards and forces the pill back to idle state
+    func forceUnlock() {
+        print("[PillState] ⚠️ Force unlock triggered - resetting all state")
+        isLocked = false
+        isTransitioning = false
+        transitionStartTime = nil
+        state = .idle
     }
 }
 
@@ -311,7 +351,9 @@ class FloatingPanelController: NSWindowController {
 
     private func setupStateBindings() {
         // React to recording state changes
+        // PHASE 1 FIX: Add debouncing to prevent rapid state changes from causing stuck states
         audio.$isRecording
+            .debounce(for: .milliseconds(50), scheduler: DispatchQueue.main)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isRecording in
                 guard let self = self else { return }
