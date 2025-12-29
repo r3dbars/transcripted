@@ -862,17 +862,37 @@ struct PillDimensions {
     static let defaultDockHeight: CGFloat = 70
 }
 
+// MARK: - Pill Animation Timing (PHASE 4: Unified timing constants)
+
+struct PillAnimationTiming {
+    /// Primary morph duration - matches transitionCooldown in PillStateManager
+    static let morphDuration: Double = 0.35
+
+    /// Transition cooldown - must match morphDuration to prevent jank
+    static let cooldownDuration: Double = 0.35
+
+    /// Content fade duration during transitions
+    static let contentFade: Double = 0.15
+
+    /// Celebration display duration before auto-clear
+    static let celebrationDuration: Double = 2.0
+
+    /// Tray expand/collapse duration
+    static let trayDuration: Double = 0.4
+}
+
 // MARK: - Pill Animation Presets (Dynamic Island-style morphing)
 
 extension Animation {
     /// Primary pill morph animation (idle ↔ recording)
-    static let pillMorph = Animation.spring(response: 0.3, dampingFraction: 0.8)
+    /// PHASE 4: Uses unified timing from PillAnimationTiming
+    static let pillMorph = Animation.spring(response: PillAnimationTiming.morphDuration, dampingFraction: 0.8)
 
     /// Tray expand/collapse animation
-    static let trayExpand = Animation.spring(response: 0.4, dampingFraction: 0.85)
+    static let trayExpand = Animation.spring(response: PillAnimationTiming.trayDuration, dampingFraction: 0.85)
 
     /// Content fade during transitions
-    static let pillContentFade = Animation.easeInOut(duration: 0.15)
+    static let pillContentFade = Animation.easeInOut(duration: PillAnimationTiming.contentFade)
 }
 
 // MARK: - Additional Radius Tokens
