@@ -16,7 +16,7 @@ class Clipboard {
 
     private static func showNotification(text: String) {
         let content = UNMutableNotificationContent()
-        content.title = "Murmur"
+        content.title = "Transcripted"
         content.body = "Transcription copied: \(String(text.prefix(100)))"
 
         let request = UNNotificationRequest(

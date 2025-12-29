@@ -1,5 +1,116 @@
 import SwiftUI
 import AppKit
+import Combine
+
+// MARK: - Edge Docking Manager
+
+/// Monitors mouse position and triggers panel expansion when near screen edge
+/// Panel stays expanded while mouse is inside the panel OR near the edge
+class EdgeDockingManager: ObservableObject {
+    @Published var shouldExpand = false
+    @Published var isLocked = false  // Prevents mouse-triggered collapse (e.g., for meeting prompts)
+
+    // Reference to panel window for bounds checking
+    weak var panelWindow: NSWindow?
+
+    private var globalMonitor: Any?
+    private var localMonitor: Any?
+    private var expandWorkItem: DispatchWorkItem?
+    private var collapseWorkItem: DispatchWorkItem?
+
+    // Configuration
+    private let edgeThreshold: CGFloat = 20  // Pixels from edge to trigger
+    private let expandDelay: TimeInterval = 0.3  // 300ms delay before expanding
+    private let collapseDelay: TimeInterval = 0.15  // 150ms grace period before collapsing
+
+    func startMonitoring() {
+        // Global monitor for when app is not focused
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            self?.handleMouseMove()
+        }
+
+        // Local monitor for when app is focused
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
+            self?.handleMouseMove()
+            return event
+        }
+    }
+
+    private func handleMouseMove() {
+        guard let screen = NSScreen.main else { return }
+        let mouseLocation = NSEvent.mouseLocation
+        let rightEdge = screen.visibleFrame.maxX
+
+        // Check if mouse is near the screen edge
+        let nearEdge = mouseLocation.x >= rightEdge - edgeThreshold
+
+        // Check if mouse is inside the expanded panel
+        let insidePanel: Bool = {
+            guard shouldExpand, let window = panelWindow else { return false }
+            return window.frame.contains(mouseLocation)
+        }()
+
+        if nearEdge || insidePanel {
+            // Cancel any pending collapse and schedule/maintain expansion
+            cancelCollapse()
+            scheduleExpand()
+        } else {
+            // Cancel pending expansion and schedule collapse with grace period
+            cancelExpand()
+            scheduleCollapse()
+        }
+    }
+
+    private func scheduleExpand() {
+        // Don't schedule if already expanded or already scheduling
+        guard !shouldExpand, expandWorkItem == nil else { return }
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.shouldExpand = true
+            self?.expandWorkItem = nil
+        }
+        expandWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + expandDelay, execute: workItem)
+    }
+
+    private func cancelExpand() {
+        expandWorkItem?.cancel()
+        expandWorkItem = nil
+    }
+
+    private func scheduleCollapse() {
+        // Don't schedule if already collapsed, already scheduling, or locked
+        guard shouldExpand, collapseWorkItem == nil, !isLocked else { return }
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self, !self.isLocked else { return }  // Double-check lock
+            self.shouldExpand = false
+            self.collapseWorkItem = nil
+        }
+        collapseWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + collapseDelay, execute: workItem)
+    }
+
+    private func cancelCollapse() {
+        collapseWorkItem?.cancel()
+        collapseWorkItem = nil
+    }
+
+    func stopMonitoring() {
+        if let monitor = globalMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalMonitor = nil
+        }
+        if let monitor = localMonitor {
+            NSEvent.removeMonitor(monitor)
+            localMonitor = nil
+        }
+    }
+
+    deinit {
+        stopMonitoring()
+    }
+}
 
 // MARK: - Window Controller
 
@@ -7,13 +118,39 @@ import AppKit
 class FloatingPanelController: NSWindowController {
     private var taskManager: TranscriptionTaskManager
     private var audio: Audio
+    private let dockingManager = EdgeDockingManager()
+    private var cancellables = Set<AnyCancellable>()
+
+    // Dimensions (UX: Fitts's Law - larger targets easier to acquire)
+    private let idleDockedWidth: CGFloat = 28  // Width when docked and not recording (was 10)
+    private let recordingDockedWidth: CGFloat = 60  // Increased width for better visibility (was 36)
+    private let expandedWidth: CGFloat = 320  // Wide enough to show notification (was 170)
+    private let panelHeight: CGFloat = 110  // Height of the main panel controls
+    private let notificationHeight: CGFloat = 100  // Space above panel for notifications
+    private let reviewNotificationHeight: CGFloat = 280  // Expanded height for review UI
+    private let totalWindowHeight: CGFloat = 390  // panelHeight + reviewNotificationHeight (uses max to fit review UI)
+
+    /// Dynamic docked width based on recording state
+    private var dockedWidth: CGFloat {
+        audio.isRecording ? recordingDockedWidth : idleDockedWidth
+    }
 
     init(taskManager: TranscriptionTaskManager, audio: Audio) {
         self.taskManager = taskManager
         self.audio = audio
 
+        // Initial position: docked at right edge (use idle width for initial state)
+        // Window is tall enough to show notifications above the panel
+        let screen = NSScreen.main ?? NSScreen.screens.first!
+        let dockedFrame = NSRect(
+            x: screen.visibleFrame.maxX - idleDockedWidth,
+            y: screen.visibleFrame.maxY - totalWindowHeight - 100,  // Vertically positioned ~100pt from top
+            width: expandedWidth,
+            height: totalWindowHeight  // Includes space for notification above panel
+        )
+
         let window = FloatingPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 170, height: 45),
+            contentRect: dockedFrame,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -23,26 +160,71 @@ class FloatingPanelController: NSWindowController {
 
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
-        window.isMovableByWindowBackground = true
+        window.isMovableByWindowBackground = false  // Disable dragging for edge-docked
         window.backgroundColor = .clear
         window.hasShadow = false
         window.isOpaque = false
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
+        window.hidesOnDeactivate = false  // Stay visible when app loses focus
 
-        if let screen = NSScreen.main {
-            let frame = screen.visibleFrame
-            let x = frame.maxX - window.frame.width - 20
-            let y = frame.maxY - window.frame.height - 20
-            window.setFrameOrigin(NSPoint(x: x, y: y))
-        }
-
-        let view = FloatingPanelView(taskManager: taskManager, audio: audio)
+        // Create view with docking manager
+        let view = FloatingPanelView(
+            taskManager: taskManager,
+            audio: audio,
+            dockingManager: dockingManager
+        )
         window.contentView = NSHostingView(rootView: view)
+
+        // Give docking manager reference to panel for bounds checking
+        dockingManager.panelWindow = window
+
+        // Start edge monitoring
+        dockingManager.startMonitoring()
+
+        // React to expansion state changes
+        dockingManager.$shouldExpand
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] expand in
+                self?.animatePanel(expanded: expand)
+            }
+            .store(in: &cancellables)
+
+        // React to recording state changes - adjust docked width instantly
+        audio.$isRecording
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self, let window = self.window, let screen = NSScreen.main else { return }
+                // Only adjust if we're in docked state (not expanded)
+                if !self.dockingManager.shouldExpand {
+                    // Instant resize - no animation
+                    var frame = window.frame
+                    frame.origin.x = screen.visibleFrame.maxX - self.dockedWidth
+                    window.setFrame(frame, display: true)
+                }
+            }
+            .store(in: &cancellables)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) not implemented")
+    }
+
+    deinit {
+        dockingManager.stopMonitoring()
+    }
+
+    private func animatePanel(expanded: Bool) {
+        guard let window = self.window, let screen = NSScreen.main else { return }
+
+        let targetX = expanded
+            ? screen.visibleFrame.maxX - expandedWidth
+            : screen.visibleFrame.maxX - dockedWidth
+
+        // Instant change - no animation
+        var frame = window.frame
+        frame.origin.x = targetX
+        window.setFrame(frame, display: true)
     }
 }
 
@@ -51,184 +233,742 @@ class FloatingPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+
+
+
+
+
+
+// MARK: - Attention Prompt View
+
+/// Expandable prompt for notifications like "Start Recording?" or "Still Recording?"
+/// Features animated green ring, shake animation, and auto-dismiss
+struct AttentionPromptView: View {
+    let promptType: AttentionPromptType
+    let onPrimaryAction: () -> Void
+    let onDismiss: () -> Void
+
+    @State private var isVisible = false
+    @State private var dismissProgress: CGFloat = 1.0
+
+    private let autoDismissSeconds: Double = 10.0
+
+    enum AttentionPromptType {
+        case startRecording(appName: String)  // "Zoom opened - Record?"
+        case stillRecording(duration: TimeInterval, silenceMinutes: Int)  // "Still recording? 2 min silence"
+
+        var icon: String {
+            switch self {
+            case .startRecording: return "mic.fill"
+            case .stillRecording: return "waveform.badge.exclamationmark"
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .startRecording(let appName): return "\(appName) Active"
+            case .stillRecording: return "Still Recording?"
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .startRecording: return "Start recording?"
+            case .stillRecording(_, let minutes): return "\(minutes)m silence detected"
+            }
+        }
+
+        var primaryButtonText: String {
+            switch self {
+            case .startRecording: return "Record"
+            case .stillRecording: return "Stop"
+            }
+        }
+
+        var secondaryButtonText: String {
+            switch self {
+            case .startRecording: return "Dismiss"
+            case .stillRecording: return "Keep"
+            }
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 16) {
+            // Icon
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [Color.premiumCoral.opacity(0.2), Color.premiumCoral.opacity(0.05)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 36, height: 36)
+                
+                Image(systemName: promptType.icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.premiumCoral)
+            }
+
+            // Text Content
+            VStack(alignment: .leading, spacing: 2) {
+                Text(promptType.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.softWhite)
+
+                Text(promptType.subtitle)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.panelTextSecondary)
+            }
+
+            Spacer()
+
+            // Actions
+            HStack(spacing: 8) {
+                // Secondary (Dismiss)
+                Button(action: {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        isVisible = false
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        onDismiss()
+                    }
+                }) {
+                    Text(promptType.secondaryButtonText)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.panelTextSecondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                // Primary (Action)
+                Button(action: {
+                    onPrimaryAction()
+                }) {
+                    Text(promptType.primaryButtonText)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(LinearGradient(
+                                    colors: [Color.premiumCoral, Color.premiumCoral.opacity(0.8)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ))
+                                .shadow(color: Color.premiumCoral.opacity(0.3), radius: 8, x: 0, y: 4)
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(12)
+        .background(
+            ZStack {
+                // Glass Background
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.glassBackground)
+                    .background(
+                        VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    )
+                
+                // Subtle Border
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.2), Color.white.opacity(0.05)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            }
+        )
+        // Entry Animation
+        .offset(y: isVisible ? 0 : 20)
+        .opacity(isVisible ? 1 : 0)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                isVisible = true
+            }
+            startDismissCountdown()
+        }
+    }
+
+    private func startDismissCountdown() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + autoDismissSeconds) {
+            withAnimation(.easeOut(duration: 0.3)) {
+                isVisible = false
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                onDismiss()
+            }
+        }
+    }
+}
+
+// Helper for Glassmorphism
+struct VisualEffectBlur: NSViewRepresentable {
+    var material: NSVisualEffectView.Material
+    var blendingMode: NSVisualEffectView.BlendingMode
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let visualEffectView = NSVisualEffectView()
+        visualEffectView.material = material
+        visualEffectView.blendingMode = blendingMode
+        visualEffectView.state = .active
+        return visualEffectView
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
+    }
+}
+
+// MARK: - Edge Peek View (Laws of UX Warm Minimalism)
+
+/// Minimal view shown when panel is docked at edge - warm cream theme
+/// Shows distinctly different content based on recording state:
+/// - Idle: warm cream edge with subtle grip dots
+/// - Recording: pulsing red dot with compact waveform
+/// - Silence warning: amber ring around recording indicator
+struct EdgePeekView: View {
+    let isRecording: Bool
+    let audioLevels: [Float]
+    let systemAudioLevels: [Float]
+    let recordingDuration: TimeInterval
+    var silenceWarning: Bool = false  // Amber ring when silence detected
+    var onStop: () -> Void = {}
+
+    var body: some View {
+        ZStack {
+            // Warm cream background with vibrancy
+            RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
+                .fill(Color.surfaceEggshell.opacity(0.95))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
+                        .stroke(
+                            isRecording ? Color.recordingCoral.opacity(0.5) : Color.accentBlue.opacity(0.15),
+                            lineWidth: isRecording ? 2 : 1
+                        )
+                )
+                .shadow(
+                    color: CardStyle.shadowSubtle.color,
+                    radius: CardStyle.shadowSubtle.radius,
+                    x: CardStyle.shadowSubtle.x,
+                    y: CardStyle.shadowSubtle.y
+                )
+
+            if isRecording {
+                VStack(spacing: 8) {
+                    // Recording Indicator (Red dot, amber ring when silence warning)
+                    ZStack {
+                        // Amber pulsing ring when silence detected (UX: non-intrusive warning)
+                        if silenceWarning {
+                            Circle()
+                                .stroke(Color.statusWarningMuted, lineWidth: 2)
+                                .frame(width: 18, height: 18)
+                                .opacity(Double(Int(Date().timeIntervalSince1970 * 1.5) % 2 == 0 ? 1.0 : 0.4))
+                        }
+
+                        Circle()
+                            .fill(silenceWarning ? Color.statusWarningMuted : Color.recordingCoral)
+                            .frame(width: 10, height: 10)
+                            .shadow(color: (silenceWarning ? Color.statusWarningMuted : Color.recordingCoral).opacity(0.6), radius: 4)
+                            .opacity(Double(Int(Date().timeIntervalSince1970 * 2) % 2 == 0 ? 1.0 : 0.5))
+                    }
+
+                    // Dual Waveform showing both mic and system audio
+                    WaveformMiniView(levels: audioLevels, systemLevels: systemAudioLevels)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .padding(.vertical, 8)
+            } else {
+                // Idle: Subtle grip dots (Laws of UX minimal)
+                VStack(spacing: 6) {
+                    ForEach(0..<8, id: \.self) { _ in
+                        Circle()
+                            .fill(Color.accentBlue.opacity(0.2))
+                            .frame(width: 4, height: 4)
+                    }
+                }
+            }
+        }
+        .frame(width: isRecording ? 60 : 28, height: 110) // Match panelHeight (110), idle 28px for discoverability
+    }
+}
+
+// MARK: - Waveform Mini View (Abstract, Laws of UX style)
+// Shows both mic and system audio with distinct visual styles:
+// - Mic audio: Filled bars (your voice)
+// - System audio: Outlined bars (what you're hearing)
+
+struct WaveformMiniView: View {
+    let levels: [Float]  // Microphone audio levels
+    var systemLevels: [Float]? = nil  // Optional system audio levels
+    var barCount: Int = 8
+    var maxHeight: CGFloat = 40
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(0..<barCount, id: \.self) { index in
+                let micLevel = index < levels.count ? CGFloat(levels[index]) : 0
+                let sysLevel = systemLevels.map { index < $0.count ? CGFloat($0[index]) : 0 } ?? 0
+
+                ZStack(alignment: .bottom) {
+                    // System audio: Outlined bar (behind mic bar)
+                    if let _ = systemLevels, sysLevel > 0.05 {
+                        RoundedRectangle(cornerRadius: 2)
+                            .stroke(colorForSystemLevel(sysLevel), lineWidth: 1.5)
+                            .frame(width: 4, height: max(4, sysLevel * maxHeight))
+                    }
+
+                    // Mic audio: Filled bar (foreground)
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(colorForMicLevel(micLevel))
+                        .frame(width: 4, height: max(4, micLevel * maxHeight))
+                }
+                .frame(height: maxHeight, alignment: .bottom)
+            }
+        }
+    }
+
+    /// Color for microphone audio (your voice) - warm tones
+    private func colorForMicLevel(_ level: CGFloat) -> Color {
+        if level > 0.75 {
+            return Color.recordingCoral
+        } else if level > 0.5 {
+            return Color.statusWarningMuted
+        } else if level > 0.1 {
+            return Color.accentBlue.opacity(0.7)
+        } else {
+            return Color.accentBlue.opacity(0.3)
+        }
+    }
+
+    /// Color for system audio (what you're hearing) - cool tones to differentiate
+    private func colorForSystemLevel(_ level: CGFloat) -> Color {
+        if level > 0.75 {
+            return Color.purple.opacity(0.8)
+        } else if level > 0.5 {
+            return Color.purple.opacity(0.6)
+        } else {
+            return Color.purple.opacity(0.4)
+        }
+    }
+}
+
 // MARK: - SwiftUI View
 
 @available(macOS 26.0, *)
 struct FloatingPanelView: View {
     @ObservedObject var taskManager: TranscriptionTaskManager
     @ObservedObject var audio: Audio
+    @ObservedObject var dockingManager: EdgeDockingManager
 
     @State private var showCompletionCheckmark = false
     @State private var checkmarkScale: CGFloat = 0.7
     @State private var isRecordButtonHovered = false
     @State private var isFileButtonHovered = false
 
-    private let windowHeight: CGFloat = 45
-    private let windowWidth: CGFloat = 170
+    // Success celebration states (Peak-End Rule)
+    @State private var showRecordingStoppedCelebration = false
+    @State private var showTranscriptSavedCelebration = false
+    @State private var showActionItemsCelebration = false
+    @State private var actionItemsCount: Int = 0
+    @State private var previousRecordingState = false
+
+    // Attention prompt states
+    @State private var showSilencePrompt = false
+    @State private var silencePromptDismissed = false  // Prevents re-showing after dismiss
+    private let silenceThresholdSeconds: TimeInterval = 120  // 2 minutes
+
+    private let panelHeight: CGFloat = 110  // Increased to fit content (was 68)
+    private let panelWidth: CGFloat = 200  // Reduced width
+    private let baseNotificationHeight: CGFloat = 100  // Base space for celebrations
+    private let reviewNotificationHeight: CGFloat = 280  // Expanded height for review UI
+    private let totalWindowWidth: CGFloat = 320  // Wide enough for notifications
+    private let maxWindowHeight: CGFloat = 390  // Max window size (controller uses this)
+
+    // Dynamic notification height based on review state
+    private var notificationHeight: CGFloat {
+        taskManager.pendingReview != nil ? reviewNotificationHeight : baseNotificationHeight
+    }
+
+    // Dynamic total height for content area (matches controller's window)
+    private var totalWindowHeight: CGFloat {
+        maxWindowHeight
+    }
+
+    // Whether we have pending action items to review
+    private var hasPendingReview: Bool {
+        taskManager.pendingReview != nil
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 2) {
-                // Record/Stop button
-                Button(action: { audio.isRecording ? audio.stop() : audio.start() }) {
-                    Image(systemName: audio.isRecording ? "stop.circle.fill" : "record.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundStyle(audio.isRecording ? .red : .gray)
-                        .symbolRenderingMode(.hierarchical)
-                        .symbolEffect(.pulse, options: .repeating, isActive: audio.isRecording)
-                        .symbolEffect(.scale.up, isActive: isRecordButtonHovered)
-                        .contentTransition(.symbolEffect(.replace))
-                        .shadow(color: isRecordButtonHovered ? (audio.isRecording ? Color.red : Color.gray).opacity(0.6) : Color.clear, radius: 8, x: 0, y: 0)
-                }
-                .buttonStyle(PlainButtonStyle())
-                .help(audio.isRecording ? "Stop recording" : "Start recording")
-                .onHover { hovering in
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isRecordButtonHovered = hovering
+            // MARK: - Top Spacer (pushes content to bottom when not in review mode)
+            // When in review mode, notification area takes the space
+            Spacer(minLength: 0)
+
+            // MARK: - Notification/Celebration Area (above panel)
+            // Shows success celebrations when transcription completes, or review UI when items pending
+            ZStack {
+                Color.clear
+
+                // Action Item Review UI (takes precedence when pending)
+                if hasPendingReview {
+                    VStack {
+                        Spacer()
+                        ActionItemReviewView(taskManager: taskManager)
+                            .padding(.horizontal, Spacing.sm)
+                            .padding(.bottom, Spacing.sm)
                     }
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .offset(y: -20)),
+                        removal: .opacity.combined(with: .scale(scale: 0.95))
+                    ))
                 }
 
-                // Visualizer - appears when recording
-                if audio.isRecording {
-                    ZStack {
-                        // Background: System audio visualizer
-                        SystemAudioVisualizer(levelHistory: audio.systemAudioLevelHistory)
-                            .frame(width: 50, height: 18)
-
-                        // Foreground: Mic audio visualizer
-                        AudioVisualizer(levelHistory: audio.audioLevelHistory)
-                            .frame(width: 50, height: 18)
-                    }
-                    .transition(.opacity)
+                // Transcript saved celebration (green checkmark) - only show when not reviewing
+                if showTranscriptSavedCelebration && !hasPendingReview {
+                    CelebrationOverlay(
+                        celebrationType: .transcriptSaved,
+                        isVisible: showTranscriptSavedCelebration
+                    )
+                    .transition(.scale.combined(with: .opacity))
                 }
 
-                Spacer()
-                    .frame(minWidth: 2, maxWidth: 4)
-
-                // Status indicator (timer during recording)
-                ZStack {
-                    if audio.isRecording {
-                        // Show recording timer
-                        Text(formatDuration(audio.recordingDuration))
-                            .font(.system(size: 8, weight: .regular, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.95))
-                            .transition(.opacity)
-                    }
+                // Action items celebration (count badge) - only show when not reviewing
+                if showActionItemsCelebration && !hasPendingReview {
+                    CelebrationOverlay(
+                        celebrationType: .actionItemsCreated(count: actionItemsCount),
+                        isVisible: showActionItemsCelebration
+                    )
+                    .transition(.scale.combined(with: .opacity))
                 }
-                .frame(width: 30)
+            }
+            .frame(width: totalWindowWidth, height: notificationHeight)
+            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: hasPendingReview)
 
-                Spacer()
-                    .frame(minWidth: 2, maxWidth: 4)
+            // MARK: - Main Panel
+            HStack(spacing: 0) {
+                // When EXPANDED: Spacer on LEFT pushes panel to right edge
+                if dockingManager.shouldExpand {
+                    Spacer()
+                }
 
-                // Right icon - morphs between processing/checkmark/folder
-                ZStack {
-                    if taskManager.activeCount > 0 {
-                        // Background transcriptions in progress
-                        Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90.circle")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .symbolRenderingMode(.hierarchical)
-                            .symbolEffect(.rotate, options: .repeating, isActive: true)
-                            .transition(.opacity.combined(with: .scale))
-                    } else if showCompletionCheckmark {
-                        // Just completed - brief checkmark
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 14))
-                            .scaleEffect(checkmarkScale)
-                            .foregroundStyle(.green.opacity(0.9))
-                            .symbolRenderingMode(.multicolor)
-                            .symbolEffect(.bounce, value: showCompletionCheckmark)
-                            .transition(.scale.combined(with: .opacity))
-                    } else {
-                        // Default - folder button
-                        Button(action: openTranscriptsFolder) {
-                            Image(systemName: "folder")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.white.opacity(isFileButtonHovered ? 1.0 : 0.8))
-                                .symbolRenderingMode(.hierarchical)
-                                .symbolEffect(.scale.up, isActive: isFileButtonHovered)
-                                .frame(width: 24, height: 24)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .help("Show transcripts folder")
-                        .onHover { hovering in
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                isFileButtonHovered = hovering
+                ZStack(alignment: .leading) {
+                    // Panel content - EdgePeekView space on LEFT when docked, full controls when expanded
+                    HStack(spacing: 0) {
+                        // Spacer removed to ensure EdgePeekView is visible
+
+
+                        if dockingManager.shouldExpand {
+                            fullPanelContent
+                        } else {
+                            // EdgePeekView at the LEFT edge - only visible when docked (not expanded)
+                            if !dockingManager.shouldExpand {
+                                EdgePeekView(
+                                    isRecording: audio.isRecording,
+                                    audioLevels: Array(audio.audioLevelHistory.suffix(8)),
+                                    systemAudioLevels: Array(audio.systemAudioLevelHistory.suffix(8)),
+                                    recordingDuration: audio.recordingDuration,
+                                    silenceWarning: showSilencePrompt,  // Amber ring when silence detected
+                                    onStop: { audio.stop() }
+                                )
+                                .padding(.leading, 0) // Remove padding to align flush with edge
                             }
                         }
-                        .transition(.opacity.combined(with: .scale))
                     }
+                    .frame(width: dockingManager.shouldExpand ? panelWidth : (audio.isRecording ? 60 : 28), height: panelHeight)
+                    .background(dockingManager.shouldExpand ? AnyView(panelBackground) : AnyView(Color.clear))
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous))
+                    .overlay(errorOverlay)
                 }
-                .frame(width: 24, height: 24)
+                // .frame(width: panelWidth, height: panelHeight) // Removed fixed frame here to allow dynamic resizing
+
+                // When DOCKED: Spacer on RIGHT (off-screen, keeps panel on left)
+                if !dockingManager.shouldExpand {
+                    Spacer()
+                }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
+            .frame(width: totalWindowWidth, height: panelHeight)
         }
-        .background(
-            ZStack {
-                VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
-                LinearGradient(
-                    gradient: Gradient(colors: [Color.white.opacity(0.05), Color.clear]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .frame(width: windowWidth, height: windowHeight)
-        .overlay(errorOverlay)
+        .frame(width: totalWindowWidth, height: totalWindowHeight)
         .onChange(of: taskManager.justCompleted) { _, newValue in
             if newValue {
-                // All background tasks completed - show checkmark
                 triggerCompletionCheckmark()
             }
         }
-    }
+        .onChange(of: audio.silenceDuration) { _, duration in
+            // UX: Don't interrupt user flow - just show amber ring, don't force panel open
+            if audio.isRecording && duration >= silenceThresholdSeconds && !silencePromptDismissed && !showSilencePrompt {
+                showSilencePrompt = true
+                // Removed: dockingManager.shouldExpand = true
+                // User will see amber ring and can choose to expand if needed
+            }
+        }
+        .onChange(of: audio.isRecording) { _, isRecording in
+            if !isRecording {
+                showSilencePrompt = false
+                silencePromptDismissed = false
 
-    private var errorOverlay: some View {
-        Group {
-            if let error = audio.error {
-                VStack {
-                    Spacer()
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 9))
-                            .symbolRenderingMode(.multicolor)
-                            .symbolEffect(.pulse, options: .repeating.speed(0.5))
-                        Text(error)
-                            .font(.system(size: 9, weight: .medium))
-                            .lineLimit(1)
-                    }
-                    .foregroundColor(.red.opacity(0.95))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule()
-                            .fill(Color.red.opacity(0.2))
-                            .overlay(Capsule().strokeBorder(Color.red.opacity(0.3), lineWidth: 1))
-                    )
-                    .padding(.bottom, 8)
+                // Trigger recording stopped celebration when recording ends
+                if previousRecordingState {
+                    triggerRecordingStoppedCelebration()
                 }
-                .transition(.opacity)
+            }
+            previousRecordingState = isRecording
+        }
+        // Trigger celebrations based on displayStatus changes
+        .onChange(of: taskManager.displayStatus) { _, newStatus in
+            switch newStatus {
+            case .transcriptSaved:
+                triggerTranscriptSavedCelebration()
+            case .completed(let count):
+                triggerActionItemsCelebration(count: count)
+            default:
+                break
+            }
+        }
+        // Lock panel open when review is active
+        .onChange(of: taskManager.pendingReview) { _, newReview in
+            if newReview != nil {
+                // Expand and lock panel when review starts
+                dockingManager.shouldExpand = true
+                dockingManager.isLocked = true
+            } else {
+                // Unlock panel when review ends
+                dockingManager.isLocked = false
             }
         }
     }
 
+    // MARK: - Celebration Triggers
+
+    private func triggerRecordingStoppedCelebration() {
+        showRecordingStoppedCelebration = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            showRecordingStoppedCelebration = false
+        }
+    }
+
+    private func triggerTranscriptSavedCelebration() {
+        showTranscriptSavedCelebration = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            showTranscriptSavedCelebration = false
+        }
+    }
+
+    private func triggerActionItemsCelebration(count: Int) {
+        actionItemsCount = count
+        showActionItemsCelebration = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            showActionItemsCelebration = false
+        }
+    }
+
+    // MARK: - Full Panel Content (Laws of UX Warm Minimalism)
+
+    private var fullPanelContent: some View {
+        VStack(spacing: 10) {
+            // Status Display Area (Laws of UX card style)
+            ZStack {
+                RoundedRectangle(cornerRadius: Radius.lawsButton, style: .continuous)
+                    .fill(Color.surfaceCard)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.lawsButton, style: .continuous)
+                            .stroke(Color.accentBlue.opacity(0.1), lineWidth: 1)
+                    )
+
+                HStack(spacing: 8) {
+                    // Left side: Status display with priority logic
+                    if audio.isRecording {
+                        // Recording indicator dot with glow pulse
+                        Circle()
+                            .fill(Color.recordingCoral)
+                            .frame(width: 8, height: 8)
+                            .shadow(color: .recordingCoral.opacity(0.5), radius: 2)
+                            .pulse(when: true, minScale: 0.9, maxScale: 1.1)
+
+                        if showSilencePrompt {
+                            // Silence warning during recording
+                            Text("Silence: \(Int(audio.silenceDuration / 60))m")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.statusWarningMuted)
+                        } else {
+                            // Timer display (monospace for retro feel)
+                            Text(formatDuration(audio.recordingDuration))
+                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                .foregroundColor(.textOnCream)
+                        }
+                    } else {
+                        // Status display with celebration overlays
+                        ZStack {
+                            LawsStatusTextView(status: taskManager.displayStatus)
+
+                            // Recording stopped celebration (blue ring)
+                            RecordingStoppedCelebration(isVisible: showRecordingStoppedCelebration)
+                        }
+                    }
+
+                    Spacer()
+
+                    // Right side: Mini waveform only when recording (shows both mic & system audio)
+                    if audio.isRecording {
+                        WaveformMiniView(
+                            levels: Array(audio.audioLevelHistory.suffix(8)),
+                            systemLevels: Array(audio.systemAudioLevelHistory.suffix(8)),
+                            maxHeight: 20
+                        )
+                        .frame(height: 20)
+                    }
+                }
+                .padding(.horizontal, 10)
+            }
+            .frame(height: 28)
+
+            // Controls (Laws of UX style buttons)
+            HStack(spacing: 10) {
+                LawsButton(
+                    iconName: audio.isRecording ? "stop.fill" : "record.circle",
+                    label: audio.isRecording ? "Stop" : "Record",
+                    color: audio.isRecording ? .textOnCreamSecondary : .recordingCoral,
+                    isActive: audio.isRecording
+                ) {
+                    if audio.isRecording {
+                        audio.stop()
+                    } else {
+                        audio.start()
+                    }
+                }
+
+                LawsButton(
+                    iconName: "folder.fill",
+                    label: "Files",
+                    color: .accentBlue,
+                    isActive: false
+                ) {
+                    openTranscriptsFolder()
+                }
+            }
+        }
+        .padding(12)
+    }
+
+    // MARK: - Panel Background (Laws of UX Warm Minimalism)
+
+    private var panelBackground: some View {
+        ZStack {
+            // Warm cream base with vibrancy
+            VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
+
+            // Eggshell tint overlay
+            Color.surfaceEggshell.opacity(0.85)
+
+            // Recording state: Add red glow border
+            if audio.isRecording {
+                RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
+                    .stroke(Color.recordingCoral.opacity(0.5), lineWidth: 2)
+            }
+
+            // Subtle border (Laws of UX style)
+            RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
+                .stroke(Color.accentBlue.opacity(0.15), lineWidth: 1)
+        }
+        // Laws of UX shadow
+        .shadow(
+            color: CardStyle.shadowCard.color,
+            radius: CardStyle.shadowCard.radius,
+            x: CardStyle.shadowCard.x,
+            y: CardStyle.shadowCard.y
+        )
+    }
+
+    // MARK: - Error Overlay (Contextual with recovery actions)
+
+    private var errorOverlay: some View {
+        Group {
+            if let errorMessage = audio.error {
+                let contextualError = ContextualError.from(message: errorMessage)
+
+                VStack {
+                    Spacer()
+                    ContextualErrorBanner(
+                        error: contextualError,
+                        onTap: errorTapAction(for: contextualError)
+                    )
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 8)
+                }
+                .transition(.asymmetric(
+                    insertion: .move(edge: .bottom).combined(with: .opacity),
+                    removal: .opacity
+                ))
+            }
+        }
+    }
+
+    /// Returns the appropriate action for tapping on an error banner
+    private func errorTapAction(for error: ContextualError) -> (() -> Void)? {
+        switch error {
+        case .transcriptionFailed:
+            // Could trigger retry - for now, just open settings
+            return {
+                if let url = URL(string: "x-apple.systempreferences:") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        case .microphoneError, .permissionDenied:
+            // Open System Settings > Privacy > Microphone
+            return {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        case .invalidAPIKey:
+            // Could open app settings - for now just dismiss
+            return nil
+        case .storageFull:
+            // Open About This Mac > Storage
+            return {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.storagemanagement") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        case .networkError:
+            // Open Network preferences
+            return {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.network") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        case .unknown:
+            return nil
+        }
+    }
+
+    // MARK: - Helper Functions
+
     private func openTranscriptsFolder() {
-        // Use custom location if set, otherwise default
         let transcriptsFolder: URL
         if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
            !customPath.isEmpty {
             transcriptsFolder = URL(fileURLWithPath: customPath)
         } else {
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            transcriptsFolder = documentsPath.appendingPathComponent("Murmur Transcripts")
+            transcriptsFolder = documentsPath.appendingPathComponent("Transcripted")
         }
-
-        // Create directory if it doesn't exist
         try? FileManager.default.createDirectory(at: transcriptsFolder, withIntermediateDirectories: true)
-
-        // Open in Finder
         NSWorkspace.shared.open(transcriptsFolder)
     }
 
@@ -239,7 +979,6 @@ struct FloatingPanelView: View {
     }
 
     private func triggerCompletionCheckmark() {
-        // Show checkmark with bounce animation
         checkmarkScale = 0.0
         showCompletionCheckmark = true
 
@@ -247,7 +986,6 @@ struct FloatingPanelView: View {
             checkmarkScale = 0.9
         }
 
-        // Fade out after 1.5 seconds
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             withAnimation(.easeOut(duration: 0.3)) {
                 showCompletionCheckmark = false
@@ -257,80 +995,748 @@ struct FloatingPanelView: View {
     }
 }
 
-// MARK: - Audio Visualizer
-
-struct AudioVisualizer: View {
-    let levelHistory: [Float]
-
+// MARK: - Screw View
+struct ScrewView: View {
     var body: some View {
-        HStack(spacing: 1) {
-            ForEach(0..<levelHistory.count, id: \.self) { index in
-                Capsule()
-                    .fill(barColor(for: index))
-                    .frame(width: 2, height: 16)
-                    .scaleEffect(y: barHeight(for: index), anchor: .center)
-                    .animation(.linear(duration: 0.025), value: levelHistory[index])
-            }
-        }
-    }
-
-    private func barHeight(for index: Int) -> CGFloat {
-        let level = CGFloat(levelHistory[index])
-        return min(0.9, max(0.2, level * 1.2))
-    }
-
-    private func barColor(for index: Int) -> Color {
-        let position = Double(index) / Double(levelHistory.count - 1)
-        let opacity = 0.4 + (position * 0.5)
-        return Color.white.opacity(opacity)
+        Circle()
+            .fill(LinearGradient(colors: [Color(white: 0.3), Color(white: 0.1)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            .frame(width: 6, height: 6)
+            .overlay(
+                Image(systemName: "plus")
+                    .font(.system(size: 4, weight: .black))
+                    .foregroundColor(.black.opacity(0.7))
+                    .rotationEffect(.degrees(45))
+            )
+            .shadow(color: .white.opacity(0.1), radius: 0, x: 0, y: 1)
+            .shadow(color: .black.opacity(0.5), radius: 1, x: 0, y: -0.5)
     }
 }
 
-// MARK: - System Audio Visualizer
 
-struct SystemAudioVisualizer: View {
-    let levelHistory: [Float]
-
-    var body: some View {
-        HStack(spacing: 1) {
-            ForEach(0..<levelHistory.count, id: \.self) { index in
-                Capsule()
-                    .fill(barColor(for: index))
-                    .frame(width: 2, height: 16)
-                    .scaleEffect(y: barHeight(for: index), anchor: .center)
-                    .animation(.linear(duration: 0.025), value: levelHistory[index])
-            }
-        }
-    }
-
-    private func barHeight(for index: Int) -> CGFloat {
-        let level = CGFloat(levelHistory[index])
-        return min(0.9, max(0.2, level * 1.2))
-    }
-
-    private func barColor(for index: Int) -> Color {
-        let position = Double(index) / Double(levelHistory.count - 1)
-        let opacity = 0.3 + (position * 0.3)
-        return Color(red: 0.7, green: 0.55, blue: 0.45).opacity(opacity)
-    }
-}
 
 // MARK: - Visual Effect
 
-struct VisualEffectBlur: NSViewRepresentable {
-    var material: NSVisualEffectView.Material
-    var blendingMode: NSVisualEffectView.BlendingMode
 
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = material
-        view.blendingMode = blendingMode
-        view.state = .active
-        return view
+
+// MARK: - CGFloat Clamping Extension
+
+extension CGFloat {
+    func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
+        return Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
+    }
+}
+import SwiftUI
+
+// MARK: - Retro Colors
+
+extension Color {
+    static let retroDarkGray = Color(red: 0.15, green: 0.15, blue: 0.16)
+    static let retroBlack = Color(red: 0.1, green: 0.1, blue: 0.1)
+    static let retroSilver = Color(red: 0.8, green: 0.8, blue: 0.85)
+    static let retroOrange = Color(red: 1.0, green: 0.35, blue: 0.0)
+    static let retroGreen = Color(red: 0.2, green: 0.8, blue: 0.2)
+    static let retroRed = Color(red: 0.9, green: 0.1, blue: 0.1)
+    static let retroGold = Color(red: 0.8, green: 0.6, blue: 0.2)
+}
+
+// MARK: - Retro Button
+
+struct RetroButton: View {
+    let iconName: String
+    let label: String?
+    let color: Color
+    let isActive: Bool
+    let action: () -> Void
+    
+    @State private var isPressed = false
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                ZStack {
+                    // Button Base (Shadow/Depth)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.black.opacity(0.5))
+                        .offset(y: isPressed ? 1 : 3)
+                    
+                    // Button Top
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(white: 0.25),
+                                    Color(white: 0.15)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        )
+                        .offset(y: isPressed ? 1 : 0)
+                    
+                    // Icon/Content
+                    Image(systemName: iconName)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(isActive ? color : .gray)
+                        .shadow(color: isActive ? color.opacity(0.6) : .clear, radius: 4)
+                        .offset(y: isPressed ? 1 : 0)
+                }
+                .frame(width: 36, height: 32)
+                
+                if let label = label {
+                    Text(label)
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.gray)
+                        .textCase(.uppercase)
+                }
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in isPressed = true }
+                .onEnded { _ in isPressed = false }
+        )
+    }
+}
+
+
+
+
+
+// MARK: - Status Text View
+
+/// Displays contextual status text in the display area when not recording
+struct StatusTextView: View {
+    let status: DisplayStatus
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(statusText)
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundColor(.retroGreen)
+                .shadow(color: .retroGreen.opacity(0.5), radius: 2)
+
+            if showAnimatedDots {
+                AnimatedDotsView()
+            }
+        }
     }
 
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        nsView.material = material
-        nsView.blendingMode = blendingMode
+    private var statusText: String {
+        // Use the computed statusText from DisplayStatus enum
+        status.statusText
+    }
+
+    private var showAnimatedDots: Bool {
+        status.isProcessing
+    }
+}
+
+// MARK: - Animated Dots View
+
+/// Animated "..." that cycles through 1, 2, 3 dots
+struct AnimatedDotsView: View {
+    @State private var dotCount = 0
+    let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Text(String(repeating: ".", count: dotCount + 1))
+            .font(.system(size: 12, weight: .bold, design: .monospaced))
+            .foregroundColor(.retroGreen)
+            .shadow(color: .retroGreen.opacity(0.5), radius: 2)
+            .frame(width: 24, alignment: .leading)
+            .onReceive(timer) { _ in
+                dotCount = (dotCount + 1) % 3
+            }
+    }
+}
+
+// MARK: - Marquee Text View
+
+/// Scrolling text that animates left-to-right when text is too wide for container
+@available(macOS 26.0, *)
+struct MarqueeTextView: View {
+    let text: String
+    let font: Font
+    let color: Color
+
+    @State private var textWidth: CGFloat = 0
+    @State private var containerWidth: CGFloat = 0
+    @State private var offset: CGFloat = 0
+    @State private var isAnimating = false
+
+    private var needsScrolling: Bool {
+        textWidth > containerWidth && containerWidth > 0
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            Text(text)
+                .font(font)
+                .foregroundColor(color)
+                .shadow(color: color.opacity(0.5), radius: 2)
+                .fixedSize()
+                .background(
+                    GeometryReader { textGeometry in
+                        Color.clear
+                            .onAppear {
+                                textWidth = textGeometry.size.width
+                                containerWidth = geometry.size.width
+                                startScrollingIfNeeded()
+                            }
+                            .onChange(of: text) { _, _ in
+                                // Reset and recalculate when text changes
+                                offset = 0
+                                isAnimating = false
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                    textWidth = textGeometry.size.width
+                                    startScrollingIfNeeded()
+                                }
+                            }
+                    }
+                )
+                .offset(x: offset)
+        }
+        .clipped()
+    }
+
+    private func startScrollingIfNeeded() {
+        guard needsScrolling && !isAnimating else { return }
+        isAnimating = true
+
+        let scrollDistance = textWidth - containerWidth + 20  // Extra padding
+        let duration = Double(scrollDistance) / 30.0  // ~30pt per second
+
+        // Animate: pause at start → scroll left → pause at end → scroll right → repeat
+        withAnimation(
+            .linear(duration: duration)
+            .delay(1.0)
+            .repeatForever(autoreverses: true)
+        ) {
+            offset = -scrollDistance
+        }
+    }
+}
+
+// MARK: - LED Visualizer
+
+struct LEDVisualizer: View {
+    let levels: [Float]
+    var systemLevels: [Float]? = nil  // Optional system audio levels
+    var rowCount: Int = 8
+    var colCount: Int = 10
+    var segmentWidth: CGFloat = 4
+    var segmentHeight: CGFloat = 2
+    var spacing: CGFloat = 1
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(0..<colCount, id: \.self) { index in
+                VStack(spacing: spacing) {
+                    ForEach(0..<rowCount, id: \.self) { barIndex in
+                        let row = (rowCount - 1) - barIndex
+                        let micActive = shouldLightUp(col: index, row: row, levels: levels)
+                        let sysActive = shouldLightUp(col: index, row: row, levels: systemLevels)
+
+                        ZStack {
+                            // Background layer: System audio (outlined rectangles)
+                            if systemLevels != nil && sysActive {
+                                Rectangle()
+                                    .stroke(colorFor(row: row).opacity(0.6), lineWidth: 1)
+                                    .frame(width: segmentWidth, height: segmentHeight)
+                            }
+
+                            // Foreground layer: Mic audio (filled) or inactive
+                            Rectangle()
+                                .fill(micActive ? colorFor(row: row) : Color.gray.opacity(0.2))
+                                .frame(width: segmentWidth, height: segmentHeight)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(4)
+        .background(Color.black)
+        .cornerRadius(2)
+        .overlay(
+            RoundedRectangle(cornerRadius: 2)
+                .stroke(Color.gray.opacity(0.5), lineWidth: 1)
+        )
+    }
+
+    private func shouldLightUp(col: Int, row: Int, levels: [Float]?) -> Bool {
+        guard let levels = levels, col < levels.count else { return false }
+        let level = levels[col] // 0.0 to 1.0
+        let threshold = Float(row) / Float(rowCount)
+        return level > threshold
+    }
+
+    private func colorFor(row: Int) -> Color {
+        let progress = Double(row) / Double(rowCount)
+        if progress >= 0.75 { return .retroRed }
+        if progress >= 0.5 { return .retroGold }
+        return .retroGreen
+    }
+}
+
+// MARK: - Contextual Error Type (UX Law: Provide actionable guidance)
+
+/// Error types with icons and recovery actions for better user guidance
+enum ContextualError: Equatable {
+    case microphoneError(message: String)
+    case transcriptionFailed(message: String)
+    case networkError(message: String)
+    case storageFull(message: String)
+    case invalidAPIKey(message: String)
+    case permissionDenied(message: String)
+    case unknown(message: String)
+
+    /// Parse an error message and return the appropriate ContextualError type
+    static func from(message: String) -> ContextualError {
+        let lowercased = message.lowercased()
+
+        if lowercased.contains("microphone") || lowercased.contains("audio input") || lowercased.contains("mic") {
+            return .microphoneError(message: message)
+        } else if lowercased.contains("speech") || lowercased.contains("transcri") || lowercased.contains("recognition") {
+            return .transcriptionFailed(message: message)
+        } else if lowercased.contains("network") || lowercased.contains("connection") || lowercased.contains("internet") || lowercased.contains("offline") {
+            return .networkError(message: message)
+        } else if lowercased.contains("disk") || lowercased.contains("storage") || lowercased.contains("space") || lowercased.contains("full") {
+            return .storageFull(message: message)
+        } else if lowercased.contains("api key") || lowercased.contains("apikey") || lowercased.contains("invalid key") || lowercased.contains("authentication") {
+            return .invalidAPIKey(message: message)
+        } else if lowercased.contains("permission") || lowercased.contains("denied") || lowercased.contains("access") {
+            return .permissionDenied(message: message)
+        } else {
+            return .unknown(message: message)
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .microphoneError: return "mic.slash.fill"
+        case .transcriptionFailed: return "waveform.badge.exclamationmark"
+        case .networkError: return "wifi.exclamationmark"
+        case .storageFull: return "externaldrive.badge.xmark"
+        case .invalidAPIKey: return "key.slash.fill"
+        case .permissionDenied: return "lock.shield.fill"
+        case .unknown: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .microphoneError: return "Microphone Error"
+        case .transcriptionFailed: return "Transcription Failed"
+        case .networkError: return "Connection Lost"
+        case .storageFull: return "Storage Full"
+        case .invalidAPIKey: return "Invalid API Key"
+        case .permissionDenied: return "Permission Denied"
+        case .unknown: return "Error"
+        }
+    }
+
+    var recoveryHint: String {
+        switch self {
+        case .microphoneError: return "Check microphone in Settings"
+        case .transcriptionFailed: return "Tap to retry"
+        case .networkError: return "Check internet connection"
+        case .storageFull: return "Free up disk space"
+        case .invalidAPIKey: return "Update key in Settings"
+        case .permissionDenied: return "Grant access in System Settings"
+        case .unknown: return "Try again"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .microphoneError, .permissionDenied:
+            return .statusWarningMuted  // Amber for permission issues
+        case .networkError, .storageFull:
+            return .statusWarningMuted  // Amber for recoverable issues
+        case .transcriptionFailed, .invalidAPIKey, .unknown:
+            return .statusErrorMuted    // Red for errors
+        }
+    }
+}
+
+// MARK: - Contextual Error Banner View
+
+/// A more informative error banner with icon, title, and recovery action
+@available(macOS 14.0, *)
+struct ContextualErrorBanner: View {
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+    let error: ContextualError
+    let onTap: (() -> Void)?
+
+    @State private var isVisible = false
+    @State private var isShaking = false
+
+    init(error: ContextualError, onTap: (() -> Void)? = nil) {
+        self.error = error
+        self.onTap = onTap
+    }
+
+    var body: some View {
+        Button(action: { onTap?() }) {
+            HStack(spacing: 10) {
+                // Icon with background
+                ZStack {
+                    Circle()
+                        .fill(error.color.opacity(0.15))
+                        .frame(width: 32, height: 32)
+
+                    Image(systemName: error.icon)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(error.color)
+                }
+
+                // Text content
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(error.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.textOnCream)
+
+                    Text(error.recoveryHint)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.textOnCreamMuted)
+                }
+
+                Spacer()
+
+                // Chevron if tappable
+                if onTap != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.textOnCreamMuted)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
+                    .fill(Color.surfaceCard)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
+                            .stroke(error.color.opacity(0.3), lineWidth: 1)
+                    )
+            )
+            .shadow(
+                color: error.color.opacity(0.15),
+                radius: 8,
+                y: 4
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .hoverScale(1.01)
+        .shake(when: isShaking)
+        .offset(y: isVisible ? 0 : 20)
+        .opacity(isVisible ? 1 : 0)
+        .onAppear {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                isVisible = true
+            }
+            // Brief shake to draw attention
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                if !reduceMotion {
+                    isShaking = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        isShaking = false
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Success Celebration Overlay (Peak-End Rule: positive endings are remembered)
+
+/// Overlay that shows celebration animations for success states
+/// Uses Laws of UX aesthetic with warm, subtle animations
+@available(macOS 14.0, *)
+struct CelebrationOverlay: View {
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+    let celebrationType: CelebrationType
+    let isVisible: Bool
+
+    enum CelebrationType: Equatable {
+        case recordingStopped           // Blue pulse ring fade
+        case transcriptSaved            // Green checkmark scale-in
+        case actionItemsCreated(count: Int)  // Count badge with bounce
+    }
+
+    @State private var ringScale: CGFloat = 0.8
+    @State private var ringOpacity: Double = 0.0
+    @State private var checkScale: CGFloat = 0.5
+    @State private var badgeBounce: CGFloat = 1.0
+
+    var body: some View {
+        ZStack {
+            switch celebrationType {
+            case .recordingStopped:
+                recordingStoppedCelebration
+            case .transcriptSaved:
+                transcriptSavedCelebration
+            case .actionItemsCreated(let count):
+                actionItemsCelebration(count: count)
+            }
+        }
+        .opacity(isVisible ? 1.0 : 0.0)
+        .animation(reduceMotion ? .none : .easeOut(duration: 0.3), value: isVisible)
+        .onChange(of: isVisible) { _, newValue in
+            if newValue {
+                triggerCelebration()
+            }
+        }
+    }
+
+    // MARK: - Recording Stopped (Blue pulse ring)
+
+    private var recordingStoppedCelebration: some View {
+        Circle()
+            .stroke(Color.accentBlue.opacity(ringOpacity), lineWidth: 3)
+            .frame(width: 60, height: 60)
+            .scaleEffect(ringScale)
+    }
+
+    // MARK: - Transcript Saved (Green checkmark)
+
+    private var transcriptSavedCelebration: some View {
+        ZStack {
+            // Background circle
+            Circle()
+                .fill(Color.statusSuccessMuted.opacity(0.15))
+                .frame(width: 48, height: 48)
+                .scaleEffect(checkScale)
+
+            // Checkmark icon
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 32, weight: .medium))
+                .foregroundColor(.statusSuccessMuted)
+                .scaleEffect(checkScale)
+        }
+    }
+
+    // MARK: - Action Items Created (Count badge with bounce)
+
+    private func actionItemsCelebration(count: Int) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checklist")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.statusSuccessMuted)
+
+            Text("\(count) task\(count == 1 ? "" : "s") added")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.textOnCream)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(
+            Capsule()
+                .fill(Color.surfaceCard)
+                .overlay(
+                    Capsule()
+                        .stroke(Color.statusSuccessMuted.opacity(0.3), lineWidth: 1)
+                )
+        )
+        .shadow(color: Color.statusSuccessMuted.opacity(0.2), radius: 8, y: 4)
+        .scaleEffect(badgeBounce)
+    }
+
+    // MARK: - Trigger Animation
+
+    private func triggerCelebration() {
+        guard !reduceMotion else { return }
+
+        switch celebrationType {
+        case .recordingStopped:
+            // Blue ring expands and fades out
+            ringScale = 0.8
+            ringOpacity = 0.8
+            withAnimation(.easeOut(duration: 0.6)) {
+                ringScale = 1.5
+                ringOpacity = 0.0
+            }
+
+        case .transcriptSaved:
+            // Green checkmark scales in with bounce
+            checkScale = 0.5
+            withAnimation(.lawsSuccess) {
+                checkScale = 1.0
+            }
+            // Subtle bounce
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                withAnimation(.spring(response: 0.2, dampingFraction: 0.5)) {
+                    checkScale = 1.1
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
+                    checkScale = 1.0
+                }
+            }
+
+        case .actionItemsCreated:
+            // Badge bounces in
+            badgeBounce = 0.7
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.5)) {
+                badgeBounce = 1.0
+            }
+            // Extra bounce
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                withAnimation(.spring(response: 0.15, dampingFraction: 0.4)) {
+                    badgeBounce = 1.1
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                withAnimation(.spring(response: 0.1, dampingFraction: 0.6)) {
+                    badgeBounce = 1.0
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Recording Stopped Celebration View
+
+/// Simple celebration when recording stops (before transcription starts)
+@available(macOS 14.0, *)
+struct RecordingStoppedCelebration: View {
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+    let isVisible: Bool
+
+    @State private var ringScale: CGFloat = 0.6
+    @State private var ringOpacity: Double = 0.0
+
+    var body: some View {
+        Circle()
+            .stroke(Color.accentBlue.opacity(ringOpacity), lineWidth: 2)
+            .frame(width: 50, height: 50)
+            .scaleEffect(ringScale)
+            .onChange(of: isVisible) { _, newValue in
+                if newValue && !reduceMotion {
+                    ringScale = 0.6
+                    ringOpacity = 0.7
+                    withAnimation(.easeOut(duration: 0.5)) {
+                        ringScale = 1.3
+                        ringOpacity = 0.0
+                    }
+                }
+            }
+    }
+}
+
+// MARK: - Laws of UX Button (Warm Minimalism)
+
+struct LawsButton: View {
+    let iconName: String
+    let label: String
+    let color: Color
+    let isActive: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+    @State private var isPressed = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: iconName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(isActive ? color : color.opacity(0.8))
+
+                Text(label)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.textOnCream)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.lawsButton, style: .continuous)
+                    .fill(isActive ? color.opacity(0.15) : Color.surfaceCard)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.lawsButton, style: .continuous)
+                    .stroke(isActive ? color.opacity(0.4) : Color.accentBlue.opacity(0.1), lineWidth: 1)
+            )
+            .shadow(
+                color: isHovered ? CardStyle.shadowHover.color : CardStyle.shadowSubtle.color,
+                radius: isHovered ? CardStyle.shadowHover.radius : CardStyle.shadowSubtle.radius,
+                x: 0,
+                y: isHovered ? 2 : 1
+            )
+            .scaleEffect(isPressed ? 0.96 : (isHovered ? 1.02 : 1.0))
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onHover { hovering in
+            withAnimation(.lawsCardHover) {
+                isHovered = hovering
+            }
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    withAnimation(.lawsTap) { isPressed = true }
+                }
+                .onEnded { _ in
+                    withAnimation(.lawsTap) { isPressed = false }
+                }
+        )
+    }
+}
+
+// MARK: - Laws of UX Status Text View
+
+struct LawsStatusTextView: View {
+    let status: DisplayStatus
+
+    var body: some View {
+        HStack(spacing: 6) {
+            // Status icon
+            Image(systemName: statusIcon)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(statusColor)
+
+            Text(statusText)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.textOnCream)
+
+            if showAnimatedDots {
+                AnimatedDotsView()
+            }
+        }
+    }
+
+    private var statusText: String {
+        // Use the computed statusText from DisplayStatus enum
+        status.statusText
+    }
+
+    private var statusIcon: String {
+        // Use the computed icon from DisplayStatus enum
+        status.icon
+    }
+
+    private var statusColor: Color {
+        switch status {
+        case .idle:
+            return .accentBlue
+        case .preparing, .transcribing, .extractingActionItems, .saving:
+            return .statusProcessingMuted
+        case .transcriptSaved, .completed:
+            return .statusSuccessMuted
+        case .pendingReview:
+            return .statusWarningMuted
+        case .failed:
+            return .statusErrorMuted
+        }
+    }
+
+    private var showAnimatedDots: Bool {
+        status.isProcessing
     }
 }
