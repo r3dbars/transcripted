@@ -15,8 +15,8 @@ struct ReadyStep: View {
     @State private var footerOpacity: Double = 0
 
     private let quickTips: [(icon: String, text: String, color: Color)] = [
-        ("menubar.rectangle", "Find Transcripted in your menu bar", .terracotta),
-        ("record.circle", "Click the red button to start capturing", .recordingRed),
+        ("capsule.portrait", "Look for the floating pill above your dock", .terracotta),
+        ("hand.tap", "Tap the pill to start recording", .recordingRed),
         ("keyboard", "Pro tip: Use ⌃⇧R for instant recording", .processingPurple),
         ("sparkles", "AI extracts insights when you stop", .successGreen)
     ]
@@ -206,53 +206,81 @@ private struct QuickStartTip: View {
     }
 }
 
-// MARK: - Menu Bar Hint
+// MARK: - Pill Preview Hint (Dynamic Island-style preview)
 
 @available(macOS 26.0, *)
 private struct MenuBarHint: View {
     @State private var arrowBounce: Bool = false
+    @State private var pillGlow: Bool = false
+    @State private var wavePhase: Double = 0
 
     var body: some View {
-        HStack(spacing: Spacing.sm) {
-            // Animated arrow pointing up
-            Image(systemName: "arrow.up")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(.terracotta)
-                .offset(y: arrowBounce ? -3 : 0)
-
-            Text("Look for")
-                .font(.bodySmall)
-                .foregroundColor(.softCharcoal)
-
-            // Menu bar icon preview
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "waveform.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(.terracotta)
-
-                Text("in your menu bar")
-                    .font(.bodySmall)
-                    .fontWeight(.medium)
-                    .foregroundColor(.terracotta)
-            }
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs)
-            .background(
+        VStack(spacing: Spacing.md) {
+            // Pill preview with pulsing glow
+            ZStack {
+                // Outer glow
                 Capsule()
-                    .fill(Color.terracotta.opacity(0.1))
-            )
+                    .fill(Color.terracotta.opacity(0.2))
+                    .frame(width: 60, height: 30)
+                    .blur(radius: 15)
+                    .scaleEffect(pillGlow ? 1.3 : 1.0)
 
-            // Animated arrow pointing up
-            Image(systemName: "arrow.up")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(.terracotta)
-                .offset(y: arrowBounce ? -3 : 0)
+                // Pill preview (mimics idle pill)
+                Capsule()
+                    .fill(.ultraThinMaterial)
+                    .frame(width: PillDimensions.idleWidth, height: PillDimensions.idleHeight)
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Color.terracotta.opacity(0.4), lineWidth: 0.5)
+                    )
+                    .overlay(
+                        // Mini waveform bars
+                        HStack(spacing: 2) {
+                            ForEach(0..<6, id: \.self) { index in
+                                RoundedRectangle(cornerRadius: 1)
+                                    .fill(Color.terracotta.opacity(0.6))
+                                    .frame(width: 2, height: miniBarHeight(for: index))
+                            }
+                        }
+                    )
+                    .shadow(color: Color.black.opacity(0.15), radius: 4, y: 2)
+            }
+
+            // Hint text with arrows
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.terracotta)
+                    .offset(y: arrowBounce ? 3 : 0)
+
+                Text("Floating pill appears above your dock")
+                    .font(.bodySmall)
+                    .foregroundColor(.softCharcoal)
+
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.terracotta)
+                    .offset(y: arrowBounce ? 3 : 0)
+            }
         }
         .onAppear {
             withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
                 arrowBounce = true
             }
+            withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) {
+                pillGlow = true
+            }
+            withAnimation(.linear(duration: 3).repeatForever(autoreverses: false)) {
+                wavePhase = .pi * 2
+            }
         }
+    }
+
+    private func miniBarHeight(for index: Int) -> CGFloat {
+        let offset = Double(index) * 0.5
+        let wave = sin(wavePhase + offset)
+        let normalized = (wave + 1) / 2
+        return 3 + 5 * CGFloat(normalized)
     }
 }
 
