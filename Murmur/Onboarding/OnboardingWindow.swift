@@ -39,7 +39,10 @@ class OnboardingWindowController: NSWindowController {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
-        window.backgroundColor = NSColor.windowBackgroundColor
+
+        // Frosted glass background (matching pill aesthetic)
+        window.isOpaque = false
+        window.backgroundColor = .clear
 
         // Allow closing onboarding (UX: Zeigarnik Effect - don't trap users)
         // Users can access settings later from the menu bar
@@ -50,6 +53,28 @@ class OnboardingWindowController: NSWindowController {
 
         // Animation on appear
         window.alphaValue = 0
+    }
+
+    private func addFrostedGlassBackground(to window: NSWindow) {
+        guard let contentView = window.contentView else { return }
+
+        // Create visual effect view for frosted glass
+        let visualEffect = NSVisualEffectView()
+        visualEffect.material = .hudWindow
+        visualEffect.blendingMode = .behindWindow
+        visualEffect.state = .active
+        visualEffect.translatesAutoresizingMaskIntoConstraints = false
+
+        // Insert behind content
+        contentView.addSubview(visualEffect, positioned: .below, relativeTo: nil)
+
+        // Fill the content view
+        NSLayoutConstraint.activate([
+            visualEffect.topAnchor.constraint(equalTo: contentView.topAnchor),
+            visualEffect.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            visualEffect.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            visualEffect.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
+        ])
     }
 
     private func setupContentView() {
@@ -64,6 +89,9 @@ class OnboardingWindowController: NSWindowController {
 
         let hostingView = NSHostingView(rootView: containerView)
         window.contentView = hostingView
+
+        // Add frosted glass background behind SwiftUI content
+        addFrostedGlassBackground(to: window)
     }
 
     func showWithAnimation() {
