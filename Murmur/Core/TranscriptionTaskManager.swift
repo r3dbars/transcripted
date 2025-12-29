@@ -125,6 +125,9 @@ class TranscriptionTaskManager: ObservableObject {
     @Published var pendingReview: PendingActionItemsReview? = nil
     @Published var isSubmittingReview: Bool = false
 
+    // PHASE 3 FIX: Deferred items from previous review (merged into next review instead of auto-submitted)
+    private var deferredActionItems: [SelectableActionItem] = []
+
     private var activeTasks: [UUID: Task<Void, Never>] = [:]
     private let transcription = Transcription()
 
@@ -382,10 +385,22 @@ class TranscriptionTaskManager: ObservableObject {
             return
         }
 
-        // If there are pending items from a previous recording, auto-submit them first
+        // PHASE 3 FIX: If there are pending items from a previous recording, defer them
+        // to be merged with the next review (instead of auto-submitting without consent)
         if let pending = await MainActor.run(body: { self.pendingReview }) {
-            print("📋 Auto-submitting \(pending.selectedCount) pending items before showing new review")
-            await submitSelectedItemsInternal()
+            let selectedItems = pending.items.filter { $0.isSelected }
+            if !selectedItems.isEmpty {
+                await MainActor.run {
+                    self.deferredActionItems = selectedItems
+                    self.pendingReview = nil
+                }
+                print("ℹ️ Deferred \(selectedItems.count) selected items to merge with next review")
+            } else {
+                await MainActor.run {
+                    self.pendingReview = nil
+                }
+                print("ℹ️ Dismissed previous review (no items selected)")
+            }
         }
 
         // Update status to show we're extracting action items
@@ -423,8 +438,24 @@ class TranscriptionTaskManager: ObservableObject {
 
             // Store items for user review instead of auto-sending
             await MainActor.run {
-                self.pendingReview = PendingActionItemsReview(from: result)
-                self.displayStatus = .pendingReview(itemCount: result.actionItems.count)
+                // Create new selectable items from extraction result
+                var allItems = result.actionItems.map { SelectableActionItem(item: $0) }
+
+                // PHASE 3 FIX: Merge any deferred items from previous review (prepend so they appear first)
+                let deferredCount = self.deferredActionItems.count
+                if deferredCount > 0 {
+                    allItems = self.deferredActionItems + allItems
+                    self.deferredActionItems = []  // Clear after merging
+                    print("📋 Merged \(deferredCount) deferred items into new review")
+                }
+
+                // Create pending review with merged items
+                self.pendingReview = PendingActionItemsReview(
+                    items: allItems,
+                    meetingTitle: result.meetingTitle,
+                    meetingSummary: result.meetingSummary
+                )
+                self.displayStatus = .pendingReview(itemCount: allItems.count)
                 // Don't schedule reset - wait for user action
             }
             print("📋 \(result.actionItems.count) action items ready for review")
