@@ -23,7 +23,7 @@ struct ActionItemReviewView: View {
                 )
 
                 Divider()
-                    .background(Color.panelCharcoalSurface)
+                    .background(Color.white.opacity(0.15))
 
                 // Scrollable item list
                 ScrollView {
@@ -38,10 +38,10 @@ struct ActionItemReviewView: View {
                     .padding(.horizontal, Spacing.sm)
                     .padding(.vertical, Spacing.xs)
                 }
-                .frame(maxHeight: 160)
+                .frame(maxHeight: 180)
 
                 Divider()
-                    .background(Color.panelCharcoalSurface)
+                    .background(Color.white.opacity(0.15))
 
                 // Footer with Skip and Add buttons
                 ActionItemReviewFooter(
@@ -55,13 +55,7 @@ struct ActionItemReviewView: View {
                     }
                 )
             }
-            .background(Color.panelCharcoalElevated)
-            .clipShape(RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
-                    .stroke(Color.glassBorder, lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
+            // Background provided by ReviewTrayView's frosted glass
             .transition(.asymmetric(
                 insertion: .opacity.combined(with: .scale(scale: 0.95)).combined(with: .offset(y: -10)),
                 removal: .opacity.combined(with: .scale(scale: 0.95))
@@ -174,7 +168,7 @@ struct ActionItemRow: View {
             .padding(.vertical, Spacing.xs)
             .background(
                 RoundedRectangle(cornerRadius: Radius.lawsButton, style: .continuous)
-                    .fill(isHovered ? Color.panelCharcoalSurface : Color.clear)
+                    .fill(isHovered ? Color.white.opacity(0.1) : Color.clear)
             )
             .contentShape(Rectangle())
         }
@@ -277,7 +271,7 @@ struct ActionItemReviewFooter: View {
                     if isSubmitting {
                         ProgressView()
                             .controlSize(.small)
-                            .tint(.panelCharcoal)
+                            .tint(.white)
                     } else {
                         Text("Add \(selectedCount)")
                             .font(.buttonText)
@@ -285,12 +279,12 @@ struct ActionItemReviewFooter: View {
                             .font(.system(size: 12, weight: .bold))
                     }
                 }
-                .foregroundColor(selectedCount > 0 ? .panelCharcoal : .panelTextMuted)
+                .foregroundColor(selectedCount > 0 ? .white : .panelTextMuted)
                 .padding(.horizontal, Spacing.md)
                 .padding(.vertical, Spacing.xs)
                 .background(
                     Capsule()
-                        .fill(selectedCount > 0 ? Color.statusSuccessMuted : Color.panelCharcoalSurface)
+                        .fill(selectedCount > 0 ? Color.statusSuccessMuted : Color.white.opacity(0.1))
                 )
             }
             .buttonStyle(.plain)

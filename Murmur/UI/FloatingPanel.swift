@@ -2,7 +2,101 @@ import SwiftUI
 import AppKit
 import Combine
 
-// MARK: - Edge Docking Manager
+// MARK: - Pill State (Dynamic Island-style states)
+
+/// Represents the visual states of the floating pill UI
+enum PillState: Equatable {
+    case idle           // 40x20px - Dormant waveform, capsule shape
+    case recording      // 180x40px - Live visualizer + timer + stop
+    case processing     // 180x40px - Status text + progress
+    case reviewing      // 280px wide - Tray expands upward for action items
+}
+
+// MARK: - Pill State Manager
+
+/// Manages pill state transitions with animation protection
+/// Replaces EdgeDockingManager with event-driven state changes
+class PillStateManager: ObservableObject {
+    @Published var state: PillState = .idle
+    @Published var isLocked = false  // Prevents state changes during review
+
+    /// Flag to prevent rapid state changes during animations
+    @Published private(set) var isTransitioning = false
+    private let transitionCooldown: TimeInterval = 0.35
+
+    // MARK: - Computed Dimensions
+
+    var pillWidth: CGFloat {
+        switch state {
+        case .idle:
+            return PillDimensions.idleWidth
+        case .recording, .processing:
+            return PillDimensions.recordingWidth
+        case .reviewing:
+            return PillDimensions.trayWidth
+        }
+    }
+
+    var pillHeight: CGFloat {
+        switch state {
+        case .idle:
+            return PillDimensions.idleHeight
+        case .recording, .processing:
+            return PillDimensions.recordingHeight
+        case .reviewing:
+            return PillDimensions.recordingHeight  // Base pill stays same, tray expands above
+        }
+    }
+
+    /// Total window height including tray when reviewing
+    var windowHeight: CGFloat {
+        switch state {
+        case .idle:
+            return PillDimensions.idleHeight + 20  // Small padding
+        case .recording, .processing:
+            return PillDimensions.recordingHeight + 20
+        case .reviewing:
+            return PillDimensions.recordingHeight + PillDimensions.trayMaxHeight
+        }
+    }
+
+    // MARK: - State Transitions
+
+    /// Transition to a new state with animation protection
+    func transition(to newState: PillState) {
+        // Don't transition if locked (e.g., during review)
+        guard !isLocked || newState == .idle else { return }
+
+        // Don't transition if already in that state
+        guard state != newState else { return }
+
+        // Don't allow transitions during cooldown (unless unlocking from review)
+        guard !isTransitioning || (isLocked && newState == .idle) else { return }
+
+        isTransitioning = true
+        state = newState
+
+        // Reset transition flag after cooldown
+        DispatchQueue.main.asyncAfter(deadline: .now() + transitionCooldown) { [weak self] in
+            self?.isTransitioning = false
+        }
+    }
+
+    /// Lock the pill in current state (used during review)
+    func lock() {
+        isLocked = true
+    }
+
+    /// Unlock and optionally transition to idle
+    func unlock(transitionToIdle: Bool = true) {
+        isLocked = false
+        if transitionToIdle {
+            transition(to: .idle)
+        }
+    }
+}
+
+// MARK: - Edge Docking Manager (DEPRECATED - to be removed)
 
 /// Monitors mouse position and triggers panel expansion when near screen edge
 /// Panel stays expanded while mouse is inside the panel OR near the edge
@@ -118,39 +212,36 @@ class EdgeDockingManager: ObservableObject {
 class FloatingPanelController: NSWindowController {
     private var taskManager: TranscriptionTaskManager
     private var audio: Audio
-    private let dockingManager = EdgeDockingManager()
+    let pillStateManager = PillStateManager()
     private var cancellables = Set<AnyCancellable>()
 
-    // Dimensions (UX: Fitts's Law - larger targets easier to acquire)
-    private let idleDockedWidth: CGFloat = 28  // Width when docked and not recording (was 10)
-    private let recordingDockedWidth: CGFloat = 60  // Increased width for better visibility (was 36)
-    private let expandedWidth: CGFloat = 320  // Wide enough to show notification (was 170)
-    private let panelHeight: CGFloat = 110  // Height of the main panel controls
-    private let notificationHeight: CGFloat = 100  // Space above panel for notifications
-    private let reviewNotificationHeight: CGFloat = 280  // Expanded height for review UI
-    private let totalWindowHeight: CGFloat = 390  // panelHeight + reviewNotificationHeight (uses max to fit review UI)
+    // DEPRECATED: Keep dockingManager temporarily for backward compatibility during transition
+    private let dockingManager = EdgeDockingManager()
 
-    /// Dynamic docked width based on recording state
-    private var dockedWidth: CGFloat {
-        audio.isRecording ? recordingDockedWidth : idleDockedWidth
-    }
+    // Maximum window dimensions (window stays fixed, content animates within)
+    private let maxWindowWidth: CGFloat = PillDimensions.trayWidth + 40  // Extra padding for shadows
+    private let maxWindowHeight: CGFloat = PillDimensions.trayMaxHeight + PillDimensions.recordingHeight + 40
 
     init(taskManager: TranscriptionTaskManager, audio: Audio) {
         self.taskManager = taskManager
         self.audio = audio
 
-        // Initial position: docked at right edge (use idle width for initial state)
-        // Window is tall enough to show notifications above the panel
         let screen = NSScreen.main ?? NSScreen.screens.first!
-        let dockedFrame = NSRect(
-            x: screen.visibleFrame.maxX - idleDockedWidth,
-            y: screen.visibleFrame.maxY - totalWindowHeight - 100,  // Vertically positioned ~100pt from top
-            width: expandedWidth,
-            height: totalWindowHeight  // Includes space for notification above panel
+
+        // Calculate position: centered above dock
+        let dockHeight = Self.detectDockHeight(for: screen)
+        let x = (screen.frame.width - maxWindowWidth) / 2
+        let y = dockHeight + PillDimensions.dockPadding
+
+        let initialFrame = NSRect(
+            x: x,
+            y: y,
+            width: maxWindowWidth,
+            height: maxWindowHeight
         )
 
         let window = FloatingPanel(
-            contentRect: dockedFrame,
+            contentRect: initialFrame,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -160,7 +251,7 @@ class FloatingPanelController: NSWindowController {
 
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
-        window.isMovableByWindowBackground = false  // Disable dragging for edge-docked
+        window.isMovableByWindowBackground = false  // Fixed position above dock
         window.backgroundColor = .clear
         window.hasShadow = false
         window.isOpaque = false
@@ -168,42 +259,21 @@ class FloatingPanelController: NSWindowController {
         window.titleVisibility = .hidden
         window.hidesOnDeactivate = false  // Stay visible when app loses focus
 
-        // Create view with docking manager
+        // Create view with pill state manager (pass dockingManager for backward compat during transition)
         let view = FloatingPanelView(
             taskManager: taskManager,
             audio: audio,
-            dockingManager: dockingManager
+            dockingManager: dockingManager,
+            pillStateManager: pillStateManager
         )
         window.contentView = NSHostingView(rootView: view)
 
-        // Give docking manager reference to panel for bounds checking
+        // DEPRECATED: Keep for backward compatibility
         dockingManager.panelWindow = window
-
-        // Start edge monitoring
         dockingManager.startMonitoring()
 
-        // React to expansion state changes
-        dockingManager.$shouldExpand
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] expand in
-                self?.animatePanel(expanded: expand)
-            }
-            .store(in: &cancellables)
-
-        // React to recording state changes - adjust docked width instantly
-        audio.$isRecording
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                guard let self = self, let window = self.window, let screen = NSScreen.main else { return }
-                // Only adjust if we're in docked state (not expanded)
-                if !self.dockingManager.shouldExpand {
-                    // Instant resize - no animation
-                    var frame = window.frame
-                    frame.origin.x = screen.visibleFrame.maxX - self.dockedWidth
-                    window.setFrame(frame, display: true)
-                }
-            }
-            .store(in: &cancellables)
+        // Wire up pill state transitions based on app events
+        setupStateBindings()
     }
 
     required init?(coder: NSCoder) {
@@ -214,16 +284,93 @@ class FloatingPanelController: NSWindowController {
         dockingManager.stopMonitoring()
     }
 
-    private func animatePanel(expanded: Bool) {
+    // MARK: - Dock Height Detection
+
+    /// Detect the height of the macOS dock
+    private static func detectDockHeight(for screen: NSScreen) -> CGFloat {
+        // The dock takes space from visibleFrame
+        // Dock can be at bottom, left, or right
+        // We detect bottom dock by comparing frame.height vs visibleFrame.height
+
+        let screenFrame = screen.frame
+        let visibleFrame = screen.visibleFrame
+
+        // Bottom dock: difference between frame bottom and visible frame bottom
+        let bottomDockHeight = visibleFrame.origin.y - screenFrame.origin.y
+
+        // If dock is at bottom and has significant height, use it
+        if bottomDockHeight > 20 {
+            return bottomDockHeight
+        }
+
+        // Dock might be hidden or on sides - use default
+        return PillDimensions.defaultDockHeight
+    }
+
+    // MARK: - State Bindings
+
+    private func setupStateBindings() {
+        // React to recording state changes
+        audio.$isRecording
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isRecording in
+                guard let self = self else { return }
+                if isRecording {
+                    self.pillStateManager.transition(to: .recording)
+                } else if self.taskManager.displayStatus.isProcessing {
+                    self.pillStateManager.transition(to: .processing)
+                } else if !self.pillStateManager.isLocked {
+                    self.pillStateManager.transition(to: .idle)
+                }
+            }
+            .store(in: &cancellables)
+
+        // React to task manager status changes
+        taskManager.$displayStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                guard let self = self else { return }
+                switch status {
+                case .preparing, .transcribing, .extractingActionItems, .saving:
+                    if !self.audio.isRecording {
+                        self.pillStateManager.transition(to: .processing)
+                    }
+                case .pendingReview:
+                    // IMPORTANT: Transition BEFORE locking - lock() would block the transition
+                    self.pillStateManager.transition(to: .reviewing)
+                    self.pillStateManager.lock()
+                case .completed, .transcriptSaved, .idle:
+                    self.pillStateManager.unlock(transitionToIdle: !self.audio.isRecording)
+                case .failed:
+                    // Stay in current state for errors
+                    break
+                }
+            }
+            .store(in: &cancellables)
+
+        // DEPRECATED: Bridge pill state to docking manager for backward compatibility
+        pillStateManager.$state
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                guard let self = self else { return }
+                // Expand panel when not idle (for transition period)
+                self.dockingManager.shouldExpand = state != .idle
+                self.dockingManager.isLocked = self.pillStateManager.isLocked
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Reposition window if screen changes
+    func repositionIfNeeded() {
         guard let window = self.window, let screen = NSScreen.main else { return }
 
-        let targetX = expanded
-            ? screen.visibleFrame.maxX - expandedWidth
-            : screen.visibleFrame.maxX - dockedWidth
+        let dockHeight = Self.detectDockHeight(for: screen)
+        let x = (screen.frame.width - maxWindowWidth) / 2
+        let y = dockHeight + PillDimensions.dockPadding
 
-        // Instant change - no animation
         var frame = window.frame
-        frame.origin.x = targetX
+        frame.origin.x = x
+        frame.origin.y = y
         window.setFrame(frame, display: true)
     }
 }
@@ -566,6 +713,650 @@ struct WaveformMiniView: View {
     }
 }
 
+// MARK: - Dormant Waveform View (Idle state - subtle breathing animation)
+
+/// 8 flat bars that subtly "breathe" using sine wave animation
+/// Terracotta color at 60% opacity, 2px bar width, 2px spacing
+@available(macOS 14.0, *)
+struct DormantWaveformView: View {
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+    @State private var phase: Double = 0
+
+    private let barCount = 8
+    private let barWidth: CGFloat = 2
+    private let barSpacing: CGFloat = 2
+    private let minHeight: CGFloat = 3
+    private let maxHeight: CGFloat = 8
+
+    var body: some View {
+        HStack(spacing: barSpacing) {
+            ForEach(0..<barCount, id: \.self) { index in
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Color.terracotta.opacity(0.6))
+                    .frame(width: barWidth, height: barHeight(for: index))
+            }
+        }
+        .onAppear {
+            if !reduceMotion {
+                startBreathing()
+            }
+        }
+    }
+
+    private func barHeight(for index: Int) -> CGFloat {
+        guard !reduceMotion else { return (minHeight + maxHeight) / 2 }
+
+        // Create wave pattern across bars
+        let offset = Double(index) * 0.4
+        let wave = sin(phase + offset)
+        let normalized = (wave + 1) / 2  // 0 to 1
+        return minHeight + (maxHeight - minHeight) * CGFloat(normalized)
+    }
+
+    private func startBreathing() {
+        // Slow, subtle breathing animation (3 second cycle)
+        withAnimation(
+            .linear(duration: 3)
+            .repeatForever(autoreverses: false)
+        ) {
+            phase = .pi * 2
+        }
+    }
+}
+
+// MARK: - Pill Idle View (40x20px - Dynamic Island style)
+
+/// Minimal capsule shown when app is idle
+/// Frosted glass background, dormant waveform, tap to start recording
+@available(macOS 14.0, *)
+struct PillIdleView: View {
+    let onTap: () -> Void
+    let failedCount: Int  // Badge for failed transcriptions
+
+    @State private var isHovered = false
+
+    init(onTap: @escaping () -> Void, failedCount: Int = 0) {
+        self.onTap = onTap
+        self.failedCount = failedCount
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            ZStack {
+                // Frosted glass capsule background
+                Capsule()
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.3), Color.white.opacity(0.1)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 0.5
+                            )
+                    )
+
+                // Dormant waveform centered
+                DormantWaveformView()
+
+                // Failed transcription badge (top-right)
+                if failedCount > 0 {
+                    FailedBadgeOverlay(count: failedCount)
+                        .offset(x: PillDimensions.idleWidth / 2 - 6, y: -PillDimensions.idleHeight / 2 + 4)
+                }
+            }
+            .frame(width: PillDimensions.idleWidth, height: PillDimensions.idleHeight)
+            .scaleEffect(isHovered ? 1.05 : 1.0)
+            .shadow(color: Color.black.opacity(0.15), radius: 4, y: 2)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onHover { hovering in
+            withAnimation(.pillMorph) {
+                isHovered = hovering
+            }
+        }
+        .accessibilityLabel("Start recording")
+        .accessibilityHint("Double-tap to start recording audio")
+    }
+}
+
+// MARK: - Failed Badge Overlay
+
+/// Small red circle showing count of failed transcriptions
+struct FailedBadgeOverlay: View {
+    let count: Int
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.errorCoral)
+                .frame(width: 14, height: 14)
+
+            Text("\(min(count, 9))\(count > 9 ? "+" : "")")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(.white)
+        }
+        .shadow(color: Color.errorCoral.opacity(0.3), radius: 2)
+    }
+}
+
+// MARK: - Recording Dot View (Pulsing red indicator)
+
+/// Classic red recording dot with pulsing animation
+@available(macOS 14.0, *)
+struct RecordingDotView: View {
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+    @State private var isPulsing = false
+
+    private let dotSize: CGFloat = 10
+
+    var body: some View {
+        Circle()
+            .fill(Color(hex: "#FF0000"))  // Pure red for recording
+            .frame(width: dotSize, height: dotSize)
+            .scaleEffect(isPulsing ? 1.1 : 0.9)
+            .shadow(color: Color.red.opacity(0.5), radius: 4)
+            .onAppear {
+                if !reduceMotion {
+                    startPulsing()
+                }
+            }
+    }
+
+    private func startPulsing() {
+        withAnimation(
+            .easeInOut(duration: 0.6)
+            .repeatForever(autoreverses: true)
+        ) {
+            isPulsing = true
+        }
+    }
+}
+
+// MARK: - Pill Recording View (180x40px - Dynamic Island style)
+
+/// Expanded pill shown during recording
+/// Contains: recording dot, waveform visualizer, timer, stop button
+@available(macOS 26.0, *)
+struct PillRecordingView: View {
+    @ObservedObject var audio: Audio
+    let onStop: () -> Void
+
+    @State private var isStopHovered = false
+
+    var body: some View {
+        ZStack {
+            // Frosted glass background with coral border tint
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.recordingCoral.opacity(0.4), lineWidth: 1.5)
+                )
+                .shadow(color: Color.recordingCoral.opacity(0.2), radius: 8)
+
+            HStack(spacing: 12) {
+                // Recording dot
+                RecordingDotView()
+                    .padding(.leading, 12)
+
+                // Waveform visualizer (reuse existing, smaller size)
+                WaveformMiniView(
+                    levels: Array(audio.audioLevelHistory.suffix(8)),
+                    systemLevels: Array(audio.systemAudioLevelHistory.suffix(8)),
+                    barCount: 6,
+                    maxHeight: 20
+                )
+                .frame(width: 50, height: 24)
+
+                // Timer (SF Mono, 13px)
+                Text(formatDuration(audio.recordingDuration))
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .foregroundColor(.panelTextPrimary)
+                    .monospacedDigit()
+
+                Spacer()
+
+                // Stop button (28x28px circle)
+                Button(action: onStop) {
+                    ZStack {
+                        Circle()
+                            .fill(isStopHovered ? Color.panelCharcoalSurface : Color.panelCharcoalElevated)
+                            .frame(width: 28, height: 28)
+
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.panelTextPrimary)
+                            .frame(width: 10, height: 10)
+                    }
+                    .scaleEffect(isStopHovered ? 1.1 : 1.0)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .onHover { hovering in
+                    withAnimation(.pillMorph) {
+                        isStopHovered = hovering
+                    }
+                }
+                .padding(.trailing, 6)
+                .accessibilityLabel("Stop recording")
+            }
+        }
+        .frame(width: PillDimensions.recordingWidth, height: PillDimensions.recordingHeight)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Recording in progress, \(formatDurationAccessible(audio.recordingDuration))")
+        .accessibilityHint("Contains stop button")
+    }
+
+    private func formatDuration(_ duration: TimeInterval) -> String {
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    private func formatDurationAccessible(_ duration: TimeInterval) -> String {
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        if minutes > 0 {
+            return "\(minutes) minute\(minutes == 1 ? "" : "s") \(seconds) second\(seconds == 1 ? "" : "s")"
+        }
+        return "\(seconds) second\(seconds == 1 ? "" : "s")"
+    }
+}
+
+// MARK: - Pill Processing View (180x40px - Status indicator)
+
+/// Shown during transcription/processing
+/// Displays status with icon and animated dots
+@available(macOS 14.0, *)
+struct PillProcessingView: View {
+    let status: DisplayStatus
+
+    var body: some View {
+        ZStack {
+            // Frosted glass background
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.processingPurple.opacity(0.3), lineWidth: 1)
+                )
+
+            HStack(spacing: 10) {
+                // Status icon with spinning animation for processing states
+                Image(systemName: status.icon)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(statusColor)
+                    .symbolEffect(.pulse, options: .repeating, isActive: status.isProcessing)
+
+                // Status text with animated dots
+                HStack(spacing: 0) {
+                    Text(status.statusText)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.panelTextPrimary)
+
+                    if status.isProcessing {
+                        AnimatedDotsView()
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .frame(width: PillDimensions.recordingWidth, height: PillDimensions.recordingHeight)
+        .accessibilityLabel(status.statusText)
+    }
+
+    private var statusColor: Color {
+        switch status {
+        case .preparing, .transcribing:
+            return .statusProcessingMuted
+        case .extractingActionItems:
+            return .processingPurple
+        case .saving:
+            return .statusProcessingMuted
+        case .completed, .transcriptSaved:
+            return .statusSuccessMuted
+        case .failed:
+            return .statusErrorMuted
+        default:
+            return .panelTextSecondary
+        }
+    }
+}
+
+// MARK: - Pill Reviewing View (Bottom pill during review tray)
+
+/// Shown at bottom of review tray
+/// Green success tint with task count - anchors the expanded tray above
+@available(macOS 14.0, *)
+struct PillReviewingView: View {
+    let itemCount: Int
+    var onTap: (() -> Void)? = nil  // Optional tap handler for future expand/collapse
+
+    @State private var isHovered = false
+    @State private var pulseOpacity: Double = 0.4
+
+    var body: some View {
+        Button(action: { onTap?() }) {
+            ZStack {
+                // Subtle pulsing glow behind pill (draws attention)
+                Capsule()
+                    .fill(Color.statusSuccessMuted.opacity(pulseOpacity * 0.3))
+                    .frame(width: PillDimensions.recordingWidth + 8, height: PillDimensions.recordingHeight + 4)
+                    .blur(radius: 8)
+
+                // Frosted glass with green success tint
+                Capsule()
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Color.statusSuccessMuted.opacity(0.5), lineWidth: 1.5)
+                    )
+
+                HStack(spacing: 8) {
+                    // Checklist icon with badge indicator
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "checklist")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.statusSuccessMuted)
+
+                        // Small count badge
+                        Circle()
+                            .fill(Color.statusSuccessMuted)
+                            .frame(width: 14, height: 14)
+                            .overlay(
+                                Text("\(min(itemCount, 9))")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(.white)
+                            )
+                            .offset(x: 8, y: -6)
+                    }
+
+                    Text("\(itemCount) task\(itemCount == 1 ? "" : "s") to review")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.panelTextPrimary)
+
+                    // Up arrow indicator showing tray is above
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.panelTextMuted)
+                }
+            }
+            .frame(width: PillDimensions.recordingWidth, height: PillDimensions.recordingHeight)
+            .scaleEffect(isHovered ? 1.02 : 1.0)
+            .shadow(color: Color.statusSuccessMuted.opacity(0.2), radius: 8, y: 2)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onHover { hovering in
+            withAnimation(.pillMorph) {
+                isHovered = hovering
+            }
+        }
+        .onAppear {
+            // Subtle pulse animation to draw attention
+            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
+                pulseOpacity = 0.8
+            }
+        }
+        .accessibilityLabel("\(itemCount) tasks ready to review")
+        .accessibilityHint("Review tray is open above")
+    }
+}
+
+// MARK: - Pill Success Celebration (Phase 6 Polish)
+
+/// Expanding green glow ring with checkmark
+/// Shows briefly when tasks are added successfully
+@available(macOS 14.0, *)
+struct PillSuccessCelebration: View {
+    let taskCount: Int
+    let isVisible: Bool
+
+    @State private var ringScale: CGFloat = 0.8
+    @State private var ringOpacity: Double = 0
+    @State private var contentOpacity: Double = 0
+
+    var body: some View {
+        ZStack {
+            // Expanding glow ring
+            Circle()
+                .stroke(Color.statusSuccessMuted.opacity(0.4), lineWidth: 3)
+                .frame(width: 80, height: 80)
+                .scaleEffect(ringScale)
+                .opacity(ringOpacity)
+
+            // Inner content
+            VStack(spacing: 4) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.statusSuccessMuted)
+
+                Text("\(taskCount) added")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.panelTextPrimary)
+            }
+            .opacity(contentOpacity)
+        }
+        .onChange(of: isVisible) { _, visible in
+            if visible {
+                animate()
+            } else {
+                reset()
+            }
+        }
+        .onAppear {
+            if isVisible {
+                animate()
+            }
+        }
+    }
+
+    private func animate() {
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+            ringScale = 1.5
+            ringOpacity = 1
+            contentOpacity = 1
+        }
+
+        // Fade out ring
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            withAnimation(.easeOut(duration: 0.5)) {
+                ringOpacity = 0
+            }
+        }
+    }
+
+    private func reset() {
+        ringScale = 0.8
+        ringOpacity = 0
+        contentOpacity = 0
+    }
+}
+
+// MARK: - Pill Error View (Phase 6 Polish)
+
+/// Coral-tinted pill with shake animation for errors
+/// Shows recovery hint and auto-dismisses
+@available(macOS 14.0, *)
+struct PillErrorView: View {
+    let message: String
+    let hint: String?
+    @Binding var isVisible: Bool
+
+    @State private var shakeOffset: CGFloat = 0
+    @State private var contentOpacity: Double = 0
+
+    var body: some View {
+        ZStack {
+            // Error-tinted frosted glass
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.errorCoral.opacity(0.5), lineWidth: 1.5)
+                )
+                .shadow(color: Color.errorCoral.opacity(0.2), radius: 6)
+
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.errorCoral)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(message)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.panelTextPrimary)
+                        .lineLimit(1)
+
+                    if let hint = hint {
+                        Text(hint)
+                            .font(.system(size: 10))
+                            .foregroundColor(.panelTextSecondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer()
+
+                // Dismiss button
+                Button(action: { isVisible = false }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.panelTextMuted)
+                        .padding(4)
+                        .background(Circle().fill(Color.white.opacity(0.1)))
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(.horizontal, 12)
+        }
+        .frame(width: PillDimensions.recordingWidth + 40, height: PillDimensions.recordingHeight + 8)
+        .offset(x: shakeOffset)
+        .opacity(contentOpacity)
+        .onChange(of: isVisible) { _, visible in
+            if visible {
+                animateIn()
+            }
+        }
+        .onAppear {
+            if isVisible {
+                animateIn()
+            }
+        }
+        .accessibilityLabel("Error: \(message)")
+        .accessibilityHint(hint ?? "Tap X to dismiss")
+    }
+
+    private func animateIn() {
+        // Fade in
+        withAnimation(.easeOut(duration: 0.2)) {
+            contentOpacity = 1
+        }
+
+        // Shake animation (5 cycles)
+        let shakeSequence: [CGFloat] = [5, -5, 4, -4, 3, -3, 2, -2, 1, -1, 0]
+        for (index, offset) in shakeSequence.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.05) {
+                withAnimation(.linear(duration: 0.05)) {
+                    shakeOffset = offset
+                }
+            }
+        }
+
+        // Auto-dismiss after 4 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+            withAnimation(.easeOut(duration: 0.3)) {
+                contentOpacity = 0
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                isVisible = false
+            }
+        }
+    }
+}
+
+// MARK: - Review Tray View (Expands upward for action item review)
+
+/// Wrapper around ActionItemReviewView with frosted glass styling
+/// Expands upward from the pill when reviewing action items
+@available(macOS 26.0, *)
+struct ReviewTrayView: View {
+    @ObservedObject var taskManager: TranscriptionTaskManager
+
+    @State private var isAppearing = false
+
+    var body: some View {
+        VStack(spacing: Spacing.sm) {
+            // Frosted glass container for review UI
+            ZStack {
+                // Background with stronger visual presence
+                RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [Color.statusSuccessMuted.opacity(0.3), Color.white.opacity(0.1)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
+                    )
+                    .shadow(color: Color.black.opacity(0.2), radius: 16, y: 6)
+                    .shadow(color: Color.statusSuccessMuted.opacity(0.1), radius: 20, y: 2)
+
+                // Action Item Review Content
+                if taskManager.pendingReview != nil {
+                    ActionItemReviewView(taskManager: taskManager)
+                        .padding(Spacing.md)
+                } else {
+                    // Placeholder while loading
+                    VStack(spacing: Spacing.sm) {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Loading tasks...")
+                            .font(.caption)
+                            .foregroundColor(.panelTextSecondary)
+                    }
+                    .padding(Spacing.lg)
+                }
+            }
+            .frame(width: PillDimensions.trayWidth)
+            .frame(minHeight: 100, maxHeight: PillDimensions.trayMaxHeight)
+
+            // Small connector indicator (visual connection to pill below)
+            Triangle()
+                .fill(Color.white.opacity(0.2))
+                .frame(width: 12, height: 6)
+                .rotationEffect(.degrees(180))
+        }
+        .scaleEffect(isAppearing ? 1 : 0.9)
+        .opacity(isAppearing ? 1 : 0)
+        .onAppear {
+            withAnimation(.trayExpand) {
+                isAppearing = true
+            }
+        }
+        .onDisappear {
+            isAppearing = false
+        }
+    }
+}
+
+// MARK: - Triangle Shape (for tray connector)
+
+struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
 // MARK: - SwiftUI View
 
 @available(macOS 26.0, *)
@@ -573,6 +1364,7 @@ struct FloatingPanelView: View {
     @ObservedObject var taskManager: TranscriptionTaskManager
     @ObservedObject var audio: Audio
     @ObservedObject var dockingManager: EdgeDockingManager
+    @ObservedObject var pillStateManager: PillStateManager
 
     @State private var showCompletionCheckmark = false
     @State private var checkmarkScale: CGFloat = 0.7
@@ -615,31 +1407,25 @@ struct FloatingPanelView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // MARK: - Top Spacer (pushes content to bottom when not in review mode)
-            // When in review mode, notification area takes the space
+            // MARK: - Top Spacer (pushes content to bottom)
             Spacer(minLength: 0)
 
-            // MARK: - Notification/Celebration Area (above panel)
-            // Shows success celebrations when transcription completes, or review UI when items pending
-            ZStack {
-                Color.clear
-
-                // Action Item Review UI (takes precedence when pending)
-                if hasPendingReview {
-                    VStack {
-                        Spacer()
-                        ActionItemReviewView(taskManager: taskManager)
-                            .padding(.horizontal, Spacing.sm)
-                            .padding(.bottom, Spacing.sm)
-                    }
+            // MARK: - Review Tray (expands upward when reviewing)
+            if pillStateManager.state == .reviewing {
+                ReviewTrayView(taskManager: taskManager)
                     .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .offset(y: -20)),
+                        insertion: .opacity.combined(with: .move(edge: .bottom)),
                         removal: .opacity.combined(with: .scale(scale: 0.95))
                     ))
-                }
+            }
 
-                // Transcript saved celebration (green checkmark) - only show when not reviewing
-                if showTranscriptSavedCelebration && !hasPendingReview {
+            // MARK: - Celebration Overlays (float above pill)
+            ZStack {
+                Color.clear
+                    .frame(height: 60)
+
+                // Transcript saved celebration
+                if showTranscriptSavedCelebration && pillStateManager.state != .reviewing {
                     CelebrationOverlay(
                         celebrationType: .transcriptSaved,
                         isVisible: showTranscriptSavedCelebration
@@ -647,8 +1433,8 @@ struct FloatingPanelView: View {
                     .transition(.scale.combined(with: .opacity))
                 }
 
-                // Action items celebration (count badge) - only show when not reviewing
-                if showActionItemsCelebration && !hasPendingReview {
+                // Action items celebration
+                if showActionItemsCelebration && pillStateManager.state != .reviewing {
                     CelebrationOverlay(
                         celebrationType: .actionItemsCreated(count: actionItemsCount),
                         isVisible: showActionItemsCelebration
@@ -656,54 +1442,14 @@ struct FloatingPanelView: View {
                     .transition(.scale.combined(with: .opacity))
                 }
             }
-            .frame(width: totalWindowWidth, height: notificationHeight)
-            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: hasPendingReview)
 
-            // MARK: - Main Panel
-            HStack(spacing: 0) {
-                // When EXPANDED: Spacer on LEFT pushes panel to right edge
-                if dockingManager.shouldExpand {
-                    Spacer()
-                }
-
-                ZStack(alignment: .leading) {
-                    // Panel content - EdgePeekView space on LEFT when docked, full controls when expanded
-                    HStack(spacing: 0) {
-                        // Spacer removed to ensure EdgePeekView is visible
-
-
-                        if dockingManager.shouldExpand {
-                            fullPanelContent
-                        } else {
-                            // EdgePeekView at the LEFT edge - only visible when docked (not expanded)
-                            if !dockingManager.shouldExpand {
-                                EdgePeekView(
-                                    isRecording: audio.isRecording,
-                                    audioLevels: Array(audio.audioLevelHistory.suffix(8)),
-                                    systemAudioLevels: Array(audio.systemAudioLevelHistory.suffix(8)),
-                                    recordingDuration: audio.recordingDuration,
-                                    silenceWarning: showSilencePrompt,  // Amber ring when silence detected
-                                    onStop: { audio.stop() }
-                                )
-                                .padding(.leading, 0) // Remove padding to align flush with edge
-                            }
-                        }
-                    }
-                    .frame(width: dockingManager.shouldExpand ? panelWidth : (audio.isRecording ? 60 : 28), height: panelHeight)
-                    .background(dockingManager.shouldExpand ? AnyView(panelBackground) : AnyView(Color.clear))
-                    .clipShape(RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous))
-                    .overlay(errorOverlay)
-                }
-                // .frame(width: panelWidth, height: panelHeight) // Removed fixed frame here to allow dynamic resizing
-
-                // When DOCKED: Spacer on RIGHT (off-screen, keeps panel on left)
-                if !dockingManager.shouldExpand {
-                    Spacer()
-                }
-            }
-            .frame(width: totalWindowWidth, height: panelHeight)
+            // MARK: - Pill Content (centered, morphs between states)
+            pillContent
+                .animation(.pillMorph, value: pillStateManager.state)
+                .padding(.bottom, 10)
         }
-        .frame(width: totalWindowWidth, height: totalWindowHeight)
+        .frame(width: pillStateManager.state == .reviewing ? PillDimensions.trayWidth + 40 : PillDimensions.recordingWidth + 40)
+        .frame(maxHeight: .infinity, alignment: .bottom)
         .onChange(of: taskManager.justCompleted) { _, newValue in
             if newValue {
                 triggerCompletionCheckmark()
@@ -777,7 +1523,29 @@ struct FloatingPanelView: View {
         }
     }
 
-    // MARK: - Full Panel Content (Laws of UX Warm Minimalism)
+    // MARK: - Pill Content (Dynamic Island-style state switching)
+
+    /// Switches between pill views based on current state
+    @ViewBuilder
+    private var pillContent: some View {
+        switch pillStateManager.state {
+        case .idle:
+            PillIdleView(
+                onTap: { audio.start() },
+                failedCount: 0  // TODO: Wire to FailedTranscriptionManager
+            )
+        case .recording:
+            PillRecordingView(audio: audio) {
+                audio.stop()
+            }
+        case .processing:
+            PillProcessingView(status: taskManager.displayStatus)
+        case .reviewing:
+            PillReviewingView(itemCount: taskManager.pendingReview?.totalCount ?? 0)
+        }
+    }
+
+    // MARK: - Full Panel Content (Laws of UX Warm Minimalism) - DEPRECATED
 
     private var fullPanelContent: some View {
         VStack(spacing: 10) {

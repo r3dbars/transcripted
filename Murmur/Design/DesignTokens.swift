@@ -840,6 +840,51 @@ extension View {
     }
 }
 
+// MARK: - Pill Dimensions (Dynamic Island-style floating pill)
+
+struct PillDimensions {
+    /// Idle state: minimal capsule centered above dock
+    static let idleWidth: CGFloat = 40
+    static let idleHeight: CGFloat = 20
+
+    /// Recording/Processing state: expanded with controls
+    static let recordingWidth: CGFloat = 180
+    static let recordingHeight: CGFloat = 40
+
+    /// Review tray: expands upward for action item review
+    static let trayWidth: CGFloat = 280
+    static let trayMaxHeight: CGFloat = 300
+
+    /// Padding above dock
+    static let dockPadding: CGFloat = 8
+
+    /// Default dock height if detection fails
+    static let defaultDockHeight: CGFloat = 70
+}
+
+// MARK: - Pill Animation Presets (Dynamic Island-style morphing)
+
+extension Animation {
+    /// Primary pill morph animation (idle ↔ recording)
+    static let pillMorph = Animation.spring(response: 0.3, dampingFraction: 0.8)
+
+    /// Tray expand/collapse animation
+    static let trayExpand = Animation.spring(response: 0.4, dampingFraction: 0.85)
+
+    /// Content fade during transitions
+    static let pillContentFade = Animation.easeInOut(duration: 0.15)
+}
+
+// MARK: - Additional Radius Tokens
+
+extension Radius {
+    /// Pill capsule radius (fully rounded ends)
+    static let pill: CGFloat = 12
+
+    /// Pill idle state radius (smaller, more capsule-like)
+    static let pillIdle: CGFloat = 10
+}
+
 // MARK: - Design Tokens Namespace
 
 enum DesignTokens {
@@ -848,4 +893,5 @@ enum DesignTokens {
     static let shadow = ShadowStyle.self
     static let animation = AnimationTiming.self
     static let accessibility = AccessibilityTokens.self
+    static let pill = PillDimensions.self
 }
