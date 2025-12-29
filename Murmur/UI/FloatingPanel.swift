@@ -137,116 +137,6 @@ class PillStateManager: ObservableObject {
     }
 }
 
-// MARK: - Edge Docking Manager (DEPRECATED - to be removed)
-
-/// Monitors mouse position and triggers panel expansion when near screen edge
-/// Panel stays expanded while mouse is inside the panel OR near the edge
-class EdgeDockingManager: ObservableObject {
-    @Published var shouldExpand = false
-    @Published var isLocked = false  // Prevents mouse-triggered collapse (e.g., for meeting prompts)
-
-    // Reference to panel window for bounds checking
-    weak var panelWindow: NSWindow?
-
-    private var globalMonitor: Any?
-    private var localMonitor: Any?
-    private var expandWorkItem: DispatchWorkItem?
-    private var collapseWorkItem: DispatchWorkItem?
-
-    // Configuration
-    private let edgeThreshold: CGFloat = 20  // Pixels from edge to trigger
-    private let expandDelay: TimeInterval = 0.3  // 300ms delay before expanding
-    private let collapseDelay: TimeInterval = 0.15  // 150ms grace period before collapsing
-
-    func startMonitoring() {
-        // Global monitor for when app is not focused
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
-            self?.handleMouseMove()
-        }
-
-        // Local monitor for when app is focused
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
-            self?.handleMouseMove()
-            return event
-        }
-    }
-
-    private func handleMouseMove() {
-        guard let screen = NSScreen.main else { return }
-        let mouseLocation = NSEvent.mouseLocation
-        let rightEdge = screen.visibleFrame.maxX
-
-        // Check if mouse is near the screen edge
-        let nearEdge = mouseLocation.x >= rightEdge - edgeThreshold
-
-        // Check if mouse is inside the expanded panel
-        let insidePanel: Bool = {
-            guard shouldExpand, let window = panelWindow else { return false }
-            return window.frame.contains(mouseLocation)
-        }()
-
-        if nearEdge || insidePanel {
-            // Cancel any pending collapse and schedule/maintain expansion
-            cancelCollapse()
-            scheduleExpand()
-        } else {
-            // Cancel pending expansion and schedule collapse with grace period
-            cancelExpand()
-            scheduleCollapse()
-        }
-    }
-
-    private func scheduleExpand() {
-        // Don't schedule if already expanded or already scheduling
-        guard !shouldExpand, expandWorkItem == nil else { return }
-
-        let workItem = DispatchWorkItem { [weak self] in
-            self?.shouldExpand = true
-            self?.expandWorkItem = nil
-        }
-        expandWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + expandDelay, execute: workItem)
-    }
-
-    private func cancelExpand() {
-        expandWorkItem?.cancel()
-        expandWorkItem = nil
-    }
-
-    private func scheduleCollapse() {
-        // Don't schedule if already collapsed, already scheduling, or locked
-        guard shouldExpand, collapseWorkItem == nil, !isLocked else { return }
-
-        let workItem = DispatchWorkItem { [weak self] in
-            guard let self = self, !self.isLocked else { return }  // Double-check lock
-            self.shouldExpand = false
-            self.collapseWorkItem = nil
-        }
-        collapseWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + collapseDelay, execute: workItem)
-    }
-
-    private func cancelCollapse() {
-        collapseWorkItem?.cancel()
-        collapseWorkItem = nil
-    }
-
-    func stopMonitoring() {
-        if let monitor = globalMonitor {
-            NSEvent.removeMonitor(monitor)
-            globalMonitor = nil
-        }
-        if let monitor = localMonitor {
-            NSEvent.removeMonitor(monitor)
-            localMonitor = nil
-        }
-    }
-
-    deinit {
-        stopMonitoring()
-    }
-}
-
 // MARK: - Window Controller
 
 @available(macOS 26.0, *)
@@ -255,9 +145,6 @@ class FloatingPanelController: NSWindowController {
     private var audio: Audio
     let pillStateManager = PillStateManager()
     private var cancellables = Set<AnyCancellable>()
-
-    // DEPRECATED: Keep dockingManager temporarily for backward compatibility during transition
-    private let dockingManager = EdgeDockingManager()
 
     // Maximum window dimensions (window stays fixed, content animates within)
     private let maxWindowWidth: CGFloat = PillDimensions.trayWidth + 40  // Extra padding for shadows
@@ -300,18 +187,13 @@ class FloatingPanelController: NSWindowController {
         window.titleVisibility = .hidden
         window.hidesOnDeactivate = false  // Stay visible when app loses focus
 
-        // Create view with pill state manager (pass dockingManager for backward compat during transition)
+        // Create view with pill state manager
         let view = FloatingPanelView(
             taskManager: taskManager,
             audio: audio,
-            dockingManager: dockingManager,
             pillStateManager: pillStateManager
         )
         window.contentView = NSHostingView(rootView: view)
-
-        // DEPRECATED: Keep for backward compatibility
-        dockingManager.panelWindow = window
-        dockingManager.startMonitoring()
 
         // Wire up pill state transitions based on app events
         setupStateBindings()
@@ -319,10 +201,6 @@ class FloatingPanelController: NSWindowController {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) not implemented")
-    }
-
-    deinit {
-        dockingManager.stopMonitoring()
     }
 
     // MARK: - Dock Height Detection
@@ -388,17 +266,6 @@ class FloatingPanelController: NSWindowController {
                     // Stay in current state for errors
                     break
                 }
-            }
-            .store(in: &cancellables)
-
-        // DEPRECATED: Bridge pill state to docking manager for backward compatibility
-        pillStateManager.$state
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] state in
-                guard let self = self else { return }
-                // Expand panel when not idle (for transition period)
-                self.dockingManager.shouldExpand = state != .idle
-                self.dockingManager.isLocked = self.pillStateManager.isLocked
             }
             .store(in: &cancellables)
     }
@@ -1406,7 +1273,6 @@ struct Triangle: Shape {
 struct FloatingPanelView: View {
     @ObservedObject var taskManager: TranscriptionTaskManager
     @ObservedObject var audio: Audio
-    @ObservedObject var dockingManager: EdgeDockingManager
     @ObservedObject var pillStateManager: PillStateManager
 
     @State private var showCompletionCheckmark = false
@@ -1499,11 +1365,9 @@ struct FloatingPanelView: View {
             }
         }
         .onChange(of: audio.silenceDuration) { _, duration in
-            // UX: Don't interrupt user flow - just show amber ring, don't force panel open
+            // UX: Don't interrupt user flow - show amber ring indicator without forcing panel expansion
             if audio.isRecording && duration >= silenceThresholdSeconds && !silencePromptDismissed && !showSilencePrompt {
                 showSilencePrompt = true
-                // Removed: dockingManager.shouldExpand = true
-                // User will see amber ring and can choose to expand if needed
             }
         }
         .onChange(of: audio.isRecording) { _, isRecording in
@@ -1527,17 +1391,6 @@ struct FloatingPanelView: View {
                 triggerActionItemsCelebration(count: count)
             default:
                 break
-            }
-        }
-        // Lock panel open when review is active
-        .onChange(of: taskManager.pendingReview) { _, newReview in
-            if newReview != nil {
-                // Expand and lock panel when review starts
-                dockingManager.shouldExpand = true
-                dockingManager.isLocked = true
-            } else {
-                // Unlock panel when review ends
-                dockingManager.isLocked = false
             }
         }
         // PHASE 4 FIX: Clear celebrations immediately when state changes
