@@ -57,9 +57,15 @@ class TodoistService {
         }
     }
 
-    /// Create tasks from action items, returns count of successfully created tasks
-    func createTasks(from actionItems: [ActionItem]) async -> Int {
-        var createdCount = 0
+    /// Create tasks from action items
+    /// - Returns: TaskCreationResult with success/failure details (Phase 2 enhancement)
+    func createTasks(from actionItems: [ActionItem]) async -> TaskCreationResult {
+        guard !actionItems.isEmpty else {
+            return .empty
+        }
+
+        var successCount = 0
+        var failures: [TaskCreationFailure] = []
 
         for (index, item) in actionItems.enumerated() {
             let title = formatTitle(task: item.task, owner: item.owner)
@@ -72,9 +78,16 @@ class TodoistService {
                     dueString: item.dueDate,
                     priority: priority
                 )
-                createdCount += 1
+                successCount += 1
                 print("✓ Created Todoist task: \(title)")
             } catch {
+                let failure = TaskCreationFailure(
+                    taskTitle: item.task,
+                    errorMessage: error.localizedDescription,
+                    isRecoverable: isRecoverableError(error),
+                    recoveryHint: recoveryHintFor(error)
+                )
+                failures.append(failure)
                 print("❌ Failed to create Todoist task '\(title)': \(error)")
             }
 
@@ -84,7 +97,44 @@ class TodoistService {
             }
         }
 
-        return createdCount
+        return TaskCreationResult(
+            successCount: successCount,
+            failureCount: failures.count,
+            failures: failures
+        )
+    }
+
+    /// Determine if an error is recoverable with retry
+    private func isRecoverableError(_ error: Error) -> Bool {
+        if let todoistError = error as? TodoistError {
+            switch todoistError {
+            case .noAPIKey:
+                return false  // Needs user configuration
+            case .requestFailed(let statusCode, _):
+                // Rate limits and server errors are recoverable
+                return statusCode == 429 || statusCode >= 500
+            }
+        }
+        // Network errors are generally recoverable
+        return true
+    }
+
+    /// Get recovery hint for specific error
+    private func recoveryHintFor(_ error: Error) -> String {
+        if let todoistError = error as? TodoistError {
+            switch todoistError {
+            case .noAPIKey:
+                return "Add your Todoist API key in Settings → AI Features"
+            case .requestFailed(let statusCode, _):
+                if statusCode == 401 || statusCode == 403 {
+                    return "Check your Todoist API key in Settings"
+                } else if statusCode == 429 {
+                    return "Rate limited - try again in a moment"
+                }
+                return "Try again later"
+            }
+        }
+        return "Check your internet connection and try again"
     }
 
     /// Format title - label non-"You" tasks as follow-ups

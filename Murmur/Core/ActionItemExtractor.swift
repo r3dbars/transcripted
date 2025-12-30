@@ -56,6 +56,14 @@ struct PendingActionItemsReview: Equatable {
         self.meetingSummary = result.meetingSummary
         self.extractedAt = Date()
     }
+
+    /// Initialize with pre-built items (PHASE 3: supports merging deferred items)
+    init(items: [SelectableActionItem], meetingTitle: String?, meetingSummary: String?) {
+        self.items = items
+        self.meetingTitle = meetingTitle
+        self.meetingSummary = meetingSummary
+        self.extractedAt = Date()
+    }
 }
 
 /// Final extraction result returned to callers

@@ -22,7 +22,17 @@ class PillStateManager: ObservableObject {
 
     /// Flag to prevent rapid state changes during animations
     @Published private(set) var isTransitioning = false
-    private let transitionCooldown: TimeInterval = 0.35
+    /// PHASE 4 FIX: Use unified timing from DesignTokens to prevent animation/cooldown mismatch
+    private let transitionCooldown: TimeInterval = PillAnimationTiming.cooldownDuration
+
+    // MARK: - Timeout Recovery (Phase 1 Bug Fix)
+
+    /// Timestamp when current transition started (for timeout recovery)
+    private var transitionStartTime: Date?
+
+    /// Maximum time a transition can be "in progress" before force-reset
+    /// 2 seconds is long enough for any animation but catches stuck states quickly
+    private let transitionTimeout: TimeInterval = 2.0
 
     // MARK: - Computed Dimensions
 
@@ -62,23 +72,42 @@ class PillStateManager: ObservableObject {
 
     // MARK: - State Transitions
 
-    /// Transition to a new state with animation protection
+    /// Transition to a new state with animation protection and timeout recovery
     func transition(to newState: PillState) {
-        // Don't transition if locked (e.g., during review)
-        guard !isLocked || newState == .idle else { return }
+        // PHASE 1 FIX: Timeout recovery - if stuck in transition for > 2s, force reset
+        if isTransitioning,
+           let startTime = transitionStartTime,
+           Date().timeIntervalSince(startTime) > transitionTimeout {
+            print("[PillState] ⚠️ Force-resetting stuck transition (was \(state) for \(String(format: "%.1f", Date().timeIntervalSince(startTime)))s)")
+            isTransitioning = false
+            transitionStartTime = nil
+        }
+
+        // Don't transition if locked (e.g., during review) - UNLESS transitioning to idle (emergency escape)
+        guard !isLocked || newState == .idle else {
+            print("[PillState] Blocked transition to \(newState) - pill is locked")
+            return
+        }
 
         // Don't transition if already in that state
         guard state != newState else { return }
 
         // Don't allow transitions during cooldown (unless unlocking from review)
-        guard !isTransitioning || (isLocked && newState == .idle) else { return }
+        guard !isTransitioning || (isLocked && newState == .idle) else {
+            print("[PillState] Blocked transition to \(newState) - cooldown active")
+            return
+        }
 
+        let previousState = state
         isTransitioning = true
+        transitionStartTime = Date()
         state = newState
+        print("[PillState] Transition: \(previousState) → \(newState)")
 
         // Reset transition flag after cooldown
         DispatchQueue.main.asyncAfter(deadline: .now() + transitionCooldown) { [weak self] in
             self?.isTransitioning = false
+            self?.transitionStartTime = nil
         }
     }
 
@@ -94,115 +123,17 @@ class PillStateManager: ObservableObject {
             transition(to: .idle)
         }
     }
-}
 
-// MARK: - Edge Docking Manager (DEPRECATED - to be removed)
+    // MARK: - Emergency Recovery (Phase 1 Bug Fix)
 
-/// Monitors mouse position and triggers panel expansion when near screen edge
-/// Panel stays expanded while mouse is inside the panel OR near the edge
-class EdgeDockingManager: ObservableObject {
-    @Published var shouldExpand = false
-    @Published var isLocked = false  // Prevents mouse-triggered collapse (e.g., for meeting prompts)
-
-    // Reference to panel window for bounds checking
-    weak var panelWindow: NSWindow?
-
-    private var globalMonitor: Any?
-    private var localMonitor: Any?
-    private var expandWorkItem: DispatchWorkItem?
-    private var collapseWorkItem: DispatchWorkItem?
-
-    // Configuration
-    private let edgeThreshold: CGFloat = 20  // Pixels from edge to trigger
-    private let expandDelay: TimeInterval = 0.3  // 300ms delay before expanding
-    private let collapseDelay: TimeInterval = 0.15  // 150ms grace period before collapsing
-
-    func startMonitoring() {
-        // Global monitor for when app is not focused
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
-            self?.handleMouseMove()
-        }
-
-        // Local monitor for when app is focused
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
-            self?.handleMouseMove()
-            return event
-        }
-    }
-
-    private func handleMouseMove() {
-        guard let screen = NSScreen.main else { return }
-        let mouseLocation = NSEvent.mouseLocation
-        let rightEdge = screen.visibleFrame.maxX
-
-        // Check if mouse is near the screen edge
-        let nearEdge = mouseLocation.x >= rightEdge - edgeThreshold
-
-        // Check if mouse is inside the expanded panel
-        let insidePanel: Bool = {
-            guard shouldExpand, let window = panelWindow else { return false }
-            return window.frame.contains(mouseLocation)
-        }()
-
-        if nearEdge || insidePanel {
-            // Cancel any pending collapse and schedule/maintain expansion
-            cancelCollapse()
-            scheduleExpand()
-        } else {
-            // Cancel pending expansion and schedule collapse with grace period
-            cancelExpand()
-            scheduleCollapse()
-        }
-    }
-
-    private func scheduleExpand() {
-        // Don't schedule if already expanded or already scheduling
-        guard !shouldExpand, expandWorkItem == nil else { return }
-
-        let workItem = DispatchWorkItem { [weak self] in
-            self?.shouldExpand = true
-            self?.expandWorkItem = nil
-        }
-        expandWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + expandDelay, execute: workItem)
-    }
-
-    private func cancelExpand() {
-        expandWorkItem?.cancel()
-        expandWorkItem = nil
-    }
-
-    private func scheduleCollapse() {
-        // Don't schedule if already collapsed, already scheduling, or locked
-        guard shouldExpand, collapseWorkItem == nil, !isLocked else { return }
-
-        let workItem = DispatchWorkItem { [weak self] in
-            guard let self = self, !self.isLocked else { return }  // Double-check lock
-            self.shouldExpand = false
-            self.collapseWorkItem = nil
-        }
-        collapseWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + collapseDelay, execute: workItem)
-    }
-
-    private func cancelCollapse() {
-        collapseWorkItem?.cancel()
-        collapseWorkItem = nil
-    }
-
-    func stopMonitoring() {
-        if let monitor = globalMonitor {
-            NSEvent.removeMonitor(monitor)
-            globalMonitor = nil
-        }
-        if let monitor = localMonitor {
-            NSEvent.removeMonitor(monitor)
-            localMonitor = nil
-        }
-    }
-
-    deinit {
-        stopMonitoring()
+    /// Force unlock and reset all state flags - use only for emergency recovery
+    /// This bypasses all guards and forces the pill back to idle state
+    func forceUnlock() {
+        print("[PillState] ⚠️ Force unlock triggered - resetting all state")
+        isLocked = false
+        isTransitioning = false
+        transitionStartTime = nil
+        state = .idle
     }
 }
 
@@ -214,9 +145,6 @@ class FloatingPanelController: NSWindowController {
     private var audio: Audio
     let pillStateManager = PillStateManager()
     private var cancellables = Set<AnyCancellable>()
-
-    // DEPRECATED: Keep dockingManager temporarily for backward compatibility during transition
-    private let dockingManager = EdgeDockingManager()
 
     // Maximum window dimensions (window stays fixed, content animates within)
     private let maxWindowWidth: CGFloat = PillDimensions.trayWidth + 40  // Extra padding for shadows
@@ -259,18 +187,13 @@ class FloatingPanelController: NSWindowController {
         window.titleVisibility = .hidden
         window.hidesOnDeactivate = false  // Stay visible when app loses focus
 
-        // Create view with pill state manager (pass dockingManager for backward compat during transition)
+        // Create view with pill state manager
         let view = FloatingPanelView(
             taskManager: taskManager,
             audio: audio,
-            dockingManager: dockingManager,
             pillStateManager: pillStateManager
         )
         window.contentView = NSHostingView(rootView: view)
-
-        // DEPRECATED: Keep for backward compatibility
-        dockingManager.panelWindow = window
-        dockingManager.startMonitoring()
 
         // Wire up pill state transitions based on app events
         setupStateBindings()
@@ -278,10 +201,6 @@ class FloatingPanelController: NSWindowController {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) not implemented")
-    }
-
-    deinit {
-        dockingManager.stopMonitoring()
     }
 
     // MARK: - Dock Height Detection
@@ -311,7 +230,9 @@ class FloatingPanelController: NSWindowController {
 
     private func setupStateBindings() {
         // React to recording state changes
+        // PHASE 1 FIX: Add debouncing to prevent rapid state changes from causing stuck states
         audio.$isRecording
+            .debounce(for: .milliseconds(50), scheduler: DispatchQueue.main)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isRecording in
                 guard let self = self else { return }
@@ -345,17 +266,6 @@ class FloatingPanelController: NSWindowController {
                     // Stay in current state for errors
                     break
                 }
-            }
-            .store(in: &cancellables)
-
-        // DEPRECATED: Bridge pill state to docking manager for backward compatibility
-        pillStateManager.$state
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] state in
-                guard let self = self else { return }
-                // Expand panel when not idle (for transition period)
-                self.dockingManager.shouldExpand = state != .idle
-                self.dockingManager.isLocked = self.pillStateManager.isLocked
             }
             .store(in: &cancellables)
     }
@@ -1363,7 +1273,6 @@ struct Triangle: Shape {
 struct FloatingPanelView: View {
     @ObservedObject var taskManager: TranscriptionTaskManager
     @ObservedObject var audio: Audio
-    @ObservedObject var dockingManager: EdgeDockingManager
     @ObservedObject var pillStateManager: PillStateManager
 
     @State private var showCompletionCheckmark = false
@@ -1456,11 +1365,9 @@ struct FloatingPanelView: View {
             }
         }
         .onChange(of: audio.silenceDuration) { _, duration in
-            // UX: Don't interrupt user flow - just show amber ring, don't force panel open
+            // UX: Don't interrupt user flow - show amber ring indicator without forcing panel expansion
             if audio.isRecording && duration >= silenceThresholdSeconds && !silencePromptDismissed && !showSilencePrompt {
                 showSilencePrompt = true
-                // Removed: dockingManager.shouldExpand = true
-                // User will see amber ring and can choose to expand if needed
             }
         }
         .onChange(of: audio.isRecording) { _, isRecording in
@@ -1486,16 +1393,12 @@ struct FloatingPanelView: View {
                 break
             }
         }
-        // Lock panel open when review is active
-        .onChange(of: taskManager.pendingReview) { _, newReview in
-            if newReview != nil {
-                // Expand and lock panel when review starts
-                dockingManager.shouldExpand = true
-                dockingManager.isLocked = true
-            } else {
-                // Unlock panel when review ends
-                dockingManager.isLocked = false
-            }
+        // PHASE 4 FIX: Clear celebrations immediately when state changes
+        // Prevents lingering overlays from previous states
+        .onChange(of: pillStateManager.state) { _, _ in
+            showRecordingStoppedCelebration = false
+            showTranscriptSavedCelebration = false
+            showActionItemsCelebration = false
         }
     }
 
