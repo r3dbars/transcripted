@@ -118,15 +118,24 @@ class TranscriptionTaskManager: ObservableObject {
     @Published var actionItemsAddedCount: Int = 0
     @Published var showActionItemsAdded: Bool = false
 
+    // Phase 2: Track full task creation result for error visibility
+    @Published var lastTaskCreationResult: TaskCreationResult?
+
     // Action item review state - holds items pending user review
     @Published var pendingReview: PendingActionItemsReview? = nil
     @Published var isSubmittingReview: Bool = false
+
+    // PHASE 3 FIX: Deferred items from previous review (merged into next review instead of auto-submitted)
+    private var deferredActionItems: [SelectableActionItem] = []
 
     private var activeTasks: [UUID: Task<Void, Never>] = [:]
     private let transcription = Transcription()
 
     // Reference to failed transcription manager
     private let failedTranscriptionManager: FailedTranscriptionManager
+
+    // PHASE 6: Failed action item extraction manager with retry queue
+    let failedActionItemManager = FailedActionItemManager()
 
     init(failedTranscriptionManager: FailedTranscriptionManager) {
         self.failedTranscriptionManager = failedTranscriptionManager
@@ -336,6 +345,90 @@ class TranscriptionTaskManager: ObservableObject {
         }
     }
 
+    // MARK: - Retry Failed Action Item Extraction (Phase 6)
+
+    /// Retry a failed action item extraction by its ID
+    func retryFailedActionItemExtraction(failedId: UUID) async -> Bool {
+        guard let failed = await MainActor.run(body: { failedActionItemManager.failedExtractions.first(where: { $0.id == failedId }) }) else {
+            print("❌ Failed action item extraction not found: \(failedId)")
+            return false
+        }
+
+        // Verify transcript file still exists
+        guard failed.transcriptExists() else {
+            print("❌ Transcript file no longer exists for failed extraction: \(failedId)")
+            await MainActor.run {
+                failedActionItemManager.removeFailedExtraction(id: failedId)
+            }
+            return false
+        }
+
+        print("🔄 Retrying action item extraction: \(failed.transcriptFilename)")
+
+        // Increment retry count (handles backoff timing)
+        await MainActor.run {
+            failedActionItemManager.incrementRetryCount(id: failedId)
+        }
+
+        do {
+            // Read transcript content
+            let content = try String(contentsOf: failed.transcriptURL, encoding: .utf8)
+            let apiKey = UserDefaults.standard.string(forKey: "geminiAPIKey") ?? ""
+
+            guard !apiKey.isEmpty else {
+                throw ActionItemExtractionError.noAPIKey
+            }
+
+            // Extract action items using Gemini
+            let result = try await ActionItemExtractor.extract(from: content, apiKey: apiKey)
+
+            if result.actionItems.isEmpty {
+                print("ℹ️ Retry successful but no action items found")
+                await MainActor.run {
+                    failedActionItemManager.removeFailedExtraction(id: failedId)
+                }
+                return true
+            }
+
+            // Store items for user review
+            await MainActor.run {
+                self.pendingReview = PendingActionItemsReview(
+                    items: result.actionItems.map { SelectableActionItem(item: $0) },
+                    meetingTitle: result.meetingTitle,
+                    meetingSummary: result.meetingSummary
+                )
+                self.displayStatus = .pendingReview(itemCount: result.actionItems.count)
+                failedActionItemManager.removeFailedExtraction(id: failedId)
+            }
+
+            print("✅ Retry successful: \(result.actionItems.count) action items ready for review")
+            return true
+
+        } catch {
+            print("❌ Action item extraction retry failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Retry all failed action item extractions that are ready (backoff elapsed)
+    func retryAllReadyActionItemExtractions() async -> (succeeded: Int, failed: Int) {
+        let ready = await MainActor.run { failedActionItemManager.extractionsReadyForRetry }
+        var succeeded = 0
+        var failed = 0
+
+        for extraction in ready {
+            let success = await retryFailedActionItemExtraction(failedId: extraction.id)
+            if success {
+                succeeded += 1
+            } else {
+                failed += 1
+            }
+        }
+
+        print("📋 Retry batch complete: \(succeeded) succeeded, \(failed) failed")
+        return (succeeded, failed)
+    }
+
     private func handleTaskCompletion(taskId: UUID) {
         // Remove from active tasks
         activeTasks.removeValue(forKey: taskId)
@@ -379,10 +472,22 @@ class TranscriptionTaskManager: ObservableObject {
             return
         }
 
-        // If there are pending items from a previous recording, auto-submit them first
+        // PHASE 3 FIX: If there are pending items from a previous recording, defer them
+        // to be merged with the next review (instead of auto-submitting without consent)
         if let pending = await MainActor.run(body: { self.pendingReview }) {
-            print("📋 Auto-submitting \(pending.selectedCount) pending items before showing new review")
-            await submitSelectedItemsInternal()
+            let selectedItems = pending.items.filter { $0.isSelected }
+            if !selectedItems.isEmpty {
+                await MainActor.run {
+                    self.deferredActionItems = selectedItems
+                    self.pendingReview = nil
+                }
+                print("ℹ️ Deferred \(selectedItems.count) selected items to merge with next review")
+            } else {
+                await MainActor.run {
+                    self.pendingReview = nil
+                }
+                print("ℹ️ Dismissed previous review (no items selected)")
+            }
         }
 
         // Update status to show we're extracting action items
@@ -420,15 +525,40 @@ class TranscriptionTaskManager: ObservableObject {
 
             // Store items for user review instead of auto-sending
             await MainActor.run {
-                self.pendingReview = PendingActionItemsReview(from: result)
-                self.displayStatus = .pendingReview(itemCount: result.actionItems.count)
+                // Create new selectable items from extraction result
+                var allItems = result.actionItems.map { SelectableActionItem(item: $0) }
+
+                // PHASE 3 FIX: Merge any deferred items from previous review (prepend so they appear first)
+                let deferredCount = self.deferredActionItems.count
+                if deferredCount > 0 {
+                    allItems = self.deferredActionItems + allItems
+                    self.deferredActionItems = []  // Clear after merging
+                    print("📋 Merged \(deferredCount) deferred items into new review")
+                }
+
+                // Create pending review with merged items
+                self.pendingReview = PendingActionItemsReview(
+                    items: allItems,
+                    meetingTitle: result.meetingTitle,
+                    meetingSummary: result.meetingSummary
+                )
+                self.displayStatus = .pendingReview(itemCount: allItems.count)
                 // Don't schedule reset - wait for user action
             }
             print("📋 \(result.actionItems.count) action items ready for review")
 
         } catch {
             print("❌ Action item extraction failed: \(error.localizedDescription)")
-            // Still show transcript saved on error
+
+            // PHASE 6: Track failure for retry
+            await MainActor.run {
+                self.failedActionItemManager.addFailedExtraction(
+                    transcriptURL: transcriptURL,
+                    error: error
+                )
+            }
+
+            // Still show transcript saved on error (transcript exists, just extraction failed)
             await MainActor.run {
                 self.displayStatus = .transcriptSaved
                 self.scheduleStatusReset()
@@ -472,6 +602,7 @@ class TranscriptionTaskManager: ObservableObject {
     }
 
     /// Internal implementation for submitting selected items
+    /// Phase 2: Now handles TaskCreationResult for proper error visibility
     private func submitSelectedItemsInternal() async {
         guard let review = await MainActor.run(body: { self.pendingReview }) else { return }
 
@@ -488,38 +619,70 @@ class TranscriptionTaskManager: ObservableObject {
 
         // Send to configured task service (Reminders or Todoist)
         let taskServiceSetting = UserDefaults.standard.string(forKey: "taskService") ?? "reminders"
-        let createdCount: Int
+        let result: TaskCreationResult
 
         if taskServiceSetting == "todoist" {
             // Use Todoist
             let todoist = TodoistService()
-            createdCount = await todoist.createTasks(from: selectedItems)
-            print("✅ Sent \(createdCount) action items to Todoist")
+            result = await todoist.createTasks(from: selectedItems)
+            print("✅ Todoist result: \(result.summary)")
         } else {
             // Use Apple Reminders (default)
             let reminders = RemindersService()
             guard await reminders.requestAccess() else {
                 print("⚠️ Reminders access denied")
+                // Phase 2: Create a proper failure result for visibility
+                let failure = TaskCreationFailure(
+                    taskTitle: "All tasks",
+                    errorMessage: "Reminders access denied",
+                    isRecoverable: false,
+                    recoveryHint: "Enable Reminders access in System Settings → Privacy & Security → Reminders"
+                )
                 await MainActor.run {
                     self.isSubmittingReview = false
                     self.pendingReview = nil
-                    self.displayStatus = .transcriptSaved
-                    self.scheduleStatusReset()
+                    self.lastTaskCreationResult = .failed(failures: [failure])
+                    self.displayStatus = .failed(message: "Reminders access denied")
+                    self.scheduleStatusReset(delay: 15)  // Keep error visible longer
                 }
                 return
             }
-            createdCount = await reminders.createReminders(from: selectedItems)
-            print("✅ Sent \(createdCount) action items to Reminders")
+            result = await reminders.createReminders(from: selectedItems)
+            print("✅ Reminders result: \(result.summary)")
         }
 
-        // Update status and trigger in-app notification
+        // Phase 2: Handle all result cases - success, partial, and failure
         await MainActor.run {
             self.isSubmittingReview = false
             self.pendingReview = nil
-            self.actionItemsAddedCount = createdCount
-            self.showActionItemsAdded = true
-            self.displayStatus = .completed(taskCount: createdCount)
-            self.scheduleStatusReset()
+            self.lastTaskCreationResult = result
+            self.actionItemsAddedCount = result.successCount
+
+            if result.allSucceeded {
+                // All tasks created successfully
+                self.showActionItemsAdded = true
+                self.displayStatus = .completed(taskCount: result.successCount)
+                self.scheduleStatusReset()
+            } else if result.partialSuccess {
+                // Some tasks created, some failed - show success but also track failures
+                self.showActionItemsAdded = true
+                self.displayStatus = .completed(taskCount: result.successCount)
+                // Log failures for debugging
+                print("⚠️ \(result.failureCount) tasks failed:")
+                for failure in result.failures {
+                    print("   - \(failure.taskTitle): \(failure.errorMessage)")
+                }
+                self.scheduleStatusReset()
+            } else if result.allFailed {
+                // All tasks failed
+                let errorMessage = result.failures.first?.errorMessage ?? "Failed to create tasks"
+                self.displayStatus = .failed(message: errorMessage)
+                self.scheduleStatusReset(delay: 15)  // Keep error visible longer
+            } else {
+                // Empty result (shouldn't happen but handle gracefully)
+                self.displayStatus = .transcriptSaved
+                self.scheduleStatusReset()
+            }
         }
     }
 
