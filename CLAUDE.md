@@ -89,10 +89,27 @@ Murmur/Services/TodoistService.swift   → Alternative: sends tasks to Todoist v
 
 ### UI Components
 
-- **FloatingPanelController** (`Murmur/UI/FloatingPanel.swift`) - NSWindowController managing the edge-docked panel
-- **EdgeDockingManager** - Monitors mouse position, handles expand/collapse animations
-- **FloatingPanelView** - SwiftUI view with record button, visualizers, status
+The floating panel UI is organized in `Murmur/UI/FloatingPanel/`:
+
+```
+FloatingPanel/
+├── FloatingPanelController.swift   # NSWindowController, window management
+├── FloatingPanelView.swift         # Main SwiftUI view composition
+├── PillStateManager.swift          # State machine (idle/recording/processing/reviewing)
+├── Components/
+│   ├── PillViews.swift             # Pill state views (Idle, Recording, Processing, Reviewing)
+│   ├── WaveformViews.swift         # Audio visualizers (EdgePeek, WaveformMini, Dormant)
+│   ├── CelebrationViews.swift      # Success animations (checkmarks, confetti)
+│   ├── ErrorViews.swift            # Error banners with recovery hints
+│   ├── AttentionPromptView.swift   # Notification prompts (silence warning)
+│   └── ReviewTrayView.swift        # Action item review tray
+└── Helpers/
+    └── LawsComponents.swift        # Reusable UI primitives (buttons, status text)
+```
+
+Other UI files:
 - **SettingsView** (`Murmur/UI/Settings.swift`) - Tabbed settings (Recording, AI Features, Advanced)
+- **ActionItemReviewView** (`Murmur/UI/ActionItemReviewView.swift`) - Task approval workflow
 - **FailedTranscriptionsView** - UI for retry queue management
 
 ### Onboarding Flow
