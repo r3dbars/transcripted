@@ -113,27 +113,30 @@ class Transcription: ObservableObject {
 
             onProgress?(0.0)
 
-            // Preprocess mic audio
+            // Preprocess mic and system audio IN PARALLEL for ~2x faster processing
             await MainActor.run {
-                self.processingStatus = "Optimizing mic audio for upload..."
+                self.processingStatus = "Optimizing audio for upload..."
             }
-            let optimizedMicURL = try await AudioPreprocessor.prepareForCloudTranscription(audioURL: micURL)
+
+            // Start both preprocessing tasks concurrently
+            let micTask = Task {
+                try await AudioPreprocessor.prepareForCloudTranscription(audioURL: micURL)
+            }
+
+            let systemTask: Task<URL?, Error> = Task {
+                guard let systemURL = systemURL else { return nil }
+                return try await AudioPreprocessor.prepareForCloudTranscription(audioURL: systemURL)
+            }
+
+            // Wait for both to complete (they run in parallel)
+            let optimizedMicURL = try await micTask.value
             if optimizedMicURL != micURL {
                 tempFilesToCleanup.append(optimizedMicURL)
             }
 
-            onProgress?(0.10)
-
-            // Preprocess system audio if present
-            var optimizedSystemURL: URL? = nil
-            if let systemURL = systemURL {
-                await MainActor.run {
-                    self.processingStatus = "Optimizing system audio for upload..."
-                }
-                optimizedSystemURL = try await AudioPreprocessor.prepareForCloudTranscription(audioURL: systemURL)
-                if optimizedSystemURL != systemURL {
-                    tempFilesToCleanup.append(optimizedSystemURL!)
-                }
+            let optimizedSystemURL = try await systemTask.value
+            if let url = optimizedSystemURL, url != systemURL {
+                tempFilesToCleanup.append(url)
             }
 
             onProgress?(0.15)
@@ -231,28 +234,30 @@ class Transcription: ObservableObject {
             // Progress: 0%
             onProgress?(0.0)
 
-            // Preprocess mic audio (downsample for faster upload - AssemblyAI handles various formats but smaller is faster)
+            // Preprocess mic and system audio IN PARALLEL for ~2x faster processing
             await MainActor.run {
-                self.processingStatus = "Optimizing mic audio for upload..."
+                self.processingStatus = "Optimizing audio for upload..."
             }
-            let optimizedMicURL = try await AudioPreprocessor.prepareForCloudTranscription(audioURL: micURL)
+
+            // Start both preprocessing tasks concurrently
+            let micTask = Task {
+                try await AudioPreprocessor.prepareForCloudTranscription(audioURL: micURL)
+            }
+
+            let systemTask: Task<URL?, Error> = Task {
+                guard let systemURL = systemURL else { return nil }
+                return try await AudioPreprocessor.prepareForCloudTranscription(audioURL: systemURL)
+            }
+
+            // Wait for both to complete (they run in parallel)
+            let optimizedMicURL = try await micTask.value
             if optimizedMicURL != micURL {
                 tempFilesToCleanup.append(optimizedMicURL)
             }
 
-            // Progress: 10%
-            onProgress?(0.10)
-
-            // Preprocess system audio if present
-            var optimizedSystemURL: URL? = nil
-            if let systemURL = systemURL {
-                await MainActor.run {
-                    self.processingStatus = "Optimizing system audio for upload..."
-                }
-                optimizedSystemURL = try await AudioPreprocessor.prepareForCloudTranscription(audioURL: systemURL)
-                if optimizedSystemURL != systemURL {
-                    tempFilesToCleanup.append(optimizedSystemURL!)
-                }
+            let optimizedSystemURL = try await systemTask.value
+            if let url = optimizedSystemURL, url != systemURL {
+                tempFilesToCleanup.append(url)
             }
 
             // Progress: 15%
