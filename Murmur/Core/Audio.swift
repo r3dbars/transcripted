@@ -313,7 +313,7 @@ class Audio: ObservableObject {
 
         print("⏹️ Stopping audio capture")
 
-        // Stop audio engine
+        // Stop audio engine FIRST (prevents new buffers from arriving)
         if engine.isRunning {
             inputNode.removeTap(onBus: 0)
             engine.stop()
@@ -324,35 +324,45 @@ class Audio: ObservableObject {
             capture.stop()
         }
 
-        // Close audio files - wait for pending writes to complete first
+        // Capture file URLs before async cleanup
         let finalMicURL = micAudioFileURL
         let finalSystemURL = systemAudioFileURL
 
-        // Flush mic audio queue before closing file to prevent race condition
-        micAudioFileQueue.sync {
-            if self.micAudioFile != nil {
-                self.micAudioFile = nil
-                print("✓ Mic audio file closed: \(finalMicURL?.lastPathComponent ?? "unknown")")
-            }
-        }
-
-        // Flush system audio queue before closing file
-        systemAudioFileQueue.sync {
-            if self.systemAudioFile != nil {
-                self.systemAudioFile = nil
-                print("✓ System audio file closed: \(finalSystemURL?.lastPathComponent ?? "unknown")")
-            }
-        }
-
+        // Update UI immediately - don't wait for file cleanup
+        // This makes the app feel instant
         DispatchQueue.main.async {
             self.isRecording = false
             self.audioLevel = 0.0
             self.stopTimer()
             self.stopWatchdog()
             NSSound(named: "Pop")?.play()
+        }
 
-            // Notify that recording is complete with file URLs
-            self.onRecordingComplete?(finalMicURL, finalSystemURL)
+        // Close audio files asynchronously - use DispatchGroup to coordinate
+        // This does NOT block the main thread
+        let cleanupGroup = DispatchGroup()
+
+        cleanupGroup.enter()
+        micAudioFileQueue.async { [weak self] in
+            if self?.micAudioFile != nil {
+                self?.micAudioFile = nil
+                print("✓ Mic audio file closed: \(finalMicURL?.lastPathComponent ?? "unknown")")
+            }
+            cleanupGroup.leave()
+        }
+
+        cleanupGroup.enter()
+        systemAudioFileQueue.async { [weak self] in
+            if self?.systemAudioFile != nil {
+                self?.systemAudioFile = nil
+                print("✓ System audio file closed: \(finalSystemURL?.lastPathComponent ?? "unknown")")
+            }
+            cleanupGroup.leave()
+        }
+
+        // Notify completion AFTER files are closed (but don't block main thread waiting)
+        cleanupGroup.notify(queue: .main) { [weak self] in
+            self?.onRecordingComplete?(finalMicURL, finalSystemURL)
         }
     }
 
