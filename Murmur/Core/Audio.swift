@@ -27,8 +27,21 @@ class Audio: ObservableObject {
     private var startTime: Date?
     private var timer: Timer?
 
-    // Device change watchdog
-    private var lastBufferTime: Date = Date()
+    // Device change watchdog - thread-safe access via lock
+    private var _lastBufferTime: Date = Date()
+    private let lastBufferTimeLock = NSLock()
+    private var lastBufferTime: Date {
+        get {
+            lastBufferTimeLock.lock()
+            defer { lastBufferTimeLock.unlock() }
+            return _lastBufferTime
+        }
+        set {
+            lastBufferTimeLock.lock()
+            defer { lastBufferTimeLock.unlock() }
+            _lastBufferTime = newValue
+        }
+    }
     private var watchdogTimer: Timer?
 
     // System audio capture
@@ -127,7 +140,7 @@ class Audio: ObservableObject {
         // Start system audio capture
         if let capture = systemAudioCapture as? SystemAudioCapture {
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let timestamp = formatTimestamp(Date())
+            let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
             let fileURL = documentsPath.appendingPathComponent("meeting_\(timestamp)_system.wav")
 
             DispatchQueue.main.async {
@@ -207,7 +220,7 @@ class Audio: ObservableObject {
         // Create mic audio file - ALWAYS save as mono for Speech framework compatibility
         do {
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let timestamp = formatTimestamp(Date())
+            let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
             let fileURL = documentsPath.appendingPathComponent("meeting_\(timestamp)_mic.wav")
 
             DispatchQueue.main.async {
@@ -311,18 +324,24 @@ class Audio: ObservableObject {
             capture.stop()
         }
 
-        // Close audio files
+        // Close audio files - wait for pending writes to complete first
         let finalMicURL = micAudioFileURL
         let finalSystemURL = systemAudioFileURL
 
-        if micAudioFile != nil {
-            micAudioFile = nil
-            print("✓ Mic audio file closed: \(finalMicURL?.lastPathComponent ?? "unknown")")
+        // Flush mic audio queue before closing file to prevent race condition
+        micAudioFileQueue.sync {
+            if self.micAudioFile != nil {
+                self.micAudioFile = nil
+                print("✓ Mic audio file closed: \(finalMicURL?.lastPathComponent ?? "unknown")")
+            }
         }
 
-        if systemAudioFile != nil {
-            systemAudioFile = nil
-            print("✓ System audio file closed: \(finalSystemURL?.lastPathComponent ?? "unknown")")
+        // Flush system audio queue before closing file
+        systemAudioFileQueue.sync {
+            if self.systemAudioFile != nil {
+                self.systemAudioFile = nil
+                print("✓ System audio file closed: \(finalSystemURL?.lastPathComponent ?? "unknown")")
+            }
         }
 
         DispatchQueue.main.async {
@@ -405,7 +424,7 @@ class Audio: ObservableObject {
 
             // Create new file segment as mono
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let timestamp = formatTimestamp(Date())
+            let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
             let fileURL = documentsPath.appendingPathComponent("meeting_\(timestamp)_mic_recovery.wav")
 
             do {
@@ -630,12 +649,6 @@ class Audio: ObservableObject {
             self.systemAudioLevelHistory.removeFirst()
             self.systemAudioLevelHistory.append(level)
         }
-    }
-
-    private func formatTimestamp(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss-SSS"
-        return formatter.string(from: date)
     }
 
     deinit {

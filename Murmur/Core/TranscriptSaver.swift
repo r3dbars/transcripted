@@ -38,7 +38,7 @@ class TranscriptSaver {
         }
 
         // Generate filename with timestamp
-        let timestamp = formatTimestamp(Date())
+        let timestamp = DateFormattingHelper.formatFilename(Date())
         let filename = "Call_\(timestamp).md"
         let fileURL = saveDir.appendingPathComponent(filename)
 
@@ -60,20 +60,6 @@ class TranscriptSaver {
         }
     }
 
-
-    /// Format timestamp for filename (YYYY-MM-DD_HH-mm-ss)
-    private static func formatTimestamp(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-        return formatter.string(from: date)
-    }
-
-    /// Format TimeInterval as MM:SS
-    private static func formatTimeInterval(_ interval: TimeInterval) -> String {
-        let minutes = Int(interval) / 60
-        let seconds = Int(interval) % 60
-        return String(format: "%02d:%02d", minutes, seconds)
-    }
 
     /// Format source label for timeline display
     private static func formatSourceLabel(_ source: String) -> String {
@@ -99,7 +85,7 @@ class TranscriptSaver {
 
         **Duration:** \(durationString)
         **Words:** \(wordCount)
-        **Date:** \(formatTimestamp(date))
+        **Date:** \(DateFormattingHelper.formatDisplay(date))
 
         ---
 
@@ -131,7 +117,7 @@ class TranscriptSaver {
             return nil
         }
 
-        let timestamp = formatTimestamp(Date())
+        let timestamp = DateFormattingHelper.formatFilename(Date())
         let filename = "Call_\(timestamp)_AssemblyAI.md"
         let fileURL = saveDir.appendingPathComponent(filename)
 
@@ -348,7 +334,7 @@ class TranscriptSaver {
             return nil
         }
 
-        let timestamp = formatTimestamp(Date())
+        let timestamp = DateFormattingHelper.formatFilename(Date())
         let filename = "Call_\(timestamp).md"
         let fileURL = saveDir.appendingPathComponent(filename)
 
@@ -540,7 +526,7 @@ class TranscriptSaver {
 
             if totalUtterances > 0 {
                 let speakerName = speakerMappings[speakerId]?.displayName ?? "Speaker \(speakerId)"
-                let timeStr = formatTimeInterval(Double(totalTimeMs) / 1000.0)
+                let timeStr = DateFormattingHelper.formatDuration(Double(totalTimeMs) / 1000.0)
                 doc += "- **\(speakerName):** \(totalUtterances) utterances, ~\(totalWords) words, \(timeStr) speaking\n"
             }
         }

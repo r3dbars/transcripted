@@ -1,60 +1,159 @@
 import SwiftUI
 
-// MARK: - Pill Idle View (40x20px - Dynamic Island style)
+// MARK: - Pill Idle View (Hover-expand design)
 
-/// Minimal capsule shown when app is idle
-/// Frosted glass background, dormant waveform, tap to start recording
+/// Minimal capsule that expands on hover to reveal Record and Files buttons
+/// Collapsed: 40x20px with minimal waveform icon
+/// Expanded: 120x28px with two buttons side-by-side
 @available(macOS 14.0, *)
 struct PillIdleView: View {
-    let onTap: () -> Void
-    let failedCount: Int  // Badge for failed transcriptions
+    let onRecord: () -> Void
+    let onFiles: () -> Void
+    let failedCount: Int
 
-    @State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+    @State private var isExpanded = false
+    @State private var hoveredButton: HoveredButton? = nil
 
-    init(onTap: @escaping () -> Void, failedCount: Int = 0) {
-        self.onTap = onTap
+    enum HoveredButton {
+        case record
+        case files
+    }
+
+    init(onRecord: @escaping () -> Void, onFiles: @escaping () -> Void, failedCount: Int = 0) {
+        self.onRecord = onRecord
+        self.onFiles = onFiles
         self.failedCount = failedCount
     }
 
+    private var currentWidth: CGFloat {
+        isExpanded ? PillDimensions.idleExpandedWidth : PillDimensions.idleWidth
+    }
+
+    private var currentHeight: CGFloat {
+        isExpanded ? PillDimensions.idleExpandedHeight : PillDimensions.idleHeight
+    }
+
     var body: some View {
-        Button(action: onTap) {
-            ZStack {
-                // Frosted glass capsule background
-                Capsule()
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [Color.white.opacity(0.3), Color.white.opacity(0.1)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 0.5
-                            )
-                    )
+        ZStack {
+            // Frosted glass capsule background
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Capsule()
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.3), Color.white.opacity(0.1)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 0.5
+                        )
+                )
 
-                // Dormant waveform centered
-                DormantWaveformView()
+            // Content: collapsed icon or expanded buttons
+            if isExpanded {
+                expandedContent
+            } else {
+                collapsedContent
+            }
 
-                // Failed transcription badge (top-right)
-                if failedCount > 0 {
-                    FailedBadgeOverlay(count: failedCount)
-                        .offset(x: PillDimensions.idleWidth / 2 - 6, y: -PillDimensions.idleHeight / 2 + 4)
+            // Failed transcription badge (top-right) - only when collapsed
+            if failedCount > 0 && !isExpanded {
+                FailedBadgeOverlay(count: failedCount)
+                    .offset(x: currentWidth / 2 - 6, y: -currentHeight / 2 + 4)
+            }
+        }
+        .frame(width: currentWidth, height: currentHeight)
+        .animation(reduceMotion ? .none : .elegant, value: isExpanded)
+        .shadow(color: Color.black.opacity(0.15), radius: 4, y: 2)
+        .onHover { hovering in
+            withAnimation(reduceMotion ? .none : .elegant) {
+                isExpanded = hovering
+                if !hovering {
+                    hoveredButton = nil
                 }
             }
-            .frame(width: PillDimensions.idleWidth, height: PillDimensions.idleHeight)
-            .scaleEffect(isHovered ? 1.05 : 1.0)
-            .shadow(color: Color.black.opacity(0.15), radius: 4, y: 2)
         }
-        .buttonStyle(PlainButtonStyle())
-        .onHover { hovering in
-            withAnimation(.pillMorph) {
-                isHovered = hovering
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(isExpanded ? "Recording options" : "Transcripted - hover to expand")
+    }
+
+    // MARK: - Collapsed Content
+
+    private var collapsedContent: some View {
+        MinimalWaveformIcon()
+    }
+
+    // MARK: - Expanded Content
+
+    private var expandedContent: some View {
+        HStack(spacing: 0) {
+            // Record button - left side
+            ExpandedPillButton(
+                icon: "mic.fill",
+                label: "Record",
+                isHovered: hoveredButton == .record,
+                action: onRecord
+            )
+            .onHover { hovering in
+                hoveredButton = hovering ? .record : (hoveredButton == .record ? nil : hoveredButton)
+            }
+
+            // Subtle divider
+            Rectangle()
+                .fill(Color.white.opacity(0.15))
+                .frame(width: 1, height: 16)
+
+            // Files button - right side
+            ExpandedPillButton(
+                icon: "doc.text.fill",
+                label: "Files",
+                isHovered: hoveredButton == .files,
+                action: onFiles
+            )
+            .onHover { hovering in
+                hoveredButton = hovering ? .files : (hoveredButton == .files ? nil : hoveredButton)
             }
         }
-        .accessibilityLabel("Start recording")
-        .accessibilityHint("Double-tap to start recording audio")
+        .opacity(isExpanded ? 1 : 0)
+        .animation(reduceMotion ? .none : .easeOut(duration: 0.2).delay(0.1), value: isExpanded)
+    }
+}
+
+// MARK: - Expanded Pill Button
+
+/// Reusable button component for the expanded idle pill
+/// Shows icon + label with hover highlight effect
+@available(macOS 14.0, *)
+struct ExpandedPillButton: View {
+    let icon: String
+    let label: String
+    let isHovered: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .medium))
+
+                Text(label)
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundColor(isHovered ? .panelTextPrimary : .panelTextSecondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isHovered ? Color.white.opacity(0.1) : Color.clear)
+            )
+            .scaleEffect(isHovered ? 1.02 : 1.0)
+            .animation(.pillMorph, value: isHovered)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .accessibilityLabel(label)
+        .accessibilityHint(label == "Record" ? "Start recording audio" : "Open transcripts folder")
     }
 }
 

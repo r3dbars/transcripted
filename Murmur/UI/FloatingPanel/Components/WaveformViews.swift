@@ -183,3 +183,43 @@ struct DormantWaveformView: View {
         }
     }
 }
+
+// MARK: - Minimal Waveform Icon (Collapsed idle state)
+
+/// Simplified 3-bar waveform icon for the collapsed idle pill
+/// Static or very subtle breathing animation, respects reduce motion
+@available(macOS 14.0, *)
+struct MinimalWaveformIcon: View {
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+    @State private var breatheScale: CGFloat = 1.0
+
+    private let barWidth: CGFloat = 2
+    private let barSpacing: CGFloat = 2
+    // Symmetric heights: short, tall, short
+    private let barHeights: [CGFloat] = [4, 8, 4]
+
+    var body: some View {
+        HStack(spacing: barSpacing) {
+            ForEach(0..<3, id: \.self) { index in
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Color.terracotta.opacity(0.5))
+                    .frame(width: barWidth, height: barHeights[index] * breatheScale)
+            }
+        }
+        .onAppear {
+            if !reduceMotion {
+                startSubtleBreathing()
+            }
+        }
+    }
+
+    private func startSubtleBreathing() {
+        // Very slow, subtle breathing (5 second cycle, minimal scale change)
+        withAnimation(
+            .easeInOut(duration: 2.5)
+            .repeatForever(autoreverses: true)
+        ) {
+            breatheScale = 1.15
+        }
+    }
+}

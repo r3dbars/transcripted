@@ -41,6 +41,7 @@
 		A1000600 /* ActionItemReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000601 /* ActionItemReviewView.swift */; };
 		A1000700 /* ServiceResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000701 /* ServiceResult.swift */; };
 		A1000800 /* FailedActionItemManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000801 /* FailedActionItemManager.swift */; };
+		A1000803 /* DateFormattingHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000802 /* DateFormattingHelper.swift */; };
 		A1000911 /* PillStateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000901 /* PillStateManager.swift */; };
 		A1000912 /* WaveformViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000902 /* WaveformViews.swift */; };
 		A1000913 /* LawsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000903 /* LawsComponents.swift */; };
@@ -91,6 +92,7 @@
 		A1000601 /* ActionItemReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionItemReviewView.swift; sourceTree = "<group>"; };
 		A1000701 /* ServiceResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceResult.swift; sourceTree = "<group>"; };
 		A1000801 /* FailedActionItemManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailedActionItemManager.swift; sourceTree = "<group>"; };
+		A1000802 /* DateFormattingHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateFormattingHelper.swift; sourceTree = "<group>"; };
 		A1000901 /* PillStateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillStateManager.swift; sourceTree = "<group>"; };
 		A1000902 /* WaveformViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformViews.swift; sourceTree = "<group>"; };
 		A1000903 /* LawsComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LawsComponents.swift; sourceTree = "<group>"; };
@@ -165,6 +167,7 @@
 				A1000401 /* AudioPreprocessor.swift */,
 				A1000701 /* ServiceResult.swift */,
 				A1000801 /* FailedActionItemManager.swift */,
+				A1000802 /* DateFormattingHelper.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -373,6 +376,7 @@
 				A1000600 /* ActionItemReviewView.swift in Sources */,
 				A1000700 /* ServiceResult.swift in Sources */,
 				A1000800 /* FailedActionItemManager.swift in Sources */,
+				A1000803 /* DateFormattingHelper.swift in Sources */,
 				A1000911 /* PillStateManager.swift in Sources */,
 				A1000912 /* WaveformViews.swift in Sources */,
 				A1000913 /* LawsComponents.swift in Sources */,
