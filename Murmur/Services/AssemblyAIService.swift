@@ -19,6 +19,7 @@ struct AssemblyAIUtterance: Codable {
     let text: String
     let speaker: String     // "A", "B", "C", etc.
     let words: [AssemblyAIWord]?
+    let channel: String?    // "1" or "2" for multichannel transcription
 }
 
 // MARK: - Sentiment analysis
@@ -94,6 +95,32 @@ struct AssemblyAITranscriptRequest: Codable {
     }
 }
 
+// MARK: - Multichannel transcript request
+
+/// Request for multichannel transcription (stereo: left=mic, right=system)
+/// Note: speaker_labels CANNOT be used with multichannel (AssemblyAI limitation)
+struct AssemblyAIMultichannelRequest: Codable {
+    let audioUrl: String
+    let multichannel: Bool = true
+    let sentimentAnalysis: Bool
+    let entityDetection: Bool
+    let summarization: Bool
+    let summaryModel: String
+    let summaryType: String
+    let languageCode: String
+
+    enum CodingKeys: String, CodingKey {
+        case audioUrl = "audio_url"
+        case multichannel
+        case sentimentAnalysis = "sentiment_analysis"
+        case entityDetection = "entity_detection"
+        case summarization
+        case summaryModel = "summary_model"
+        case summaryType = "summary_type"
+        case languageCode = "language_code"
+    }
+}
+
 // MARK: - Transcript response (polling)
 
 struct AssemblyAITranscriptResponse: Codable {
@@ -137,6 +164,32 @@ struct AssemblyAITranscriptionMetadata {
     let speakerCount: Int
     let wordCount: Int
     let utteranceCount: Int
+}
+
+// MARK: - Multichannel transcription result
+
+/// Result from multichannel transcription with channel-separated utterances
+/// Channel 1 = Microphone (you), Channel 2 = System audio (meeting participants)
+struct AssemblyAIMultichannelResult {
+    let micUtterances: [AssemblyAIUtterance]       // Channel 1 (left)
+    let systemUtterances: [AssemblyAIUtterance]    // Channel 2 (right)
+    let allUtterances: [AssemblyAIUtterance]       // Combined, sorted by timestamp
+    let words: [AssemblyAIWord]
+    let entities: [AssemblyAIEntity]
+    let sentimentResults: [AssemblyAISentimentResult]
+    let summary: String?
+    let chapters: [AssemblyAIChapter]
+    let metadata: AssemblyAIMultichannelMetadata
+}
+
+struct AssemblyAIMultichannelMetadata {
+    let transcriptId: String
+    let duration: Double?
+    let confidence: Double?
+    let micWordCount: Int
+    let systemWordCount: Int
+    let micUtteranceCount: Int
+    let systemUtteranceCount: Int
 }
 
 // MARK: - Processing status (for UI updates)
@@ -253,6 +306,205 @@ class AssemblyAIService {
 
         onStatusUpdate?(.completed)
         return result
+    }
+
+    // MARK: - Multichannel Transcription
+
+    /// Transcribe stereo audio with multichannel mode
+    /// - Channel 1 (left): Microphone audio (you)
+    /// - Channel 2 (right): System audio (meeting participants)
+    ///
+    /// Benefits over dual-file transcription:
+    /// - Single API call (50% cost reduction)
+    /// - Perfectly synchronized timestamps
+    /// - Channel-based speaker attribution (no guessing)
+    ///
+    /// - Parameters:
+    ///   - stereoAudioURL: Stereo WAV file (left=mic, right=system)
+    ///   - apiKey: AssemblyAI API key
+    ///   - onStatusUpdate: Callback for UI status updates
+    /// - Returns: Multichannel result with channel-separated utterances
+    static func transcribeMultichannel(
+        stereoAudioURL: URL,
+        apiKey: String,
+        onStatusUpdate: StatusCallback? = nil
+    ) async throws -> AssemblyAIMultichannelResult {
+        guard !apiKey.isEmpty else {
+            throw AssemblyAIError.noAPIKey
+        }
+
+        // Step 1: Upload stereo audio file
+        onStatusUpdate?(.uploading)
+        print("📤 AssemblyAI Multichannel: Uploading stereo audio...")
+        let uploadedURL = try await uploadAudio(fileURL: stereoAudioURL, apiKey: apiKey)
+
+        // Step 2: Submit multichannel transcription request
+        onStatusUpdate?(.queued)
+        print("📋 AssemblyAI Multichannel: Submitting job...")
+        let transcriptId = try await submitMultichannelTranscription(audioUrl: uploadedURL, apiKey: apiKey)
+
+        // Step 3: Poll for completion
+        print("⏳ AssemblyAI Multichannel: Polling for completion...")
+        let result = try await pollForMultichannelCompletion(
+            transcriptId: transcriptId,
+            apiKey: apiKey,
+            onStatusUpdate: onStatusUpdate
+        )
+
+        onStatusUpdate?(.completed)
+        return result
+    }
+
+    // MARK: - Submit Multichannel Transcription
+
+    private static func submitMultichannelTranscription(audioUrl: String, apiKey: String) async throws -> String {
+        let requestBody = AssemblyAIMultichannelRequest(
+            audioUrl: audioUrl,
+            sentimentAnalysis: true,
+            entityDetection: true,
+            summarization: true,
+            summaryModel: "informative",
+            summaryType: "paragraph",
+            languageCode: "en"
+        )
+
+        var request = URLRequest(url: URL(string: "\(baseURL)/transcript")!)
+        request.httpMethod = "POST"
+        request.setValue(apiKey, forHTTPHeaderField: "authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(requestBody)
+        request.timeoutInterval = 30
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+            print("❌ AssemblyAI multichannel submit failed: \(errorBody)")
+            throw AssemblyAIError.transcriptionFailed(errorBody)
+        }
+
+        let transcriptResponse = try JSONDecoder().decode(AssemblyAITranscriptResponse.self, from: data)
+        print("✓ AssemblyAI Multichannel: Job submitted: \(transcriptResponse.id)")
+
+        return transcriptResponse.id
+    }
+
+    // MARK: - Poll for Multichannel Completion
+
+    private static func pollForMultichannelCompletion(
+        transcriptId: String,
+        apiKey: String,
+        onStatusUpdate: StatusCallback?
+    ) async throws -> AssemblyAIMultichannelResult {
+        let startTime = Date()
+        var lastStatus = ""
+        var pollCount = 0
+
+        while Date().timeIntervalSince(startTime) < maxPollingDurationSeconds {
+            // Wait between polls
+            try await Task.sleep(nanoseconds: UInt64(pollingIntervalSeconds * 1_000_000_000))
+            pollCount += 1
+
+            // Fetch current status
+            var request = URLRequest(url: URL(string: "\(baseURL)/transcript/\(transcriptId)")!)
+            request.setValue(apiKey, forHTTPHeaderField: "authorization")
+            request.timeoutInterval = 30
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                print("⚠️ AssemblyAI Multichannel: Poll failed, retrying...")
+                continue
+            }
+
+            let transcriptResponse = try JSONDecoder().decode(AssemblyAITranscriptResponse.self, from: data)
+
+            // Update UI if status changed
+            if transcriptResponse.status != lastStatus {
+                lastStatus = transcriptResponse.status
+                switch transcriptResponse.status {
+                case "queued":
+                    onStatusUpdate?(.queued)
+                case "processing":
+                    onStatusUpdate?(.processing)
+                default:
+                    break
+                }
+                print("📊 AssemblyAI Multichannel status: \(transcriptResponse.status) (poll #\(pollCount))")
+            }
+
+            // Check for completion
+            switch transcriptResponse.status {
+            case "completed":
+                onStatusUpdate?(.analyzing)
+                print("✓ AssemblyAI Multichannel: Completed after \(pollCount) polls")
+                return buildMultichannelResult(from: transcriptResponse)
+
+            case "error":
+                let errorMessage = transcriptResponse.error ?? "Unknown error"
+                print("❌ AssemblyAI Multichannel: Failed - \(errorMessage)")
+                throw AssemblyAIError.transcriptionFailed(errorMessage)
+
+            default:
+                continue
+            }
+        }
+
+        print("❌ AssemblyAI Multichannel: Timed out")
+        throw AssemblyAIError.timeout
+    }
+
+    // MARK: - Build Multichannel Result
+
+    private static func buildMultichannelResult(from response: AssemblyAITranscriptResponse) -> AssemblyAIMultichannelResult {
+        let allUtterances = response.utterances ?? []
+        let words = response.words ?? []
+        let entities = response.entities ?? []
+        let sentimentResults = response.sentimentAnalysisResults ?? []
+        let chapters = response.chapters ?? []
+
+        // Separate utterances by channel
+        // Channel "1" = Left = Microphone
+        // Channel "2" = Right = System audio
+        let micUtterances = allUtterances.filter { $0.channel == "1" }
+        let systemUtterances = allUtterances.filter { $0.channel == "2" }
+
+        // Sort all by timestamp for combined view
+        let sortedAll = allUtterances.sorted { $0.start < $1.start }
+
+        // Count words per channel (approximate via utterance word counts)
+        let micWordCount = micUtterances.reduce(0) { $0 + ($1.words?.count ?? $1.text.split(separator: " ").count) }
+        let systemWordCount = systemUtterances.reduce(0) { $0 + ($1.words?.count ?? $1.text.split(separator: " ").count) }
+
+        let metadata = AssemblyAIMultichannelMetadata(
+            transcriptId: response.id,
+            duration: response.audioDuration,
+            confidence: response.confidence,
+            micWordCount: micWordCount,
+            systemWordCount: systemWordCount,
+            micUtteranceCount: micUtterances.count,
+            systemUtteranceCount: systemUtterances.count
+        )
+
+        print("✓ AssemblyAI Multichannel transcribed:")
+        print("  • Channel 1 (Mic): \(micUtterances.count) utterances, ~\(micWordCount) words")
+        print("  • Channel 2 (System): \(systemUtterances.count) utterances, ~\(systemWordCount) words")
+        print("  • Entities: \(entities.count), Sentiment: \(sentimentResults.count) segments")
+        print("  • Summary: \(response.summary != nil ? "Yes" : "No"), Chapters: \(chapters.count)")
+
+        return AssemblyAIMultichannelResult(
+            micUtterances: micUtterances,
+            systemUtterances: systemUtterances,
+            allUtterances: sortedAll,
+            words: words,
+            entities: entities,
+            sentimentResults: sentimentResults,
+            summary: response.summary,
+            chapters: chapters,
+            metadata: metadata
+        )
     }
 
     // MARK: - Upload Audio

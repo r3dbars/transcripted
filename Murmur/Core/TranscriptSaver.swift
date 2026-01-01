@@ -751,6 +751,239 @@ class TranscriptSaver {
         }
     }
 
+    // MARK: - Multichannel Transcript Saving
+
+    /// Save multichannel AssemblyAI transcript (stereo: mic=left/ch1, system=right/ch2)
+    /// This is the preferred format - single API call with channel-based speaker attribution
+    /// - Parameters:
+    ///   - result: Multichannel transcription result with channel-separated utterances
+    ///   - speakerMappings: Optional mapping of speaker IDs to identified names
+    ///   - directory: Optional custom directory
+    /// - Returns: URL of saved file, or nil if save failed
+    @available(macOS 14.0, *)
+    @discardableResult
+    static func saveMultichannelTranscript(
+        _ result: MultichannelTranscriptionResult,
+        speakerMappings: [String: SpeakerMapping] = [:],
+        directory: URL? = nil
+    ) -> URL? {
+        let saveDir = directory ?? defaultSaveDirectory
+
+        do {
+            try FileManager.default.createDirectory(at: saveDir, withIntermediateDirectories: true)
+        } catch {
+            print("❌ Failed to create save directory: \(error.localizedDescription)")
+            return nil
+        }
+
+        let timestamp = DateFormattingHelper.formatFilename(Date())
+        let filename = "Call_\(timestamp).md"
+        let fileURL = saveDir.appendingPathComponent(filename)
+
+        let markdown = formatMultichannelMarkdown(result: result, speakerMappings: speakerMappings, date: Date())
+
+        do {
+            try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
+            print("✓ Multichannel transcript saved to: \(fileURL.path)")
+            showSaveNotification(fileURL: fileURL)
+            return fileURL
+        } catch {
+            print("❌ Failed to save multichannel transcript: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Format multichannel transcript as markdown
+    @available(macOS 14.0, *)
+    private static func formatMultichannelMarkdown(
+        result: MultichannelTranscriptionResult,
+        speakerMappings: [String: SpeakerMapping] = [:],
+        date: Date
+    ) -> String {
+        let aaiResult = result.result
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .short
+        let dateString = dateFormatter.string(from: date)
+
+        let minutes = Int(result.duration) / 60
+        let seconds = Int(result.duration) % 60
+        let durationString = String(format: "%d:%02d", minutes, seconds)
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm:ss"
+        let timeString = timeFormatter.string(from: date)
+
+        let isoFormatter = DateFormatter()
+        isoFormatter.dateFormat = "yyyy-MM-dd"
+        let isoDate = isoFormatter.string(from: date)
+
+        // Aggregate metadata
+        let totalWordCount = aaiResult.metadata.micWordCount + aaiResult.metadata.systemWordCount
+        let totalUtterances = aaiResult.metadata.micUtteranceCount + aaiResult.metadata.systemUtteranceCount
+
+        // Determine overall sentiment
+        let overallSentiment = determineOverallSentiment(aaiResult.sentimentResults)
+
+        // Build YAML frontmatter
+        var yaml = """
+        ---
+        date: \(isoDate)
+        time: \(timeString)
+        duration: "\(durationString)"
+        processing_time: "\(String(format: "%.1f", result.processingTime))s"
+        transcription_engine: assemblyai_multichannel
+        sources: [mic, system_audio]
+        mic_utterances: \(aaiResult.metadata.micUtteranceCount)
+        system_utterances: \(aaiResult.metadata.systemUtteranceCount)
+        total_word_count: \(totalWordCount)
+        overall_sentiment: \(overallSentiment)
+        entity_count: \(aaiResult.entities.count)
+        """
+
+        yaml += "\n---\n"
+
+        // Build document
+        var doc = yaml
+        doc += "\n# Meeting Recording - \(dateString)\n\n"
+        doc += "**Duration:** \(durationString) | **Words:** \(totalWordCount) | **Utterances:** \(totalUtterances)\n\n"
+        doc += "---\n\n"
+
+        // SECTION 1: Summary
+        doc += "## Summary\n\n"
+        if let summary = aaiResult.summary, !summary.isEmpty {
+            doc += "\(summary)\n\n"
+        } else {
+            doc += "*Generating summary...*\n\n"
+        }
+
+        // SECTION 2: Chapters
+        if !aaiResult.chapters.isEmpty {
+            doc += "---\n\n"
+            doc += "## Chapters\n\n"
+            for (index, chapter) in aaiResult.chapters.enumerated() {
+                let startTime = String(format: "%02d:%02d", chapter.start / 60000, (chapter.start / 1000) % 60)
+                doc += "### \(index + 1). \(chapter.headline) [\(startTime)]\n\n"
+                doc += "\(chapter.summary)\n\n"
+            }
+        }
+
+        // SECTION 3: Entities
+        if !aaiResult.entities.isEmpty {
+            doc += "---\n\n"
+            doc += "## Entities Detected\n\n"
+            let groupedEntities = Dictionary(grouping: aaiResult.entities, by: { $0.entityType })
+            for (entityType, entities) in groupedEntities.sorted(by: { $0.key < $1.key }) {
+                let uniqueValues = Array(Set(entities.map { $0.text })).sorted()
+                let displayType = entityType.replacingOccurrences(of: "_", with: " ").capitalized
+                doc += "- **\(displayType):** \(uniqueValues.joined(separator: ", "))\n"
+            }
+            doc += "\n"
+        }
+
+        // SECTION 4: Sentiment Analysis
+        if !aaiResult.sentimentResults.isEmpty {
+            doc += "---\n\n"
+            doc += "## Sentiment Analysis\n\n"
+            doc += "**Overall Tone:** \(overallSentiment.capitalized)\n\n"
+
+            // Sentiment by channel
+            let micSentiments = aaiResult.sentimentResults.filter { $0.speaker == "1" || aaiResult.micUtterances.contains(where: { $0.start <= $0.start && $0.end >= $0.end }) }
+            let sysSentiments = aaiResult.sentimentResults.filter { $0.speaker == "2" || aaiResult.systemUtterances.contains(where: { $0.start <= $0.start && $0.end >= $0.end }) }
+
+            if !micSentiments.isEmpty || !sysSentiments.isEmpty {
+                doc += "| Channel | Positive | Neutral | Negative |\n"
+                doc += "|---------|----------|---------|----------|\n"
+
+                if !micSentiments.isEmpty {
+                    let (pos, neu, neg) = calculateSentimentPercentages(micSentiments)
+                    doc += "| Microphone (You) | \(pos)% | \(neu)% | \(neg)% |\n"
+                }
+
+                if !sysSentiments.isEmpty {
+                    let (pos, neu, neg) = calculateSentimentPercentages(sysSentiments)
+                    doc += "| Meeting Audio | \(pos)% | \(neu)% | \(neg)% |\n"
+                }
+
+                doc += "\n"
+            }
+        }
+
+        // SECTION 5: Channel Analytics
+        doc += "---\n\n"
+        doc += "## Channel Analytics\n\n"
+
+        // Mic stats
+        let micTimeMs = aaiResult.micUtterances.reduce(0) { $0 + ($1.end - $1.start) }
+        let micTimeStr = DateFormattingHelper.formatDuration(Double(micTimeMs) / 1000.0)
+        doc += "- **Microphone (You):** \(aaiResult.metadata.micUtteranceCount) utterances, ~\(aaiResult.metadata.micWordCount) words, \(micTimeStr) speaking\n"
+
+        // System stats
+        let sysTimeMs = aaiResult.systemUtterances.reduce(0) { $0 + ($1.end - $1.start) }
+        let sysTimeStr = DateFormattingHelper.formatDuration(Double(sysTimeMs) / 1000.0)
+        doc += "- **Meeting Audio:** \(aaiResult.metadata.systemUtteranceCount) utterances, ~\(aaiResult.metadata.systemWordCount) words, \(sysTimeStr) speaking\n"
+
+        doc += "\n"
+
+        // SECTION 6: Full Transcript
+        doc += "---\n\n"
+        doc += "## Full Transcript\n\n"
+
+        // Merge all utterances sorted by timestamp
+        for utterance in aaiResult.allUtterances {
+            let startMinutes = utterance.start / 60000
+            let startSeconds = (utterance.start / 1000) % 60
+            let timestampStr = String(format: "%02d:%02d", startMinutes, startSeconds)
+
+            // Determine source from channel
+            let source = utterance.channel == "1" ? "Mic" : "System"
+            let speaker = utterance.channel == "1" ? "You" : "Remote"
+
+            // Find sentiment for this utterance
+            let sentiment = findSentiment(at: utterance.start, in: aaiResult.sentimentResults)
+            let emoji = sentimentEmoji(for: sentiment)
+
+            // Find entities for this utterance
+            let entities = findEntities(from: utterance.start, to: utterance.end, in: aaiResult.entities)
+            let entityMarkers = inlineEntityMarkers(for: entities)
+
+            var line = "[\(timestampStr)] [\(source)/\(speaker)] \(emoji) \(utterance.text)"
+
+            if !entityMarkers.isEmpty {
+                line += " \(entityMarkers)"
+            }
+
+            doc += "\(line)\n\n"
+        }
+
+        // SECTION 7: Word-level Details (collapsible)
+        if !aaiResult.words.isEmpty {
+            doc += "---\n\n"
+            doc += "<details>\n<summary>Word-level Details (\(aaiResult.words.count) words)</summary>\n\n"
+            doc += "| Time | Word | Confidence | Channel |\n"
+            doc += "|------|------|------------|--------|\n"
+
+            for word in aaiResult.words.prefix(150) {
+                let time = String(format: "%.2f", Double(word.start) / 1000.0)
+                let conf = String(format: "%.0f%%", word.confidence * 100)
+                let channel = word.speaker == "1" ? "Mic" : (word.speaker == "2" ? "System" : word.speaker ?? "-")
+                doc += "| \(time)s | \(word.text) | \(conf) | \(channel) |\n"
+            }
+
+            if aaiResult.words.count > 150 {
+                doc += "\n*... and \(aaiResult.words.count - 150) more words*\n"
+            }
+
+            doc += "\n</details>\n\n"
+        }
+
+        // Footer
+        doc += "---\n\n"
+        doc += "*Generated by Transcripted with AssemblyAI Multichannel • Duration: \(durationString) • \(totalWordCount) words*\n"
+
+        return doc
+    }
+
     /// Show macOS notification that transcript was saved
     private static func showSaveNotification(fileURL: URL) {
         let notification = NSUserNotification()
