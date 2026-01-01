@@ -75,18 +75,6 @@ extension AudioObjectID {
         return processObject
     }
 
-    func readProcessBundleID() -> String? {
-        if let result = try? readString(kAudioProcessPropertyBundleID) {
-            result.isEmpty ? nil : result
-        } else {
-            nil
-        }
-    }
-
-    func readProcessIsRunning() -> Bool {
-        (try? readBool(kAudioProcessPropertyIsRunning)) ?? false
-    }
-
     /// Reads the value for `kAudioHardwarePropertyDefaultSystemOutputDevice`, should only be called on the system object.
     func readDefaultSystemOutputDevice() throws -> AudioDeviceID {
         try requireSystemObject()

@@ -847,6 +847,10 @@ struct PillDimensions {
     static let idleWidth: CGFloat = 40
     static let idleHeight: CGFloat = 20
 
+    /// Idle expanded state: hover to reveal Record/Files buttons
+    static let idleExpandedWidth: CGFloat = 120
+    static let idleExpandedHeight: CGFloat = 28
+
     /// Recording/Processing state: expanded with controls
     static let recordingWidth: CGFloat = 180
     static let recordingHeight: CGFloat = 40

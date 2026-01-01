@@ -91,9 +91,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             audio: audio!
         )
         floatingPanel?.showWindow(nil)
-
-        // Permissions are now requested during onboarding
-        // requestPermissions() - no longer needed here
     }
 
     #if DEBUG
@@ -161,21 +158,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         settingsWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-    }
-
-    func requestPermissions() {
-        // Pre-request Reminders access for smoother UX later
-        Task {
-            let store = EKEventStore()
-            do {
-                let granted = try await store.requestFullAccessToReminders()
-                print(granted ? "✓ Reminders access granted" : "⚠️ Reminders access denied")
-            } catch {
-                print("⚠️ Reminders permission error: \(error.localizedDescription)")
-            }
-        }
-
-        print("ℹ️ System audio permission will be requested on first capture attempt")
     }
 
     /// Handle recording completion - trigger transcription
