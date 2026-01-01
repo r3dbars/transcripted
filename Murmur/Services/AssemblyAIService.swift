@@ -258,18 +258,21 @@ class AssemblyAIService {
     // MARK: - Upload Audio
 
     private static func uploadAudio(fileURL: URL, apiKey: String) async throws -> String {
-        let audioData = try Data(contentsOf: fileURL)
-        let fileSizeMB = Double(audioData.count) / (1024 * 1024)
+        // Get file size without loading into memory
+        let fileAttributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let fileSize = fileAttributes[.size] as? Int64 ?? 0
+        let fileSizeMB = Double(fileSize) / (1024 * 1024)
         print("📦 AssemblyAI: File size: \(String(format: "%.2f", fileSizeMB)) MB")
 
         var request = URLRequest(url: URL(string: "\(baseURL)/upload")!)
         request.httpMethod = "POST"
         request.setValue(apiKey, forHTTPHeaderField: "authorization")
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-        request.httpBody = audioData
         request.timeoutInterval = 300  // 5 minutes for large files
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        // Stream file directly from disk - does NOT load entire file into memory
+        // This prevents memory spikes for large recordings (e.g., 400MB for 1-hour meeting)
+        let (data, response) = try await URLSession.shared.upload(for: request, fromFile: fileURL)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AssemblyAIError.invalidResponse
