@@ -208,6 +208,7 @@ class TranscriptionTaskManager: ObservableObject {
     // MARK: - Enhanced AssemblyAI Pipeline with Speaker Identification
 
     /// Transcribe with speaker identification: Transcribe → Identify Speakers → Save with Names
+    /// Uses multichannel mode when both mic and system audio are available (preferred - 50% fewer API calls)
     /// - Returns: URL of saved transcript with identified speaker names
     private func transcribeWithSpeakerIdentification(
         micURL: URL,
@@ -216,10 +217,87 @@ class TranscriptionTaskManager: ObservableObject {
         taskId: UUID
     ) async throws -> URL {
 
+        // Use multichannel mode when both sources available (preferred approach)
+        if let systemURL = systemURL {
+            return try await transcribeMultichannelPipeline(
+                micURL: micURL,
+                systemURL: systemURL,
+                outputFolder: outputFolder,
+                taskId: taskId
+            )
+        }
+
+        // Fallback: Single source (mic only) - use original pipeline
+        return try await transcribeSingleSourcePipeline(
+            micURL: micURL,
+            outputFolder: outputFolder,
+            taskId: taskId
+        )
+    }
+
+    /// Multichannel pipeline: Merge to stereo → Single API call → Channel-based attribution
+    /// Benefits: 50% fewer API calls, perfect sync, channel-based speaker ID
+    private func transcribeMultichannelPipeline(
+        micURL: URL,
+        systemURL: URL,
+        outputFolder: URL,
+        taskId: UUID
+    ) async throws -> URL {
+
+        print("🔀 Using multichannel pipeline (mic + system → stereo)")
+
+        // Phase 1: Transcribe with multichannel mode
+        let result = try await transcription.transcribeMultichannel(
+            micURL: micURL,
+            systemURL: systemURL,
+            onProgress: { [weak self] progress in
+                Task { @MainActor in
+                    self?.displayStatus = .transcribing(progress: progress)
+                }
+            }
+        )
+
+        print("✅ Phase 1 complete: Multichannel transcription done")
+        print("   • Mic utterances: \(result.result.micUtterances.count)")
+        print("   • System utterances: \(result.result.systemUtterances.count)")
+
+        // Phase 2: Save transcript (multichannel uses channel-based attribution, no speaker ID needed)
+        await MainActor.run {
+            self.displayStatus = .saving
+        }
+
+        guard let transcriptURL = TranscriptSaver.saveMultichannelTranscript(
+            result,
+            speakerMappings: [:],  // Multichannel uses channel labels (Mic/You, System/Remote)
+            directory: outputFolder
+        ) else {
+            throw NSError(domain: "Transcription", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Failed to save transcript"
+            ])
+        }
+
+        print("✅ Phase 2 complete: Transcript saved to \(transcriptURL.lastPathComponent)")
+
+        // Cleanup audio files
+        try? FileManager.default.removeItem(at: micURL)
+        try? FileManager.default.removeItem(at: systemURL)
+
+        return transcriptURL
+    }
+
+    /// Single source pipeline: Original approach for mic-only recordings
+    private func transcribeSingleSourcePipeline(
+        micURL: URL,
+        outputFolder: URL,
+        taskId: UUID
+    ) async throws -> URL {
+
+        print("📝 Using single source pipeline (mic only)")
+
         // Phase 1: Transcribe and get intermediate result (not saved yet)
         let transcriptionResult = try await transcription.transcribeToIntermediateResult(
             micURL: micURL,
-            systemURL: systemURL,
+            systemURL: nil,
             onProgress: { [weak self] progress in
                 Task { @MainActor in
                     self?.displayStatus = .transcribing(progress: progress)
@@ -289,14 +367,12 @@ class TranscriptionTaskManager: ObservableObject {
 
         // Cleanup audio files
         try? FileManager.default.removeItem(at: micURL)
-        if let systemURL = systemURL {
-            try? FileManager.default.removeItem(at: systemURL)
-        }
 
         return transcriptURL
     }
 
     /// Retry a failed transcription by its ID
+    /// Uses multichannel pipeline when both mic and system audio are available
     func retryFailedTranscription(failedId: UUID) async -> Bool {
         guard let failed = failedTranscriptionManager.failedTranscriptions.first(where: { $0.id == failedId }) else {
             print("❌ Failed transcription not found: \(failedId)")
@@ -317,6 +393,7 @@ class TranscriptionTaskManager: ObservableObject {
         // Increment retry count
         await MainActor.run {
             failedTranscriptionManager.incrementRetryCount(id: failedId)
+            self.displayStatus = .preparing
         }
 
         // Get output folder (same as original)
@@ -324,23 +401,31 @@ class TranscriptionTaskManager: ObservableObject {
         let transcriptedFolder = documentsURL.appendingPathComponent("Transcripted")
 
         do {
-            let transcriptURL = try await transcription.transcribeMeetingFiles(
+            // Use multichannel pipeline when both sources available (consistent with main flow)
+            let transcriptURL = try await transcribeWithSpeakerIdentification(
                 micURL: failed.micAudioURL,
                 systemURL: failed.systemAudioURL,
-                outputFolder: transcriptedFolder
+                outputFolder: transcriptedFolder,
+                taskId: failedId
             )
 
             print("✅ Retry successful: \(transcriptURL.lastPathComponent)")
 
-            // Remove from failed queue and delete audio files
+            // Remove from failed queue (audio files already cleaned up by pipeline)
             await MainActor.run {
-                failedTranscriptionManager.deleteFailedTranscription(id: failedId)
+                failedTranscriptionManager.removeFailedTranscription(id: failedId)
+                self.displayStatus = .transcriptSaved
+                self.scheduleStatusReset()
             }
 
             return true
 
         } catch {
             print("❌ Retry failed: \(error.localizedDescription)")
+            await MainActor.run {
+                self.displayStatus = .failed(message: "Retry failed")
+                self.scheduleStatusReset(delay: 15)
+            }
             return false
         }
     }
