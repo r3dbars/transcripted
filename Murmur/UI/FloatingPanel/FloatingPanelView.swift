@@ -10,8 +10,6 @@ struct FloatingPanelView: View {
 
     @State private var showCompletionCheckmark = false
     @State private var checkmarkScale: CGFloat = 0.7
-    @State private var isRecordButtonHovered = false
-    @State private var isFileButtonHovered = false
 
     // Success celebration states (Peak-End Rule)
     @State private var showRecordingStoppedCelebration = false
@@ -24,28 +22,6 @@ struct FloatingPanelView: View {
     @State private var showSilencePrompt = false
     @State private var silencePromptDismissed = false  // Prevents re-showing after dismiss
     private let silenceThresholdSeconds: TimeInterval = 120  // 2 minutes
-
-    private let panelHeight: CGFloat = 110  // Increased to fit content (was 68)
-    private let panelWidth: CGFloat = 200  // Reduced width
-    private let baseNotificationHeight: CGFloat = 100  // Base space for celebrations
-    private let reviewNotificationHeight: CGFloat = 280  // Expanded height for review UI
-    private let totalWindowWidth: CGFloat = 320  // Wide enough for notifications
-    private let maxWindowHeight: CGFloat = 390  // Max window size (controller uses this)
-
-    // Dynamic notification height based on review state
-    private var notificationHeight: CGFloat {
-        taskManager.pendingReview != nil ? reviewNotificationHeight : baseNotificationHeight
-    }
-
-    // Dynamic total height for content area (matches controller's window)
-    private var totalWindowHeight: CGFloat {
-        maxWindowHeight
-    }
-
-    // Whether we have pending action items to review
-    private var hasPendingReview: Bool {
-        taskManager.pendingReview != nil
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -167,7 +143,8 @@ struct FloatingPanelView: View {
         switch pillStateManager.state {
         case .idle:
             PillIdleView(
-                onTap: { audio.start() },
+                onRecord: { audio.start() },
+                onFiles: { openTranscriptsFolder() },
                 failedCount: 0  // TODO: Wire to FailedTranscriptionManager
             )
         case .recording:
@@ -178,186 +155,6 @@ struct FloatingPanelView: View {
             PillProcessingView(status: taskManager.displayStatus)
         case .reviewing:
             PillReviewingView(itemCount: taskManager.pendingReview?.totalCount ?? 0)
-        }
-    }
-
-    // MARK: - Full Panel Content (Laws of UX Warm Minimalism) - DEPRECATED
-
-    private var fullPanelContent: some View {
-        VStack(spacing: 10) {
-            // Status Display Area (Laws of UX card style)
-            ZStack {
-                RoundedRectangle(cornerRadius: Radius.lawsButton, style: .continuous)
-                    .fill(Color.surfaceCard)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Radius.lawsButton, style: .continuous)
-                            .stroke(Color.accentBlue.opacity(0.1), lineWidth: 1)
-                    )
-
-                HStack(spacing: 8) {
-                    // Left side: Status display with priority logic
-                    if audio.isRecording {
-                        // Recording indicator dot with glow pulse
-                        Circle()
-                            .fill(Color.recordingCoral)
-                            .frame(width: 8, height: 8)
-                            .shadow(color: .recordingCoral.opacity(0.5), radius: 2)
-                            .pulse(when: true, minScale: 0.9, maxScale: 1.1)
-
-                        if showSilencePrompt {
-                            // Silence warning during recording
-                            Text("Silence: \(Int(audio.silenceDuration / 60))m")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.statusWarningMuted)
-                        } else {
-                            // Timer display (monospace for retro feel)
-                            Text(formatDuration(audio.recordingDuration))
-                                .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                .foregroundColor(.textOnCream)
-                        }
-                    } else {
-                        // Status display with celebration overlays
-                        ZStack {
-                            LawsStatusTextView(status: taskManager.displayStatus)
-
-                            // Recording stopped celebration (blue ring)
-                            RecordingStoppedCelebration(isVisible: showRecordingStoppedCelebration)
-                        }
-                    }
-
-                    Spacer()
-
-                    // Right side: Mini waveform only when recording (shows both mic & system audio)
-                    if audio.isRecording {
-                        WaveformMiniView(
-                            levels: Array(audio.audioLevelHistory.suffix(8)),
-                            systemLevels: Array(audio.systemAudioLevelHistory.suffix(8)),
-                            maxHeight: 20
-                        )
-                        .frame(height: 20)
-                    }
-                }
-                .padding(.horizontal, 10)
-            }
-            .frame(height: 28)
-
-            // Controls (Laws of UX style buttons)
-            HStack(spacing: 10) {
-                LawsButton(
-                    iconName: audio.isRecording ? "stop.fill" : "record.circle",
-                    label: audio.isRecording ? "Stop" : "Record",
-                    color: audio.isRecording ? .textOnCreamSecondary : .recordingCoral,
-                    isActive: audio.isRecording
-                ) {
-                    if audio.isRecording {
-                        audio.stop()
-                    } else {
-                        audio.start()
-                    }
-                }
-
-                LawsButton(
-                    iconName: "folder.fill",
-                    label: "Files",
-                    color: .accentBlue,
-                    isActive: false
-                ) {
-                    openTranscriptsFolder()
-                }
-            }
-        }
-        .padding(12)
-    }
-
-    // MARK: - Panel Background (Laws of UX Warm Minimalism)
-
-    private var panelBackground: some View {
-        ZStack {
-            // Warm cream base with vibrancy
-            VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
-
-            // Eggshell tint overlay
-            Color.surfaceEggshell.opacity(0.85)
-
-            // Recording state: Add red glow border
-            if audio.isRecording {
-                RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
-                    .stroke(Color.recordingCoral.opacity(0.5), lineWidth: 2)
-            }
-
-            // Subtle border (Laws of UX style)
-            RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
-                .stroke(Color.accentBlue.opacity(0.15), lineWidth: 1)
-        }
-        // Laws of UX shadow
-        .shadow(
-            color: CardStyle.shadowCard.color,
-            radius: CardStyle.shadowCard.radius,
-            x: CardStyle.shadowCard.x,
-            y: CardStyle.shadowCard.y
-        )
-    }
-
-    // MARK: - Error Overlay (Contextual with recovery actions)
-
-    private var errorOverlay: some View {
-        Group {
-            if let errorMessage = audio.error {
-                let contextualError = ContextualError.from(message: errorMessage)
-
-                VStack {
-                    Spacer()
-                    ContextualErrorBanner(
-                        error: contextualError,
-                        onTap: errorTapAction(for: contextualError)
-                    )
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 8)
-                }
-                .transition(.asymmetric(
-                    insertion: .move(edge: .bottom).combined(with: .opacity),
-                    removal: .opacity
-                ))
-            }
-        }
-    }
-
-    /// Returns the appropriate action for tapping on an error banner
-    private func errorTapAction(for error: ContextualError) -> (() -> Void)? {
-        switch error {
-        case .transcriptionFailed:
-            // Could trigger retry - for now, just open settings
-            return {
-                if let url = URL(string: "x-apple.systempreferences:") {
-                    NSWorkspace.shared.open(url)
-                }
-            }
-        case .microphoneError, .permissionDenied:
-            // Open System Settings > Privacy > Microphone
-            return {
-                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
-                    NSWorkspace.shared.open(url)
-                }
-            }
-        case .invalidAPIKey:
-            // Could open app settings - for now just dismiss
-            return nil
-        case .storageFull:
-            // Open About This Mac > Storage
-            return {
-                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.storagemanagement") {
-                    NSWorkspace.shared.open(url)
-                }
-            }
-        case .networkError:
-            // Open Network preferences
-            return {
-                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.network") {
-                    NSWorkspace.shared.open(url)
-                }
-            }
-        case .unknown:
-            return nil
         }
     }
 

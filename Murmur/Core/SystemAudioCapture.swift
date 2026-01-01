@@ -16,10 +16,22 @@ class SystemAudioCapture: ObservableObject {
     private let queue = DispatchQueue(label: "SystemAudioCapture", qos: .userInitiated)
     private var bufferCallback: ((AVAudioPCMBuffer) -> Void)?
 
-    // Device change watchdog
-    private var lastBufferTime: Date = Date()
+    // Device change watchdog - thread-safe access via lock
+    private var _lastBufferTime: Date = Date()
+    private let lastBufferTimeLock = NSLock()
+    private var lastBufferTime: Date {
+        get {
+            lastBufferTimeLock.lock()
+            defer { lastBufferTimeLock.unlock() }
+            return _lastBufferTime
+        }
+        set {
+            lastBufferTimeLock.lock()
+            defer { lastBufferTimeLock.unlock() }
+            _lastBufferTime = newValue
+        }
+    }
     private var watchdogTimer: Timer?
-    private var audioFile: AVAudioFile?
 
     init() {}
 
@@ -45,11 +57,6 @@ class SystemAudioCapture: ObservableObject {
             errorMessage = errMsg
             throw error
         }
-    }
-
-    /// Sets the audio file reference for writing (called from Audio.swift)
-    func setAudioFile(_ file: AVAudioFile?) {
-        self.audioFile = file
     }
 
     /// Stops capturing system audio
