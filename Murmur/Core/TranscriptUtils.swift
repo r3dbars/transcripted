@@ -14,7 +14,8 @@ enum TranscriptUtils {
         }
 
         // Pattern to match the existing summary section
-        let summaryPattern = "## Summary\\n\\n(###.*?\\n\\n.*?)?\\n---"
+        // Matches: ## Summary\n\n<any content including placeholder>\n---
+        let summaryPattern = "## Summary\\n\\n.*?\\n---"
         let newSummarySection = """
         ## Summary
 
@@ -27,6 +28,13 @@ enum TranscriptUtils {
 
         if let regex = try? NSRegularExpression(pattern: summaryPattern, options: [.dotMatchesLineSeparators]) {
             let range = NSRange(content.startIndex..., in: content)
+            let matchCount = regex.numberOfMatches(in: content, options: [], range: range)
+
+            if matchCount == 0 {
+                print("⚠️ Summary section pattern not found in transcript")
+                return
+            }
+
             content = regex.stringByReplacingMatches(in: content, options: [], range: range, withTemplate: newSummarySection)
 
             do {
@@ -35,6 +43,8 @@ enum TranscriptUtils {
             } catch {
                 print("⚠️ Failed to write summary update: \(error.localizedDescription)")
             }
+        } else {
+            print("⚠️ Failed to create summary regex")
         }
     }
 
