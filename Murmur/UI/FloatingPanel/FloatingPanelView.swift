@@ -47,7 +47,7 @@ struct FloatingPanelView: View {
             // MARK: - Celebration Overlays & Toast (float above pill)
             ZStack {
                 Color.clear
-                    .frame(height: 60)
+                    .frame(height: pillStateManager.state == .reviewing ? 0 : 60)
 
                 // Single celebration overlay based on consolidated state
                 if celebrationState != .none && pillStateManager.state != .reviewing {

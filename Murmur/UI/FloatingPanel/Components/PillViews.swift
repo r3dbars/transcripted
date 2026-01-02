@@ -220,27 +220,28 @@ struct PillRecordingView: View {
                 )
                 .shadow(color: Color.recordingCoral.opacity(0.3), radius: 8)
 
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 // Recording dot
                 RecordingDotView()
-                    .padding(.leading, 12)
+                    .padding(.leading, 10)
 
                 // Waveform visualizer (reuse existing, smaller size)
                 WaveformMiniView(
                     levels: Array(audio.audioLevelHistory.suffix(8)),
                     systemLevels: Array(audio.systemAudioLevelHistory.suffix(8)),
-                    barCount: 6,
-                    maxHeight: 20
+                    barCount: 5,
+                    maxHeight: 18
                 )
-                .frame(width: 50, height: 24)
+                .frame(width: 40, height: 20)
 
-                // Timer (SF Mono, 13px)
+                // Timer (SF Mono, 13px) - fixed width to prevent wrapping
                 Text(formatDuration(audio.recordingDuration))
                     .font(.system(size: 13, weight: .medium, design: .monospaced))
                     .foregroundColor(.panelTextPrimary)
-                    .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
 
-                Spacer()
+                Spacer(minLength: 4)
 
                 // Stop button (28x28px circle)
                 Button(action: onStop) {
