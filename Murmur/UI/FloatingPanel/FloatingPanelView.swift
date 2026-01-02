@@ -18,6 +18,9 @@ struct FloatingPanelView: View {
     @ObservedObject var pillStateManager: PillStateManager
     @ObservedObject var failedTranscriptionManager: FailedTranscriptionManager
 
+    // User preference for aurora recording indicator
+    @AppStorage("useAuroraRecording") private var useAuroraRecording: Bool = false
+
     // Consolidated celebration state (replaces 3 separate @State vars)
     @State private var celebrationState: CelebrationState = .none
 
@@ -150,8 +153,14 @@ struct FloatingPanelView: View {
                 failedCount: failedTranscriptionManager.failedTranscriptions.count
             )
         case .recording:
-            PillRecordingView(audio: audio) {
-                audio.stop()
+            if useAuroraRecording {
+                AuroraRecordingView(audio: audio) {
+                    audio.stop()
+                }
+            } else {
+                PillRecordingView(audio: audio) {
+                    audio.stop()
+                }
             }
         case .processing:
             PillProcessingView(status: taskManager.displayStatus)
