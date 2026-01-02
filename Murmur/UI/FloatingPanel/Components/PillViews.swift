@@ -1,10 +1,10 @@
 import SwiftUI
 
-// MARK: - Pill Idle View (Hover-expand design)
+// MARK: - Pill Idle View (Horizontal slide-out design)
 
-/// Minimal capsule that expands on hover to reveal Record and Files buttons
-/// Collapsed: 40x20px with minimal waveform icon
-/// Expanded: 120x28px with two buttons side-by-side
+/// Minimal capsule that slides out horizontally on hover to reveal buttons
+/// Collapsed: 40x24px with minimal waveform icon (centered)
+/// Expanded: Buttons slide out from center - Record left, Files right
 @available(macOS 14.0, *)
 struct PillIdleView: View {
     let onRecord: () -> Void
@@ -26,49 +26,80 @@ struct PillIdleView: View {
         self.failedCount = failedCount
     }
 
-    private var currentWidth: CGFloat {
-        isExpanded ? PillDimensions.idleExpandedWidth : PillDimensions.idleWidth
-    }
-
-    private var currentHeight: CGFloat {
-        isExpanded ? PillDimensions.idleExpandedHeight : PillDimensions.idleHeight
-    }
+    // Button dimensions
+    private let buttonWidth: CGFloat = 56
+    private let buttonHeight: CGFloat = 28
+    private let coreWidth: CGFloat = 40
+    private let coreHeight: CGFloat = 24
 
     var body: some View {
         ZStack {
-            // Frosted glass capsule background
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Capsule()
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [Color.white.opacity(0.3), Color.white.opacity(0.1)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 0.5
-                        )
+            // Slide-out buttons (appear from behind core pill)
+            HStack(spacing: 4) {
+                // Record button - slides out left
+                SlideOutButton(
+                    icon: "mic.fill",
+                    isHovered: hoveredButton == .record,
+                    action: onRecord
                 )
+                .frame(width: buttonWidth, height: buttonHeight)
+                .offset(x: isExpanded ? 0 : buttonWidth / 2)
+                .opacity(isExpanded ? 1 : 0)
+                .onHover { hovering in
+                    hoveredButton = hovering ? .record : (hoveredButton == .record ? nil : hoveredButton)
+                }
 
-            // Content: collapsed icon or expanded buttons
-            if isExpanded {
-                expandedContent
-            } else {
-                collapsedContent
+                // Spacer for core pill area
+                Spacer()
+                    .frame(width: coreWidth - 8)
+
+                // Files button - slides out right
+                SlideOutButton(
+                    icon: "folder.fill",
+                    isHovered: hoveredButton == .files,
+                    action: onFiles
+                )
+                .frame(width: buttonWidth, height: buttonHeight)
+                .offset(x: isExpanded ? 0 : -buttonWidth / 2)
+                .opacity(isExpanded ? 1 : 0)
+                .onHover { hovering in
+                    hoveredButton = hovering ? .files : (hoveredButton == .files ? nil : hoveredButton)
+                }
             }
 
-            // Failed transcription badge (top-right) - only when collapsed
-            if failedCount > 0 && !isExpanded {
-                FailedBadgeOverlay(count: failedCount)
-                    .offset(x: currentWidth / 2 - 6, y: -currentHeight / 2 + 4)
+            // Core pill (always visible, stays centered)
+            ZStack {
+                Capsule()
+                    .fill(Color.panelCharcoal)
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(
+                                isExpanded ? Color.panelCharcoalElevated : Color.panelCharcoalSurface,
+                                lineWidth: 1
+                            )
+                    )
+
+                MinimalWaveformIcon()
+                    .scaleEffect(isExpanded ? 0.9 : 1.0)
+
+                // Failed transcription badge (top-right)
+                if failedCount > 0 {
+                    FailedBadgeOverlay(count: failedCount)
+                        .offset(x: coreWidth / 2 - 4, y: -coreHeight / 2 + 2)
+                        .opacity(isExpanded ? 0.5 : 1.0)
+                }
             }
+            .frame(width: coreWidth, height: coreHeight)
+            .shadow(color: Color.black.opacity(0.2), radius: 4, y: 2)
+            .zIndex(1)  // Core pill stays on top
         }
-        .frame(width: currentWidth, height: currentHeight)
-        .animation(reduceMotion ? .none : .elegant, value: isExpanded)
-        .shadow(color: Color.black.opacity(0.15), radius: 4, y: 2)
+        .frame(
+            width: isExpanded ? (buttonWidth * 2 + coreWidth) : coreWidth,
+            height: buttonHeight
+        )
+        .animation(reduceMotion ? .none : .snappy(duration: 0.2), value: isExpanded)
         .onHover { hovering in
-            withAnimation(reduceMotion ? .none : .elegant) {
+            withAnimation(reduceMotion ? .none : .snappy(duration: 0.2)) {
                 isExpanded = hovering
                 if !hovering {
                     hoveredButton = nil
@@ -78,82 +109,39 @@ struct PillIdleView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(isExpanded ? "Recording options" : "Transcripted - hover to expand")
     }
-
-    // MARK: - Collapsed Content
-
-    private var collapsedContent: some View {
-        MinimalWaveformIcon()
-    }
-
-    // MARK: - Expanded Content
-
-    private var expandedContent: some View {
-        HStack(spacing: 0) {
-            // Record button - left side
-            ExpandedPillButton(
-                icon: "mic.fill",
-                label: "Record",
-                isHovered: hoveredButton == .record,
-                action: onRecord
-            )
-            .onHover { hovering in
-                hoveredButton = hovering ? .record : (hoveredButton == .record ? nil : hoveredButton)
-            }
-
-            // Subtle divider
-            Rectangle()
-                .fill(Color.white.opacity(0.15))
-                .frame(width: 1, height: 16)
-
-            // Files button - right side
-            ExpandedPillButton(
-                icon: "doc.text.fill",
-                label: "Files",
-                isHovered: hoveredButton == .files,
-                action: onFiles
-            )
-            .onHover { hovering in
-                hoveredButton = hovering ? .files : (hoveredButton == .files ? nil : hoveredButton)
-            }
-        }
-        .opacity(isExpanded ? 1 : 0)
-        .animation(reduceMotion ? .none : .easeOut(duration: 0.2).delay(0.1), value: isExpanded)
-    }
 }
 
-// MARK: - Expanded Pill Button
+// MARK: - Slide-Out Button
 
-/// Reusable button component for the expanded idle pill
-/// Shows icon + label with hover highlight effect
+/// Compact circular button that slides out from the core pill
 @available(macOS 14.0, *)
-struct ExpandedPillButton: View {
+struct SlideOutButton: View {
     let icon: String
-    let label: String
     let isHovered: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .medium))
+            ZStack {
+                Capsule()
+                    .fill(isHovered ? Color.panelCharcoalElevated : Color.panelCharcoal.opacity(0.9))
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(
+                                isHovered ? Color.recordingCoral.opacity(0.5) : Color.panelCharcoalSurface,
+                                lineWidth: 1
+                            )
+                    )
 
-                Text(label)
-                    .font(.system(size: 10, weight: .medium))
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(isHovered ? .recordingCoral : .panelTextSecondary)
             }
-            .foregroundColor(isHovered ? .panelTextPrimary : .panelTextSecondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isHovered ? Color.white.opacity(0.1) : Color.clear)
-            )
-            .scaleEffect(isHovered ? 1.02 : 1.0)
-            .animation(.pillMorph, value: isHovered)
+            .scaleEffect(isHovered ? 1.05 : 1.0)
         }
         .buttonStyle(PlainButtonStyle())
-        .accessibilityLabel(label)
-        .accessibilityHint(label == "Record" ? "Start recording audio" : "Open transcripts folder")
+        .shadow(color: Color.black.opacity(0.15), radius: 3, y: 1)
+        .animation(.snappy(duration: 0.15), value: isHovered)
     }
 }
 
@@ -223,36 +211,37 @@ struct PillRecordingView: View {
 
     var body: some View {
         ZStack {
-            // Frosted glass background with coral border tint
+            // Solid dark background with coral border tint
             Capsule()
-                .fill(.ultraThinMaterial)
+                .fill(Color.panelCharcoal)
                 .overlay(
                     Capsule()
-                        .strokeBorder(Color.recordingCoral.opacity(0.4), lineWidth: 1.5)
+                        .strokeBorder(Color.recordingCoral.opacity(0.6), lineWidth: 1.5)
                 )
-                .shadow(color: Color.recordingCoral.opacity(0.2), radius: 8)
+                .shadow(color: Color.recordingCoral.opacity(0.3), radius: 8)
 
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 // Recording dot
                 RecordingDotView()
-                    .padding(.leading, 12)
+                    .padding(.leading, 10)
 
                 // Waveform visualizer (reuse existing, smaller size)
                 WaveformMiniView(
                     levels: Array(audio.audioLevelHistory.suffix(8)),
                     systemLevels: Array(audio.systemAudioLevelHistory.suffix(8)),
-                    barCount: 6,
-                    maxHeight: 20
+                    barCount: 5,
+                    maxHeight: 18
                 )
-                .frame(width: 50, height: 24)
+                .frame(width: 40, height: 20)
 
-                // Timer (SF Mono, 13px)
+                // Timer (SF Mono, 13px) - fixed width to prevent wrapping
                 Text(formatDuration(audio.recordingDuration))
                     .font(.system(size: 13, weight: .medium, design: .monospaced))
                     .foregroundColor(.panelTextPrimary)
-                    .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
 
-                Spacer()
+                Spacer(minLength: 4)
 
                 // Stop button (28x28px circle)
                 Button(action: onStop) {
@@ -309,12 +298,12 @@ struct PillProcessingView: View {
 
     var body: some View {
         ZStack {
-            // Frosted glass background
+            // Solid dark background
             Capsule()
-                .fill(.ultraThinMaterial)
+                .fill(Color.panelCharcoal)
                 .overlay(
                     Capsule()
-                        .strokeBorder(Color.processingPurple.opacity(0.3), lineWidth: 1)
+                        .strokeBorder(Color.processingPurple.opacity(0.4), lineWidth: 1)
                 )
 
             HStack(spacing: 10) {
@@ -380,12 +369,12 @@ struct PillReviewingView: View {
                     .frame(width: PillDimensions.recordingWidth + 8, height: PillDimensions.recordingHeight + 4)
                     .blur(radius: 8)
 
-                // Frosted glass with green success tint
+                // Solid dark background with green success tint
                 Capsule()
-                    .fill(.ultraThinMaterial)
+                    .fill(Color.panelCharcoal)
                     .overlay(
                         Capsule()
-                            .strokeBorder(Color.statusSuccessMuted.opacity(0.5), lineWidth: 1.5)
+                            .strokeBorder(Color.statusSuccessMuted.opacity(0.6), lineWidth: 1.5)
                     )
 
                 HStack(spacing: 8) {

@@ -489,6 +489,9 @@ extension SettingsView {
 
     private var advancedTabContent: some View {
         VStack(spacing: Spacing.md) {
+            // UI Preferences Card
+            uiPreferencesCard
+
             // Test AssemblyAI Card
             testAssemblyAICard
 
@@ -497,6 +500,29 @@ extension SettingsView {
 
             // API Status Card
             apiStatusCard
+        }
+    }
+
+    private var uiPreferencesCard: some View {
+        SettingsCard(title: "Interface", icon: "slider.horizontal.3") {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                Toggle(isOn: Binding(
+                    get: { UserDefaults.standard.bool(forKey: "enableUISounds") != false },
+                    set: { UserDefaults.standard.set($0, forKey: "enableUISounds") }
+                )) {
+                    HStack {
+                        Text("Sound feedback")
+                            .font(.bodySmall)
+                            .foregroundColor(.textOnCream)
+                        Spacer()
+                    }
+                }
+                .toggleStyle(.switch)
+
+                Text("Play subtle sounds when recording starts, stops, and completes.")
+                    .font(.caption)
+                    .foregroundColor(.textOnCreamMuted)
+            }
         }
     }
 
