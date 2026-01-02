@@ -15,6 +15,7 @@ struct TranscriptedApp: App {
 }
 
 @available(macOS 26.0, *)
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var floatingPanel: FloatingPanelController?

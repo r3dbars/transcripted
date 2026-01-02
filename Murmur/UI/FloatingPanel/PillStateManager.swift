@@ -15,6 +15,7 @@ enum PillState: Equatable {
 
 /// Manages pill state transitions with animation protection
 /// Replaces EdgeDockingManager with event-driven state changes
+@MainActor
 class PillStateManager: ObservableObject {
     @Published var state: PillState = .idle
     @Published var isLocked = false  // Prevents state changes during review

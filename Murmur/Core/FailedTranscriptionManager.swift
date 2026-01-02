@@ -2,6 +2,7 @@ import Foundation
 import Combine
 
 /// Manages the queue of failed transcriptions with persistent storage
+@MainActor
 class FailedTranscriptionManager: ObservableObject {
     @Published var failedTranscriptions: [FailedTranscription] = []
 

@@ -37,6 +37,7 @@
 		A1000301 /* DateParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000311 /* DateParser.swift */; };
 		A1000302 /* RemindersService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000312 /* RemindersService.swift */; };
 		A1000304 /* AssemblyAIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000314 /* AssemblyAIService.swift */; };
+		A1000305 /* DeepgramService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000315 /* DeepgramService.swift */; };
 		A1000400 /* AudioPreprocessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000401 /* AudioPreprocessor.swift */; };
 		A1000600 /* ActionItemReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000601 /* ActionItemReviewView.swift */; };
 		A1000700 /* ServiceResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000701 /* ServiceResult.swift */; };
@@ -88,6 +89,7 @@
 		A1000311 /* DateParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParser.swift; sourceTree = "<group>"; };
 		A1000312 /* RemindersService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemindersService.swift; sourceTree = "<group>"; };
 		A1000314 /* AssemblyAIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssemblyAIService.swift; sourceTree = "<group>"; };
+		A1000315 /* DeepgramService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepgramService.swift; sourceTree = "<group>"; };
 		A1000401 /* AudioPreprocessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPreprocessor.swift; sourceTree = "<group>"; };
 		A1000601 /* ActionItemReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionItemReviewView.swift; sourceTree = "<group>"; };
 		A1000701 /* ServiceResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceResult.swift; sourceTree = "<group>"; };
@@ -270,6 +272,7 @@
 				A1000312 /* RemindersService.swift */,
 				957699D9D32FB594FDC17C0C /* TodoistService.swift */,
 				A1000314 /* AssemblyAIService.swift */,
+				A1000315 /* DeepgramService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -372,6 +375,7 @@
 				A1000302 /* RemindersService.swift in Sources */,
 				177299A5CC91824348F205F7 /* TodoistService.swift in Sources */,
 				A1000304 /* AssemblyAIService.swift in Sources */,
+				A1000305 /* DeepgramService.swift in Sources */,
 				A1000400 /* AudioPreprocessor.swift in Sources */,
 				A1000600 /* ActionItemReviewView.swift in Sources */,
 				A1000700 /* ServiceResult.swift in Sources */,
