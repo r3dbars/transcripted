@@ -32,6 +32,7 @@ struct SettingsView: View {
     @AppStorage("transcriptionProvider") private var transcriptionProvider: String = "deepgram"
     @AppStorage("deepgramAPIKey") private var deepgramAPIKey: String = ""
     @AppStorage("assemblyaiAPIKey") private var assemblyaiAPIKey: String = ""
+    @AppStorage("useAuroraRecording") private var useAuroraRecording: Bool = false
     @Environment(\.dismiss) private var dismiss
 
     // MARK: - Tab State
@@ -221,6 +222,23 @@ extension SettingsView {
                     Text("Used to identify you in transcripts and attribute action items.")
                         .font(.caption)
                         .foregroundColor(.textOnCreamMuted)
+                }
+            }
+
+            // Appearance Card
+            SettingsCard(title: "Appearance", icon: "paintbrush") {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    Toggle(isOn: $useAuroraRecording) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Aurora Recording Indicator")
+                                .font(.bodySmall)
+                                .foregroundColor(.textOnCream)
+                            Text("Flowing colors that dance with your conversation")
+                                .font(.caption)
+                                .foregroundColor(.textOnCreamMuted)
+                        }
+                    }
+                    .toggleStyle(.switch)
                 }
             }
         }
