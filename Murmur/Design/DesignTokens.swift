@@ -866,23 +866,26 @@ struct PillDimensions {
     static let defaultDockHeight: CGFloat = 70
 }
 
-// MARK: - Pill Animation Timing (PHASE 4: Unified timing constants)
+// MARK: - Pill Animation Timing (Quick & Responsive - 150-200ms target)
 
 struct PillAnimationTiming {
-    /// Primary morph duration - matches transitionCooldown in PillStateManager
-    static let morphDuration: Double = 0.35
+    /// Primary morph duration - quick, snappy transitions (175ms)
+    static let morphDuration: Double = 0.175
 
     /// Transition cooldown - must match morphDuration to prevent jank
-    static let cooldownDuration: Double = 0.35
+    static let cooldownDuration: Double = 0.175
 
     /// Content fade duration during transitions
-    static let contentFade: Double = 0.15
+    static let contentFade: Double = 0.1
 
     /// Celebration display duration before auto-clear
     static let celebrationDuration: Double = 2.0
 
     /// Tray expand/collapse duration
-    static let trayDuration: Double = 0.4
+    static let trayDuration: Double = 0.2
+
+    /// Toast notification display duration
+    static let toastDuration: Double = 5.0
 }
 
 // MARK: - Pill Animation Presets (Dynamic Island-style morphing)
