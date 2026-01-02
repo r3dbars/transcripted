@@ -11,7 +11,7 @@ struct ReviewTrayView: View {
     @State private var isAppearing = false
 
     var body: some View {
-        VStack(spacing: Spacing.sm) {
+        VStack(spacing: 4) {
             // Frosted glass container for review UI
             ZStack {
                 // Background with stronger visual presence
