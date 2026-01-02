@@ -15,6 +15,14 @@ class SystemAudioCapture: ObservableObject {
     private var aggregateDeviceID: AudioObjectID = .unknown
     private var deviceProcID: AudioDeviceIOProcID?
     private var tapStreamDescription: AudioStreamBasicDescription?
+    private var isPrepared: Bool = false
+
+    /// Returns the audio format after prepare() has been called
+    /// Use this to create your audio file BEFORE calling start()
+    var audioFormat: AVAudioFormat? {
+        guard var desc = tapStreamDescription else { return nil }
+        return AVAudioFormat(streamDescription: &desc)
+    }
 
     private let queue = DispatchQueue(label: "SystemAudioCapture", qos: .userInitiated)
     private var bufferCallback: ((AVAudioPCMBuffer) -> Void)?
@@ -38,9 +46,27 @@ class SystemAudioCapture: ObservableObject {
 
     init() {}
 
+    /// Prepares the system audio tap without starting capture
+    /// Call this first, then use audioFormat to create your file, then call start()
+    /// This separation prevents disk I/O from blocking the audio callback thread
+    func prepare() throws {
+        guard !isPrepared else {
+            print("⚠️ SystemAudioCapture: Already prepared")
+            return
+        }
+
+        print("🔊 Setting up system audio tap...")
+        try setupSystemAudioTap()
+        isPrepared = true
+        print("🔊 System audio tap created successfully, format: \(audioFormat?.sampleRate ?? 0)Hz, \(audioFormat?.channelCount ?? 0)ch")
+    }
+
     /// Starts capturing system audio and calls the callback with each buffer
+    /// If prepare() wasn't called, this will call it automatically
     func start(bufferCallback: @escaping (AVAudioPCMBuffer) -> Void) throws {
+        print("🔊 SystemAudioCapture.start() called")
         guard !isCapturing else {
+            print("⚠️ SystemAudioCapture: Already capturing, ignoring")
             return
         }
 
@@ -48,15 +74,24 @@ class SystemAudioCapture: ObservableObject {
         errorMessage = nil
 
         do {
-            try setupSystemAudioTap()
+            // Setup tap if not already prepared
+            if !isPrepared {
+                print("🔊 Preparing tap in start()...")
+                try prepare()
+            }
+
+            print("🔊 Starting audio device...")
             try startAudioDevice()
+            print("🔊 Audio device started successfully")
 
             DispatchQueue.main.async {
                 self.isCapturing = true
                 self.startWatchdog()
             }
+            print("🔊 SystemAudioCapture: Now capturing!")
         } catch {
             let errMsg = "Failed to start system audio capture: \(error.localizedDescription)"
+            print("❌ SystemAudioCapture ERROR: \(errMsg)")
             errorMessage = errMsg
             throw error
         }
@@ -146,13 +181,29 @@ class SystemAudioCapture: ObservableObject {
             throw "Failed to create AVAudioFormat from tap description"
         }
 
+        // Track callback count for debugging (thread-safe via atomic-like access)
+        var callbackCount = 0
+
         // Create I/O proc to receive audio buffers
         var err = AudioDeviceCreateIOProcIDWithBlock(&deviceProcID, aggregateDeviceID, queue) { [weak self] inNow, inInputData, inInputTime, outOutputData, inOutputTime in
-            guard let self = self, let bufferCallback = self.bufferCallback else { return }
+            guard let self = self, let bufferCallback = self.bufferCallback else {
+                print("⚠️ I/O Proc: self or bufferCallback is nil")
+                return
+            }
+
+            callbackCount += 1
+            if callbackCount <= 3 {
+                print("🔊 I/O Proc callback #\(callbackCount)")
+            }
 
             do {
                 guard let buffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: inInputData, deallocator: nil) else {
+                    print("❌ I/O Proc: Failed to create PCM buffer")
                     throw "Failed to create PCM buffer"
+                }
+
+                if callbackCount <= 3 {
+                    print("🔊 Buffer created: \(buffer.frameLength) frames")
                 }
 
                 // Update watchdog timestamp
@@ -161,7 +212,7 @@ class SystemAudioCapture: ObservableObject {
                 // Send buffer to callback
                 bufferCallback(buffer)
             } catch {
-                // Silently handle buffer errors
+                print("❌ I/O Proc error: \(error)")
             }
         }
 
@@ -209,6 +260,7 @@ class SystemAudioCapture: ObservableObject {
         }
 
         bufferCallback = nil
+        isPrepared = false
         print("✓ System audio cleanup complete")
     }
 

@@ -64,6 +64,9 @@ class Audio: ObservableObject {
     // Throttle system audio visualizer updates (skip every other callback)
     private var systemLevelUpdateCounter: Int = 0
 
+    // Debug: Track system audio buffer count
+    private var systemBufferCount: Int = 0
+
     // Callback for when recording completes
     var onRecordingComplete: ((URL?, URL?) -> Void)?
 
@@ -107,6 +110,7 @@ class Audio: ObservableObject {
         // Set flag immediately to prevent concurrent starts
         isRecording = true
         error = nil
+        systemBufferCount = 0  // Reset debug counter
         resetSilenceTracking()  // Start fresh silence tracking
         print("📝 Starting audio capture")
 
@@ -142,92 +146,102 @@ class Audio: ObservableObject {
         let recordingFormat = hardwareFormat
 
         // Start system audio capture
+        // CRITICAL: Create audio file BEFORE starting I/O proc to avoid CPU overload
+        // Creating files in the audio callback causes HALC_ProxyIOContext::IOWorkLoop overload
         if let capture = systemAudioCapture as? SystemAudioCapture {
+            print("🎙️ System audio capture object exists, setting up...")
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
             let fileURL = documentsPath.appendingPathComponent("meeting_\(timestamp)_system.wav")
+            print("🎙️ System audio file URL: \(fileURL.lastPathComponent)")
 
             DispatchQueue.main.async {
                 self.systemAudioFileURL = fileURL
             }
 
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                guard let strongSelf = self else { return }
+                guard let strongSelf = self else {
+                    print("❌ System audio setup: self is nil!")
+                    return
+                }
 
-                var systemAudioAttempts = 0
-                let maxAttempts = 2
+                print("🎙️ Starting system audio capture on background thread...")
 
-                while systemAudioAttempts < maxAttempts {
-                    do {
-                        try capture.start { [weak self] systemBuffer in
-                            guard let self = self else { return }
+                do {
+                    // Step 1: Prepare the tap (creates aggregate device, gets format)
+                    // This does NOT start the I/O proc yet
+                    try capture.prepare()
 
-                            // Calculate system audio level synchronously (fast, no I/O)
-                            self.calculateSystemLevel(buffer: systemBuffer)
+                    // Step 2: Get the actual format from the tap
+                    guard let tapFormat = capture.audioFormat else {
+                        throw NSError(domain: "Audio", code: 10, userInfo: [NSLocalizedDescriptionKey: "Failed to get tap format"])
+                    }
+                    print("🔧 System audio format: \(Int(tapFormat.sampleRate))Hz, \(tapFormat.channelCount)ch, interleaved=\(tapFormat.isInterleaved)")
 
-                            // CRITICAL: Copy buffer before async dispatch
-                            // System audio uses bufferListNoCopy - memory is only valid during callback
-                            guard let bufferCopy = self.deepCopyBuffer(systemBuffer) else {
-                                print("⚠️ Failed to copy system audio buffer")
-                                return
+                    // Step 3: Create audio file BEFORE starting I/O proc (critical!)
+                    let settings: [String: Any] = [
+                        AVFormatIDKey: kAudioFormatLinearPCM,
+                        AVSampleRateKey: tapFormat.sampleRate,
+                        AVNumberOfChannelsKey: Int(tapFormat.channelCount),
+                        AVLinearPCMBitDepthKey: 32,
+                        AVLinearPCMIsFloatKey: true,
+                        AVLinearPCMIsBigEndianKey: false,
+                        AVLinearPCMIsNonInterleaved: !tapFormat.isInterleaved
+                    ]
+
+                    strongSelf.systemAudioFile = try AVAudioFile(
+                        forWriting: fileURL,
+                        settings: settings,
+                        commonFormat: .pcmFormatFloat32,
+                        interleaved: tapFormat.isInterleaved
+                    )
+                    print("✅ System audio file created BEFORE I/O proc: \(Int(tapFormat.sampleRate))Hz, \(tapFormat.channelCount)ch")
+
+                    // Step 4: Now start the I/O proc with a lightweight callback
+                    // The file already exists, so callback only needs to copy+write
+                    try capture.start { [weak self] systemBuffer in
+                        guard let self = self else { return }
+
+                        self.systemBufferCount += 1
+                        let currentBufferCount = self.systemBufferCount
+
+                        // Calculate system audio level synchronously (fast, no I/O)
+                        self.calculateSystemLevel(buffer: systemBuffer)
+
+                        // CRITICAL: Copy buffer before async dispatch
+                        // System audio uses bufferListNoCopy - memory is only valid during callback
+                        guard let bufferCopy = self.deepCopyBuffer(systemBuffer) else {
+                            if currentBufferCount <= 3 {
+                                print("⚠️ Failed to copy system audio buffer #\(currentBufferCount)")
                             }
+                            return
+                        }
 
-                            // Dispatch file operations to background queue (non-blocking)
-                            self.systemAudioFileQueue.async { [weak self] in
-                                guard let self = self else { return }
+                        // Debug: Log format details on first few buffers
+                        if currentBufferCount <= 3 {
+                            let fmt = bufferCopy.format
+                            print("🔍 System buffer #\(currentBufferCount): \(Int(fmt.sampleRate))Hz, \(fmt.channelCount)ch, frames=\(bufferCopy.frameLength)")
+                        }
 
-                                // Create audio file on first buffer
-                                if self.systemAudioFile == nil, let fileURL = self.systemAudioFileURL {
-                                    do {
-                                        let nativeFormat = bufferCopy.format
-
-                                        // Save at native 48kHz (actual rate, despite tap claiming 96kHz)
-                                        let settings: [String: Any] = [
-                                            AVFormatIDKey: kAudioFormatLinearPCM,
-                                            AVSampleRateKey: 48000.0,
-                                            AVNumberOfChannelsKey: Int(nativeFormat.channelCount),
-                                            AVLinearPCMBitDepthKey: 32,
-                                            AVLinearPCMIsFloatKey: true,
-                                            AVLinearPCMIsBigEndianKey: false,
-                                            AVLinearPCMIsNonInterleaved: false
-                                        ]
-
-                                        self.systemAudioFile = try AVAudioFile(
-                                            forWriting: fileURL,
-                                            settings: settings,
-                                            commonFormat: .pcmFormatFloat32,
-                                            interleaved: true
-                                        )
-
-                                        print("✅ System audio: Saving at 48kHz")
-                                    } catch {
-                                        print("❌ Failed to create system audio file: \(error.localizedDescription)")
-                                    }
-                                }
-
-                                // Write copied buffer to file
-                                if let audioFile = self.systemAudioFile {
-                                    do {
-                                        try audioFile.write(from: bufferCopy)
-                                    } catch {
-                                        print("❌ System audio write failed: \(error.localizedDescription)")
-                                    }
+                        // Dispatch file write to background queue (non-blocking)
+                        // File already exists, so this is just a write operation
+                        self.systemAudioFileQueue.async { [weak self] in
+                            guard let self = self, let audioFile = self.systemAudioFile else { return }
+                            do {
+                                try audioFile.write(from: bufferCopy)
+                            } catch {
+                                if currentBufferCount <= 5 {
+                                    print("❌ System audio write #\(currentBufferCount) failed: \(error.localizedDescription)")
                                 }
                             }
                         }
-                        print("✓ System audio capture started")
-                        break  // Success!
-                    } catch {
-                        systemAudioAttempts += 1
-                        if systemAudioAttempts >= maxAttempts {
-                            print("⚠️ System audio failed after \(maxAttempts) attempts: \(error.localizedDescription)")
-                            DispatchQueue.main.async {
-                                strongSelf.error = "System audio unavailable - recording mic only"
-                            }
-                        } else {
-                            print("⚠️ System audio attempt \(systemAudioAttempts) failed, retrying...")
-                            Thread.sleep(forTimeInterval: 0.2)
-                        }
+                    }
+                    print("✓ System audio capture started")
+
+                } catch {
+                    print("⚠️ System audio failed: \(error.localizedDescription)")
+                    DispatchQueue.main.async {
+                        strongSelf.error = "System audio unavailable - recording mic only"
                     }
                 }
             }
