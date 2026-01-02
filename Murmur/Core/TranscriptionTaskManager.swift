@@ -612,8 +612,19 @@ class TranscriptionTaskManager: ObservableObject {
 
             // Update transcript with Gemini-generated summary (if available)
             var currentURL = transcriptURL
+            print("📋 Gemini extraction result:")
+            print("   • Title: \(result.meetingTitle ?? "nil")")
+            if let summary = result.meetingSummary {
+                print("   • Summary: \(String(summary.prefix(100)))...")
+            } else {
+                print("   • Summary: nil")
+            }
+            print("   • Action items: \(result.actionItems.count)")
+
             if let summary = result.meetingSummary, !summary.isEmpty {
                 TranscriptUtils.updateWithSummary(at: currentURL, summary: summary)
+            } else {
+                print("⚠️ No summary returned from Gemini")
             }
 
             // Rename file with descriptive title (if available)
