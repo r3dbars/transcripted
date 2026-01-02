@@ -53,6 +53,7 @@
 		A1000918 /* ReviewTrayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000908 /* ReviewTrayView.swift */; };
 		A1000919 /* FloatingPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000909 /* FloatingPanelView.swift */; };
 		A100091A /* FloatingPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100090A /* FloatingPanelController.swift */; };
+		A100091B /* AuroraRecordingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100090B /* AuroraRecordingView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -105,6 +106,7 @@
 		A1000908 /* ReviewTrayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewTrayView.swift; sourceTree = "<group>"; };
 		A1000909 /* FloatingPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelView.swift; sourceTree = "<group>"; };
 		A100090A /* FloatingPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelController.swift; sourceTree = "<group>"; };
+		A100090B /* AuroraRecordingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuroraRecordingView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -206,6 +208,7 @@
 				A1000906 /* CelebrationViews.swift */,
 				A1000907 /* PillViews.swift */,
 				A1000908 /* ReviewTrayView.swift */,
+				A100090B /* AuroraRecordingView.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -391,6 +394,7 @@
 				A1000918 /* ReviewTrayView.swift in Sources */,
 				A1000919 /* FloatingPanelView.swift in Sources */,
 				A100091A /* FloatingPanelController.swift in Sources */,
+				A100091B /* AuroraRecordingView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

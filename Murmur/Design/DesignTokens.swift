@@ -192,6 +192,20 @@ extension Color {
 
     /// Glass Background - ultra thin material equivalent
     static let glassBackground = Color.black.opacity(0.4)
+
+    // MARK: - Aurora Recording Indicator Colors
+
+    /// Aurora mic color - warm coral for microphone audio
+    static let auroraCoral = Color(hex: "#FF6B6B")
+
+    /// Aurora system color - cool teal for system audio
+    static let auroraTeal = Color(hex: "#4ECDC4")
+
+    /// Aurora mic secondary - lighter coral for gradients
+    static let auroraCoralLight = Color(hex: "#FFB3B3")
+
+    /// Aurora system secondary - lighter teal for gradients
+    static let auroraTealLight = Color(hex: "#A8E6E0")
 }
 
 // MARK: - Gradients
@@ -400,6 +414,22 @@ struct ShadowStyle {
     static let recordingGlow = ShadowStyle(
         color: Color.recordingCoral.opacity(0.5),
         radius: 12,
+        x: 0,
+        y: 0
+    )
+
+    /// Aurora mic glow - coral bloom effect
+    static let auroraMicGlow = ShadowStyle(
+        color: Color.auroraCoral.opacity(0.6),
+        radius: 16,
+        x: 0,
+        y: 0
+    )
+
+    /// Aurora system glow - teal bloom effect
+    static let auroraSystemGlow = ShadowStyle(
+        color: Color.auroraTeal.opacity(0.6),
+        radius: 16,
         x: 0,
         y: 0
     )
