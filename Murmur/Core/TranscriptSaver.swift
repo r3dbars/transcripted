@@ -984,6 +984,216 @@ class TranscriptSaver {
         return doc
     }
 
+    // MARK: - Deepgram Multichannel Transcript Saving
+
+    /// Save Deepgram multichannel transcript (stereo: mic=left/ch0, system=right/ch1)
+    /// Key advantage: Deepgram supports BOTH multichannel AND speaker diarization!
+    /// - Parameters:
+    ///   - result: Deepgram multichannel transcription result wrapper
+    ///   - speakerMappings: Optional mapping of speaker IDs to identified names
+    ///   - directory: Optional custom directory
+    /// - Returns: URL of saved file, or nil if save failed
+    @available(macOS 14.0, *)
+    @discardableResult
+    static func saveDeepgramMultichannelTranscript(
+        _ result: DeepgramMultichannelTranscriptionResult,
+        speakerMappings: [String: SpeakerMapping] = [:],
+        directory: URL? = nil
+    ) -> URL? {
+        let saveDir = directory ?? defaultSaveDirectory
+
+        do {
+            try FileManager.default.createDirectory(at: saveDir, withIntermediateDirectories: true)
+        } catch {
+            print("❌ Failed to create save directory: \(error.localizedDescription)")
+            return nil
+        }
+
+        let timestamp = DateFormattingHelper.formatFilename(Date())
+        let filename = "Call_\(timestamp).md"
+        let fileURL = saveDir.appendingPathComponent(filename)
+
+        let markdown = formatDeepgramMultichannelMarkdown(result: result, speakerMappings: speakerMappings, date: Date())
+
+        do {
+            try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
+            print("✓ Deepgram multichannel transcript saved to: \(fileURL.path)")
+            showSaveNotification(fileURL: fileURL)
+            return fileURL
+        } catch {
+            print("❌ Failed to save Deepgram multichannel transcript: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Format Deepgram multichannel transcript as markdown
+    @available(macOS 14.0, *)
+    private static func formatDeepgramMultichannelMarkdown(
+        result: DeepgramMultichannelTranscriptionResult,
+        speakerMappings: [String: SpeakerMapping] = [:],
+        date: Date
+    ) -> String {
+        let dgResult = result.result
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .short
+        let dateString = dateFormatter.string(from: date)
+
+        let minutes = Int(result.duration) / 60
+        let seconds = Int(result.duration) % 60
+        let durationString = String(format: "%d:%02d", minutes, seconds)
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm:ss"
+        let timeString = timeFormatter.string(from: date)
+
+        let isoFormatter = DateFormatter()
+        isoFormatter.dateFormat = "yyyy-MM-dd"
+        let isoDate = isoFormatter.string(from: date)
+
+        // Aggregate metadata
+        let totalWordCount = dgResult.metadata.micWordCount + dgResult.metadata.systemWordCount
+        let totalUtterances = dgResult.metadata.micUtteranceCount + dgResult.metadata.systemUtteranceCount
+
+        // Build YAML frontmatter
+        var yaml = """
+        ---
+        date: \(isoDate)
+        time: \(timeString)
+        duration: "\(durationString)"
+        processing_time: "\(String(format: "%.1f", result.processingTime))s"
+        transcription_engine: deepgram_multichannel
+        sources: [mic, system_audio]
+        mic_utterances: \(dgResult.metadata.micUtteranceCount)
+        system_utterances: \(dgResult.metadata.systemUtteranceCount)
+        mic_speakers: \(dgResult.metadata.micSpeakerCount)
+        system_speakers: \(dgResult.metadata.systemSpeakerCount)
+        total_word_count: \(totalWordCount)
+        """
+
+        yaml += "\n---\n"
+
+        // Build document
+        var doc = yaml
+        doc += "\n# Meeting Recording - \(dateString)\n\n"
+        doc += "**Duration:** \(durationString) | **Words:** \(totalWordCount) | **Utterances:** \(totalUtterances)\n\n"
+        doc += "---\n\n"
+
+        // SECTION 1: Summary placeholder
+        doc += "## Summary\n\n"
+        doc += "*Summary generation available with Gemini integration*\n\n"
+
+        // SECTION 2: Channel & Speaker Analytics
+        doc += "---\n\n"
+        doc += "## Channel & Speaker Analytics\n\n"
+
+        // Mic channel stats
+        let micTimeSeconds = dgResult.micUtterances.reduce(0.0) { $0 + ($1.end - $1.start) }
+        let micTimeStr = DateFormattingHelper.formatDuration(micTimeSeconds)
+        doc += "### Microphone (You)\n"
+        doc += "- **Utterances:** \(dgResult.metadata.micUtteranceCount)\n"
+        doc += "- **Words:** ~\(dgResult.metadata.micWordCount)\n"
+        doc += "- **Speaking Time:** \(micTimeStr)\n"
+        if dgResult.metadata.micSpeakerCount > 1 {
+            doc += "- **Speakers Detected:** \(dgResult.metadata.micSpeakerCount)\n"
+        }
+        doc += "\n"
+
+        // System channel stats with speaker breakdown
+        let sysTimeSeconds = dgResult.systemUtterances.reduce(0.0) { $0 + ($1.end - $1.start) }
+        let sysTimeStr = DateFormattingHelper.formatDuration(sysTimeSeconds)
+        doc += "### Meeting Audio (Remote Participants)\n"
+        doc += "- **Utterances:** \(dgResult.metadata.systemUtteranceCount)\n"
+        doc += "- **Words:** ~\(dgResult.metadata.systemWordCount)\n"
+        doc += "- **Speaking Time:** \(sysTimeStr)\n"
+        doc += "- **Speakers Detected:** \(dgResult.metadata.systemSpeakerCount)\n\n"
+
+        // Speaker breakdown within system audio (the key advantage of Deepgram!)
+        if dgResult.metadata.systemSpeakerCount > 0 {
+            doc += "#### Remote Speaker Breakdown\n\n"
+            let speakerGroups = Dictionary(grouping: dgResult.systemUtterances, by: { $0.speaker })
+            for speaker in speakerGroups.keys.sorted() {
+                let utterances = speakerGroups[speaker] ?? []
+                let wordCount = utterances.reduce(0) { $0 + $1.transcript.split(separator: " ").count }
+                let speakingTime = utterances.reduce(0.0) { $0 + ($1.end - $1.start) }
+                let speakingTimeStr = DateFormattingHelper.formatDuration(speakingTime)
+
+                // Use speaker mapping if available
+                let speakerKey = "system_\(speaker)"
+                let speakerName = speakerMappings[speakerKey]?.displayName ?? "Speaker \(speaker)"
+
+                doc += "- **\(speakerName):** \(utterances.count) utterances, ~\(wordCount) words, \(speakingTimeStr)\n"
+            }
+            doc += "\n"
+        }
+
+        // SECTION 3: Full Transcript
+        doc += "---\n\n"
+        doc += "## Full Transcript\n\n"
+
+        // Merge all utterances sorted by timestamp
+        for utterance in dgResult.allUtterances {
+            // Deepgram uses seconds, convert to MM:SS
+            let startMinutes = Int(utterance.start) / 60
+            let startSeconds = Int(utterance.start) % 60
+            let timestampStr = String(format: "%02d:%02d", startMinutes, startSeconds)
+
+            // Determine source from channel
+            let source = utterance.channel == 0 ? "Mic" : "System"
+
+            // Determine speaker name
+            let speakerLabel: String
+            if utterance.channel == 0 {
+                // Mic channel - typically just "You"
+                let speakerKey = "mic_\(utterance.speaker)"
+                speakerLabel = speakerMappings[speakerKey]?.displayName ?? "You"
+            } else {
+                // System channel - use diarized speaker IDs
+                let speakerKey = "system_\(utterance.speaker)"
+                speakerLabel = speakerMappings[speakerKey]?.displayName ?? "Speaker \(utterance.speaker)"
+            }
+
+            let confidence = String(format: "%.0f%%", utterance.confidence * 100)
+
+            doc += "[\(timestampStr)] [\(source)/\(speakerLabel)] (\(confidence)) \(utterance.transcript)\n\n"
+        }
+
+        // SECTION 4: Word-level Details (collapsible)
+        let allWords = dgResult.micWords + dgResult.systemWords
+        if !allWords.isEmpty {
+            doc += "---\n\n"
+            doc += "<details>\n<summary>Word-level Details (\(allWords.count) words)</summary>\n\n"
+            doc += "| Time | Word | Confidence | Channel | Speaker |\n"
+            doc += "|------|------|------------|---------|--------|\n"
+
+            // Sort all words by start time
+            let sortedWords = allWords.sorted { $0.start < $1.start }
+
+            for word in sortedWords.prefix(150) {
+                let time = String(format: "%.2f", word.start)
+                let conf = String(format: "%.0f%%", word.confidence * 100)
+                // Determine channel based on which array the word came from
+                let isMicWord = dgResult.micWords.contains { $0.start == word.start && $0.word == word.word }
+                let channel = isMicWord ? "Mic" : "System"
+                let speaker = word.speaker.map { String($0) } ?? "-"
+                doc += "| \(time)s | \(word.word) | \(conf) | \(channel) | \(speaker) |\n"
+            }
+
+            if allWords.count > 150 {
+                doc += "\n*... and \(allWords.count - 150) more words*\n"
+            }
+
+            doc += "\n</details>\n\n"
+        }
+
+        // Footer
+        doc += "---\n\n"
+        let totalSpeakers = dgResult.metadata.micSpeakerCount + dgResult.metadata.systemSpeakerCount
+        doc += "*Generated by Transcripted with Deepgram Multichannel • Duration: \(durationString) • \(totalWordCount) words • \(totalSpeakers) speakers*\n"
+
+        return doc
+    }
+
     /// Show macOS notification that transcript was saved
     private static func showSaveNotification(fileURL: URL) {
         let notification = NSUserNotification()

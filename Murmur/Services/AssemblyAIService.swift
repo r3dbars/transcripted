@@ -402,9 +402,16 @@ class AssemblyAIService {
         var pollCount = 0
 
         while Date().timeIntervalSince(startTime) < maxPollingDurationSeconds {
+            // Check for task cancellation at the start of each poll iteration
+            // This allows the polling loop to exit quickly if the parent task is cancelled
+            try Task.checkCancellation()
+
             // Wait between polls
             try await Task.sleep(nanoseconds: UInt64(pollingIntervalSeconds * 1_000_000_000))
             pollCount += 1
+
+            // Check again after sleep (task may have been cancelled while waiting)
+            try Task.checkCancellation()
 
             // Fetch current status
             var request = URLRequest(url: URL(string: "\(baseURL)/transcript/\(transcriptId)")!)
@@ -590,9 +597,16 @@ class AssemblyAIService {
         var pollCount = 0
 
         while Date().timeIntervalSince(startTime) < maxPollingDurationSeconds {
+            // Check for task cancellation at the start of each poll iteration
+            // This allows the polling loop to exit quickly if the parent task is cancelled
+            try Task.checkCancellation()
+
             // Wait between polls
             try await Task.sleep(nanoseconds: UInt64(pollingIntervalSeconds * 1_000_000_000))
             pollCount += 1
+
+            // Check again after sleep (task may have been cancelled while waiting)
+            try Task.checkCancellation()
 
             // Fetch current status
             var request = URLRequest(url: URL(string: "\(baseURL)/transcript/\(transcriptId)")!)

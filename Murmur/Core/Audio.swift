@@ -3,6 +3,10 @@ import Foundation
 import AppKit
 import CoreAudio
 
+/// Main audio recording class that captures microphone and system audio
+/// Note: This class does NOT use @MainActor because it manages AVAudioEngine
+/// which requires synchronous access from audio tap callbacks on audio threads.
+/// UI updates are dispatched to main thread explicitly.
 @available(macOS 26.0, *)
 class Audio: ObservableObject {
     @Published var isRecording: Bool = false
@@ -158,46 +162,58 @@ class Audio: ObservableObject {
                         try capture.start { [weak self] systemBuffer in
                             guard let self = self else { return }
 
-                            // Create audio file on first buffer
-                            if self.systemAudioFile == nil, let fileURL = self.systemAudioFileURL {
-                                do {
-                                    let nativeFormat = systemBuffer.format
-
-                                    // Save at native 48kHz (actual rate, despite tap claiming 96kHz)
-                                    let settings: [String: Any] = [
-                                        AVFormatIDKey: kAudioFormatLinearPCM,
-                                        AVSampleRateKey: 48000.0,
-                                        AVNumberOfChannelsKey: Int(nativeFormat.channelCount),
-                                        AVLinearPCMBitDepthKey: 32,
-                                        AVLinearPCMIsFloatKey: true,
-                                        AVLinearPCMIsBigEndianKey: false,
-                                        AVLinearPCMIsNonInterleaved: false
-                                    ]
-
-                                    self.systemAudioFile = try AVAudioFile(
-                                        forWriting: fileURL,
-                                        settings: settings,
-                                        commonFormat: .pcmFormatFloat32,
-                                        interleaved: true
-                                    )
-
-                                    print("✅ System audio: Saving at 48kHz")
-                                } catch {
-                                    print("❌ Failed to create system audio file: \(error.localizedDescription)")
-                                }
-                            }
-
-                            // Write buffer to file
-                            if let audioFile = self.systemAudioFile {
-                                do {
-                                    try audioFile.write(from: systemBuffer)
-                                } catch {
-                                    print("❌ System audio write failed: \(error.localizedDescription)")
-                                }
-                            }
-
-                            // Calculate system audio level for visualizer
+                            // Calculate system audio level synchronously (fast, no I/O)
                             self.calculateSystemLevel(buffer: systemBuffer)
+
+                            // CRITICAL: Copy buffer before async dispatch
+                            // System audio uses bufferListNoCopy - memory is only valid during callback
+                            guard let bufferCopy = self.deepCopyBuffer(systemBuffer) else {
+                                print("⚠️ Failed to copy system audio buffer")
+                                return
+                            }
+
+                            // Dispatch file operations to background queue (non-blocking)
+                            self.systemAudioFileQueue.async { [weak self] in
+                                guard let self = self else { return }
+
+                                // Create audio file on first buffer
+                                if self.systemAudioFile == nil, let fileURL = self.systemAudioFileURL {
+                                    do {
+                                        let nativeFormat = bufferCopy.format
+
+                                        // Save at native 48kHz (actual rate, despite tap claiming 96kHz)
+                                        let settings: [String: Any] = [
+                                            AVFormatIDKey: kAudioFormatLinearPCM,
+                                            AVSampleRateKey: 48000.0,
+                                            AVNumberOfChannelsKey: Int(nativeFormat.channelCount),
+                                            AVLinearPCMBitDepthKey: 32,
+                                            AVLinearPCMIsFloatKey: true,
+                                            AVLinearPCMIsBigEndianKey: false,
+                                            AVLinearPCMIsNonInterleaved: false
+                                        ]
+
+                                        self.systemAudioFile = try AVAudioFile(
+                                            forWriting: fileURL,
+                                            settings: settings,
+                                            commonFormat: .pcmFormatFloat32,
+                                            interleaved: true
+                                        )
+
+                                        print("✅ System audio: Saving at 48kHz")
+                                    } catch {
+                                        print("❌ Failed to create system audio file: \(error.localizedDescription)")
+                                    }
+                                }
+
+                                // Write copied buffer to file
+                                if let audioFile = self.systemAudioFile {
+                                    do {
+                                        try audioFile.write(from: bufferCopy)
+                                    } catch {
+                                        print("❌ System audio write failed: \(error.localizedDescription)")
+                                    }
+                                }
+                            }
                         }
                         print("✓ System audio capture started")
                         break  // Success!
@@ -485,8 +501,10 @@ class Audio: ObservableObject {
             self.calculateLevel(buffer: buffer)
 
             // Convert to mono if needed, then write to file
-            self.micAudioFileQueue.async {
-                guard let audioFile = self.micAudioFile,
+            // Note: Use weak self in nested async to prevent retain cycle
+            self.micAudioFileQueue.async { [weak self] in
+                guard let self = self,
+                      let audioFile = self.micAudioFile,
                       let monoFormat = self.monoOutputFormat else { return }
 
                 do {
@@ -512,11 +530,13 @@ class Audio: ObservableObject {
             try engine.start()
             lastBufferTime = Date() // Reset watchdog
 
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
                 self.error = "Switched to default mic"
 
-                // Clear error after 3 seconds
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                // Clear error after 3 seconds (use weak self to prevent retain)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                    guard let self = self else { return }
                     if self.error == "Switched to default mic" {
                         self.error = nil
                     }
@@ -526,7 +546,8 @@ class Audio: ObservableObject {
             print("✅ Device recovery complete, recording continues")
         } catch {
             print("❌ Failed to restart engine: \(error.localizedDescription)")
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
                 self.error = "Failed to recover from device change"
                 self.stop()
             }
@@ -573,6 +594,36 @@ class Audio: ObservableObject {
         }
 
         return monoBuffer
+    }
+
+    /// Deep copy an AVAudioPCMBuffer to ensure data safety across async dispatch
+    /// Required because system audio buffers use bufferListNoCopy and don't own their memory
+    private func deepCopyBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength) else {
+            return nil
+        }
+        copy.frameLength = buffer.frameLength
+
+        // Copy audio data based on format (interleaved vs non-interleaved)
+        if buffer.format.isInterleaved {
+            // Interleaved: single contiguous buffer
+            if let srcData = buffer.floatChannelData?[0],
+               let dstData = copy.floatChannelData?[0] {
+                let bytesToCopy = Int(buffer.frameLength) * Int(buffer.format.channelCount) * MemoryLayout<Float>.size
+                memcpy(dstData, srcData, bytesToCopy)
+            }
+        } else {
+            // Non-interleaved: separate buffer per channel
+            if let srcChannels = buffer.floatChannelData,
+               let dstChannels = copy.floatChannelData {
+                let bytesPerChannel = Int(buffer.frameLength) * MemoryLayout<Float>.size
+                for channel in 0..<Int(buffer.format.channelCount) {
+                    memcpy(dstChannels[channel], srcChannels[channel], bytesPerChannel)
+                }
+            }
+        }
+
+        return copy
     }
 
     private func calculateLevel(buffer: AVAudioPCMBuffer) {
