@@ -89,7 +89,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Create floating panel
         floatingPanel = FloatingPanelController(
             taskManager: taskManager!,
-            audio: audio!
+            audio: audio!,
+            failedTranscriptionManager: failedTranscriptionManager!
         )
         floatingPanel?.showWindow(nil)
     }
