@@ -29,6 +29,8 @@ struct SettingsView: View {
     @AppStorage("geminiAPIKey") private var geminiAPIKey: String = ""
     @AppStorage("taskService") private var taskService: String = "reminders"
     @AppStorage("todoistAPIKey") private var todoistAPIKey: String = ""
+    @AppStorage("transcriptionProvider") private var transcriptionProvider: String = "deepgram"
+    @AppStorage("deepgramAPIKey") private var deepgramAPIKey: String = ""
     @AppStorage("assemblyaiAPIKey") private var assemblyaiAPIKey: String = ""
     @Environment(\.dismiss) private var dismiss
 
@@ -41,6 +43,8 @@ struct SettingsView: View {
     // MARK: - Validation States
     @State private var isValidatingTodoistKey = false
     @State private var todoistKeyValidationResult: Bool? = nil
+    @State private var isValidatingDeepgramKey = false
+    @State private var deepgramKeyValidationResult: Bool? = nil
     @State private var isValidatingAssemblyAIKey = false
     @State private var assemblyAIKeyValidationResult: Bool? = nil
 
@@ -179,47 +183,31 @@ extension SettingsView {
                 }
             }
 
-            // AssemblyAI API Key Card
+            // Transcription Provider Card
             SettingsCard(title: "Transcription", icon: "waveform.circle") {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
-                    Text("AssemblyAI API Key:")
+                    Text("Provider:")
                         .font(.caption)
                         .foregroundColor(.textOnCreamSecondary)
 
-                    HStack(spacing: Spacing.sm) {
-                        SecureField("Enter your API key", text: $assemblyaiAPIKey)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, design: .monospaced))
-                            .onChange(of: assemblyaiAPIKey) { _, _ in
-                                assemblyAIKeyValidationResult = nil
-                            }
-
-                        validationIndicator(
-                            isValidating: isValidatingAssemblyAIKey,
-                            result: assemblyAIKeyValidationResult
-                        )
-
-                        Button("Verify") {
-                            Task {
-                                isValidatingAssemblyAIKey = true
-                                assemblyAIKeyValidationResult = await AssemblyAIService.validateAPIKey(assemblyaiAPIKey)
-                                isValidatingAssemblyAIKey = false
-                            }
+                    Picker("", selection: $transcriptionProvider) {
+                        Text("Deepgram").tag("deepgram")
+                        Text("AssemblyAI").tag("assemblyai")
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: transcriptionProvider) { _, newValue in
+                        // Reset validation when switching providers
+                        if newValue == "deepgram" {
+                            assemblyAIKeyValidationResult = nil
+                        } else {
+                            deepgramKeyValidationResult = nil
                         }
-                        .buttonStyle(LawsSecondaryButtonStyle())
-                        .disabled(assemblyaiAPIKey.isEmpty || isValidatingAssemblyAIKey)
                     }
 
-                    Text("Get free credits at assemblyai.com/dashboard")
-                        .font(.caption)
-                        .foregroundColor(.textOnCreamMuted)
-
-                    HStack(spacing: Spacing.xs) {
-                        Image(systemName: "sparkles")
-                            .foregroundColor(.accentBlue)
-                        Text("AI features: speaker diarization, sentiment, chapters, entities")
-                            .font(.caption)
-                            .foregroundColor(.textOnCreamSecondary)
+                    if transcriptionProvider == "deepgram" {
+                        deepgramConfigView
+                    } else {
+                        assemblyAIConfigView
                     }
                 }
             }
@@ -244,6 +232,114 @@ extension SettingsView {
         } else {
             return saveLocation.replacingOccurrences(of: NSHomeDirectory(), with: "~")
         }
+    }
+
+    // MARK: - Provider Config Views
+
+    private var deepgramConfigView: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Deepgram API Key:")
+                .font(.caption)
+                .foregroundColor(.textOnCreamSecondary)
+
+            HStack(spacing: Spacing.sm) {
+                SecureField("Enter your API key", text: $deepgramAPIKey)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+                    .onChange(of: deepgramAPIKey) { _, _ in
+                        deepgramKeyValidationResult = nil
+                    }
+
+                validationIndicator(
+                    isValidating: isValidatingDeepgramKey,
+                    result: deepgramKeyValidationResult
+                )
+
+                Button("Verify") {
+                    Task {
+                        isValidatingDeepgramKey = true
+                        deepgramKeyValidationResult = await DeepgramService.validateAPIKey(deepgramAPIKey)
+                        isValidatingDeepgramKey = false
+                    }
+                }
+                .buttonStyle(LawsSecondaryButtonStyle())
+                .disabled(deepgramAPIKey.isEmpty || isValidatingDeepgramKey)
+            }
+
+            Text("Get free credits at console.deepgram.com")
+                .font(.caption)
+                .foregroundColor(.textOnCreamMuted)
+
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "star.fill")
+                    .foregroundColor(.statusSuccessMuted)
+                Text("Recommended: multichannel + speaker diarization in one call!")
+                    .font(.caption)
+                    .foregroundColor(.statusSuccessMuted)
+            }
+
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "sparkles")
+                    .foregroundColor(.accentBlue)
+                Text("Uses Nova-3 model with smart formatting")
+                    .font(.caption)
+                    .foregroundColor(.textOnCreamSecondary)
+            }
+        }
+        .padding(.top, Spacing.xs)
+    }
+
+    private var assemblyAIConfigView: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("AssemblyAI API Key:")
+                .font(.caption)
+                .foregroundColor(.textOnCreamSecondary)
+
+            HStack(spacing: Spacing.sm) {
+                SecureField("Enter your API key", text: $assemblyaiAPIKey)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+                    .onChange(of: assemblyaiAPIKey) { _, _ in
+                        assemblyAIKeyValidationResult = nil
+                    }
+
+                validationIndicator(
+                    isValidating: isValidatingAssemblyAIKey,
+                    result: assemblyAIKeyValidationResult
+                )
+
+                Button("Verify") {
+                    Task {
+                        isValidatingAssemblyAIKey = true
+                        assemblyAIKeyValidationResult = await AssemblyAIService.validateAPIKey(assemblyaiAPIKey)
+                        isValidatingAssemblyAIKey = false
+                    }
+                }
+                .buttonStyle(LawsSecondaryButtonStyle())
+                .disabled(assemblyaiAPIKey.isEmpty || isValidatingAssemblyAIKey)
+            }
+
+            Text("Get free credits at assemblyai.com/dashboard")
+                .font(.caption)
+                .foregroundColor(.textOnCreamMuted)
+
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundColor(.statusWarningMuted)
+                Text("Note: Multichannel mode disables speaker diarization")
+                    .font(.caption)
+                    .foregroundColor(.statusWarningMuted)
+            }
+
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "sparkles")
+                    .foregroundColor(.accentBlue)
+                Text("AI features: sentiment, chapters, entities")
+                    .font(.caption)
+                    .foregroundColor(.textOnCreamSecondary)
+            }
+        }
+        .padding(.top, Spacing.xs)
     }
 }
 
@@ -461,11 +557,20 @@ extension SettingsView {
     private var apiStatusCard: some View {
         SettingsCard(title: "API Status", icon: "key") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                apiStatusRow(
-                    name: "AssemblyAI",
-                    isConfigured: !assemblyaiAPIKey.isEmpty,
-                    isVerified: assemblyAIKeyValidationResult
-                )
+                // Show status for selected transcription provider
+                if transcriptionProvider == "deepgram" {
+                    apiStatusRow(
+                        name: "Deepgram",
+                        isConfigured: !deepgramAPIKey.isEmpty,
+                        isVerified: deepgramKeyValidationResult
+                    )
+                } else {
+                    apiStatusRow(
+                        name: "AssemblyAI",
+                        isConfigured: !assemblyaiAPIKey.isEmpty,
+                        isVerified: assemblyAIKeyValidationResult
+                    )
+                }
 
                 apiStatusRow(
                     name: "Gemini",

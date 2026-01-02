@@ -73,6 +73,7 @@ struct FailedActionItemExtraction: Identifiable, Codable, Equatable {
 
 /// Manages the queue of failed action item extractions with persistent storage
 @available(macOS 14.0, *)
+@MainActor
 class FailedActionItemManager: ObservableObject {
     @Published var failedExtractions: [FailedActionItemExtraction] = []
 

@@ -1,13 +1,13 @@
 import Foundation
 @preconcurrency import AVFoundation
 
-/// Maps AssemblyAI speaker labels (A, B, C) to identified names from Gemini
+/// Maps speaker labels to identified names from Gemini
 struct SpeakerMapping {
-    let speakerId: String           // "A", "B", "C", "D", etc.
+    let speakerId: String           // "A", "B", "C", "D", etc. or "0", "1", "2" for Deepgram
     var identifiedName: String?     // "John Smith" or nil if unidentified
     var confidence: String?         // "high" or "medium"
 
-    /// Display name: uses identified name if available, otherwise "Speaker A/B/C"
+    /// Display name: uses identified name if available, otherwise "Speaker X"
     var displayName: String {
         if let name = identifiedName {
             return confidence == "medium" ? "\(name)?" : name
@@ -55,7 +55,76 @@ struct MultichannelTranscriptionResult {
     let processingTime: TimeInterval
 }
 
+// MARK: - Unified Multichannel Result (Provider-agnostic)
+
+/// Unified multichannel transcription result that wraps either AssemblyAI or Deepgram
+/// This allows TranscriptionTaskManager to work with either provider seamlessly
+enum UnifiedMultichannelResult {
+    case assemblyAI(MultichannelTranscriptionResult)
+    case deepgram(DeepgramMultichannelTranscriptionResult)
+
+    var duration: TimeInterval {
+        switch self {
+        case .assemblyAI(let result): return result.duration
+        case .deepgram(let result): return result.duration
+        }
+    }
+
+    var processingTime: TimeInterval {
+        switch self {
+        case .assemblyAI(let result): return result.processingTime
+        case .deepgram(let result): return result.processingTime
+        }
+    }
+
+    var micUtteranceCount: Int {
+        switch self {
+        case .assemblyAI(let result): return result.result.micUtterances.count
+        case .deepgram(let result): return result.result.micUtterances.count
+        }
+    }
+
+    var systemUtteranceCount: Int {
+        switch self {
+        case .assemblyAI(let result): return result.result.systemUtterances.count
+        case .deepgram(let result): return result.result.systemUtterances.count
+        }
+    }
+
+    /// All unique speaker IDs in the system audio channel (for Gemini speaker identification)
+    var systemSpeakerIds: Set<String> {
+        switch self {
+        case .assemblyAI(let result):
+            // AssemblyAI multichannel doesn't have speaker diarization within channels
+            return Set(["Remote"])
+        case .deepgram(let result):
+            // Deepgram has speaker diarization within each channel!
+            return Set(result.result.systemUtterances.map { String($0.speaker) })
+        }
+    }
+}
+
+/// Wrapper for Deepgram multichannel result (matches MultichannelTranscriptionResult pattern)
+struct DeepgramMultichannelTranscriptionResult {
+    let result: DeepgramMultichannelResult
+    let duration: TimeInterval
+    let processingTime: TimeInterval
+}
+
+// MARK: - Transcription Provider
+
+enum TranscriptionProvider: String {
+    case deepgram = "deepgram"
+    case assemblyai = "assemblyai"
+
+    static var current: TranscriptionProvider {
+        let setting = UserDefaults.standard.string(forKey: "transcriptionProvider") ?? "deepgram"
+        return TranscriptionProvider(rawValue: setting) ?? .deepgram
+    }
+}
+
 @available(macOS 26.0, *)
+@MainActor
 class Transcription: ObservableObject {
     @Published var isProcessing: Bool = false
     @Published var error: String?
@@ -71,7 +140,8 @@ class Transcription: ObservableObject {
     ///   - systemURL: System audio file URL (optional)
     ///   - onProgress: Optional callback for progress updates (0.0 to 1.0)
     /// - Returns: CombinedAssemblyAIResult with all rich data for further processing
-    func transcribeToIntermediateResult(
+    /// Note: nonisolated to keep heavy async work (file I/O, API calls) off main thread
+    nonisolated func transcribeToIntermediateResult(
         micURL: URL,
         systemURL: URL?,
         onProgress: ((Double) -> Void)? = nil
@@ -201,12 +271,152 @@ class Transcription: ObservableObject {
     /// - Channel-based speaker attribution (no guessing who spoke)
     /// - Lower memory usage (single file processing)
     ///
+    /// Uses the configured transcription provider (Deepgram or AssemblyAI)
+    /// Deepgram advantage: multichannel + diarization work together!
+    ///
     /// - Parameters:
     ///   - micURL: Microphone audio file URL
     ///   - systemURL: System audio file URL (required for multichannel)
     ///   - onProgress: Optional callback for progress updates (0.0 to 1.0)
-    /// - Returns: MultichannelTranscriptionResult with channel-separated utterances
-    func transcribeMultichannel(
+    /// - Returns: UnifiedMultichannelResult with channel-separated utterances
+    /// Note: nonisolated to keep heavy async work (audio merging, API calls) off main thread
+    nonisolated func transcribeMultichannel(
+        micURL: URL,
+        systemURL: URL,
+        onProgress: ((Double) -> Void)? = nil
+    ) async throws -> UnifiedMultichannelResult {
+        let provider = TranscriptionProvider.current
+
+        switch provider {
+        case .deepgram:
+            return try await transcribeMultichannelWithDeepgram(
+                micURL: micURL,
+                systemURL: systemURL,
+                onProgress: onProgress
+            )
+        case .assemblyai:
+            let result = try await transcribeMultichannelWithAssemblyAI(
+                micURL: micURL,
+                systemURL: systemURL,
+                onProgress: onProgress
+            )
+            return .assemblyAI(result)
+        }
+    }
+
+    // MARK: - Deepgram Multichannel Implementation
+
+    /// Transcribe with Deepgram - supports multichannel + diarization together
+    private nonisolated func transcribeMultichannelWithDeepgram(
+        micURL: URL,
+        systemURL: URL,
+        onProgress: ((Double) -> Void)? = nil
+    ) async throws -> UnifiedMultichannelResult {
+        let apiKey = UserDefaults.standard.string(forKey: "deepgramAPIKey") ?? ""
+        guard !apiKey.isEmpty else {
+            throw NSError(domain: "Transcription", code: 100, userInfo: [
+                NSLocalizedDescriptionKey: "Deepgram API key not configured. Please add your API key in Settings."
+            ])
+        }
+
+        await MainActor.run {
+            self.isProcessing = true
+            self.error = nil
+            self.processingStatus = "Preparing audio..."
+        }
+
+        let processingStartTime = Date()
+        var stereoTempURL: URL?
+
+        do {
+            // Get recording duration from original mic file
+            let micFile = try AVAudioFile(forReading: micURL)
+            let duration = Double(micFile.length) / micFile.processingFormat.sampleRate
+
+            onProgress?(0.0)
+
+            // Step 1: Merge mic + system audio into stereo file
+            await MainActor.run {
+                self.processingStatus = "Merging audio channels..."
+            }
+
+            print("🔀 Deepgram Multichannel: Merging mic + system into stereo...")
+            stereoTempURL = try await AudioPreprocessor.prepareMergedStereoForCloud(
+                micURL: micURL,
+                systemURL: systemURL
+            )
+
+            onProgress?(0.20)
+
+            // Step 2: Transcribe with Deepgram multichannel + diarization
+            await MainActor.run {
+                self.processingStatus = "Uploading to Deepgram..."
+            }
+
+            guard let stereoURL = stereoTempURL else {
+                throw NSError(domain: "Transcription", code: 101, userInfo: [
+                    NSLocalizedDescriptionKey: "Failed to create merged stereo file"
+                ])
+            }
+
+            let result = try await DeepgramService.transcribeMultichannel(
+                stereoAudioURL: stereoURL,
+                apiKey: apiKey,
+                onStatusUpdate: { status in
+                    Task { @MainActor in
+                        self.processingStatus = status.rawValue
+                    }
+                }
+            )
+
+            onProgress?(0.90)
+
+            // Step 3: Cleanup temp stereo file
+            AudioPreprocessor.cleanup(tempURL: stereoURL)
+
+            let processingTime = Date().timeIntervalSince(processingStartTime)
+
+            await MainActor.run {
+                self.processingStatus = "Transcription complete!"
+                self.isProcessing = false
+            }
+
+            onProgress?(1.0)
+
+            print("✅ Deepgram Multichannel transcription complete:")
+            print("   • Mic utterances: \(result.micUtterances.count)")
+            print("   • System utterances: \(result.systemUtterances.count)")
+            print("   • System speakers: \(result.metadata.systemSpeakerCount) (diarization!)")
+            print("   • Processing time: \(String(format: "%.1f", processingTime))s")
+
+            let wrappedResult = DeepgramMultichannelTranscriptionResult(
+                result: result,
+                duration: duration,
+                processingTime: processingTime
+            )
+
+            return .deepgram(wrappedResult)
+
+        } catch {
+            // Cleanup temp file on failure
+            if let tempURL = stereoTempURL {
+                AudioPreprocessor.cleanup(tempURL: tempURL)
+            }
+
+            await MainActor.run {
+                self.error = "Deepgram transcription failed: \(error.localizedDescription)"
+                self.isProcessing = false
+                self.processingStatus = ""
+            }
+            throw error
+        }
+    }
+
+    // MARK: - AssemblyAI Multichannel Implementation (Legacy)
+
+    /// Transcribe with AssemblyAI multichannel mode
+    /// Note: AssemblyAI does NOT support diarization with multichannel
+    private nonisolated func transcribeMultichannelWithAssemblyAI(
         micURL: URL,
         systemURL: URL,
         onProgress: ((Double) -> Void)? = nil
@@ -239,7 +449,7 @@ class Transcription: ObservableObject {
                 self.processingStatus = "Merging audio channels..."
             }
 
-            print("🔀 Multichannel: Merging mic + system into stereo...")
+            print("🔀 AssemblyAI Multichannel: Merging mic + system into stereo...")
             stereoTempURL = try await AudioPreprocessor.prepareMergedStereoForCloud(
                 micURL: micURL,
                 systemURL: systemURL
@@ -282,7 +492,7 @@ class Transcription: ObservableObject {
 
             onProgress?(1.0)
 
-            print("✅ Multichannel transcription complete:")
+            print("✅ AssemblyAI Multichannel transcription complete:")
             print("   • Mic utterances: \(result.micUtterances.count)")
             print("   • System utterances: \(result.systemUtterances.count)")
             print("   • Processing time: \(String(format: "%.1f", processingTime))s")
@@ -300,7 +510,7 @@ class Transcription: ObservableObject {
             }
 
             await MainActor.run {
-                self.error = "Multichannel transcription failed: \(error.localizedDescription)"
+                self.error = "AssemblyAI transcription failed: \(error.localizedDescription)"
                 self.isProcessing = false
                 self.processingStatus = ""
             }

@@ -3,6 +3,9 @@ import AudioToolbox
 import AVFoundation
 
 /// Captures system-wide audio output using CoreAudio process taps (macOS 14.2+)
+/// Note: This class does NOT use @MainActor because it manages CoreAudio devices
+/// that require synchronous access from both main and audio threads.
+/// UI updates are dispatched to main thread explicitly.
 @available(macOS 14.2, *)
 class SystemAudioCapture: ObservableObject {
     @Published var isCapturing: Bool = false
@@ -63,15 +66,18 @@ class SystemAudioCapture: ObservableObject {
     func stop() {
         guard isCapturing else { return }
 
-        DispatchQueue.main.async {
-            self.isCapturing = false
-            self.stopWatchdog()
+        // Update UI immediately - don't block the main thread
+        DispatchQueue.main.async { [weak self] in
+            self?.isCapturing = false
+            self?.stopWatchdog()
         }
 
-        // Let audio pipeline settle before destroying devices
-        Thread.sleep(forTimeInterval: 0.5)
-
-        cleanup()
+        // Move delay + cleanup to background queue to avoid blocking main thread
+        // The 0.5s delay lets the audio pipeline settle before destroying devices
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            Thread.sleep(forTimeInterval: 0.5)
+            self?.cleanup()
+        }
     }
 
     // MARK: - Private Methods
@@ -247,11 +253,13 @@ class SystemAudioCapture: ObservableObject {
             lastBufferTime = Date() // Reset watchdog
             print("✅ System audio device recovery complete, capturing continues")
 
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
                 self.errorMessage = "Switched to default output"
 
-                // Clear error after 3 seconds
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                // Clear error after 3 seconds (use weak self to prevent retain)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                    guard let self = self else { return }
                     if self.errorMessage == "Switched to default output" {
                         self.errorMessage = nil
                     }
@@ -259,7 +267,8 @@ class SystemAudioCapture: ObservableObject {
             }
         } catch {
             print("❌ Failed to recover from output change: \(error.localizedDescription)")
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
                 self.errorMessage = "System audio unavailable"
                 self.isCapturing = false
                 self.stopWatchdog()
