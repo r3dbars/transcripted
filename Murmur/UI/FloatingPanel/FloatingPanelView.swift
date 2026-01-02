@@ -2,21 +2,28 @@ import SwiftUI
 
 // MARK: - SwiftUI View
 
+// MARK: - Celebration State (consolidated)
+
+/// Single enum for all celebration overlays - prevents state explosion
+enum CelebrationState: Equatable {
+    case none
+    case transcriptSaved
+    case actionItemsCreated(count: Int)
+}
+
 @available(macOS 26.0, *)
 struct FloatingPanelView: View {
     @ObservedObject var taskManager: TranscriptionTaskManager
     @ObservedObject var audio: Audio
     @ObservedObject var pillStateManager: PillStateManager
+    @ObservedObject var failedTranscriptionManager: FailedTranscriptionManager
 
-    @State private var showCompletionCheckmark = false
-    @State private var checkmarkScale: CGFloat = 0.7
+    // Consolidated celebration state (replaces 3 separate @State vars)
+    @State private var celebrationState: CelebrationState = .none
 
-    // Success celebration states (Peak-End Rule)
-    @State private var showRecordingStoppedCelebration = false
-    @State private var showTranscriptSavedCelebration = false
-    @State private var showActionItemsCelebration = false
-    @State private var actionItemsCount: Int = 0
-    @State private var previousRecordingState = false
+    // Toast notification state
+    @State private var showErrorToast = false
+    @State private var currentError: ContextualError?
 
     // Attention prompt states
     @State private var showSilencePrompt = false
@@ -37,27 +44,24 @@ struct FloatingPanelView: View {
                     ))
             }
 
-            // MARK: - Celebration Overlays (float above pill)
+            // MARK: - Celebration Overlays & Toast (float above pill)
             ZStack {
                 Color.clear
-                    .frame(height: 60)
+                    .frame(height: pillStateManager.state == .reviewing ? 0 : 60)
 
-                // Transcript saved celebration
-                if showTranscriptSavedCelebration && pillStateManager.state != .reviewing {
-                    CelebrationOverlay(
-                        celebrationType: .transcriptSaved,
-                        isVisible: showTranscriptSavedCelebration
-                    )
-                    .transition(.scale.combined(with: .opacity))
+                // Single celebration overlay based on consolidated state
+                if celebrationState != .none && pillStateManager.state != .reviewing {
+                    celebrationOverlay
+                        .transition(.scale.combined(with: .opacity))
                 }
 
-                // Action items celebration
-                if showActionItemsCelebration && pillStateManager.state != .reviewing {
-                    CelebrationOverlay(
-                        celebrationType: .actionItemsCreated(count: actionItemsCount),
-                        isVisible: showActionItemsCelebration
-                    )
-                    .transition(.scale.combined(with: .opacity))
+                // Toast notification for errors (appears above pill, auto-dismisses)
+                if showErrorToast, let error = currentError {
+                    ToastNotificationView(error: error, isVisible: $showErrorToast)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .opacity
+                        ))
                 }
             }
 
@@ -68,11 +72,6 @@ struct FloatingPanelView: View {
         }
         .frame(width: pillStateManager.state == .reviewing ? PillDimensions.trayWidth + 40 : PillDimensions.recordingWidth + 40)
         .frame(maxHeight: .infinity, alignment: .bottom)
-        .onChange(of: taskManager.justCompleted) { _, newValue in
-            if newValue {
-                triggerCompletionCheckmark()
-            }
-        }
         .onChange(of: audio.silenceDuration) { _, duration in
             // UX: Don't interrupt user flow - show amber ring indicator without forcing panel expansion
             if audio.isRecording && duration >= silenceThresholdSeconds && !silencePromptDismissed && !showSilencePrompt {
@@ -83,55 +82,58 @@ struct FloatingPanelView: View {
             if !isRecording {
                 showSilencePrompt = false
                 silencePromptDismissed = false
-
-                // Trigger recording stopped celebration when recording ends
-                if previousRecordingState {
-                    triggerRecordingStoppedCelebration()
-                }
             }
-            previousRecordingState = isRecording
         }
-        // Trigger celebrations based on displayStatus changes
+        // Trigger celebrations and toasts based on displayStatus changes
         .onChange(of: taskManager.displayStatus) { _, newStatus in
             switch newStatus {
             case .transcriptSaved:
-                triggerTranscriptSavedCelebration()
+                triggerCelebration(.transcriptSaved, duration: 2.0)
             case .completed(let count):
-                triggerActionItemsCelebration(count: count)
+                triggerCelebration(.actionItemsCreated(count: count), duration: 3.0)
+            case .failed(let message):
+                triggerErrorToast(message: message)
             default:
                 break
             }
         }
-        // PHASE 4 FIX: Clear celebrations immediately when state changes
-        // Prevents lingering overlays from previous states
+        // Clear celebrations immediately when pill state changes
         .onChange(of: pillStateManager.state) { _, _ in
-            showRecordingStoppedCelebration = false
-            showTranscriptSavedCelebration = false
-            showActionItemsCelebration = false
+            celebrationState = .none
         }
     }
 
-    // MARK: - Celebration Triggers
+    // MARK: - Celebration
 
-    private func triggerRecordingStoppedCelebration() {
-        showRecordingStoppedCelebration = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            showRecordingStoppedCelebration = false
+    /// Computed overlay view based on current celebration state
+    @ViewBuilder
+    private var celebrationOverlay: some View {
+        switch celebrationState {
+        case .none:
+            EmptyView()
+        case .transcriptSaved:
+            CelebrationOverlay(celebrationType: .transcriptSaved, isVisible: true)
+        case .actionItemsCreated(let count):
+            CelebrationOverlay(celebrationType: .actionItemsCreated(count: count), isVisible: true)
         }
     }
 
-    private func triggerTranscriptSavedCelebration() {
-        showTranscriptSavedCelebration = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            showTranscriptSavedCelebration = false
+    /// Unified celebration trigger - shows overlay then auto-dismisses
+    private func triggerCelebration(_ state: CelebrationState, duration: TimeInterval) {
+        celebrationState = state
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            if celebrationState == state {  // Only clear if still showing same celebration
+                celebrationState = .none
+            }
         }
     }
 
-    private func triggerActionItemsCelebration(count: Int) {
-        actionItemsCount = count
-        showActionItemsCelebration = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-            showActionItemsCelebration = false
+    /// Trigger error toast notification - parses message into contextual error
+    private func triggerErrorToast(message: String) {
+        // Parse the error message to determine type and recovery hint
+        currentError = ContextualError.from(message: message)
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            showErrorToast = true
         }
     }
 
@@ -145,7 +147,7 @@ struct FloatingPanelView: View {
             PillIdleView(
                 onRecord: { audio.start() },
                 onFiles: { openTranscriptsFolder() },
-                failedCount: 0  // TODO: Wire to FailedTranscriptionManager
+                failedCount: failedTranscriptionManager.failedTranscriptions.count
             )
         case .recording:
             PillRecordingView(audio: audio) {
@@ -171,27 +173,5 @@ struct FloatingPanelView: View {
         }
         try? FileManager.default.createDirectory(at: transcriptsFolder, withIntermediateDirectories: true)
         NSWorkspace.shared.open(transcriptsFolder)
-    }
-
-    private func formatDuration(_ duration: TimeInterval) -> String {
-        let minutes = Int(duration) / 60
-        let seconds = Int(duration) % 60
-        return String(format: "%02d:%02d", minutes, seconds)
-    }
-
-    private func triggerCompletionCheckmark() {
-        checkmarkScale = 0.0
-        showCompletionCheckmark = true
-
-        withAnimation(.spring(response: 0.7, dampingFraction: 0.5, blendDuration: 0)) {
-            checkmarkScale = 0.9
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            withAnimation(.easeOut(duration: 0.3)) {
-                showCompletionCheckmark = false
-                checkmarkScale = 0.7
-            }
-        }
     }
 }

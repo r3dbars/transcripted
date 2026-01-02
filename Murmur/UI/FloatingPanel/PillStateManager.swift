@@ -1,5 +1,43 @@
 import SwiftUI
 import Combine
+import AppKit
+
+// MARK: - Sound Feedback
+
+/// Lightweight sound manager for UI state feedback
+/// Uses macOS system sounds for unobtrusive audio cues
+enum PillSounds {
+    /// Soft click for recording start
+    static func playRecordingStart() {
+        playSystemSound("Pop")
+    }
+
+    /// Subtle confirmation for recording stop
+    static func playRecordingStop() {
+        playSystemSound("Tink")
+    }
+
+    /// Soft completion sound
+    static func playComplete() {
+        playSystemSound("Glass")
+    }
+
+    /// Subtle alert for errors
+    static func playError() {
+        playSystemSound("Basso")
+    }
+
+    private static func playSystemSound(_ name: String) {
+        // Check if sounds are enabled (respect user preference)
+        guard UserDefaults.standard.bool(forKey: "enableUISounds") != false else { return }
+
+        // Play from system sounds directory
+        if let sound = NSSound(named: NSSound.Name(name)) {
+            sound.volume = 0.3  // Keep it subtle (30% volume)
+            sound.play()
+        }
+    }
+}
 
 // MARK: - Pill State (Dynamic Island-style states)
 
@@ -104,6 +142,9 @@ class PillStateManager: ObservableObject {
         state = newState
         print("[PillState] Transition: \(previousState) → \(newState)")
 
+        // Play state-appropriate sound feedback
+        playTransitionSound(from: previousState, to: newState)
+
         // Reset transition flag after cooldown
         DispatchQueue.main.asyncAfter(deadline: .now() + transitionCooldown) { [weak self] in
             self?.isTransitioning = false
@@ -134,5 +175,28 @@ class PillStateManager: ObservableObject {
         isTransitioning = false
         transitionStartTime = nil
         state = .idle
+    }
+
+    // MARK: - Sound Feedback
+
+    /// Play appropriate sound based on state transition
+    private func playTransitionSound(from previousState: PillState, to newState: PillState) {
+        switch (previousState, newState) {
+        case (_, .recording):
+            // Starting recording - soft pop
+            PillSounds.playRecordingStart()
+        case (.recording, .processing):
+            // Stopped recording, starting transcription - subtle tink
+            PillSounds.playRecordingStop()
+        case (.processing, .reviewing):
+            // Transcription complete, showing action items - glass chime
+            PillSounds.playComplete()
+        case (_, .idle) where previousState == .reviewing:
+            // Finished reviewing - subtle completion
+            PillSounds.playComplete()
+        default:
+            // No sound for other transitions (keeps it unobtrusive)
+            break
+        }
     }
 }

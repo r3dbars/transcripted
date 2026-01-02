@@ -8,6 +8,7 @@ import Combine
 class FloatingPanelController: NSWindowController {
     private var taskManager: TranscriptionTaskManager
     private var audio: Audio
+    private var failedTranscriptionManager: FailedTranscriptionManager
     let pillStateManager = PillStateManager()
     private var cancellables = Set<AnyCancellable>()
 
@@ -15,9 +16,10 @@ class FloatingPanelController: NSWindowController {
     private let maxWindowWidth: CGFloat = PillDimensions.trayWidth + 40  // Extra padding for shadows
     private let maxWindowHeight: CGFloat = PillDimensions.trayMaxHeight + PillDimensions.recordingHeight + 40
 
-    init(taskManager: TranscriptionTaskManager, audio: Audio) {
+    init(taskManager: TranscriptionTaskManager, audio: Audio, failedTranscriptionManager: FailedTranscriptionManager) {
         self.taskManager = taskManager
         self.audio = audio
+        self.failedTranscriptionManager = failedTranscriptionManager
 
         let screen = NSScreen.main ?? NSScreen.screens.first!
 
@@ -52,11 +54,12 @@ class FloatingPanelController: NSWindowController {
         window.titleVisibility = .hidden
         window.hidesOnDeactivate = false  // Stay visible when app loses focus
 
-        // Create view with pill state manager
+        // Create view with pill state manager and failed transcription manager
         let view = FloatingPanelView(
             taskManager: taskManager,
             audio: audio,
-            pillStateManager: pillStateManager
+            pillStateManager: pillStateManager,
+            failedTranscriptionManager: failedTranscriptionManager
         )
         window.contentView = NSHostingView(rootView: view)
 
@@ -128,7 +131,8 @@ class FloatingPanelController: NSWindowController {
                 case .completed, .transcriptSaved, .idle:
                     self.pillStateManager.unlock(transitionToIdle: !self.audio.isRecording)
                 case .failed:
-                    // Stay in current state for errors
+                    // Play error sound and stay in current state
+                    PillSounds.playError()
                     break
                 }
             }
