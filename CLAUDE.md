@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Important References
+
+- **MEMORY.md** - Contains lessons learned and debugging references from past issues. **Check this file first when debugging audio, transcription, or performance issues.**
+
 ## Project Overview
 
 **Transcripted** is a native macOS application that automatically records, transcribes, and organizes voice conversations from meetings and calls. The app supports both on-device transcription (Apple Speech framework) and cloud transcription services (Deepgram, AssemblyAI). It extracts action items from transcripts using Gemini AI and sends them to Apple Reminders or Todoist.
@@ -13,13 +17,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 open Murmur.xcodeproj
 
 # Build from command line
-xcodebuild -project Murmur.xcodeproj -scheme Transcripted -configuration Debug build
+xcodebuild -project Murmur.xcodeproj -scheme Murmur -configuration Debug build
 
 # Build for release
-xcodebuild -project Murmur.xcodeproj -scheme Transcripted -configuration Release build
+xcodebuild -project Murmur.xcodeproj -scheme Murmur -configuration Release build
 
 # Clean build
-xcodebuild -project Murmur.xcodeproj -scheme Transcripted clean
+xcodebuild -project Murmur.xcodeproj -scheme Murmur clean
 ```
 
 **Requirements:**
