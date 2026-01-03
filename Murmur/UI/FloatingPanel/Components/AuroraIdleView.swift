@@ -97,6 +97,7 @@ struct AuroraIdleView: View {
                 .scaleEffect(isRecordHovered ? 1.1 : 1.0)
             }
             .buttonStyle(PlainButtonStyle())
+            .floatingTooltip("Record")
             .onHover { hovering in
                 withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
                     isRecordHovered = hovering
@@ -126,6 +127,7 @@ struct AuroraIdleView: View {
                 .scaleEffect(isFilesHovered ? 1.1 : 1.0)
             }
             .buttonStyle(PlainButtonStyle())
+            .floatingTooltip("Transcripts")
             .onHover { hovering in
                 withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
                     isFilesHovered = hovering

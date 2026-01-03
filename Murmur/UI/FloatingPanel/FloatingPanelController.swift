@@ -53,6 +53,7 @@ class FloatingPanelController: NSWindowController {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.hidesOnDeactivate = false  // Stay visible when app loses focus
+        window.acceptsMouseMovedEvents = true  // Enable tooltips on hover
 
         // Create view with pill state manager and failed transcription manager
         let view = FloatingPanelView(

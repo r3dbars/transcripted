@@ -270,6 +270,7 @@ struct AuroraRecordingView: View {
                 .scaleEffect(isStopHovered ? 1.1 : 1.0)
             }
             .buttonStyle(PlainButtonStyle())
+            .floatingTooltip("Stop")
             .onHover { hovering in
                 withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
                     isStopHovered = hovering
@@ -303,6 +304,7 @@ struct AuroraRecordingView: View {
                 .scaleEffect(isTasksHovered ? 1.1 : 1.0)
             }
             .buttonStyle(PlainButtonStyle())
+            .floatingTooltip("Tasks")
             .onHover { hovering in
                 withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
                     isTasksHovered = hovering
