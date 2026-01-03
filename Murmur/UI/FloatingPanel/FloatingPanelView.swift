@@ -147,7 +147,7 @@ struct FloatingPanelView: View {
     private var pillContent: some View {
         switch pillStateManager.state {
         case .idle:
-            PillIdleView(
+            AuroraIdleView(
                 onRecord: { audio.start() },
                 onFiles: { openTranscriptsFolder() },
                 failedCount: failedTranscriptionManager.failedTranscriptions.count

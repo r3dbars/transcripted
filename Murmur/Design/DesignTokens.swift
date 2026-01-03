@@ -195,17 +195,17 @@ extension Color {
 
     // MARK: - Aurora Recording Indicator Colors
 
-    /// Aurora mic color - warm coral for microphone audio
-    static let auroraCoral = Color(hex: "#FF6B6B")
+    /// Aurora mic color - hot pink for microphone audio (synthwave)
+    static let auroraCoral = Color(hex: "#EC4899")
 
-    /// Aurora system color - cool teal for system audio
-    static let auroraTeal = Color(hex: "#4ECDC4")
+    /// Aurora system color - electric blue for system audio (synthwave)
+    static let auroraTeal = Color(hex: "#3B82F6")
 
-    /// Aurora mic secondary - lighter coral for gradients
-    static let auroraCoralLight = Color(hex: "#FFB3B3")
+    /// Aurora mic secondary - lighter pink for gradients
+    static let auroraCoralLight = Color(hex: "#F472B6")
 
-    /// Aurora system secondary - lighter teal for gradients
-    static let auroraTealLight = Color(hex: "#A8E6E0")
+    /// Aurora system secondary - lighter blue for gradients
+    static let auroraTealLight = Color(hex: "#60A5FA")
 }
 
 // MARK: - Gradients

@@ -13,6 +13,8 @@ struct AuroraRecordingView: View {
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @State private var isExpanded = false
     @State private var isStopHovered = false
+    @State private var isTasksHovered = false
+    @AppStorage("taskService") private var taskService: String = "reminders"
 
     // Smoothed audio levels (prevents jitter)
     @State private var smoothedMicLevel: CGFloat = 0
@@ -253,17 +255,8 @@ struct AuroraRecordingView: View {
     // MARK: - Expanded Content
 
     private var expandedContent: some View {
-        HStack(spacing: 12) {
-            Spacer()
-
-            // Timer
-            Text(formatDuration(audio.recordingDuration))
-                .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                .foregroundColor(.panelTextPrimary)
-                .lineLimit(1)
-                .fixedSize()
-
-            // Stop button
+        HStack(spacing: 0) {
+            // Stop button (left) - PRIMARY ACTION
             Button(action: onStop) {
                 ZStack {
                     Circle()
@@ -283,9 +276,61 @@ struct AuroraRecordingView: View {
                 }
             }
             .accessibilityLabel("Stop recording")
+            .frame(width: 44)
 
             Spacer()
-                .frame(width: 8)
+
+            // Timer (center)
+            Text(formatDuration(audio.recordingDuration))
+                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                .foregroundColor(.panelTextPrimary)
+                .lineLimit(1)
+                .fixedSize()
+
+            Spacer()
+
+            // Tasks button (right) - SECONDARY ACTION
+            Button(action: openTaskApp) {
+                ZStack {
+                    Circle()
+                        .fill(isTasksHovered ? Color.panelCharcoalSurface : Color.panelCharcoalElevated)
+                        .frame(width: 32, height: 32)
+
+                    Image(systemName: "checklist")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.panelTextPrimary)
+                }
+                .scaleEffect(isTasksHovered ? 1.1 : 1.0)
+            }
+            .buttonStyle(PlainButtonStyle())
+            .onHover { hovering in
+                withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
+                    isTasksHovered = hovering
+                }
+            }
+            .accessibilityLabel("Open tasks")
+            .frame(width: 44)
+        }
+        .padding(.horizontal, 8)
+    }
+
+    // MARK: - Actions
+
+    private func openTaskApp() {
+        if taskService == "todoist" {
+            // Try native Todoist app first, fallback to web
+            if let appURL = URL(string: "todoist://"),
+               NSWorkspace.shared.open(appURL) {
+                return
+            }
+            if let webURL = URL(string: "https://todoist.com/app") {
+                NSWorkspace.shared.open(webURL)
+            }
+        } else {
+            // Open Apple Reminders
+            if let url = URL(string: "x-apple-reminders://") {
+                NSWorkspace.shared.open(url)
+            }
         }
     }
 
