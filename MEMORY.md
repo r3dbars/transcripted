@@ -4,6 +4,91 @@ This file documents important lessons learned during development. Reference this
 
 ---
 
+## Architecture Quick Reference
+
+### What This App Does
+Transcripted captures mic + system audio, transcribes via cloud APIs, identifies speakers and extracts action items via Gemini, then sends tasks to Reminders/Todoist.
+
+### Core Data Flow
+```
+Record → WAV files → Transcription → Speaker ID → Save → Action Items → Review → Tasks
+```
+
+### Key Components
+| Component | File | Purpose |
+|-----------|------|---------|
+| Audio capture | `Core/Audio.swift` | Mic via AVAudioEngine, coordinates system audio |
+| System audio | `Core/SystemAudioCapture.swift` | CoreAudio process taps (macOS 26+) |
+| Orchestration | `Core/TranscriptionTaskManager.swift` | Background transcription queue, progress |
+| UI State | `UI/FloatingPanel/PillStateManager.swift` | State machine: idle→recording→processing→reviewing |
+| Action Items | `Core/ActionItemExtractor.swift` | Two-pass Gemini: speaker ID, then extraction |
+| Transcription | `Core/Transcription.swift` | Provider abstraction (Apple/Deepgram/AssemblyAI) |
+| Transcript Output | `Core/TranscriptSaver.swift` | Markdown with YAML frontmatter |
+
+### State Machine (PillStateManager)
+```
+idle (40×20) → recording (180×40) → processing (180×40) → reviewing (280px tray) → idle
+```
+
+---
+
+## macOS 26 System Audio Permissions
+
+**Important**: System audio capture via `AudioHardwareCreateProcessTap` does NOT require Screen Recording permission on macOS 26. The OS provides an audio-only permission flow, which is more privacy-preserving.
+
+This is why the app uses `@available(macOS 26.0, *)` throughout.
+
+---
+
+## Transcription Pipeline
+
+### Providers
+| Provider | Type | Key Feature |
+|----------|------|-------------|
+| Apple | On-device | Privacy-first, 45-sec chunks |
+| AssemblyAI | Cloud | Speaker diarization, sentiment, chapters |
+| Deepgram | Cloud | Nova-2, low latency |
+
+### Multichannel vs Single-Source
+- **Both mic + system available**: Merge to stereo → single API call (50% fewer calls)
+- **Mic only**: Single source pipeline
+
+### DisplayStatus (Goal-Gradient Effect)
+```
+idle → gettingReady (0-15%) → transcribing (15-75%) → findingActionItems (75-95%) → finishing (95-100%)
+```
+
+---
+
+## UI & Design System
+
+### Floating Panel States
+| State | Dimensions | Content |
+|-------|------------|---------|
+| idle | 40×20 | Dormant waveform |
+| recording | 180×40 | Aurora + timer + stop button |
+| processing | 180×40 | Aurora + progress + status text |
+| reviewing | 280px tray | Action item list |
+
+### Aurora Color Palette (Synthwave)
+- **Mic audio**: Hot pink coral `#EC4899` / light `#F472B6`
+- **System audio**: Electric blue `#3B82F6` / light `#60A5FA`
+- **Background**: Dark charcoal `#1A1A1A`
+- **Text primary**: White `#FFFFFF`
+
+### Animation Timing
+- Pill morph: 175ms spring (response: 0.175, damping: 0.8)
+- Content fade: 100ms
+- Toast duration: 5s
+- Success celebration: 2s
+
+### Key UI Files
+- `Design/DesignTokens.swift` - All colors, spacing, animations
+- `UI/FloatingPanel/Components/Aurora*.swift` - Recording/Processing/Success views
+- `UI/FloatingPanel/PillStateManager.swift` - State machine with sound feedback
+
+---
+
 ## CoreAudio I/O Callback CPU Overload (Jan 2, 2026)
 
 ### Symptom
@@ -106,6 +191,12 @@ try capture.start { systemBuffer in
 
 ## General Audio Debugging Tips
 
+### Audio Format Critical Details
+- **Hardware format**: Use `inputFormat(forBus: 1)`, NOT `outputFormat(forBus: 0)`
+- **Mic audio**: Saved as mono (manually downmixed if multi-channel)
+- **System audio**: 48kHz stereo (tap claims 96kHz but actual is 48kHz)
+- **Deep copy required**: System audio buffers use `bufferListNoCopy` - memory only valid during callback
+
 ### Verify Audio Pipeline Health
 ```swift
 // Add to callback for debugging
@@ -137,4 +228,4 @@ afplay ~/Documents/Transcripted/meeting_*_system.wav
 
 - [Apple Audio Unit Hosting Guide](https://developer.apple.com/documentation/audiotoolbox/audio_unit_hosting_guide)
 - [Core Audio Overview](https://developer.apple.com/library/archive/documentation/MusicAudio/Conceptual/CoreAudioOverview/)
-- Process taps require macOS 14.2+ (`AudioHardwareCreateProcessTap`)
+- Process taps via `AudioHardwareCreateProcessTap` - macOS 26 provides audio-only permission (no Screen Recording needed)
