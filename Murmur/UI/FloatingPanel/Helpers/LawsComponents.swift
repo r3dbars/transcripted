@@ -114,7 +114,7 @@ struct LawsStatusTextView: View {
         switch status {
         case .idle:
             return .accentBlue
-        case .preparing, .transcribing, .extractingActionItems, .saving:
+        case .gettingReady, .transcribing, .findingActionItems, .finishing:
             return .statusProcessingMuted
         case .transcriptSaved, .completed:
             return .statusSuccessMuted

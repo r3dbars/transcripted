@@ -121,7 +121,7 @@ class FloatingPanelController: NSWindowController {
             .sink { [weak self] status in
                 guard let self = self else { return }
                 switch status {
-                case .preparing, .transcribing, .extractingActionItems, .saving:
+                case .gettingReady, .transcribing, .findingActionItems, .finishing:
                     if !self.audio.isRecording {
                         self.pillStateManager.transition(to: .processing)
                     }
@@ -129,7 +129,15 @@ class FloatingPanelController: NSWindowController {
                     // IMPORTANT: Transition BEFORE locking - lock() would block the transition
                     self.pillStateManager.transition(to: .reviewing)
                     self.pillStateManager.lock()
-                case .completed, .transcriptSaved, .idle:
+                case .completed, .transcriptSaved:
+                    // Stay in processing state so success view can display
+                    // The scheduleStatusReset() timer will set .idle after ~10s
+                    self.pillStateManager.unlock(transitionToIdle: false)
+                    if self.pillStateManager.state != .processing {
+                        self.pillStateManager.transition(to: .processing)
+                    }
+                case .idle:
+                    // Now transition to idle (triggered by scheduleStatusReset timer)
                     self.pillStateManager.unlock(transitionToIdle: !self.audio.isRecording)
                 case .failed:
                     // Play error sound and stay in current state
