@@ -332,11 +332,11 @@ struct PillProcessingView: View {
 
     private var statusColor: Color {
         switch status {
-        case .preparing, .transcribing:
+        case .gettingReady, .transcribing:
             return .statusProcessingMuted
-        case .extractingActionItems:
+        case .findingActionItems:
             return .processingPurple
-        case .saving:
+        case .finishing:
             return .statusProcessingMuted
         case .completed, .transcriptSaved:
             return .statusSuccessMuted

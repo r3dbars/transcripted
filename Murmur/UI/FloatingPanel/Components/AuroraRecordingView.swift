@@ -14,6 +14,7 @@ struct AuroraRecordingView: View {
     @State private var isExpanded = false
     @State private var isStopHovered = false
     @State private var isTasksHovered = false
+    @State private var collapseTask: Task<Void, Never>?
     @AppStorage("taskService") private var taskService: String = "reminders"
 
     // Smoothed audio levels (prevents jitter)
@@ -47,7 +48,22 @@ struct AuroraRecordingView: View {
         )
         .animation(.spring(response: 0.15, dampingFraction: 0.8), value: isExpanded)
         .onHover { hovering in
-            isExpanded = hovering
+            if hovering {
+                // Cancel any pending collapse and expand immediately
+                collapseTask?.cancel()
+                collapseTask = nil
+                isExpanded = true
+            } else {
+                // Delay collapse by 1 second
+                collapseTask = Task {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    if !Task.isCancelled {
+                        await MainActor.run {
+                            isExpanded = false
+                        }
+                    }
+                }
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Recording in progress, \(formatDurationAccessible(audio.recordingDuration))")
@@ -270,6 +286,7 @@ struct AuroraRecordingView: View {
                 .scaleEffect(isStopHovered ? 1.1 : 1.0)
             }
             .buttonStyle(PlainButtonStyle())
+            .floatingTooltip("Stop")
             .onHover { hovering in
                 withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
                     isStopHovered = hovering
@@ -303,6 +320,7 @@ struct AuroraRecordingView: View {
                 .scaleEffect(isTasksHovered ? 1.1 : 1.0)
             }
             .buttonStyle(PlainButtonStyle())
+            .floatingTooltip("Tasks")
             .onHover { hovering in
                 withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
                     isTasksHovered = hovering
