@@ -21,6 +21,19 @@ struct FloatingPanelView: View {
     @State private var silencePromptDismissed = false  // Prevents re-showing after dismiss
     private let silenceThresholdSeconds: TimeInterval = 120  // 2 minutes
 
+    // MARK: - Computed Properties
+
+    /// Dynamic frame width based on state and meeting detection
+    private var frameWidth: CGFloat {
+        if pillStateManager.state == .reviewing {
+            return PillDimensions.trayWidth + 40
+        } else if pillStateManager.meetingDetected && pillStateManager.state == .idle {
+            return 260  // MeetingDetectedOverlay is 220px + padding
+        } else {
+            return PillDimensions.recordingWidth + 40
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // MARK: - Top Spacer (pushes content to bottom)
@@ -50,12 +63,30 @@ struct FloatingPanelView: View {
                 }
             }
 
-            // MARK: - Pill Content (centered, morphs between states)
-            pillContent
-                .animation(.pillMorph, value: pillStateManager.state)
+            // MARK: - Meeting Detection Overlay (replaces idle pill when detected)
+            if pillStateManager.meetingDetected && pillStateManager.state == .idle {
+                MeetingDetectedOverlay(
+                    onRecord: {
+                        pillStateManager.dismissMeetingDetection()
+                        audio.start()
+                    },
+                    onDismiss: {
+                        pillStateManager.dismissMeetingDetection()
+                    }
+                )
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.95).combined(with: .opacity),
+                    removal: .opacity
+                ))
                 .padding(.bottom, 10)
+            } else {
+                // MARK: - Pill Content (centered, morphs between states)
+                pillContent
+                    .animation(.pillMorph, value: pillStateManager.state)
+                    .padding(.bottom, 10)
+            }
         }
-        .frame(width: pillStateManager.state == .reviewing ? PillDimensions.trayWidth + 40 : PillDimensions.recordingWidth + 40)
+        .frame(width: frameWidth)
         .frame(maxHeight: .infinity, alignment: .bottom)
         .onChange(of: audio.silenceDuration) { _, duration in
             // UX: Don't interrupt user flow - show amber ring indicator without forcing panel expansion
@@ -71,9 +102,13 @@ struct FloatingPanelView: View {
         }
         // Trigger error toasts based on displayStatus changes
         // (Success is now shown in-pill via AuroraSuccessView, not as overlay)
+        // Note: Use Task to debounce rapid status changes and prevent
+        // "action tried to update multiple times per frame" warning
         .onChange(of: taskManager.displayStatus) { _, newStatus in
-            if case .failed(let message) = newStatus {
-                triggerErrorToast(message: message)
+            Task { @MainActor in
+                if case .failed(let message) = newStatus {
+                    triggerErrorToast(message: message)
+                }
             }
         }
     }
