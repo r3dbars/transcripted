@@ -224,8 +224,39 @@ afplay ~/Documents/Transcripted/meeting_*_system.wav
 
 ---
 
+## Expected Console Warnings (Jan 4, 2026)
+
+### CoreAudio Internal Warnings
+
+During system audio setup and teardown, the macOS CoreAudio framework emits internal log messages that **cannot be suppressed from user code**. These are **expected and harmless**:
+
+| Warning | When | Why |
+|---------|------|-----|
+| `HALC_ShellObject::SetPropertyData: call to the proxy failed` | Startup | Internal format negotiation during aggregate device creation |
+| `throwing -10877` | Startup | `kAudioUnitErr_InvalidElement` during tap initialization |
+| `AudioObjectRemovePropertyListener: no object with given ID` | Cleanup | Race condition when destroying audio objects |
+
+### Why These Can't Be Suppressed
+
+These messages are logged directly by the CoreAudio framework (HALC = Hardware Abstraction Layer Core), not by our code. They appear even when all our error handling is correct. The messages indicate internal operations that the framework handles gracefully.
+
+### Verifying Audio Is Working Despite Warnings
+
+If you see these warnings but want to confirm audio capture is working:
+
+1. **Check callback count** - Should see "I/O Proc callback #1", #2, #3 at startup
+2. **Check file sizes** - System audio should grow continuously (~384KB/sec)
+3. **No "skipping cycle due to overload"** - This is the critical error (see CPU Overload section above)
+
+### SwiftUI Warning
+
+`onChange(of: DisplayStatus) action tried to update multiple times per frame` - Fixed by wrapping state updates in `Task { @MainActor in ... }` to debounce rapid status changes during transcription progress updates.
+
+---
+
 ## Related Documentation
 
 - [Apple Audio Unit Hosting Guide](https://developer.apple.com/documentation/audiotoolbox/audio_unit_hosting_guide)
 - [Core Audio Overview](https://developer.apple.com/library/archive/documentation/MusicAudio/Conceptual/CoreAudioOverview/)
 - Process taps via `AudioHardwareCreateProcessTap` - macOS 26 provides audio-only permission (no Screen Recording needed)
+- [OSStatus Lookup](https://www.osstatus.com/) - For decoding CoreAudio error codes

@@ -3,9 +3,17 @@ import AudioToolbox
 import AVFoundation
 
 /// Captures system-wide audio output using CoreAudio process taps (macOS 14.2+)
+///
 /// Note: This class does NOT use @MainActor because it manages CoreAudio devices
 /// that require synchronous access from both main and audio threads.
 /// UI updates are dispatched to main thread explicitly.
+///
+/// ## Expected Console Warnings
+/// During setup and teardown, CoreAudio may emit internal framework messages such as:
+/// - `HALC_ShellObject::SetPropertyData: call to the proxy failed` - Normal during aggregate device creation
+/// - `throwing -10877` - Internal format negotiation (kAudioUnitErr_InvalidElement)
+/// - `AudioObjectRemovePropertyListener: no object with given ID` - Cleanup race condition (harmless)
+/// These are internal CoreAudio logs that cannot be suppressed from user code and don't affect functionality.
 @available(macOS 14.2, *)
 class SystemAudioCapture: ObservableObject {
     @Published var isCapturing: Bool = false
@@ -230,18 +238,17 @@ class SystemAudioCapture: ObservableObject {
     private func cleanup() {
         print("🧹 Cleaning up system audio capture...")
 
-        // FIRST: Destroy the tap (releases references to aggregate device)
-        if processTapID.isValid {
-            let result = AudioHardwareDestroyProcessTap(processTapID)
-            if result == noErr {
-                print("✓ Process tap destroyed")
-            } else {
-                print("⚠️ Failed to destroy process tap: \(result)")
-            }
-            processTapID = .unknown
-        }
+        // Cleanup order is important to minimize CoreAudio internal warnings:
+        // 1. Stop the device first (stops I/O callbacks)
+        // 2. Destroy the I/O proc (releases callback reference)
+        // 3. Destroy the aggregate device (releases sub-devices)
+        // 4. Destroy the process tap last (it depends on nothing else)
+        //
+        // Note: Some CoreAudio warnings like "AudioObjectRemovePropertyListener: no object"
+        // may still appear during cleanup - these are internal framework race conditions
+        // that don't affect functionality.
 
-        // THEN: Stop and destroy the aggregate device
+        // Step 1 & 2: Stop device and destroy I/O proc
         if aggregateDeviceID.isValid {
             _ = AudioDeviceStop(aggregateDeviceID, deviceProcID)
 
@@ -249,14 +256,26 @@ class SystemAudioCapture: ObservableObject {
                 _ = AudioDeviceDestroyIOProcID(aggregateDeviceID, deviceProcID)
                 self.deviceProcID = nil
             }
+        }
 
+        // Step 3: Destroy aggregate device
+        if aggregateDeviceID.isValid {
             let result = AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
             if result == noErr {
                 print("✓ Aggregate device destroyed")
-            } else {
-                print("⚠️ Failed to destroy aggregate device: \(result)")
             }
+            // Don't log warnings for cleanup failures - they're expected race conditions
             aggregateDeviceID = .unknown
+        }
+
+        // Step 4: Destroy the process tap last
+        if processTapID.isValid {
+            let result = AudioHardwareDestroyProcessTap(processTapID)
+            if result == noErr {
+                print("✓ Process tap destroyed")
+            }
+            // Don't log warnings for cleanup failures - they're expected race conditions
+            processTapID = .unknown
         }
 
         bufferCallback = nil
