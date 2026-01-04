@@ -119,10 +119,7 @@ struct FloatingPanelView: View {
             case .completed(let count):
                 AuroraSuccessView(successType: .tasksAdded(count: count))
             default:
-                AuroraProcessingView(
-                    status: taskManager.displayStatus,
-                    recordingDuration: audio.recordingDuration
-                )
+                AuroraProcessingView(status: taskManager.displayStatus)
             }
         case .reviewing:
             PillReviewingView(itemCount: taskManager.pendingReview?.totalCount ?? 0)
