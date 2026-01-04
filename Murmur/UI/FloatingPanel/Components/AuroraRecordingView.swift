@@ -11,7 +11,7 @@ struct AuroraRecordingView: View {
     let onStop: () -> Void
 
     @Environment(\.accessibilityReduceMotion) var reduceMotion
-    @State private var isExpanded = false
+    @State private var isExpanded = true  // Start expanded, auto-collapse after 5s
     @State private var isStopHovered = false
     @State private var isTasksHovered = false
     @State private var collapseTask: Task<Void, Never>?
@@ -54,7 +54,7 @@ struct AuroraRecordingView: View {
                 collapseTask = nil
                 isExpanded = true
             } else {
-                // Delay collapse by 1 second
+                // Start collapse timer when mouse leaves
                 collapseTask = Task {
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                     if !Task.isCancelled {
@@ -62,6 +62,15 @@ struct AuroraRecordingView: View {
                             isExpanded = false
                         }
                     }
+                }
+            }
+        }
+        .onAppear {
+            // Auto-collapse after 5 seconds of initial display
+            Task {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                await MainActor.run {
+                    isExpanded = false
                 }
             }
         }
