@@ -33,6 +33,7 @@ struct SettingsView: View {
     @AppStorage("deepgramAPIKey") private var deepgramAPIKey: String = ""
     @AppStorage("assemblyaiAPIKey") private var assemblyaiAPIKey: String = ""
     @AppStorage("useAuroraRecording") private var useAuroraRecording: Bool = false
+    @AppStorage("enableMeetingDetection") private var enableMeetingDetection: Bool = true
     @Environment(\.dismiss) private var dismiss
 
     // MARK: - Tab State
@@ -239,6 +240,31 @@ extension SettingsView {
                         }
                     }
                     .toggleStyle(.switch)
+                }
+            }
+
+            // Meeting Detection Card
+            SettingsCard(title: "Meeting Detection", icon: "person.2") {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    Toggle(isOn: $enableMeetingDetection) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Remind me to record meetings")
+                                .font(.bodySmall)
+                                .foregroundColor(.textOnCream)
+                            Text("Detects video calls and offers to record")
+                                .font(.caption)
+                                .foregroundColor(.textOnCreamMuted)
+                        }
+                    }
+                    .toggleStyle(.switch)
+
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "info.circle")
+                            .foregroundColor(.accentBlue)
+                        Text("Uses audio + app detection to minimize false positives")
+                            .font(.caption)
+                            .foregroundColor(.textOnCreamMuted)
+                    }
                 }
             }
         }
