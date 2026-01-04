@@ -278,7 +278,10 @@ class MeetingDetector: ObservableObject {
             let power = 20 * log10(max(rms, 0.00001))
             let level = max(0.0, min(1.0, (power + 60) / 60))
 
-            self.currentMicLevel = level
+            // Thread safety: dispatch to main thread since checkActivityWindow reads this
+            DispatchQueue.main.async {
+                self.currentMicLevel = level
+            }
         }
 
         do {
@@ -314,7 +317,10 @@ class MeetingDetector: ObservableObject {
                 let power = 20 * log10(max(rms, 0.00001))
                 let level = max(0.0, min(1.0, (power + 60) / 60))
 
-                self.currentSystemLevel = level
+                // Thread safety: dispatch to main thread since checkActivityWindow reads this
+                DispatchQueue.main.async {
+                    self.currentSystemLevel = level
+                }
             }
             print("🔊 Passive system audio monitor started")
         } catch {
