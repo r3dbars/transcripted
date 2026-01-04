@@ -6,6 +6,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **MEMORY.md** - Contains lessons learned and debugging references from past issues. **Check this file first when debugging audio, transcription, or performance issues.**
 
+## Behavioral Guidelines
+
+### Proactive Implementation
+By default, implement changes rather than only suggesting them. If intent is unclear, infer the most useful likely action and proceed, using tools to discover missing details instead of guessing.
+
+### Read Before Answering
+Never speculate about code you have not opened. If a specific file is referenced, read it before answering. Investigate and read relevant files BEFORE answering questions about the codebase. This is especially critical for this codebase given the nuanced CoreAudio and Speech framework APIs.
+
+### Work Summaries
+After completing a task that involves tool use (file edits, builds, searches), provide a quick summary of the work done.
+
+### Parallel Tool Execution
+When calling multiple tools with no dependencies between them, make all independent calls in parallel to maximize speed and efficiency.
+
+### No Overengineering
+Avoid over-engineering. Only make changes that are directly requested or clearly necessary:
+- Don't add features beyond what was asked
+- Don't refactor surrounding code unless explicitly requested
+- A bug fix doesn't need surrounding code cleaned up
+- A simple feature doesn't need extra configurability
+
 ## Project Overview
 
 **Transcripted** is a native macOS application that automatically records, transcribes, and organizes voice conversations from meetings and calls. The app supports both on-device transcription (Apple Speech framework) and cloud transcription services (Deepgram, AssemblyAI). It extracts action items from transcripts using Gemini AI and sends them to Apple Reminders or Todoist.
