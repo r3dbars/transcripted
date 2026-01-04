@@ -8,7 +8,6 @@ import SwiftUI
 @available(macOS 26.0, *)
 struct AuroraProcessingView: View {
     let status: DisplayStatus
-    let recordingDuration: TimeInterval
 
     @Environment(\.accessibilityReduceMotion) var reduceMotion
 
@@ -23,11 +22,6 @@ struct AuroraProcessingView: View {
     // Fixed expanded dimensions (no collapse for processing - users want to see status)
     private let width: CGFloat = 200
     private let height: CGFloat = 44
-
-    init(status: DisplayStatus, recordingDuration: TimeInterval = 0) {
-        self.status = status
-        self.recordingDuration = recordingDuration
-    }
 
     var body: some View {
         ZStack {
@@ -95,61 +89,20 @@ struct AuroraProcessingView: View {
     // MARK: - Content
 
     private var expandedContent: some View {
-        HStack(spacing: 0) {
-            // Duration display (left)
-            Text(formatDuration(recordingDuration))
-                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+        VStack(spacing: 2) {
+            Text(status.statusText)
+                .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.panelTextPrimary)
-                .frame(width: 60, alignment: .center)
+                .lineLimit(1)
 
-            Spacer()
-
-            // Status text (center)
-            VStack(spacing: 2) {
-                Text(status.statusText)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.panelTextPrimary)
+            // Warning text (if applicable)
+            if let warning = warningText {
+                Text(warning)
+                    .font(.system(size: 10, weight: .regular))
+                    .foregroundColor(.statusWarningMuted)
                     .lineLimit(1)
-
-                // Warning text (if applicable)
-                if let warning = warningText {
-                    Text(warning)
-                        .font(.system(size: 10, weight: .regular))
-                        .foregroundColor(.statusWarningMuted)
-                        .lineLimit(1)
-                }
-            }
-
-            Spacer()
-
-            // Estimated time (right) - optional
-            if let estimate = estimatedTimeRemaining {
-                Text(estimate)
-                    .font(.system(size: 11, weight: .regular))
-                    .foregroundColor(.panelTextMuted)
-                    .frame(width: 50, alignment: .center)
-            } else {
-                Spacer()
-                    .frame(width: 50)
             }
         }
-        .padding(.horizontal, 12)
-    }
-
-    // MARK: - Estimated Time
-
-    private var estimatedTimeRemaining: String? {
-        guard recordingDuration > 0 else { return nil }
-
-        // Rough estimate: processing takes ~10% of recording time
-        let estimatedTotal = recordingDuration * 0.1
-        let currentProgress = status.progress
-        let elapsedFraction = currentProgress
-        let estimatedRemaining = estimatedTotal * (1 - elapsedFraction)
-
-        if estimatedRemaining < 10 { return nil }  // Don't show if almost done
-        if estimatedRemaining < 60 { return "~\(Int(estimatedRemaining))s" }
-        return "~\(Int(estimatedRemaining / 60)) min"
     }
 
     // MARK: - Aurora Background
@@ -331,14 +284,6 @@ struct AuroraProcessingView: View {
         timerCancellable?.invalidate()
         timerCancellable = nil
     }
-
-    // MARK: - Format Helpers
-
-    private func formatDuration(_ duration: TimeInterval) -> String {
-        let minutes = Int(duration) / 60
-        let seconds = Int(duration) % 60
-        return String(format: "%02d:%02d", minutes, seconds)
-    }
 }
 
 // MARK: - Preview
@@ -350,10 +295,10 @@ struct AuroraProcessingView_Previews: PreviewProvider {
         ZStack {
             Color.black
             VStack(spacing: 20) {
-                AuroraProcessingView(status: .gettingReady, recordingDuration: 125)
-                AuroraProcessingView(status: .transcribing(progress: 0.45), recordingDuration: 125)
-                AuroraProcessingView(status: .findingActionItems, recordingDuration: 125)
-                AuroraProcessingView(status: .finishing, recordingDuration: 125)
+                AuroraProcessingView(status: .gettingReady)
+                AuroraProcessingView(status: .transcribing(progress: 0.45))
+                AuroraProcessingView(status: .findingActionItems)
+                AuroraProcessingView(status: .finishing)
             }
         }
         .frame(width: 400, height: 400)

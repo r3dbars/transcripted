@@ -47,11 +47,11 @@ enum DisplayStatus: Equatable {
         case .idle:
             return "Ready"
         case .gettingReady:
-            return "Getting ready..."
+            return "Preparing..."
         case .transcribing:
             return "Transcribing..."
         case .findingActionItems:
-            return "Finding action items..."
+            return "Finding tasks..."
         case .finishing:
             return "Almost done..."
         case .transcriptSaved:
