@@ -3,32 +3,37 @@ import UserNotifications
 
 // MARK: - Display Status for UI (Goal-Gradient Effect)
 // Users are more motivated when they can see visible progress
+// Simplified to 4 user-focused phases for cognitive clarity
 
 enum DisplayStatus: Equatable {
     case idle
-    case preparing                      // 0-10%: Loading audio files
-    case transcribing(progress: Double) // 10-70%: Active transcription
-    case extractingActionItems          // 70-90%: AI processing
-    case saving                         // 90-95%: Writing to disk
-    case transcriptSaved                // Complete but no action items
-    case pendingReview(itemCount: Int)  // Waiting for user to review action items
-    case completed(taskCount: Int)      // Complete with action items
-    case failed(message: String)        // Error state
+
+    // Processing phases (4 user-focused steps)
+    case gettingReady                    // 0-15%: Loading audio, initial setup
+    case transcribing(progress: Double)  // 15-75%: Active transcription
+    case findingActionItems              // 75-95%: AI analysis
+    case finishing                       // 95-100%: Saving, final steps
+
+    // Completion states
+    case transcriptSaved                 // Complete but no action items
+    case pendingReview(itemCount: Int)   // Waiting for user to review action items
+    case completed(taskCount: Int)       // Complete with action items
+    case failed(message: String)         // Error state
 
     /// Computed progress value (0.0 to 1.0) for UI progress bar
     var progress: Double {
         switch self {
         case .idle:
             return 0.0
-        case .preparing:
+        case .gettingReady:
             return 0.10
         case .transcribing(let p):
-            // Map transcription progress (0-1) to (0.10-0.70)
-            return 0.10 + (p * 0.60)
-        case .extractingActionItems:
-            return 0.80
-        case .saving:
-            return 0.95
+            // Map transcription progress (0-1) to (0.15-0.75)
+            return 0.15 + (p * 0.60)
+        case .findingActionItems:
+            return 0.85
+        case .finishing:
+            return 0.97
         case .transcriptSaved, .pendingReview, .completed:
             return 1.0
         case .failed:
@@ -36,24 +41,23 @@ enum DisplayStatus: Equatable {
         }
     }
 
-    /// User-friendly status text
+    /// User-friendly status text (outcome-oriented, not technical)
     var statusText: String {
         switch self {
         case .idle:
             return "Ready"
-        case .preparing:
-            return "Preparing..."
-        case .transcribing(let p):
-            let pct = Int(p * 100)
-            return "Transcribing (\(pct)%)"
-        case .extractingActionItems:
-            return "Extracting tasks..."
-        case .saving:
-            return "Saving..."
+        case .gettingReady:
+            return "Getting ready..."
+        case .transcribing:
+            return "Transcribing..."
+        case .findingActionItems:
+            return "Finding action items..."
+        case .finishing:
+            return "Almost done..."
         case .transcriptSaved:
             return "Saved"
         case .pendingReview(let count):
-            return "\(count) task\(count == 1 ? "" : "s") to review"
+            return "\(count) item\(count == 1 ? "" : "s") to review"
         case .completed(let count):
             return "\(count) task\(count == 1 ? "" : "s") added"
         case .failed(let message):
@@ -66,7 +70,7 @@ enum DisplayStatus: Equatable {
         switch self {
         case .idle:
             return "circle"
-        case .preparing, .transcribing, .extractingActionItems, .saving:
+        case .gettingReady, .transcribing, .findingActionItems, .finishing:
             return "arrow.triangle.2.circlepath"
         case .transcriptSaved:
             return "checkmark.circle.fill"
@@ -79,10 +83,10 @@ enum DisplayStatus: Equatable {
         }
     }
 
-    /// Whether this is a "processing" state (show progress bar)
+    /// Whether this is a "processing" state (show progress indicator)
     var isProcessing: Bool {
         switch self {
-        case .preparing, .transcribing, .extractingActionItems, .saving:
+        case .gettingReady, .transcribing, .findingActionItems, .finishing:
             return true
         default:
             return false
@@ -147,10 +151,10 @@ class TranscriptionTaskManager: ObservableObject {
     func startTranscription(micURL: URL, systemURL: URL?, outputFolder: URL) {
         let task = TranscriptionTask(micURL: micURL, systemURL: systemURL, outputFolder: outputFolder)
 
-        // Increment active count and set preparing status immediately (Goal-Gradient Effect)
+        // Increment active count and set initial status immediately (Goal-Gradient Effect)
         DispatchQueue.main.async {
             self.activeCount += 1
-            self.displayStatus = .preparing
+            self.displayStatus = .gettingReady
         }
 
         print("📝 Starting transcription task \(task.id) (active: \(activeCount))")
@@ -268,7 +272,7 @@ class TranscriptionTaskManager: ObservableObject {
 
         // Phase 2: Save transcript based on provider
         await MainActor.run {
-            self.displayStatus = .saving
+            self.displayStatus = .finishing
         }
 
         let transcriptURL: URL?
@@ -336,7 +340,7 @@ class TranscriptionTaskManager: ObservableObject {
 
         if !geminiApiKey.isEmpty && !transcriptionResult.allSpeakerIds.isEmpty {
             await MainActor.run {
-                self.displayStatus = .extractingActionItems  // Reuse status for "AI processing"
+                self.displayStatus = .findingActionItems  // AI processing phase
             }
 
             print("📋 Phase 2: Identifying \(transcriptionResult.allSpeakerIds.count) speakers with Gemini...")
@@ -372,7 +376,7 @@ class TranscriptionTaskManager: ObservableObject {
 
         // Phase 3: Save transcript WITH speaker names
         await MainActor.run {
-            self.displayStatus = .saving
+            self.displayStatus = .finishing
         }
 
         guard let transcriptURL = TranscriptSaver.saveRichAssemblyAITranscript(
@@ -415,7 +419,7 @@ class TranscriptionTaskManager: ObservableObject {
         // Increment retry count
         await MainActor.run {
             failedTranscriptionManager.incrementRetryCount(id: failedId)
-            self.displayStatus = .preparing
+            self.displayStatus = .gettingReady
         }
 
         // Get output folder (same as original)
@@ -598,9 +602,9 @@ class TranscriptionTaskManager: ObservableObject {
             }
         }
 
-        // Update status to show we're extracting action items
+        // Update status to show we're finding action items
         await MainActor.run {
-            self.displayStatus = .extractingActionItems
+            self.displayStatus = .findingActionItems
         }
 
         do {

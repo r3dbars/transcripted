@@ -2,15 +2,6 @@ import SwiftUI
 
 // MARK: - SwiftUI View
 
-// MARK: - Celebration State (consolidated)
-
-/// Single enum for all celebration overlays - prevents state explosion
-enum CelebrationState: Equatable {
-    case none
-    case transcriptSaved
-    case actionItemsCreated(count: Int)
-}
-
 @available(macOS 26.0, *)
 struct FloatingPanelView: View {
     @ObservedObject var taskManager: TranscriptionTaskManager
@@ -20,9 +11,6 @@ struct FloatingPanelView: View {
 
     // User preference for aurora recording indicator
     @AppStorage("useAuroraRecording") private var useAuroraRecording: Bool = false
-
-    // Consolidated celebration state (replaces 3 separate @State vars)
-    @State private var celebrationState: CelebrationState = .none
 
     // Toast notification state
     @State private var showErrorToast = false
@@ -47,16 +35,10 @@ struct FloatingPanelView: View {
                     ))
             }
 
-            // MARK: - Celebration Overlays & Toast (float above pill)
+            // MARK: - Toast Notifications (float above pill)
             ZStack {
                 Color.clear
                     .frame(height: pillStateManager.state == .reviewing ? 0 : 60)
-
-                // Single celebration overlay based on consolidated state
-                if celebrationState != .none && pillStateManager.state != .reviewing {
-                    celebrationOverlay
-                        .transition(.scale.combined(with: .opacity))
-                }
 
                 // Toast notification for errors (appears above pill, auto-dismisses)
                 if showErrorToast, let error = currentError {
@@ -87,49 +69,16 @@ struct FloatingPanelView: View {
                 silencePromptDismissed = false
             }
         }
-        // Trigger celebrations and toasts based on displayStatus changes
+        // Trigger error toasts based on displayStatus changes
+        // (Success is now shown in-pill via AuroraSuccessView, not as overlay)
         .onChange(of: taskManager.displayStatus) { _, newStatus in
-            switch newStatus {
-            case .transcriptSaved:
-                triggerCelebration(.transcriptSaved, duration: 2.0)
-            case .completed(let count):
-                triggerCelebration(.actionItemsCreated(count: count), duration: 3.0)
-            case .failed(let message):
+            if case .failed(let message) = newStatus {
                 triggerErrorToast(message: message)
-            default:
-                break
-            }
-        }
-        // Clear celebrations immediately when pill state changes
-        .onChange(of: pillStateManager.state) { _, _ in
-            celebrationState = .none
-        }
-    }
-
-    // MARK: - Celebration
-
-    /// Computed overlay view based on current celebration state
-    @ViewBuilder
-    private var celebrationOverlay: some View {
-        switch celebrationState {
-        case .none:
-            EmptyView()
-        case .transcriptSaved:
-            CelebrationOverlay(celebrationType: .transcriptSaved, isVisible: true)
-        case .actionItemsCreated(let count):
-            CelebrationOverlay(celebrationType: .actionItemsCreated(count: count), isVisible: true)
-        }
-    }
-
-    /// Unified celebration trigger - shows overlay then auto-dismisses
-    private func triggerCelebration(_ state: CelebrationState, duration: TimeInterval) {
-        celebrationState = state
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
-            if celebrationState == state {  // Only clear if still showing same celebration
-                celebrationState = .none
             }
         }
     }
+
+    // MARK: - Error Toast
 
     /// Trigger error toast notification - parses message into contextual error
     private func triggerErrorToast(message: String) {
@@ -163,7 +112,18 @@ struct FloatingPanelView: View {
                 }
             }
         case .processing:
-            PillProcessingView(status: taskManager.displayStatus)
+            // Show success view for success states, processing aurora otherwise
+            switch taskManager.displayStatus {
+            case .transcriptSaved:
+                AuroraSuccessView(successType: .transcriptSaved)
+            case .completed(let count):
+                AuroraSuccessView(successType: .tasksAdded(count: count))
+            default:
+                AuroraProcessingView(
+                    status: taskManager.displayStatus,
+                    recordingDuration: audio.recordingDuration
+                )
+            }
         case .reviewing:
             PillReviewingView(itemCount: taskManager.pendingReview?.totalCount ?? 0)
         }
