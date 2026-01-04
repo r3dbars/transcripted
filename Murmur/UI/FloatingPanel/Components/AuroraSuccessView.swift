@@ -38,7 +38,7 @@ struct AuroraSuccessView: View {
                     .scaleEffect(checkScale)
                     .opacity(checkOpacity)
 
-                // Text content
+                // Text content - fixedSize prevents truncation
                 VStack(alignment: .leading, spacing: 2) {
                     Text(primaryText)
                         .font(.system(size: 14, weight: .semibold))
@@ -52,6 +52,7 @@ struct AuroraSuccessView: View {
                             .opacity(textOpacity)
                     }
                 }
+                .fixedSize(horizontal: true, vertical: false)
 
                 Spacer()
             }
@@ -70,7 +71,7 @@ struct AuroraSuccessView: View {
     private var primaryText: String {
         switch successType {
         case .transcriptSaved:
-            return "Transcription saved"
+            return "Saved"
         case .tasksAdded(let count):
             return "\(count) task\(count == 1 ? "" : "s") added"
         }
@@ -79,7 +80,7 @@ struct AuroraSuccessView: View {
     private var secondaryText: String? {
         switch successType {
         case .transcriptSaved:
-            return "No action items found"
+            return "No tasks found"
         case .tasksAdded:
             return nil
         }
@@ -146,9 +147,9 @@ struct AuroraSuccessView: View {
     private var accessibilityText: String {
         switch successType {
         case .transcriptSaved:
-            return "Transcript saved successfully. No action items found."
+            return "Transcript saved. No tasks found."
         case .tasksAdded(let count):
-            return "\(count) task\(count == 1 ? "" : "s") added successfully"
+            return "\(count) task\(count == 1 ? "" : "s") added"
         }
     }
 }
