@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import EventKit
+import Combine
 
 @available(macOS 26.0, *)
 @main
@@ -24,6 +25,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var audio: Audio?
     var settingsWindow: NSWindow?
     var failedTranscriptionsWindow: NSWindow?
+
+    // Meeting detection
+    var meetingDetector: MeetingDetector?
+    private var cancellables = Set<AnyCancellable>()
 
     // Onboarding
     var onboardingWindowController: OnboardingWindowController?
@@ -96,6 +101,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             failedTranscriptionManager: failedTranscriptionManager!
         )
         floatingPanel?.showWindow(nil)
+
+        // Set up meeting detection (if enabled in settings)
+        setupMeetingDetection()
+    }
+
+    // MARK: - Meeting Detection
+
+    /// Set up intelligent meeting detection
+    private func setupMeetingDetection() {
+        guard let audio = audio,
+              let pillStateManager = floatingPanel?.pillStateManager else { return }
+
+        // Check if meeting detection is enabled (defaults to true)
+        guard UserDefaults.standard.object(forKey: "enableMeetingDetection") as? Bool ?? true else {
+            print("🔍 Meeting detection disabled in settings")
+            return
+        }
+
+        // Create meeting detector
+        meetingDetector = MeetingDetector(audio: audio)
+
+        // Wire up to pill state manager
+        pillStateManager.setMeetingDetector(meetingDetector!)
+
+        // Subscribe to detection changes
+        meetingDetector?.$isMeetingDetected
+            .receive(on: DispatchQueue.main)
+            .sink { [weak pillStateManager] detected in
+                pillStateManager?.meetingDetected = detected
+            }
+            .store(in: &cancellables)
+
+        // Start detection
+        meetingDetector?.startDetection()
+        print("✅ Meeting detection started")
     }
 
     #if DEBUG
