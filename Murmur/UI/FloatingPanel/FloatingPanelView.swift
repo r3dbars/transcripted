@@ -27,9 +27,8 @@ struct FloatingPanelView: View {
     private var frameWidth: CGFloat {
         if pillStateManager.state == .reviewing {
             return PillDimensions.trayWidth + 40
-        } else if pillStateManager.meetingDetected && pillStateManager.state == .idle {
-            return 260  // MeetingDetectedOverlay is 220px + padding
         } else {
+            // Both meeting detected overlay and recording pill use same width (180px)
             return PillDimensions.recordingWidth + 40
         }
     }
