@@ -114,7 +114,7 @@ struct LawsStatusTextView: View {
         switch status {
         case .idle:
             return .accentBlue
-        case .preparing, .transcribing, .extractingActionItems, .saving:
+        case .gettingReady, .transcribing, .findingActionItems, .finishing:
             return .statusProcessingMuted
         case .transcriptSaved, .completed:
             return .statusSuccessMuted
@@ -134,4 +134,77 @@ struct LawsStatusTextView: View {
 
 extension Color {
     static let retroGreen = Color(red: 0.2, green: 0.8, blue: 0.2)
+}
+
+// MARK: - Custom Floating Tooltip (for non-activating panels)
+
+/// Custom tooltip modifier that works with non-activating floating panels
+/// Shows tooltip above the view after 1 second hover delay
+struct FloatingTooltipModifier: ViewModifier {
+    let text: String
+    let delay: TimeInterval
+
+    @State private var isHovered = false
+    @State private var showTooltip = false
+    @State private var hoverTask: Task<Void, Never>?
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .top) {
+                if showTooltip {
+                    tooltipView
+                        .offset(y: -32)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                        .zIndex(1000)
+                }
+            }
+            .onHover { hovering in
+                isHovered = hovering
+
+                if hovering {
+                    // Start delay timer
+                    hoverTask = Task {
+                        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                        if !Task.isCancelled && isHovered {
+                            withAnimation(.easeOut(duration: 0.15)) {
+                                showTooltip = true
+                            }
+                        }
+                    }
+                } else {
+                    // Cancel timer and hide tooltip
+                    hoverTask?.cancel()
+                    hoverTask = nil
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        showTooltip = false
+                    }
+                }
+            }
+    }
+
+    private var tooltipView: some View {
+        Text(text)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(.white)
+            .fixedSize()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color(white: 0.15))
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(Color.white.opacity(0.2), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
+    }
+}
+
+extension View {
+    /// Adds a custom floating tooltip that works with non-activating panels
+    /// - Parameters:
+    ///   - text: The tooltip text to display
+    ///   - delay: Delay in seconds before showing (default: 1.0)
+    func floatingTooltip(_ text: String, delay: TimeInterval = 1.0) -> some View {
+        modifier(FloatingTooltipModifier(text: text, delay: delay))
+    }
 }

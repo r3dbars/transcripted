@@ -29,6 +29,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var onboardingWindowController: OnboardingWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Configure tooltip delay to 1 second
+        UserDefaults.standard.set(1000, forKey: "NSInitialToolTipDelay")
+
         NSApp.setActivationPolicy(.accessory)
 
         // Check if onboarding is needed
