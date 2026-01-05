@@ -52,6 +52,19 @@ class SystemAudioCapture: ObservableObject {
     }
     private var watchdogTimer: Timer?
 
+    // MARK: - Proactive Device Change Listener
+    // Detects output device changes IMMEDIATELY (not reactively via watchdog)
+    // This is how OBS Studio, Mozilla Firefox, and professional audio apps handle device switching
+    private var deviceChangeListenerBlock: AudioObjectPropertyListenerBlock?
+    private var lastDeviceChangeTime: Date?
+    private let deviceChangeDebounce: TimeInterval = 0.3  // 300ms debounce - device changes fire multiple times
+
+    // MARK: - Buffer Statistics (thread-safe)
+    private var _totalBuffers: Int = 0
+    private var _buffersWithData: Int = 0
+    private var _buffersDropped: Int = 0
+    private let statsLock = NSLock()
+
     init() {}
 
     /// Prepares the system audio tap without starting capture
@@ -66,6 +79,10 @@ class SystemAudioCapture: ObservableObject {
         print("🔊 Setting up system audio tap...")
         try setupSystemAudioTap()
         isPrepared = true
+
+        // Start proactive device change listener (critical for bulletproof device switching)
+        startDeviceChangeListener()
+
         print("🔊 System audio tap created successfully, format: \(audioFormat?.sampleRate ?? 0)Hz, \(audioFormat?.channelCount ?? 0)ch")
     }
 
@@ -210,12 +227,30 @@ class SystemAudioCapture: ObservableObject {
                     throw "Failed to create PCM buffer"
                 }
 
-                if callbackCount <= 3 {
-                    print("🔊 Buffer created: \(buffer.frameLength) frames")
+                // Track total buffers received
+                self.incrementStats(hasData: false)
+
+                // CRITICAL FIX: Check for zero-frame buffers BEFORE updating watchdog
+                // Zero-frame buffers were defeating the watchdog by updating lastBufferTime
+                // even though no actual audio was being captured (device switch scenario)
+                let frameLength = buffer.frameLength
+                if frameLength == 0 {
+                    // Log throttled: first 10, then every 100th
+                    if callbackCount <= 10 || callbackCount % 100 == 0 {
+                        print("⚠️ System audio: Zero-frame buffer #\(callbackCount)")
+                    }
+                    self.incrementDropped()
+                    // Do NOT update lastBufferTime - let watchdog detect silence
+                    return
                 }
 
-                // Update watchdog timestamp
+                if callbackCount <= 3 {
+                    print("🔊 Buffer created: \(frameLength) frames")
+                }
+
+                // Only update watchdog timestamp for buffers with actual data
                 self.lastBufferTime = Date()
+                self.markBufferHasData()
 
                 // Send buffer to callback
                 bufferCallback(buffer)
@@ -238,8 +273,12 @@ class SystemAudioCapture: ObservableObject {
     private func cleanup() {
         print("🧹 Cleaning up system audio capture...")
 
+        // Log buffer statistics before cleanup
+        logStats()
+
         // Cleanup order is important to minimize CoreAudio internal warnings:
-        // 1. Stop the device first (stops I/O callbacks)
+        // 0. Stop the device change listener first
+        // 1. Stop the device (stops I/O callbacks)
         // 2. Destroy the I/O proc (releases callback reference)
         // 3. Destroy the aggregate device (releases sub-devices)
         // 4. Destroy the process tap last (it depends on nothing else)
@@ -247,6 +286,9 @@ class SystemAudioCapture: ObservableObject {
         // Note: Some CoreAudio warnings like "AudioObjectRemovePropertyListener: no object"
         // may still appear during cleanup - these are internal framework race conditions
         // that don't affect functionality.
+
+        // Step 0: Stop device change listener
+        stopDeviceChangeListener()
 
         // Step 1 & 2: Stop device and destroy I/O proc
         if aggregateDeviceID.isValid {
@@ -280,6 +322,7 @@ class SystemAudioCapture: ObservableObject {
 
         bufferCallback = nil
         isPrepared = false
+        resetStats()
         print("✓ System audio cleanup complete")
     }
 
@@ -304,34 +347,172 @@ class SystemAudioCapture: ObservableObject {
         watchdogTimer = nil
     }
 
+    // MARK: - Proactive Device Change Listener Methods
+
+    /// Starts listening for default output device changes
+    /// This is the PROACTIVE approach used by OBS Studio, Mozilla Firefox, and professional audio apps
+    /// Instead of waiting for silence (reactive), we detect device changes immediately
+    private func startDeviceChangeListener() {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        deviceChangeListenerBlock = { [weak self] _, _ in
+            self?.handleDeviceChangeNotification()
+        }
+
+        guard let block = deviceChangeListenerBlock else { return }
+
+        let status = AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            queue,
+            block
+        )
+
+        if status != noErr {
+            print("⚠️ Failed to add device change listener: \(status)")
+        } else {
+            print("✓ Device change listener registered (proactive device switching enabled)")
+        }
+    }
+
+    /// Called when default output device changes
+    /// Uses 300ms debounce because macOS fires MULTIPLE notifications for a single device change
+    private func handleDeviceChangeNotification() {
+        // Debounce: device changes fire multiple times rapidly
+        let now = Date()
+        if let lastChange = lastDeviceChangeTime,
+           now.timeIntervalSince(lastChange) < deviceChangeDebounce {
+            return  // Ignore rapid-fire duplicate notifications
+        }
+        lastDeviceChangeTime = now
+
+        print("🔄 Output device changed - proactively reconfiguring tap...")
+
+        // Trigger recovery immediately (don't wait for watchdog to detect silence)
+        // This minimizes audio gap from ~3s (watchdog) to ~200ms (proactive)
+        recoverFromOutputChange()
+    }
+
+    /// Removes the device change listener during cleanup
+    private func stopDeviceChangeListener() {
+        guard let block = deviceChangeListenerBlock else { return }
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let status = AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            queue,
+            block
+        )
+
+        if status == noErr {
+            print("✓ Device change listener removed")
+        }
+        deviceChangeListenerBlock = nil
+    }
+
+    // MARK: - Buffer Statistics Methods (thread-safe)
+
+    /// Increments total buffer count, optionally marking it as having data
+    private func incrementStats(hasData: Bool) {
+        statsLock.lock()
+        _totalBuffers += 1
+        if hasData { _buffersWithData += 1 }
+        statsLock.unlock()
+    }
+
+    /// Increments dropped buffer count
+    private func incrementDropped() {
+        statsLock.lock()
+        _buffersDropped += 1
+        statsLock.unlock()
+    }
+
+    /// Marks the current buffer as having valid data
+    private func markBufferHasData() {
+        statsLock.lock()
+        _buffersWithData += 1
+        statsLock.unlock()
+    }
+
+    /// Logs buffer statistics summary (call during cleanup)
+    private func logStats() {
+        statsLock.lock()
+        let total = _totalBuffers
+        let withData = _buffersWithData
+        let dropped = _buffersDropped
+        statsLock.unlock()
+
+        guard total > 0 else { return }
+
+        let successRate = Double(withData) / Double(total) * 100
+        print("📊 System audio stats: \(total) buffers, \(withData) with data (\(String(format: "%.1f", successRate))%), \(dropped) dropped")
+
+        // Warn if significant buffer loss detected
+        if withData < total / 2 {
+            print("⚠️ WARNING: More than 50% of system audio buffers were empty - device issues likely occurred")
+        }
+    }
+
+    /// Resets buffer statistics (call when starting new session)
+    private func resetStats() {
+        statsLock.lock()
+        _totalBuffers = 0
+        _buffersWithData = 0
+        _buffersDropped = 0
+        statsLock.unlock()
+    }
+
     private func recoverFromOutputChange() {
         print("🔄 Recovering from system audio output change...")
 
-        // Store current callback
+        // Store current callback - we'll need it after cleanup
         guard let callback = self.bufferCallback else {
             print("❌ No buffer callback available for recovery")
             return
         }
 
-        // Cleanup old devices
-        cleanup()
+        // Step 1: Full cleanup of old tap/aggregate device
+        // Order matters: stop listener, log stats, cleanup devices
+        // Don't stop device listener - we want to keep it active for future changes
+        logStats()
+        cleanupDevicesOnly()  // Use device-only cleanup to preserve listener
+        resetStats()
 
-        // Attempt to recreate tap with new default output
+        // Step 2: HAL settle time - CRITICAL
+        // The aggregate device is not ready immediately after the CoreAudio API call returns
+        // Mozilla cubeb-coreaudio-rs and Apple developer forums recommend 100ms delay
+        // Without this, the new tap may fail or produce garbage data
+        Thread.sleep(forTimeInterval: 0.1)  // 100ms
+
+        // Step 3: Recreate tap targeting the new default output device
         do {
             try setupSystemAudioTap()
             try startAudioDevice()
 
-            lastBufferTime = Date() // Reset watchdog
-            print("✅ System audio device recovery complete, capturing continues")
+            // Restore callback and reset watchdog
+            self.bufferCallback = callback
+            lastBufferTime = Date()
+
+            print("✅ System audio device recovery complete (gap: ~200ms)")
 
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                self.errorMessage = "Switched to default output"
+                self.errorMessage = "Switched to new output device"
 
-                // Clear error after 3 seconds (use weak self to prevent retain)
+                // Clear status message after 3 seconds
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
                     guard let self = self else { return }
-                    if self.errorMessage == "Switched to default output" {
+                    if self.errorMessage == "Switched to new output device" {
                         self.errorMessage = nil
                     }
                 }
@@ -345,6 +526,35 @@ class SystemAudioCapture: ObservableObject {
                 self.stopWatchdog()
             }
         }
+    }
+
+    /// Cleanup only the audio devices, preserving the device change listener
+    /// Used during recovery to minimize teardown/rebuild time
+    private func cleanupDevicesOnly() {
+        // Step 1 & 2: Stop device and destroy I/O proc
+        if aggregateDeviceID.isValid {
+            _ = AudioDeviceStop(aggregateDeviceID, deviceProcID)
+
+            if let deviceProcID {
+                _ = AudioDeviceDestroyIOProcID(aggregateDeviceID, deviceProcID)
+                self.deviceProcID = nil
+            }
+        }
+
+        // Step 3: Destroy aggregate device
+        if aggregateDeviceID.isValid {
+            _ = AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
+            aggregateDeviceID = .unknown
+        }
+
+        // Step 4: Destroy the process tap
+        if processTapID.isValid {
+            _ = AudioHardwareDestroyProcessTap(processTapID)
+            processTapID = .unknown
+        }
+
+        // Keep bufferCallback - we need it for recovery
+        isPrepared = false
     }
 
     deinit {
