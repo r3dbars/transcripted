@@ -29,7 +29,7 @@ Avoid over-engineering. Only make changes that are directly requested or clearly
 
 ## Project Overview
 
-**Transcripted** is a native macOS application that automatically records, transcribes, and organizes voice conversations from meetings and calls. The app supports both on-device transcription (Apple Speech framework) and cloud transcription services (Deepgram, AssemblyAI). It extracts action items from transcripts using Gemini AI and sends them to Apple Reminders or Todoist.
+**Transcripted** is a native macOS application that automatically records, transcribes, and organizes voice conversations from meetings and calls. The app uses Deepgram for cloud transcription with multichannel speaker diarization. It extracts action items from transcripts using Gemini AI and sends them to Apple Reminders or Todoist.
 
 ## Build & Run Commands
 
@@ -65,27 +65,28 @@ Murmur/Core/SystemAudioCapture.swift → System-wide audio via CoreAudio process
                                      → Creates aggregate device with tap
                                      → Captures all system audio including meeting apps
 
-Murmur/Core/Transcription.swift      → Apple SFSpeechRecognizer (on-device)
-                                     → Processes 45-second chunks (API limit)
-                                     → Groups into sentences based on punctuation/pauses
+Murmur/Core/Transcription.swift      → Deepgram multichannel transcription
+                                     → Merges mic + system audio into stereo
+                                     → Speaker diarization per channel
 
 Murmur/Core/TranscriptSaver.swift    → Outputs markdown with YAML frontmatter
                                      → Saves to ~/Documents/Transcripted/
 ```
 
-### Transcription Providers
+### Transcription Provider
 
-The app supports three transcription engines (configurable in Settings):
+The app uses **Deepgram** for cloud transcription with multichannel support:
 
-| Provider | Type | Features |
-|----------|------|----------|
-| Apple | On-device | 100% private, no internet, identifies speakers by audio source only |
-| Deepgram | Cloud | Speaker diarization, sentiment, entities, topics, intents, summaries |
-| AssemblyAI | Cloud | Speaker diarization, sentiment, chapters, entity detection |
+| Feature | Description |
+|---------|-------------|
+| Model | Nova-3 with smart formatting |
+| Multichannel | Mic (ch0) + System audio (ch1) in stereo |
+| Diarization | Speaker identification within each channel |
+| Retry | Exponential backoff (2s, 4s, 8s) for 408, 429, 500-504 |
 
-**Services:**
-- `Murmur/Services/DeepgramService.swift` - Nova-2 model, exponential retry (2s, 4s, 8s)
-- `Murmur/Services/AssemblyAIService.swift` - Upload-poll architecture, 30min timeout
+**Service:** `Murmur/Services/DeepgramService.swift`
+
+**Note:** System audio is required for transcription. The app will prompt for Screen Recording permission.
 
 ### State Management
 
@@ -170,14 +171,13 @@ User settings stored in `UserDefaults`:
 | Key | Description |
 |-----|-------------|
 | `transcriptSaveLocation` | Custom output folder path |
-| `transcriptionProvider` | "apple", "deepgram", or "assemblyai" |
-| `deepgramAPIKey` | Deepgram API key (if using Deepgram) |
-| `assemblyaiAPIKey` | AssemblyAI API key (if using AssemblyAI) |
-| `geminiAPIKey` | API key for action item extraction |
+| `deepgramAPIKey` | Deepgram API key for transcription |
+| `geminiAPIKey` | Gemini API key for action item extraction |
 | `taskService` | "reminders" or "todoist" |
 | `todoistAPIKey` | Todoist API key (if using Todoist) |
 | `userName` | User's name for action item attribution |
 | `hasCompletedOnboarding` | Onboarding completion flag |
+| `enableMeetingDetection` | Enable/disable meeting detection prompt |
 
 ## Debug Features
 
@@ -216,7 +216,6 @@ Timeline entries: `[MM:SS] [Mic/SysAudio/Speaker X] Text`
 
 ### Cloud Service Retry Logic
 - **Deepgram**: Automatic retry with exponential backoff (2s, 4s, 8s) for status codes 408, 429, 500-504
-- **AssemblyAI**: Polls every 3 seconds, 30-minute timeout for processing
 
 ## File Organization
 
@@ -225,7 +224,7 @@ Murmur/
 ├── Core/              # Audio, transcription, clipboard, validators
 ├── Design/            # DesignTokens, PremiumComponents
 ├── Onboarding/        # Steps/, Animations/, OnboardingState
-├── Services/          # RemindersService, TodoistService, DeepgramService, AssemblyAIService
+├── Services/          # RemindersService, TodoistService, DeepgramService
 ├── UI/                # FloatingPanel, Settings, FailedTranscriptionsView
 ├── TranscriptedApp.swift   # App entry point (AppDelegate pattern)
 └── Transcripted.entitlements
