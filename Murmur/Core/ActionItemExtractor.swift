@@ -85,7 +85,7 @@ struct SpeakerIdentificationResult: Codable {
 /// Individual speaker identified in the call
 struct IdentifiedSpeaker: Codable {
     let name: String
-    let speakerId: String?   // "A", "B", "C" - maps to AssemblyAI's speaker labels
+    let speakerId: String?   // "0", "1", "2" - maps to Deepgram's speaker IDs
     let confidence: String   // "high" or "medium"
     let evidence: String     // The quote/moment that revealed the name
 }
@@ -154,22 +154,22 @@ enum ActionItemExtractor {
           "speakers": [
             {
               "name": "Jack",
-              "speakerId": "A",
+              "speakerId": "0",
               "confidence": "high",
               "evidence": "[00:18] Greeting - 'Hey Jack, how's it going?'"
             },
             {
               "name": "Sarah",
-              "speakerId": "B",
+              "speakerId": "1",
               "confidence": "medium",
               "evidence": "[01:45] Direct address - 'Sarah, what do you think?'"
             }
           ],
-          "userSpeakerId": "A"
+          "userSpeakerId": "0"
         }
         ```
 
-        - **speakerId**: The detected speaker label (A, B, C, etc.) - match to [Speaker X] in transcript
+        - **speakerId**: The detected speaker number (0, 1, 2, etc.) - match to [System/Speaker 0] in transcript
         - **confidence**: "high" = explicitly named, "medium" = inferred from context
         - **evidence**: Include timestamp from transcript to verify speaker mapping
         - **userSpeakerId**: Which speaker ID is \(userName), if identifiable (null if uncertain)
@@ -323,16 +323,32 @@ enum ActionItemExtractor {
     // MARK: - Main Extract Function (Two-Pass Pipeline)
 
     /// Extract action items from transcript using two-pass Gemini AI pipeline
-    static func extract(from transcript: String, apiKey: String) async throws -> ExtractionResult {
+    /// - Parameters:
+    ///   - transcript: The transcript text to analyze
+    ///   - apiKey: Gemini API key
+    ///   - preIdentifiedSpeakers: Optional pre-identified speakers (skips Pass 1 if provided)
+    /// - Returns: ExtractionResult with action items and meeting metadata
+    static func extract(
+        from transcript: String,
+        apiKey: String,
+        preIdentifiedSpeakers: SpeakerIdentificationResult? = nil
+    ) async throws -> ExtractionResult {
         // Get user's configured name
         let userName = UserDefaults.standard.string(forKey: "userName")
         let effectiveUserName = (userName?.isEmpty ?? true) ? "You" : userName!
 
-        // Pass 1: Identify speakers (lightweight - just returns speaker names and timestamps)
-        print("📋 Pass 1: Identifying speakers...")
-        let speakerResult = try await identifySpeakers(from: transcript, userName: effectiveUserName, apiKey: apiKey)
-        let speakerNames = speakerResult.speakers.map { $0.name }
-        print("📋 Pass 1 complete: Found \(speakerResult.speakers.count) speakers: \(speakerNames.joined(separator: ", "))")
+        // Pass 1: Identify speakers (skip if pre-identified)
+        let speakerResult: SpeakerIdentificationResult
+        if let preIdentified = preIdentifiedSpeakers {
+            speakerResult = preIdentified
+            let speakerNames = speakerResult.speakers.map { $0.name }
+            print("📋 Pass 1: Using \(speakerResult.speakers.count) pre-identified speakers: \(speakerNames.joined(separator: ", "))")
+        } else {
+            print("📋 Pass 1: Identifying speakers...")
+            speakerResult = try await identifySpeakers(from: transcript, userName: effectiveUserName, apiKey: apiKey)
+            let speakerNames = speakerResult.speakers.map { $0.name }
+            print("📋 Pass 1 complete: Found \(speakerResult.speakers.count) speakers: \(speakerNames.joined(separator: ", "))")
+        }
 
         // Apply speaker attributions locally (fast, no API call)
         let attributedTranscript = applyAttributions(to: transcript, speakers: speakerResult.speakers)
@@ -352,10 +368,10 @@ enum ActionItemExtractor {
         return try await identifySpeakers(from: transcript, speakerIds: [], userName: userName, apiKey: apiKey)
     }
 
-    /// Identify speakers from transcript with known speaker IDs from AssemblyAI
+    /// Identify speakers from transcript with known speaker IDs from Deepgram
     /// - Parameters:
     ///   - transcript: The transcript text with speaker labels
-    ///   - speakerIds: List of speaker IDs detected by AssemblyAI (e.g., ["A", "B", "C"])
+    ///   - speakerIds: List of speaker IDs detected by Deepgram (e.g., ["0", "1", "2"])
     ///   - userName: The configured user name
     ///   - apiKey: Gemini API key
     /// - Returns: SpeakerIdentificationResult with mappings
@@ -379,6 +395,30 @@ enum ActionItemExtractor {
             print("⚠️ Pass 1 parsing failed, using empty speaker list: \(error)")
             return SpeakerIdentificationResult(speakers: [], userSpeakerId: nil)
         }
+    }
+
+    // MARK: - Convert Speaker Identification to Mappings
+
+    /// Convert Gemini speaker identification result to TranscriptSaver format
+    /// - Parameters:
+    ///   - result: Speaker identification result from Gemini
+    ///   - channel: Channel prefix for mapping keys ("system" or "mic")
+    /// - Returns: Dictionary with keys like "system_0", "system_1"
+    static func toSpeakerMappings(
+        _ result: SpeakerIdentificationResult,
+        channel: String = "system"
+    ) -> [String: SpeakerMapping] {
+        var mappings: [String: SpeakerMapping] = [:]
+        for speaker in result.speakers {
+            guard let id = speaker.speakerId else { continue }
+            let key = "\(channel)_\(id)"
+            mappings[key] = SpeakerMapping(
+                speakerId: id,
+                identifiedName: speaker.name,
+                confidence: speaker.confidence
+            )
+        }
+        return mappings
     }
 
     // MARK: - Apply Speaker Attributions Locally

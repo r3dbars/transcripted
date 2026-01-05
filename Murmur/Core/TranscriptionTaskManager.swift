@@ -133,6 +133,9 @@ class TranscriptionTaskManager: ObservableObject {
     // PHASE 3 FIX: Deferred items from previous review (merged into next review instead of auto-submitted)
     private var deferredActionItems: [SelectableActionItem] = []
 
+    // Cache speaker identification result from transcription phase to reuse in action item extraction
+    private var cachedSpeakerResult: SpeakerIdentificationResult?
+
     private var activeTasks: [UUID: Task<Void, Never>] = [:]
     private let transcription = Transcription()
 
@@ -212,6 +215,31 @@ class TranscriptionTaskManager: ObservableObject {
 
     // MARK: - Deepgram Multichannel Transcription Pipeline
 
+    /// Format Deepgram result as text for Gemini speaker identification
+    /// Uses same format as saved transcript so Gemini can match speaker IDs
+    nonisolated private static func formatForSpeakerIdentification(_ result: DeepgramMultichannelResult) -> String {
+        // Combine and sort all utterances by time
+        var allUtterances: [(time: Double, channel: Int, speaker: Int, text: String)] = []
+
+        for utterance in result.micUtterances {
+            allUtterances.append((utterance.start, 0, 0, utterance.transcript))
+        }
+        for utterance in result.systemUtterances {
+            allUtterances.append((utterance.start, 1, utterance.speaker, utterance.transcript))
+        }
+
+        allUtterances.sort { $0.time < $1.time }
+
+        return allUtterances.map { utterance in
+            let minutes = Int(utterance.time) / 60
+            let seconds = Int(utterance.time) % 60
+            let timestamp = String(format: "[%02d:%02d]", minutes, seconds)
+            let source = utterance.channel == 0 ? "Mic" : "System"
+            let speaker = utterance.channel == 0 ? "You" : "Speaker \(utterance.speaker)"
+            return "\(timestamp) [\(source)/\(speaker)] \(utterance.text)"
+        }.joined(separator: "\n")
+    }
+
     /// Transcribe with multichannel mode (requires both mic and system audio)
     /// - Returns: URL of saved transcript with speaker attribution
     /// Note: nonisolated to keep heavy async work off the main thread
@@ -265,14 +293,62 @@ class TranscriptionTaskManager: ObservableObject {
         print("   • Mic utterances: \(result.micUtteranceCount)")
         print("   • System utterances: \(result.systemUtteranceCount)")
 
-        // Phase 2: Save transcript with Deepgram speaker diarization
+        // Phase 1.5: Identify speakers using Gemini (optional, graceful failure)
+        var speakerMappings: [String: SpeakerMapping] = [:]
+        var speakerResult: SpeakerIdentificationResult? = nil
+
+        let geminiAPIKey = UserDefaults.standard.string(forKey: "geminiAPIKey") ?? ""
+        if !geminiAPIKey.isEmpty {
+            await MainActor.run {
+                self.displayStatus = .finishing
+            }
+
+            do {
+                // Format transcript for Gemini analysis
+                let transcriptText = Self.formatForSpeakerIdentification(result.deepgramResult.result)
+
+                // Get unique speaker IDs from system audio
+                let speakerIds = Array(result.systemSpeakerIds).sorted()
+
+                // Get user name
+                let userName = UserDefaults.standard.string(forKey: "userName")
+                let effectiveUserName = (userName?.isEmpty ?? true) ? "You" : userName!
+
+                print("🔍 Identifying speakers with Gemini...")
+                speakerResult = try await ActionItemExtractor.identifySpeakers(
+                    from: transcriptText,
+                    speakerIds: speakerIds,
+                    userName: effectiveUserName,
+                    apiKey: geminiAPIKey
+                )
+
+                // Convert to mappings for TranscriptSaver
+                speakerMappings = ActionItemExtractor.toSpeakerMappings(speakerResult!)
+
+                let speakerNames = speakerResult!.speakers.map { $0.name }
+                print("✅ Speaker identification: Found \(speakerResult!.speakers.count) speakers: \(speakerNames.joined(separator: ", "))")
+
+                // Cache for action item extraction (capture the non-optional value)
+                let resultToCache = speakerResult
+                await MainActor.run {
+                    self.cachedSpeakerResult = resultToCache
+                }
+            } catch {
+                print("⚠️ Speaker identification failed, using defaults: \(error.localizedDescription)")
+                // Continue with empty mappings - transcript will show "Speaker 0", etc.
+            }
+        } else {
+            print("ℹ️ No Gemini API key, skipping speaker identification")
+        }
+
+        // Phase 2: Save transcript with speaker names
         await MainActor.run {
             self.displayStatus = .finishing
         }
 
         guard let savedURL = TranscriptSaver.saveDeepgramMultichannelTranscript(
             result.deepgramResult,
-            speakerMappings: [:],  // Could add Gemini speaker ID for system speakers here
+            speakerMappings: speakerMappings,
             directory: outputFolder
         ) else {
             throw NSError(domain: "Transcription", code: 1, userInfo: [
@@ -503,8 +579,18 @@ class TranscriptionTaskManager: ObservableObject {
             // Read transcript content
             let content = try String(contentsOf: transcriptURL, encoding: .utf8)
 
-            // Extract action items using Gemini
-            let result = try await ActionItemExtractor.extract(from: content, apiKey: apiKey)
+            // Get cached speaker result (if available from transcription phase)
+            let cachedSpeakers = await MainActor.run { self.cachedSpeakerResult }
+
+            // Extract action items using Gemini (reusing speaker identification if available)
+            let result = try await ActionItemExtractor.extract(
+                from: content,
+                apiKey: apiKey,
+                preIdentifiedSpeakers: cachedSpeakers
+            )
+
+            // Clear cached speaker result after use
+            await MainActor.run { self.cachedSpeakerResult = nil }
 
             // Update transcript with Gemini-generated summary (if available)
             var currentURL = transcriptURL
