@@ -147,7 +147,7 @@ class TranscriptionTaskManager: ObservableObject {
     }
 
     /// Start a new transcription task in the background
-    /// Uses enhanced pipeline for AssemblyAI: Transcribe → Identify Speakers → Save with Names → Action Items
+    /// Uses Deepgram multichannel pipeline: Transcribe → Save with Speaker Attribution → Extract Action Items
     func startTranscription(micURL: URL, systemURL: URL?, outputFolder: URL) {
         let task = TranscriptionTask(micURL: micURL, systemURL: systemURL, outputFolder: outputFolder)
 
@@ -210,11 +210,10 @@ class TranscriptionTaskManager: ObservableObject {
         activeTasks[task.id] = asyncTask
     }
 
-    // MARK: - Enhanced AssemblyAI Pipeline with Speaker Identification
+    // MARK: - Deepgram Multichannel Transcription Pipeline
 
-    /// Transcribe with speaker identification: Transcribe → Identify Speakers → Save with Names
-    /// Uses multichannel mode when both mic and system audio are available (preferred - 50% fewer API calls)
-    /// - Returns: URL of saved transcript with identified speaker names
+    /// Transcribe with multichannel mode (requires both mic and system audio)
+    /// - Returns: URL of saved transcript with speaker attribution
     /// Note: nonisolated to keep heavy async work off the main thread
     nonisolated private func transcribeWithSpeakerIdentification(
         micURL: URL,
@@ -223,19 +222,16 @@ class TranscriptionTaskManager: ObservableObject {
         taskId: UUID
     ) async throws -> URL {
 
-        // Use multichannel mode when both sources available (preferred approach)
-        if let systemURL = systemURL {
-            return try await transcribeMultichannelPipeline(
-                micURL: micURL,
-                systemURL: systemURL,
-                outputFolder: outputFolder,
-                taskId: taskId
-            )
+        // Require system audio for multichannel transcription
+        guard let systemURL = systemURL else {
+            throw NSError(domain: "Transcription", code: 100, userInfo: [
+                NSLocalizedDescriptionKey: "System audio is required. Please grant Screen Recording permission in System Settings."
+            ])
         }
 
-        // Fallback: Single source (mic only) - use original pipeline
-        return try await transcribeSingleSourcePipeline(
+        return try await transcribeMultichannelPipeline(
             micURL: micURL,
+            systemURL: systemURL,
             outputFolder: outputFolder,
             taskId: taskId
         )
@@ -252,11 +248,10 @@ class TranscriptionTaskManager: ObservableObject {
         taskId: UUID
     ) async throws -> URL {
 
-        let provider = TranscriptionProvider.current
-        print("🔀 Using multichannel pipeline with \(provider.rawValue) (mic + system → stereo)")
+        print("🔀 Using Deepgram multichannel pipeline (mic + system → stereo)")
 
-        // Phase 1: Transcribe with multichannel mode (provider-agnostic)
-        let unifiedResult = try await transcription.transcribeMultichannel(
+        // Phase 1: Transcribe with Deepgram multichannel mode
+        let result = try await transcription.transcribeMultichannel(
             micURL: micURL,
             systemURL: systemURL,
             onProgress: { [weak self] progress in
@@ -267,35 +262,19 @@ class TranscriptionTaskManager: ObservableObject {
         )
 
         print("✅ Phase 1 complete: Multichannel transcription done")
-        print("   • Mic utterances: \(unifiedResult.micUtteranceCount)")
-        print("   • System utterances: \(unifiedResult.systemUtteranceCount)")
+        print("   • Mic utterances: \(result.micUtteranceCount)")
+        print("   • System utterances: \(result.systemUtteranceCount)")
 
-        // Phase 2: Save transcript based on provider
+        // Phase 2: Save transcript with Deepgram speaker diarization
         await MainActor.run {
             self.displayStatus = .finishing
         }
 
-        let transcriptURL: URL?
-
-        switch unifiedResult {
-        case .deepgram(let result):
-            // Deepgram: Save with speaker diarization info
-            transcriptURL = TranscriptSaver.saveDeepgramMultichannelTranscript(
-                result,
-                speakerMappings: [:],  // Could add Gemini speaker ID for system speakers here
-                directory: outputFolder
-            )
-
-        case .assemblyAI(let result):
-            // AssemblyAI: Save with channel-based attribution only (no diarization in multichannel)
-            transcriptURL = TranscriptSaver.saveMultichannelTranscript(
-                result,
-                speakerMappings: [:],
-                directory: outputFolder
-            )
-        }
-
-        guard let savedURL = transcriptURL else {
+        guard let savedURL = TranscriptSaver.saveDeepgramMultichannelTranscript(
+            result.deepgramResult,
+            speakerMappings: [:],  // Could add Gemini speaker ID for system speakers here
+            directory: outputFolder
+        ) else {
             throw NSError(domain: "Transcription", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "Failed to save transcript"
             ])
@@ -310,95 +289,8 @@ class TranscriptionTaskManager: ObservableObject {
         return savedURL
     }
 
-    /// Single source pipeline: Original approach for mic-only recordings
-    /// Note: nonisolated to keep heavy async work off the main thread
-    nonisolated private func transcribeSingleSourcePipeline(
-        micURL: URL,
-        outputFolder: URL,
-        taskId: UUID
-    ) async throws -> URL {
-
-        print("📝 Using single source pipeline (mic only)")
-
-        // Phase 1: Transcribe and get intermediate result (not saved yet)
-        let transcriptionResult = try await transcription.transcribeToIntermediateResult(
-            micURL: micURL,
-            systemURL: nil,
-            onProgress: { [weak self] progress in
-                Task { @MainActor in
-                    self?.displayStatus = .transcribing(progress: progress)
-                }
-            }
-        )
-
-        print("✅ Phase 1 complete: Transcription done, \(transcriptionResult.allSpeakerIds.count) speakers detected")
-
-        // Phase 2: Identify speakers with Gemini (if API key available)
-        var speakerMappings: [String: SpeakerMapping] = [:]
-        let geminiApiKey = UserDefaults.standard.string(forKey: "geminiAPIKey") ?? ""
-        let userName = UserDefaults.standard.string(forKey: "userName") ?? "You"
-
-        if !geminiApiKey.isEmpty && !transcriptionResult.allSpeakerIds.isEmpty {
-            await MainActor.run {
-                self.displayStatus = .findingActionItems  // AI processing phase
-            }
-
-            print("📋 Phase 2: Identifying \(transcriptionResult.allSpeakerIds.count) speakers with Gemini...")
-
-            // Generate preliminary transcript for Gemini
-            let preliminaryTranscript = ActionItemExtractor.generatePreliminaryTranscript(from: transcriptionResult)
-
-            // Identify speakers
-            let speakerResult = await ActionItemExtractor.identifySpeakersWithFallback(
-                from: preliminaryTranscript,
-                speakerIds: Array(transcriptionResult.allSpeakerIds).sorted(),
-                userName: userName,
-                apiKey: geminiApiKey
-            )
-
-            // Build speaker mappings
-            speakerMappings = ActionItemExtractor.buildSpeakerMappings(
-                from: speakerResult,
-                allSpeakerIds: transcriptionResult.allSpeakerIds,
-                userName: userName
-            )
-
-            let identifiedCount = speakerMappings.values.filter { $0.identifiedName != nil }.count
-            print("✅ Phase 2 complete: Identified \(identifiedCount) of \(speakerMappings.count) speakers")
-
-        } else {
-            // No Gemini key or no speakers - use generic mappings
-            for id in transcriptionResult.allSpeakerIds {
-                speakerMappings[id] = SpeakerMapping(speakerId: id, identifiedName: nil, confidence: nil)
-            }
-            print("ℹ️ Phase 2 skipped: Using generic speaker labels")
-        }
-
-        // Phase 3: Save transcript WITH speaker names
-        await MainActor.run {
-            self.displayStatus = .finishing
-        }
-
-        guard let transcriptURL = TranscriptSaver.saveRichAssemblyAITranscript(
-            transcriptionResult,
-            speakerMappings: speakerMappings,
-            directory: outputFolder
-        ) else {
-            throw NSError(domain: "Transcription", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "Failed to save transcript"
-            ])
-        }
-
-        print("✅ Phase 3 complete: Transcript saved to \(transcriptURL.lastPathComponent)")
-
-        // Cleanup audio files
-        try? FileManager.default.removeItem(at: micURL)
-
-        return transcriptURL
-    }
-
     /// Retry a failed transcription by its ID
-    /// Uses multichannel pipeline when both mic and system audio are available
+    /// Requires system audio for multichannel transcription
     func retryFailedTranscription(failedId: UUID) async -> Bool {
         guard let failed = failedTranscriptionManager.failedTranscriptions.first(where: { $0.id == failedId }) else {
             print("❌ Failed transcription not found: \(failedId)")

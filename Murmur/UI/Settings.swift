@@ -29,9 +29,7 @@ struct SettingsView: View {
     @AppStorage("geminiAPIKey") private var geminiAPIKey: String = ""
     @AppStorage("taskService") private var taskService: String = "reminders"
     @AppStorage("todoistAPIKey") private var todoistAPIKey: String = ""
-    @AppStorage("transcriptionProvider") private var transcriptionProvider: String = "deepgram"
     @AppStorage("deepgramAPIKey") private var deepgramAPIKey: String = ""
-    @AppStorage("assemblyaiAPIKey") private var assemblyaiAPIKey: String = ""
     @AppStorage("useAuroraRecording") private var useAuroraRecording: Bool = false
     @AppStorage("enableMeetingDetection") private var enableMeetingDetection: Bool = true
     @Environment(\.dismiss) private var dismiss
@@ -47,14 +45,10 @@ struct SettingsView: View {
     @State private var todoistKeyValidationResult: Bool? = nil
     @State private var isValidatingDeepgramKey = false
     @State private var deepgramKeyValidationResult: Bool? = nil
-    @State private var isValidatingAssemblyAIKey = false
-    @State private var assemblyAIKeyValidationResult: Bool? = nil
 
     // MARK: - Test States
     @State private var isTestingActionItems = false
     @State private var actionItemsTestStatus = ""
-    @State private var isTestingAssemblyAI = false
-    @State private var assemblyAITestStatus = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -185,33 +179,9 @@ extension SettingsView {
                 }
             }
 
-            // Transcription Provider Card
+            // Transcription Provider Card (Deepgram)
             SettingsCard(title: "Transcription", icon: "waveform.circle") {
-                VStack(alignment: .leading, spacing: Spacing.sm) {
-                    Text("Provider:")
-                        .font(.caption)
-                        .foregroundColor(.textOnCreamSecondary)
-
-                    Picker("", selection: $transcriptionProvider) {
-                        Text("Deepgram").tag("deepgram")
-                        Text("AssemblyAI").tag("assemblyai")
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: transcriptionProvider) { _, newValue in
-                        // Reset validation when switching providers
-                        if newValue == "deepgram" {
-                            assemblyAIKeyValidationResult = nil
-                        } else {
-                            deepgramKeyValidationResult = nil
-                        }
-                    }
-
-                    if transcriptionProvider == "deepgram" {
-                        deepgramConfigView
-                    } else {
-                        assemblyAIConfigView
-                    }
-                }
+                deepgramConfigView
             }
 
             // Your Name Card
@@ -326,59 +296,6 @@ extension SettingsView {
                 Image(systemName: "sparkles")
                     .foregroundColor(.accentBlue)
                 Text("Uses Nova-3 model with smart formatting")
-                    .font(.caption)
-                    .foregroundColor(.textOnCreamSecondary)
-            }
-        }
-        .padding(.top, Spacing.xs)
-    }
-
-    private var assemblyAIConfigView: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("AssemblyAI API Key:")
-                .font(.caption)
-                .foregroundColor(.textOnCreamSecondary)
-
-            HStack(spacing: Spacing.sm) {
-                SecureField("Enter your API key", text: $assemblyaiAPIKey)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12, design: .monospaced))
-                    .onChange(of: assemblyaiAPIKey) { _, _ in
-                        assemblyAIKeyValidationResult = nil
-                    }
-
-                validationIndicator(
-                    isValidating: isValidatingAssemblyAIKey,
-                    result: assemblyAIKeyValidationResult
-                )
-
-                Button("Verify") {
-                    Task {
-                        isValidatingAssemblyAIKey = true
-                        assemblyAIKeyValidationResult = await AssemblyAIService.validateAPIKey(assemblyaiAPIKey)
-                        isValidatingAssemblyAIKey = false
-                    }
-                }
-                .buttonStyle(LawsSecondaryButtonStyle())
-                .disabled(assemblyaiAPIKey.isEmpty || isValidatingAssemblyAIKey)
-            }
-
-            Text("Get free credits at assemblyai.com/dashboard")
-                .font(.caption)
-                .foregroundColor(.textOnCreamMuted)
-
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "exclamationmark.triangle")
-                    .foregroundColor(.statusWarningMuted)
-                Text("Note: Multichannel mode disables speaker diarization")
-                    .font(.caption)
-                    .foregroundColor(.statusWarningMuted)
-            }
-
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "sparkles")
-                    .foregroundColor(.accentBlue)
-                Text("AI features: sentiment, chapters, entities")
                     .font(.caption)
                     .foregroundColor(.textOnCreamSecondary)
             }
@@ -536,9 +453,6 @@ extension SettingsView {
             // UI Preferences Card
             uiPreferencesCard
 
-            // Test AssemblyAI Card
-            testAssemblyAICard
-
             // Test Action Items Card
             testActionItemsCard
 
@@ -564,33 +478,6 @@ extension SettingsView {
                 .toggleStyle(.switch)
 
                 Text("Play subtle sounds when recording starts, stops, and completes.")
-                    .font(.caption)
-                    .foregroundColor(.textOnCreamMuted)
-            }
-        }
-    }
-
-    private var testAssemblyAICard: some View {
-        SettingsCard(title: "Test AssemblyAI", icon: "play.circle") {
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                HStack {
-                    Button("Test with Audio File...") {
-                        testAssemblyAIWithAudio()
-                    }
-                    .buttonStyle(LawsSecondaryButtonStyle())
-                    .disabled(isTestingAssemblyAI || assemblyaiAPIKey.isEmpty)
-
-                    if isTestingAssemblyAI {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                    }
-                }
-
-                if !assemblyAITestStatus.isEmpty {
-                    statusText(assemblyAITestStatus)
-                }
-
-                Text("Processing may take 1-2 minutes.")
                     .font(.caption)
                     .foregroundColor(.textOnCreamMuted)
             }
@@ -627,20 +514,11 @@ extension SettingsView {
     private var apiStatusCard: some View {
         SettingsCard(title: "API Status", icon: "key") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                // Show status for selected transcription provider
-                if transcriptionProvider == "deepgram" {
-                    apiStatusRow(
-                        name: "Deepgram",
-                        isConfigured: !deepgramAPIKey.isEmpty,
-                        isVerified: deepgramKeyValidationResult
-                    )
-                } else {
-                    apiStatusRow(
-                        name: "AssemblyAI",
-                        isConfigured: !assemblyaiAPIKey.isEmpty,
-                        isVerified: assemblyAIKeyValidationResult
-                    )
-                }
+                apiStatusRow(
+                    name: "Deepgram",
+                    isConfigured: !deepgramAPIKey.isEmpty,
+                    isVerified: deepgramKeyValidationResult
+                )
 
                 apiStatusRow(
                     name: "Gemini",
@@ -950,162 +828,6 @@ extension SettingsView {
             await MainActor.run {
                 actionItemsTestStatus = "❌ \(error.localizedDescription)"
                 isTestingActionItems = false
-            }
-        }
-    }
-
-    private func testAssemblyAIWithAudio() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.wav, .mp3, .mpeg4Audio, .audio]
-        panel.prompt = "Test AssemblyAI"
-        panel.message = "Select an audio file to test AssemblyAI transcription"
-
-        panel.begin { response in
-            guard response == .OK, let url = panel.url else { return }
-            Task { await runAssemblyAITest(audioURL: url) }
-        }
-    }
-
-    private func runAssemblyAITest(audioURL: URL) async {
-        await MainActor.run {
-            isTestingAssemblyAI = true
-            assemblyAITestStatus = "Uploading..."
-        }
-
-        print("\n🧪 TEST: AssemblyAI Transcription with Speaker Identification")
-
-        do {
-            // Phase 1: Transcribe with AssemblyAI
-            let result = try await AssemblyAIService.transcribe(
-                audioURL: audioURL,
-                apiKey: assemblyaiAPIKey,
-                onStatusUpdate: { status in
-                    Task { @MainActor in
-                        assemblyAITestStatus = status.rawValue
-                    }
-                }
-            )
-
-            if result.utterances.isEmpty {
-                await MainActor.run {
-                    assemblyAITestStatus = "No speech detected."
-                    isTestingAssemblyAI = false
-                }
-                return
-            }
-
-            let duration = result.metadata.duration ?? 0
-            let combinedResult = CombinedAssemblyAIResult(
-                micResult: result,  // Treat test file as mic input
-                systemResult: nil,
-                duration: TimeInterval(duration),
-                processingTime: 0  // Not tracked for test files
-            )
-
-            print("✅ Phase 1 complete: \(result.metadata.utteranceCount) utterances, \(combinedResult.allSpeakerIds.count) speakers detected")
-
-            // Phase 2: Identify speakers with Gemini (if API key available)
-            var speakerMappings: [String: SpeakerMapping] = [:]
-
-            if !geminiAPIKey.isEmpty && !combinedResult.allSpeakerIds.isEmpty {
-                await MainActor.run {
-                    assemblyAITestStatus = "Identifying speakers..."
-                }
-
-                print("📋 Phase 2: Identifying \(combinedResult.allSpeakerIds.count) speakers with Gemini...")
-
-                // Generate preliminary transcript for Gemini
-                let preliminaryTranscript = ActionItemExtractor.generatePreliminaryTranscript(from: combinedResult)
-
-                // Identify speakers
-                let speakerResult = await ActionItemExtractor.identifySpeakersWithFallback(
-                    from: preliminaryTranscript,
-                    speakerIds: Array(combinedResult.allSpeakerIds).sorted(),
-                    userName: userName,
-                    apiKey: geminiAPIKey
-                )
-
-                // Build speaker mappings
-                speakerMappings = ActionItemExtractor.buildSpeakerMappings(
-                    from: speakerResult,
-                    allSpeakerIds: combinedResult.allSpeakerIds,
-                    userName: userName
-                )
-
-                let identifiedCount = speakerMappings.values.filter { $0.identifiedName != nil }.count
-                print("✅ Phase 2 complete: Identified \(identifiedCount) of \(speakerMappings.count) speakers")
-            } else {
-                // No Gemini key - use generic mappings
-                for id in combinedResult.allSpeakerIds {
-                    speakerMappings[id] = SpeakerMapping(speakerId: id, identifiedName: nil, confidence: nil)
-                }
-                print("ℹ️ Phase 2 skipped: No Gemini API key, using generic speaker labels")
-            }
-
-            // Phase 3: Save with speaker names
-            await MainActor.run {
-                assemblyAITestStatus = "Saving transcript..."
-            }
-
-            guard let savedURL = TranscriptSaver.saveRichAssemblyAITranscript(
-                combinedResult,
-                speakerMappings: speakerMappings
-            ) else {
-                await MainActor.run {
-                    assemblyAITestStatus = "❌ Failed to save transcript"
-                    isTestingAssemblyAI = false
-                }
-                return
-            }
-
-            print("✅ Phase 3 complete: Transcript saved")
-
-            // Phase 4: Extract action items, summary, and rename file (if Gemini available)
-            var currentURL = savedURL
-            if !geminiAPIKey.isEmpty {
-                await MainActor.run {
-                    assemblyAITestStatus = "Extracting summary & action items..."
-                }
-
-                print("📋 Phase 4: Extracting action items and summary with Gemini...")
-
-                do {
-                    let content = try String(contentsOf: savedURL, encoding: .utf8)
-                    let extractionResult = try await ActionItemExtractor.extract(from: content, apiKey: geminiAPIKey)
-
-                    // Update transcript with Gemini-generated summary
-                    if let summary = extractionResult.meetingSummary, !summary.isEmpty {
-                        TranscriptUtils.updateWithSummary(at: currentURL, summary: summary)
-                    }
-
-                    // Rename file with descriptive title
-                    if let title = extractionResult.meetingTitle, !title.isEmpty {
-                        currentURL = TranscriptUtils.renameWithTitle(at: currentURL, title: title)
-                    }
-
-                    print("✅ Phase 4 complete: \(extractionResult.actionItems.count) action items found")
-                } catch {
-                    print("⚠️ Phase 4 failed: \(error.localizedDescription)")
-                }
-            }
-
-            let identifiedCount = speakerMappings.values.filter { $0.identifiedName != nil }.count
-            await MainActor.run {
-                if identifiedCount > 0 {
-                    assemblyAITestStatus = "✓ \(result.metadata.utteranceCount) utterances, \(identifiedCount)/\(result.metadata.speakerCount) speakers identified!"
-                } else {
-                    assemblyAITestStatus = "✓ \(result.metadata.utteranceCount) utterances, \(result.metadata.speakerCount) speakers (generic labels)"
-                }
-                isTestingAssemblyAI = false
-            }
-
-        } catch {
-            await MainActor.run {
-                assemblyAITestStatus = "❌ \(error.localizedDescription)"
-                isTestingAssemblyAI = false
             }
         }
     }
