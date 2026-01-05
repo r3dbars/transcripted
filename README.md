@@ -1,13 +1,14 @@
 # Transcripted
 
-A native macOS app that automatically records, transcribes, and organizes voice conversations from meetings and calls. Built with Swift, SwiftUI, and supports both on-device and cloud transcription.
+A native macOS app that automatically records, transcribes, and organizes voice conversations from meetings and calls. Built with Swift, SwiftUI, using Deepgram for cloud transcription with speaker diarization.
 
 ## Features
 
 **Recording & Transcription**
 - Floating pill UI - Dynamic Island-style interface that doesn't interrupt your workflow
 - Dual audio capture - Records both microphone and system audio (Zoom, Meet, Teams, etc.)
-- Multiple transcription providers - Apple (on-device), Deepgram, or AssemblyAI
+- Deepgram transcription - Multichannel audio with speaker diarization
+- Meeting detection - Automatically prompts to record when video calls are detected
 - Real-time status - Visual feedback during recording and processing
 
 **AI-Powered Action Items**
@@ -59,15 +60,14 @@ Murmur/
 ├── Core/                           # Business logic
 │   ├── Audio.swift                 # Microphone capture via AVAudioEngine
 │   ├── SystemAudioCapture.swift    # System audio via CoreAudio process taps
-│   ├── Transcription.swift         # Apple Speech framework wrapper
+│   ├── Transcription.swift         # Deepgram multichannel transcription
 │   ├── TranscriptionTaskManager.swift  # Background transcription queue
 │   ├── ActionItemExtractor.swift   # Gemini AI integration
 │   ├── DateParser.swift            # Natural language date parsing
 │   └── TranscriptSaver.swift       # Markdown output
 │
 ├── Services/                       # External integrations
-│   ├── DeepgramService.swift       # Cloud transcription
-│   ├── AssemblyAIService.swift     # Cloud transcription
+│   ├── DeepgramService.swift       # Cloud transcription with diarization
 │   ├── RemindersService.swift      # Apple Reminders
 │   └── TodoistService.swift        # Todoist API
 │
@@ -101,15 +101,16 @@ Murmur/
 └── TranscriptedApp.swift           # App entry point
 ```
 
-## Transcription Providers
+## Transcription
 
-| Provider | Type | Features |
-|----------|------|----------|
-| Apple | On-device | 100% private, no internet required |
-| Deepgram | Cloud | Speaker diarization, sentiment, summaries |
-| AssemblyAI | Cloud | Speaker diarization, chapters, entities |
+The app uses **Deepgram** for cloud transcription with:
 
-Configure in Settings (gear icon in menu bar).
+- **Multichannel support** - Mic (channel 0) + System audio (channel 1) merged to stereo
+- **Speaker diarization** - Identifies multiple speakers within system audio
+- **Nova-3 model** - Latest Deepgram model with smart formatting
+- **Automatic retry** - Exponential backoff for transient failures
+
+**Note:** System audio (Screen Recording permission) is required for meeting transcription.
 
 ## Configuration
 
@@ -118,18 +119,17 @@ Settings are stored in UserDefaults:
 | Key | Description |
 |-----|-------------|
 | `transcriptSaveLocation` | Custom output folder |
-| `transcriptionProvider` | "apple", "deepgram", or "assemblyai" |
-| `geminiAPIKey` | For action item extraction |
+| `deepgramAPIKey` | Deepgram API key for transcription |
+| `geminiAPIKey` | Gemini API key for action item extraction |
 | `taskService` | "reminders" or "todoist" |
 | `userName` | Your name for task attribution |
 
 ## Privacy & Security
 
-- On-device transcription available (Apple provider)
-- Cloud providers only used when explicitly configured
 - Audio files deleted after successful transcription
 - No analytics or tracking
 - All API keys stored locally in UserDefaults
+- Transcripts saved locally to `~/Documents/Transcripted/`
 
 ## Troubleshooting
 
@@ -146,9 +146,10 @@ Settings are stored in UserDefaults:
 
 ### Transcription Failing
 
-- Check your API keys in Settings (for cloud providers)
-- Verify internet connection (for cloud providers)
+- Check your Deepgram API key in Settings
+- Verify internet connection
 - Check `~/Documents/Transcripted/failed_transcriptions.json` for queued retries
+- Ensure Screen Recording permission is granted (required for system audio)
 
 ## License
 
