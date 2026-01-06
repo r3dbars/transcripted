@@ -3,9 +3,9 @@ import AppKit
 import AVFoundation
 import UniformTypeIdentifiers
 
-// MARK: - Settings Tab Enum
+// MARK: - Settings Tab Enum (Legacy - kept for backward compatibility)
 
-enum SettingsTab: String, CaseIterable {
+enum LegacySettingsTab: String, CaseIterable {
     case recording = "Recording"
     case aiFeatures = "AI Features"
     case advanced = "Advanced"
@@ -35,7 +35,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     // MARK: - Tab State
-    @State private var selectedTab: SettingsTab = .recording
+    @State private var selectedTab: LegacySettingsTab = .recording
 
     // MARK: - Accessibility
     @Environment(\.accessibilityReduceMotion) var reduceMotion
@@ -89,7 +89,7 @@ struct SettingsView: View {
 
     private var tabBarView: some View {
         HStack(spacing: Spacing.sm) {
-            ForEach(SettingsTab.allCases, id: \.self) { tab in
+            ForEach(LegacySettingsTab.allCases, id: \.self) { tab in
                 TabButton(
                     tab: tab,
                     isSelected: selectedTab == tab,
@@ -640,7 +640,7 @@ struct SettingsCard<Content: View>: View {
 
 @available(macOS 26.0, *)
 struct TabButton: View {
-    let tab: SettingsTab
+    let tab: LegacySettingsTab
     let isSelected: Bool
     let action: () -> Void
 

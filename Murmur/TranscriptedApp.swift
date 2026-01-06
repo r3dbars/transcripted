@@ -23,8 +23,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var failedTranscriptionManager: FailedTranscriptionManager?
     var taskManager: TranscriptionTaskManager?
     var audio: Audio?
-    var settingsWindow: NSWindow?
     var failedTranscriptionsWindow: NSWindow?
+
+    // New settings window controller (redesigned dashboard)
+    var settingsWindowController: SettingsWindowController?
 
     // Meeting detection
     var meetingDetector: MeetingDetector?
@@ -183,26 +185,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func openSettings() {
-        if settingsWindow == nil {
-            let view = SettingsView()
-            let controller = NSHostingController(rootView: view)
-
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 450, height: 400),
-                styleMask: [.titled, .closable],
-                backing: .buffered,
-                defer: false
-            )
-            window.contentViewController = controller
-            window.title = "Transcripted Settings"
-            window.center()
-            window.isReleasedWhenClosed = false
-
-            settingsWindow = window
+        if settingsWindowController == nil {
+            settingsWindowController = SettingsWindowController()
         }
 
-        settingsWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        settingsWindowController?.showWindow()
     }
 
     /// Handle recording completion - trigger transcription
@@ -213,6 +200,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         print("📝 Recording complete - starting transcription")
+
+        // Capture recording health info before it gets reset (Phase 3: Post-hoc transparency)
+        let healthInfo = audio?.createHealthInfo()
+        if let health = healthInfo {
+            print("📊 Recording health: quality=\(health.captureQuality.rawValue), gaps=\(health.audioGaps), switches=\(health.deviceSwitches)")
+        }
 
         // Get output folder from settings
         let outputFolder: URL
@@ -231,7 +224,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         taskManager?.startTranscription(
             micURL: micURL,
             systemURL: systemURL,
-            outputFolder: outputFolder
+            outputFolder: outputFolder,
+            healthInfo: healthInfo
         )
     }
 }
