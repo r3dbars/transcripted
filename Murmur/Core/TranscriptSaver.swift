@@ -1,6 +1,54 @@
 import Foundation
 import AppKit
 
+/// Recording health information for transcript metadata (Phase 3)
+/// Captures quality metrics to be embedded in transcript YAML frontmatter
+struct RecordingHealthInfo {
+    /// Capture quality rating based on buffer success rate
+    enum CaptureQuality: String {
+        case excellent = "excellent"  // >= 98%
+        case good = "good"            // 90-97%
+        case fair = "fair"            // 80-89%
+        case degraded = "degraded"    // < 80%
+
+        static func from(successRate: Double) -> CaptureQuality {
+            switch successRate {
+            case 0.98...: return .excellent
+            case 0.90..<0.98: return .good
+            case 0.80..<0.90: return .fair
+            default: return .degraded
+            }
+        }
+    }
+
+    let captureQuality: CaptureQuality
+    let audioGaps: Int
+    let deviceSwitches: Int
+    let gapDescriptions: [String]
+
+    /// Create health info from Audio instance
+    @available(macOS 26.0, *)
+    static func from(audio: Audio, systemCapture: SystemAudioCapture?) -> RecordingHealthInfo {
+        let successRate = systemCapture?.bufferSuccessRate ?? 1.0
+        return RecordingHealthInfo(
+            captureQuality: CaptureQuality.from(successRate: successRate),
+            audioGaps: audio.recordingGaps.count,
+            deviceSwitches: audio.deviceSwitchCount,
+            gapDescriptions: audio.recordingGaps.map { $0.description }
+        )
+    }
+
+    /// Default "no issues" health info
+    static var perfect: RecordingHealthInfo {
+        RecordingHealthInfo(
+            captureQuality: .excellent,
+            audioGaps: 0,
+            deviceSwitches: 0,
+            gapDescriptions: []
+        )
+    }
+}
+
 /// Handles automatic saving of transcripts to the filesystem
 class TranscriptSaver {
 
@@ -105,13 +153,17 @@ class TranscriptSaver {
     ///   - result: Deepgram multichannel transcription result wrapper
     ///   - speakerMappings: Optional mapping of speaker IDs to identified names
     ///   - directory: Optional custom directory
+    ///   - meetingTitle: Optional meeting title extracted from AI
+    ///   - healthInfo: Optional recording health metrics for transparency
     /// - Returns: URL of saved file, or nil if save failed
     @available(macOS 14.0, *)
     @discardableResult
     static func saveDeepgramMultichannelTranscript(
         _ result: DeepgramMultichannelTranscriptionResult,
         speakerMappings: [String: SpeakerMapping] = [:],
-        directory: URL? = nil
+        directory: URL? = nil,
+        meetingTitle: String? = nil,
+        healthInfo: RecordingHealthInfo? = nil
     ) -> URL? {
         let saveDir = directory ?? defaultSaveDirectory
 
@@ -126,12 +178,23 @@ class TranscriptSaver {
         let filename = "Call_\(timestamp).md"
         let fileURL = saveDir.appendingPathComponent(filename)
 
-        let markdown = formatDeepgramMultichannelMarkdown(result: result, speakerMappings: speakerMappings, date: Date())
+        let markdown = formatDeepgramMultichannelMarkdown(result: result, speakerMappings: speakerMappings, date: Date(), healthInfo: healthInfo)
 
         do {
             try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
             print("✓ Deepgram multichannel transcript saved to: \(fileURL.path)")
             showSaveNotification(fileURL: fileURL)
+
+            // Record to stats database
+            Task { @MainActor in
+                let metadata = StatsService.createMetadata(
+                    from: result,
+                    transcriptPath: fileURL.path,
+                    title: meetingTitle
+                )
+                await StatsService.shared.recordSession(metadata)
+            }
+
             return fileURL
         } catch {
             print("❌ Failed to save Deepgram multichannel transcript: \(error.localizedDescription)")
@@ -144,7 +207,8 @@ class TranscriptSaver {
     private static func formatDeepgramMultichannelMarkdown(
         result: DeepgramMultichannelTranscriptionResult,
         speakerMappings: [String: SpeakerMapping] = [:],
-        date: Date
+        date: Date,
+        healthInfo: RecordingHealthInfo? = nil
     ) -> String {
         let dgResult = result.result
         let dateFormatter = DateFormatter()
@@ -183,6 +247,21 @@ class TranscriptSaver {
         system_speakers: \(dgResult.metadata.systemSpeakerCount)
         total_word_count: \(totalWordCount)
         """
+
+        // Add recording health metadata (Phase 3: Post-hoc transparency)
+        if let health = healthInfo {
+            yaml += "\ncapture_quality: \(health.captureQuality.rawValue)"
+            yaml += "\naudio_gaps: \(health.audioGaps)"
+            yaml += "\ndevice_switches: \(health.deviceSwitches)"
+
+            // Add gap details if any occurred
+            if !health.gapDescriptions.isEmpty {
+                yaml += "\ngap_events:"
+                for gap in health.gapDescriptions {
+                    yaml += "\n  - \"\(gap)\""
+                }
+            }
+        }
 
         yaml += "\n---\n"
 

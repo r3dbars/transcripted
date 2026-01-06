@@ -9,6 +9,22 @@
 /* Begin PBXBuildFile section */
 		177299A5CC91824348F205F7 /* TodoistService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 957699D9D32FB594FDC17C0C /* TodoistService.swift */; };
 		A1000500 /* TranscriptUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000501 /* TranscriptUtils.swift */; };
+		A1001011 /* StatsDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001001 /* StatsDatabase.swift */; };
+		A1001012 /* StatsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001002 /* StatsService.swift */; };
+		A1001013 /* TranscriptScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001003 /* TranscriptScanner.swift */; };
+		A1001111 /* SettingsNavigationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001110 /* SettingsNavigationState.swift */; };
+		A1001121 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001120 /* SettingsWindowController.swift */; };
+		A1001123 /* SettingsContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001122 /* SettingsContainerView.swift */; };
+		A1001125 /* SettingsSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001124 /* SettingsSidebarView.swift */; };
+		A1001131 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001130 /* DashboardView.swift */; };
+		A1001133 /* TranscriptsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001132 /* TranscriptsView.swift */; };
+		A1001135 /* PreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001134 /* PreferencesView.swift */; };
+		A1001137 /* HelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001136 /* HelpView.swift */; };
+		A1001141 /* StatsCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001140 /* StatsCardView.swift */; };
+		A1001143 /* HeatMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001142 /* HeatMapView.swift */; };
+		A1001145 /* RecentTranscriptsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001144 /* RecentTranscriptsView.swift */; };
+		A1001147 /* SettingsSectionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001146 /* SettingsSectionCard.swift */; };
+		A1001149 /* AchievementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001148 /* AchievementView.swift */; };
 		A1000001 /* TranscriptedApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002 /* TranscriptedApp.swift */; };
 		A1000003 /* Transcription.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000004 /* Transcription.swift */; };
 		A1000005 /* Audio.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000006 /* Audio.swift */; };
@@ -62,6 +78,22 @@
 
 /* Begin PBXFileReference section */
 		957699D9D32FB594FDC17C0C /* TodoistService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TodoistService.swift; sourceTree = "<group>"; };
+		A1001001 /* StatsDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsDatabase.swift; sourceTree = "<group>"; };
+		A1001002 /* StatsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsService.swift; sourceTree = "<group>"; };
+		A1001003 /* TranscriptScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptScanner.swift; sourceTree = "<group>"; };
+		A1001110 /* SettingsNavigationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsNavigationState.swift; sourceTree = "<group>"; };
+		A1001120 /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
+		A1001122 /* SettingsContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsContainerView.swift; sourceTree = "<group>"; };
+		A1001124 /* SettingsSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSidebarView.swift; sourceTree = "<group>"; };
+		A1001130 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		A1001132 /* TranscriptsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptsView.swift; sourceTree = "<group>"; };
+		A1001134 /* PreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesView.swift; sourceTree = "<group>"; };
+		A1001136 /* HelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpView.swift; sourceTree = "<group>"; };
+		A1001140 /* StatsCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsCardView.swift; sourceTree = "<group>"; };
+		A1001142 /* HeatMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeatMapView.swift; sourceTree = "<group>"; };
+		A1001144 /* RecentTranscriptsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentTranscriptsView.swift; sourceTree = "<group>"; };
+		A1001146 /* SettingsSectionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSectionCard.swift; sourceTree = "<group>"; };
+		A1001148 /* AchievementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AchievementView.swift; sourceTree = "<group>"; };
 		A1000002 /* TranscriptedApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptedApp.swift; sourceTree = "<group>"; };
 		A1000004 /* Transcription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcription.swift; sourceTree = "<group>"; };
 		A1000006 /* Audio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Audio.swift; sourceTree = "<group>"; };
@@ -181,6 +213,9 @@
 				A1000801 /* FailedActionItemManager.swift */,
 				A1000802 /* DateFormattingHelper.swift */,
 				A1000932 /* MeetingDetector.swift */,
+				A1001001 /* StatsDatabase.swift */,
+				A1001002 /* StatsService.swift */,
+				A1001003 /* TranscriptScanner.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -189,11 +224,56 @@
 			isa = PBXGroup;
 			children = (
 				A1000910 /* FloatingPanel */,
+				A1001100 /* Settings */,
 				A1000010 /* Settings.swift */,
 				A1000059 /* FailedTranscriptionsView.swift */,
 				A1000601 /* ActionItemReviewView.swift */,
 			);
 			path = UI;
+			sourceTree = "<group>";
+		};
+		A1001100 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				A1001120 /* SettingsWindowController.swift */,
+				A1001122 /* SettingsContainerView.swift */,
+				A1001124 /* SettingsSidebarView.swift */,
+				A1001101 /* Models */,
+				A1001102 /* Tabs */,
+				A1001103 /* Components */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		A1001101 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				A1001110 /* SettingsNavigationState.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A1001102 /* Tabs */ = {
+			isa = PBXGroup;
+			children = (
+				A1001130 /* DashboardView.swift */,
+				A1001132 /* TranscriptsView.swift */,
+				A1001134 /* PreferencesView.swift */,
+				A1001136 /* HelpView.swift */,
+			);
+			path = Tabs;
+			sourceTree = "<group>";
+		};
+		A1001103 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				A1001140 /* StatsCardView.swift */,
+				A1001142 /* HeatMapView.swift */,
+				A1001144 /* RecentTranscriptsView.swift */,
+				A1001146 /* SettingsSectionCard.swift */,
+				A1001148 /* AchievementView.swift */,
+			);
+			path = Components;
 			sourceTree = "<group>";
 		};
 		A1000910 /* FloatingPanel */ = {
@@ -411,6 +491,22 @@
 				A100091E /* AuroraSuccessView.swift in Sources */,
 				A1000931 /* MeetingDetector.swift in Sources */,
 				A1000933 /* MeetingDetectedOverlay.swift in Sources */,
+				A1001011 /* StatsDatabase.swift in Sources */,
+				A1001012 /* StatsService.swift in Sources */,
+				A1001013 /* TranscriptScanner.swift in Sources */,
+				A1001111 /* SettingsNavigationState.swift in Sources */,
+				A1001121 /* SettingsWindowController.swift in Sources */,
+				A1001123 /* SettingsContainerView.swift in Sources */,
+				A1001125 /* SettingsSidebarView.swift in Sources */,
+				A1001131 /* DashboardView.swift in Sources */,
+				A1001133 /* TranscriptsView.swift in Sources */,
+				A1001135 /* PreferencesView.swift in Sources */,
+				A1001137 /* HelpView.swift in Sources */,
+				A1001141 /* StatsCardView.swift in Sources */,
+				A1001143 /* HeatMapView.swift in Sources */,
+				A1001145 /* RecentTranscriptsView.swift in Sources */,
+				A1001147 /* SettingsSectionCard.swift in Sources */,
+				A1001149 /* AchievementView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
