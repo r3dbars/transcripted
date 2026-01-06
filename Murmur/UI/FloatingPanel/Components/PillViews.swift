@@ -284,6 +284,11 @@ struct PillRecordingView: View {
 
     @State private var isStopHovered = false
 
+    // MARK: - Invisible Warning Indicator (Phase 2: 2-second delay)
+    // Brief issues (<2s) are completely invisible to users
+    @State private var showWarningDelayed = false
+    @State private var warningDelayTask: Task<Void, Never>?
+
     var body: some View {
         ZStack {
             // Solid dark background with coral border tint
@@ -297,17 +302,18 @@ struct PillRecordingView: View {
 
             HStack(spacing: 8) {
                 // Recording dot + optional system audio warning
+                // Warning only shows after 2-second delay (brief issues are invisible)
                 HStack(spacing: 4) {
                     RecordingDotView()
 
-                    // System audio status indicator (only show when there's an issue)
-                    if audio.systemAudioStatus.isWarning || audio.systemAudioStatus.isRecovering {
+                    // System audio status indicator (only show after 2s delay)
+                    if showWarningDelayed {
                         SystemAudioWarningIndicator(status: audio.systemAudioStatus)
                             .transition(.scale.combined(with: .opacity))
                     }
                 }
                 .padding(.leading, 10)
-                .animation(.snappy(duration: 0.2), value: audio.systemAudioStatus)
+                .animation(.snappy(duration: 0.2), value: showWarningDelayed)
 
                 // Waveform visualizer (reuse existing, smaller size)
                 WaveformMiniView(
@@ -351,6 +357,30 @@ struct PillRecordingView: View {
             }
         }
         .frame(width: PillDimensions.recordingWidth, height: PillDimensions.recordingHeight)
+        // MARK: - 2-Second Delay Logic for Warning Indicator
+        // Achieves "invisible" recovery for brief issues (<2s)
+        .onChange(of: audio.systemAudioStatus) { _, newStatus in
+            warningDelayTask?.cancel()
+
+            if newStatus.isWarning || newStatus.isRecovering {
+                // Start 2-second delay before showing warning
+                warningDelayTask = Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    if !Task.isCancelled {
+                        await MainActor.run {
+                            showWarningDelayed = true
+                        }
+                    }
+                }
+            } else {
+                // Issue resolved - hide indicator immediately
+                showWarningDelayed = false
+            }
+        }
+        .onDisappear {
+            warningDelayTask?.cancel()
+            showWarningDelayed = false
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Recording in progress, \(formatDurationAccessible(audio.recordingDuration))")
         .accessibilityHint("Contains stop button")

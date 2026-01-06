@@ -100,13 +100,15 @@ struct TranscriptionTask: Identifiable {
     let systemURL: URL?
     let outputFolder: URL
     let startTime: Date
+    let healthInfo: RecordingHealthInfo?
 
-    init(micURL: URL, systemURL: URL?, outputFolder: URL) {
+    init(micURL: URL, systemURL: URL?, outputFolder: URL, healthInfo: RecordingHealthInfo? = nil) {
         self.id = UUID()
         self.micURL = micURL
         self.systemURL = systemURL
         self.outputFolder = outputFolder
         self.startTime = Date()
+        self.healthInfo = healthInfo
     }
 }
 
@@ -151,8 +153,9 @@ class TranscriptionTaskManager: ObservableObject {
 
     /// Start a new transcription task in the background
     /// Uses Deepgram multichannel pipeline: Transcribe → Save with Speaker Attribution → Extract Action Items
-    func startTranscription(micURL: URL, systemURL: URL?, outputFolder: URL) {
-        let task = TranscriptionTask(micURL: micURL, systemURL: systemURL, outputFolder: outputFolder)
+    /// - Parameter healthInfo: Recording health metrics for transcript metadata (Phase 3: Post-hoc transparency)
+    func startTranscription(micURL: URL, systemURL: URL?, outputFolder: URL, healthInfo: RecordingHealthInfo? = nil) {
+        let task = TranscriptionTask(micURL: micURL, systemURL: systemURL, outputFolder: outputFolder, healthInfo: healthInfo)
 
         // Increment active count and set initial status immediately (Goal-Gradient Effect)
         DispatchQueue.main.async {
@@ -173,12 +176,13 @@ class TranscriptionTaskManager: ObservableObject {
                     self.displayStatus = .transcribing(progress: 0.0)
                 }
 
-                // AssemblyAI pipeline: Transcribe → Identify Speakers → Save with Names → Action Items
+                // Deepgram pipeline: Transcribe → Identify Speakers → Save with Names → Action Items
                 let transcriptURL = try await self.transcribeWithSpeakerIdentification(
                     micURL: micURL,
                     systemURL: systemURL,
                     outputFolder: outputFolder,
-                    taskId: task.id
+                    taskId: task.id,
+                    healthInfo: task.healthInfo
                 )
 
                 // Extract action items from the saved transcript
@@ -247,7 +251,8 @@ class TranscriptionTaskManager: ObservableObject {
         micURL: URL,
         systemURL: URL?,
         outputFolder: URL,
-        taskId: UUID
+        taskId: UUID,
+        healthInfo: RecordingHealthInfo?
     ) async throws -> URL {
 
         // Require system audio for multichannel transcription
@@ -261,7 +266,8 @@ class TranscriptionTaskManager: ObservableObject {
             micURL: micURL,
             systemURL: systemURL,
             outputFolder: outputFolder,
-            taskId: taskId
+            taskId: taskId,
+            healthInfo: healthInfo
         )
     }
 
@@ -273,7 +279,8 @@ class TranscriptionTaskManager: ObservableObject {
         micURL: URL,
         systemURL: URL,
         outputFolder: URL,
-        taskId: UUID
+        taskId: UUID,
+        healthInfo: RecordingHealthInfo?
     ) async throws -> URL {
 
         print("🔀 Using Deepgram multichannel pipeline (mic + system → stereo)")
@@ -349,7 +356,8 @@ class TranscriptionTaskManager: ObservableObject {
         guard let savedURL = TranscriptSaver.saveDeepgramMultichannelTranscript(
             result.deepgramResult,
             speakerMappings: speakerMappings,
-            directory: outputFolder
+            directory: outputFolder,
+            healthInfo: healthInfo
         ) else {
             throw NSError(domain: "Transcription", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "Failed to save transcript"
@@ -396,11 +404,13 @@ class TranscriptionTaskManager: ObservableObject {
 
         do {
             // Use multichannel pipeline when both sources available (consistent with main flow)
+            // Note: healthInfo is nil for retries since we don't have the original recording state
             let transcriptURL = try await transcribeWithSpeakerIdentification(
                 micURL: failed.micAudioURL,
                 systemURL: failed.systemAudioURL,
                 outputFolder: transcriptedFolder,
-                taskId: failedId
+                taskId: failedId,
+                healthInfo: nil
             )
 
             print("✅ Retry successful: \(transcriptURL.lastPathComponent)")
@@ -612,6 +622,25 @@ class TranscriptionTaskManager: ObservableObject {
             // Rename file with descriptive title (if available)
             if let title = result.meetingTitle, !title.isEmpty {
                 currentURL = TranscriptUtils.renameWithTitle(at: currentURL, title: title)
+            }
+
+            // Record action items to stats database and update YAML
+            let actionItemCount = result.actionItems.count
+            TranscriptUtils.updateActionItemsCount(at: currentURL, count: actionItemCount)
+
+            if actionItemCount > 0 {
+                // Convert to ActionItemRecord for database storage
+                let records = result.actionItems.map { item in
+                    ActionItemRecord(
+                        task: item.task,
+                        owner: item.owner,
+                        priority: item.priority,
+                        dueDate: item.dueDate,
+                        destination: "extracted"
+                    )
+                }
+                await StatsService.shared.recordActionItems(records, for: currentURL.path)
+                print("📊 Recorded \(actionItemCount) action items to stats database")
             }
 
             if result.actionItems.isEmpty {

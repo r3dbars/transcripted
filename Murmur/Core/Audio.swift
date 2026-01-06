@@ -59,6 +59,37 @@ class Audio: ObservableObject {
     @Published var micAudioFileURL: URL?
     @Published var systemAudioFileURL: URL?
 
+    // MARK: - Recording Health Tracking (Phase 1: Sleep/Wake + Gap Logging)
+
+    /// Simple struct to track audio gaps (sleep/wake, device switches)
+    struct AudioGap {
+        let start: Date
+        let duration: TimeInterval
+        let reason: String
+
+        var description: String {
+            let durationStr = String(format: "%.1f", duration)
+            return "\(reason): \(durationStr)s"
+        }
+    }
+
+    /// Gaps detected during recording (sleep/wake, device switches)
+    private(set) var recordingGaps: [AudioGap] = []
+
+    /// Count of device switches during this recording
+    private(set) var deviceSwitchCount: Int = 0
+
+    /// Timestamp when system started sleeping (for gap calculation)
+    private var sleepTimestamp: Date?
+
+    /// Create a snapshot of recording health info for transcript metadata
+    /// Call this when stopping recording to capture health metrics
+    func createHealthInfo() -> RecordingHealthInfo {
+        // Cast the type-erased systemAudioCapture to get buffer stats
+        let systemCapture = systemAudioCapture as? SystemAudioCapture
+        return RecordingHealthInfo.from(audio: self, systemCapture: systemCapture)
+    }
+
     private var engine: AVAudioEngine?
     private var inputNode: AVAudioInputNode?
     private var startTime: Date?
@@ -141,6 +172,47 @@ class Audio: ObservableObject {
             .sink { [weak self] errorMessage in
                 self?.updateSystemAudioStatus(fromError: errorMessage)
             }
+
+        // MARK: - Sleep/Wake Observers (Phase 1: Invisible Reliability)
+        // Handle macOS sleep/wake to prevent AVAudioEngine crashes and log gaps
+
+        NotificationCenter.default.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self, self.isRecording else { return }
+            print("💤 System sleeping during recording - preparing for gap")
+            self.sleepTimestamp = Date()
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self, self.isRecording else { return }
+            print("☀️ System waking - waiting for HAL stabilization")
+
+            // Wait 500ms for audio subsystem to stabilize before continuing
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self = self, self.isRecording else { return }
+
+                // Record the gap
+                if let sleepStart = self.sleepTimestamp {
+                    let gap = AudioGap(
+                        start: sleepStart,
+                        duration: Date().timeIntervalSince(sleepStart),
+                        reason: "Sleep/wake"
+                    )
+                    self.recordingGaps.append(gap)
+                    print("📊 Recorded sleep/wake gap: \(gap.description)")
+                }
+                self.sleepTimestamp = nil
+
+                // Existing device recovery will handle reconnection via watchdog
+            }
+        }
     }
 
     /// Updates systemAudioStatus based on SystemAudioCapture's error messages
@@ -192,6 +264,12 @@ class Audio: ObservableObject {
         resetSilenceTracking()  // Start fresh silence tracking
         systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
         systemAudioSilenceStart = nil  // Reset system audio silence tracking
+
+        // Reset health tracking for new recording session
+        recordingGaps = []
+        deviceSwitchCount = 0
+        sleepTimestamp = nil
+
         print("📝 Starting audio capture")
 
         Task {
@@ -526,7 +604,10 @@ class Audio: ObservableObject {
 
         guard let engine = engine, let inputNode = inputNode else { return }
 
-        print("🔄 Recovering from device change...")
+        // Track device switch for health monitoring
+        let switchStart = Date()
+        deviceSwitchCount += 1
+        print("🔄 Recovering from device change (switch #\(deviceSwitchCount))...")
 
         // Stop engine (but keep recording flag true)
         inputNode.removeTap(onBus: 0)
@@ -657,7 +738,14 @@ class Audio: ObservableObject {
                 }
             }
 
-            print("✅ Device recovery complete, recording continues")
+            // Record the device switch gap
+            let gap = AudioGap(
+                start: switchStart,
+                duration: Date().timeIntervalSince(switchStart),
+                reason: "Device switch"
+            )
+            recordingGaps.append(gap)
+            print("✅ Device recovery complete (gap: \(gap.description)), recording continues")
         } catch {
             print("❌ Failed to restart engine: \(error.localizedDescription)")
             DispatchQueue.main.async { [weak self] in
