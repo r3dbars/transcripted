@@ -81,6 +81,29 @@ class SystemAudioCapture: ObservableObject {
     private var _buffersDropped: Int = 0
     private let statsLock = NSLock()
 
+    /// Public getter for buffer success rate (Phase 3: Transcript Metadata)
+    /// Returns 1.0 if no buffers received yet (assume success until proven otherwise)
+    var bufferSuccessRate: Double {
+        statsLock.lock()
+        defer { statsLock.unlock() }
+        guard _totalBuffers > 0 else { return 1.0 }
+        return Double(_buffersWithData) / Double(_totalBuffers)
+    }
+
+    /// Public getter for total buffers received
+    var totalBuffers: Int {
+        statsLock.lock()
+        defer { statsLock.unlock() }
+        return _totalBuffers
+    }
+
+    /// Public getter for buffers with actual audio data
+    var buffersWithData: Int {
+        statsLock.lock()
+        defer { statsLock.unlock() }
+        return _buffersWithData
+    }
+
     init() {}
 
     /// Prepares the system audio tap without starting capture
