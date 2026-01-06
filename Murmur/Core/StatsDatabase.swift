@@ -11,6 +11,10 @@ final class StatsDatabase {
     private var db: OpaquePointer?
     private let dbPath: URL
 
+    /// Serial queue ensuring thread-safe database access
+    /// All database operations are serialized through this queue
+    private let queue = DispatchQueue(label: "com.transcripted.statsdb", qos: .utility)
+
     private init() {
         // Store database in the Transcripted folder
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -102,8 +106,14 @@ final class StatsDatabase {
 
     // MARK: - Recording Operations
 
-    /// Record a new transcription session
+    /// Record a new transcription session (thread-safe, async)
     func recordSession(_ metadata: RecordingMetadata) {
+        queue.async { [weak self] in
+            self?.recordSessionImpl(metadata)
+        }
+    }
+
+    private func recordSessionImpl(_ metadata: RecordingMetadata) {
         let sql = """
         INSERT OR REPLACE INTO recordings (id, date, time, duration_seconds, word_count, speaker_count, processing_time_ms, transcript_path, title, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
@@ -142,11 +152,17 @@ final class StatsDatabase {
         sqlite3_finalize(statement)
 
         // Update daily activity
-        updateDailyActivity(for: metadata.date, durationDelta: metadata.durationSeconds)
+        updateDailyActivityImpl(for: metadata.date, durationDelta: metadata.durationSeconds)
     }
 
-    /// Get all recordings
+    /// Get all recordings (thread-safe, sync)
     func getAllRecordings() -> [RecordingMetadata] {
+        return queue.sync {
+            getAllRecordingsImpl()
+        }
+    }
+
+    private func getAllRecordingsImpl() -> [RecordingMetadata] {
         var recordings: [RecordingMetadata] = []
 
         let sql = "SELECT id, date, time, duration_seconds, word_count, speaker_count, processing_time_ms, transcript_path, title FROM recordings ORDER BY date DESC, time DESC;"
@@ -188,8 +204,14 @@ final class StatsDatabase {
         return recordings
     }
 
-    /// Get recordings for a specific date range
+    /// Get recordings for a specific date range (thread-safe, sync)
     func getRecordings(from startDate: Date, to endDate: Date) -> [RecordingMetadata] {
+        return queue.sync {
+            getRecordingsImpl(from: startDate, to: endDate)
+        }
+    }
+
+    private func getRecordingsImpl(from startDate: Date, to endDate: Date) -> [RecordingMetadata] {
         var recordings: [RecordingMetadata] = []
 
         let dateFormatter = DateFormatter()
@@ -240,8 +262,14 @@ final class StatsDatabase {
 
     // MARK: - Action Item Operations
 
-    /// Record action items for a session
+    /// Record action items for a session (thread-safe, async)
     func recordActionItems(_ items: [ActionItemRecord], for recordingId: String) {
+        queue.async { [weak self] in
+            self?.recordActionItemsImpl(items, for: recordingId)
+        }
+    }
+
+    private func recordActionItemsImpl(_ items: [ActionItemRecord], for recordingId: String) {
         let sql = """
         INSERT INTO action_items (id, recording_id, task, owner, priority, due_date, destination, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?);
@@ -272,11 +300,17 @@ final class StatsDatabase {
         }
 
         // Update daily activity
-        updateDailyActivityActionItems(count: items.count)
+        updateDailyActivityActionItemsImpl(count: items.count)
     }
 
-    /// Get total action items count
+    /// Get total action items count (thread-safe, sync)
     func getTotalActionItemsCount() -> Int {
+        return queue.sync {
+            getTotalActionItemsCountImpl()
+        }
+    }
+
+    private func getTotalActionItemsCountImpl() -> Int {
         let sql = "SELECT COUNT(*) FROM action_items;"
         var statement: OpaquePointer?
         var count = 0
@@ -291,8 +325,14 @@ final class StatsDatabase {
         return count
     }
 
-    /// Get action items count for a date range
+    /// Get action items count for a date range (thread-safe, sync)
     func getActionItemsCount(from startDate: Date, to endDate: Date) -> Int {
+        return queue.sync {
+            getActionItemsCountImpl(from: startDate, to: endDate)
+        }
+    }
+
+    private func getActionItemsCountImpl(from startDate: Date, to endDate: Date) -> Int {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let startStr = dateFormatter.string(from: startDate)
@@ -317,7 +357,7 @@ final class StatsDatabase {
 
     // MARK: - Daily Activity Operations
 
-    private func updateDailyActivity(for date: Date, durationDelta: Int) {
+    private func updateDailyActivityImpl(for date: Date, durationDelta: Int) {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let dateStr = dateFormatter.string(from: date)
@@ -347,7 +387,7 @@ final class StatsDatabase {
         sqlite3_finalize(statement)
     }
 
-    private func updateDailyActivityActionItems(count: Int) {
+    private func updateDailyActivityActionItemsImpl(count: Int) {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let dateStr = dateFormatter.string(from: Date())
@@ -375,8 +415,14 @@ final class StatsDatabase {
         sqlite3_finalize(statement)
     }
 
-    /// Get daily activity for a month
+    /// Get daily activity for a month (thread-safe, sync)
     func getDailyActivity(for month: Date) -> [String: DailyActivity] {
+        return queue.sync {
+            getDailyActivityImpl(for: month)
+        }
+    }
+
+    private func getDailyActivityImpl(for month: Date) -> [String: DailyActivity] {
         var activities: [String: DailyActivity] = [:]
 
         // Get first and last day of month
@@ -417,8 +463,14 @@ final class StatsDatabase {
         return activities
     }
 
-    /// Get all dates with activity (for streak calculation)
+    /// Get all dates with activity (for streak calculation) (thread-safe, sync)
     func getAllActiveDates() -> [String] {
+        return queue.sync {
+            getAllActiveDatesImpl()
+        }
+    }
+
+    private func getAllActiveDatesImpl() -> [String] {
         var dates: [String] = []
 
         let sql = "SELECT date FROM daily_activity WHERE recording_count > 0 ORDER BY date DESC;"
@@ -437,8 +489,14 @@ final class StatsDatabase {
 
     // MARK: - Aggregate Stats
 
-    /// Get total recordings count
+    /// Get total recordings count (thread-safe, sync)
     func getTotalRecordingsCount() -> Int {
+        return queue.sync {
+            getTotalRecordingsCountImpl()
+        }
+    }
+
+    private func getTotalRecordingsCountImpl() -> Int {
         let sql = "SELECT COUNT(*) FROM recordings;"
         var statement: OpaquePointer?
         var count = 0
@@ -453,8 +511,14 @@ final class StatsDatabase {
         return count
     }
 
-    /// Get total duration in seconds
+    /// Get total duration in seconds (thread-safe, sync)
     func getTotalDurationSeconds() -> Int {
+        return queue.sync {
+            getTotalDurationSecondsImpl()
+        }
+    }
+
+    private func getTotalDurationSecondsImpl() -> Int {
         let sql = "SELECT COALESCE(SUM(duration_seconds), 0) FROM recordings;"
         var statement: OpaquePointer?
         var total = 0
@@ -469,8 +533,14 @@ final class StatsDatabase {
         return total
     }
 
-    /// Get stats for the last N days
+    /// Get stats for the last N days (thread-safe, sync)
     func getStatsForLastDays(_ days: Int) -> (recordings: Int, durationSeconds: Int, actionItems: Int) {
+        return queue.sync {
+            getStatsForLastDaysImpl(days)
+        }
+    }
+
+    private func getStatsForLastDaysImpl(_ days: Int) -> (recordings: Int, durationSeconds: Int, actionItems: Int) {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let startDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
@@ -511,8 +581,14 @@ final class StatsDatabase {
 
     // MARK: - Migration Support
 
-    /// Check if a recording exists by transcript path
+    /// Check if a recording exists by transcript path (thread-safe, sync)
     func recordingExists(transcriptPath: String) -> Bool {
+        return queue.sync {
+            recordingExistsImpl(transcriptPath: transcriptPath)
+        }
+    }
+
+    private func recordingExistsImpl(transcriptPath: String) -> Bool {
         let sql = "SELECT COUNT(*) FROM recordings WHERE transcript_path = ?;"
         var statement: OpaquePointer?
         var exists = false
@@ -529,8 +605,14 @@ final class StatsDatabase {
         return exists
     }
 
-    /// Clear all data (for testing)
+    /// Clear all data (for testing) (thread-safe, async)
     func clearAllData() {
+        queue.async { [weak self] in
+            self?.clearAllDataImpl()
+        }
+    }
+
+    private func clearAllDataImpl() {
         executeSQL("DELETE FROM action_items;")
         executeSQL("DELETE FROM recordings;")
         executeSQL("DELETE FROM daily_activity;")
