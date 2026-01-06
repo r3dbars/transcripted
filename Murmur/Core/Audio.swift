@@ -2,6 +2,38 @@ import Foundation
 @preconcurrency import AVFoundation
 import AppKit
 import CoreAudio
+import Combine
+
+/// Status of system audio capture for UI feedback
+/// Used to show warnings when device switching or audio loss occurs
+enum SystemAudioStatus: Equatable {
+    case unknown        // Not recording
+    case healthy        // Receiving audio data normally
+    case reconnecting   // Device change detected, recovering (~200ms)
+    case silent         // Prolonged silence (>10s) - might indicate capture issue
+    case failed         // Recovery failed - system audio unavailable
+
+    var isWarning: Bool {
+        switch self {
+        case .silent, .failed: return true
+        default: return false
+        }
+    }
+
+    var isRecovering: Bool {
+        self == .reconnecting
+    }
+
+    var displayText: String {
+        switch self {
+        case .unknown: return ""
+        case .healthy: return ""
+        case .reconnecting: return "Reconnecting..."
+        case .silent: return "System audio silent"
+        case .failed: return "System audio unavailable"
+        }
+    }
+}
 
 /// Main audio recording class that captures microphone and system audio
 /// Note: This class does NOT use @MainActor because it manages AVAudioEngine
@@ -15,6 +47,7 @@ class Audio: ObservableObject {
     @Published var audioLevelHistory: [Float] = Array(repeating: 0.0, count: 15)
     @Published var systemAudioLevelHistory: [Float] = Array(repeating: 0.0, count: 15)
     @Published var error: String?
+    @Published var systemAudioStatus: SystemAudioStatus = .unknown
 
     // Silence detection for "Still Recording?" prompt
     @Published var silenceDuration: TimeInterval = 0.0  // How long we've been in silence
@@ -67,6 +100,11 @@ class Audio: ObservableObject {
     // Debug: Track system audio buffer count
     private var systemBufferCount: Int = 0
 
+    // System audio status observation
+    private var systemAudioCancellable: AnyCancellable?
+    private var systemAudioSilenceStart: Date?
+    private let systemAudioSilenceThreshold: TimeInterval = 10  // 10s of silence = warning
+
     // Callback for when recording completes
     var onRecordingComplete: ((URL?, URL?) -> Void)?
 
@@ -90,7 +128,44 @@ class Audio: ObservableObject {
         }
 
         // Initialize system audio capture (macOS 14.2+)
-        systemAudioCapture = SystemAudioCapture()
+        let capture = SystemAudioCapture()
+        systemAudioCapture = capture
+
+        // Observe SystemAudioCapture's errorMessage to update status
+        // This allows the UI to react to device changes and failures
+        systemAudioCancellable = capture.$errorMessage
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] errorMessage in
+                self?.updateSystemAudioStatus(fromError: errorMessage)
+            }
+    }
+
+    /// Updates systemAudioStatus based on SystemAudioCapture's error messages
+    private func updateSystemAudioStatus(fromError errorMessage: String?) {
+        guard isRecording else {
+            systemAudioStatus = .unknown
+            return
+        }
+
+        if let message = errorMessage {
+            if message.contains("Switched to") {
+                // Brief reconnecting state, then back to healthy
+                systemAudioStatus = .reconnecting
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    guard let self = self, self.isRecording else { return }
+                    if self.systemAudioStatus == .reconnecting {
+                        self.systemAudioStatus = .healthy
+                    }
+                }
+            } else if message.contains("unavailable") || message.contains("failed") {
+                systemAudioStatus = .failed
+            }
+        } else {
+            // No error - status is healthy (if we're recording)
+            if systemAudioStatus != .silent {
+                systemAudioStatus = .healthy
+            }
+        }
     }
 
     func start() {
@@ -112,6 +187,8 @@ class Audio: ObservableObject {
         error = nil
         systemBufferCount = 0  // Reset debug counter
         resetSilenceTracking()  // Start fresh silence tracking
+        systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
+        systemAudioSilenceStart = nil  // Reset system audio silence tracking
         print("📝 Starting audio capture")
 
         Task {
@@ -363,6 +440,7 @@ class Audio: ObservableObject {
         DispatchQueue.main.async {
             self.isRecording = false
             self.audioLevel = 0.0
+            self.systemAudioStatus = .unknown  // Reset status when not recording
             self.stopTimer()
             self.stopWatchdog()
             NSSound(named: "Pop")?.play()
@@ -452,14 +530,30 @@ class Audio: ObservableObject {
             return
         }
 
+        // HAL settle time - wait for audio hardware to stabilize after device change
+        // Same approach as SystemAudioCapture recovery
+        Thread.sleep(forTimeInterval: 0.1)  // 100ms
+
         // Get ACTUAL hardware format (not converter format)
         let recordingFormat = newInputNode.inputFormat(forBus: 1)
+        let oldChannelCount = self.inputChannelCount
         print("🎤 Switched to default device: \(recordingFormat.sampleRate)Hz, \(recordingFormat.channelCount)ch")
 
+        // ALWAYS update channel count for proper downmix handling
+        // This was a bug: if only channel count changed (not sample rate), downmix wouldn't work
+        self.inputChannelCount = recordingFormat.channelCount
+        if recordingFormat.channelCount > 1 && oldChannelCount != recordingFormat.channelCount {
+            print("🔄 Recovery: Will manually downmix \(recordingFormat.channelCount)ch → mono")
+        }
+
         // Check if we need to create a new file due to format change
-        if let currentFile = micAudioFile,
-           recordingFormat.sampleRate != currentFile.processingFormat.sampleRate {
-            print("⚠️ Sample rate changed, closing old file and creating new segment")
+        // Must check BOTH sample rate AND channel count changes
+        let sampleRateChanged = micAudioFile.map { recordingFormat.sampleRate != $0.processingFormat.sampleRate } ?? false
+        let channelCountChanged = oldChannelCount != recordingFormat.channelCount
+
+        if sampleRateChanged || channelCountChanged {
+            let changeReason = sampleRateChanged ? "Sample rate" : "Channel count"
+            print("⚠️ \(changeReason) changed, closing old file and creating new segment")
             micAudioFile = nil
 
             // Create new file segment as mono
@@ -468,7 +562,7 @@ class Audio: ObservableObject {
             let fileURL = documentsPath.appendingPathComponent("meeting_\(timestamp)_mic_recovery.wav")
 
             do {
-                // Always create mono format
+                // Always create mono format at new sample rate
                 guard let monoFormat = AVAudioFormat(
                     commonFormat: .pcmFormatFloat32,
                     sampleRate: recordingFormat.sampleRate,
@@ -479,12 +573,6 @@ class Audio: ObservableObject {
                     return
                 }
                 self.monoOutputFormat = monoFormat
-
-                // Track channel count for manual downmix
-                self.inputChannelCount = recordingFormat.channelCount
-                if recordingFormat.channelCount > 1 {
-                    print("🔄 Recovery: Will manually downmix \(recordingFormat.channelCount)ch → mono")
-                }
 
                 micAudioFile = try AVAudioFile(
                     forWriting: fileURL,
@@ -719,10 +807,47 @@ class Audio: ObservableObject {
         let power = 20 * log10(max(rms, 0.00001))
         let level = max(0.0, min(1.0, (power + 60) / 60))
 
+        // Track system audio silence for warning indicator
+        updateSystemAudioSilenceTracking(peakLevel: level)
+
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.systemAudioLevelHistory.removeFirst()
             self.systemAudioLevelHistory.append(level)
+        }
+    }
+
+    /// Tracks prolonged silence in system audio for warning display
+    private func updateSystemAudioSilenceTracking(peakLevel: Float) {
+        let silenceThreshold: Float = 0.001  // Very low threshold for silence
+
+        if peakLevel < silenceThreshold {
+            // System audio is silent
+            if systemAudioSilenceStart == nil {
+                systemAudioSilenceStart = Date()
+            }
+
+            let silenceDuration = Date().timeIntervalSince(systemAudioSilenceStart!)
+            if silenceDuration > systemAudioSilenceThreshold {
+                // Prolonged silence - show warning (but only if not already in a worse state)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    if self.systemAudioStatus == .healthy {
+                        self.systemAudioStatus = .silent
+                        print("⚠️ System audio: Silent for \(Int(silenceDuration))s")
+                    }
+                }
+            }
+        } else {
+            // Audio present - reset silence tracking
+            systemAudioSilenceStart = nil
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                // Only reset to healthy if we were in silent state (not failed/reconnecting)
+                if self.systemAudioStatus == .silent {
+                    self.systemAudioStatus = .healthy
+                }
+            }
         }
     }
 
