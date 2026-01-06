@@ -139,6 +139,10 @@ class Audio: ObservableObject {
     private var systemAudioSilenceStart: Date?
     private let systemAudioSilenceThreshold: TimeInterval = 10  // 10s of silence = warning
 
+    // Sleep/wake notification observers (stored for cleanup in deinit)
+    private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
+
     // Callback for when recording completes
     var onRecordingComplete: ((URL?, URL?) -> Void)?
 
@@ -176,7 +180,7 @@ class Audio: ObservableObject {
         // MARK: - Sleep/Wake Observers (Phase 1: Invisible Reliability)
         // Handle macOS sleep/wake to prevent AVAudioEngine crashes and log gaps
 
-        NotificationCenter.default.addObserver(
+        sleepObserver = NotificationCenter.default.addObserver(
             forName: NSWorkspace.willSleepNotification,
             object: nil,
             queue: .main
@@ -186,7 +190,7 @@ class Audio: ObservableObject {
             self.sleepTimestamp = Date()
         }
 
-        NotificationCenter.default.addObserver(
+        wakeObserver = NotificationCenter.default.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
             queue: .main
@@ -952,6 +956,13 @@ class Audio: ObservableObject {
     }
 
     deinit {
+        // Remove sleep/wake observers to prevent leaks
+        if let observer = sleepObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = wakeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
         stop()
     }
 }
