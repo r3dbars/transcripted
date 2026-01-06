@@ -81,6 +81,9 @@ class Audio: ObservableObject {
     }
     private var watchdogTimer: Timer?
 
+    // Mic recovery guard (prevents concurrent recovery attempts)
+    private var isMicRecovering: Bool = false
+
     // System audio capture
     private var systemAudioCapture: Any? // SystemAudioCapture (macOS 14.2+)
 
@@ -512,6 +515,15 @@ class Audio: ObservableObject {
     }
 
     private func recoverFromDeviceChange() {
+        // CRITICAL: Prevent concurrent recovery attempts
+        // AVAudioEngine notifications can fire multiple times during rapid device changes
+        guard !isMicRecovering else {
+            print("⚠️ Mic recovery already in progress, skipping duplicate request")
+            return
+        }
+        isMicRecovering = true
+        defer { isMicRecovering = false }
+
         guard let engine = engine, let inputNode = inputNode else { return }
 
         print("🔄 Recovering from device change...")
