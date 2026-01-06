@@ -198,6 +198,81 @@ struct RecordingDotView: View {
     }
 }
 
+// MARK: - System Audio Warning Indicator
+
+/// Warning indicator shown when system audio capture has issues
+/// Shows amber warning for silence/failure, blue for reconnecting
+@available(macOS 14.0, *)
+struct SystemAudioWarningIndicator: View {
+    let status: SystemAudioStatus
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+    @State private var isPulsing = false
+
+    var body: some View {
+        ZStack {
+            // Pulsing background
+            Circle()
+                .fill(fillColor.opacity(isPulsing ? 0.8 : 0.5))
+                .frame(width: 18, height: 18)
+
+            // Icon
+            Image(systemName: iconName)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(.white)
+        }
+        .help(helpText)
+        .onAppear {
+            if !reduceMotion {
+                startPulsing()
+            }
+        }
+        .accessibilityLabel(helpText)
+    }
+
+    private var fillColor: Color {
+        switch status {
+        case .reconnecting:
+            return .accentBlue
+        case .silent, .failed:
+            return .statusWarningMuted
+        default:
+            return .clear
+        }
+    }
+
+    private var iconName: String {
+        switch status {
+        case .reconnecting:
+            return "arrow.triangle.2.circlepath"
+        case .silent:
+            return "speaker.slash.fill"
+        case .failed:
+            return "exclamationmark.triangle.fill"
+        default:
+            return "speaker.fill"
+        }
+    }
+
+    private var helpText: String {
+        switch status {
+        case .reconnecting:
+            return "Reconnecting to audio device..."
+        case .silent:
+            return "System audio is silent - remote participants may not be captured"
+        case .failed:
+            return "System audio capture failed"
+        default:
+            return "System audio status"
+        }
+    }
+
+    private func startPulsing() {
+        withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+            isPulsing = true
+        }
+    }
+}
+
 // MARK: - Pill Recording View (180x40px - Dynamic Island style)
 
 /// Expanded pill shown during recording
@@ -221,9 +296,18 @@ struct PillRecordingView: View {
                 .shadow(color: Color.recordingCoral.opacity(0.3), radius: 8)
 
             HStack(spacing: 8) {
-                // Recording dot
-                RecordingDotView()
-                    .padding(.leading, 10)
+                // Recording dot + optional system audio warning
+                HStack(spacing: 4) {
+                    RecordingDotView()
+
+                    // System audio status indicator (only show when there's an issue)
+                    if audio.systemAudioStatus.isWarning || audio.systemAudioStatus.isRecovering {
+                        SystemAudioWarningIndicator(status: audio.systemAudioStatus)
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .padding(.leading, 10)
+                .animation(.snappy(duration: 0.2), value: audio.systemAudioStatus)
 
                 // Waveform visualizer (reuse existing, smaller size)
                 WaveformMiniView(
