@@ -195,6 +195,8 @@ try capture.start { systemBuffer in
 - **Hardware format**: Use `inputFormat(forBus: 1)`, NOT `outputFormat(forBus: 0)`
 - **Mic audio**: Saved as mono (manually downmixed if multi-channel)
 - **System audio**: 48kHz stereo (tap claims 96kHz but actual is 48kHz)
+  - **CRITICAL**: Always use 48kHz when creating system audio files, NOT the tap's reported rate
+  - If you use the reported 96kHz, files will appear half the expected duration (Jan 6, 2026 fix)
 - **Deep copy required**: System audio buffers use `bufferListNoCopy` - memory only valid during callback
 
 ### Verify Audio Pipeline Health

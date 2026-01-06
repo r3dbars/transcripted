@@ -355,12 +355,18 @@ class Audio: ObservableObject {
                     guard let tapFormat = capture.audioFormat else {
                         throw NSError(domain: "Audio", code: 10, userInfo: [NSLocalizedDescriptionKey: "Failed to get tap format"])
                     }
-                    print("🔧 System audio format: \(Int(tapFormat.sampleRate))Hz, \(tapFormat.channelCount)ch, interleaved=\(tapFormat.isInterleaved)")
+                    print("🔧 System audio format (reported): \(Int(tapFormat.sampleRate))Hz, \(tapFormat.channelCount)ch, interleaved=\(tapFormat.isInterleaved)")
+
+                    // CRITICAL: CoreAudio process taps report 96kHz but actual audio data is 48kHz
+                    // See MEMORY.md: "System audio: 48kHz stereo (tap claims 96kHz but actual rate is 48kHz)"
+                    // Using the reported rate causes files to be half the expected duration
+                    let actualSampleRate: Double = 48000.0
+                    print("🔧 System audio format (actual): \(Int(actualSampleRate))Hz (tap reports \(Int(tapFormat.sampleRate))Hz but data is 48kHz)")
 
                     // Step 3: Create audio file BEFORE starting I/O proc (critical!)
                     let settings: [String: Any] = [
                         AVFormatIDKey: kAudioFormatLinearPCM,
-                        AVSampleRateKey: tapFormat.sampleRate,
+                        AVSampleRateKey: actualSampleRate,  // Use actual 48kHz, not reported 96kHz
                         AVNumberOfChannelsKey: Int(tapFormat.channelCount),
                         AVLinearPCMBitDepthKey: 32,
                         AVLinearPCMIsFloatKey: true,
@@ -374,7 +380,7 @@ class Audio: ObservableObject {
                         commonFormat: .pcmFormatFloat32,
                         interleaved: tapFormat.isInterleaved
                     )
-                    print("✅ System audio file created BEFORE I/O proc: \(Int(tapFormat.sampleRate))Hz, \(tapFormat.channelCount)ch")
+                    print("✅ System audio file created BEFORE I/O proc: \(Int(actualSampleRate))Hz, \(tapFormat.channelCount)ch")
 
                     // Step 4: Now start the I/O proc with a lightweight callback
                     // The file already exists, so callback only needs to copy+write
