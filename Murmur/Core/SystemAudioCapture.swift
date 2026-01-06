@@ -59,6 +59,22 @@ class SystemAudioCapture: ObservableObject {
     private var lastDeviceChangeTime: Date?
     private let deviceChangeDebounce: TimeInterval = 0.3  // 300ms debounce - device changes fire multiple times
 
+    // MARK: - Recovery Guard (prevents concurrent recovery attempts)
+    private var _isRecovering: Bool = false
+    private let recoveryLock = NSLock()
+    private var isRecovering: Bool {
+        get {
+            recoveryLock.lock()
+            defer { recoveryLock.unlock() }
+            return _isRecovering
+        }
+        set {
+            recoveryLock.lock()
+            defer { recoveryLock.unlock() }
+            _isRecovering = newValue
+        }
+    }
+
     // MARK: - Buffer Statistics (thread-safe)
     private var _totalBuffers: Int = 0
     private var _buffersWithData: Int = 0
@@ -473,6 +489,16 @@ class SystemAudioCapture: ObservableObject {
     }
 
     private func recoverFromOutputChange() {
+        // CRITICAL: Prevent concurrent recovery attempts
+        // Multiple device changes can fire rapidly, and Thread.sleep blocks
+        // Without this guard, concurrent recoveries cause deadlock (spinning beach ball)
+        guard !isRecovering else {
+            print("⚠️ Recovery already in progress, skipping duplicate request")
+            return
+        }
+        isRecovering = true
+        defer { isRecovering = false }
+
         print("🔄 Recovering from system audio output change...")
 
         // Store current callback - we'll need it after cleanup
@@ -482,17 +508,16 @@ class SystemAudioCapture: ObservableObject {
         }
 
         // Step 1: Full cleanup of old tap/aggregate device
-        // Order matters: stop listener, log stats, cleanup devices
-        // Don't stop device listener - we want to keep it active for future changes
+        // Order matters: log stats, cleanup devices (preserve listener for future changes)
         logStats()
-        cleanupDevicesOnly()  // Use device-only cleanup to preserve listener
+        cleanupDevicesOnly()
         resetStats()
 
         // Step 2: HAL settle time - CRITICAL
         // The aggregate device is not ready immediately after the CoreAudio API call returns
         // Mozilla cubeb-coreaudio-rs and Apple developer forums recommend 100ms delay
         // Without this, the new tap may fail or produce garbage data
-        Thread.sleep(forTimeInterval: 0.1)  // 100ms
+        Thread.sleep(forTimeInterval: 0.15)  // 150ms (slightly longer for stability)
 
         // Step 3: Recreate tap targeting the new default output device
         do {
@@ -503,7 +528,7 @@ class SystemAudioCapture: ObservableObject {
             self.bufferCallback = callback
             lastBufferTime = Date()
 
-            print("✅ System audio device recovery complete (gap: ~200ms)")
+            print("✅ System audio device recovery complete (gap: ~250ms)")
 
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
