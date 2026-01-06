@@ -15,11 +15,20 @@ struct AuroraIdleView: View {
     @State private var isRecordHovered = false
     @State private var isFilesHovered = false
 
+    /// Tracks whether the view has settled after appearing
+    /// When false, view starts at success view's size (200×44) to enable smooth transition
+    /// When true, view uses normal collapsed/expanded sizing
+    @State private var hasSettled = false
+
     // Ultra-small collapsed state (smaller than recording)
     private let collapsedWidth: CGFloat = 40
     private let collapsedHeight: CGFloat = 20
     private let expandedWidth: CGFloat = 200
     private let expandedHeight: CGFloat = 44
+
+    // Initial size matches AuroraSuccessView for smooth transition
+    private let initialWidth: CGFloat = 200
+    private let initialHeight: CGFloat = 44
 
     var body: some View {
         ZStack {
@@ -79,6 +88,35 @@ struct AuroraIdleView: View {
             .offset(x: 28, y: -14)
     }
 
+    // MARK: - Branding View
+
+    private var brandingView: some View {
+        VStack(spacing: 1) {
+            // Coral circle with waveform icon - compact for 44px pill
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.recordingCoral, Color.recordingCoralDeep],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 20, height: 20)
+
+                Image(systemName: "waveform")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+
+            // App name - tiny, below logo
+            Text("Transcripted")
+                .font(.system(size: 7, weight: .medium))
+                .foregroundColor(.panelTextSecondary)
+                .tracking(0.3)
+        }
+    }
+
     // MARK: - Expanded Content
 
     private var expandedContent: some View {
@@ -108,8 +146,8 @@ struct AuroraIdleView: View {
 
             Spacer()
 
-            // Center: Dormant waveform (subtle, gently pulsing)
-            IdlePanelWaveformView(isAnimating: !reduceMotion)
+            // Center: App branding (logo + name)
+            brandingView
 
             Spacer()
 
