@@ -154,6 +154,16 @@ class MeetingDetector: ObservableObject {
         print("🔍 Meeting prompt dismissed (explicit: \(explicit)), cooldown for \(Int(cooldown))s")
     }
 
+    /// Stop passive audio monitoring before recording starts
+    /// CRITICAL: Must call this BEFORE Audio starts its SystemAudioCapture
+    /// to avoid dual-tap conflict that breaks system audio capture.
+    /// CoreAudio doesn't handle multiple concurrent process taps well.
+    func stopPassiveMonitorForRecording() {
+        guard isPassiveMonitorRunning else { return }
+        print("🔍 Stopping passive monitor before recording starts (avoiding dual-tap conflict)")
+        stopPassiveAudioMonitor()
+    }
+
     // MARK: - Stage 1: Meeting App Detection
 
     private func checkForMeetingApps() {

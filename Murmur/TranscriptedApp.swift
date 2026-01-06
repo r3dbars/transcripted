@@ -124,6 +124,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Create meeting detector
         meetingDetector = MeetingDetector(audio: audio)
 
+        // CRITICAL: Wire Audio to MeetingDetector for passive monitor coordination
+        // This prevents the dual-tap conflict that was breaking system audio capture
+        audio.setMeetingDetector(meetingDetector!)
+
         // Wire up to pill state manager
         pillStateManager.setMeetingDetector(meetingDetector!)
 

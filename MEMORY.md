@@ -254,6 +254,56 @@ If you see these warnings but want to confirm audio capture is working:
 
 ---
 
+## Dual SystemAudioCapture Conflict Bug (Jan 6, 2026)
+
+### Symptom
+- System audio captured for only ~60 seconds, then went silent for remainder of recording
+- Mic audio worked perfectly for entire duration
+- Console showed: `✅ System audio capture started` but later `⚠️ System audio: Silent for 10s`
+- Transcript showed `system_utterances: 1` vs `mic_utterances: 18`
+- System audio file had audio at start, then silence
+
+### Root Cause
+**Two concurrent `SystemAudioCapture` instances conflicted.**
+
+1. `MeetingDetector` creates a passive `SystemAudioCapture` for meeting detection (monitoring audio levels without recording)
+2. `Audio.swift` creates another `SystemAudioCapture` for actual recording
+3. When recording starts, both taps run simultaneously
+4. After 3 seconds, `MeetingDetector.checkForMeetingApps()` sees `isRecording == true`
+5. It calls `stopPassiveAudioMonitor()` → `SystemAudioCapture.stop()` → `cleanup()`
+6. Cleanup destroys the process tap and aggregate device
+7. **This breaks the recording's tap** - CoreAudio doesn't handle concurrent taps well
+
+### Evidence
+- System audio captured "Hello" (first word) at 60% confidence before passive monitor stopped
+- System audio duration: 66.0s (until passive monitor cleanup)
+- Mic audio duration: 131.9s (full recording)
+- Log sequence: passive starts → recording starts → passive destroyed → silence begins
+
+### The Fix
+**Stop the passive monitor BEFORE starting the recording's capture.**
+
+1. Added `stopPassiveMonitorForRecording()` method to `MeetingDetector`
+2. Added `meetingDetector` weak reference to `Audio`
+3. Call `meetingDetector?.stopPassiveMonitorForRecording()` at start of `startAudioCapture()`
+4. Wired up dependency in `TranscriptedApp.setupMeetingDetection()`
+
+### Files Modified
+- `Murmur/Core/MeetingDetector.swift` - Added `stopPassiveMonitorForRecording()` method
+- `Murmur/Core/Audio.swift` - Added `meetingDetector` reference and call before capture
+- `Murmur/TranscriptedApp.swift` - Wire up `audio.setMeetingDetector(meetingDetector!)`
+
+### Key Lesson
+**CoreAudio process taps and aggregate devices are system resources.** Having multiple concurrent taps for the same processes can cause resource conflicts. When one tap is destroyed during cleanup, it can affect others. Always ensure only one tap is active at a time.
+
+### How to Debug Similar Issues
+1. **Check for multiple SystemAudioCapture instances** - Search for `SystemAudioCapture()` constructor calls
+2. **Check cleanup timing** - Look at "Cleaning up system audio capture" logs vs recording duration
+3. **Compare audio durations** - If system audio is shorter than mic, something killed the tap mid-recording
+4. **Look for the first captured system audio** - If present, proves tap WAS working initially
+
+---
+
 ## Related Documentation
 
 - [Apple Audio Unit Hosting Guide](https://developer.apple.com/documentation/audiotoolbox/audio_unit_hosting_guide)
