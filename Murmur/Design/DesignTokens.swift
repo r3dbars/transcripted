@@ -179,6 +179,12 @@ extension Color {
     /// Attention green with glow opacity
     static let attentionGreenGlow = Color(hex: "#22C55E").opacity(0.5)
 
+    /// Error red - for destructive actions and validation errors
+    static let errorRed = Color(hex: "#EF4444")
+
+    /// Error red with glow opacity
+    static let errorRedGlow = Color(hex: "#EF4444").opacity(0.5)
+
     // MARK: - Premium UI Colors
 
     /// Premium Coral - sophisticated accent
@@ -951,4 +957,246 @@ enum DesignTokens {
     static let animation = AnimationTiming.self
     static let accessibility = AccessibilityTokens.self
     static let pill = PillDimensions.self
+    static let settings = SettingsDimensions.self
+}
+
+// MARK: - Settings Window Dimensions
+
+struct SettingsDimensions {
+    /// Settings window width
+    static let windowWidth: CGFloat = 800
+
+    /// Settings window height
+    static let windowHeight: CGFloat = 600
+
+    /// Sidebar width
+    static let sidebarWidth: CGFloat = 180
+
+    /// Content area width (window - sidebar - divider)
+    static let contentWidth: CGFloat = 619
+
+    /// Stats card height
+    static let statsCardHeight: CGFloat = 120
+
+    /// Stats card minimum width
+    static let statsCardMinWidth: CGFloat = 140
+
+    /// Heat map cell size
+    static let heatMapCellSize: CGFloat = 24
+
+    /// Heat map cell spacing
+    static let heatMapCellSpacing: CGFloat = 4
+}
+
+// MARK: - Heat Map Colors (5-Step Gradient)
+
+extension Color {
+    /// Heat map level 0 - empty cell (slightly elevated from background)
+    static let heatMapLevel0 = Color(hex: "#2A2A2A")
+
+    /// Heat map level 1 - faint warmth (1-2 recordings)
+    static let heatMapLevel1 = Color(hex: "#4A2F2F")
+
+    /// Heat map level 2 - warming (3-4 recordings)
+    static let heatMapLevel2 = Color(hex: "#7A3D3D")
+
+    /// Heat map level 3 - engaged (5-6 recordings)
+    static let heatMapLevel3 = Color(hex: "#AA4545")
+
+    /// Heat map level 4 - maximum intensity (7+ recordings)
+    static let heatMapLevel4 = Color.recordingCoral
+
+    // Legacy aliases for compatibility
+    static let heatMapEmpty = heatMapLevel0
+    static let heatMapLight = heatMapLevel1
+    static let heatMapMedium = heatMapLevel2
+    static let heatMapHigh = heatMapLevel3
+    static let heatMapMax = heatMapLevel4
+}
+
+// MARK: - Premium Card System ("Night Studio" Aesthetic)
+
+/// Premium card styling tokens for glass slab effect
+struct PremiumCardStyle {
+    /// Gradient top color - warmer charcoal
+    static let gradientTop = Color(hex: "#292929")
+
+    /// Gradient bottom color - slightly darker
+    static let gradientBottom = Color(hex: "#232323")
+
+    /// Inner highlight opacity (top edge light reflection)
+    static let highlightOpacity: Double = 0.06
+
+    /// Border opacity at top edge
+    static let borderOpacityTop: Double = 0.08
+
+    /// Border opacity at bottom edge
+    static let borderOpacityBottom: Double = 0.02
+
+    /// Hover glow opacity
+    static let hoverGlowOpacity: Double = 0.15
+
+    /// Hover glow blur radius
+    static let hoverGlowRadius: CGFloat = 20
+
+    /// Card shadow at rest
+    static let shadowRest = ShadowStyle(
+        color: Color.black.opacity(0.3),
+        radius: 8,
+        x: 0,
+        y: 4
+    )
+
+    /// Card shadow on hover
+    static let shadowHover = ShadowStyle(
+        color: Color.black.opacity(0.4),
+        radius: 12,
+        x: 0,
+        y: 6
+    )
+}
+
+// MARK: - Premium Card View Modifier
+
+/// Transforms flat cards into premium glass slabs with depth and glow effects
+@available(macOS 14.0, *)
+struct PremiumCardModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+    let isHovered: Bool
+    let glowColor: Color
+    let cornerRadius: CGFloat
+
+    init(
+        isHovered: Bool,
+        glowColor: Color = .recordingCoral,
+        cornerRadius: CGFloat = Radius.lawsCard
+    ) {
+        self.isHovered = isHovered
+        self.glowColor = glowColor
+        self.cornerRadius = cornerRadius
+    }
+
+    func body(content: Content) -> some View {
+        content
+            // Base gradient fill
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                PremiumCardStyle.gradientTop,
+                                PremiumCardStyle.gradientBottom
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+            }
+            // Inner highlight (top edge light reflection)
+            .overlay(alignment: .top) {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(PremiumCardStyle.highlightOpacity),
+                                Color.clear
+                            ],
+                            startPoint: .top,
+                            endPoint: .center
+                        )
+                    )
+                    .frame(height: 40)
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            }
+            // Subtle gradient border
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(PremiumCardStyle.borderOpacityTop),
+                                Color.white.opacity(PremiumCardStyle.borderOpacityBottom)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
+            }
+            // Glow effect on hover
+            .shadow(
+                color: isHovered ? glowColor.opacity(PremiumCardStyle.hoverGlowOpacity) : Color.clear,
+                radius: PremiumCardStyle.hoverGlowRadius,
+                y: 0
+            )
+            // Standard shadow
+            .shadow(
+                color: isHovered ? PremiumCardStyle.shadowHover.color : PremiumCardStyle.shadowRest.color,
+                radius: isHovered ? PremiumCardStyle.shadowHover.radius : PremiumCardStyle.shadowRest.radius,
+                y: isHovered ? PremiumCardStyle.shadowHover.y : PremiumCardStyle.shadowRest.y
+            )
+            // Subtle scale on hover
+            .scaleEffect(isHovered ? 1.01 : 1.0)
+            .animation(reduceMotion ? .none : .lawsCardHover, value: isHovered)
+    }
+}
+
+// MARK: - Premium Card View Extension
+
+@available(macOS 14.0, *)
+extension View {
+    /// Apply premium "glass slab" card styling with depth, highlights, and hover glow
+    func premiumCard(
+        isHovered: Bool,
+        glowColor: Color = .recordingCoral,
+        cornerRadius: CGFloat = Radius.lawsCard
+    ) -> some View {
+        modifier(PremiumCardModifier(
+            isHovered: isHovered,
+            glowColor: glowColor,
+            cornerRadius: cornerRadius
+        ))
+    }
+}
+
+// MARK: - Staggered Animation Modifier
+
+/// Applies staggered appear animation for page transitions
+@available(macOS 14.0, *)
+struct StaggeredAppearModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+    let delay: Double
+    let offset: CGFloat
+
+    @State private var isVisible = false
+
+    init(delay: Double, offset: CGFloat = 10) {
+        self.delay = delay
+        self.offset = offset
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(isVisible ? 1 : 0)
+            .offset(y: isVisible ? 0 : offset)
+            .onAppear {
+                guard !reduceMotion else {
+                    isVisible = true
+                    return
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                        isVisible = true
+                    }
+                }
+            }
+    }
+}
+
+@available(macOS 14.0, *)
+extension View {
+    /// Apply staggered appear animation (for page transitions)
+    func staggeredAppear(delay: Double, offset: CGFloat = 10) -> some View {
+        modifier(StaggeredAppearModifier(delay: delay, offset: offset))
+    }
 }
