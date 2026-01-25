@@ -5,12 +5,16 @@ import Combine
 // MARK: - Window Controller
 
 @available(macOS 26.0, *)
-class FloatingPanelController: NSWindowController {
+class FloatingPanelController: NSWindowController, NSWindowDelegate {
     private var taskManager: TranscriptionTaskManager
     private var audio: Audio
     private var failedTranscriptionManager: FailedTranscriptionManager
     let pillStateManager = PillStateManager()
     private var cancellables = Set<AnyCancellable>()
+
+    // Position persistence keys
+    private static let savedPositionXKey = "floatingPanelX"
+    private static let savedPositionYKey = "floatingPanelY"
 
     // Maximum window dimensions (window stays fixed, content animates within)
     private let maxWindowWidth: CGFloat = PillDimensions.trayWidth + 40  // Extra padding for shadows
@@ -23,10 +27,20 @@ class FloatingPanelController: NSWindowController {
 
         let screen = NSScreen.main ?? NSScreen.screens.first!
 
-        // Calculate position: centered above dock
+        // Calculate position: use saved position if valid, otherwise center above dock
         let dockHeight = Self.detectDockHeight(for: screen)
-        let x = (screen.frame.width - maxWindowWidth) / 2
-        let y = dockHeight + PillDimensions.dockPadding
+        let x: CGFloat
+        let y: CGFloat
+
+        if let savedX = UserDefaults.standard.object(forKey: Self.savedPositionXKey) as? CGFloat,
+           let savedY = UserDefaults.standard.object(forKey: Self.savedPositionYKey) as? CGFloat,
+           Self.isOnScreen(x: savedX, y: savedY) {
+            x = savedX
+            y = savedY
+        } else {
+            x = (screen.frame.width - maxWindowWidth) / 2
+            y = dockHeight + PillDimensions.dockPadding
+        }
 
         let initialFrame = NSRect(
             x: x,
@@ -46,7 +60,8 @@ class FloatingPanelController: NSWindowController {
 
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
-        window.isMovableByWindowBackground = false  // Fixed position above dock
+        window.isMovableByWindowBackground = true  // Allow dragging by clicking background
+        window.delegate = self  // For position persistence
         window.backgroundColor = .clear
         window.hasShadow = false
         window.isOpaque = false
@@ -148,9 +163,14 @@ class FloatingPanelController: NSWindowController {
             .store(in: &cancellables)
     }
 
-    /// Reposition window if screen changes
+    /// Reposition window if screen changes (only if no saved position)
     func repositionIfNeeded() {
         guard let window = self.window, let screen = NSScreen.main else { return }
+
+        // Only reposition if no saved position exists
+        if UserDefaults.standard.object(forKey: Self.savedPositionXKey) != nil {
+            return
+        }
 
         let dockHeight = Self.detectDockHeight(for: screen)
         let x = (screen.frame.width - maxWindowWidth) / 2
@@ -160,6 +180,22 @@ class FloatingPanelController: NSWindowController {
         frame.origin.x = x
         frame.origin.y = y
         window.setFrame(frame, display: true)
+    }
+
+    // MARK: - Position Persistence
+
+    /// Check if a position is visible on any connected screen
+    private static func isOnScreen(x: CGFloat, y: CGFloat) -> Bool {
+        let point = NSPoint(x: x, y: y)
+        return NSScreen.screens.contains { $0.frame.contains(point) }
+    }
+
+    // MARK: - NSWindowDelegate
+
+    func windowDidMove(_ notification: Notification) {
+        guard let window = self.window else { return }
+        UserDefaults.standard.set(window.frame.origin.x, forKey: Self.savedPositionXKey)
+        UserDefaults.standard.set(window.frame.origin.y, forKey: Self.savedPositionYKey)
     }
 }
 
