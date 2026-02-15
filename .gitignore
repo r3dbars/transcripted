@@ -1,0 +1,8 @@
+# Build artifacts
+build/
+
+# Debug logs
+debug.log
+
+# macOS
+.DS_Store

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Draft</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.justinbetker.draft</string>
+    <key>CFBundleVersion</key>
+    <string>0.1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>Draft</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Draft needs microphone access to transcribe your voice into text.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Draft uses speech recognition to convert your voice to text.</string>
+</dict>
+</plist>
