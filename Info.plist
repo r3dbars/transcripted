@@ -20,5 +20,7 @@
     <string>Draft needs microphone access to transcribe your voice into text.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Draft uses speech recognition to convert your voice to text.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Draft captures your screen to extract conversation context for smarter message drafting.</string>
 </dict>
 </plist>
