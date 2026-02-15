@@ -29,6 +29,9 @@ class DraftEngine: ObservableObject {
         hasAPIKey = false
     }
 
+    /// Reference to style engine — set by ContentView after init
+    var styleEngine: StyleEngine?
+
     func draftMessage(from rawText: String) {
         guard let apiKey = KeychainHelper.load(key: apiKeyName) else {
             error = "No API key — please add your Anthropic key in settings"
@@ -39,15 +42,22 @@ class DraftEngine: ObservableObject {
         error = nil
         draftedText = ""
 
+        let customPrompt = styleEngine?.buildSystemPrompt()
+
         Task {
             do {
-                let result = try await AnthropicAPI.draft(rawText: rawText, apiKey: apiKey)
+                let result = try await AnthropicAPI.draft(rawText: rawText, apiKey: apiKey, systemPrompt: customPrompt)
                 self.draftedText = result
             } catch {
                 self.error = error.localizedDescription
             }
             self.isDrafting = false
         }
+    }
+
+    /// Get API key for style summary regeneration
+    func getAPIKey() -> String? {
+        KeychainHelper.load(key: apiKeyName)
     }
 
     func clear() {
