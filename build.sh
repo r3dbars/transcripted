@@ -23,6 +23,8 @@ cat > "$BUILD_DIR/Draft.entitlements" << 'EOF'
 <dict>
     <key>com.apple.security.app-sandbox</key>
     <false/>
+    <key>com.apple.security.network.client</key>
+    <true/>
     <key>com.apple.security.device.audio-input</key>
     <true/>
     <key>com.apple.security.speech.recognition</key>
@@ -40,7 +42,8 @@ swiftc \
     -framework SwiftUI \
     -framework Combine \
     -framework Speech \
-    DraftApp.swift \
+    -framework Security \
+    $(find Sources -name '*.swift') \
     -parse-as-library \
     -target arm64-apple-macos14.0 \
     -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
