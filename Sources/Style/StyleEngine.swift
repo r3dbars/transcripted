@@ -8,6 +8,7 @@ import SwiftUI
 class StyleEngine: ObservableObject {
     @Published var exampleCount = 0
     @Published var styleFileContents = ""
+    @Published var hasCompletedOnboarding: Bool
 
     private let storageDir: URL
     private let styleFileURL: URL
@@ -127,6 +128,8 @@ class StyleEngine: ObservableObject {
     }
 
     init() {
+        hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "style-onboarding-completed")
+
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
@@ -139,6 +142,11 @@ class StyleEngine: ObservableObject {
 
         // Load existing file
         loadStyleFile()
+    }
+
+    func completeOnboarding() {
+        hasCompletedOnboarding = true
+        UserDefaults.standard.set(true, forKey: "style-onboarding-completed")
     }
 
     // MARK: - Public Interface
@@ -206,31 +214,109 @@ class StyleEngine: ObservableObject {
         saveStyleFile()
     }
 
-    /// Regenerate the Style Summary section using Haiku
+    /// Regenerate the Style Summary section using Sonnet
     func regenerateStyleSummary(apiKey: String) async {
-        // Extract just the examples section for analysis
+        // Include both onboarding samples and accepted examples for full picture
+        let onboardingSamples = extractOnboardingSamplesText()
         let examples = extractExamplesText()
-        guard !examples.isEmpty else { return }
+        let allText = (onboardingSamples + "\n\n" + examples).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !allText.isEmpty else { return }
 
         do {
             let analysis = try await AnthropicAPI.draft(
-                rawText: examples,
+                rawText: allText,
                 apiKey: apiKey,
                 systemPrompt: Self.styleAnalysisPrompt(forExampleCount: exampleCount),
                 maxTokens: 4096,
                 useModel: AnthropicAPI.sonnetModel
             )
 
-            // Replace the Style Summary section
-            if let summaryRange = styleFileContents.range(of: "## Style Summary\n"),
-               let examplesRange = styleFileContents.range(of: "\n## Accepted Examples") {
-                let replacement = "## Style Summary\n" + analysis + "\n"
-                styleFileContents.replaceSubrange(summaryRange.lowerBound..<examplesRange.lowerBound, with: replacement)
-                saveStyleFile()
+            // Replace the Style Summary section (ends at Onboarding Samples or Accepted Examples)
+            if let summaryRange = styleFileContents.range(of: "## Style Summary\n") {
+                let nextSection = styleFileContents.range(of: "\n## Onboarding Samples")
+                    ?? styleFileContents.range(of: "\n## Accepted Examples")
+                if let endRange = nextSection {
+                    let replacement = "## Style Summary\n" + analysis + "\n"
+                    styleFileContents.replaceSubrange(summaryRange.lowerBound..<endRange.lowerBound, with: replacement)
+                    saveStyleFile()
+                }
             }
         } catch {
             print("⚠️ Style summary regeneration failed: \(error)")
         }
+    }
+
+    // MARK: - Bulk Import (Onboarding)
+
+    /// Prompt for analyzing raw, messy writing samples from onboarding
+    private static func bulkAnalysisPrompt(userName: String?) -> String {
+        let nameClause = userName.flatMap { $0.isEmpty ? nil : $0 }
+            .map { "The user's name is \($0). Focus ONLY on messages written by them." }
+            ?? "Focus on identifying a single author's writing patterns across the samples."
+
+        return """
+            You are analyzing real writing samples to build a comprehensive writing style profile.
+
+            These samples were copied directly from the user's messages — Slack, iMessage, email, \
+            and other platforms. They may include:
+            - Timestamps, sender names, channel names (ignore these)
+            - Emoji reactions, thread indicators, quoted replies (ignore metadata)
+            - Messages from OTHER people mixed in (focus only on the user's writing)
+
+            \(nameClause)
+
+            Analyze their writing across these dimensions:
+
+            1. **Tone & Voice** — casual vs formal, warm vs direct, confident vs hedging. \
+            How do they balance authority with approachability?
+            2. **Sentence Patterns** — length, complexity, fragments vs complete sentences. \
+            How do they vary rhythm for effect?
+            3. **Openings & Closings** — how they start and end messages across different contexts.
+            4. **Punctuation Fingerprint** — dashes, ellipses, exclamation points, emoji usage, \
+            formatting choices.
+            5. **Signature Phrases** — recurring words, filler phrases, verbal tics. Quote examples.
+            6. **Argument Structure** — how they build points, handle agreement/disagreement.
+            7. **Paragraph Flow** — short bursts vs long blocks, transition patterns.
+            8. **Emotional Range** — how they express enthusiasm, concern, criticism, urgency.
+            9. **Vocabulary Signatures** — distinctive word choices, jargon, slang preferences.
+            10. **Contextual Adaptation** — how their style shifts across platforms and audiences.
+
+            Write a detailed profile (400-600 words) that captures what makes this person's \
+            writing THEM — not generic observations, but specific patterns a ghostwriter \
+            would need to convincingly write as this person. Use second person ("You..."). \
+            Quote actual phrases from the samples as evidence. \
+            IMPORTANT: Do NOT include a title or top-level heading. Start directly with the first section.
+            """
+    }
+
+    /// Import bulk writing samples from onboarding and generate initial style profile
+    func importBulkSamples(rawText: String, apiKey: String) async throws -> String {
+        let userName = UserDefaults.standard.string(forKey: "user-display-name")
+
+        // Send to Sonnet for deep analysis
+        let analysis = try await AnthropicAPI.draft(
+            rawText: rawText,
+            apiKey: apiKey,
+            systemPrompt: Self.bulkAnalysisPrompt(userName: userName),
+            maxTokens: 4096,
+            useModel: AnthropicAPI.sonnetModel
+        )
+
+        // Build style.md with onboarding samples + generated summary
+        styleFileContents = """
+            # Writing Style Profile
+
+            ## Style Summary
+            \(analysis)
+
+            ## Onboarding Samples
+            \(rawText.trimmingCharacters(in: .whitespacesAndNewlines))
+
+            ## Accepted Examples
+            """
+
+        saveStyleFile()
+        return analysis
     }
 
     // MARK: - File I/O
@@ -245,6 +331,15 @@ class StyleEngine: ObservableObject {
 
     private func saveStyleFile() {
         try? styleFileContents.write(to: styleFileURL, atomically: true, encoding: .utf8)
+    }
+
+    private func extractOnboardingSamplesText() -> String {
+        guard let start = styleFileContents.range(of: "## Onboarding Samples\n") else { return "" }
+        let afterStart = styleFileContents[start.upperBound...]
+        if let nextSection = afterStart.range(of: "\n## ") {
+            return String(afterStart[..<nextSection.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return String(afterStart).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func extractExamplesText() -> String {

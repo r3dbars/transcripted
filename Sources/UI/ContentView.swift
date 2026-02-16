@@ -29,9 +29,11 @@ struct ContentView: View {
                     .tabItem { Label("Style", systemImage: "person.text.rectangle") }
             }
 
-            // API key entry overlay
+            // Onboarding overlays (sequential gates)
             if !drafter.hasAPIKey {
                 APIKeyEntryView(draftEngine: drafter)
+            } else if !styleEngine.hasCompletedOnboarding {
+                StyleOnboardingView(styleEngine: styleEngine, draftEngine: drafter)
             }
         }
         .frame(minWidth: 600, minHeight: 500)
@@ -256,9 +258,16 @@ struct DraftTab: View {
                     // Cancel parallel auto-draft if user manually clicks Draft
                     isParallelCapture = false
 
-                    if let context = lastCapturedContext, context.sender != nil {
+                    // Stop voice recording and collect final text
+                    if speech.isListening {
+                        speech.stopListening()
+                        let separator = textBeforeRecording.isEmpty || textBeforeRecording.hasSuffix("\n") || textBeforeRecording.hasSuffix(" ") ? "" : " "
+                        inputText = textBeforeRecording + separator + speech.finalTranscript
+                    }
+
+                    if let context = lastCapturedContext, context.hasConversation {
                         let platform = PlatformFormatter.detect(from: previousAppTracker.previousApp)
-                        logger.log("✨ DRAFT | context-aware [\(platform.rawValue)] replying to \(context.sender ?? "?")")
+                        logger.log("✨ DRAFT | context-aware [\(platform.rawValue)] talking to \(context.talkingTo ?? "?")")
                         drafter.draftWithContext(
                             voiceText: inputText,
                             context: context,
@@ -454,13 +463,7 @@ struct DraftTab: View {
             contextCapture.onContextCaptured = { context in
                 lastCapturedContext = context
 
-                let logDetail: String
-                if let sender = context.sender, let platform = context.platform {
-                    logDetail = "[\(platform)] \(sender): \(context.message?.prefix(40) ?? "?")"
-                } else {
-                    logDetail = "\(context.displayText.prefix(60))"
-                }
-                logger.log("📸 CONTEXT CAPTURED | \(logDetail)")
+                logger.log("📸 CONTEXT RAW | platform=\(context.platform ?? "nil") talkingTo=\(context.talkingTo ?? "nil") formality=\(context.formality ?? "nil") conversation=\(context.conversation?.prefix(100) ?? "nil") hasConversation=\(context.hasConversation)")
 
                 if isParallelCapture {
                     // Inject context at the TOP of the input by setting textBeforeRecording.
@@ -469,11 +472,11 @@ struct DraftTab: View {
                     // So this naturally prepends context above voice text.
                     let contextPrefix = context.displayText
                     if !contextPrefix.isEmpty {
-                        textBeforeRecording = contextPrefix + "\n\n"
+                        textBeforeRecording = contextPrefix + "\n\nYOUR INSTRUCTIONS:\n"
                         // Trigger an immediate rebuild of inputText with the context prefix
                         let separator = ""
                         inputText = textBeforeRecording + separator + speech.finalTranscript + speech.volatileText
-                        logger.log("📎 PARALLEL | injected context at top: \(contextPrefix.prefix(40))")
+                        logger.log("📎 PARALLEL | injected context at top: \(contextPrefix.prefix(60))")
                     }
 
                     // Check if speech is also done → auto-draft

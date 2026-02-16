@@ -19,9 +19,10 @@ private func hotkeyHandler(
     // If we defer to Task/@MainActor, focus may shift to Draft before capture.
     let frontApp = NSWorkspace.shared.frontmostApplication
     let imageData: Data? = frontApp.flatMap { ScreenCapture.captureFrontmostWindow(of: $0) }
+    let appName = frontApp?.localizedName
 
     Task { @MainActor in
-        await _sharedEngine?.processCapture(imageData: imageData)
+        await _sharedEngine?.processCapture(imageData: imageData, appName: appName)
     }
     return noErr
 }
@@ -85,7 +86,7 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     /// Called from the hotkey callback with pre-captured screenshot data
-    func processCapture(imageData: Data?) async {
+    func processCapture(imageData: Data?, appName: String? = nil) async {
         guard !isCapturing else { return }
 
         isCapturing = true
@@ -115,7 +116,8 @@ class ContextCaptureEngine: ObservableObject {
             let context = try await AnthropicAPI.extractStructuredContext(
                 imageData: imageData,
                 apiKey: apiKey,
-                userName: userName
+                userName: userName,
+                appName: appName
             )
             capturedContext = context
             onContextCaptured?(context)
@@ -133,6 +135,6 @@ class ContextCaptureEngine: ObservableObject {
             return
         }
         let imageData = ScreenCapture.captureFrontmostWindow(of: app)
-        await processCapture(imageData: imageData)
+        await processCapture(imageData: imageData, appName: app.localizedName)
     }
 }
