@@ -77,12 +77,12 @@ struct AnthropicAPI {
 
     // MARK: - Text Drafting
 
-    static func draft(rawText: String, apiKey: String, systemPrompt customPrompt: String? = nil) async throws -> String {
+    static func draft(rawText: String, apiKey: String, systemPrompt customPrompt: String? = nil, maxTokens: Int = 1024) async throws -> String {
         guard !apiKey.isEmpty else { throw AnthropicAPIError.noAPIKey }
 
         let body = AnthropicRequest(
             model: model,
-            max_tokens: 1024,
+            max_tokens: maxTokens,
             system: customPrompt ?? systemPrompt,
             messages: [AnthropicMessage(role: "user", content: rawText)]
         )
