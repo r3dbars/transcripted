@@ -394,12 +394,9 @@ struct DraftTab: View {
         .onAppear {
             contextCapture.onContextCaptured = { context in
                 logger.log("📸 CONTEXT CAPTURED | \(context.count) chars from screenshot")
-                // Prepend captured context, keep any existing text
-                if inputText.isEmpty {
-                    inputText = context
-                } else {
-                    inputText = context + "\n\n" + inputText
-                }
+                // Clear everything and start fresh with new capture
+                inputText = context
+                drafter.clear()
                 // Focus the input so user can start typing immediately
                 isInputFocused = true
             }
