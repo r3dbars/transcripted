@@ -32,14 +32,28 @@ Every time the user accepts a draft (Copy or "Paste to Source App"), `recordExam
 
 The diff between AI_DRAFT and USER_SENT is the core learning signal — it reveals exactly where the style profile is wrong.
 
-### Incremental Refinement (Not Rebuild)
+### Graduated Refinement
 
-Every 5 accepted examples, `regenerateStyleSummary()` sends the current profile + training pairs to **Sonnet** with a refinement prompt:
+Refinement frequency adapts based on example count and profile quality:
+
+- **Examples 1-20:** Refine every **3** accepted drafts (early learning phase — each data point matters)
+- **Examples 21+, avg edit distance < 0.25:** Refine every **10** (profile is working well — user barely edits)
+- **Examples 21+, avg edit distance ≥ 0.25:** Refine every **5** (still learning — something's off)
+
+`shouldRefineNow()` encapsulates this logic. It reads the last 10 edit distances from style.md to determine which phase the profile is in.
+
+### Recency-Weighted Refinement
+
+`regenerateStyleSummary()` sends only the **last 20 examples** to Sonnet (via `extractRecentExamplesText(last:)`), not all accumulated history. Early examples were recorded when the profile was poor — those lessons are already encoded in the profile. Sending stale examples wastes tokens and adds noise.
+
+### Incremental (Not Rebuild)
+
+Sonnet gets the current profile + recent training pairs with a refinement prompt:
 
 - **Has existing profile:** "Here's the current profile. Here are training pairs showing what the AI got wrong. Fix the profile based on these patterns."
 - **No existing profile:** "Build a profile from these training pairs. The USER_SENT versions are ground truth."
 
-This is fundamentally different from the old approach (rebuild from scratch every time). The profile gets surgically adjusted based on actual errors, not reconstructed. The profile can't regress because Sonnet is told to preserve what's working.
+The profile gets surgically adjusted based on actual errors, not reconstructed. The profile can't regress because Sonnet is told to preserve what's working.
 
 ### Application
 
@@ -47,7 +61,7 @@ This is fundamentally different from the old approach (rebuild from scratch ever
 
 ### Cost Model
 
-Only the Style Summary is injected into the system prompt, not training pairs. Drafting cost stays constant regardless of example count. Refinement runs every 5th accepted draft using Sonnet.
+Only the Style Summary is injected into the system prompt, not training pairs. Drafting cost stays constant regardless of example count. Refinement frequency decreases as the profile improves (every 3 → every 5 → every 10), and only the last 20 examples are sent to Sonnet per refinement.
 
 ## File Format (style.md)
 
@@ -89,7 +103,8 @@ No onboarding samples section — raw pastes are discarded after initial profile
 
 func buildSystemPrompt() -> String              // Returns style-aware or default prompt
 func recordExample(aiDraft: String, userFinal: String, platform: String)  // Saves training pair
-func regenerateStyleSummary(apiKey: String) async // Incremental Sonnet refinement
+func shouldRefineNow() -> Bool                   // Graduated refinement scheduling
+func regenerateStyleSummary(apiKey: String) async // Recency-weighted Sonnet refinement (last 20 examples)
 func importBulkSamples(rawText: String, apiKey: String) async throws -> String  // Onboarding
 func completeOnboarding()                        // Sets hasCompletedOnboarding = true
 ```

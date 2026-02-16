@@ -34,9 +34,10 @@ These fire at ~60 seconds and mean "recognition task timed out." The correct res
 ## How It Works
 
 1. **Silence-based commitment** — Timer watches `volatileText`. When unchanged for 1.5 seconds, commits to `finalTranscript` and advances `committedPrefixLength` to `lastSeenFullTextLength`.
-2. **Prefix-based extraction** — Each partial result: extract `fullText[committedPrefixLength...]` as the new volatile portion.
-3. **Auto-restart on task death** — When `isFinal` or error 203/216, commit remaining text and create a fresh recognition task.
-4. **Buffer reset detection** — If `fullText.count < committedPrefixLength`, Apple reset its buffer; snap prefix back to 0.
+2. **"Done speaking" detection** — A separate timer (`doneThreshold: 2.5s`) sets `speechFinished = true` after extended silence. ContentView uses this to know the user has finished talking (distinct from mid-sentence pauses).
+3. **Prefix-based extraction** — Each partial result: extract `fullText[committedPrefixLength...]` as the new volatile portion.
+4. **Auto-restart on task death** — When `isFinal` or error 203/216, commit remaining text and create a fresh recognition task.
+5. **Buffer reset detection** — If `fullText.count < committedPrefixLength`, Apple reset its buffer; snap prefix back to 0.
 
 ## Public Interface
 
@@ -45,6 +46,7 @@ These fire at ~60 seconds and mean "recognition task timed out." The correct res
 @Published var volatileText: String      // Current unfinalized speech
 @Published var isListening: Bool
 @Published var statusMessage: String
+@Published var speechFinished: Bool      // True after 2.5s extended silence — signals "done talking"
 
 var displayText: String                  // finalTranscript + volatileText
 var hasText: Bool
