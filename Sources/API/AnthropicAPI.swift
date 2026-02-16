@@ -70,11 +70,40 @@ struct AnthropicAPI {
         information that wasn't in the original. Keep it concise and natural-sounding.
         """
 
-    private static let contextExtractionPrompt = """
-        Extract the conversation text from this screenshot. Identify who is speaking and format \
-        the output as a readable thread with speaker names. Only include the message content — \
-        skip UI elements like buttons, timestamps, and navigation. Be concise and accurate.
-        """
+    /// Build the structured context extraction prompt, optionally including the user's name
+    private static func contextExtractionPrompt(userName: String?) -> String {
+        let nameClause: String
+        if let name = userName, !name.isEmpty {
+            nameClause = """
+                The user's name is \(name). Messages from them are what the user previously said — \
+                focus on identifying what OTHER people said that the user would be replying to.
+                """
+        } else {
+            nameClause = """
+                Focus on identifying the most recent message that someone sent which the user \
+                would likely want to reply to.
+                """
+        }
+
+        return """
+            Analyze this screenshot of a messaging app or email client.
+            \(nameClause)
+
+            Extract:
+            1. platform — which app is this? (slack, email, imessage, discord, teams, other)
+            2. sender — who sent the most recent message the user would reply to? (NOT the user themselves)
+            3. message — their exact message text
+            4. context — any visible context (channel name, subject line, thread topic)
+            5. formality — what formality level fits a reply? (casual, professional, formal)
+            6. participants — any other visible participants in the conversation
+
+            Return ONLY valid JSON with no markdown fences, no explanation, just the JSON object:
+            {"platform":"...","sender":"...","message":"...","context":"...","formality":"...","participants":"..."}
+
+            If you can't determine a field, use null for its value. \
+            Prioritize accuracy of sender and message — those are critical.
+            """
+    }
 
     // MARK: - Text Drafting
 
@@ -91,18 +120,57 @@ struct AnthropicAPI {
         return try await sendRequest(body: body, apiKey: apiKey)
     }
 
-    // MARK: - Vision Context Extraction
+    // MARK: - Structured Vision Context Extraction
 
-    static func extractContext(imageData: Data, apiKey: String) async throws -> String {
+    /// Extract structured context from a screenshot, returning a CapturedContext with parsed fields.
+    /// Falls back to raw text if JSON parsing fails.
+    static func extractStructuredContext(imageData: Data, apiKey: String, userName: String? = nil) async throws -> CapturedContext {
         guard !apiKey.isEmpty else { throw AnthropicAPIError.noAPIKey }
 
+        let rawText = try await sendVisionRequest(
+            imageData: imageData,
+            systemPrompt: contextExtractionPrompt(userName: userName),
+            userText: "Analyze this screenshot and return the structured JSON.",
+            apiKey: apiKey
+        )
+
+        // Try to parse as JSON first
+        let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Strip markdown fences if the model added them despite instructions
+        let jsonString = trimmed
+            .replacingOccurrences(of: "```json", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let jsonData = jsonString.data(using: .utf8),
+           var context = try? JSONDecoder().decode(CapturedContext.self, from: jsonData) {
+            // Store raw text as backup
+            context.rawText = rawText
+            return context
+        }
+
+        // JSON parsing failed — fall back to raw text
+        var fallback = CapturedContext()
+        fallback.rawText = rawText
+        return fallback
+    }
+
+    // MARK: - Legacy Vision Context Extraction (kept for backward compat)
+
+    static func extractContext(imageData: Data, apiKey: String) async throws -> String {
+        let context = try await extractStructuredContext(imageData: imageData, apiKey: apiKey)
+        return context.displayText
+    }
+
+    // MARK: - Vision Request Helper
+
+    private static func sendVisionRequest(imageData: Data, systemPrompt: String, userText: String, apiKey: String) async throws -> String {
         let base64Image = imageData.base64EncodedString()
 
-        // Build the JSON body manually for vision (content is an array, not a string)
         let jsonBody: [String: Any] = [
             "model": model,
             "max_tokens": 2048,
-            "system": contextExtractionPrompt,
+            "system": systemPrompt,
             "messages": [
                 [
                     "role": "user",
@@ -117,7 +185,7 @@ struct AnthropicAPI {
                         ],
                         [
                             "type": "text",
-                            "text": "Extract the conversation from this screenshot."
+                            "text": userText
                         ]
                     ]
                 ]

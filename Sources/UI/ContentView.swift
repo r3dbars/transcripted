@@ -59,10 +59,13 @@ struct DraftTab: View {
     @ObservedObject var contextCapture: ContextCaptureEngine
 
     @State private var showSettings = false
+    @State private var settingsName = UserDefaults.standard.string(forKey: "user-display-name") ?? ""
     @State private var showDebugLog = false
     @State private var inputText = ""
     @State private var textBeforeRecording = ""
     @State private var previousInputLength = 0
+    @State private var lastCapturedContext: CapturedContext?
+    @State private var isParallelCapture = false  // True when hotkey triggered parallel voice+vision
     @FocusState private var isInputFocused: Bool
 
     var body: some View {
@@ -96,19 +99,42 @@ struct DraftTab: View {
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $showSettings) {
-                    VStack(spacing: 12) {
-                        Text("API Key")
+                    VStack(spacing: 16) {
+                        Text("Settings")
                             .font(.headline)
-                        Text("Key is stored in macOS Keychain")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Button("Reset API Key") {
-                            logger.log("🔑 API KEY reset")
-                            drafter.clearAPIKey()
-                            showSettings = false
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Your Name")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            TextField("Your name", text: $settingsName)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 220)
+                                .onChange(of: settingsName) {
+                                    let trimmed = settingsName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    if !trimmed.isEmpty {
+                                        UserDefaults.standard.set(trimmed, forKey: "user-display-name")
+                                    }
+                                }
+                            Text("Used to identify your messages in screenshots")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
                         }
-                        .buttonStyle(.bordered)
-                        .foregroundColor(.red)
+
+                        Divider()
+
+                        VStack(spacing: 4) {
+                            Text("Key is stored in macOS Keychain")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Button("Reset API Key") {
+                                logger.log("🔑 API KEY reset")
+                                drafter.clearAPIKey()
+                                showSettings = false
+                            }
+                            .buttonStyle(.bordered)
+                            .foregroundColor(.red)
+                        }
                     }
                     .padding(20)
                 }
@@ -197,6 +223,9 @@ struct DraftTab: View {
             HStack(spacing: 12) {
                 // Record / Stop
                 Button(action: {
+                    // Cancel parallel auto-draft if user manually controls recording
+                    isParallelCapture = false
+
                     if speech.isListening {
                         speech.stopListening()
                         let separator = textBeforeRecording.isEmpty || textBeforeRecording.hasSuffix("\n") || textBeforeRecording.hasSuffix(" ") ? "" : " "
@@ -224,8 +253,21 @@ struct DraftTab: View {
 
                 // Draft button
                 Button(action: {
-                    logger.log("✨ DRAFT | sending \(inputText.count) chars to Haiku")
-                    drafter.draftMessage(from: inputText)
+                    // Cancel parallel auto-draft if user manually clicks Draft
+                    isParallelCapture = false
+
+                    if let context = lastCapturedContext, context.sender != nil {
+                        let platform = PlatformFormatter.detect(from: previousAppTracker.previousApp)
+                        logger.log("✨ DRAFT | context-aware [\(platform.rawValue)] replying to \(context.sender ?? "?")")
+                        drafter.draftWithContext(
+                            voiceText: inputText,
+                            context: context,
+                            platform: platform
+                        )
+                    } else {
+                        logger.log("✨ DRAFT | sending \(inputText.count) chars to Haiku")
+                        drafter.draftMessage(from: inputText)
+                    }
                 }) {
                     HStack {
                         Image(systemName: "sparkles")
@@ -392,13 +434,61 @@ struct DraftTab: View {
         }
         // Wire context capture to pre-fill input
         .onAppear {
-            contextCapture.onContextCaptured = { context in
-                logger.log("📸 CONTEXT CAPTURED | \(context.count) chars from screenshot")
-                // Clear everything and start fresh with new capture
-                inputText = context
+            // Fires immediately on hotkey — start voice recording in parallel with vision
+            contextCapture.onHotkeyFired = {
+                inputText = ""
+                textBeforeRecording = ""
+                lastCapturedContext = nil
                 drafter.clear()
-                // Focus the input so user can start typing immediately
+                speech.clear()
+
+                // Start voice recording immediately
+                speech.startListening()
+                isParallelCapture = true
                 isInputFocused = true
+
+                logger.log("🚀 PARALLEL | hotkey fired, voice started, waiting for vision...")
+            }
+
+            // Fires when vision processing completes with structured context
+            contextCapture.onContextCaptured = { context in
+                lastCapturedContext = context
+
+                let logDetail: String
+                if let sender = context.sender, let platform = context.platform {
+                    logDetail = "[\(platform)] \(sender): \(context.message?.prefix(40) ?? "?")"
+                } else {
+                    logDetail = "\(context.displayText.prefix(60))"
+                }
+                logger.log("📸 CONTEXT CAPTURED | \(logDetail)")
+
+                if isParallelCapture {
+                    // Inject context at the TOP of the input by setting textBeforeRecording.
+                    // The speech .onChange handlers rebuild inputText as:
+                    //   textBeforeRecording + separator + speech.finalTranscript + volatileText
+                    // So this naturally prepends context above voice text.
+                    let contextPrefix = context.displayText
+                    if !contextPrefix.isEmpty {
+                        textBeforeRecording = contextPrefix + "\n\n"
+                        // Trigger an immediate rebuild of inputText with the context prefix
+                        let separator = ""
+                        inputText = textBeforeRecording + separator + speech.finalTranscript + speech.volatileText
+                        logger.log("📎 PARALLEL | injected context at top: \(contextPrefix.prefix(40))")
+                    }
+
+                    // Check if speech is also done → auto-draft
+                    if speech.speechFinished {
+                        logger.log("✅ PARALLEL | vision arrived, speech already done → auto-draft")
+                        triggerAutoDraft()
+                    } else {
+                        logger.log("⏳ PARALLEL | vision done, waiting for speech to finish...")
+                    }
+                } else {
+                    // Manual capture mode: fill input with context as before
+                    inputText = context.displayText
+                    drafter.clear()
+                    isInputFocused = true
+                }
             }
         }
         .onChange(of: contextCapture.captureError) {
@@ -406,6 +496,37 @@ struct DraftTab: View {
                 logger.log("❌ CAPTURE ERROR | \(error)")
             }
         }
+        // Auto-draft trigger: speech finished in parallel mode
+        .onChange(of: speech.speechFinished) {
+            guard speech.speechFinished, isParallelCapture else { return }
+            guard lastCapturedContext != nil else {
+                logger.log("⏳ PARALLEL | speech done, waiting for vision...")
+                return
+            }
+            logger.log("✅ PARALLEL | speech finished, vision already done → auto-draft")
+            triggerAutoDraft()
+        }
+    }
+
+    // MARK: - Parallel Pipeline Auto-Draft
+
+    private func triggerAutoDraft() {
+        // Stop recording, collect final text
+        speech.stopListening()
+        let separator = textBeforeRecording.isEmpty || textBeforeRecording.hasSuffix("\n") || textBeforeRecording.hasSuffix(" ") ? "" : " "
+        inputText = textBeforeRecording + separator + speech.finalTranscript
+
+        isParallelCapture = false
+
+        // Need voice input to draft
+        guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            logger.log("⚠️ PARALLEL | no voice input, skipping auto-draft")
+            return
+        }
+
+        let platform = PlatformFormatter.detect(from: previousAppTracker.previousApp)
+        logger.log("✨ AUTO-DRAFT | parallel complete, drafting [\(platform.rawValue)]")
+        drafter.draftWithContext(voiceText: inputText, context: lastCapturedContext, platform: platform)
     }
 
     // MARK: - Accept & Copy/Paste

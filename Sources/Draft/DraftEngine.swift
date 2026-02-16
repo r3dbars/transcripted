@@ -32,6 +32,7 @@ class DraftEngine: ObservableObject {
     /// Reference to style engine — set by ContentView after init
     var styleEngine: StyleEngine?
 
+    /// Original drafting method — used when no screen context is available
     func draftMessage(from rawText: String) {
         guard let apiKey = KeychainHelper.load(key: apiKeyName) else {
             error = "No API key — please add your Anthropic key in settings"
@@ -48,6 +49,47 @@ class DraftEngine: ObservableObject {
             do {
                 let result = try await AnthropicAPI.draft(rawText: rawText, apiKey: apiKey, systemPrompt: customPrompt)
                 self.draftedText = result
+            } catch {
+                self.error = error.localizedDescription
+            }
+            self.isDrafting = false
+        }
+    }
+
+    /// Context-aware drafting — uses structured screen context + platform formatting
+    func draftWithContext(voiceText: String, context: CapturedContext?, platform: PlatformFormatter) {
+        guard let apiKey = KeychainHelper.load(key: apiKeyName) else {
+            error = "No API key — please add your Anthropic key in settings"
+            return
+        }
+
+        isDrafting = true
+        error = nil
+        draftedText = ""
+
+        // Build system prompt with style + platform formatting
+        var systemPrompt = styleEngine?.buildSystemPrompt() ?? ""
+        if !platform.formattingInstructions.isEmpty {
+            systemPrompt += "\n\n" + platform.formattingInstructions
+        }
+
+        // Build the user message with context
+        var userMessage = ""
+        if let context = context {
+            userMessage += context.draftingContext + "\n\n"
+        }
+        userMessage += "The user said: \"\(voiceText.trimmingCharacters(in: .whitespacesAndNewlines))\"\n\n"
+        userMessage += "Write the reply. Output ONLY the reply text, nothing else."
+
+        Task {
+            do {
+                let result = try await AnthropicAPI.draft(
+                    rawText: userMessage,
+                    apiKey: apiKey,
+                    systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt
+                )
+                // Apply platform post-processing as safety net
+                self.draftedText = platform.postProcess(result)
             } catch {
                 self.error = error.localizedDescription
             }

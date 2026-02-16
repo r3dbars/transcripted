@@ -57,7 +57,7 @@ fi
 
 # Sign
 echo "Signing..."
-codesign --force --deep --sign - \
+codesign --force --deep --sign "Apple Development: r3dbars (LZRN6W4R74)" \
     --entitlements "$BUILD_DIR/Draft.entitlements" \
     "$APP_BUNDLE" 2>&1
 
