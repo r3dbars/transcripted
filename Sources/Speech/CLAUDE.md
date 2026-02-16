@@ -57,8 +57,13 @@ func stopListening()
 func clear()
 ```
 
-## Testing
+## Verification
 
-- Speak a sentence, pause 2s, speak another → both should appear (first in white, second transitions from blue → white)
-- Record for 60+ seconds → should seamlessly chain recognition tasks
-- Stop mid-sentence → volatile text commits to final
+After modifying SpeechEngine, verify with these checks:
+
+- **Basic recording:** Speak a sentence, pause 2s, speak another → both should appear (first in white, second transitions from blue → white)
+- **Task chaining:** Record for 60+ seconds → should seamlessly chain recognition tasks (watch for `🔄 RESTART TASK` in console)
+- **Stop mid-sentence:** Stop while speaking → volatile text commits to final
+- **Done detection:** Speak, then wait 2.5s → `speechFinished` should become true (check `🏁 DONE TIMER` in console)
+- **Buffer reset:** Long recordings may trigger `🔀 BUFFER RESET` in console — text should NOT be lost
+- **Debug log:** `tail -f ~/draft-debug.log | grep SPEECH` shows all speech events in real time

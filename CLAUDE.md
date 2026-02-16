@@ -38,6 +38,80 @@ This compiles all Swift files from `Sources/`, signs the app bundle, and launche
 - **Paste to source app** — Pastes the polished message back to the exact app that was screenshotted, with activation polling for reliability
 - **Frictionless keyboard flow** — Enter in input → Draft, Enter in output → Paste to source app, Shift+Enter → newline
 
+## End-to-End Data Flow
+
+### Hotkey → Draft → Accept Pipeline (the primary flow)
+
+```
+1. User presses Ctrl+Option+D in Slack/iMessage/etc.
+   │
+   ├─→ [SYNC in C callback] Capture frontApp + screenshot (before focus shifts)
+   │
+   ├─→ [PARALLEL A] Start voice recording (SpeechEngine.startListening())
+   │                 └─→ User speaks instructions while vision processes
+   │
+   └─→ [PARALLEL B] Send screenshot to Haiku Vision (AnthropicAPI.extractStructuredContext())
+                     └─→ Returns CapturedContext (platform, talkingTo, formality, conversation)
+                     └─→ Injected at TOP of inputText via textBeforeRecording
+
+2. Both complete → triggerAutoDraft() OR user presses Enter
+   │
+   ├─→ CapturedContext.draftingPrompt(userInstructions:) assembles full prompt
+   ├─→ StyleEngine.buildSystemPrompt() adds style profile
+   ├─→ PlatformFormatter adds formatting instructions to system prompt
+   └─→ AnthropicAPI.draft() → result → PlatformFormatter.postProcess()
+       └─→ draftedText (displayed in output TextEditor, editable by user)
+       └─→ originalDraft (frozen snapshot for style learning)
+
+3. User edits draft (optional) → presses Enter or clicks "Paste to [App]"
+   │
+   ├─→ recordAcceptedExample()
+   │   ├─→ styleEngine.recordExample(aiDraft: originalDraft, userFinal: draftedText, platform)
+   │   ├─→ Training pair saved to style.md (AI_DRAFT vs USER_SENT + edit distance)
+   │   └─→ shouldRefineNow() → maybe triggers Sonnet refinement (last 20 examples)
+   │
+   └─→ pasteToApp() → activate source app → poll isActive → simulate ⌘V
+```
+
+### Plain Draft Pipeline (no screenshot)
+
+```
+User types/speaks in input → Enter → DraftEngine.draftMessage()
+└─→ StyleEngine.buildSystemPrompt() + raw text → AnthropicAPI.draft() → output
+```
+
+## Common Modifications Playbook
+
+### To add a new messaging platform (e.g., LinkedIn):
+
+1. **`Sources/Draft/PlatformFormatter.swift`** — Add `case linkedin` to the enum, add bundle ID in `detect()`, add `formattingInstructions` for the platform, add `postProcess()` rules if markdown needs fixing
+2. **`Sources/Draft/CLAUDE.md`** — Add to the bundle ID mapping table
+3. **Test** — Open the target app, capture with ⌃⌥D, verify platform detection in debug log
+
+### To add new metadata to training pairs:
+
+1. **`Sources/Style/StyleEngine.swift`** — Add the field to the `exampleBlock` string in `recordExample()`, update `extractRecentEditDistances()` if it's a parseable metric
+2. **`Sources/UI/ContentView.swift`** — Pass the new data into `recordExample()` from `recordAcceptedExample()` (~line 587)
+3. **`Sources/Style/StyleEngine.swift`** — Update `buildRefinementPrompt()` to tell Sonnet about the new field
+4. **`Sources/Style/CLAUDE.md`** — Update the file format example
+
+### To change the refinement logic:
+
+1. **`Sources/Style/StyleEngine.swift`** — Modify `shouldRefineNow()` for frequency, `extractRecentExamplesText(last:)` for window size, `buildRefinementPrompt()` for what Sonnet sees
+2. **`Sources/UI/ContentView.swift`** — The call site at `recordAcceptedExample()` (~line 597) just calls `shouldRefineNow()` — usually no changes needed here
+
+### To modify the vision extraction prompt:
+
+1. **`Sources/API/AnthropicAPI.swift`** — Edit `contextExtractionPrompt()` (~line 74)
+2. **`Sources/Capture/CapturedContext.swift`** — If adding new labeled fields, update `parse()` and the struct properties
+3. **`Sources/Capture/CLAUDE.md`** — Update CapturedContext struct docs
+
+### To add a new UI feature/tab:
+
+1. **`Sources/UI/ContentView.swift`** — Add to the `TabView` in `ContentView.body` (~line 17)
+2. Define the new view in a separate file in `Sources/UI/`
+3. **`Sources/UI/CLAUDE.md`** — Document the new view and its purpose
+
 ## Key Decisions
 
 - **Single binary, no Xcode project** — compiled with `swiftc` directly via `build.sh`
