@@ -11,6 +11,7 @@ class SpeechEngine: ObservableObject {
     @Published var volatileText = ""       // Replace-only: current unfinalized speech
     @Published var isListening = false
     @Published var statusMessage = "Tap Record to start"
+    @Published var speechFinished = false  // True after extended silence (2.5s) — signals "done talking"
 
     var displayText: String { finalTranscript + volatileText }
     var hasText: Bool { !finalTranscript.isEmpty || !volatileText.isEmpty }
@@ -24,6 +25,10 @@ class SpeechEngine: ObservableObject {
     private var silenceTimer: Timer?
     private let silenceThreshold: TimeInterval = 1.5
     private var lastVolatileSnapshot = ""
+
+    // "Done speaking" detection — longer silence signals user is finished
+    private var doneTimer: Timer?
+    private let doneThreshold: TimeInterval = 2.5
 
     // Tracks how much of the current task's cumulative text we've already committed
     private var committedPrefixLength = 0
@@ -84,7 +89,9 @@ class SpeechEngine: ObservableObject {
         callbackCount = 0
         taskGeneration = 0
         silenceTimer?.invalidate()
+        doneTimer?.invalidate()
         lastVolatileSnapshot = ""
+        speechFinished = false
 
         log("▶️ START LISTENING")
 
@@ -111,6 +118,8 @@ class SpeechEngine: ObservableObject {
 
         silenceTimer?.invalidate()
         silenceTimer = nil
+        doneTimer?.invalidate()
+        doneTimer = nil
 
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
@@ -134,6 +143,7 @@ class SpeechEngine: ObservableObject {
     func clear() {
         finalTranscript = ""
         volatileText = ""
+        speechFinished = false
         committedPrefixLength = 0
         lastSeenFullTextLength = 0
     }
@@ -250,6 +260,22 @@ class SpeechEngine: ObservableObject {
         silenceTimer = Timer.scheduledTimer(withTimeInterval: silenceThreshold, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 self?.commitVolatileOnSilence()
+            }
+        }
+
+        // Also reset the "done speaking" timer — longer threshold
+        resetDoneTimer()
+    }
+
+    private func resetDoneTimer() {
+        doneTimer?.invalidate()
+        speechFinished = false
+
+        doneTimer = Timer.scheduledTimer(withTimeInterval: doneThreshold, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self, self.isListening, self.hasText else { return }
+                self.log("🏁 DONE TIMER | speech finished after \(self.doneThreshold)s silence")
+                self.speechFinished = true
             }
         }
     }

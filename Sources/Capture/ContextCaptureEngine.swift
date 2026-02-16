@@ -1,5 +1,5 @@
 // ContextCaptureEngine.swift
-// Orchestrates: hotkey → screenshot → Haiku Vision → context text
+// Orchestrates: hotkey → screenshot → Haiku Vision → structured context
 
 import AppKit
 import Carbon
@@ -31,14 +31,18 @@ private func hotkeyHandler(
 @MainActor
 class ContextCaptureEngine: ObservableObject {
     @Published var isCapturing = false
-    @Published var capturedContext = ""
+    @Published var capturedContext: CapturedContext?
     @Published var captureError: String?
 
     private var hotkeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
 
-    /// Called when context is ready — set by ContentView to pre-fill input
-    var onContextCaptured: ((String) -> Void)?
+    /// Called when structured context is ready — set by ContentView
+    var onContextCaptured: ((CapturedContext) -> Void)?
+
+    /// Fires immediately on hotkey press — before vision processing starts.
+    /// ContentView uses this to start voice recording in parallel.
+    var onHotkeyFired: (() -> Void)?
 
     func registerHotkey() {
         _sharedEngine = self
@@ -87,6 +91,11 @@ class ContextCaptureEngine: ObservableObject {
         isCapturing = true
         captureError = nil
 
+        // Activate Draft and notify UI IMMEDIATELY — before vision processing.
+        // This lets ContentView start voice recording in parallel with vision.
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        onHotkeyFired?()
+
         guard let apiKey = KeychainHelper.load(key: "anthropic-api-key") else {
             captureError = "No API key — add your Anthropic key in settings"
             isCapturing = false
@@ -96,21 +105,24 @@ class ContextCaptureEngine: ObservableObject {
         guard let imageData = imageData else {
             captureError = "Screenshot failed — grant Screen Recording permission in System Settings → Privacy & Security → Screen Recording"
             isCapturing = false
-            // Still bring Draft to front so user sees the error
-            NSApplication.shared.activate(ignoringOtherApps: true)
             return
         }
 
+        // Load user's name from UserDefaults for identity-aware extraction
+        let userName = UserDefaults.standard.string(forKey: "user-display-name")
+
         do {
-            let context = try await AnthropicAPI.extractContext(imageData: imageData, apiKey: apiKey)
+            let context = try await AnthropicAPI.extractStructuredContext(
+                imageData: imageData,
+                apiKey: apiKey,
+                userName: userName
+            )
             capturedContext = context
             onContextCaptured?(context)
         } catch {
             captureError = error.localizedDescription
         }
 
-        // Bring Draft to front after processing
-        NSApplication.shared.activate(ignoringOtherApps: true)
         isCapturing = false
     }
 
