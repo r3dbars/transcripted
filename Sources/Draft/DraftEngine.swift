@@ -56,7 +56,7 @@ class DraftEngine: ObservableObject {
         }
     }
 
-    /// Context-aware drafting — uses structured screen context + platform formatting
+    /// Context-aware drafting — uses full conversation context + user's voice instructions
     func draftWithContext(voiceText: String, context: CapturedContext?, platform: PlatformFormatter) {
         guard let apiKey = KeychainHelper.load(key: apiKeyName) else {
             error = "No API key — please add your Anthropic key in settings"
@@ -73,13 +73,13 @@ class DraftEngine: ObservableObject {
             systemPrompt += "\n\n" + platform.formattingInstructions
         }
 
-        // Build the user message with context
-        var userMessage = ""
+        // Build the user message — context struct assembles everything
+        let userMessage: String
         if let context = context {
-            userMessage += context.draftingContext + "\n\n"
+            userMessage = context.draftingPrompt(userInstructions: voiceText)
+        } else {
+            userMessage = "The user said: \"\(voiceText.trimmingCharacters(in: .whitespacesAndNewlines))\"\n\nWrite the reply. Output ONLY the reply text, nothing else."
         }
-        userMessage += "The user said: \"\(voiceText.trimmingCharacters(in: .whitespacesAndNewlines))\"\n\n"
-        userMessage += "Write the reply. Output ONLY the reply text, nothing else."
 
         Task {
             do {
