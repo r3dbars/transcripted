@@ -2,36 +2,64 @@
 
 ## What This Does
 
-Captures a screenshot of the user's current app window and sends it to Haiku Vision to extract conversation text. Triggered by a global hotkey (Ctrl+Option+D) that works from any app.
+Captures a screenshot of the user's current app window, sends it to Haiku Vision to extract the full conversation thread, and stores the source app reference for paste-back. Triggered by a global hotkey (Ctrl+Option+D) that works from any app.
 
 ## Key Files
 
-- `ContextCaptureEngine.swift` — Hotkey registration, screenshot orchestration, API call
+- `ContextCaptureEngine.swift` — Hotkey registration, screenshot orchestration, API call, source app storage
+- `CapturedContext.swift` — Structured data extracted from a screenshot (platform, talkingTo, formality, conversation) + parser + prompt builder
 - `ScreenCapture.swift` — Low-level window capture via CGWindowListCreateImage
 
 ## How It Works
 
 1. **Hotkey fires** — Carbon `RegisterEventHotKey` intercepts Ctrl+Option+D at OS level
-2. **Synchronous screenshot** — The C callback captures the frontmost window IMMEDIATELY (before any async dispatch), using `NSWorkspace.shared.frontmostApplication` to get the correct app
-3. **Async processing** — `Task { @MainActor }` sends the screenshot to Haiku Vision API
-4. **Context delivered** — `onContextCaptured` callback fills ContentView's input with extracted text
-5. **Draft activates** — `NSApplication.shared.activate()` brings Draft to front
+2. **Synchronous capture** — The C callback captures TWO things IMMEDIATELY (before any async dispatch):
+   - `frontApp` — the `NSRunningApplication` reference (stored for paste-back later)
+   - `imageData` — the screenshot PNG of that app's frontmost window
+3. **Parallel activation** — `Task { @MainActor }` brings Draft to front AND fires `onHotkeyFired` callback (ContentView uses this to start voice recording in parallel with vision processing)
+4. **Vision processing** — Screenshot sent to Haiku Vision with user's name and app name as hints
+5. **Context parsed** — Haiku's plain-text response → `CapturedContext.parse()` → structured data
+6. **Context delivered** — `onContextCaptured` callback fills ContentView's input with labeled sections
 
 ## Critical Design Decision: Sync Capture in C Callback
 
-The screenshot MUST happen synchronously inside `hotkeyHandler()` before any `Task { @MainActor }` dispatch. If deferred to async, macOS has time to shift window focus to Draft, and you capture Draft's own window instead of the target app. This was the hardest bug to find.
+The screenshot AND the frontmost app reference MUST be captured synchronously inside `hotkeyHandler()` before any `Task { @MainActor }` dispatch. If deferred to async, macOS shifts window focus to Draft, and you capture Draft's own window instead of the target app. The stored `sourceApp` would also be wrong.
 
 ```swift
 private func hotkeyHandler(...) -> OSStatus {
-    // CORRECT: capture NOW while target app is still frontmost
+    // CORRECT: capture BOTH while target app is still frontmost
     let frontApp = NSWorkspace.shared.frontmostApplication
     let imageData = frontApp.flatMap { ScreenCapture.captureFrontmostWindow(of: $0) }
     Task { @MainActor in
-        await _sharedEngine?.processCapture(imageData: imageData)
+        await _sharedEngine?.processCapture(imageData: imageData, sourceApp: frontApp)
     }
     return noErr
 }
 ```
+
+## CapturedContext Struct
+
+Plain Swift struct (no Codable) with labeled fields parsed from Haiku's plain-text response:
+
+```swift
+struct CapturedContext {
+    var platform: String?       // "slack", "email", "imessage", "discord", "teams", "other"
+    var talkingTo: String?      // "Sarah Graham" — from the conversation header/title bar
+    var formality: String?      // "casual", "professional", "formal"
+    var conversation: String?   // Full conversation thread text (all messages, all participants)
+
+    var hasConversation: Bool   // True if conversation is non-empty
+    var displayText: String     // Transparent labeled sections for the UI TextEditor
+    func draftingPrompt(userInstructions: String) -> String  // Assembles full prompt for DraftEngine
+    static func parse(from text: String) -> CapturedContext  // Parses Haiku's plain-text response
+}
+```
+
+**`displayText`** shows the user exactly what was captured — transparent labeled sections (PLATFORM, TALKING TO, FORMALITY, CONVERSATION) so there's no mystery about what Draft "sees."
+
+**`draftingPrompt()`** assembles the full drafting prompt with conversation context + user's voice instructions as separate labeled sections. Explicitly tells Haiku that USER'S INSTRUCTIONS are highest priority.
+
+**`parse()`** is a line-by-line parser using `hasPrefix` checks. An `inConversation` flag captures everything after the "CONVERSATION:" header until end of text.
 
 ## Hotkey Details
 
@@ -48,13 +76,16 @@ private func hotkeyHandler(...) -> OSStatus {
 ```swift
 // ContextCaptureEngine
 @Published var isCapturing: Bool
-@Published var capturedContext: String
+@Published var capturedContext: CapturedContext?
 @Published var captureError: String?
-var onContextCaptured: ((String) -> Void)?
+@Published var sourceApp: NSRunningApplication?  // The app that was screenshotted
+
+var onContextCaptured: ((CapturedContext) -> Void)?  // Fires when vision processing completes
+var onHotkeyFired: (() -> Void)?                     // Fires immediately on hotkey (before vision)
 
 func registerHotkey()
 func unregisterHotkey()
-func processCapture(imageData: Data?) async
+func processCapture(imageData: Data?, sourceApp: NSRunningApplication?) async
 func manualCapture(app: NSRunningApplication?) async
 
 // ScreenCapture
