@@ -28,7 +28,23 @@ Main App (TabView: Draft tab + Style tab)
 
 Both gates are overlays on top of the TabView. Once cleared, they don't reappear (API key in Keychain, onboarding flag in UserDefaults).
 
-## ContentView Structure
+## ContentView.swift Section Map (719 lines)
+
+Use this to jump to the right area when modifying ContentView:
+
+```
+Lines   1-51   ContentView          — @StateObject engines, TabView, onboarding overlays, .task init
+Lines  53-72   DraftTab (struct)    — @ObservedObject declarations, @State vars, @FocusState
+Lines  74-301  DraftTab body        — Header, context bar, inputAreaView, voice indicator, controls, outputAreaView, debug log
+Lines 302-404  .onChange handlers   — Speech sync (303-317), draft completion (318-329), input tracking (330-336), context capture wiring (338-404)
+Lines 407-426  triggerAutoDraft()   — Parallel pipeline completion → auto-draft
+Lines 428-464  inputAreaView        — Input TextEditor with placeholder, Enter key handler
+Lines 466-544  outputAreaView       — Output TextEditor with Copy/Paste buttons, Enter key handler
+Lines 546-571  triggerDraft()       — Manual draft trigger (Enter or button), context-aware vs. plain
+Lines 573-604  Accept & Style       — acceptAndCopy(), acceptAndPasteToSourceApp(), recordAcceptedExample()
+Lines 606-670  Paste to App         — pasteTargetApp, pasteToApp(), waitForActivation() polling
+Lines 673-718  StyleProfileView     — Second tab showing style.md contents
+```
 
 `ContentView` owns all engines as `@StateObject` and wires them together:
 - `SpeechEngine`, `DraftEngine`, `StyleEngine`, `AppLogger`, `PreviousAppTracker`, `ContextCaptureEngine`
@@ -143,3 +159,17 @@ Hardcoded bundle ID fallback (`com.justinbetker.draft`) since `Bundle.main.bundl
 1. On launch, if `drafter.hasAPIKey` is false → `APIKeyEntryView` overlay appears
 2. User enters key → saved to Keychain → overlay dismisses
 3. Gear icon → popover with "Reset API Key" → clears Keychain → overlay reappears
+
+## Verification
+
+After modifying UI components, verify with these checks:
+
+- **Full flow:** ⌃⌥D over Slack → speak instructions → Enter → edit draft → Enter → message pasted back to Slack
+- **Keyboard shortcuts:** Enter in input triggers draft, Enter in output triggers paste, Shift+Enter inserts newline in both, ⌘R toggles recording
+- **Auto-focus:** After draft completes, cursor should be in the output TextEditor (ready for edit → Enter)
+- **Parallel pipeline:** ⌃⌥D → speak → vision context should appear at top of input while voice text appends below "YOUR INSTRUCTIONS:"
+- **Paste-back:** "Paste to [App]" button should show correct app name. Pasting should activate the target app and simulate ⌘V.
+- **Onboarding gates:** Delete API key (gear → Reset) → API key overlay appears. Reset onboarding flag → style onboarding appears. Both block the main UI.
+- **Style tab:** Shows style.md contents. After accepting drafts, example count badge should increment.
+- **Debug log:** Expand the debug panel at the bottom → all events should be logged with timestamps. Also available at `~/draft-debug.log`
+- **Build:** `bash build.sh` — must compile cleanly (only warning: CGWindowListCreateImage deprecation)

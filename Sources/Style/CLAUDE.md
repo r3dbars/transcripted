@@ -115,3 +115,16 @@ func completeOnboarding()                        // Sets hasCompletedOnboarding 
 - **Onboarding flag:** `UserDefaults` key `"style-onboarding-completed"`
 - **User's name:** `UserDefaults` key `"user-display-name"` (set during onboarding, used for vision extraction too)
 - **Format:** Markdown with structured sections, written atomically on every change
+
+## Verification
+
+After modifying StyleEngine, verify with these checks:
+
+- **Training pair saved:** Accept a draft → open `~/Library/Application Support/Draft/style.md` → new `### Example N` should have `AI_DRAFT`, `USER_SENT`, `PLATFORM`, `EDIT_DISTANCE`
+- **Edit detection:** Edit a draft before accepting → `AI_DRAFT` should differ from `USER_SENT`, edit distance > 0
+- **No-edit detection:** Accept without editing → `AI_DRAFT` equals `USER_SENT`, edit distance = 0 (or near 0)
+- **Graduated frequency:** Check debug log for `🔄 STYLE | refinement triggered at N examples` — should fire at 3, 6, 9... (early) then 10, 20... (stabilized)
+- **Recency window:** During refinement, only the last 20 examples should be sent to Sonnet (check prompt size in console if debugging)
+- **Onboarding:** Reset with `defaults delete com.justinbetker.draft style-onboarding-completed` → relaunch → onboarding should appear. After completing, style.md should have profile but NO raw pasted text
+- **Debug monitoring:** `tail -f ~/draft-debug.log | grep STYLE` shows all style events in real time
+- **Inspect style.md directly:** `cat ~/Library/Application\ Support/Draft/style.md` to see current profile + examples

@@ -96,3 +96,13 @@ static func save(key: String, value: String) -> Bool
 static func load(key: String) -> String?
 static func delete(key: String) -> Bool
 ```
+
+## Verification
+
+After modifying AnthropicAPI, verify with these checks:
+
+- **Text drafting:** Type text in input → hit Draft → check debug log for `✅ DRAFTED` with character count
+- **Vision extraction:** Press ⌃⌥D over a messaging app → check console for `🔍 VISION RAW RESPONSE` showing the labeled sections (PLATFORM/TALKING TO/FORMALITY/CONVERSATION)
+- **Style refinement:** Accept 3 drafts → check for `🔄 STYLE | refinement triggered` in debug log (confirms Sonnet calls work)
+- **Error handling:** Temporarily break the API key → verify the UI shows an error message, not a crash
+- **Model selection:** Drafting should use Haiku (fast), style analysis should use Sonnet — check the `model` field in console output

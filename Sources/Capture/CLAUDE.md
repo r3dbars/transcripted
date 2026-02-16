@@ -91,3 +91,14 @@ func manualCapture(app: NSRunningApplication?) async
 // ScreenCapture
 static func captureFrontmostWindow(of app: NSRunningApplication) -> Data?
 ```
+
+## Verification
+
+After modifying capture or context extraction, verify with these checks:
+
+- **Hotkey capture:** Open Slack/iMessage → press ⌃⌥D → check debug log for `📸 CONTEXT RAW` showing platform, talkingTo, formality, and conversation text
+- **Source app stored:** After capture, the "Paste to [App]" button should show the correct app name
+- **Manual capture:** Click "Capture Screen" button → should capture the previous app (not Draft itself)
+- **Permission denied:** If Screen Recording permission is missing, should show error message (not crash). Look for `❌ CAPTURE ERROR` in debug log
+- **Parse accuracy:** Check that `CapturedContext.parse()` correctly splits the labeled sections — `platform` should be lowercase, `talkingTo` should be the name from the header (not from message content)
+- **Console output:** `🔍 VISION RAW RESPONSE` in Xcode/terminal console shows the full Haiku Vision response for debugging prompt issues

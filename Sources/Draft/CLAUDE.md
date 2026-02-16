@@ -91,3 +91,14 @@ func postProcess(_ text: String) -> String  // Post-draft formatting fixes
 ## Design Notes
 
 DraftEngine is intentionally separate from SpeechEngine. They don't know about each other — the UI coordinates them. StyleEngine is injected as an optional reference by ContentView, keeping the dependency lightweight. PlatformFormatter is detected at draft time from the paste target app.
+
+## Verification
+
+After modifying DraftEngine or PlatformFormatter, verify with these checks:
+
+- **Plain draft:** Type text → hit Draft (no screen capture) → check debug log for `✨ DRAFT | sending N chars to Haiku` and `✅ DRAFTED`
+- **Context-aware draft:** Capture a conversation (⌃⌥D) → speak instructions → Draft → check log for `✨ DRAFT | context-aware [platform] talking to [name]`
+- **originalDraft snapshot:** Draft a message → edit the output text → accept → check `style.md` — `AI_DRAFT` should be the original, `USER_SENT` should be your edited version
+- **Platform formatting:** Capture from Slack → draft → verify no `**bold**` or `## headers` in output (Slack uses `*bold*`). Capture from iMessage → verify no markdown at all.
+- **PlatformFormatter detection:** Check debug log for platform name in brackets: `[slack]`, `[imessage]`, `[email]`, etc.
+- **Error state:** If API fails, `drafter.error` should show a message in the UI (not crash)
