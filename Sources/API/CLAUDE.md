@@ -2,18 +2,18 @@
 
 ## What This Does
 
-Handles communication with the Anthropic Messages API and secure storage of the API key in macOS Keychain.
+Handles communication with the Anthropic Messages API (text drafting + vision context extraction) and secure storage of the API key in macOS Keychain.
 
 ## Key Files
 
-- `AnthropicAPI.swift` — URLSession-based HTTP client for Claude Haiku
+- `AnthropicAPI.swift` — URLSession-based HTTP client for Claude Haiku (text + vision)
 - `KeychainHelper.swift` — Simple Keychain wrapper (save/load/delete)
 
 ## Anthropic API Details
 
 ### No Official Swift SDK
 
-Anthropic provides SDKs for Python, TypeScript, Java, etc. — but NOT Swift. We use raw `URLSession` with `Codable` structs. Zero dependencies.
+Anthropic provides SDKs for Python, TypeScript, Java, etc. — but NOT Swift. We use raw `URLSession` with `Codable` structs for text, and `JSONSerialization` for vision (mixed-type content arrays).
 
 ### Endpoint & Auth
 
@@ -26,30 +26,30 @@ Anthropic provides SDKs for Python, TypeScript, Java, etc. — but NOT Swift. We
 
 ### Model
 
-Currently using `claude-haiku-4-5-20251001`. This is the fastest/cheapest Claude model — ideal for message polishing where latency matters.
+Currently using `claude-haiku-4-5-20251001`. Fastest/cheapest Claude model — ideal for message polishing and vision extraction where latency matters.
 
-### Request Format
+### Two API Modes
+
+**Text Drafting** (`draft()`): Uses `Codable` structs. Supports optional `systemPrompt` override (for style-aware drafting) and configurable `maxTokens` (default 1024, style analysis uses 4096).
+
+**Vision Context Extraction** (`extractContext()`): Uses `JSONSerialization` because vision content is a mixed-type array (image + text blocks). Sends base64 PNG screenshot, returns extracted conversation text.
+
+### Vision Request Format
 
 ```json
 {
   "model": "claude-haiku-4-5-20251001",
-  "max_tokens": 1024,
-  "system": "You are a writing assistant...",
-  "messages": [{"role": "user", "content": "rough text here"}]
+  "max_tokens": 2048,
+  "system": "Extract the conversation text...",
+  "messages": [{
+    "role": "user",
+    "content": [
+      {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "..."}},
+      {"type": "text", "text": "Extract the conversation from this screenshot."}
+    ]
+  }]
 }
 ```
-
-### Response Format
-
-```json
-{
-  "id": "msg_...",
-  "content": [{"type": "text", "text": "polished text"}],
-  "stop_reason": "end_turn"
-}
-```
-
-Extract text from `content[0].text`.
 
 ### Common Error Codes
 
@@ -62,17 +62,13 @@ Extract text from `content[0].text`.
 - Service name: `com.draft.anthropic-api-key`
 - Account key: `anthropic-api-key`
 - Uses `SecItemAdd`, `SecItemCopyMatching`, `SecItemDelete`
-- Requires `-framework Security` in build.sh
-
-### Why Keychain Over UserDefaults
-
-UserDefaults stores as plain XML plist — readable by any process. Keychain encrypts at rest using the user's login credentials. API keys should always use Keychain on macOS.
 
 ## Public Interface
 
 ```swift
 // AnthropicAPI
-static func draft(rawText: String, apiKey: String) async throws -> String
+static func draft(rawText: String, apiKey: String, systemPrompt: String? = nil, maxTokens: Int = 1024) async throws -> String
+static func extractContext(imageData: Data, apiKey: String) async throws -> String
 
 // KeychainHelper
 static func save(key: String, value: String) -> Bool
