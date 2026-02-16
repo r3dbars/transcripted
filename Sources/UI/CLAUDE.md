@@ -117,8 +117,8 @@ When the hotkey fires:
 - Speech output syncs to `inputText` via `.onChange(of:)` — `finalTranscript` and `volatileText` both update the TextEditor
 - Context capture fills `inputText` via `onContextCaptured` callback, prepends labeled sections
 - `@FocusState` on both TextEditors for cursor management
-- Style examples recorded when user hits Copy or "Paste to [App]"
-- Style summary auto-regenerates every 5 accepted examples
+- Style training pairs recorded when user hits Copy or "Paste to [App]" (AI draft vs. user's edited version + platform + edit distance)
+- Style summary auto-regenerates via graduated frequency: every 3 examples early on (1-20), then every 5-10 once the profile stabilizes (determined by `styleEngine.shouldRefineNow()`)
 
 ## StyleOnboardingView
 

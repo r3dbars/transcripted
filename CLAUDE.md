@@ -33,7 +33,7 @@ This compiles all Swift files from `Sources/`, signs the app bundle, and launche
 - **Voice-to-text** — Speak rough thoughts, Draft polishes them via Haiku
 - **Full conversation context** — Ctrl+Option+D screenshots the current app, Haiku Vision extracts the entire visible conversation thread (all messages, participants, platform, formality)
 - **Platform-aware formatting** — Detects Slack/iMessage/email/Discord/Teams and adjusts drafting style (e.g., no subject lines for Slack, casual for iMessage)
-- **Style learning** — Every accepted draft teaches Draft your writing style; tiered analysis deepens with more examples
+- **Style learning** — Every accepted draft saves a training pair (AI output vs. what you actually sent); Sonnet incrementally refines your style profile with graduated frequency
 - **Style onboarding** — New users paste real writing samples on first launch; Sonnet builds an immediate style profile (no cold start)
 - **Paste to source app** — Pastes the polished message back to the exact app that was screenshotted, with activation polling for reliability
 - **Frictionless keyboard flow** — Enter in input → Draft, Enter in output → Paste to source app, Shift+Enter → newline
