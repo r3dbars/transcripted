@@ -593,9 +593,9 @@ struct DraftTab: View {
         )
         logger.log("📚 STYLE | recorded example #\(styleEngine.exampleCount) [\(platform.rawValue)]")
 
-        // Regenerate style summary every 5 examples
-        if styleEngine.exampleCount % 5 == 0, let apiKey = drafter.getAPIKey() {
-            logger.log("🔄 STYLE | regenerating summary at \(styleEngine.exampleCount) examples")
+        // Graduated refinement: every 3 early on, every 10 once stabilized
+        if styleEngine.shouldRefineNow(), let apiKey = drafter.getAPIKey() {
+            logger.log("🔄 STYLE | refinement triggered at \(styleEngine.exampleCount) examples")
             Task {
                 await styleEngine.regenerateStyleSummary(apiKey: apiKey)
                 logger.log("✅ STYLE | summary updated")
