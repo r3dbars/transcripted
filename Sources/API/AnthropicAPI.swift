@@ -61,6 +61,7 @@ enum AnthropicAPIError: LocalizedError {
 struct AnthropicAPI {
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
     private static let model = "claude-haiku-4-5-20251001"
+    static let sonnetModel = "claude-sonnet-4-20250514"
     private static let apiVersion = "2023-06-01"
 
     private static let systemPrompt = """
@@ -77,11 +78,11 @@ struct AnthropicAPI {
 
     // MARK: - Text Drafting
 
-    static func draft(rawText: String, apiKey: String, systemPrompt customPrompt: String? = nil, maxTokens: Int = 1024) async throws -> String {
+    static func draft(rawText: String, apiKey: String, systemPrompt customPrompt: String? = nil, maxTokens: Int = 1024, useModel: String? = nil) async throws -> String {
         guard !apiKey.isEmpty else { throw AnthropicAPIError.noAPIKey }
 
         let body = AnthropicRequest(
-            model: model,
+            model: useModel ?? model,
             max_tokens: maxTokens,
             system: customPrompt ?? systemPrompt,
             messages: [AnthropicMessage(role: "user", content: rawText)]

@@ -217,7 +217,8 @@ class StyleEngine: ObservableObject {
                 rawText: examples,
                 apiKey: apiKey,
                 systemPrompt: Self.styleAnalysisPrompt(forExampleCount: exampleCount),
-                maxTokens: 4096
+                maxTokens: 4096,
+                useModel: AnthropicAPI.sonnetModel
             )
 
             // Replace the Style Summary section
