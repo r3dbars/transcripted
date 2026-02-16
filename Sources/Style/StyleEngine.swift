@@ -24,7 +24,8 @@ class StyleEngine: ObservableObject {
             You are analyzing writing samples from a single person to build their writing style profile. \
             Study every sample carefully. Write in second person ("You..."). Be specific — quote actual \
             phrases and patterns you observe. Never be generic. Every claim must be backed by evidence \
-            from the samples.
+            from the samples. \
+            IMPORTANT: Do NOT include a title or top-level heading. Start directly with the first section.
             """
 
         if count < 10 {
@@ -215,7 +216,8 @@ class StyleEngine: ObservableObject {
             let analysis = try await AnthropicAPI.draft(
                 rawText: examples,
                 apiKey: apiKey,
-                systemPrompt: Self.styleAnalysisPrompt(forExampleCount: exampleCount)
+                systemPrompt: Self.styleAnalysisPrompt(forExampleCount: exampleCount),
+                maxTokens: 4096
             )
 
             // Replace the Style Summary section
