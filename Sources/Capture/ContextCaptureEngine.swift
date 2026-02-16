@@ -19,10 +19,9 @@ private func hotkeyHandler(
     // If we defer to Task/@MainActor, focus may shift to Draft before capture.
     let frontApp = NSWorkspace.shared.frontmostApplication
     let imageData: Data? = frontApp.flatMap { ScreenCapture.captureFrontmostWindow(of: $0) }
-    let appName = frontApp?.localizedName
 
     Task { @MainActor in
-        await _sharedEngine?.processCapture(imageData: imageData, appName: appName)
+        await _sharedEngine?.processCapture(imageData: imageData, sourceApp: frontApp)
     }
     return noErr
 }
@@ -34,6 +33,10 @@ class ContextCaptureEngine: ObservableObject {
     @Published var isCapturing = false
     @Published var capturedContext: CapturedContext?
     @Published var captureError: String?
+
+    /// The app that was frontmost when the hotkey was pressed — the source of the screenshot.
+    /// Used for "Paste to [App]" so we paste back to the right app, not just the last focused one.
+    @Published var sourceApp: NSRunningApplication?
 
     private var hotkeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
@@ -86,11 +89,16 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     /// Called from the hotkey callback with pre-captured screenshot data
-    func processCapture(imageData: Data?, appName: String? = nil) async {
+    func processCapture(imageData: Data?, sourceApp: NSRunningApplication? = nil) async {
         guard !isCapturing else { return }
 
         isCapturing = true
         captureError = nil
+
+        // Store the source app so "Paste to [App]" knows where to send the reply
+        if let app = sourceApp {
+            self.sourceApp = app
+        }
 
         // Activate Draft and notify UI IMMEDIATELY — before vision processing.
         // This lets ContentView start voice recording in parallel with vision.
@@ -111,6 +119,7 @@ class ContextCaptureEngine: ObservableObject {
 
         // Load user's name from UserDefaults for identity-aware extraction
         let userName = UserDefaults.standard.string(forKey: "user-display-name")
+        let appName = sourceApp?.localizedName
 
         do {
             let context = try await AnthropicAPI.extractStructuredContext(
@@ -135,6 +144,6 @@ class ContextCaptureEngine: ObservableObject {
             return
         }
         let imageData = ScreenCapture.captureFrontmostWindow(of: app)
-        await processCapture(imageData: imageData, appName: app.localizedName)
+        await processCapture(imageData: imageData, sourceApp: app)
     }
 }

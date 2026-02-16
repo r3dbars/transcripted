@@ -69,6 +69,7 @@ struct DraftTab: View {
     @State private var lastCapturedContext: CapturedContext?
     @State private var isParallelCapture = false  // True when hotkey triggered parallel voice+vision
     @FocusState private var isInputFocused: Bool
+    @FocusState private var isOutputFocused: Bool
 
     var body: some View {
         VStack(spacing: 16) {
@@ -182,29 +183,7 @@ struct DraftTab: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            // Input area
-            TextEditor(text: $inputText)
-                .font(.body)
-                .frame(maxWidth: .infinity, minHeight: 120, maxHeight: .infinity)
-                .scrollContentBackground(.hidden)
-                .background(Color(nsColor: .textBackgroundColor))
-                .cornerRadius(8)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                )
-                .overlay(alignment: .topLeading, content: {
-                    if inputText.isEmpty && !speech.isListening {
-                        Text("Speak, type, or paste your rough thoughts here...")
-                            .foregroundColor(.secondary)
-                            .italic()
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 8)
-                            .allowsHitTesting(false)
-                    }
-                })
-                .focused($isInputFocused)
-                .disabled(drafter.isDrafting)
+            inputAreaView
 
             // Voice indicator
             if speech.isListening && !speech.volatileText.isEmpty {
@@ -254,30 +233,7 @@ struct DraftTab: View {
                 .keyboardShortcut("r", modifiers: .command)
 
                 // Draft button
-                Button(action: {
-                    // Cancel parallel auto-draft if user manually clicks Draft
-                    isParallelCapture = false
-
-                    // Stop voice recording and collect final text
-                    if speech.isListening {
-                        speech.stopListening()
-                        let separator = textBeforeRecording.isEmpty || textBeforeRecording.hasSuffix("\n") || textBeforeRecording.hasSuffix(" ") ? "" : " "
-                        inputText = textBeforeRecording + separator + speech.finalTranscript
-                    }
-
-                    if let context = lastCapturedContext, context.hasConversation {
-                        let platform = PlatformFormatter.detect(from: previousAppTracker.previousApp)
-                        logger.log("✨ DRAFT | context-aware [\(platform.rawValue)] talking to \(context.talkingTo ?? "?")")
-                        drafter.draftWithContext(
-                            voiceText: inputText,
-                            context: context,
-                            platform: platform
-                        )
-                    } else {
-                        logger.log("✨ DRAFT | sending \(inputText.count) chars to Haiku")
-                        drafter.draftMessage(from: inputText)
-                    }
-                }) {
+                Button(action: { triggerDraft() }) {
                     HStack {
                         Image(systemName: "sparkles")
                             .font(.title2)
@@ -290,7 +246,6 @@ struct DraftTab: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.purple)
                 .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || drafter.isDrafting || !drafter.hasAPIKey)
-                .keyboardShortcut(.return, modifiers: .command)
 
                 Spacer()
 
@@ -313,71 +268,7 @@ struct DraftTab: View {
                 .disabled(inputText.isEmpty && drafter.draftedText.isEmpty)
             }
 
-            // Output area
-            if drafter.isDrafting || !drafter.draftedText.isEmpty || drafter.error != nil {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Drafted Message")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.secondary)
-
-                        Spacer()
-
-                        if !drafter.draftedText.isEmpty {
-                            Button(action: { acceptAndCopy() }) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "doc.on.doc")
-                                    Text("Copy")
-                                }
-                                .font(.caption)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-
-                            Button(action: { acceptAndPasteToLastApp() }) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "arrow.uturn.left")
-                                    Text("Paste to \(previousAppTracker.previousApp?.localizedName ?? "Last App")")
-                                }
-                                .font(.caption)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .disabled(previousAppTracker.previousApp == nil)
-                        }
-                    }
-
-                    if drafter.isDrafting {
-                        HStack {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Drafting...")
-                                .foregroundColor(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
-                    } else if let error = drafter.error {
-                        Text(error)
-                            .font(.body)
-                            .foregroundColor(.red)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding()
-                    } else {
-                        TextEditor(text: $drafter.draftedText)
-                            .font(.body)
-                            .frame(maxWidth: .infinity, minHeight: 60)
-                            .scrollContentBackground(.hidden)
-                    }
-                }
-                .frame(maxWidth: .infinity, minHeight: 80)
-                .background(Color.purple.opacity(0.05))
-                .cornerRadius(8)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.purple.opacity(0.2), lineWidth: 1)
-                )
-            }
+            outputAreaView
 
             // Debug log panel
             DisclosureGroup(isExpanded: $showDebugLog) {
@@ -427,6 +318,8 @@ struct DraftTab: View {
         .onChange(of: drafter.draftedText) {
             if !drafter.draftedText.isEmpty {
                 logger.log("✅ DRAFTED | received \(drafter.draftedText.count) chars from Haiku")
+                // Auto-focus the output so user can edit and hit Enter to paste
+                isOutputFocused = true
             }
         }
         .onChange(of: drafter.error) {
@@ -532,6 +425,151 @@ struct DraftTab: View {
         drafter.draftWithContext(voiceText: inputText, context: lastCapturedContext, platform: platform)
     }
 
+    // MARK: - Extracted Views (keeps body type-checkable)
+
+    private var inputAreaView: some View {
+        TextEditor(text: $inputText)
+            .font(.body)
+            .frame(maxWidth: .infinity, minHeight: 120, maxHeight: .infinity)
+            .scrollContentBackground(.hidden)
+            .background(Color(nsColor: .textBackgroundColor))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+            )
+            .overlay(alignment: .topLeading, content: {
+                if inputText.isEmpty && !speech.isListening {
+                    Text("Speak, type, or paste your rough thoughts here...")
+                        .foregroundColor(.secondary)
+                        .italic()
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                }
+            })
+            .focused($isInputFocused)
+            .disabled(drafter.isDrafting)
+            .onKeyPress(keys: [.return], phases: .down) { keyPress in
+                if keyPress.modifiers.contains(.shift) {
+                    return .ignored  // Shift+Enter inserts a newline
+                }
+                // Enter → trigger draft
+                if !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !drafter.isDrafting {
+                    triggerDraft()
+                    return .handled
+                }
+                return .ignored
+            }
+    }
+
+    @ViewBuilder
+    private var outputAreaView: some View {
+        if drafter.isDrafting || !drafter.draftedText.isEmpty || drafter.error != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Drafted Message")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary)
+
+                    Spacer()
+
+                    if !drafter.draftedText.isEmpty {
+                        Button(action: { acceptAndCopy() }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "doc.on.doc")
+                                Text("Copy")
+                            }
+                            .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+
+                        Button(action: { acceptAndPasteToSourceApp() }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.uturn.left")
+                                Text("Paste to \(pasteTargetAppName)")
+                            }
+                            .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(pasteTargetApp == nil)
+                    }
+                }
+
+                if drafter.isDrafting {
+                    HStack {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Drafting...")
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                } else if let error = drafter.error {
+                    Text(error)
+                        .font(.body)
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                } else {
+                    TextEditor(text: $drafter.draftedText)
+                        .font(.body)
+                        .frame(maxWidth: .infinity, minHeight: 60)
+                        .scrollContentBackground(.hidden)
+                        .focused($isOutputFocused)
+                        .onKeyPress(keys: [.return], phases: .down) { keyPress in
+                            if keyPress.modifiers.contains(.shift) {
+                                return .ignored  // Shift+Enter inserts a newline
+                            }
+                            // Enter → paste to source app
+                            if !drafter.draftedText.isEmpty && pasteTargetApp != nil {
+                                acceptAndPasteToSourceApp()
+                                return .handled
+                            }
+                            return .ignored
+                        }
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 80)
+            .background(Color.purple.opacity(0.05))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.purple.opacity(0.2), lineWidth: 1)
+            )
+        }
+    }
+
+    // MARK: - Draft Action
+
+    private func triggerDraft() {
+        // Cancel parallel auto-draft if user manually triggers
+        isParallelCapture = false
+
+        // Stop voice recording and collect final text
+        if speech.isListening {
+            speech.stopListening()
+            let separator = textBeforeRecording.isEmpty || textBeforeRecording.hasSuffix("\n") || textBeforeRecording.hasSuffix(" ") ? "" : " "
+            inputText = textBeforeRecording + separator + speech.finalTranscript
+        }
+
+        if let context = lastCapturedContext, context.hasConversation {
+            let platform = PlatformFormatter.detect(from: previousAppTracker.previousApp)
+            logger.log("✨ DRAFT | context-aware [\(platform.rawValue)] talking to \(context.talkingTo ?? "?")")
+            drafter.draftWithContext(
+                voiceText: inputText,
+                context: context,
+                platform: platform
+            )
+        } else {
+            logger.log("✨ DRAFT | sending \(inputText.count) chars to Haiku")
+            drafter.draftMessage(from: inputText)
+        }
+    }
+
     // MARK: - Accept & Copy/Paste
 
     private func acceptAndCopy() {
@@ -541,9 +579,9 @@ struct DraftTab: View {
         recordAcceptedExample()
     }
 
-    private func acceptAndPasteToLastApp() {
+    private func acceptAndPasteToSourceApp() {
         recordAcceptedExample()
-        pasteToLastApp(drafter.draftedText)
+        pasteToApp(drafter.draftedText)
     }
 
     private func recordAcceptedExample() {
@@ -560,9 +598,18 @@ struct DraftTab: View {
         }
     }
 
-    // MARK: - Paste to Last App
+    // MARK: - Paste to Source App
 
-    private func pasteToLastApp(_ text: String) {
+    /// The app we should paste back to: source app from capture, or previous app as fallback
+    private var pasteTargetApp: NSRunningApplication? {
+        contextCapture.sourceApp ?? previousAppTracker.previousApp
+    }
+
+    private var pasteTargetAppName: String {
+        pasteTargetApp?.localizedName ?? "Last App"
+    }
+
+    private func pasteToApp(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
 
@@ -574,12 +621,19 @@ struct DraftTab: View {
             return
         }
 
-        let appName = previousAppTracker.previousApp?.localizedName ?? "Last App"
-        logger.log("📤 PASTE TO \(appName) | \(text.count) chars")
+        guard let targetApp = pasteTargetApp else {
+            logger.log("⚠️ PASTE | no target app available")
+            return
+        }
 
-        previousAppTracker.previousApp?.activate()
+        let appName = targetApp.localizedName ?? "Unknown"
+        let isSourceApp = contextCapture.sourceApp != nil
+        logger.log("📤 PASTE TO \(appName) | \(text.count) chars (\(isSourceApp ? "source app" : "previous app"))")
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        targetApp.activate()
+
+        // Wait for the target app to actually come to front, then paste
+        waitForActivation(of: targetApp) {
             let vDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true)
             vDown?.flags = .maskCommand
             vDown?.post(tap: .cghidEventTap)
@@ -587,6 +641,26 @@ struct DraftTab: View {
             let vUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false)
             vUp?.flags = .maskCommand
             vUp?.post(tap: .cghidEventTap)
+        }
+    }
+
+    /// Poll until the target app is frontmost, then fire the callback.
+    /// Falls back to a fixed delay after 1.5s to avoid hanging forever.
+    private func waitForActivation(of app: NSRunningApplication, attempt: Int = 0, then action: @escaping () -> Void) {
+        if app.isActive {
+            // App is in front — paste now (small delay for UI to settle)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                action()
+            }
+        } else if attempt < 15 {
+            // Check again in 100ms (up to 1.5s total)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.waitForActivation(of: app, attempt: attempt + 1, then: action)
+            }
+        } else {
+            // Fallback: fire anyway after max wait
+            logger.log("⚠️ PASTE | activation timeout, pasting anyway")
+            action()
         }
     }
 }
