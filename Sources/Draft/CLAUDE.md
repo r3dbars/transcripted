@@ -60,7 +60,8 @@ com.microsoft.teams         → .teams
 
 ```swift
 // DraftEngine
-@Published var draftedText: String    // Haiku's polished output
+@Published var draftedText: String    // Haiku's polished output (mutated by TextEditor edits)
+@Published var originalDraft: String  // Snapshot of AI output before user edits (for style learning)
 @Published var isDrafting: Bool       // Loading state
 @Published var error: String?         // Error message if API fails
 var hasAPIKey: Bool                   // Whether Keychain has a key stored

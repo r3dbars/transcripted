@@ -19,114 +19,6 @@ class StyleEngine: ObservableObject {
         information that wasn't in the original. Keep it concise and natural-sounding.
         """
 
-    /// Returns a progressively deeper analysis prompt based on how many examples exist
-    private static func styleAnalysisPrompt(forExampleCount count: Int) -> String {
-        let baseInstruction = """
-            You are analyzing writing samples from a single person to build their writing style profile. \
-            Study every sample carefully. Write in second person ("You..."). Be specific — quote actual \
-            phrases and patterns you observe. Never be generic. Every claim must be backed by evidence \
-            from the samples. \
-            IMPORTANT: Do NOT include a title or top-level heading. Start directly with the first section.
-            """
-
-        if count < 10 {
-            // Early: foundation profile
-            return baseInstruction + """
-
-                Write a style profile covering these dimensions:
-
-                **Tone & Voice**: What's their default register? Formal, casual, somewhere between? \
-                How do they balance authority with approachability?
-
-                **Sentence Patterns**: Short and punchy? Long and flowing? How do they vary length for effect?
-
-                **Openings & Closings**: How do they start messages? How do they end them? \
-                Do they use greetings? Sign-offs? Action-oriented closings?
-
-                **Punctuation & Emphasis**: Exclamation marks, em dashes, italics, ellipses — \
-                what's their punctuation fingerprint? How do they use formatting for emphasis?
-
-                **Signature Phrases**: Any recurring words, expressions, or verbal tics that show up across samples?
-
-                Format as a structured profile with the bold section headers above. Be thorough but concise.
-                """
-        } else if count < 20 {
-            // Growing: add deeper patterns
-            return baseInstruction + """
-
-                Write a detailed style profile covering these dimensions:
-
-                **Tone & Voice**: Default register, how they balance authority with warmth. \
-                Do they use humor? How?
-
-                **Sentence Patterns**: Length variation, rhythm. How do they use short sentences \
-                for impact vs. longer ones for explanation?
-
-                **Openings & Closings**: How they start and end messages. Greeting patterns, \
-                sign-off patterns, action-oriented closings.
-
-                **Punctuation & Emphasis**: Their punctuation fingerprint — exclamation marks, \
-                em dashes, italics, formatting choices. How heavily do they use each?
-
-                **Argument Structure**: How do they build a point? Do they lead with the conclusion \
-                or build up to it? How do they handle agreement vs. disagreement?
-
-                **Paragraph Flow**: How do they transition between ideas? Short paragraphs or long? \
-                Do they use one-line paragraphs for emphasis?
-
-                **Emotional Range**: How do they express enthusiasm, concern, criticism, agreement? \
-                What's their range from most casual to most serious?
-
-                **Signature Phrases**: Recurring words, expressions, verbal tics, and characteristic \
-                ways of phrasing things.
-
-                Format as a structured profile with the bold section headers above. Be thorough — \
-                this profile will be used to write messages in this person's voice.
-                """
-        } else {
-            // Mature: full persona
-            return baseInstruction + """
-
-                Write a comprehensive style profile covering these dimensions:
-
-                **Tone & Voice**: Default register, authority-warmth balance, use of humor. \
-                How does their voice differ from generic professional writing?
-
-                **Sentence Patterns**: Length variation and rhythm. How they use fragments, \
-                how they build momentum, where they place their strongest words.
-
-                **Openings & Closings**: Exact opening and closing patterns. How they vary \
-                these based on context (quick reply vs. detailed response).
-
-                **Punctuation & Emphasis**: Full fingerprint — exclamation frequency, em dash usage, \
-                italics patterns, double punctuation habits, formatting choices.
-
-                **Argument Structure**: How they build and defend points. Lead with conclusion or build up? \
-                How they handle agreement, partial agreement, and disagreement. How they give feedback.
-
-                **Paragraph Flow & Transitions**: Paragraph length patterns, how they transition \
-                between topics, use of one-line paragraphs for emphasis.
-
-                **Emotional Range**: Full spectrum — enthusiasm, concern, criticism, encouragement, \
-                urgency. How do they modulate intensity?
-
-                **Vocabulary Signatures**: Words and phrases that are uniquely theirs. Jargon preferences. \
-                Filler words they use or avoid. How technical vs. accessible they aim to be.
-
-                **Contextual Adaptation**: How their style shifts between quick acknowledgments, \
-                detailed feedback, brainstorming, and formal communication.
-
-                **What Makes Them Them**: The 2-3 qualities that most distinguish this person's writing \
-                from a generic AI or average professional. What would be lost if you smoothed out \
-                their style?
-
-                Format as a structured profile with the bold section headers above. This profile will be \
-                used to write messages that are indistinguishable from this person's actual writing. \
-                Be as specific and evidence-based as possible.
-                """
-        }
-    }
-
     init() {
         hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "style-onboarding-completed")
 
@@ -176,23 +68,33 @@ class StyleEngine: ObservableObject {
     private func extractStyleSummary() -> String {
         guard let summaryStart = styleFileContents.range(of: "## Style Summary\n") else { return "" }
         let afterSummary = styleFileContents[summaryStart.upperBound...]
-        // Summary ends at the next "##" section or end of file
+        // Summary ends at "## Examples" or end of file
         if let nextSection = afterSummary.range(of: "\n##") {
             let summary = String(afterSummary[..<nextSection.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-            // Don't return the placeholder text
             return summary == "(Will be generated after 5 examples)" ? "" : summary
         }
         let summary = String(afterSummary).trimmingCharacters(in: .whitespacesAndNewlines)
         return summary == "(Will be generated after 5 examples)" ? "" : summary
     }
 
-    /// Record an accepted example (called on Copy or Paste-to-last-app)
-    func recordExample(acceptedMessage: String) {
+    // MARK: - Training Pair Recording
+
+    /// Record a training pair — what the AI drafted vs. what the user actually sent
+    func recordExample(aiDraft: String, userFinal: String, platform: String) {
         exampleCount += 1
+        let distance = wordEditDistance(aiDraft, userFinal)
+        let distanceStr = String(format: "%.2f", distance)
+
         let exampleBlock = """
 
             ### Example \(exampleCount)
-            \(acceptedMessage.trimmingCharacters(in: .whitespacesAndNewlines))
+            PLATFORM: \(platform)
+            EDIT_DISTANCE: \(distanceStr)
+            AI_DRAFT:
+            \(aiDraft.trimmingCharacters(in: .whitespacesAndNewlines))
+
+            USER_SENT:
+            \(userFinal.trimmingCharacters(in: .whitespacesAndNewlines))
             """
 
         if styleFileContents.isEmpty {
@@ -203,38 +105,48 @@ class StyleEngine: ObservableObject {
                 ## Style Summary
                 (Will be generated after 5 examples)
 
-                ## Accepted Examples
+                ## Examples
                 \(exampleBlock)
                 """
         } else {
-            // Append to existing file
             styleFileContents += "\n" + exampleBlock
         }
 
         saveStyleFile()
     }
 
-    /// Regenerate the Style Summary section using Sonnet
+    /// Simple word-overlap edit distance (0 = identical, 1 = completely different)
+    private func wordEditDistance(_ a: String, _ b: String) -> Double {
+        let wordsA = Set(a.lowercased().split(whereSeparator: \.isWhitespace))
+        let wordsB = Set(b.lowercased().split(whereSeparator: \.isWhitespace))
+        guard !wordsA.isEmpty || !wordsB.isEmpty else { return 0 }
+        let common = wordsA.intersection(wordsB).count
+        let total = max(wordsA.count, wordsB.count)
+        return 1.0 - (Double(common) / Double(total))
+    }
+
+    // MARK: - Incremental Style Refinement
+
+    /// Regenerate the Style Summary using Sonnet — incremental refinement based on training pairs
     func regenerateStyleSummary(apiKey: String) async {
-        // Include both onboarding samples and accepted examples for full picture
-        let onboardingSamples = extractOnboardingSamplesText()
+        let currentProfile = extractStyleSummary()
         let examples = extractExamplesText()
-        let allText = (onboardingSamples + "\n\n" + examples).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !allText.isEmpty else { return }
+        guard !examples.isEmpty else { return }
+
+        let refinementPrompt = Self.buildRefinementPrompt(currentProfile: currentProfile)
 
         do {
             let analysis = try await AnthropicAPI.draft(
-                rawText: allText,
+                rawText: examples,
                 apiKey: apiKey,
-                systemPrompt: Self.styleAnalysisPrompt(forExampleCount: exampleCount),
+                systemPrompt: refinementPrompt,
                 maxTokens: 4096,
                 useModel: AnthropicAPI.sonnetModel
             )
 
-            // Replace the Style Summary section (ends at Onboarding Samples or Accepted Examples)
+            // Replace the Style Summary section
             if let summaryRange = styleFileContents.range(of: "## Style Summary\n") {
-                let nextSection = styleFileContents.range(of: "\n## Onboarding Samples")
-                    ?? styleFileContents.range(of: "\n## Accepted Examples")
+                let nextSection = styleFileContents.range(of: "\n## Examples")
                 if let endRange = nextSection {
                     let replacement = "## Style Summary\n" + analysis + "\n"
                     styleFileContents.replaceSubrange(summaryRange.lowerBound..<endRange.lowerBound, with: replacement)
@@ -244,6 +156,66 @@ class StyleEngine: ObservableObject {
         } catch {
             print("⚠️ Style summary regeneration failed: \(error)")
         }
+    }
+
+    /// Build the incremental refinement prompt — tells Sonnet to fix what's wrong, not rebuild from scratch
+    private static func buildRefinementPrompt(currentProfile: String) -> String {
+        if currentProfile.isEmpty {
+            // No existing profile — build from training pairs alone
+            return """
+                You are building a writing style profile from training data.
+
+                Each example shows two versions of the same message:
+                - AI_DRAFT: what an AI assistant generated
+                - USER_SENT: what the user actually sent (after editing the AI's draft)
+
+                The USER_SENT version is the ground truth — it's how this person actually writes. \
+                The differences between AI_DRAFT and USER_SENT reveal their preferences.
+
+                Analyze the USER_SENT versions across all examples. Build a comprehensive style profile covering:
+
+                **Tone & Voice** — their default register, warmth, directness
+                **Sentence Patterns** — length, rhythm, fragments vs. complete sentences
+                **Openings & Closings** — how they start and end messages
+                **Punctuation & Formatting** — their punctuation fingerprint, emoji usage, markdown habits
+                **Signature Phrases** — recurring words, expressions, verbal tics
+                **Platform Adaptation** — how their style shifts across platforms (check PLATFORM tags)
+
+                Also note patterns in what they consistently CHANGE from the AI drafts — these are the \
+                strongest signals of their preferences.
+
+                Write in second person ("You..."). Be specific — quote actual phrases as evidence. \
+                IMPORTANT: Do NOT include a title or top-level heading. Start directly with the first section.
+                """
+        }
+
+        return """
+            You are refining a writing style profile based on new evidence.
+
+            CURRENT PROFILE:
+            \(currentProfile)
+
+            The training data below shows pairs: what an AI drafted (AI_DRAFT) vs. what the user actually \
+            sent (USER_SENT). The DIFFERENCES between these reveal where the current profile is inaccurate.
+
+            Analyze the patterns in what the user changes:
+            - Consistent length changes (AI writes too long/short)
+            - Tone shifts (AI too formal/casual for specific platforms)
+            - Word substitutions (AI uses words this person avoids)
+            - Structural changes (AI uses bullets, user prefers paragraphs — or vice versa)
+            - Opening/closing pattern corrections
+            - Platform-specific patterns (check PLATFORM tags — they may write very differently on Slack vs. email)
+            - Punctuation corrections (AI adds/removes exclamation marks, dashes, emoji the user wouldn't use)
+
+            Rewrite the COMPLETE style profile:
+            - PRESERVE everything in the current profile that's still accurate
+            - FIX dimensions where the training pairs show clear, repeated patterns
+            - ADD platform-specific style notes if writing differs across platforms
+            - Be specific — quote actual phrases from USER_SENT as evidence
+
+            Write in second person ("You..."). \
+            IMPORTANT: Do NOT include a title or top-level heading. Start directly with the first section.
+            """
     }
 
     // MARK: - Bulk Import (Onboarding)
@@ -289,7 +261,8 @@ class StyleEngine: ObservableObject {
             """
     }
 
-    /// Import bulk writing samples from onboarding and generate initial style profile
+    /// Import bulk writing samples from onboarding and generate initial style profile.
+    /// Raw samples are used for analysis only — NOT persisted in style.md.
     func importBulkSamples(rawText: String, apiKey: String) async throws -> String {
         let userName = UserDefaults.standard.string(forKey: "user-display-name")
 
@@ -302,17 +275,14 @@ class StyleEngine: ObservableObject {
             useModel: AnthropicAPI.sonnetModel
         )
 
-        // Build style.md with onboarding samples + generated summary
+        // Build style.md with ONLY the generated summary — raw samples are discarded
         styleFileContents = """
             # Writing Style Profile
 
             ## Style Summary
             \(analysis)
 
-            ## Onboarding Samples
-            \(rawText.trimmingCharacters(in: .whitespacesAndNewlines))
-
-            ## Accepted Examples
+            ## Examples
             """
 
         saveStyleFile()
@@ -333,17 +303,8 @@ class StyleEngine: ObservableObject {
         try? styleFileContents.write(to: styleFileURL, atomically: true, encoding: .utf8)
     }
 
-    private func extractOnboardingSamplesText() -> String {
-        guard let start = styleFileContents.range(of: "## Onboarding Samples\n") else { return "" }
-        let afterStart = styleFileContents[start.upperBound...]
-        if let nextSection = afterStart.range(of: "\n## ") {
-            return String(afterStart[..<nextSection.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return String(afterStart).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     private func extractExamplesText() -> String {
-        guard let range = styleFileContents.range(of: "## Accepted Examples") else { return "" }
-        return String(styleFileContents[range.lowerBound...])
+        guard let range = styleFileContents.range(of: "## Examples") else { return "" }
+        return String(styleFileContents[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

@@ -7,6 +7,10 @@ import SwiftUI
 class DraftEngine: ObservableObject {
     @Published var draftedText = ""
     @Published var isDrafting = false
+
+    /// Snapshot of the AI's original draft — before user edits the output TextEditor.
+    /// Used by StyleEngine to compare AI output vs. what the user actually sent.
+    @Published var originalDraft = ""
     @Published var error: String?
     @Published var hasAPIKey = false
 
@@ -49,6 +53,7 @@ class DraftEngine: ObservableObject {
             do {
                 let result = try await AnthropicAPI.draft(rawText: rawText, apiKey: apiKey, systemPrompt: customPrompt)
                 self.draftedText = result
+                self.originalDraft = result
             } catch {
                 self.error = error.localizedDescription
             }
@@ -89,7 +94,9 @@ class DraftEngine: ObservableObject {
                     systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt
                 )
                 // Apply platform post-processing as safety net
-                self.draftedText = platform.postProcess(result)
+                let processed = platform.postProcess(result)
+                self.draftedText = processed
+                self.originalDraft = processed
             } catch {
                 self.error = error.localizedDescription
             }
@@ -104,6 +111,7 @@ class DraftEngine: ObservableObject {
 
     func clear() {
         draftedText = ""
+        originalDraft = ""
         error = nil
     }
 }

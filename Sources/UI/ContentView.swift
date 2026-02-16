@@ -585,8 +585,13 @@ struct DraftTab: View {
     }
 
     private func recordAcceptedExample() {
-        styleEngine.recordExample(acceptedMessage: drafter.draftedText)
-        logger.log("📚 STYLE | recorded example #\(styleEngine.exampleCount)")
+        let platform = PlatformFormatter.detect(from: pasteTargetApp)
+        styleEngine.recordExample(
+            aiDraft: drafter.originalDraft,
+            userFinal: drafter.draftedText,
+            platform: platform.rawValue
+        )
+        logger.log("📚 STYLE | recorded example #\(styleEngine.exampleCount) [\(platform.rawValue)]")
 
         // Regenerate style summary every 5 examples
         if styleEngine.exampleCount % 5 == 0, let apiKey = drafter.getAPIKey() {
