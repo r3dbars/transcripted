@@ -7,7 +7,7 @@ SwiftUI views for the Draft app — input area, voice controls, context capture,
 ## Key Files
 
 - `ContentView.swift` — Main app view with `ContentView` (owns all engines, onboarding gates) and `DraftTab` (the primary drafting interface)
-- `StyleOnboardingView.swift` — 3-step onboarding flow: intro (name) → paste writing samples → profile result
+- `StyleOnboardingView.swift` — 5-step onboarding flow: intro (name) → source choice → (iMessage preview OR paste samples) → profile result
 - `APIKeyEntryView.swift` — Overlay shown on first launch to enter Anthropic API key
 - `PreviousAppTracker.swift` — Tracks which app the user was in before switching to Draft
 - `AppLogger.swift` — Debug logger with in-app log panel and file output
@@ -138,13 +138,20 @@ When the hotkey fires:
 
 ## StyleOnboardingView
 
-3-step flow as a full-screen overlay:
+5-step flow as a full-screen overlay (two branching paths after source choice):
+
+```
+.intro → .sourceChoice → .imessagePreview (if iMessage) → .result
+                       ↘ .samples (if manual paste)     → .result
+```
 
 1. **Intro** — Welcome message, name input field (saved to UserDefaults for vision identity)
-2. **Samples** — Large TextEditor for pasting writing samples, word count indicator, "Build My Profile" button, "Skip for Now" option
-3. **Result** — Shows generated profile, "Looks Good" to accept, "Add More & Regenerate" to iterate
+2. **Source Choice** — Two cards: "Import from iMessages" (recommended, reads ~/Library/Messages/chat.db) or "Paste Samples Manually"
+3a. **iMessage Preview** — Read-only ScrollView showing loaded messages, privacy notice, message count, "Analyze These Messages" button. Handles errors: FDA denied (link to System Settings + retry), no database/empty (fallback to manual paste)
+3b. **Samples** — Large TextEditor for pasting writing samples, word count indicator, "Build My Profile" button
+4. **Result** — Shows generated profile, "Looks Good" to accept, "Add More & Regenerate" goes back to source choice
 
-Uses `StyleEngine.importBulkSamples()` for analysis and `StyleEngine.completeOnboarding()` on accept/skip.
+Uses `iMessageReader` actor for database access, `StyleEngine.importBulkSamples()` for analysis, and `StyleEngine.completeOnboarding()` on accept/skip.
 
 ## PreviousAppTracker
 

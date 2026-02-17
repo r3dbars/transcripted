@@ -44,6 +44,7 @@ swiftc \
     -framework Speech \
     -framework Security \
     -framework Carbon \
+    -lsqlite3 \
     $(find Sources -name '*.swift') \
     -parse-as-library \
     -target arm64-apple-macos14.0 \

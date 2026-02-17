@@ -15,12 +15,14 @@ Learns the user's writing style through training pairs (AI draft vs. what the us
 Solves the **cold start problem** — without onboarding, the first 10+ drafts are generic because Draft doesn't know how you write yet.
 
 1. After API key entry, `StyleOnboardingView` appears (gated by `hasCompletedOnboarding`)
-2. User pastes real writing samples (Slack messages, texts, emails — messy is fine)
-3. `importBulkSamples()` sends samples to **Sonnet** with a specialized `bulkAnalysisPrompt`
-4. Sonnet returns a comprehensive 400-600 word style profile analyzing 10 dimensions
-5. **Only the generated profile is saved** — raw samples are discarded after analysis
-6. User can review, add more samples and regenerate, or accept
-7. "Skip for Now" is always available — the incremental system works without onboarding
+2. User chooses a source: **Import from iMessages** (recommended) or **Paste Samples Manually**
+3. iMessage path: `iMessageReader` reads `~/Library/Messages/chat.db` (requires Full Disk Access), shows preview, user approves
+4. Manual path: User pastes real writing samples (Slack messages, texts, emails — messy is fine)
+5. Either path calls `importBulkSamples()` which sends text to **Sonnet** with a specialized `bulkAnalysisPrompt`
+6. Sonnet returns a comprehensive 400-600 word style profile analyzing 10 dimensions
+7. **Only the generated profile is saved** — raw samples/messages are discarded after analysis
+8. User can review, add more samples and regenerate, or accept
+9. "Skip for Now" is always available — the incremental system works without onboarding
 
 ### Training Pair Collection
 
