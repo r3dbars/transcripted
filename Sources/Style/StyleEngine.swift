@@ -283,16 +283,28 @@ class StyleEngine: ObservableObject {
                 - USER_SENT: what the user actually sent (after editing the AI's draft)
                 - EDIT_DISTANCE: how much they changed it (0 = kept as-is, 1 = completely rewritten)
 
-                The USER_SENT version is the ground truth — it's how this person actually writes. \
+                ⚠️ CRITICAL SOURCE RULES — read these before analyzing ANY example:
+                1. USER_SENT is the SOLE source of truth for this person's writing style. \
+                EVERY positive pattern (signature phrases, tone, metrics) must come from USER_SENT text ONLY.
+                2. AI_DRAFT shows what the AI wrote — NOT what the user writes. Do NOT attribute \
+                AI_DRAFT phrases, patterns, or metrics to the user.
+                3. If a phrase/pattern appears in AI_DRAFT but is REMOVED or CHANGED in USER_SENT, \
+                that is a NEVER signal — the user actively rejected it. Add it to the NEVER list.
+                4. If the user kept an AI_DRAFT phrase unchanged, that is WEAK evidence at best — \
+                it means they tolerated it, not that it's their natural voice. Do not list it as a \
+                signature phrase unless it also appears in other USER_SENT messages independently.
+                5. ALL quantitative metrics (message length, sentence count, emoji frequency, \
+                connector usage) must be measured from USER_SENT messages ONLY.
+
                 High edit distance examples (0.3+) are the STRONGEST signals — they show where the AI \
-                got it most wrong.
+                got it most wrong. Low edit distance (< 0.1) means the AI was close.
 
                 Build a profile with ALL of these sections (use these exact headings):
 
                 **Tone & Voice** — their default register, warmth, directness
 
-                **Sentence Patterns** — average length (estimate in words), fragments vs. complete \
-                sentences, how they chain ideas
+                **Sentence Patterns** — average length (estimate in words FROM USER_SENT), fragments vs. \
+                complete sentences, how they chain ideas
 
                 **Platform-Specific Patterns** — how their style shifts by platform (check PLATFORM tags). \
                 Dedicate a sub-section to each platform with evidence.
@@ -302,21 +314,26 @@ class StyleEngine: ObservableObject {
                 **Punctuation & Formatting** — their punctuation fingerprint, emoji usage, capitalization
 
                 **Signature Phrases** — list 5-15 characteristic phrases/expressions as bullets with quotes. \
-                For each, include the phrase, a usage note, and 1-2 direct quotes from USER_SENT proving it.
+                For each, include the phrase, a usage note, and 1-2 direct quotes from USER_SENT proving it. \
+                ONLY count phrases that appear in USER_SENT. If a phrase only appears in AI_DRAFT, it is \
+                the AI's habit, NOT the user's.
 
-                **Quantitative Fingerprint** — estimate: avg sentence length, typical message length by \
-                platform, contraction usage, active voice ratio
+                **Quantitative Fingerprint** — estimate FROM USER_SENT ONLY: avg sentence length, typical \
+                message length by platform, contraction usage, active voice ratio. \
+                Count words in USER_SENT messages to get real averages — do NOT use AI_DRAFT lengths.
 
                 **ALWAYS** — 5-10 rules a ghostwriter must follow (specific, actionable). \
                 For each rule, include a direct quote from USER_SENT proving the pattern.
 
                 **NEVER** — 5-10 things this person would never write, using contrast pairs: \
-                "Never X — instead Y." CRITICAL: include things the AI consistently added that the user \
-                consistently removed (these are the strongest NEVER signals). Also include generic AI \
-                patterns like "I hope this helps", corporate pleasantries, hedging language.
+                "Never X — instead Y." Build this list from TWO sources: \
+                (a) Things the AI wrote in AI_DRAFT that the user removed or replaced in USER_SENT — \
+                quote the AI's version AND the user's replacement. These are the strongest NEVER signals. \
+                (b) Generic AI patterns this person would avoid (corporate pleasantries, hedging, etc.)
 
                 EVIDENCE RULE: For EVERY pattern you claim, include 1-2 direct quotes from USER_SENT \
-                as proof. If you can't quote evidence, flag the pattern as needing more data.
+                as proof. For NEVER rules, quote what the AI wrote AND what the user changed it to. \
+                If you can't quote evidence from USER_SENT, do NOT include the pattern.
 
                 Write in second person ("You..."). \
                 IMPORTANT: Do NOT include a title or top-level heading. Start directly with **Tone & Voice**.
@@ -330,19 +347,37 @@ class StyleEngine: ObservableObject {
             CURRENT PROFILE:
             \(currentProfile)
 
+            ⚠️ CRITICAL SOURCE RULES — read these before analyzing ANY training pair:
+            1. USER_SENT is the SOLE source of truth for this person's writing style. \
+            EVERY positive pattern (signature phrases, tone, metrics) must come from USER_SENT text ONLY.
+            2. AI_DRAFT shows what the AI wrote — NOT what the user writes. Do NOT attribute \
+            AI_DRAFT phrases, patterns, or metrics to the user.
+            3. If a phrase/pattern appears in AI_DRAFT but is REMOVED or CHANGED in USER_SENT, \
+            that is a NEVER signal — the user actively rejected it. Add it to the NEVER list.
+            4. If the user kept an AI_DRAFT phrase unchanged, that is WEAK evidence at best — \
+            it means they tolerated it, not that it's their natural voice. Do not list it as a \
+            signature phrase unless it also appears in other USER_SENT messages independently.
+            5. ALL quantitative metrics (message length, sentence count, emoji frequency, \
+            connector usage) must be measured from USER_SENT messages ONLY.
+            6. AUDIT THE CURRENT PROFILE for contamination: if the current profile lists phrases \
+            or metrics that don't appear in any USER_SENT message, REMOVE them. The previous \
+            profile may have incorrectly attributed AI patterns to the user.
+
             The training data below shows pairs: what an AI drafted (AI_DRAFT) vs. what the user actually \
             sent (USER_SENT). The EDIT_DISTANCE shows how much they changed it (0 = kept, 1 = rewrote). \
             High edit distance examples (0.3+) are the STRONGEST signals — pay extra attention to these.
 
             Analyze the patterns in what the user changes:
-            - Consistent length changes (AI writes too long/short)
+            - Consistent length changes (compare AI_DRAFT word count vs. USER_SENT word count)
             - Tone shifts (AI too formal/casual for specific platforms)
-            - Word substitutions (AI uses words this person avoids → add to NEVER list)
+            - Word substitutions (AI uses words this person avoids → add to NEVER list with contrast pair)
             - Structural changes (AI uses bullets, user prefers paragraphs — or vice versa)
             - Opening/closing pattern corrections
             - Platform-specific patterns (check PLATFORM tags — they may write very differently on Slack vs. email)
             - Punctuation corrections (AI adds/removes exclamation marks, dashes, emoji)
             - Things the AI adds that the user consistently removes → these are NEVER rules
+            - Phrases the AI uses that the user replaces with different phrasing → the user's version \
+            is the signature phrase, the AI's version is a NEVER
 
             Rewrite the COMPLETE style profile with ALL of these sections:
             **Tone & Voice**, **Sentence Patterns**, **Platform-Specific Patterns**, \
@@ -350,17 +385,20 @@ class StyleEngine: ObservableObject {
             **Quantitative Fingerprint**, **ALWAYS**, **NEVER**
 
             Rules for the rewrite:
-            - PRESERVE everything in the current profile that's still accurate
+            - PRESERVE patterns from the current profile ONLY if they have evidence in USER_SENT messages
+            - REMOVE patterns from the current profile that were based on AI_DRAFT text (contamination)
             - FIX dimensions where the training pairs show clear, repeated patterns
             - ADD new NEVER rules as contrast pairs ("Never X — instead Y") for things the AI \
-            consistently does wrong. Things the AI adds that the user removes are the strongest signals.
-            - ADD new signature phrases discovered in USER_SENT messages (with direct quotes as evidence)
-            - UPDATE quantitative metrics if new data changes the estimates
+            consistently does wrong. Quote the AI's version AND the user's replacement.
+            - Signature Phrases must ONLY contain phrases from USER_SENT. If a phrase only ever \
+            appears in AI_DRAFT columns, it is the AI's habit and must NOT be listed.
+            - UPDATE Quantitative Fingerprint by counting words in USER_SENT messages ONLY. \
+            Do NOT average in AI_DRAFT lengths — they reflect the AI's verbosity, not the user's.
             - ADD platform-specific sub-sections for any new platforms seen
 
             EVIDENCE RULE: For EVERY pattern you claim, include 1-2 direct quotes from USER_SENT \
             as proof. For NEVER rules, quote what the AI wrote AND what the user changed it to. \
-            If you can't quote evidence, flag the pattern as needing more data.
+            If you can't quote evidence from USER_SENT, REMOVE the pattern — do not keep it.
 
             Write in second person ("You..."). Target 500-800 words. \
             IMPORTANT: Do NOT include a title or top-level heading. Start directly with **Tone & Voice**.
