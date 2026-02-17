@@ -43,24 +43,43 @@ class StyleEngine: ObservableObject {
 
     // MARK: - Public Interface
 
-    /// Build system prompt — includes only the Style Summary (not all examples)
+    /// Build system prompt — style profile + reference samples + structured instructions
     func buildSystemPrompt() -> String {
         let summary = extractStyleSummary()
         guard !summary.isEmpty else {
             return Self.defaultSystemPrompt
         }
 
+        // Pull 2-3 diverse reference samples from training pairs
+        let samples = extractReferenceSamples(count: 3)
+        var samplesBlock = ""
+        if !samples.isEmpty {
+            let sampleEntries = samples.map { s in
+                "<sample platform=\"\(s.platform)\">\n\(s.text)\n</sample>"
+            }.joined(separator: "\n")
+            samplesBlock = "\n<reference_messages>\n\(sampleEntries)\n</reference_messages>\n"
+        }
+
         return """
-            You are ghostwriting as a specific person. Their writing style profile follows:
+            You are ghostwriting as a specific person. Your output must be indistinguishable from \
+            something they actually wrote. Study the style profile and reference messages below, \
+            then write EXACTLY as they would.
 
+            <style_profile>
             \(summary)
-
-            Your job is to take their rough, unpolished text and rewrite it as they would naturally write it. \
-            Embody their voice completely — use their vocabulary, mirror their sentence rhythms, match how \
-            they open and close messages, replicate their punctuation habits and emphasis patterns. \
-            The output should be indistinguishable from something they actually wrote. \
-            Preserve the original meaning, intent, and all information. Don't add anything they didn't say. \
-            Don't over-polish — if they write casually, keep it casual. Match their energy level.
+            </style_profile>
+            \(samplesBlock)
+            <instructions>
+            - Output ONLY the message text. No labels, no explanations, no meta-commentary.
+            - Match their exact register for the target platform — they write differently on Slack vs. email vs. iMessage.
+            - Preserve the original meaning, intent, and all information from their input. Don't add anything they didn't say.
+            - Don't over-polish — if they write casually, keep it casual. If they use fragments, use fragments.
+            - Incorporate their signature phrases naturally (1-2 per message, don't force all of them).
+            - Respect every rule in their NEVER list — these are the strongest signals of their voice.
+            - Match their typical message length for this platform. Don't write more than they would.
+            - Do NOT write like a helpful AI assistant. No "I hope this helps", no "Let me know if you need anything", \
+            no corporate pleasantries. Write like a real person texting or messaging their friends/colleagues.
+            </instructions>
             """
     }
 
@@ -75,6 +94,49 @@ class StyleEngine: ObservableObject {
         }
         let summary = String(afterSummary).trimmingCharacters(in: .whitespacesAndNewlines)
         return summary == "(Will be generated after 5 examples)" ? "" : summary
+    }
+
+    // MARK: - Reference Sample Extraction
+
+    private struct ReferenceSample {
+        let platform: String
+        let text: String
+    }
+
+    /// Extract diverse USER_SENT samples from training pairs for the system prompt.
+    /// Prefers recent examples from different platforms for maximum style coverage.
+    private func extractReferenceSamples(count: Int) -> [ReferenceSample] {
+        let blocks = styleFileContents.components(separatedBy: "### Example")
+        let exampleBlocks = Array(blocks.dropFirst())
+
+        var samples: [ReferenceSample] = []
+        var seenPlatforms: Set<String> = []
+
+        // Walk backwards (most recent first) and prefer diverse platforms
+        for block in exampleBlocks.reversed() {
+            guard let platformRange = block.range(of: "PLATFORM: ") else { continue }
+            let afterPlatform = block[platformRange.upperBound...]
+            let platform = String(afterPlatform.prefix(while: { $0 != "\n" }))
+                .trimmingCharacters(in: .whitespaces)
+
+            guard let userSentRange = block.range(of: "USER_SENT:\n") else { continue }
+            let afterUserSent = block[userSentRange.upperBound...]
+            let text = String(afterUserSent).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !text.isEmpty else { continue }
+
+            // Prioritize unseen platforms for diversity
+            if !seenPlatforms.contains(platform) {
+                samples.append(ReferenceSample(platform: platform, text: text))
+                seenPlatforms.insert(platform)
+            } else if samples.count < count {
+                samples.append(ReferenceSample(platform: platform, text: text))
+            }
+
+            if samples.count >= count { break }
+        }
+
+        return samples
     }
 
     // MARK: - Training Pair Recording
@@ -206,58 +268,85 @@ class StyleEngine: ObservableObject {
         if currentProfile.isEmpty {
             // No existing profile — build from training pairs alone
             return """
-                You are building a writing style profile from training data.
+                You are building a writing style profile from training data. This profile will be used \
+                by a ghostwriter AI to write messages indistinguishable from this person.
 
                 Each example shows two versions of the same message:
                 - AI_DRAFT: what an AI assistant generated
                 - USER_SENT: what the user actually sent (after editing the AI's draft)
+                - EDIT_DISTANCE: how much they changed it (0 = kept as-is, 1 = completely rewritten)
 
                 The USER_SENT version is the ground truth — it's how this person actually writes. \
-                The differences between AI_DRAFT and USER_SENT reveal their preferences.
+                High edit distance examples (0.3+) are the STRONGEST signals — they show where the AI \
+                got it most wrong.
 
-                Analyze the USER_SENT versions across all examples. Build a comprehensive style profile covering:
+                Build a profile with ALL of these sections (use these exact headings):
 
                 **Tone & Voice** — their default register, warmth, directness
-                **Sentence Patterns** — length, rhythm, fragments vs. complete sentences
-                **Openings & Closings** — how they start and end messages
-                **Punctuation & Formatting** — their punctuation fingerprint, emoji usage, markdown habits
-                **Signature Phrases** — recurring words, expressions, verbal tics
-                **Platform Adaptation** — how their style shifts across platforms (check PLATFORM tags)
 
-                Also note patterns in what they consistently CHANGE from the AI drafts — these are the \
-                strongest signals of their preferences.
+                **Sentence Patterns** — average length (estimate in words), fragments vs. complete \
+                sentences, how they chain ideas
 
-                Write in second person ("You..."). Be specific — quote actual phrases as evidence. \
-                IMPORTANT: Do NOT include a title or top-level heading. Start directly with the first section.
+                **Platform-Specific Patterns** — how their style shifts by platform (check PLATFORM tags). \
+                Dedicate a sub-section to each platform with evidence.
+
+                **Openings & Closings** — how they start and end messages (by platform if different)
+
+                **Punctuation & Formatting** — their punctuation fingerprint, emoji usage, capitalization
+
+                **Signature Phrases** — list 5-15 characteristic phrases/expressions as bullets with quotes
+
+                **Quantitative Fingerprint** — estimate: avg sentence length, typical message length by \
+                platform, contraction usage, active voice ratio
+
+                **ALWAYS** — 5-10 rules a ghostwriter must follow (specific, actionable)
+
+                **NEVER** — 5-10 things this person would never write. CRITICAL: include things the AI \
+                consistently added that the user consistently removed. Also include generic AI patterns \
+                like "I hope this helps", corporate pleasantries, hedging language.
+
+                Write in second person ("You..."). Quote actual phrases from USER_SENT as evidence. \
+                IMPORTANT: Do NOT include a title or top-level heading. Start directly with **Tone & Voice**.
                 """
         }
 
         return """
-            You are refining a writing style profile based on new evidence.
+            You are refining a writing style profile based on new evidence. This profile is used by \
+            a ghostwriter AI to write messages indistinguishable from this person.
 
             CURRENT PROFILE:
             \(currentProfile)
 
             The training data below shows pairs: what an AI drafted (AI_DRAFT) vs. what the user actually \
-            sent (USER_SENT). The DIFFERENCES between these reveal where the current profile is inaccurate.
+            sent (USER_SENT). The EDIT_DISTANCE shows how much they changed it (0 = kept, 1 = rewrote). \
+            High edit distance examples (0.3+) are the STRONGEST signals — pay extra attention to these.
 
             Analyze the patterns in what the user changes:
             - Consistent length changes (AI writes too long/short)
             - Tone shifts (AI too formal/casual for specific platforms)
-            - Word substitutions (AI uses words this person avoids)
+            - Word substitutions (AI uses words this person avoids → add to NEVER list)
             - Structural changes (AI uses bullets, user prefers paragraphs — or vice versa)
             - Opening/closing pattern corrections
             - Platform-specific patterns (check PLATFORM tags — they may write very differently on Slack vs. email)
-            - Punctuation corrections (AI adds/removes exclamation marks, dashes, emoji the user wouldn't use)
+            - Punctuation corrections (AI adds/removes exclamation marks, dashes, emoji)
+            - Things the AI adds that the user consistently removes → these are NEVER rules
 
-            Rewrite the COMPLETE style profile:
+            Rewrite the COMPLETE style profile with ALL of these sections:
+            **Tone & Voice**, **Sentence Patterns**, **Platform-Specific Patterns**, \
+            **Openings & Closings**, **Punctuation & Formatting**, **Signature Phrases**, \
+            **Quantitative Fingerprint**, **ALWAYS**, **NEVER**
+
+            Rules for the rewrite:
             - PRESERVE everything in the current profile that's still accurate
             - FIX dimensions where the training pairs show clear, repeated patterns
-            - ADD platform-specific style notes if writing differs across platforms
+            - ADD new NEVER rules for things the AI consistently does wrong
+            - ADD new signature phrases discovered in USER_SENT messages
+            - UPDATE quantitative metrics if new data changes the estimates
+            - ADD platform-specific sub-sections for any new platforms seen
             - Be specific — quote actual phrases from USER_SENT as evidence
 
-            Write in second person ("You..."). \
-            IMPORTANT: Do NOT include a title or top-level heading. Start directly with the first section.
+            Write in second person ("You..."). Target 500-800 words. \
+            IMPORTANT: Do NOT include a title or top-level heading. Start directly with **Tone & Voice**.
             """
     }
 
@@ -270,7 +359,8 @@ class StyleEngine: ObservableObject {
             ?? "Focus on identifying a single author's writing patterns across the samples."
 
         return """
-            You are analyzing real writing samples to build a comprehensive writing style profile.
+            You are analyzing real writing samples to build a comprehensive writing style profile \
+            that a ghostwriter AI will use to write messages indistinguishable from this person.
 
             These samples were copied directly from the user's messages — Slack, iMessage, email, \
             and other platforms. They may include:
@@ -280,27 +370,60 @@ class StyleEngine: ObservableObject {
 
             \(nameClause)
 
-            Analyze their writing across these dimensions:
+            Build a profile with ALL of the following sections (use these exact headings):
 
-            1. **Tone & Voice** — casual vs formal, warm vs direct, confident vs hedging. \
-            How do they balance authority with approachability?
-            2. **Sentence Patterns** — length, complexity, fragments vs complete sentences. \
-            How do they vary rhythm for effect?
-            3. **Openings & Closings** — how they start and end messages across different contexts.
-            4. **Punctuation Fingerprint** — dashes, ellipses, exclamation points, emoji usage, \
-            formatting choices.
-            5. **Signature Phrases** — recurring words, filler phrases, verbal tics. Quote examples.
-            6. **Argument Structure** — how they build points, handle agreement/disagreement.
-            7. **Paragraph Flow** — short bursts vs long blocks, transition patterns.
-            8. **Emotional Range** — how they express enthusiasm, concern, criticism, urgency.
-            9. **Vocabulary Signatures** — distinctive word choices, jargon, slang preferences.
-            10. **Contextual Adaptation** — how their style shifts across platforms and audiences.
+            **Tone & Voice**
+            Their default register, warmth, directness. How do they balance authority with \
+            approachability? How does tone shift by platform or audience?
 
-            Write a detailed profile (400-600 words) that captures what makes this person's \
-            writing THEM — not generic observations, but specific patterns a ghostwriter \
-            would need to convincingly write as this person. Use second person ("You..."). \
-            Quote actual phrases from the samples as evidence. \
-            IMPORTANT: Do NOT include a title or top-level heading. Start directly with the first section.
+            **Sentence Patterns**
+            Average sentence length (estimate in words). Use of fragments vs. complete sentences. \
+            How they chain ideas (dashes, commas, periods, conjunctions). Rhythm variation.
+
+            **Platform-Specific Patterns**
+            How their style shifts across platforms. Dedicate a sub-section to each platform you \
+            see evidence for (Slack, iMessage, email, etc.). Cover: formality level, message length, \
+            greeting/closing patterns, formatting choices.
+
+            **Openings & Closings**
+            How they start messages (by platform if different). How they end messages. \
+            Greeting formulas, sign-off patterns, forward-looking hooks.
+
+            **Punctuation & Formatting**
+            Their punctuation fingerprint: dashes, ellipses, exclamation points (single vs. double), \
+            emoji usage, capitalization habits, markdown/formatting preferences.
+
+            **Signature Phrases**
+            List 5-15 of their most characteristic phrases, expressions, and verbal tics. \
+            Format as a bullet list with the phrase in quotes and a brief note on usage context. \
+            Example: - "but honestly" (pivot to their real point)
+
+            **Quantitative Fingerprint**
+            Estimate these metrics from the samples:
+            - Average sentence length (words)
+            - Typical message length by platform (sentences)
+            - Approximate active voice ratio
+            - Contraction usage (always/sometimes/never)
+            - Questions per message (average)
+
+            **ALWAYS**
+            List 5-10 patterns that appear in virtually everything they write. \
+            These are rules a ghostwriter must follow. Be specific and actionable.
+
+            **NEVER**
+            List 5-10 things this person would NEVER write. Include generic AI patterns \
+            they'd avoid (e.g., "I hope this helps", corporate pleasantries, hedging language). \
+            Also include specific word choices, punctuation, or structures they never use. \
+            This section is CRITICAL — it prevents the AI from reverting to its default voice.
+
+            Write in second person ("You..."). Quote actual phrases from the samples as evidence. \
+            Be specific — not "you write casually" but "you open Slack messages with 'yo' or 'hey man' \
+            and chain thoughts with dashes instead of periods."
+
+            Target 500-800 words. Depth over breadth — if you have strong evidence for some dimensions \
+            and weak evidence for others, go deep on what you can prove and note what needs more data.
+
+            IMPORTANT: Do NOT include a title or top-level heading. Start directly with **Tone & Voice**.
             """
     }
 
