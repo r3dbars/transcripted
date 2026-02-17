@@ -22,6 +22,8 @@ struct StyleOnboardingView: View {
     @State private var isLoadingMessages = false
     @State private var messageLoadError: String?
     @State private var formattedMessageText = ""
+    @State private var showSupplementInput = false
+    @State private var supplementText = ""
 
     private var wordCount: Int {
         samplesText.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
@@ -256,7 +258,7 @@ struct StyleOnboardingView: View {
                     .frame(maxWidth: 450)
 
                 HStack(spacing: 12) {
-                    if error.contains("Full Disk Access") {
+                    if error.contains("Full Disk Access") || error.contains("authorization") || error.contains("permission") {
                         Button(action: {
                             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
                                 NSWorkspace.shared.open(url)
@@ -334,6 +336,60 @@ struct StyleOnboardingView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
+                // Supplement with additional samples
+                VStack(spacing: 8) {
+                    Button(action: { withAnimation { showSupplementInput.toggle() } }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: showSupplementInput ? "chevron.down" : "chevron.right")
+                                .font(.caption2)
+                            Image(systemName: "plus.circle")
+                                .foregroundColor(.purple)
+                            Text("Add Slack, email, or other writing samples")
+                                .font(.caption)
+                                .foregroundColor(.purple)
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    if showSupplementInput {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Paste additional writing samples to enrich your profile:")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            TextEditor(text: $supplementText)
+                                .font(.system(.caption, design: .monospaced))
+                                .frame(maxWidth: 560, minHeight: 100, maxHeight: 150)
+                                .scrollContentBackground(.hidden)
+                                .background(Color(nsColor: .textBackgroundColor))
+                                .cornerRadius(8)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.purple.opacity(0.3), lineWidth: 1)
+                                )
+                                .overlay(alignment: .topLeading) {
+                                    if supplementText.isEmpty {
+                                        Text("Paste Slack messages, emails, etc...")
+                                            .foregroundColor(.secondary)
+                                            .italic()
+                                            .font(.caption)
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 8)
+                                            .allowsHitTesting(false)
+                                    }
+                                }
+
+                            let supplementWords = supplementText.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
+                            if supplementWords > 0 {
+                                Text("+ \(supplementWords) words from pasted samples")
+                                    .font(.caption2)
+                                    .foregroundColor(.purple)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: 560)
+
                 if let error = analysisError {
                     Text(error)
                         .font(.caption)
@@ -342,7 +398,16 @@ struct StyleOnboardingView: View {
 
                 // Actions
                 HStack(spacing: 12) {
-                    Button(action: { Task { await buildProfile(from: formattedMessageText) } }) {
+                    Button(action: {
+                        let combined: String
+                        let trimmedSupplement = supplementText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if trimmedSupplement.isEmpty {
+                            combined = formattedMessageText
+                        } else {
+                            combined = formattedMessageText + "\n\n---\n\n" + trimmedSupplement
+                        }
+                        Task { await buildProfile(from: combined) }
+                    }) {
                         HStack {
                             Image(systemName: "sparkles")
                             Text("Analyze These Messages")

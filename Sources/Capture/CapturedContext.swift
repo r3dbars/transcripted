@@ -60,10 +60,26 @@ struct CapturedContext {
             prompt += "\nUSER'S INSTRUCTIONS:\n\(trimmedInstructions)\n"
         }
 
-        prompt += "\nWrite the reply. The USER'S INSTRUCTIONS section is the highest priority — "
-        prompt += "it contains what the user wants to say and how they want to say it. "
-        prompt += "The CONVERSATION section is context so you understand what's being discussed. "
-        prompt += "Output ONLY the reply text, nothing else."
+        prompt += """
+
+        INSTRUCTIONS:
+        You are ghostwriting a reply for the user in this conversation.
+
+        1. USER'S INSTRUCTIONS are your primary directive. They may be:
+           - A specific idea: "say yes to lunch" → draft a message expressing that intent
+           - A tone/style directive: "make it short and funny" → you decide WHAT to say based on the conversation, applying their constraint
+           - A mix of both: "decline politely, say I'm busy" → use their intent with their tone guidance
+
+        2. CONVERSATION is background context so you understand what's being discussed and who said what. You are replying to the most recent message directed at the user.
+
+        3. Match the conversational energy. If messages in the thread are 5-10 words, don't write a paragraph. If they're detailed, match that depth. Read the room.
+
+        4. Don't parrot. Never echo back what the other person just said. "Thanks for the update on the deployment" is robotic — "nice, thanks" is human.
+
+        5. Don't add AI fluff. No "Hey!" greetings unless the conversation warrants one. No sign-offs like "Let me know!" unless the user asked for that. No exclamation points unless the user's style uses them.
+
+        6. Output ONLY the reply text. No labels, no quotes, no explanations, no alternatives.
+        """
 
         return prompt
     }

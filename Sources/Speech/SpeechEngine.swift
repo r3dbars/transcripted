@@ -39,6 +39,15 @@ class SpeechEngine: ObservableObject {
     private func log(_ msg: String) {
         let entry = "[\(taskGeneration).\(callbackCount)] \(msg)"
         print(entry)
+        // Also write to debug log file so we can diagnose issues
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let logLine = "[\(timestamp)] SPEECH \(msg)\n"
+        let logPath = FileManager.default.homeDirectoryForCurrentUser.path + "/draft-debug.log"
+        if let data = logLine.data(using: .utf8), let fh = FileHandle(forWritingAtPath: logPath) {
+            fh.seekToEndOfFile()
+            fh.write(data)
+            fh.closeFile()
+        }
     }
 
     init() {
@@ -46,29 +55,41 @@ class SpeechEngine: ObservableObject {
     }
 
     func requestPermissions() async -> Bool {
+        log("🎤 PERM CHECK | starting permission requests...")
+
         let speechStatus = await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { status in
                 continuation.resume(returning: status)
             }
         }
 
+        log("🎤 PERM CHECK | speechStatus=\(speechStatus.rawValue) (0=notDetermined, 1=denied, 2=restricted, 3=authorized)")
+
         guard speechStatus == .authorized else {
+            log("❌ PERM | speech recognition NOT authorized (status=\(speechStatus.rawValue))")
             statusMessage = "Speech recognition not authorized"
             return false
         }
 
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        log("🎤 PERM CHECK | micStatus=\(micStatus.rawValue) (0=notDetermined, 1=restricted, 2=denied, 3=authorized)")
+
         if micStatus == .notDetermined {
             let granted = await AVCaptureDevice.requestAccess(for: .audio)
+            log("🎤 PERM CHECK | mic access request result=\(granted)")
             if !granted {
+                log("❌ PERM | microphone access denied")
                 statusMessage = "Microphone access denied"
                 return false
             }
         } else if micStatus != .authorized {
+            log("❌ PERM | microphone not authorized (status=\(micStatus.rawValue))")
             statusMessage = "Microphone access denied"
             return false
         }
 
+        let recognizerAvailable = speechRecognizer?.isAvailable ?? false
+        log("✅ PERM | all granted. recognizerAvailable=\(recognizerAvailable)")
         statusMessage = "Ready — tap Record"
         return true
     }
@@ -76,11 +97,20 @@ class SpeechEngine: ObservableObject {
     // MARK: - Public Controls
 
     func startListening() {
-        guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
+        if speechRecognizer == nil {
+            log("❌ SPEECH | recognizer is nil")
             statusMessage = "Speech recognizer not available"
             return
         }
-        guard !isListening else { return }
+        guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
+            log("❌ SPEECH | recognizer not available (isAvailable=false)")
+            statusMessage = "Speech recognizer not available"
+            return
+        }
+        guard !isListening else {
+            log("⚠️ SPEECH | already listening, ignoring startListening()")
+            return
+        }
 
         speechRecognizer.defaultTaskHint = .dictation
 
@@ -98,9 +128,16 @@ class SpeechEngine: ObservableObject {
         createRecognitionTask()
 
         let inputNode = audioEngine.inputNode
-        let recordingFormat = inputNode.outputFormat(forBus: 0)
+        let nativeFormat = inputNode.outputFormat(forBus: 0)
+        log("🎤 AUDIO FORMAT native | sampleRate=\(nativeFormat.sampleRate) channels=\(nativeFormat.channelCount)")
 
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+        // Force mono at the hardware's native sample rate. Multi-channel pro audio interfaces
+        // (e.g., BEACN Mic at 96kHz/4ch) cause SFSpeechRecognizer error 1110 "no speech detected."
+        // AVAudioEngine handles the channel mixdown automatically on the tap.
+        let monoFormat = AVAudioFormat(standardFormatWithSampleRate: nativeFormat.sampleRate, channels: 1)!
+        log("🎤 AUDIO FORMAT tap | sampleRate=\(monoFormat.sampleRate) channels=\(monoFormat.channelCount)")
+
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: monoFormat) { [weak self] buffer, _ in
             self?.recognitionRequest?.append(buffer)
         }
 
@@ -108,7 +145,9 @@ class SpeechEngine: ObservableObject {
             audioEngine.prepare()
             try audioEngine.start()
             isListening = true
+            log("🎤 AUDIO ENGINE STARTED")
         } catch {
+            log("❌ AUDIO ENGINE FAILED | \(error.localizedDescription)")
             statusMessage = "Audio engine failed: \(error.localizedDescription)"
         }
     }

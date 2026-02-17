@@ -166,7 +166,7 @@ struct DraftTab: View {
                 .controlSize(.small)
                 .disabled(contextCapture.isCapturing || previousAppTracker.previousApp == nil)
 
-                Text("⌃⌥D")
+                Text("⌥Space")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 4)
