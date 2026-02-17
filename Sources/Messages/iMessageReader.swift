@@ -57,16 +57,12 @@ actor iMessageReader {
         guard openResult == SQLITE_OK, let db = db else {
             let errMsg = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
             sqlite3_close(db)
-            if errMsg.contains("unable to open") || errMsg.contains("permission") || errMsg.contains("not authorized") {
+            if errMsg.contains("unable to open") || errMsg.contains("permission") || errMsg.contains("not authorized") || errMsg.contains("authorization") {
                 throw ReaderError.accessDenied
             }
             throw ReaderError.queryFailed(errMsg)
         }
         defer { sqlite3_close(db) }
-
-        // iMessage dates: nanoseconds since 2001-01-01 (Apple reference date)
-        let sixMonthsAgo = Date().addingTimeInterval(-180 * 24 * 60 * 60)
-        let imessageTimestamp = Int64(sixMonthsAgo.timeIntervalSinceReferenceDate * 1_000_000_000)
 
         let query = """
             SELECT m.text, m.date, h.id
@@ -75,8 +71,6 @@ actor iMessageReader {
             WHERE m.is_from_me = 1
               AND m.text IS NOT NULL
               AND m.text != ''
-              AND length(m.text) - length(replace(m.text, ' ', '')) >= 4
-              AND m.date > ?
             ORDER BY m.date DESC
             LIMIT ?
             """
@@ -87,8 +81,7 @@ actor iMessageReader {
         }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_int64(stmt, 1, imessageTimestamp)
-        sqlite3_bind_int(stmt, 2, Int32(limit))
+        sqlite3_bind_int(stmt, 1, Int32(limit))
 
         var messages: [ImportedMessage] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -122,22 +115,26 @@ actor iMessageReader {
     private func shouldSkip(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Too short
         let words = trimmed.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-        if words.count < 5 { return true }
 
-        // Pure emoji / reactions (fewer than 5 non-emoji ASCII scalars)
+        // Single-character messages (just "k", "y", etc.) — not enough signal
+        if trimmed.count < 2 { return true }
+
+        // Pure emoji / reactions (fewer than 3 non-emoji ASCII scalars)
         let nonEmojiCount = trimmed.unicodeScalars.filter { !$0.properties.isEmoji || $0.isASCII }.count
-        if nonEmojiCount < 5 { return true }
+        if nonEmojiCount < 3 { return true }
 
-        // Tapback / reaction messages
+        // Tapback / reaction messages — catch both "Liked a message" and 'Liked "quoted text"' formats
         let lower = trimmed.lowercased()
-        let tapbackPrefixes = [
-            "loved an image", "liked an image", "laughed at",
-            "emphasized an image", "loved a message", "liked a message",
-            "questioned an image", "disliked an image", "disliked a message"
-        ]
-        if tapbackPrefixes.contains(where: { lower.hasPrefix($0) }) { return true }
+        let tapbackVerbs = ["loved", "liked", "laughed at", "emphasized", "questioned", "disliked", "reacted"]
+        if tapbackVerbs.contains(where: { lower.hasPrefix($0) }) {
+            // It's a tapback if it starts with a verb + follows with "a message/an image" or a quoted string
+            if lower.contains("an image") || lower.contains("a message") { return true }
+            // "Liked "morning! dogs are out"" or "Reacted 💯 to "something""
+            if trimmed.contains("\"") || trimmed.contains("\u{201C}") { return true }
+            // "Reacted 💯 to" pattern
+            if lower.contains(" to ") && tapbackVerbs.contains(where: { lower.hasPrefix($0) }) { return true }
+        }
 
         // URL-only messages
         if lower.hasPrefix("http") && words.count <= 2 { return true }

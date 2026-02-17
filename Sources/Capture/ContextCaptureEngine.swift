@@ -62,12 +62,12 @@ class ContextCaptureEngine: ObservableObject {
             &eventHandlerRef
         )
 
-        // Ctrl+Option+D
+        // Option+Space
         let hotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 1)  // 'DRFT'
-        let modifiers: UInt32 = UInt32(controlKey | optionKey)
+        let modifiers: UInt32 = UInt32(optionKey)
 
         RegisterEventHotKey(
-            UInt32(kVK_ANSI_D),
+            UInt32(kVK_Space),
             modifiers,
             hotkeyID,
             GetApplicationEventTarget(),
