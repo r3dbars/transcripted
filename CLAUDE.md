@@ -13,6 +13,7 @@ Sources/
 ├── API/                     ← Anthropic API client (text + vision) + Keychain storage
 ├── Draft/                   ← DraftEngine + PlatformFormatter — orchestrates drafting
 ├── Style/                   ← StyleEngine — learns user's writing voice + onboarding
+├── Messages/                ← iMessage database reader (SQLite, onboarding import)
 ├── Capture/                 ← Screen capture, context extraction, CapturedContext struct
 └── UI/                      ← SwiftUI views, onboarding, app tracker, debug logger
 ```
@@ -34,7 +35,8 @@ This compiles all Swift files from `Sources/`, signs the app bundle, and launche
 - **Full conversation context** — Ctrl+Option+D screenshots the current app, Haiku Vision extracts the entire visible conversation thread (all messages, participants, platform, formality)
 - **Platform-aware formatting** — Detects Slack/iMessage/email/Discord/Teams and adjusts drafting style (e.g., no subject lines for Slack, casual for iMessage)
 - **Style learning** — Every accepted draft saves a training pair (AI output vs. what you actually sent); Sonnet incrementally refines your style profile with graduated frequency
-- **Style onboarding** — New users paste real writing samples on first launch; Sonnet builds an immediate style profile (no cold start)
+- **Style onboarding** — New users can import iMessages automatically (recommended) or paste samples manually; Sonnet builds an immediate style profile (no cold start)
+- **iMessage import** — Optional onboarding path that reads `~/Library/Messages/chat.db` for zero-effort style profile generation (requires Full Disk Access)
 - **Paste to source app** — Pastes the polished message back to the exact app that was screenshotted, with activation polling for reliability
 - **Frictionless keyboard flow** — Enter in input → Draft, Enter in output → Paste to source app, Shift+Enter → newline
 
@@ -143,3 +145,4 @@ User types/speaks in input → Enter → DraftEngine.draftMessage()
 - `Carbon` — Global hotkey registration (RegisterEventHotKey)
 - `CoreGraphics` — Window capture (CGWindowListCreateImage)
 - `Combine` — Required by SwiftUI internally
+- `SQLite3` (via `-lsqlite3`) — iMessage database reading for style onboarding

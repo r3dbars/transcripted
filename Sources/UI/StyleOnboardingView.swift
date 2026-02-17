@@ -1,13 +1,14 @@
 // StyleOnboardingView.swift
-// Onboarding: intro → paste writing samples → Sonnet builds a style profile
+// Onboarding: intro → source choice → (iMessage preview OR paste samples) → Sonnet builds a style profile
 
 import SwiftUI
+import AppKit
 
 struct StyleOnboardingView: View {
     @ObservedObject var styleEngine: StyleEngine
     @ObservedObject var draftEngine: DraftEngine
 
-    enum Step { case intro, samples, result }
+    enum Step { case intro, sourceChoice, samples, imessagePreview, result }
 
     @State private var step: Step = .intro
     @State private var nameInput = UserDefaults.standard.string(forKey: "user-display-name") ?? ""
@@ -15,6 +16,12 @@ struct StyleOnboardingView: View {
     @State private var isAnalyzing = false
     @State private var generatedProfile: String?
     @State private var analysisError: String?
+
+    // iMessage import state
+    @State private var importedMessages: [iMessageReader.ImportedMessage] = []
+    @State private var isLoadingMessages = false
+    @State private var messageLoadError: String?
+    @State private var formattedMessageText = ""
 
     private var wordCount: Int {
         samplesText.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
@@ -25,8 +32,12 @@ struct StyleOnboardingView: View {
             switch step {
             case .intro:
                 introView
+            case .sourceChoice:
+                sourceChoiceView
             case .samples:
                 sampleInputView
+            case .imessagePreview:
+                imessagePreviewView
             case .result:
                 if let profile = generatedProfile {
                     profileResultView(profile: profile)
@@ -81,7 +92,7 @@ struct StyleOnboardingView: View {
             Button(action: {
                 let trimmed = nameInput.trimmingCharacters(in: .whitespacesAndNewlines)
                 UserDefaults.standard.set(trimmed, forKey: "user-display-name")
-                withAnimation { step = .samples }
+                withAnimation { step = .sourceChoice }
             }) {
                 HStack {
                     Text("Next — Build My Writing Profile")
@@ -110,7 +121,261 @@ struct StyleOnboardingView: View {
         .padding(30)
     }
 
-    // MARK: - Step 2: Paste Samples
+    // MARK: - Step 2: Source Choice
+
+    private var sourceChoiceView: some View {
+        let name = nameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return VStack(spacing: 24) {
+            Spacer()
+
+            Image(systemName: "sparkles")
+                .font(.system(size: 40))
+                .foregroundColor(.purple)
+
+            Text("How should we learn \(name)'s style?")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text("Choose how to provide writing samples for your style profile.")
+                .font(.body)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 450)
+
+            HStack(spacing: 16) {
+                // iMessage card
+                Button(action: { loadIMessages() }) {
+                    VStack(spacing: 12) {
+                        Image(systemName: "message.fill")
+                            .font(.system(size: 32))
+                            .foregroundColor(.blue)
+
+                        Text("Import from iMessages")
+                            .font(.headline)
+
+                        Text("Recommended")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.blue)
+
+                        Text("Automatically reads your recent texts.\nZero effort, rich data.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+
+                        Text("One-time read. Raw messages\nare discarded after analysis.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .italic()
+                            .padding(.top, 4)
+                    }
+                    .frame(maxWidth: 220, minHeight: 200)
+                    .padding(20)
+                    .background(Color.blue.opacity(0.05))
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.blue.opacity(0.3), lineWidth: 1.5)
+                    )
+                }
+                .buttonStyle(.plain)
+
+                // Manual paste card
+                Button(action: { withAnimation { step = .samples } }) {
+                    VStack(spacing: 12) {
+                        Image(systemName: "doc.on.clipboard")
+                            .font(.system(size: 32))
+                            .foregroundColor(.purple)
+
+                        Text("Paste Samples Manually")
+                            .font(.headline)
+
+                        Text("Copy-paste messages from\nSlack, email, or texts.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 4)
+                    }
+                    .frame(maxWidth: 220, minHeight: 200)
+                    .padding(20)
+                    .background(Color.purple.opacity(0.05))
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.purple.opacity(0.2), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            Button("Skip for Now") {
+                styleEngine.completeOnboarding()
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.secondary)
+            .font(.caption)
+
+            Spacer()
+        }
+        .padding(30)
+    }
+
+    // MARK: - Step 3a: iMessage Preview
+
+    private var imessagePreviewView: some View {
+        let name = nameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return VStack(spacing: 20) {
+            Spacer()
+
+            if isLoadingMessages {
+                // Loading state
+                ProgressView()
+                    .controlSize(.regular)
+                Text("Reading \(name)'s messages...")
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+                Text("This may take a moment.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else if let error = messageLoadError {
+                // Error state
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 40))
+                    .foregroundColor(.orange)
+
+                Text("Couldn't Read iMessages")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                Text(error)
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 450)
+
+                HStack(spacing: 12) {
+                    if error.contains("Full Disk Access") {
+                        Button(action: {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }) {
+                            HStack {
+                                Image(systemName: "gear")
+                                Text("Open System Settings")
+                            }
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 16)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.blue)
+
+                        Button("Try Again") { loadIMessages() }
+                            .buttonStyle(.bordered)
+                    }
+
+                    Button("Use Manual Paste Instead") {
+                        messageLoadError = nil
+                        withAnimation { step = .samples }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            } else if isAnalyzing {
+                // Analyzing state
+                ProgressView()
+                    .controlSize(.regular)
+                Text("Analyzing \(name)'s writing style...")
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+                Text("Building your personalized style profile...")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                // Preview state — messages loaded, awaiting approval
+                Image(systemName: "message.fill")
+                    .font(.system(size: 40))
+                    .foregroundColor(.blue)
+
+                Text("Preview Your Messages")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                // Privacy notice
+                HStack(spacing: 8) {
+                    Image(systemName: "lock.shield.fill")
+                        .foregroundColor(.blue)
+                    Text("This is a one-time analysis. Your raw messages are never saved — only the generated writing profile is kept.")
+                        .font(.caption)
+                }
+                .padding(12)
+                .frame(maxWidth: 560)
+                .background(Color.blue.opacity(0.08))
+                .cornerRadius(8)
+
+                // Message preview
+                ScrollView {
+                    Text(formattedMessageText)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: 530, alignment: .leading)
+                        .padding(10)
+                }
+                .frame(maxWidth: 560, maxHeight: 250)
+                .background(Color(nsColor: .textBackgroundColor))
+                .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                )
+
+                Text("\(importedMessages.count) messages from your iMessage history")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                if let error = analysisError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
+
+                // Actions
+                HStack(spacing: 12) {
+                    Button(action: { Task { await buildProfile(from: formattedMessageText) } }) {
+                        HStack {
+                            Image(systemName: "sparkles")
+                            Text("Analyze These Messages")
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 20)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.purple)
+
+                    Button("Go Back") {
+                        importedMessages = []
+                        formattedMessageText = ""
+                        withAnimation { step = .sourceChoice }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            Button("Skip for Now") {
+                styleEngine.completeOnboarding()
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.secondary)
+            .font(.caption)
+            .disabled(isAnalyzing || isLoadingMessages)
+
+            Spacer()
+        }
+        .padding(30)
+    }
+
+    // MARK: - Step 3b: Paste Samples
 
     private var sampleInputView: some View {
         let name = nameInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -260,9 +525,9 @@ struct StyleOnboardingView: View {
                 .tint(.green)
 
                 Button(action: {
-                    // Go back to samples to add more
+                    // Go back to source choice to add more
                     generatedProfile = nil
-                    withAnimation { step = .samples }
+                    withAnimation { step = .sourceChoice }
                 }) {
                     HStack {
                         Image(systemName: "plus")
@@ -281,18 +546,20 @@ struct StyleOnboardingView: View {
 
     // MARK: - Analysis
 
-    private func buildProfile() async {
+    private func buildProfile(from text: String? = nil) async {
         guard let apiKey = draftEngine.getAPIKey() else {
             analysisError = "No API key found"
             return
         }
+
+        let sourceText = text ?? samplesText
 
         isAnalyzing = true
         analysisError = nil
 
         do {
             let profile = try await styleEngine.importBulkSamples(
-                rawText: samplesText,
+                rawText: sourceText,
                 apiKey: apiKey
             )
             generatedProfile = profile
@@ -302,5 +569,31 @@ struct StyleOnboardingView: View {
         }
 
         isAnalyzing = false
+    }
+
+    // MARK: - iMessage Loading
+
+    private func loadIMessages() {
+        isLoadingMessages = true
+        messageLoadError = nil
+        withAnimation { step = .imessagePreview }
+
+        Task {
+            let reader = iMessageReader()
+            do {
+                let messages = try await reader.readMessages()
+                let formatted = await reader.formatForAnalysis(messages)
+                await MainActor.run {
+                    importedMessages = messages
+                    formattedMessageText = formatted
+                    isLoadingMessages = false
+                }
+            } catch {
+                await MainActor.run {
+                    messageLoadError = error.localizedDescription
+                    isLoadingMessages = false
+                }
+            }
+        }
     }
 }
