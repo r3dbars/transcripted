@@ -99,6 +99,12 @@ struct AnthropicAPI {
             - For TALKING TO: look at the conversation HEADER or TITLE BAR at the top of the chat — \
             this shows the contact name or group name. Do NOT confuse names mentioned INSIDE messages \
             with the conversation partner. The header/title is the source of truth.
+            - Preserve ALL text exactly as written — including emoji, typos, slang, and formatting. \
+            Do NOT clean up, rephrase, or "fix" the text. Accuracy matters more than readability.
+            - If a speaker name is unclear, use "Unknown".
+            - If you're uncertain about any text, include your best guess with a [?] marker.
+            - Skip UI elements: buttons, timestamps, reaction counts, read receipts, typing indicators.
+            - If you see code blocks or formatted text within messages, keep the formatting.
 
             Extract the FULL visible conversation — every message, in order, with sender names.
 
@@ -113,8 +119,18 @@ struct AnthropicAPI {
             [Other Sender]: [their message]
             ...
 
-            Include every visible message in chronological order. Preserve the actual text. \
-            Use each sender's display name as shown on screen.
+            Example output:
+            PLATFORM: imessage
+            TALKING TO: Nate
+            FORMALITY: casual
+
+            CONVERSATION:
+            Nate: Hey, can we sync on the curriculum next week?
+            Justin: Sounds great! Tuesday works for me 👍
+
+            Include every visible message in chronological order. Preserve the actual text exactly. \
+            Use each sender's display name as shown on screen. This will be used as context for \
+            drafting a reply, so accuracy of the original text is critical.
             """
     }
 

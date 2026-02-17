@@ -69,11 +69,18 @@ class StyleEngine: ObservableObject {
             \(summary)
             </style_profile>
             \(samplesBlock)
+            <the_test>
+            If someone who knows this person well read your output, could they tell it wasn't written \
+            by them? If YES, you failed. Your job is to BE them, not to edit them.
+            </the_test>
+
             <instructions>
             - Output ONLY the message text. No labels, no explanations, no meta-commentary.
             - Match their exact register for the target platform — they write differently on Slack vs. email vs. iMessage.
             - Preserve the original meaning, intent, and all information from their input. Don't add anything they didn't say.
             - Don't over-polish — if they write casually, keep it casual. If they use fragments, use fragments.
+            - When in doubt between two phrasings, choose the one that sounds more like THEM — even if it's \
+            less polished. Lean toward their natural voice, not what sounds "better."
             - Incorporate their signature phrases naturally (1-2 per message, don't force all of them).
             - Respect every rule in their NEVER list — these are the strongest signals of their voice.
             - Match their typical message length for this platform. Don't write more than they would.
@@ -294,18 +301,24 @@ class StyleEngine: ObservableObject {
 
                 **Punctuation & Formatting** — their punctuation fingerprint, emoji usage, capitalization
 
-                **Signature Phrases** — list 5-15 characteristic phrases/expressions as bullets with quotes
+                **Signature Phrases** — list 5-15 characteristic phrases/expressions as bullets with quotes. \
+                For each, include the phrase, a usage note, and 1-2 direct quotes from USER_SENT proving it.
 
                 **Quantitative Fingerprint** — estimate: avg sentence length, typical message length by \
                 platform, contraction usage, active voice ratio
 
-                **ALWAYS** — 5-10 rules a ghostwriter must follow (specific, actionable)
+                **ALWAYS** — 5-10 rules a ghostwriter must follow (specific, actionable). \
+                For each rule, include a direct quote from USER_SENT proving the pattern.
 
-                **NEVER** — 5-10 things this person would never write. CRITICAL: include things the AI \
-                consistently added that the user consistently removed. Also include generic AI patterns \
-                like "I hope this helps", corporate pleasantries, hedging language.
+                **NEVER** — 5-10 things this person would never write, using contrast pairs: \
+                "Never X — instead Y." CRITICAL: include things the AI consistently added that the user \
+                consistently removed (these are the strongest NEVER signals). Also include generic AI \
+                patterns like "I hope this helps", corporate pleasantries, hedging language.
 
-                Write in second person ("You..."). Quote actual phrases from USER_SENT as evidence. \
+                EVIDENCE RULE: For EVERY pattern you claim, include 1-2 direct quotes from USER_SENT \
+                as proof. If you can't quote evidence, flag the pattern as needing more data.
+
+                Write in second person ("You..."). \
                 IMPORTANT: Do NOT include a title or top-level heading. Start directly with **Tone & Voice**.
                 """
         }
@@ -339,11 +352,15 @@ class StyleEngine: ObservableObject {
             Rules for the rewrite:
             - PRESERVE everything in the current profile that's still accurate
             - FIX dimensions where the training pairs show clear, repeated patterns
-            - ADD new NEVER rules for things the AI consistently does wrong
-            - ADD new signature phrases discovered in USER_SENT messages
+            - ADD new NEVER rules as contrast pairs ("Never X — instead Y") for things the AI \
+            consistently does wrong. Things the AI adds that the user removes are the strongest signals.
+            - ADD new signature phrases discovered in USER_SENT messages (with direct quotes as evidence)
             - UPDATE quantitative metrics if new data changes the estimates
             - ADD platform-specific sub-sections for any new platforms seen
-            - Be specific — quote actual phrases from USER_SENT as evidence
+
+            EVIDENCE RULE: For EVERY pattern you claim, include 1-2 direct quotes from USER_SENT \
+            as proof. For NEVER rules, quote what the AI wrote AND what the user changed it to. \
+            If you can't quote evidence, flag the pattern as needing more data.
 
             Write in second person ("You..."). Target 500-800 words. \
             IMPORTANT: Do NOT include a title or top-level heading. Start directly with **Tone & Voice**.
@@ -395,8 +412,11 @@ class StyleEngine: ObservableObject {
 
             **Signature Phrases**
             List 5-15 of their most characteristic phrases, expressions, and verbal tics. \
-            Format as a bullet list with the phrase in quotes and a brief note on usage context. \
-            Example: - "but honestly" (pivot to their real point)
+            Format as a bullet list with the phrase in quotes, a usage note, and 1-2 direct quotes \
+            from the samples proving the pattern. Example format:
+            - "but honestly" (pivot to their real point) — "but honestly what got me even more is..."
+            - "let me know" (forward-looking closer) — "let me know after you check it out", \
+            "Let me know your thoughts on that"
 
             **Quantitative Fingerprint**
             Estimate these metrics from the samples:
@@ -408,17 +428,23 @@ class StyleEngine: ObservableObject {
 
             **ALWAYS**
             List 5-10 patterns that appear in virtually everything they write. \
-            These are rules a ghostwriter must follow. Be specific and actionable.
+            These are rules a ghostwriter must follow. Be specific and actionable. \
+            For each rule, include a direct quote proving the pattern.
 
             **NEVER**
-            List 5-10 things this person would NEVER write. Include generic AI patterns \
-            they'd avoid (e.g., "I hope this helps", corporate pleasantries, hedging language). \
-            Also include specific word choices, punctuation, or structures they never use. \
+            List 5-10 things this person would NEVER write, using contrast pairs: \
+            "Never X — instead Y." This format shows the ghostwriter what to do INSTEAD. \
+            Include generic AI patterns they'd avoid. Examples of the format:
+            - Never uses corporate sign-offs like "Best regards" — instead ends with action \
+            items or casual "Let me know!"
+            - Never hedges with "I think maybe" or "It might be worth considering" — instead \
+            states opinions directly
             This section is CRITICAL — it prevents the AI from reverting to its default voice.
 
-            Write in second person ("You..."). Quote actual phrases from the samples as evidence. \
-            Be specific — not "you write casually" but "you open Slack messages with 'yo' or 'hey man' \
-            and chain thoughts with dashes instead of periods."
+            EVIDENCE RULE: For EVERY pattern you identify in every section, include 1-2 direct \
+            quotes from the samples that prove it. Not "you write casually" but "you open messages \
+            with 'yo' or 'hey man' and chain thoughts with dashes: 'that's wild - I'll check it out'." \
+            If you can't find a direct quote, note the pattern but flag it as needing more evidence.
 
             Target 500-800 words. Depth over breadth — if you have strong evidence for some dimensions \
             and weak evidence for others, go deep on what you can prove and note what needs more data.
