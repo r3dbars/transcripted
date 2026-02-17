@@ -55,13 +55,33 @@ Sonnet gets the current profile + recent training pairs with a refinement prompt
 
 The profile gets surgically adjusted based on actual errors, not reconstructed. The profile can't regress because Sonnet is told to preserve what's working.
 
-### Application
+### Application — Ghostwriting System Prompt
 
-`buildSystemPrompt()` extracts only the Style Summary section (not examples) and wraps it in ghostwriting instructions. Tells Haiku to embody the user's voice — use their vocabulary, mirror their rhythms, match their energy.
+`buildSystemPrompt()` assembles a structured system prompt with three components:
+
+1. **Style profile** — extracted from `## Style Summary`, wrapped in `<style_profile>` XML tags
+2. **Reference samples** — 2-3 diverse USER_SENT examples from training pairs, wrapped in `<reference_messages>` with platform tags. Extracted by `extractReferenceSamples(count:)` which walks backwards (most recent first) and prioritizes different platforms for diversity.
+3. **Instructions** — explicit rules in `<instructions>` tags: match platform register, use signature phrases, respect NEVER list, match message length, don't write like an AI assistant.
+
+The XML structure lets Haiku parse the profile sections independently (per Anthropic's prompt engineering guidance). The reference samples provide "ground truth" — descriptions tell Haiku what patterns to follow, but samples demonstrate the actual rhythm and cadence.
+
+### Profile Structure
+
+The analysis and refinement prompts generate profiles with these **required sections** (enforced by the prompts):
+
+- **Tone & Voice** — register, warmth, directness
+- **Sentence Patterns** — length, rhythm, fragments, idea chaining
+- **Platform-Specific Patterns** — sub-sections per platform (Slack, iMessage, email, etc.)
+- **Openings & Closings** — greeting/sign-off patterns by platform
+- **Punctuation & Formatting** — punctuation fingerprint, emoji, capitalization
+- **Signature Phrases** — 5-15 characteristic phrases as a bullet list with quotes
+- **Quantitative Fingerprint** — sentence length, message length by platform, contraction usage, active voice ratio
+- **ALWAYS** — 5-10 rules a ghostwriter must follow
+- **NEVER** — 5-10 things this person would never write (critical for preventing AI default patterns)
 
 ### Cost Model
 
-Only the Style Summary is injected into the system prompt, not training pairs. Drafting cost stays constant regardless of example count. Refinement frequency decreases as the profile improves (every 3 → every 5 → every 10), and only the last 20 examples are sent to Sonnet per refinement.
+Style Summary + 2-3 reference samples (~1200-1500 tokens) are injected into the system prompt. Drafting cost stays roughly constant regardless of example count. Refinement frequency decreases as the profile improves (every 3 → every 5 → every 10), and only the last 20 examples are sent to Sonnet per refinement.
 
 ## File Format (style.md)
 
@@ -69,7 +89,29 @@ Only the Style Summary is injected into the system prompt, not training pairs. D
 # Writing Style Profile
 
 ## Style Summary
-[Sonnet-generated structured profile]
+**Tone & Voice**
+[Sonnet-generated analysis...]
+
+**Sentence Patterns**
+[...]
+
+**Platform-Specific Patterns**
+Slack: [...]
+iMessage: [...]
+
+**Signature Phrases**
+- "yo" (casual greeting)
+- "but honestly" (pivot to real point)
+[...]
+
+**ALWAYS**
+- Open Slack DMs with "yo" or "hey man"
+[...]
+
+**NEVER**
+- Use semicolons
+- Write "I hope this helps"
+[...]
 
 ## Examples
 
@@ -81,15 +123,6 @@ Hey Sarah! That sounds great, I'm totally in for lunch tomorrow.
 
 USER_SENT:
 hey! yeah totally down for lunch tmrw 👍
-
-### Example 2
-PLATFORM: email
-EDIT_DISTANCE: 0.05
-AI_DRAFT:
-Thanks for sending this over, I'll review it this afternoon.
-
-USER_SENT:
-Thanks for sending this over — I'll review it this afternoon.
 ```
 
 No onboarding samples section — raw pastes are discarded after initial profile generation.
