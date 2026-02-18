@@ -23,13 +23,16 @@ enum AuthCredential: Sendable {
 
     // MARK: - Apply to Request
 
-    /// Sets the correct auth header on an outgoing URLRequest.
+    /// Sets the correct auth header(s) on an outgoing URLRequest.
     func apply(to request: inout URLRequest) {
         switch self {
         case .apiKey(let key):
             request.setValue(key, forHTTPHeaderField: "x-api-key")
         case .subscriptionToken(let token):
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            // OAuth tokens require the oauth beta flag — without this,
+            // the API rejects subscription tokens from non-Claude-Code apps.
+            request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         }
     }
 
