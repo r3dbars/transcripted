@@ -14,7 +14,7 @@ Learns the user's writing style through training pairs (AI draft vs. what the us
 
 Solves the **cold start problem** — without onboarding, the first 10+ drafts are generic because Draft doesn't know how you write yet.
 
-1. After API key entry, `StyleOnboardingView` appears (gated by `hasCompletedOnboarding`)
+1. After auth setup, `StyleOnboardingView` appears (gated by `hasCompletedOnboarding`)
 2. User chooses a source: **Import from iMessages** (recommended) or **Paste Samples Manually**
 3. iMessage path: `iMessageReader` reads `~/Library/Messages/chat.db` (requires Full Disk Access, no date filter, no SQL word filter — just `is_from_me = 1` with `LIMIT 2000`, Swift-level `shouldSkip()` filters to 2+ character messages), shows preview, user approves. Includes optional "Add Slack, email, or other writing samples" expandable section — if provided, combined text (iMessages + supplement) is sent together.
 4. Manual path: User pastes real writing samples (Slack messages, texts, emails — messy is fine)

@@ -2,13 +2,13 @@
 
 ## What This Does
 
-SwiftUI views for the Draft app — input area, voice controls, context capture, Draft button, polished output display, style profile viewer, style onboarding, and API key entry.
+SwiftUI views for the Draft app — input area, voice controls, context capture, Draft button, polished output display, style profile viewer, style onboarding, and auth setup.
 
 ## Key Files
 
 - `ContentView.swift` — Main app view with `ContentView` (owns all engines, onboarding gates) and `DraftTab` (the primary drafting interface)
 - `StyleOnboardingView.swift` — 5-step onboarding flow: intro (name) → source choice → (iMessage preview OR paste samples) → profile result
-- `APIKeyEntryView.swift` — Overlay shown on first launch to enter Anthropic API key
+- `APIKeyEntryView.swift` — Auth setup overlay with segmented picker (API key or Claude subscription token)
 - `PreviousAppTracker.swift` — Tracks which app the user was in before switching to Draft
 - `AppLogger.swift` — Debug logger with in-app log panel and file output
 
@@ -17,7 +17,7 @@ SwiftUI views for the Draft app — input area, voice controls, context capture,
 ```
 Launch
   ↓
-Has API key? ──No──→ APIKeyEntryView (overlay)
+Has credentials? ──No──→ APIKeyEntryView (overlay — name + auth picker)
   │ Yes
   ↓
 Completed style onboarding? ──No──→ StyleOnboardingView (overlay)
@@ -26,7 +26,7 @@ Completed style onboarding? ──No──→ StyleOnboardingView (overlay)
 Main App (TabView: Draft tab + Style tab)
 ```
 
-Both gates are overlays on top of the TabView. Once cleared, they don't reappear (API key in Keychain, onboarding flag in UserDefaults).
+Both gates are overlays on top of the TabView. Once cleared, they don't reappear (credentials in Keychain, onboarding flag in UserDefaults).
 
 ## ContentView.swift Section Map (719 lines)
 
@@ -179,7 +179,7 @@ After modifying UI components, verify with these checks:
 - **Auto-focus:** After draft completes, cursor should be in the output TextEditor (ready for edit → Enter)
 - **Parallel pipeline:** ⌥Space → speak → vision context should appear at top of input while voice text appends below "YOUR INSTRUCTIONS:"
 - **Paste-back:** "Paste to [App]" button should show correct app name. Pasting should activate the target app and simulate ⌘V.
-- **Onboarding gates:** Delete API key (gear → Reset) → API key overlay appears. Reset onboarding flag → style onboarding appears. Both block the main UI.
+- **Onboarding gates:** Gear → "Switch Auth Method" → auth overlay appears. Reset onboarding flag → style onboarding appears. Both block the main UI.
 - **Style tab:** Shows style.md contents. After accepting drafts, example count badge should increment.
 - **Debug log:** Expand the debug panel at the bottom → all events should be logged with timestamps. Also available at `~/draft-debug.log`
 - **Build:** `bash build.sh` — must compile cleanly (only warning: CGWindowListCreateImage deprecation)

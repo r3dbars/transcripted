@@ -6,7 +6,7 @@ Orchestrates the "rough text → polished message" workflow. Connects the speech
 
 ## Key Files
 
-- `DraftEngine.swift` — `@MainActor ObservableObject` managing API key state, drafting workflow, and output
+- `DraftEngine.swift` — `@MainActor ObservableObject` managing auth credential state, drafting workflow, and output
 - `PlatformFormatter.swift` — Detects target platform (Slack/iMessage/email/Discord/Teams) and provides formatting rules
 
 ## How It Works
@@ -85,7 +85,8 @@ func postProcess(_ text: String) -> String  // Post-draft formatting fixes
 ## Dependencies
 
 - `AnthropicAPI` (from API/)
-- `KeychainHelper` (from API/)
+- `AuthCredential` (from API/) — loads/saves auth credentials, applies headers
+- `KeychainHelper` (from API/) — used indirectly via AuthCredential
 - `StyleEngine` (from Style/) — optional reference for personalized prompts
 - `CapturedContext` (from Capture/) — structured conversation context
 - `PlatformFormatter` (local) — platform-specific formatting
