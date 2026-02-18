@@ -13,6 +13,8 @@ Sources/
 ├── API/                     ← Anthropic API client (text + vision) + AuthCredential + Keychain
 ├── Draft/                   ← DraftEngine + PlatformFormatter — orchestrates drafting
 ├── Style/                   ← StyleEngine — learns user's writing voice + onboarding
+├── Prompts/                 ← PromptStore — externalized prompts (prompts.json) for orchestrator agent
+├── Feedback/                ← FeedbackStore — accept/edit signal logging (feedback.jsonl) for orchestrator
 ├── Messages/                ← iMessage database reader (SQLite, onboarding import)
 ├── Capture/                 ← Screen capture, context extraction, CapturedContext struct
 └── UI/                      ← SwiftUI views, onboarding, app tracker, debug logger
@@ -71,6 +73,7 @@ This compiles all Swift files from `Sources/`, signs the app bundle, and launche
    ├─→ recordAcceptedExample()
    │   ├─→ styleEngine.recordExample(aiDraft: originalDraft, userFinal: draftedText, platform)
    │   ├─→ Training pair saved to style.md (AI_DRAFT vs USER_SENT + edit distance)
+   │   ├─→ feedbackStore.record() → appends JSON line to feedback.jsonl (orchestrator signal)
    │   └─→ shouldRefineNow() → maybe triggers Sonnet refinement (last 20 examples)
    │
    └─→ pasteToApp() → activate source app → poll isActive → simulate ⌘V
@@ -105,9 +108,10 @@ User types/speaks in input → Enter → DraftEngine.draftMessage()
 
 ### To modify the vision extraction prompt:
 
-1. **`Sources/API/AnthropicAPI.swift`** — Edit `contextExtractionPrompt()` (~line 74)
-2. **`Sources/Capture/CapturedContext.swift`** — If adding new labeled fields, update `parse()` and the struct properties
-3. **`Sources/Capture/CLAUDE.md`** — Update CapturedContext struct docs
+1. **`~/Library/Application Support/Draft/prompts.json`** — Edit the `context_extraction` key directly (or let the orchestrator agent do it). Preserve `{USER_NAME}` and `{APP_NAME}` placeholders.
+2. **`Sources/Prompts/PromptStore.swift`** — If changing placeholders or adding new ones, update `contextExtractionPrompt(userName:appName:)` and `DefaultPrompts.contextExtraction`.
+3. **`Sources/Capture/CapturedContext.swift`** — If adding new labeled fields, update `parse()` and the struct properties
+4. **`Sources/Capture/CLAUDE.md`** — Update CapturedContext struct docs
 
 ### To add a new UI feature/tab:
 
@@ -136,6 +140,8 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - **Synchronous screenshot in hotkey callback** — captures frontmost app + screenshot before window focus shifts to Draft
 - **Plain-text vision extraction** — Haiku Vision returns labeled sections (PLATFORM/TALKING TO/FORMALITY/CONVERSATION), parsed by `CapturedContext.parse()`. No JSON — simpler and handles variable-length conversations
 - **Source app stored on capture** — The exact `NSRunningApplication` is saved at hotkey time, so paste-back targets the right app even if focus changes
+- **Externalized prompts** — All system prompts live in `~/Library/Application Support/Draft/prompts.json`, loaded by `PromptStore`. An orchestrator agent can rewrite prompts without recompiling. Engines read from `promptStore` with hardcoded fallbacks in `DefaultPrompts`.
+- **Feedback logging** — Every accepted draft appends a JSON line to `~/Library/Application Support/Draft/feedback.jsonl` with raw text, AI draft, user's accepted version, action (copy/paste), and example count. The orchestrator agent reads this to understand which drafts work and which need improvement.
 
 ## Project-Wide Learnings
 
@@ -150,6 +156,8 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 9. **Haiku confuses message content with metadata** — the vision prompt must explicitly say "look at the conversation HEADER/TITLE BAR for the contact name, NOT names mentioned inside messages"
 10. **Pro audio interfaces break SFSpeechRecognizer** — USB interfaces like BEACN Mic (96kHz/4ch) cause error 1110 "no speech detected." Fix: force mono tap format (`AVAudioFormat(standardFormatWithSampleRate: nativeRate, channels: 1)`) — AVAudioEngine handles the channel mixdown automatically
 11. **iMessage `text` stores U+FFFC for attachment-only messages** — 558 out of 625 messages can be this invisible placeholder character. Filter by `trimmed.count < 2`, not word count
+12. **Prompts are externalized to JSON** — `PromptStore` reads `prompts.json` on launch and provides prompts to all engines. `DefaultPrompts` enum holds the hardcoded source-of-truth defaults (used on first run or if file is corrupt). Each engine holds an optional `promptStore` reference with fallback to `DefaultPrompts`. The `{STYLE_SUMMARY}`, `{USER_NAME}`, and `{APP_NAME}` placeholders in prompt templates are replaced at runtime by PromptStore methods.
+13. **AnthropicAPI is a thin HTTP client** — model and prompts are passed by callers, not hardcoded in the API layer. `AnthropicAPI.draft(model:systemPrompt:)` and `extractStructuredContext(model:systemPrompt:)` require explicit parameters. Only `sonnetModel` remains as a constant (used by StyleEngine for refinement).
 
 ## Frameworks Linked
 

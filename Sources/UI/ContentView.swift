@@ -8,6 +8,8 @@ struct ContentView: View {
     @StateObject private var speech = SpeechEngine()
     @StateObject private var drafter = DraftEngine()
     @StateObject private var styleEngine = StyleEngine()
+    @StateObject private var promptStore = PromptStore()
+    @StateObject private var feedbackStore = FeedbackStore()
     @StateObject private var logger = AppLogger()
     @StateObject private var previousAppTracker = PreviousAppTracker()
     @StateObject private var contextCapture = ContextCaptureEngine()
@@ -19,6 +21,7 @@ struct ContentView: View {
                     speech: speech,
                     drafter: drafter,
                     styleEngine: styleEngine,
+                    feedbackStore: feedbackStore,
                     logger: logger,
                     previousAppTracker: previousAppTracker,
                     contextCapture: contextCapture
@@ -41,11 +44,14 @@ struct ContentView: View {
             _ = await speech.requestPermissions()
             drafter.checkCredential()
             drafter.styleEngine = styleEngine
+            drafter.promptStore = promptStore
+            styleEngine.promptStore = promptStore
+            contextCapture.promptStore = promptStore
 
             // Wire up context capture
             contextCapture.registerHotkey()
 
-            logger.log("🚀 APP LAUNCHED | auth: \(drafter.authModeName), style: \(styleEngine.exampleCount) examples, hotkey registered")
+            logger.log("🚀 APP LAUNCHED | auth: \(drafter.authModeName), style: \(styleEngine.exampleCount) examples, model: \(promptStore.config.model), hotkey registered")
         }
     }
 }
@@ -56,6 +62,7 @@ struct DraftTab: View {
     @ObservedObject var speech: SpeechEngine
     @ObservedObject var drafter: DraftEngine
     @ObservedObject var styleEngine: StyleEngine
+    var feedbackStore: FeedbackStore
     @ObservedObject var logger: AppLogger
     @ObservedObject var previousAppTracker: PreviousAppTracker
     @ObservedObject var contextCapture: ContextCaptureEngine
@@ -579,15 +586,15 @@ struct DraftTab: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(drafter.draftedText, forType: .string)
         logger.log("📋 COPY | \(drafter.draftedText.count) chars to clipboard")
-        recordAcceptedExample()
+        recordAcceptedExample(action: .copy)
     }
 
     private func acceptAndPasteToSourceApp() {
-        recordAcceptedExample()
+        recordAcceptedExample(action: .paste)
         pasteToApp(drafter.draftedText)
     }
 
-    private func recordAcceptedExample() {
+    private func recordAcceptedExample(action: AcceptAction = .copy) {
         let platform = PlatformFormatter.detect(from: pasteTargetApp)
         styleEngine.recordExample(
             aiDraft: drafter.originalDraft,
@@ -595,6 +602,15 @@ struct DraftTab: View {
             platform: platform.rawValue
         )
         logger.log("📚 STYLE | recorded example #\(styleEngine.exampleCount) [\(platform.rawValue)]")
+
+        // Log feedback for the orchestrator agent
+        feedbackStore.record(
+            rawText: drafter.lastRawText,
+            draftedText: drafter.originalDraft,
+            acceptedText: drafter.draftedText,
+            action: action,
+            exampleCount: styleEngine.exampleCount
+        )
 
         // Graduated refinement: every 3 early on, every 10 once stabilized
         if styleEngine.shouldRefineNow(), let auth = drafter.getAuth() {

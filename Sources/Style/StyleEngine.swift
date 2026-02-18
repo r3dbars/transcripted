@@ -13,11 +13,8 @@ class StyleEngine: ObservableObject {
     private let storageDir: URL
     private let styleFileURL: URL
 
-    private static let defaultSystemPrompt = """
-        You are a writing assistant. Take the user's rough spoken text and rewrite it as a clear, \
-        well-structured message. Preserve the original meaning, intent, and tone. Don't add \
-        information that wasn't in the original. Keep it concise and natural-sounding.
-        """
+    /// Reference to PromptStore — set by ContentView after init.
+    var promptStore: PromptStore?
 
     init() {
         hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "style-onboarding-completed")
@@ -47,7 +44,7 @@ class StyleEngine: ObservableObject {
     func buildSystemPrompt() -> String {
         let summary = extractStyleSummary()
         guard !summary.isEmpty else {
-            return Self.defaultSystemPrompt
+            return promptStore?.config.draftingSystem ?? DefaultPrompts.draftingSystem
         }
 
         // Pull 2-3 diverse reference samples from training pairs
@@ -251,9 +248,9 @@ class StyleEngine: ObservableObject {
             let analysis = try await AnthropicAPI.draft(
                 rawText: examples,
                 auth: auth,
+                model: AnthropicAPI.sonnetModel,
                 systemPrompt: refinementPrompt,
-                maxTokens: 4096,
-                useModel: AnthropicAPI.sonnetModel
+                maxTokens: 4096
             )
 
             // Replace the Style Summary section
@@ -500,9 +497,9 @@ class StyleEngine: ObservableObject {
         let analysis = try await AnthropicAPI.draft(
             rawText: rawText,
             auth: auth,
+            model: AnthropicAPI.sonnetModel,
             systemPrompt: Self.bulkAnalysisPrompt(userName: userName),
-            maxTokens: 4096,
-            useModel: AnthropicAPI.sonnetModel
+            maxTokens: 4096
         )
 
         // Build style.md with ONLY the generated summary — raw samples are discarded
