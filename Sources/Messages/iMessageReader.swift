@@ -46,7 +46,7 @@ actor iMessageReader {
 
     // MARK: - Read Messages
 
-    /// Read the user's sent messages from the last 6 months, filtered for quality.
+    /// Read the user's sent messages, filtered for quality.
     func readMessages(limit: Int = 2000) throws -> [ImportedMessage] {
         guard FileManager.default.fileExists(atPath: dbPath) else {
             throw ReaderError.databaseNotFound

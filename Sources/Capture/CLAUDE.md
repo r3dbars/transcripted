@@ -2,7 +2,7 @@
 
 ## What This Does
 
-Captures a screenshot of the user's current app window, sends it to Haiku Vision to extract the full conversation thread, and stores the source app reference for paste-back. Triggered by a global hotkey (Ctrl+Option+D) that works from any app.
+Captures a screenshot of the user's current app window, sends it to Haiku Vision to extract the full conversation thread, and stores the source app reference for paste-back. Triggered by a global hotkey (Option+Space) that works from any app.
 
 ## Key Files
 
@@ -12,7 +12,7 @@ Captures a screenshot of the user's current app window, sends it to Haiku Vision
 
 ## How It Works
 
-1. **Hotkey fires** — Carbon `RegisterEventHotKey` intercepts Ctrl+Option+D at OS level
+1. **Hotkey fires** — Carbon `RegisterEventHotKey` intercepts Option+Space at OS level
 2. **Synchronous capture** — The C callback captures TWO things IMMEDIATELY (before any async dispatch):
    - `frontApp` — the `NSRunningApplication` reference (stored for paste-back later)
    - `imageData` — the screenshot PNG of that app's frontmost window
@@ -57,13 +57,13 @@ struct CapturedContext {
 
 **`displayText`** shows the user exactly what was captured — transparent labeled sections (PLATFORM, TALKING TO, FORMALITY, CONVERSATION) so there's no mystery about what Draft "sees."
 
-**`draftingPrompt()`** assembles the full drafting prompt with conversation context + user's voice instructions as separate labeled sections. Explicitly tells Haiku that USER'S INSTRUCTIONS are highest priority.
+**`draftingPrompt()`** assembles the full drafting prompt with conversation context + user's voice instructions as separate labeled sections, followed by a 6-rule INSTRUCTIONS block: (1) instruction type awareness — handles specific intent, tone directives, or a mix; (2) conversation is background context for the reply; (3) match conversational energy/length; (4) no parroting back what the other person said; (5) no AI fluff (unnecessary greetings, sign-offs, exclamation points); (6) output only the reply text, no labels or explanations.
 
 **`parse()`** is a line-by-line parser using `hasPrefix` checks. An `inConversation` flag captures everything after the "CONVERSATION:" header until end of text.
 
 ## Hotkey Details
 
-- **Shortcut:** Ctrl+Option+D (`controlKey | optionKey`, `kVK_ANSI_D`)
+- **Shortcut:** Option+Space (`optionKey`, `kVK_Space`)
 - **Registration:** Carbon `RegisterEventHotKey` with signature `0x44524654` ('DRFT')
 - **Why Carbon:** `NSEvent.addGlobalMonitorForEvents` is a passive observer — apps can consume events before the monitor sees them. Carbon hotkeys intercept at OS level (same mechanism as Alfred/Raycast).
 
@@ -96,7 +96,7 @@ static func captureFrontmostWindow(of app: NSRunningApplication) -> Data?
 
 After modifying capture or context extraction, verify with these checks:
 
-- **Hotkey capture:** Open Slack/iMessage → press ⌃⌥D → check debug log for `📸 CONTEXT RAW` showing platform, talkingTo, formality, and conversation text
+- **Hotkey capture:** Open Slack/iMessage → press ⌥Space → check debug log for `📸 CONTEXT RAW` showing platform, talkingTo, formality, and conversation text
 - **Source app stored:** After capture, the "Paste to [App]" button should show the correct app name
 - **Manual capture:** Click "Capture Screen" button → should capture the previous app (not Draft itself)
 - **Permission denied:** If Screen Recording permission is missing, should show error message (not crash). Look for `❌ CAPTURE ERROR` in debug log

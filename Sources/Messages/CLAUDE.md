@@ -11,8 +11,8 @@ Reads the user's sent iMessages from `~/Library/Messages/chat.db` for automatic 
 ## How It Works
 
 1. Opens `~/Library/Messages/chat.db` in read-only mode (`SQLITE_OPEN_READONLY`)
-2. Queries the last 6 months of sent messages (`is_from_me = 1`) with 5+ words
-3. Applies quality filters in Swift (skip tapbacks, emoji-only, URL-only)
+2. Queries sent messages: `is_from_me = 1 AND text IS NOT NULL AND text != ''` with `ORDER BY date DESC LIMIT 2000`
+3. Applies quality filters **in Swift only** — no SQL-level word/length filters
 4. Returns `[ImportedMessage]` structs shown in preview UI
 5. `formatForAnalysis()` joins messages for the Sonnet analysis call
 6. Raw messages are discarded after profile generation — never saved
@@ -21,7 +21,7 @@ Reads the user's sent iMessages from `~/Library/Messages/chat.db` for automatic 
 
 Requires **Full Disk Access** (FDA) because `~/Library/Messages/` is SIP-protected. The app is already unsandboxed (`com.apple.security.app-sandbox: false`), but FDA is a separate grant in System Settings → Privacy & Security → Full Disk Access.
 
-If FDA isn't granted, `sqlite3_open_v2` fails and `ReaderError.accessDenied` is thrown. The UI shows a link to System Settings with a "Try Again" button.
+If FDA isn't granted, `sqlite3_open_v2` fails and `ReaderError.accessDenied` is thrown. FDA detection checks the error message for "unable to open", "permission", "not authorized", AND "authorization" patterns. The UI shows a link to System Settings with a "Try Again" button.
 
 ## iMessage Date Format
 
@@ -31,17 +31,22 @@ Apple stores dates as **nanoseconds since 2001-01-01** (the `NSDate` reference d
 let date = Date(timeIntervalSinceReferenceDate: Double(nanos) / 1_000_000_000)
 ```
 
-The query uses this to filter to the last 6 months.
+Note: There is NO date filter in the query — all sent messages are fetched up to the LIMIT.
 
 ## Quality Filters
 
-**SQL-level:** `length(text) - length(replace(text, ' ', '')) >= 4` (proxy for 5+ words)
+**SQL-level:** None. The query only filters `is_from_me = 1 AND text IS NOT NULL AND text != ''`.
 
 **Swift-level** (`shouldSkip()`):
-- Under 5 words
-- Pure emoji (fewer than 5 non-emoji ASCII scalars)
-- Tapback reactions ("Loved an image", "Liked a message", etc.)
-- URL-only messages (starts with `http`, 2 or fewer words)
+- `trimmed.count < 2` — single-character messages ("k", "y") have no style signal
+- `nonEmojiCount < 3` — pure emoji / reaction messages (fewer than 3 non-emoji ASCII scalars)
+- Tapback reactions — catches multiple formats:
+  - Standard: "Loved an image", "Liked a message"
+  - Quoted: `Liked "some text"` or `Liked \u{201C}some text\u{201D}` (smart quotes)
+  - Emoji reactions: `Reacted 💯 to "something"` (verb + " to " pattern)
+- URL-only messages — starts with `http` with 2 or fewer words
+
+**Important:** iMessage stores the Unicode Object Replacement Character (U+FFFC) in the `text` field for attachment-only messages (photos, audio, etc.). These are filtered out by the `trimmed.count < 2` check since U+FFFC alone is a single character. In practice, the majority of messages in a typical chat.db may be these invisible placeholders.
 
 ## Public Interface
 
@@ -58,4 +63,5 @@ actor iMessageReader {
 - **Happy path:** Grant FDA → onboarding → choose iMessage → verify messages appear in preview
 - **FDA denied:** Revoke FDA → try iMessage → verify error with "Open System Settings" link
 - **No database:** Temporarily rename `~/Library/Messages/chat.db` → verify fallback error
+- **Message count:** Expect fewer messages than the 2000 limit — most are filtered by `shouldSkip()` (U+FFFC placeholders, tapbacks, emoji-only, single characters)
 - **Build:** `bash build.sh` — requires `-lsqlite3` linker flag in build.sh

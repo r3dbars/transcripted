@@ -64,12 +64,14 @@ com.microsoft.teams         → .teams
 @Published var originalDraft: String  // Snapshot of AI output before user edits (for style learning)
 @Published var isDrafting: Bool       // Loading state
 @Published var error: String?         // Error message if API fails
-var hasAPIKey: Bool                   // Whether Keychain has a key stored
+var hasCredential: Bool               // Whether Keychain has a credential stored
 var styleEngine: StyleEngine?         // Set by ContentView after init
+var authModeName: String              // "API Key", "Claude Subscription", or "None"
 
 func saveAPIKey(_ key: String) -> Bool
-func clearAPIKey()
-func getAPIKey() -> String?           // For style summary regeneration
+func saveSubscriptionToken(_ token: String) -> Bool
+func clearCredential()
+func getAuth() -> AuthCredential?     // For style summary regeneration
 func draftMessage(from rawText: String)                                          // Plain drafting
 func draftWithContext(voiceText: String, context: CapturedContext?, platform: PlatformFormatter)  // Context-aware
 func clear()
@@ -97,7 +99,7 @@ DraftEngine is intentionally separate from SpeechEngine. They don't know about e
 After modifying DraftEngine or PlatformFormatter, verify with these checks:
 
 - **Plain draft:** Type text → hit Draft (no screen capture) → check debug log for `✨ DRAFT | sending N chars to Haiku` and `✅ DRAFTED`
-- **Context-aware draft:** Capture a conversation (⌃⌥D) → speak instructions → Draft → check log for `✨ DRAFT | context-aware [platform] talking to [name]`
+- **Context-aware draft:** Capture a conversation (⌥Space) → speak instructions → Draft → check log for `✨ DRAFT | context-aware [platform] talking to [name]`
 - **originalDraft snapshot:** Draft a message → edit the output text → accept → check `style.md` — `AI_DRAFT` should be the original, `USER_SENT` should be your edited version
 - **Platform formatting:** Capture from Slack → draft → verify no `**bold**` or `## headers` in output (Slack uses `*bold*`). Capture from iMessage → verify no markdown at all.
 - **PlatformFormatter detection:** Check debug log for platform name in brackets: `[slack]`, `[imessage]`, `[email]`, etc.

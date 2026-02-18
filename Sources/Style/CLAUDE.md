@@ -16,9 +16,9 @@ Solves the **cold start problem** — without onboarding, the first 10+ drafts a
 
 1. After API key entry, `StyleOnboardingView` appears (gated by `hasCompletedOnboarding`)
 2. User chooses a source: **Import from iMessages** (recommended) or **Paste Samples Manually**
-3. iMessage path: `iMessageReader` reads `~/Library/Messages/chat.db` (requires Full Disk Access), shows preview, user approves
+3. iMessage path: `iMessageReader` reads `~/Library/Messages/chat.db` (requires Full Disk Access, no date filter, no SQL word filter — just `is_from_me = 1` with `LIMIT 2000`, Swift-level `shouldSkip()` filters to 2+ character messages), shows preview, user approves. Includes optional "Add Slack, email, or other writing samples" expandable section — if provided, combined text (iMessages + supplement) is sent together.
 4. Manual path: User pastes real writing samples (Slack messages, texts, emails — messy is fine)
-5. Either path calls `importBulkSamples()` which sends text to **Sonnet** with a specialized `bulkAnalysisPrompt`
+5. Either path calls `importBulkSamples()` which sends text to **Sonnet** with a specialized `bulkAnalysisPrompt`. When iMessage + supplementary text are combined, the joined text is passed as a single string.
 6. Sonnet returns a comprehensive 400-600 word style profile analyzing 10 dimensions
 7. **Only the generated profile is saved** — raw samples/messages are discarded after analysis
 8. User can review, add more samples and regenerate, or accept
@@ -139,8 +139,8 @@ No onboarding samples section — raw pastes are discarded after initial profile
 func buildSystemPrompt() -> String              // Returns style-aware or default prompt
 func recordExample(aiDraft: String, userFinal: String, platform: String)  // Saves training pair
 func shouldRefineNow() -> Bool                   // Graduated refinement scheduling
-func regenerateStyleSummary(apiKey: String) async // Recency-weighted Sonnet refinement (last 20 examples)
-func importBulkSamples(rawText: String, apiKey: String) async throws -> String  // Onboarding
+func regenerateStyleSummary(auth: AuthCredential) async // Recency-weighted Sonnet refinement (last 20 examples)
+func importBulkSamples(rawText: String, auth: AuthCredential) async throws -> String  // Onboarding
 func completeOnboarding()                        // Sets hasCompletedOnboarding = true
 ```
 

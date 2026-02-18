@@ -32,7 +32,8 @@ class SpeechEngine: ObservableObject {
 
     // Tracks how much of the current task's cumulative text we've already committed
     private var committedPrefixLength = 0
-    private var lastSeenFullTextLength = 0
+    private var committedPrefixContent = ""   // The actual text content at commit time — for content shift detection
+    private var lastSeenFullText = ""         // Most recent fullText from Apple (for commit reference)
     private var callbackCount = 0
     private var taskGeneration = 0
 
@@ -115,7 +116,8 @@ class SpeechEngine: ObservableObject {
         speechRecognizer.defaultTaskHint = .dictation
 
         committedPrefixLength = 0
-        lastSeenFullTextLength = 0
+        committedPrefixContent = ""
+        lastSeenFullText = ""
         callbackCount = 0
         taskGeneration = 0
         silenceTimer?.invalidate()
@@ -174,7 +176,8 @@ class SpeechEngine: ObservableObject {
         }
 
         committedPrefixLength = 0
-        lastSeenFullTextLength = 0
+        committedPrefixContent = ""
+        lastSeenFullText = ""
         lastVolatileSnapshot = ""
         statusMessage = "Ready — tap Record"
     }
@@ -184,7 +187,8 @@ class SpeechEngine: ObservableObject {
         volatileText = ""
         speechFinished = false
         committedPrefixLength = 0
-        lastSeenFullTextLength = 0
+        committedPrefixContent = ""
+        lastSeenFullText = ""
     }
 
     // MARK: - Recognition Task Management
@@ -230,7 +234,8 @@ class SpeechEngine: ObservableObject {
         recognitionRequest = nil
 
         committedPrefixLength = 0
-        lastSeenFullTextLength = 0
+        committedPrefixContent = ""
+        lastSeenFullText = ""
         silenceTimer?.invalidate()
         lastVolatileSnapshot = ""
 
@@ -250,13 +255,22 @@ class SpeechEngine: ObservableObject {
                     self.commitRemainingText(from: fullText)
                     self.restartRecognitionTask()
                 } else {
-                    // Detect Apple Speech buffer reset — fullText shrunk below our prefix
+                    // Detect Apple Speech buffer reset or content revision
                     if fullText.count < self.committedPrefixLength {
+                        // Buffer completely reset — fullText is shorter than our committed prefix
                         self.log("🔀 BUFFER RESET | full(\(fullText.count)) < prefix(\(self.committedPrefixLength)) → reset to 0")
                         self.committedPrefixLength = 0
+                        self.committedPrefixContent = ""
+                    } else if !self.committedPrefixContent.isEmpty && !fullText.hasPrefix(self.committedPrefixContent) {
+                        // Content shift — Apple revised text we already committed.
+                        // Find how many characters from the start still match, then realign.
+                        let commonLen = zip(fullText, self.committedPrefixContent).prefix(while: { $0 == $1 }).count
+                        self.log("🔀 CONTENT SHIFT | prefix was \(self.committedPrefixLength) → realigned to \(commonLen) (committed \"\(self.committedPrefixContent.prefix(30))\" vs full \"\(fullText.prefix(30))\")")
+                        self.committedPrefixLength = commonLen
+                        self.committedPrefixContent = String(fullText.prefix(commonLen))
                     }
 
-                    self.lastSeenFullTextLength = fullText.count
+                    self.lastSeenFullText = fullText
 
                     let extracted: String
                     if self.committedPrefixLength < fullText.count {
@@ -325,15 +339,26 @@ class SpeechEngine: ObservableObject {
         log("⏱️ SILENCE COMMIT | volatile=\"\(volatileText.prefix(40))...\"")
 
         finalTranscript += volatileText + "\n"
-        committedPrefixLength = lastSeenFullTextLength
+        committedPrefixLength = lastSeenFullText.count
+        committedPrefixContent = lastSeenFullText
         volatileText = ""
         lastVolatileSnapshot = ""
     }
 
     private func commitRemainingText(from fullText: String) {
+        // On isFinal, verify prefix alignment before extracting remaining text
+        let effectivePrefix: Int
+        if !committedPrefixContent.isEmpty && !fullText.hasPrefix(committedPrefixContent) {
+            let commonLen = zip(fullText, committedPrefixContent).prefix(while: { $0 == $1 }).count
+            log("🔀 CONTENT SHIFT (isFinal) | prefix was \(committedPrefixLength) → \(commonLen)")
+            effectivePrefix = commonLen
+        } else {
+            effectivePrefix = committedPrefixLength
+        }
+
         let uncommitted: String
-        if committedPrefixLength < fullText.count {
-            let startIndex = fullText.index(fullText.startIndex, offsetBy: committedPrefixLength)
+        if effectivePrefix < fullText.count {
+            let startIndex = fullText.index(fullText.startIndex, offsetBy: effectivePrefix)
             uncommitted = String(fullText[startIndex...]).trimmingCharacters(in: .whitespaces)
         } else {
             uncommitted = volatileText

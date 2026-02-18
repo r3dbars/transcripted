@@ -30,7 +30,7 @@ struct ContentView: View {
             }
 
             // Onboarding overlays (sequential gates)
-            if !drafter.hasAPIKey {
+            if !drafter.hasCredential {
                 APIKeyEntryView(draftEngine: drafter)
             } else if !styleEngine.hasCompletedOnboarding {
                 StyleOnboardingView(styleEngine: styleEngine, draftEngine: drafter)
@@ -39,13 +39,13 @@ struct ContentView: View {
         .frame(minWidth: 600, minHeight: 500)
         .task {
             _ = await speech.requestPermissions()
-            drafter.checkAPIKey()
+            drafter.checkCredential()
             drafter.styleEngine = styleEngine
 
             // Wire up context capture
             contextCapture.registerHotkey()
 
-            logger.log("🚀 APP LAUNCHED | permissions requested, API key checked, style: \(styleEngine.exampleCount) examples, hotkey registered")
+            logger.log("🚀 APP LAUNCHED | auth: \(drafter.authModeName), style: \(styleEngine.exampleCount) examples, hotkey registered")
         }
     }
 }
@@ -127,12 +127,15 @@ struct DraftTab: View {
                         Divider()
 
                         VStack(spacing: 4) {
-                            Text("Key is stored in macOS Keychain")
+                            Text("Credentials stored in macOS Keychain")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            Button("Reset API Key") {
-                                logger.log("🔑 API KEY reset")
-                                drafter.clearAPIKey()
+                            Text("Auth: \(drafter.authModeName)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Button("Switch Auth Method") {
+                                logger.log("🔑 AUTH reset")
+                                drafter.clearCredential()
                                 showSettings = false
                             }
                             .buttonStyle(.bordered)
@@ -245,7 +248,7 @@ struct DraftTab: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.purple)
-                .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || drafter.isDrafting || !drafter.hasAPIKey)
+                .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || drafter.isDrafting || !drafter.hasCredential)
 
                 Spacer()
 
@@ -594,10 +597,10 @@ struct DraftTab: View {
         logger.log("📚 STYLE | recorded example #\(styleEngine.exampleCount) [\(platform.rawValue)]")
 
         // Graduated refinement: every 3 early on, every 10 once stabilized
-        if styleEngine.shouldRefineNow(), let apiKey = drafter.getAPIKey() {
+        if styleEngine.shouldRefineNow(), let auth = drafter.getAuth() {
             logger.log("🔄 STYLE | refinement triggered at \(styleEngine.exampleCount) examples")
             Task {
-                await styleEngine.regenerateStyleSummary(apiKey: apiKey)
+                await styleEngine.regenerateStyleSummary(auth: auth)
                 logger.log("✅ STYLE | summary updated")
             }
         }

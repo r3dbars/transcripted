@@ -105,8 +105,8 @@ class ContextCaptureEngine: ObservableObject {
         NSApplication.shared.activate(ignoringOtherApps: true)
         onHotkeyFired?()
 
-        guard let apiKey = KeychainHelper.load(key: "anthropic-api-key") else {
-            captureError = "No API key — add your Anthropic key in settings"
+        guard let auth = AuthCredential.load() else {
+            captureError = "No credentials — add your API key or Claude subscription token in settings"
             isCapturing = false
             return
         }
@@ -124,12 +124,14 @@ class ContextCaptureEngine: ObservableObject {
         do {
             let context = try await AnthropicAPI.extractStructuredContext(
                 imageData: imageData,
-                apiKey: apiKey,
+                auth: auth,
                 userName: userName,
                 appName: appName
             )
             capturedContext = context
             onContextCaptured?(context)
+        } catch AnthropicAPIError.subscriptionTokenExpired {
+            captureError = "Subscription token expired — run `claude setup-token` and update in Settings"
         } catch {
             captureError = error.localizedDescription
         }
