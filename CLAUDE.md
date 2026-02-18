@@ -10,7 +10,7 @@ A macOS utility that captures rough spoken (or typed) thoughts and uses Claude H
 Sources/
 ├── DraftApp.swift           ← @main entry point only
 ├── Speech/                  ← Voice capture engine (Apple SFSpeechRecognizer)
-├── API/                     ← Anthropic API client (text + vision) + Keychain storage
+├── API/                     ← Anthropic API client (text + vision) + AuthCredential + Keychain
 ├── Draft/                   ← DraftEngine + PlatformFormatter — orchestrates drafting
 ├── Style/                   ← StyleEngine — learns user's writing voice + onboarding
 ├── Messages/                ← iMessage database reader (SQLite, onboarding import)
