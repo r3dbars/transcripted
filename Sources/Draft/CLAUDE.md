@@ -66,6 +66,8 @@ com.microsoft.teams         → .teams
 @Published var error: String?         // Error message if API fails
 var hasCredential: Bool               // Whether Keychain has a credential stored
 var styleEngine: StyleEngine?         // Set by ContentView after init
+var promptStore: PromptStore?         // Set by ContentView after init — provides model + prompts
+var lastRawText: String               // The raw user input from the last draft (for FeedbackStore)
 var authModeName: String              // "API Key", "Claude Subscription", or "None"
 
 func saveAPIKey(_ key: String) -> Bool

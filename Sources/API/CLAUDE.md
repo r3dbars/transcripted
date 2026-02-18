@@ -77,14 +77,14 @@ Anthropic provides SDKs for Python, TypeScript, Java, etc. — but NOT Swift. We
 
 ### Models
 
-- **Haiku** (`claude-haiku-4-5-20251001`) — Default for text drafting and vision extraction. Fastest/cheapest, ideal where latency matters.
+- **Haiku** (`claude-haiku-4-5-20251001`) — Default for text drafting and vision extraction. Fastest/cheapest, ideal where latency matters. **Model is not hardcoded in AnthropicAPI** — callers pass `model:` explicitly (read from `PromptStore` or `DefaultPrompts`).
 - **Sonnet** (`claude-sonnet-4-20250514`) — Used for style analysis (deeper reasoning needed for writing profiles). Exposed as `AnthropicAPI.sonnetModel` so other components can reference it.
 
 ### Two API Modes
 
-**Text Drafting** (`draft()`): Uses `Codable` structs. Accepts optional `systemPrompt` override (for style-aware drafting), configurable `maxTokens` (default 1024, style analysis uses 4096), and optional `useModel` parameter to override the default Haiku model (used by StyleEngine for Sonnet-powered analysis).
+**Text Drafting** (`draft()`): Uses `Codable` structs. **Requires `model:` parameter** — no default model. Accepts optional `systemPrompt` (for style-aware drafting), configurable `maxTokens` (default 1024, style analysis uses 4096). Callers get model from `PromptStore` with `DefaultPrompts` fallback.
 
-**Vision Context Extraction** (`extractStructuredContext()`): Uses `JSONSerialization` because vision content is a mixed-type array (image + text blocks). Sends base64 PNG screenshot. Accepts optional `userName` (for identity-aware extraction — "which messages are mine?") and `appName` (passed from the OS so Haiku doesn't misidentify the platform). Returns a `CapturedContext` struct parsed from plain-text labeled sections.
+**Vision Context Extraction** (`extractStructuredContext()`): Uses `JSONSerialization` because vision content is a mixed-type array (image + text blocks). Sends base64 PNG screenshot. **Requires `model:` and `systemPrompt:` parameters** — the context extraction prompt is now provided by `PromptStore.contextExtractionPrompt(userName:appName:)`, not built inside AnthropicAPI. Returns a `CapturedContext` struct parsed from plain-text labeled sections.
 
 ### Vision Extraction Flow
 
@@ -143,16 +143,16 @@ static let sonnetModel: String  // "claude-sonnet-4-20250514"
 static func draft(
     rawText: String,
     auth: AuthCredential,
+    model: String,                 // Required — no default (callers read from PromptStore)
     systemPrompt: String? = nil,
-    maxTokens: Int = 1024,
-    useModel: String? = nil        // Override default Haiku model
+    maxTokens: Int = 1024
 ) async throws -> String
 
 static func extractStructuredContext(
     imageData: Data,
     auth: AuthCredential,
-    userName: String? = nil,       // User's name for identity-aware extraction
-    appName: String? = nil         // OS app name hint for platform detection
+    model: String,                 // Required — no default
+    systemPrompt: String           // Context extraction prompt (from PromptStore)
 ) async throws -> CapturedContext
 
 // KeychainHelper

@@ -48,6 +48,9 @@ class ContextCaptureEngine: ObservableObject {
     /// ContentView uses this to start voice recording in parallel.
     var onHotkeyFired: (() -> Void)?
 
+    /// Reference to PromptStore — set by ContentView after init.
+    var promptStore: PromptStore?
+
     func registerHotkey() {
         _sharedEngine = self
 
@@ -117,16 +120,21 @@ class ContextCaptureEngine: ObservableObject {
             return
         }
 
-        // Load user's name from UserDefaults for identity-aware extraction
+        // Load user's name and build the context extraction prompt
         let userName = UserDefaults.standard.string(forKey: "user-display-name")
         let appName = sourceApp?.localizedName
+        let model = promptStore?.config.model ?? DefaultPrompts.model
+        let extractionPrompt = promptStore?.contextExtractionPrompt(userName: userName, appName: appName)
+            ?? DefaultPrompts.contextExtraction
+                .replacingOccurrences(of: "{USER_NAME}", with: userName.map { "The user's name is \($0). They are one of the participants in this conversation." } ?? "Identify the user based on which side of the conversation they appear on.")
+                .replacingOccurrences(of: "{APP_NAME}", with: appName.map { "This screenshot is from the app \"\($0)\"." } ?? "Identify which messaging app this is from the UI.")
 
         do {
             let context = try await AnthropicAPI.extractStructuredContext(
                 imageData: imageData,
                 auth: auth,
-                userName: userName,
-                appName: appName
+                model: model,
+                systemPrompt: extractionPrompt
             )
             capturedContext = context
             onContextCaptured?(context)

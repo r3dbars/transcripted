@@ -82,6 +82,7 @@ struct CapturedContext {
 
 var onContextCaptured: ((CapturedContext) -> Void)?  // Fires when vision processing completes
 var onHotkeyFired: (() -> Void)?                     // Fires immediately on hotkey (before vision)
+var promptStore: PromptStore?                        // Set by ContentView — provides model + context extraction prompt
 
 func registerHotkey()
 func unregisterHotkey()

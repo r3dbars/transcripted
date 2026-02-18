@@ -3,6 +3,13 @@ build/
 
 # Debug logs
 debug.log
+*.log
 
 # macOS
 .DS_Store
+
+# Secrets / credentials
+.env
+.env.local
+*.pem
+*.key

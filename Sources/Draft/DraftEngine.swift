@@ -19,6 +19,12 @@ class DraftEngine: ObservableObject {
     /// Reference to style engine — set by ContentView after init.
     var styleEngine: StyleEngine?
 
+    /// Reference to PromptStore — set by ContentView after init.
+    var promptStore: PromptStore?
+
+    /// The raw text from the user's last draft request — exposed for FeedbackStore logging.
+    private(set) var lastRawText = ""
+
     func checkCredential() {
         hasCredential = AuthCredential.load() != nil
     }
@@ -59,12 +65,14 @@ class DraftEngine: ObservableObject {
         isDrafting = true
         error = nil
         draftedText = ""
+        lastRawText = rawText
 
         let customPrompt = styleEngine?.buildSystemPrompt()
+        let model = promptStore?.config.model ?? DefaultPrompts.model
 
         Task {
             do {
-                let result = try await AnthropicAPI.draft(rawText: rawText, auth: auth, systemPrompt: customPrompt)
+                let result = try await AnthropicAPI.draft(rawText: rawText, auth: auth, model: model, systemPrompt: customPrompt)
                 self.draftedText = result
                 self.originalDraft = result
             } catch AnthropicAPIError.subscriptionTokenExpired {
@@ -86,6 +94,7 @@ class DraftEngine: ObservableObject {
         isDrafting = true
         error = nil
         draftedText = ""
+        lastRawText = voiceText
 
         // Build system prompt with style + platform formatting
         var systemPrompt = styleEngine?.buildSystemPrompt() ?? ""
@@ -103,9 +112,11 @@ class DraftEngine: ObservableObject {
 
         Task {
             do {
+                let draftModel = self.promptStore?.config.model ?? DefaultPrompts.model
                 let result = try await AnthropicAPI.draft(
                     rawText: userMessage,
                     auth: auth,
+                    model: draftModel,
                     systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt
                 )
                 // Apply platform post-processing as safety net
@@ -129,6 +140,7 @@ class DraftEngine: ObservableObject {
     func clear() {
         draftedText = ""
         originalDraft = ""
+        lastRawText = ""
         error = nil
     }
 }

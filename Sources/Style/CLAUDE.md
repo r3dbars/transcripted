@@ -135,8 +135,9 @@ No onboarding samples section — raw pastes are discarded after initial profile
 @Published var exampleCount: Int
 @Published var styleFileContents: String
 @Published var hasCompletedOnboarding: Bool     // Persisted to UserDefaults
+var promptStore: PromptStore?                   // Set by ContentView — provides fallback drafting prompt
 
-func buildSystemPrompt() -> String              // Returns style-aware or default prompt
+func buildSystemPrompt() -> String              // Returns style-aware or PromptStore fallback prompt
 func recordExample(aiDraft: String, userFinal: String, platform: String)  // Saves training pair
 func shouldRefineNow() -> Bool                   // Graduated refinement scheduling
 func regenerateStyleSummary(auth: AuthCredential) async // Recency-weighted Sonnet refinement (last 20 examples)
