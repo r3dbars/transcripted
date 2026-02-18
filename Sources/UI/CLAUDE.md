@@ -9,6 +9,9 @@ SwiftUI views for the Draft app — input area, voice controls, context capture,
 - `ContentView.swift` — Main app view with `ContentView` (owns all engines, onboarding gates) and `DraftTab` (the primary drafting interface)
 - `StyleOnboardingView.swift` — 5-step onboarding flow: intro (name) → source choice → (iMessage preview OR paste samples) → profile result
 - `APIKeyEntryView.swift` — Auth setup overlay with segmented picker (API key or Claude subscription token)
+- `AgentTab.swift` — Third tab showing insight cards from the orchestrator agent (Apply/Skip)
+- `OrchestratorBridge.swift` — Manages Python agent subprocess, SSE subscription, Apply/Skip POST callbacks
+- `InsightCard.swift` — Model for insight cards (suggestionId, promptKey, saw, why, currentValue, proposedValue, status)
 - `PreviousAppTracker.swift` — Tracks which app the user was in before switching to Draft
 - `AppLogger.swift` — Debug logger with in-app log panel and file output
 
@@ -23,7 +26,7 @@ Has credentials? ──No──→ APIKeyEntryView (overlay — name + auth pick
 Completed style onboarding? ──No──→ StyleOnboardingView (overlay)
   │ Yes
   ↓
-Main App (TabView: Draft tab + Style tab)
+Main App (TabView: Draft tab + Style tab + Agent tab)
 ```
 
 Both gates are overlays on top of the TabView. Once cleared, they don't reappear (credentials in Keychain, onboarding flag in UserDefaults).

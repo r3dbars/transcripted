@@ -17,7 +17,14 @@ Sources/
 ├── Feedback/                ← FeedbackStore — accept/edit signal logging (feedback.jsonl) for orchestrator
 ├── Messages/                ← iMessage database reader (SQLite, onboarding import)
 ├── Capture/                 ← Screen capture, context extraction, CapturedContext struct
-└── UI/                      ← SwiftUI views, onboarding, app tracker, debug logger
+└── UI/                      ← SwiftUI views, onboarding, app tracker, debug logger, Agent tab
+agent/                       ← Python orchestrator agent (Claude Agent SDK) — auto-improves prompts
+├── tools.py                 ← @tool functions for reading feedback, prompts, style, suggesting changes
+├── server.py                ← aiohttp SSE server on localhost:19832
+├── orchestrator.py          ← Claude Agent SDK analysis loop (Sonnet, $0.50/run budget)
+├── watcher.py               ← Polls feedback.jsonl for new entries
+├── main.py                  ← Entry point (python3 -m agent.main)
+└── prompts.py               ← Agent personality and system prompt
 ```
 
 **Each subfolder in Sources/ has its own CLAUDE.md with component-specific knowledge. Read the relevant CLAUDE.md before modifying any file in that folder.**
@@ -42,6 +49,7 @@ This compiles all Swift files from `Sources/`, signs the app bundle, and launche
 - **iMessage import** — Optional onboarding path that reads `~/Library/Messages/chat.db` for zero-effort style profile generation (requires Full Disk Access)
 - **Paste to source app** — Pastes the polished message back to the exact app that was screenshotted, with activation polling for reliability
 - **Frictionless keyboard flow** — Enter in input → Draft, Enter in output → Paste to source app, Shift+Enter → newline
+- **Orchestrator agent** — Autonomous Python agent (Claude Agent SDK) watches feedback, analyzes patterns, and streams prompt improvement suggestions to the Agent tab. Apply/Skip decisions feed back into the agent's learning (meta-feedback loop).
 
 ## End-to-End Data Flow
 
