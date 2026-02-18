@@ -31,6 +31,26 @@ This behavior was discovered through debug logging and is not documented anywher
 
 These fire at ~60 seconds and mean "recognition task timed out." The correct response is to commit any remaining volatile text and restart the recognition task. The audio engine and its tap stay running — only the request/task need to be recreated.
 
+### 4. Multi-Channel Audio Interfaces Break SFSpeechRecognizer
+
+Pro audio interfaces like BEACN Mic (96kHz/4 channels) cause SFSpeechRecognizer error 1110 ("no speech detected"). The recognizer expects mono audio and can't parse multi-channel input.
+
+**Fix:** Force the audio tap to mono at the hardware's native sample rate:
+
+```swift
+let nativeFormat = inputNode.outputFormat(forBus: 0)
+let monoFormat = AVAudioFormat(standardFormatWithSampleRate: nativeFormat.sampleRate, channels: 1)!
+inputNode.installTap(onBus: 0, bufferSize: 1024, format: monoFormat) { ... }
+```
+
+AVAudioEngine handles the channel mixdown automatically. **Do NOT force 16kHz** — mismatching the sample rate causes the tap to crash with an ObjC exception.
+
+## Logging
+
+`log()` writes to both stdout AND `~/draft-debug.log` with ISO8601 timestamps and a `SPEECH` prefix. Permission diagnostics (speech auth status, mic auth status, recognizer availability) and audio format details (native sample rate, channel count, tap format) are logged on every `startListening()` call.
+
+Monitor in real time: `tail -f ~/draft-debug.log | grep SPEECH`
+
 ## How It Works
 
 1. **Silence-based commitment** — Timer watches `volatileText`. When unchanged for 1.5 seconds, commits to `finalTranscript` and advances `committedPrefixLength` to `lastSeenFullTextLength`.
@@ -66,4 +86,5 @@ After modifying SpeechEngine, verify with these checks:
 - **Stop mid-sentence:** Stop while speaking → volatile text commits to final
 - **Done detection:** Speak, then wait 2.5s → `speechFinished` should become true (check `🏁 DONE TIMER` in console)
 - **Buffer reset:** Long recordings may trigger `🔀 BUFFER RESET` in console — text should NOT be lost
-- **Debug log:** `tail -f ~/draft-debug.log | grep SPEECH` shows all speech events in real time
+- **Multi-channel mic:** Plug in a multi-channel audio interface → record → should work normally (check `🎤 AUDIO FORMAT native` in debug log for channel count, `🎤 AUDIO FORMAT tap` should show `channels=1`)
+- **Debug log:** `tail -f ~/draft-debug.log | grep SPEECH` shows all speech events in real time (includes permission diagnostics, audio format, and all recognition callbacks)

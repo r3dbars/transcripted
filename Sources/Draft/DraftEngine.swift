@@ -1,5 +1,7 @@
 // DraftEngine.swift
-// Manages the "rough text → polished message" workflow via Claude Haiku
+// Manages the "rough text → polished message" workflow via Claude.
+//
+// Supports both API key auth and Claude subscription token auth via AuthCredential.
 
 import SwiftUI
 
@@ -12,34 +14,45 @@ class DraftEngine: ObservableObject {
     /// Used by StyleEngine to compare AI output vs. what the user actually sent.
     @Published var originalDraft = ""
     @Published var error: String?
-    @Published var hasAPIKey = false
+    @Published var hasCredential = false
 
-    private let apiKeyName = "anthropic-api-key"
+    /// Reference to style engine — set by ContentView after init.
+    var styleEngine: StyleEngine?
 
-    func checkAPIKey() {
-        hasAPIKey = KeychainHelper.load(key: apiKeyName) != nil
+    func checkCredential() {
+        hasCredential = AuthCredential.load() != nil
     }
 
     func saveAPIKey(_ key: String) -> Bool {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
-        let saved = KeychainHelper.save(key: apiKeyName, value: trimmed)
-        if saved { hasAPIKey = true }
+        let saved = AuthCredential.saveAPIKey(trimmed)
+        if saved { hasCredential = true }
         return saved
     }
 
-    func clearAPIKey() {
-        KeychainHelper.delete(key: apiKeyName)
-        hasAPIKey = false
+    func saveSubscriptionToken(_ token: String) -> Bool {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let saved = AuthCredential.saveSubscriptionToken(trimmed)
+        if saved { hasCredential = true }
+        return saved
     }
 
-    /// Reference to style engine — set by ContentView after init
-    var styleEngine: StyleEngine?
+    func clearCredential() {
+        AuthCredential.clear()
+        hasCredential = false
+    }
+
+    /// Returns the current auth mode name for display ("API Key" or "Claude Subscription").
+    var authModeName: String {
+        AuthCredential.load()?.modeName ?? "None"
+    }
 
     /// Original drafting method — used when no screen context is available
     func draftMessage(from rawText: String) {
-        guard let apiKey = KeychainHelper.load(key: apiKeyName) else {
-            error = "No API key — please add your Anthropic key in settings"
+        guard let auth = AuthCredential.load() else {
+            error = "No credentials — add your API key or Claude subscription token in settings"
             return
         }
 
@@ -51,9 +64,11 @@ class DraftEngine: ObservableObject {
 
         Task {
             do {
-                let result = try await AnthropicAPI.draft(rawText: rawText, apiKey: apiKey, systemPrompt: customPrompt)
+                let result = try await AnthropicAPI.draft(rawText: rawText, auth: auth, systemPrompt: customPrompt)
                 self.draftedText = result
                 self.originalDraft = result
+            } catch AnthropicAPIError.subscriptionTokenExpired {
+                self.error = "Subscription token expired — run `claude setup-token` and update in Settings"
             } catch {
                 self.error = error.localizedDescription
             }
@@ -63,8 +78,8 @@ class DraftEngine: ObservableObject {
 
     /// Context-aware drafting — uses full conversation context + user's voice instructions
     func draftWithContext(voiceText: String, context: CapturedContext?, platform: PlatformFormatter) {
-        guard let apiKey = KeychainHelper.load(key: apiKeyName) else {
-            error = "No API key — please add your Anthropic key in settings"
+        guard let auth = AuthCredential.load() else {
+            error = "No credentials — add your API key or Claude subscription token in settings"
             return
         }
 
@@ -90,13 +105,15 @@ class DraftEngine: ObservableObject {
             do {
                 let result = try await AnthropicAPI.draft(
                     rawText: userMessage,
-                    apiKey: apiKey,
+                    auth: auth,
                     systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt
                 )
                 // Apply platform post-processing as safety net
                 let processed = platform.postProcess(result)
                 self.draftedText = processed
                 self.originalDraft = processed
+            } catch AnthropicAPIError.subscriptionTokenExpired {
+                self.error = "Subscription token expired — run `claude setup-token` and update in Settings"
             } catch {
                 self.error = error.localizedDescription
             }
@@ -104,9 +121,9 @@ class DraftEngine: ObservableObject {
         }
     }
 
-    /// Get API key for style summary regeneration
-    func getAPIKey() -> String? {
-        KeychainHelper.load(key: apiKeyName)
+    /// Get current auth credential for style summary regeneration
+    func getAuth() -> AuthCredential? {
+        AuthCredential.load()
     }
 
     func clear() {

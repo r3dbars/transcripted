@@ -1,5 +1,8 @@
 // AnthropicAPI.swift
-// URLSession-based client for calling the Anthropic Messages API (Claude Haiku)
+// URLSession-based client for calling the Anthropic Messages API (Claude).
+//
+// Accepts AuthCredential instead of a raw API key string, so both API key
+// and Claude subscription token auth work transparently.
 
 import Foundation
 
@@ -41,19 +44,22 @@ struct AnthropicErrorResponse: Codable {
 // MARK: - API Client
 
 enum AnthropicAPIError: LocalizedError {
-    case noAPIKey
+    case noCredential
     case invalidResponse
     case emptyResponse
     case apiError(String)
     case networkError(String)
+    case subscriptionTokenExpired  // 401 when using subscription token
 
     var errorDescription: String? {
         switch self {
-        case .noAPIKey: return "No API key configured"
+        case .noCredential: return "No API credentials configured"
         case .invalidResponse: return "Invalid response from API"
         case .emptyResponse: return "Empty response from API"
         case .apiError(let msg): return msg
         case .networkError(let msg): return "Network error: \(msg)"
+        case .subscriptionTokenExpired:
+            return "Claude subscription token expired — run `claude setup-token` and update in settings"
         }
     }
 }
@@ -136,30 +142,31 @@ struct AnthropicAPI {
 
     // MARK: - Text Drafting
 
-    static func draft(rawText: String, apiKey: String, systemPrompt customPrompt: String? = nil, maxTokens: Int = 1024, useModel: String? = nil) async throws -> String {
-        guard !apiKey.isEmpty else { throw AnthropicAPIError.noAPIKey }
-
+    static func draft(
+        rawText: String,
+        auth: AuthCredential,
+        systemPrompt customPrompt: String? = nil,
+        maxTokens: Int = 1024,
+        useModel: String? = nil
+    ) async throws -> String {
         let body = AnthropicRequest(
             model: useModel ?? model,
             max_tokens: maxTokens,
             system: customPrompt ?? systemPrompt,
             messages: [AnthropicMessage(role: "user", content: rawText)]
         )
-
-        return try await sendRequest(body: body, apiKey: apiKey)
+        return try await sendRequest(body: body, auth: auth)
     }
 
     // MARK: - Vision Context Extraction
 
     /// Extract full conversation context from a screenshot as plain text, parsed into CapturedContext
-    static func extractStructuredContext(imageData: Data, apiKey: String, userName: String? = nil, appName: String? = nil) async throws -> CapturedContext {
-        guard !apiKey.isEmpty else { throw AnthropicAPIError.noAPIKey }
-
+    static func extractStructuredContext(imageData: Data, auth: AuthCredential, userName: String? = nil, appName: String? = nil) async throws -> CapturedContext {
         let rawText = try await sendVisionRequest(
             imageData: imageData,
             systemPrompt: contextExtractionPrompt(userName: userName, appName: appName),
             userText: "Extract the full conversation from this screenshot.",
-            apiKey: apiKey
+            auth: auth
         )
 
         // Debug: log the raw Haiku response so we can see what came back
@@ -170,7 +177,7 @@ struct AnthropicAPI {
 
     // MARK: - Vision Request Helper
 
-    private static func sendVisionRequest(imageData: Data, systemPrompt: String, userText: String, apiKey: String) async throws -> String {
+    private static func sendVisionRequest(imageData: Data, systemPrompt: String, userText: String, auth: AuthCredential) async throws -> String {
         let base64Image = imageData.base64EncodedString()
 
         let jsonBody: [String: Any] = [
@@ -201,46 +208,41 @@ struct AnthropicAPI {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
+        auth.apply(to: &request)
         request.httpBody = try JSONSerialization.data(withJSONObject: jsonBody)
 
         let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw AnthropicAPIError.invalidResponse
-        }
-
-        if httpResponse.statusCode != 200 {
-            if let errorResponse = try? JSONDecoder().decode(AnthropicErrorResponse.self, from: data) {
-                throw AnthropicAPIError.apiError(errorResponse.error.message)
-            }
-            throw AnthropicAPIError.apiError("HTTP \(httpResponse.statusCode)")
-        }
-
-        let apiResponse = try JSONDecoder().decode(AnthropicResponse.self, from: data)
-
-        guard let firstBlock = apiResponse.content.first else {
-            throw AnthropicAPIError.emptyResponse
-        }
-
-        return firstBlock.text
+        return try parseResponse(data: data, response: response, auth: auth)
     }
 
     // MARK: - Shared Request Logic
 
-    private static func sendRequest(body: AnthropicRequest, apiKey: String) async throws -> String {
+    private static func sendRequest(body: AnthropicRequest, auth: AuthCredential) async throws -> String {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
+        auth.apply(to: &request)
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
+        return try parseResponse(data: data, response: response, auth: auth)
+    }
 
+    // MARK: - Shared Response Parsing
+
+    private static func parseResponse(data: Data, response: URLResponse, auth: AuthCredential) throws -> String {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AnthropicAPIError.invalidResponse
+        }
+
+        // Distinguish expired subscription tokens from invalid API keys
+        if httpResponse.statusCode == 401 {
+            if case .subscriptionToken = auth {
+                throw AnthropicAPIError.subscriptionTokenExpired
+            }
+            throw AnthropicAPIError.apiError("Invalid credentials (HTTP 401)")
         }
 
         if httpResponse.statusCode != 200 {
@@ -251,11 +253,9 @@ struct AnthropicAPI {
         }
 
         let apiResponse = try JSONDecoder().decode(AnthropicResponse.self, from: data)
-
         guard let firstBlock = apiResponse.content.first else {
             throw AnthropicAPIError.emptyResponse
         }
-
         return firstBlock.text
     }
 }

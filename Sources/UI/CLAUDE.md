@@ -57,7 +57,7 @@ Lines 673-718  StyleProfileView     — Second tab showing style.md contents
 ┌─────────────────────────────────────────┐
 │ Draft           [Capturing...]    ⚙️    │  ← Header + capture status + settings
 ├─────────────────────────────────────────┤
-│ Context              [Capture Screen]   │  ← Context label + capture button + ⌃⌥D hint
+│ Context              [Capture Screen]   │  ← Context label + capture button + ⌥Space hint
 ├─────────────────────────────────────────┤
 │ PLATFORM: Slack                         │
 │ TALKING TO: Sarah Graham                │
@@ -89,7 +89,7 @@ Second tab: **Style Profile** — shows style.md contents (summary + examples).
 - **Enter** (in output area) — Pastes drafted message to source app
 - **Shift+Enter** — Inserts newline (in both text areas)
 - **⌘R** — Toggle Record/Stop voice input
-- **Ctrl+Option+D** — Global hotkey: capture screen context (works from any app)
+- **Option+Space** — Global hotkey: capture screen context (works from any app)
 
 ### Enter Key Implementation
 
@@ -147,7 +147,7 @@ When the hotkey fires:
 
 1. **Intro** — Welcome message, name input field (saved to UserDefaults for vision identity)
 2. **Source Choice** — Two cards: "Import from iMessages" (recommended, reads ~/Library/Messages/chat.db) or "Paste Samples Manually"
-3a. **iMessage Preview** — Read-only ScrollView showing loaded messages, privacy notice, message count, "Analyze These Messages" button. Handles errors: FDA denied (link to System Settings + retry), no database/empty (fallback to manual paste)
+3a. **iMessage Preview** — Read-only ScrollView showing loaded messages, privacy notice, message count, "Analyze These Messages" button. Includes expandable "Add Slack, email, or other writing samples" section for supplementary paste — combined text is sent together for a richer profile. Handles errors: FDA denied (link to System Settings + retry), no database/empty (fallback to manual paste)
 3b. **Samples** — Large TextEditor for pasting writing samples, word count indicator, "Build My Profile" button
 4. **Result** — Shows generated profile, "Looks Good" to accept, "Add More & Regenerate" goes back to source choice
 
@@ -161,20 +161,23 @@ Observes `NSWorkspace.didDeactivateApplicationNotification` to remember the last
 
 Hardcoded bundle ID fallback (`com.justinbetker.draft`) since `Bundle.main.bundleIdentifier` can be nil for swiftc-built apps.
 
-## API Key Flow
+## Auth Setup Flow
 
-1. On launch, if `drafter.hasAPIKey` is false → `APIKeyEntryView` overlay appears
-2. User enters key → saved to Keychain → overlay dismisses
-3. Gear icon → popover with "Reset API Key" → clears Keychain → overlay reappears
+1. On launch, if `drafter.hasCredential` is false → `APIKeyEntryView` overlay appears
+2. Overlay shows name input + segmented picker (API Key / Claude Subscription)
+3. API Key tab: `SecureField` for `sk-ant-...` with prefix validation
+4. Subscription tab: step-by-step instructions for `claude setup-token` + paste field
+5. "Connect" saves to Keychain → overlay dismisses
+6. Gear icon → popover shows current auth mode + "Switch Auth Method" → clears Keychain → overlay reappears
 
 ## Verification
 
 After modifying UI components, verify with these checks:
 
-- **Full flow:** ⌃⌥D over Slack → speak instructions → Enter → edit draft → Enter → message pasted back to Slack
+- **Full flow:** ⌥Space over Slack → speak instructions → Enter → edit draft → Enter → message pasted back to Slack
 - **Keyboard shortcuts:** Enter in input triggers draft, Enter in output triggers paste, Shift+Enter inserts newline in both, ⌘R toggles recording
 - **Auto-focus:** After draft completes, cursor should be in the output TextEditor (ready for edit → Enter)
-- **Parallel pipeline:** ⌃⌥D → speak → vision context should appear at top of input while voice text appends below "YOUR INSTRUCTIONS:"
+- **Parallel pipeline:** ⌥Space → speak → vision context should appear at top of input while voice text appends below "YOUR INSTRUCTIONS:"
 - **Paste-back:** "Paste to [App]" button should show correct app name. Pasting should activate the target app and simulate ⌘V.
 - **Onboarding gates:** Delete API key (gear → Reset) → API key overlay appears. Reset onboarding flag → style onboarding appears. Both block the main UI.
 - **Style tab:** Shows style.md contents. After accepting drafts, example count badge should increment.

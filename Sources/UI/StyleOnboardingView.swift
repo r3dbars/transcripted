@@ -612,8 +612,8 @@ struct StyleOnboardingView: View {
     // MARK: - Analysis
 
     private func buildProfile(from text: String? = nil) async {
-        guard let apiKey = draftEngine.getAPIKey() else {
-            analysisError = "No API key found"
+        guard let auth = draftEngine.getAuth() else {
+            analysisError = "No credentials configured"
             return
         }
 
@@ -625,7 +625,7 @@ struct StyleOnboardingView: View {
         do {
             let profile = try await styleEngine.importBulkSamples(
                 rawText: sourceText,
-                apiKey: apiKey
+                auth: auth
             )
             generatedProfile = profile
             withAnimation { step = .result }

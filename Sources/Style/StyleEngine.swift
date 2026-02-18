@@ -240,7 +240,7 @@ class StyleEngine: ObservableObject {
     // MARK: - Incremental Style Refinement
 
     /// Regenerate the Style Summary using Sonnet — incremental refinement based on recent training pairs
-    func regenerateStyleSummary(apiKey: String) async {
+    func regenerateStyleSummary(auth: AuthCredential) async {
         let currentProfile = extractStyleSummary()
         let examples = extractRecentExamplesText(last: 20)
         guard !examples.isEmpty else { return }
@@ -250,7 +250,7 @@ class StyleEngine: ObservableObject {
         do {
             let analysis = try await AnthropicAPI.draft(
                 rawText: examples,
-                apiKey: apiKey,
+                auth: auth,
                 systemPrompt: refinementPrompt,
                 maxTokens: 4096,
                 useModel: AnthropicAPI.sonnetModel
@@ -493,13 +493,13 @@ class StyleEngine: ObservableObject {
 
     /// Import bulk writing samples from onboarding and generate initial style profile.
     /// Raw samples are used for analysis only — NOT persisted in style.md.
-    func importBulkSamples(rawText: String, apiKey: String) async throws -> String {
+    func importBulkSamples(rawText: String, auth: AuthCredential) async throws -> String {
         let userName = UserDefaults.standard.string(forKey: "user-display-name")
 
         // Send to Sonnet for deep analysis
         let analysis = try await AnthropicAPI.draft(
             rawText: rawText,
-            apiKey: apiKey,
+            auth: auth,
             systemPrompt: Self.bulkAnalysisPrompt(userName: userName),
             maxTokens: 4096,
             useModel: AnthropicAPI.sonnetModel
