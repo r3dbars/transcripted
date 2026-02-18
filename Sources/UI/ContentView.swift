@@ -1,5 +1,5 @@
 // ContentView.swift
-// Main app view — TabView with Draft and Style tabs
+// Main app view — TabView with Draft, Style, and Agent tabs
 
 import SwiftUI
 import Carbon
@@ -13,6 +13,7 @@ struct ContentView: View {
     @StateObject private var logger = AppLogger()
     @StateObject private var previousAppTracker = PreviousAppTracker()
     @StateObject private var contextCapture = ContextCaptureEngine()
+    @StateObject private var orchestrator = OrchestratorBridge()
 
     var body: some View {
         ZStack {
@@ -30,6 +31,9 @@ struct ContentView: View {
 
                 StyleProfileView(styleEngine: styleEngine)
                     .tabItem { Label("Style", systemImage: "person.text.rectangle") }
+
+                AgentTab(orchestrator: orchestrator)
+                    .tabItem { Label("Agent", systemImage: "brain.head.profile") }
             }
 
             // Onboarding overlays (sequential gates)
@@ -40,6 +44,9 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 600, minHeight: 500)
+        .onDisappear {
+            orchestrator.stop()
+        }
         .task {
             _ = await speech.requestPermissions()
             drafter.checkCredential()
@@ -51,7 +58,22 @@ struct ContentView: View {
             // Wire up context capture
             contextCapture.registerHotkey()
 
-            logger.log("🚀 APP LAUNCHED | auth: \(drafter.authModeName), style: \(styleEngine.exampleCount) examples, model: \(promptStore.config.model), hotkey registered")
+            // Start orchestrator agent subprocess
+            orchestrator.start()
+
+            // Listen for prompt changes from the agent
+            NotificationCenter.default.addObserver(
+                forName: .promptsDidChange,
+                object: nil,
+                queue: .main
+            ) { [promptStore, logger] _ in
+                Task { @MainActor in
+                    promptStore.reload()
+                    logger.log("🤖 AGENT | prompts.json reloaded after agent change")
+                }
+            }
+
+            logger.log("🚀 APP LAUNCHED | auth: \(drafter.authModeName), style: \(styleEngine.exampleCount) examples, model: \(promptStore.config.model), hotkey registered, agent started")
         }
     }
 }

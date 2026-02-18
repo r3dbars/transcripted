@@ -13,3 +13,9 @@ debug.log
 .env.local
 *.pem
 *.key
+
+# Python
+agent/__pycache__/
+agent/*.pyc
+agent/.venv/
+__pycache__/
