@@ -14,6 +14,7 @@ class DraftAppState: ObservableObject {
     let previousAppTracker = PreviousAppTracker()
     let contextCapture = ContextCaptureEngine()
     let orchestrator = OrchestratorBridge()
+    let chatEngine = StreamingChatEngine()
 
     private var promptsObserver: NSObjectProtocol?
 
