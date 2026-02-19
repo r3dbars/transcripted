@@ -19,7 +19,7 @@ Sources/
 ├── Capture/                 ← Screen capture, context extraction, CapturedContext struct
 └── UI/                      ← SwiftUI views, onboarding, app tracker, debug logger, Agent tab
 agent/                       ← Python orchestrator agent (Claude Agent SDK) — auto-improves prompts
-├── tools.py                 ← @tool functions for reading feedback, prompts, style, suggesting changes
+├── tools.py                 ← 1 @tool (propose_prompt_change) + MCP server — minimal tool architecture
 ├── server.py                ← aiohttp SSE server on localhost:19832
 ├── orchestrator.py          ← Claude Agent SDK analysis loop (Sonnet, $0.50/run budget)
 ├── watcher.py               ← Polls feedback.jsonl for new entries

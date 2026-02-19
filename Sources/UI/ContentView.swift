@@ -35,6 +35,7 @@ struct ContentView: View {
                 AgentTab(orchestrator: orchestrator)
                     .tabItem { Label("Agent", systemImage: "brain.head.profile") }
             }
+            .transaction { $0.animation = nil }
 
             // Onboarding overlays (sequential gates)
             if !drafter.hasCredential {
@@ -59,6 +60,7 @@ struct ContentView: View {
             contextCapture.registerHotkey()
 
             // Start orchestrator agent subprocess
+            orchestrator.logger = logger
             orchestrator.start()
 
             // Listen for prompt changes from the agent
@@ -306,7 +308,7 @@ struct DraftTab: View {
             DisclosureGroup(isExpanded: $showDebugLog) {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 2) {
                             ForEach(Array(logger.entries.enumerated()), id: \.offset) { index, entry in
                                 Text(entry)
                                     .font(.system(size: 10, design: .monospaced))
@@ -485,6 +487,10 @@ struct DraftTab: View {
             .onKeyPress(keys: [.return], phases: .down) { keyPress in
                 if keyPress.modifiers.contains(.shift) {
                     return .ignored  // Shift+Enter inserts a newline
+                }
+                // Don't draft while actively recording — wait for user to stop and press Enter
+                if speech.isListening {
+                    return .ignored
                 }
                 // Enter → trigger draft
                 if !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !drafter.isDrafting {
