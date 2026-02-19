@@ -22,7 +22,7 @@ from claude_agent_sdk import (
     ToolUseBlock,
 )
 
-from .agent_lock import agent_lock
+from .agent_lock import chat_lock
 from .prompts import CHAT_SYSTEM_PROMPT
 from .tools import DRAFT_DATA_DIR, draft_tools_server, card_queue
 
@@ -63,7 +63,7 @@ async def run_chat(user_message: str) -> None:
     else:
         query = user_message
 
-    async with agent_lock:
+    async with chat_lock:
         # Strip Claude Code env vars (same as orchestrator)
         os.environ.pop("CLAUDECODE", None)
         os.environ.pop("CLAUDE_CODE_SESSION", None)
