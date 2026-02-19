@@ -53,7 +53,6 @@ async def run_analysis(new_entry_count: int, total_lines: int) -> None:
             add_dirs=[str(DRAFT_DATA_DIR)],
             model="sonnet",
             max_turns=10,
-            max_budget_usd=0.50,
         )
 
         query_text = f"""{new_entry_count} new feedback entries have arrived since your last analysis.
