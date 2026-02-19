@@ -13,9 +13,12 @@ class SpeechEngine: ObservableObject {
     @Published var isListening = false
     @Published var statusMessage = "Tap Record to start"
     @Published var speechFinished = false  // True after extended silence (2.5s) — signals "done talking"
+    @Published var audioLevel: Float = 0   // 0.0 to 1.0, RMS audio level for waveform visualization
 
     var displayText: String { finalTranscript + volatileText }
     var hasText: Bool { !finalTranscript.isEmpty || !volatileText.isEmpty }
+
+    private var lastLevelUpdate: CFAbsoluteTime = 0
 
     private var speechRecognizer: SFSpeechRecognizer?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
@@ -151,6 +154,26 @@ class SpeechEngine: ObservableObject {
 
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: monoFormat) { [weak self] buffer, _ in
             self?.recognitionRequest?.append(buffer)
+
+            // Extract audio level for waveform visualization (~20Hz throttled)
+            guard let self = self,
+                  let channelData = buffer.floatChannelData?[0] else { return }
+            let now = CFAbsoluteTimeGetCurrent()
+            guard now - self.lastLevelUpdate > 0.05 else { return }  // ~20Hz
+            self.lastLevelUpdate = now
+
+            let frameLength = Int(buffer.frameLength)
+            var sumOfSquares: Float = 0
+            for i in 0..<frameLength {
+                let sample = channelData[i]
+                sumOfSquares += sample * sample
+            }
+            let rms = sqrt(sumOfSquares / Float(max(1, frameLength)))
+            let normalized = min(1.0, rms * 5.0)
+
+            Task { @MainActor [weak self] in
+                self?.audioLevel = normalized
+            }
         }
 
         do {
@@ -179,6 +202,7 @@ class SpeechEngine: ObservableObject {
         recognitionRequest = nil
         recognitionTask = nil
         isListening = false
+        audioLevel = 0
 
         if !volatileText.isEmpty {
             finalTranscript += volatileText + "\n"

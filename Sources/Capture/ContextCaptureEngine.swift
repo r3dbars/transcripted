@@ -1,27 +1,36 @@
 // ContextCaptureEngine.swift
-// Orchestrates: hotkey → screenshot → Haiku Vision → structured context
+// Orchestrates: hotkey toggle → screenshot → session start/stop
 
 import AppKit
 import Carbon
 
 // MARK: - Carbon Hotkey Handler (C-level callback)
 
-// Global reference so the C callback can reach the engine
+// Global references so the C callback can reach the engines
 private weak var _sharedEngine: ContextCaptureEngine?
+private weak var _sharedSessionController: DraftSessionController?
 
 private func hotkeyHandler(
     nextHandler: EventHandlerCallRef?,
     event: EventRef?,
     userData: UnsafeMutableRawPointer?
-) -> OSStatus {
-    // CRITICAL: Capture screenshot SYNCHRONOUSLY before any async work.
-    // At this instant, the user's app (Slack, etc.) is still frontmost.
-    // If we defer to Task/@MainActor, focus may shift to Draft before capture.
+)-> OSStatus {
+    // Capture screenshot SYNCHRONOUSLY before focus shifts (always, regardless of session state)
     let frontApp = NSWorkspace.shared.frontmostApplication
     let imageData: Data? = frontApp.flatMap { ScreenCapture.captureFrontmostWindow(of: $0) }
 
+    // Route to start, stop, or cancel on MainActor (isInSession is @MainActor-isolated)
     Task { @MainActor in
-        await _sharedEngine?.processCapture(imageData: imageData, sourceApp: frontApp)
+        guard let session = _sharedSessionController else { return }
+        if session.isInSession {
+            if session.overlayController.state == .review {
+                session.cancelSession()  // ⌥Space during review = cancel
+            } else {
+                session.stopSessionAndDraft()  // ⌥Space during listening = stop & draft
+            }
+        } else {
+            session.startSession(imageData: imageData, sourceApp: frontApp)
+        }
     }
     return noErr
 }
@@ -34,22 +43,27 @@ class ContextCaptureEngine: ObservableObject {
     @Published var capturedContext: CapturedContext?
     @Published var captureError: String?
 
-    /// The app that was frontmost when the hotkey was pressed — the source of the screenshot.
-    /// Used for "Paste to [App]" so we paste back to the right app, not just the last focused one.
+    /// The app that was frontmost when the hotkey was pressed
     @Published var sourceApp: NSRunningApplication?
 
     private var hotkeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
 
-    /// Called when structured context is ready — set by ContentView
+    /// Called when structured context is ready — set by ContentView (legacy, unused in v2)
     var onContextCaptured: ((CapturedContext) -> Void)?
 
-    /// Fires immediately on hotkey press — before vision processing starts.
-    /// ContentView uses this to start voice recording in parallel.
+    /// Fires immediately on hotkey press (legacy, unused in v2)
     var onHotkeyFired: (() -> Void)?
 
-    /// Reference to PromptStore — set by ContentView after init.
+    /// Reference to PromptStore — set by DraftAppState after init
     var promptStore: PromptStore?
+
+    /// Set by DraftAppDelegate to wire the hotkey to the session controller
+    var sessionController: DraftSessionController? {
+        didSet {
+            _sharedSessionController = sessionController
+        }
+    }
 
     func registerHotkey() {
         _sharedEngine = self
@@ -89,23 +103,22 @@ class ContextCaptureEngine: ObservableObject {
             eventHandlerRef = nil
         }
         _sharedEngine = nil
+        _sharedSessionController = nil
     }
 
-    /// Called from the hotkey callback with pre-captured screenshot data
+    /// Process capture from the hotkey (legacy interface, preserved for compatibility)
     func processCapture(imageData: Data?, sourceApp: NSRunningApplication? = nil) async {
         guard !isCapturing else { return }
 
         isCapturing = true
         captureError = nil
 
-        // Store the source app so "Paste to [App]" knows where to send the reply
         if let app = sourceApp {
             self.sourceApp = app
         }
 
-        // Activate Draft and notify UI IMMEDIATELY — before vision processing.
-        // This lets ContentView start voice recording in parallel with vision.
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        // NOTE: In v2, we do NOT call NSApplication.shared.activate() here.
+        // The floating overlay is non-activating, so the target app stays frontmost.
         onHotkeyFired?()
 
         guard let auth = AuthCredential.load() else {
@@ -120,7 +133,6 @@ class ContextCaptureEngine: ObservableObject {
             return
         }
 
-        // Load user's name and build the context extraction prompt
         let userName = UserDefaults.standard.string(forKey: "user-display-name")
         let appName = sourceApp?.localizedName
         let model = promptStore?.config.model ?? DefaultPrompts.model
@@ -147,7 +159,7 @@ class ContextCaptureEngine: ObservableObject {
         isCapturing = false
     }
 
-    /// Manual capture from the UI button (uses PreviousAppTracker)
+    /// Manual capture from the UI button
     func manualCapture(app: NSRunningApplication?) async {
         guard let app = app else {
             captureError = "No previous app detected"
