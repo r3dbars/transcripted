@@ -5,6 +5,40 @@
 import Foundation
 import SwiftUI
 
+private actor AppLogFileWriter {
+    private var logPath: String?
+    private var handle: FileHandle?
+
+    func reset(at path: String) {
+        logPath = path
+        closeHandle()
+        FileManager.default.createFile(atPath: path, contents: nil)
+        openHandleIfNeeded()
+    }
+
+    func append(_ line: String) {
+        guard !line.isEmpty else { return }
+        openHandleIfNeeded()
+        guard let data = line.data(using: .utf8), let handle else { return }
+        handle.write(data)
+    }
+
+    private func openHandleIfNeeded() {
+        guard handle == nil, let path = logPath else { return }
+        handle = FileHandle(forWritingAtPath: path)
+        handle?.seekToEndOfFile()
+    }
+
+    private func closeHandle() {
+        try? handle?.close()
+        handle = nil
+    }
+
+    deinit {
+        try? handle?.close()
+    }
+}
+
 @MainActor
 class AppLogger: ObservableObject {
     @Published var entries: [String] = []
@@ -13,6 +47,8 @@ class AppLogger: ObservableObject {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return home + "/draft-debug.log"
     }()
+    private let fileWriter = AppLogFileWriter()
+    private var lastLogByKey: [String: CFAbsoluteTime] = [:]
 
     private let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -20,14 +56,10 @@ class AppLogger: ObservableObject {
         return f
     }()
 
-    /// Background queue for file I/O — keeps main thread responsive
-    private let fileQueue = DispatchQueue(label: "draft.logger.file", qos: .utility)
-
     init() {
-        // Clear log file on launch (on background queue)
         let path = logFilePath
-        fileQueue.async {
-            FileManager.default.createFile(atPath: path, contents: nil)
+        Task.detached(priority: .utility) { [fileWriter] in
+            await fileWriter.reset(at: path)
         }
     }
 
@@ -36,21 +68,25 @@ class AppLogger: ObservableObject {
         let entry = "[\(timestamp)] \(message)"
         entries.append(entry)
 
-        // File I/O on background queue — never blocks the main thread
         let line = entry + "\n"
-        let path = logFilePath
-        fileQueue.async {
-            if let data = line.data(using: .utf8),
-               let handle = FileHandle(forWritingAtPath: path) {
-                handle.seekToEndOfFile()
-                handle.write(data)
-                handle.closeFile()
-            }
+        Task.detached(priority: .utility) { [fileWriter] in
+            await fileWriter.append(line)
         }
 
         // Keep last 200 entries to avoid unbounded growth
         if entries.count > 200 {
             entries.removeFirst(entries.count - 200)
         }
+    }
+
+    /// Logs at most once per key in the provided interval.
+    /// Useful for high-frequency callbacks (speech partials, streaming updates).
+    func logThrottled(_ message: String, key: String, minimumInterval: TimeInterval = 0.25) {
+        let now = CFAbsoluteTimeGetCurrent()
+        if let last = lastLogByKey[key], now - last < minimumInterval {
+            return
+        }
+        lastLogByKey[key] = now
+        log(message)
     }
 }

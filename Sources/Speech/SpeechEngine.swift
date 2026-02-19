@@ -4,6 +4,7 @@
 import SwiftUI
 import Speech
 import AVFoundation
+import os
 
 @MainActor
 class SpeechEngine: ObservableObject {
@@ -36,18 +37,27 @@ class SpeechEngine: ObservableObject {
     private var lastSeenFullText = ""         // Most recent fullText from Apple (for commit reference)
     private var callbackCount = 0
     private var taskGeneration = 0
+    private let osLogger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.justinbetker.draft",
+        category: "SpeechEngine"
+    )
+    private let detailedLoggingEnabled: Bool = {
+        let env = ProcessInfo.processInfo.environment["DRAFT_VERBOSE_SPEECH_LOGS"] == "1"
+        let userDefault = UserDefaults.standard.bool(forKey: "draft-verbose-speech-logs")
+        return env || userDefault
+    }()
 
-    private func log(_ msg: String) {
+    private func log(_ msg: String, force: Bool = false) {
+        let isImportant = msg.hasPrefix("❌") || msg.hasPrefix("⚠️")
+        guard detailedLoggingEnabled || force || isImportant else { return }
+
         let entry = "[\(taskGeneration).\(callbackCount)] \(msg)"
-        print(entry)
-        // Also write to debug log file so we can diagnose issues
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let logLine = "[\(timestamp)] SPEECH \(msg)\n"
-        let logPath = FileManager.default.homeDirectoryForCurrentUser.path + "/draft-debug.log"
-        if let data = logLine.data(using: .utf8), let fh = FileHandle(forWritingAtPath: logPath) {
-            fh.seekToEndOfFile()
-            fh.write(data)
-            fh.closeFile()
+        if msg.hasPrefix("❌") {
+            osLogger.error("\(entry, privacy: .public)")
+        } else if msg.hasPrefix("⚠️") {
+            osLogger.warning("\(entry, privacy: .public)")
+        } else {
+            osLogger.debug("\(entry, privacy: .public)")
         }
     }
 

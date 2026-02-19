@@ -14,6 +14,7 @@ struct ContentView: View {
     @StateObject private var previousAppTracker = PreviousAppTracker()
     @StateObject private var contextCapture = ContextCaptureEngine()
     @StateObject private var orchestrator = OrchestratorBridge()
+    @State private var promptsObserver: NSObjectProtocol?
 
     var body: some View {
         ZStack {
@@ -47,6 +48,10 @@ struct ContentView: View {
         .frame(minWidth: 600, minHeight: 500)
         .onDisappear {
             orchestrator.stop()
+            if let observer = promptsObserver {
+                NotificationCenter.default.removeObserver(observer)
+                promptsObserver = nil
+            }
         }
         .task {
             _ = await speech.requestPermissions()
@@ -64,14 +69,16 @@ struct ContentView: View {
             orchestrator.start()
 
             // Listen for prompt changes from the agent
-            NotificationCenter.default.addObserver(
-                forName: .promptsDidChange,
-                object: nil,
-                queue: .main
-            ) { [promptStore, logger] _ in
-                Task { @MainActor in
-                    promptStore.reload()
-                    logger.log("🤖 AGENT | prompts.json reloaded after agent change")
+            if promptsObserver == nil {
+                promptsObserver = NotificationCenter.default.addObserver(
+                    forName: .promptsDidChange,
+                    object: nil,
+                    queue: .main
+                ) { [promptStore, logger] _ in
+                    Task { @MainActor in
+                        promptStore.reload()
+                        logger.log("🤖 AGENT | prompts.json reloaded after agent change")
+                    }
                 }
             }
 
@@ -336,18 +343,27 @@ struct DraftTab: View {
         // Sync speech into inputText
         .onChange(of: speech.finalTranscript) {
             guard speech.isListening || !speech.finalTranscript.isEmpty else { return }
-            let separator = textBeforeRecording.isEmpty || textBeforeRecording.hasSuffix("\n") || textBeforeRecording.hasSuffix(" ") ? "" : " "
-            inputText = textBeforeRecording + separator + speech.finalTranscript
-            if !speech.volatileText.isEmpty {
-                inputText += speech.volatileText
+            let rebuilt = composeInputTextFromSpeech(includeVolatile: true)
+            if rebuilt != inputText {
+                inputText = rebuilt
             }
-            logger.log("📝 SPEECH FINAL | \"\(speech.finalTranscript.suffix(40))\"")
+            logger.logThrottled(
+                "📝 SPEECH FINAL | \"\(speech.finalTranscript.suffix(40))\"",
+                key: "speech-final",
+                minimumInterval: 0.35
+            )
         }
         .onChange(of: speech.volatileText) {
             guard speech.isListening else { return }
-            let separator = textBeforeRecording.isEmpty || textBeforeRecording.hasSuffix("\n") || textBeforeRecording.hasSuffix(" ") ? "" : " "
-            inputText = textBeforeRecording + separator + speech.finalTranscript + speech.volatileText
-            logger.log("💬 SPEECH VOLATILE | \"\(speech.volatileText.suffix(40))\"")
+            let rebuilt = composeInputTextFromSpeech(includeVolatile: true)
+            if rebuilt != inputText {
+                inputText = rebuilt
+            }
+            logger.logThrottled(
+                "💬 SPEECH VOLATILE | \"\(speech.volatileText.suffix(40))\"",
+                key: "speech-volatile",
+                minimumInterval: 0.5
+            )
         }
         .onChange(of: drafter.draftedText) {
             if !drafter.draftedText.isEmpty {
@@ -364,7 +380,11 @@ struct DraftTab: View {
         .onChange(of: inputText) {
             let diff = abs(inputText.count - previousInputLength)
             if diff > 5 && !speech.isListening {
-                logger.log("✏️ INPUT CHANGED | \(inputText.count) chars (was \(previousInputLength))")
+                logger.logThrottled(
+                    "✏️ INPUT CHANGED | \(inputText.count) chars (was \(previousInputLength))",
+                    key: "input-edit",
+                    minimumInterval: 0.5
+                )
             }
             previousInputLength = inputText.count
         }
@@ -443,8 +463,7 @@ struct DraftTab: View {
     private func triggerAutoDraft() {
         // Stop recording, collect final text
         speech.stopListening()
-        let separator = textBeforeRecording.isEmpty || textBeforeRecording.hasSuffix("\n") || textBeforeRecording.hasSuffix(" ") ? "" : " "
-        inputText = textBeforeRecording + separator + speech.finalTranscript
+        inputText = composeInputTextFromSpeech(includeVolatile: false)
 
         isParallelCapture = false
 
@@ -590,8 +609,7 @@ struct DraftTab: View {
         // Stop voice recording and collect final text
         if speech.isListening {
             speech.stopListening()
-            let separator = textBeforeRecording.isEmpty || textBeforeRecording.hasSuffix("\n") || textBeforeRecording.hasSuffix(" ") ? "" : " "
-            inputText = textBeforeRecording + separator + speech.finalTranscript
+            inputText = composeInputTextFromSpeech(includeVolatile: false)
         }
 
         if let context = lastCapturedContext, context.hasConversation {
@@ -714,6 +732,16 @@ struct DraftTab: View {
             logger.log("⚠️ PASTE | activation timeout, pasting anyway")
             action()
         }
+    }
+
+    /// Fast path for rebuilding the input area from live speech state.
+    private func composeInputTextFromSpeech(includeVolatile: Bool) -> String {
+        let separator = textBeforeRecording.isEmpty || textBeforeRecording.hasSuffix("\n") || textBeforeRecording.hasSuffix(" ") ? "" : " "
+        var rebuilt = textBeforeRecording + separator + speech.finalTranscript
+        if includeVolatile {
+            rebuilt += speech.volatileText
+        }
+        return rebuilt
     }
 }
 

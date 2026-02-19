@@ -7,6 +7,40 @@
 import Foundation
 import SwiftUI
 
+private actor AgentLogWriter {
+    private var path: String?
+    private var handle: FileHandle?
+
+    func reset(at path: String) {
+        self.path = path
+        closeHandle()
+        FileManager.default.createFile(atPath: path, contents: nil)
+        openHandleIfNeeded()
+    }
+
+    func append(_ line: String) {
+        guard !line.isEmpty else { return }
+        openHandleIfNeeded()
+        guard let data = line.data(using: .utf8), let handle else { return }
+        handle.write(data)
+    }
+
+    private func openHandleIfNeeded() {
+        guard handle == nil, let path else { return }
+        handle = FileHandle(forWritingAtPath: path)
+        handle?.seekToEndOfFile()
+    }
+
+    private func closeHandle() {
+        try? handle?.close()
+        handle = nil
+    }
+
+    deinit {
+        try? handle?.close()
+    }
+}
+
 extension Notification.Name {
     static let promptsDidChange = Notification.Name("promptsDidChange")
 }
@@ -25,6 +59,7 @@ class OrchestratorBridge: ObservableObject {
     private var process: Process?
     private var sseTask: Task<Void, Never>?
     private let port = 19832
+    private let agentLogWriter = AgentLogWriter()
 
     private var baseURL: URL { URL(string: "http://127.0.0.1:\(port)")! }
 
@@ -44,13 +79,13 @@ class OrchestratorBridge: ObservableObject {
         // Capture values needed by the background task
         let logPath = agentLogPath
         let execPath = Bundle.main.executablePath ?? "(nil)"
+        let logWriter = agentLogWriter
 
         // Move ALL blocking work (FileManager, Process setup, Process.run())
         // off the main thread. Process.run() can block for code-signing
         // validation, and FileManager I/O adds unnecessary main-thread stalls.
-        Task.detached { [weak self] in
-            // Clear agent log file
-            FileManager.default.createFile(atPath: logPath, contents: nil)
+        Task.detached { [weak self, logWriter] in
+            await logWriter.reset(at: logPath)
 
             let proc = Process()
 
@@ -116,30 +151,20 @@ class OrchestratorBridge: ObservableObject {
                 }
 
                 // Read stderr in background
-                Task.detached {
+                Task.detached { [logWriter] in
                     let handle = errPipe.fileHandleForReading
                     for try await line in handle.bytes.lines {
                         let entry = "🐍 ERR | \(line)\n"
-                        if let data = entry.data(using: .utf8),
-                           let fh = FileHandle(forWritingAtPath: logPath) {
-                            fh.seekToEndOfFile()
-                            fh.write(data)
-                            fh.closeFile()
-                        }
+                        await logWriter.append(entry)
                     }
                 }
 
                 // Read stdout in background
-                Task.detached {
+                Task.detached { [logWriter] in
                     let handle = outPipe.fileHandleForReading
                     for try await line in handle.bytes.lines {
                         let entry = "🐍 OUT | \(line)\n"
-                        if let data = entry.data(using: .utf8),
-                           let fh = FileHandle(forWritingAtPath: logPath) {
-                            fh.seekToEndOfFile()
-                            fh.write(data)
-                            fh.closeFile()
-                        }
+                        await logWriter.append(entry)
                     }
                 }
 
@@ -221,7 +246,15 @@ class OrchestratorBridge: ObservableObject {
                     // Process immediately — AsyncLineSequence skips empty
                     // lines, so we can't rely on the SSE blank-line separator.
                     // Our events always have exactly one event: + one data: line.
-                    logger?.log("🐍 AGENT | SSE event: type=\(eventType)")
+                    if eventType == "chat_token" {
+                        logger?.logThrottled(
+                            "🐍 AGENT | SSE event: type=chat_token",
+                            key: "agent-sse-chat-token",
+                            minimumInterval: 2.0
+                        )
+                    } else {
+                        logger?.log("🐍 AGENT | SSE event: type=\(eventType)")
+                    }
                     handleSSEEvent(type: eventType, data: dataBuffer)
                     eventType = ""
                     dataBuffer = ""
