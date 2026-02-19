@@ -49,7 +49,8 @@ async def run_analysis(new_entry_count: int, total_lines: int) -> None:
         options = ClaudeAgentOptions(
             system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
             mcp_servers={"draft-tools": draft_tools_server},
-            permission_mode="acceptEdits",
+            permission_mode="bypassPermissions",
+            disallowed_tools=["Write", "Edit", "MultiEdit"],
             add_dirs=[str(DRAFT_DATA_DIR)],
             model="sonnet",
             max_turns=10,

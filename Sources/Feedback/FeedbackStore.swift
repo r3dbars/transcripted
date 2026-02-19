@@ -90,4 +90,5 @@ class FeedbackStore: ObservableObject {
             try? lineWithNewline.write(to: feedbackURL)
         }
     }
+
 }
