@@ -99,8 +99,10 @@ struct AnthropicAPI {
             auth: auth
         )
 
-        // Debug: log the raw Haiku response so we can see what came back
-        print("🔍 VISION RAW RESPONSE (\(rawText.count) chars):\n\(rawText)")
+        // Optional deep debug path — disabled by default to avoid hot-path console I/O.
+        if ProcessInfo.processInfo.environment["DRAFT_DEBUG_VISION_RESPONSE"] == "1" {
+            print("🔍 VISION RAW RESPONSE (\(rawText.count) chars):\n\(rawText)")
+        }
 
         return CapturedContext.parse(from: rawText)
     }
