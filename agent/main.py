@@ -9,6 +9,7 @@ Run: python3 -m agent.main
 """
 
 import asyncio
+import logging
 import signal
 import sys
 from pathlib import Path
@@ -19,6 +20,19 @@ from .server import create_app
 from .watcher import FeedbackWatcher
 from .orchestrator import run_analysis
 from .tools import DRAFT_DATA_DIR, FEEDBACK_PATH
+
+# Set up file logging so we can see output even when stdout/stderr are piped
+_log_path = Path.home() / "draft-agent.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(message)s",
+    datefmt="%H:%M:%S",
+    handlers=[
+        logging.FileHandler(_log_path, mode="w"),
+        logging.StreamHandler(sys.stderr),
+    ],
+)
+log = logging.getLogger("agent")
 
 PORT = 19832
 
@@ -58,7 +72,7 @@ async def _debounce_loop() -> None:
             try:
                 await run_analysis(count, _total_lines)
             except Exception as e:
-                print(f"❌ Analysis error: {e}")
+                log.error(f"❌ Analysis error: {e}")
 
 
 async def main() -> None:
@@ -66,9 +80,9 @@ async def main() -> None:
     # Ensure data directory exists
     DRAFT_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    print(f"🤖 Draft Orchestrator Agent starting...")
-    print(f"   Data dir: {DRAFT_DATA_DIR}")
-    print(f"   Port: {PORT}")
+    log.info(f"🤖 Draft Orchestrator Agent starting...")
+    log.info(f"   Data dir: {DRAFT_DATA_DIR}")
+    log.info(f"   Port: {PORT}")
 
     # Start HTTP server
     app = create_app()
@@ -76,7 +90,7 @@ async def main() -> None:
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", PORT)
     await site.start()
-    print(f"✅ Server running on http://127.0.0.1:{PORT}")
+    log.info(f"✅ Server running on http://127.0.0.1:{PORT}")
 
     # Start feedback watcher
     watcher = FeedbackWatcher(FEEDBACK_PATH, _on_new_feedback, poll_interval=5.0)
@@ -95,7 +109,7 @@ async def main() -> None:
 
 async def _shutdown(runner: web.AppRunner) -> None:
     """Graceful shutdown."""
-    print("\n🛑 Shutting down...")
+    log.info("🛑 Shutting down...")
     await runner.cleanup()
     # Cancel all running tasks to exit cleanly
     for task in asyncio.all_tasks():

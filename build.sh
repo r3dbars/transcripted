@@ -36,6 +36,7 @@ EOF
 # Compile
 echo "Compiling..."
 swiftc \
+    -O \
     -o "$APP_BUNDLE/Contents/MacOS/$APP_NAME" \
     -framework AVFoundation \
     -framework AppKit \

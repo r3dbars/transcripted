@@ -1,10 +1,13 @@
 """HTTP server with SSE streaming for the Draft orchestrator agent.
 
 Endpoints:
-- GET /events    — SSE stream of insight cards
-- POST /apply    — Apply a suggested prompt change
-- POST /skip     — Skip a suggested prompt change
-- GET /health    — Agent status
+- GET /events      — SSE stream of insight cards + chat responses
+- POST /apply      — Apply a suggested prompt change
+- POST /skip       — Skip a suggested prompt change
+- POST /chat       — Send a chat message to the agent
+- POST /chat/clear — Clear chat conversation history
+- POST /trigger    — Manually trigger analysis (testing)
+- GET /health      — Agent status
 """
 
 import asyncio
@@ -50,8 +53,14 @@ async def sse_handler(request: web.Request) -> web.StreamResponse:
     while True:
         try:
             card = await asyncio.wait_for(card_queue.get(), timeout=15.0)
-            payload = json.dumps(card)
-            await response.write(f"event: insight\ndata: {payload}\n\n".encode())
+            # Route by discriminator field
+            if "_chat_event" in card:
+                event_type = card.pop("_chat_event")
+                payload = json.dumps(card)
+                await response.write(f"event: {event_type}\ndata: {payload}\n\n".encode())
+            else:
+                payload = json.dumps(card)
+                await response.write(f"event: insight\ndata: {payload}\n\n".encode())
         except asyncio.TimeoutError:
             # Keepalive comment to prevent connection timeout
             await response.write(b": keepalive\n\n")
@@ -113,6 +122,40 @@ async def skip_handler(request: web.Request) -> web.Response:
     return web.json_response({"skipped": True})
 
 
+async def chat_handler(request: web.Request) -> web.Response:
+    """Accept a chat message — runs agent in background, streams response via SSE."""
+    from .chat import run_chat
+
+    body = await request.json()
+    message = body.get("message", "").strip()
+    if not message:
+        return web.json_response({"error": "empty message"}, status=400)
+
+    asyncio.create_task(run_chat(message))
+    return web.json_response({"status": "processing"})
+
+
+async def chat_clear_handler(request: web.Request) -> web.Response:
+    """Clear chat conversation history."""
+    from .chat import clear_history
+    clear_history()
+    return web.json_response({"cleared": True})
+
+
+async def trigger_handler(request: web.Request) -> web.Response:
+    """Manually trigger an analysis pass — useful for testing."""
+    # Late import to avoid circular dependency (orchestrator imports from server)
+    from .orchestrator import run_analysis
+    from .tools import FEEDBACK_PATH
+
+    total_lines = sum(1 for _ in open(FEEDBACK_PATH)) if FEEDBACK_PATH.exists() else 0
+    if total_lines == 0:
+        return web.json_response({"triggered": False, "reason": "no feedback data"})
+
+    asyncio.create_task(run_analysis(total_lines, total_lines))
+    return web.json_response({"triggered": True, "entries": total_lines})
+
+
 async def health_handler(request: web.Request) -> web.Response:
     """Health check — returns agent status."""
     return web.json_response({
@@ -130,5 +173,8 @@ def create_app() -> web.Application:
     app.router.add_get("/events", sse_handler)
     app.router.add_post("/apply", apply_handler)
     app.router.add_post("/skip", skip_handler)
+    app.router.add_post("/chat", chat_handler)
+    app.router.add_post("/chat/clear", chat_clear_handler)
+    app.router.add_post("/trigger", trigger_handler)
     app.router.add_get("/health", health_handler)
     return app

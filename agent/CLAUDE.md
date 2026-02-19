@@ -11,7 +11,7 @@ main.py          — Entry point: HTTP server + watcher + debounce loop
 server.py        — aiohttp server: SSE /events, POST /apply, POST /skip, GET /health
 watcher.py       — Polls feedback.jsonl for new lines (5s interval)
 orchestrator.py  — Claude Agent SDK: runs analysis, streams cards
-tools.py         — 7 @tool functions + MCP server + suggestion logger
+tools.py         — 1 @tool (propose_prompt_change) + MCP server + suggestion logger
 prompts.py       — Agent system prompt (personality + rules)
 ```
 
@@ -23,17 +23,17 @@ prompts.py       — Agent system prompt (personality + rules)
 - **Skip**: `POST /skip` — logs to `suggestion_log.jsonl` for meta-learning
 - **Health**: `GET /health` — returns status, PID, uptime, last analysis time
 
-## Tools
+## Tools — Minimal Architecture
+
+Only 1 custom MCP tool. File reading uses Claude Code's built-in tools (Read, Bash, Glob).
 
 | Tool | Purpose |
 |------|---------|
-| `read_feedback` | Read recent entries from feedback.jsonl |
-| `read_prompts` | Read current prompts.json |
-| `read_style_profile` | Read style.md |
-| `read_suggestion_log` | Read past Apply/Skip decisions |
-| `get_edit_patterns` | Compute aggregate edit distance stats |
-| `get_platform_stats` | Per-platform quality breakdown |
 | `propose_prompt_change` | Emit an insight card to SSE queue |
+
+All other file access (feedback.jsonl, prompts.json, style.md, suggestion_log.jsonl) is handled
+by Claude Code's built-in Read tool. The system prompt tells the agent where the files live.
+The agent figures out how to read and analyze them on its own.
 
 ## Data Files
 
