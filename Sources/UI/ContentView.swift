@@ -14,6 +14,7 @@ struct ContentView: View {
     @StateObject private var previousAppTracker = PreviousAppTracker()
     @StateObject private var contextCapture = ContextCaptureEngine()
     @StateObject private var orchestrator = OrchestratorBridge()
+    @StateObject private var chatEngine = StreamingChatEngine()
     @State private var promptsObserver: NSObjectProtocol?
 
     var body: some View {
@@ -33,8 +34,12 @@ struct ContentView: View {
                 StyleProfileView(styleEngine: styleEngine)
                     .tabItem { Label("Style", systemImage: "person.text.rectangle") }
 
-                AgentTab(orchestrator: orchestrator)
-                    .tabItem { Label("Agent", systemImage: "brain.head.profile") }
+                AgentTab(
+                    orchestrator: orchestrator,
+                    chatEngine: chatEngine,
+                    auth: drafter.getAuth()
+                )
+                .tabItem { Label("Agent", systemImage: "brain.head.profile") }
             }
             .transaction { $0.animation = nil }
 
@@ -67,6 +72,11 @@ struct ContentView: View {
             // Start orchestrator agent subprocess
             orchestrator.logger = logger
             orchestrator.start()
+
+            // Wire native chat engine → orchestrator for insight card passthrough
+            chatEngine.onInsightProposed = { [weak orchestrator] card in
+                orchestrator?.addInsight(card)
+            }
 
             // Listen for prompt changes from the agent
             if promptsObserver == nil {

@@ -41,7 +41,7 @@ _pending_new_count = 0
 _last_trigger_time = 0.0
 _total_lines = 0
 DEBOUNCE_SECONDS = 30
-MIN_ENTRIES_FOR_TRIGGER = 3
+MIN_ENTRIES_FOR_TRIGGER = 5
 
 
 async def _on_new_feedback(new_lines: int) -> None:

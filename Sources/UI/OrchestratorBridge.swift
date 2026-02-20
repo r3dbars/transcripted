@@ -3,6 +3,11 @@
 //
 // Spawns `python3 -m agent.main` on start(), subscribes to SSE stream,
 // handles Apply/Skip POST callbacks, and terminates process on stop().
+//
+// NOTE: Interactive chat has moved to StreamingChatEngine (native Swift).
+// OrchestratorBridge now handles only background analysis and insight cards.
+// The chat_token / chat_done / chat_error SSE events and sendChatMessage /
+// clearChat methods are removed — StreamingChatEngine owns that surface.
 
 import Foundation
 import SwiftUI
@@ -51,8 +56,6 @@ class OrchestratorBridge: ObservableObject {
     @Published var isConnected = false
     @Published var isAnalyzing = false
     @Published var agentStatus: String = "Starting..."
-    @Published var chatMessages: [ChatMessage] = []
-    @Published var isChatResponding = false
 
     var logger: AppLogger?
 
@@ -303,16 +306,6 @@ class OrchestratorBridge: ObservableObject {
         case "connected":
             isConnected = true
             agentStatus = "Watching for feedback..."
-            // Clean up any interrupted chat streams from a reconnect
-            if isChatResponding {
-                isChatResponding = false
-                if let idx = chatMessages.lastIndex(where: { $0.isStreaming }) {
-                    chatMessages[idx].isStreaming = false
-                    if chatMessages[idx].text.isEmpty {
-                        chatMessages[idx].text = "(interrupted)"
-                    }
-                }
-            }
 
         case "insight":
             if let card = parseInsightCard(from: dict) {
@@ -320,30 +313,9 @@ class OrchestratorBridge: ObservableObject {
                 logger?.log("🐍 AGENT | Card received: \(card.promptKeyLabel) — \(card.changeDescription.prefix(60))")
             }
 
-        case "chat_token":
-            if let text = dict["text"] as? String,
-               let messageId = dict["message_id"] as? String {
-                handleChatToken(messageId: messageId, text: text)
-            }
-
-        case "chat_done":
-            if let messageId = dict["message_id"] as? String,
-               let fullText = dict["full_text"] as? String {
-                handleChatDone(messageId: messageId, fullText: fullText)
-            }
-
-        case "chat_tool":
-            if let toolName = dict["tool_name"] as? String,
-               let messageId = dict["message_id"] as? String {
-                let toolInput = dict["tool_input"] as? [String: Any]
-                handleChatTool(messageId: messageId, toolName: toolName, toolInput: toolInput)
-            }
-
-        case "chat_error":
-            let errorMsg = dict["error"] as? String ?? "Unknown error"
-            handleChatError(error: errorMsg)
-
         default:
+            // chat_token / chat_done / chat_tool / chat_error are now handled
+            // by StreamingChatEngine and will not appear on this SSE stream.
             break
         }
     }
@@ -405,151 +377,11 @@ class OrchestratorBridge: ObservableObject {
         }
     }
 
-    // MARK: - Chat
+    // MARK: - Insight Management
 
-    func sendChatMessage(_ text: String) {
-        let userMsg = ChatMessage(role: .user, text: text)
-        chatMessages.append(userMsg)
-        isChatResponding = true
-
-        Task {
-            var request = URLRequest(url: baseURL.appendingPathComponent("chat"))
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            let body: [String: String] = ["message": text]
-            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-            do {
-                let (_, response) = try await URLSession.shared.data(for: request)
-                if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-                    logger?.log("🐍 CHAT | POST /chat failed: HTTP \(http.statusCode)")
-                    isChatResponding = false
-                }
-            } catch {
-                logger?.log("🐍 CHAT | POST /chat error: \(error)")
-                isChatResponding = false
-            }
-        }
-    }
-
-    func clearChat() {
-        chatMessages.removeAll()
-        isChatResponding = false
-        tokenFlushTask?.cancel()
-        tokenFlushTask = nil
-        tokenBuffer.removeAll()
-
-        Task {
-            var request = URLRequest(url: baseURL.appendingPathComponent("chat/clear"))
-            request.httpMethod = "POST"
-            _ = try? await URLSession.shared.data(for: request)
-            logger?.log("🐍 CHAT | History cleared")
-        }
-    }
-
-    // Token buffering — batch rapid SSE tokens into ~100ms UI updates
-    // to avoid overwhelming SwiftUI's view graph with per-token re-renders.
-    private var tokenBuffer: [String: String] = [:]
-    private var tokenFlushTask: Task<Void, Never>?
-
-    private func handleChatToken(messageId: String, text: String) {
-        tokenBuffer[messageId, default: ""] += text
-
-        // Schedule a single flush if not already pending
-        if tokenFlushTask == nil {
-            tokenFlushTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
-                self?.flushTokenBuffer()
-                self?.tokenFlushTask = nil
-            }
-        }
-    }
-
-    private func flushTokenBuffer() {
-        guard !tokenBuffer.isEmpty else { return }
-        for (messageId, bufferedText) in tokenBuffer {
-            if let idx = chatMessages.firstIndex(where: { $0.id == messageId }) {
-                chatMessages[idx].text += bufferedText
-            } else {
-                var msg = ChatMessage(role: .assistant, text: bufferedText, id: messageId)
-                msg.isStreaming = true
-                chatMessages.append(msg)
-            }
-        }
-        tokenBuffer.removeAll()
-    }
-
-    private func handleChatTool(messageId: String, toolName: String, toolInput: [String: Any]?) {
-        let label = toolDisplayName(toolName, input: toolInput)
-        let detail = toolDetailString(toolName, input: toolInput)
-        let toolMsg = ChatMessage(role: .tool, text: label, toolDetail: detail)
-        chatMessages.append(toolMsg)
-        logger?.log("🐍 CHAT | Tool: \(toolName)")
-    }
-
-    /// Short label for the tool indicator row
-    private func toolDisplayName(_ name: String, input: [String: Any]?) -> String {
-        if name.contains("propose_prompt_change") {
-            let key = input?["prompt_key"] as? String ?? ""
-            return key.isEmpty ? "Proposing prompt change..." : "Proposing change to \(key)"
-        }
-        switch name {
-        case "Read":
-            if let path = input?["file_path"] as? String {
-                let filename = (path as NSString).lastPathComponent
-                return "Reading \(filename)"
-            }
-            return "Reading file..."
-        case "Bash":
-            return "Running command..."
-        case "Glob":
-            return "Searching files..."
-        case "Grep":
-            let pattern = input?["pattern"] as? String ?? ""
-            return pattern.isEmpty ? "Searching code..." : "Searching for \"\(pattern.prefix(30))\""
-        default:
-            return "Using \(name)..."
-        }
-    }
-
-    /// Full detail string shown when expanded
-    private func toolDetailString(_ name: String, input: [String: Any]?) -> String? {
-        guard let input = input, !input.isEmpty else { return nil }
-        // Build a readable summary of the tool input
-        var lines: [String] = []
-        for (key, value) in input.sorted(by: { $0.key < $1.key }) {
-            let valueStr = String(describing: value)
-            // Truncate long values
-            let display = valueStr.count > 200 ? String(valueStr.prefix(200)) + "..." : valueStr
-            lines.append("\(key): \(display)")
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    private func handleChatDone(messageId: String, fullText: String) {
-        // Cancel the timer but flush pending tokens first (don't lose them)
-        tokenFlushTask?.cancel()
-        tokenFlushTask = nil
-        flushTokenBuffer()
-        tokenBuffer.removeAll()
-
-        if let idx = chatMessages.firstIndex(where: { $0.id == messageId }) {
-            chatMessages[idx].text = fullText
-            chatMessages[idx].isStreaming = false
-        } else {
-            // Message wasn't created by token flush — create from full text
-            var msg = ChatMessage(role: .assistant, text: fullText, id: messageId)
-            msg.isStreaming = false
-            chatMessages.append(msg)
-        }
-        isChatResponding = false
-    }
-
-    private func handleChatError(error: String) {
-        isChatResponding = false
-        let errorMsg = ChatMessage(role: .assistant, text: "Error: \(error)")
-        chatMessages.append(errorMsg)
-        logger?.log("🐍 CHAT | Error: \(error)")
+    /// Called by StreamingChatEngine when the user's chat triggers a propose_prompt_change tool call.
+    func addInsight(_ card: InsightCard) {
+        insights.append(card)
     }
 
     // MARK: - Parsing

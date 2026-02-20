@@ -14,6 +14,7 @@ class DraftAppState: ObservableObject {
     let previousAppTracker = PreviousAppTracker()
     let contextCapture = ContextCaptureEngine()
     let orchestrator = OrchestratorBridge()
+    let chatEngine = StreamingChatEngine()
 
     private var promptsObserver: NSObjectProtocol?
 
@@ -24,6 +25,7 @@ class DraftAppState: ObservableObject {
         drafter.promptStore = promptStore
         styleEngine.promptStore = promptStore
         contextCapture.promptStore = promptStore
+        chatEngine.promptStore = promptStore
 
         // Start orchestrator agent subprocess
         orchestrator.logger = logger
