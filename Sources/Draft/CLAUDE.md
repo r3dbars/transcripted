@@ -95,7 +95,9 @@ func postProcess(_ text: String) -> String  // Post-draft formatting fixes
 
 ## Design Notes
 
-DraftEngine is intentionally separate from SpeechEngine. They don't know about each other — the UI coordinates them. StyleEngine is injected as an optional reference by ContentView, keeping the dependency lightweight. PlatformFormatter is detected at draft time from the paste target app.
+DraftEngine is intentionally separate from SpeechEngine. They don't know about each other — the UI coordinates them. StyleEngine is injected as an optional reference, keeping the dependency lightweight. PlatformFormatter is detected at draft time from the paste target app.
+
+**v2 note:** In the floating overlay flow, `DraftSessionController` (in `Sources/UI/FloatingOverlay.swift`) calls `AnthropicAPI.streamDraft()` directly instead of going through `DraftEngine.draftWithContext()`. DraftEngine's `draftWithContext()` and `draftMessage()` are the v1 interface, preserved for compatibility. The platform formatting logic in `PlatformFormatter` is still used by both paths.
 
 ## Verification
 

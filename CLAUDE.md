@@ -2,29 +2,25 @@
 
 ## What This Is
 
-A macOS utility that captures rough spoken (or typed) thoughts and uses Claude Haiku to polish them into well-crafted messages matching the user's personal writing style. Features global hotkey screen capture for full conversation context extraction and platform-aware formatting. Built with SwiftUI, Apple Speech Framework, and the Anthropic Messages API.
+A macOS utility that captures rough spoken (or typed) thoughts and uses Claude Haiku to polish them into well-crafted messages matching the user's personal writing style. Features a floating overlay UI (non-activating NSPanel), global hotkey screen capture for full conversation context extraction, token-by-token streaming, and platform-aware formatting. Built with SwiftUI, Apple Speech Framework, and the Anthropic Messages API.
 
 ## Architecture
 
 ```
 Sources/
 ├── DraftApp.swift           ← @main entry point only
+├── DraftAppState.swift      ← Centralized engine ownership (lives in AppDelegate, survives window cycles)
 ├── Speech/                  ← Voice capture engine (Apple SFSpeechRecognizer)
-├── API/                     ← Anthropic API client (text + vision) + AuthCredential + Keychain
-├── Draft/                   ← DraftEngine + PlatformFormatter — orchestrates drafting
+├── API/                     ← Anthropic API client (text + vision + streaming) + AuthCredential + Keychain
+├── Draft/                   ← DraftEngine + PlatformFormatter — orchestrates drafting (v1 interface)
 ├── Style/                   ← StyleEngine — learns user's writing voice + onboarding
-├── Prompts/                 ← PromptStore — externalized prompts (prompts.json) for orchestrator agent
-├── Feedback/                ← FeedbackStore — accept/edit signal logging (feedback.jsonl) for orchestrator
+├── Prompts/                 ← PromptStore — externalized prompts (prompts.json)
+├── Feedback/                ← FeedbackStore — accept/edit signal logging (feedback.jsonl)
 ├── Messages/                ← iMessage database reader (SQLite, onboarding import)
-├── Capture/                 ← Screen capture, context extraction, CapturedContext struct
-└── UI/                      ← SwiftUI views, onboarding, app tracker, debug logger, Agent tab
-agent/                       ← Python orchestrator agent (Claude Agent SDK) — auto-improves prompts
-├── tools.py                 ← 1 @tool (propose_prompt_change) + MCP server — minimal tool architecture
-├── server.py                ← aiohttp SSE server on localhost:19832
-├── orchestrator.py          ← Claude Agent SDK analysis loop (Sonnet, $0.50/run budget)
-├── watcher.py               ← Polls feedback.jsonl for new entries
-├── main.py                  ← Entry point (python3 -m agent.main)
-└── prompts.py               ← Agent personality and system prompt
+├── Capture/                 ← Screen capture, context extraction, hotkey registration, three-way routing
+├── Analysis/                ← AnalysisEngine — native Swift feedback analyzer (replaces Python agent)
+└── UI/                      ← FloatingOverlay (primary UI), MenuBarPanel, onboarding, Agent tab
+agent/                       ← ⚠️ DEPRECATED — Python orchestrator replaced by Sources/Analysis/
 ```
 
 **Each subfolder in Sources/ has its own CLAUDE.md with component-specific knowledge. Read the relevant CLAUDE.md before modifying any file in that folder.**
@@ -40,59 +36,72 @@ This compiles all Swift files from `Sources/`, signs the app bundle, and launche
 
 ## Key Features
 
-- **Voice-to-text** — Speak rough thoughts, Draft polishes them via Haiku
+- **Floating overlay UI** — Non-activating NSPanel appears over the user's current app; target app stays frontmost so paste works without re-activation
+- **Voice-to-text** — Speak rough thoughts, Draft polishes them via Haiku with token-by-token streaming
 - **Full conversation context** — Option+Space screenshots the current app, Haiku Vision extracts the entire visible conversation thread (all messages, participants, platform, formality)
 - **Platform-aware formatting** — Detects Slack/iMessage/email/Discord/Teams and adjusts drafting style (e.g., no subject lines for Slack, casual for iMessage)
 - **Style learning** — Every accepted draft saves a training pair (AI output vs. what you actually sent); Sonnet incrementally refines your style profile with graduated frequency
 - **Style onboarding** — New users can import iMessages automatically (recommended) or paste samples manually; Sonnet builds an immediate style profile (no cold start)
 - **Combined onboarding** — iMessage import path includes optional "Add Slack, email, or other writing samples" section to supplement with additional sources for a richer profile
 - **iMessage import** — Optional onboarding path that reads `~/Library/Messages/chat.db` for zero-effort style profile generation (requires Full Disk Access)
-- **Paste to source app** — Pastes the polished message back to the exact app that was screenshotted, with activation polling for reliability
-- **Frictionless keyboard flow** — Enter in input → Draft, Enter in output → Paste to source app, Shift+Enter → newline
-- **Orchestrator agent** — Autonomous Python agent (Claude Agent SDK) watches feedback, analyzes patterns, and streams prompt improvement suggestions to the Agent tab. Apply/Skip decisions feed back into the agent's learning (meta-feedback loop).
+- **Paste to source app** — Injects the polished message into the exact app that was screenshotted, with clipboard save/restore
+- **Frictionless keyboard flow** — ⌥Space to start → speak → ⌥Space to draft → Enter to inject → no clicking required
+- **Native analysis engine** — Swift-native AnalysisEngine watches feedback via DispatchSource, uses Sonnet to analyze patterns, and proposes prompt improvements as InsightCards in the Agent tab
 
 ## End-to-End Data Flow
 
-### Hotkey → Draft → Accept Pipeline (the primary flow)
+### Hotkey → Draft → Inject Pipeline (v2 — Floating Overlay)
 
 ```
-1. User presses Option+Space in Slack/iMessage/etc.
+1. User presses ⌥Space in Slack/iMessage/etc.
    │
    ├─→ [SYNC in C callback] Capture frontApp + screenshot (before focus shifts)
    │
-   ├─→ [PARALLEL A] Start voice recording (SpeechEngine.startListening())
-   │                 └─→ User speaks instructions while vision processes
-   │
-   └─→ [PARALLEL B] Send screenshot to Haiku Vision (AnthropicAPI.extractStructuredContext())
-                     └─→ Returns CapturedContext (platform, talkingTo, formality, conversation)
-                     └─→ Injected at TOP of inputText via textBeforeRecording
+   └─→ [MainActor] DraftSessionController.startSession(imageData:sourceApp:)
+       │
+       ├─→ Show floating overlay (listening state, waveform animation)
+       │
+       ├─→ [PARALLEL A] Start voice recording (SpeechEngine.startListening())
+       │                 └─→ User speaks instructions while vision processes
+       │                 └─→ Live transcription shown in overlay
+       │
+       └─→ [PARALLEL B] Vision processing (stored as visionTask)
+                         └─→ AnthropicAPI.withTimeout(seconds: 8) {
+                               extractStructuredContext(imageData)
+                             }
+                         └─→ Returns CapturedContext → stored as lastCapturedContext
 
-2. Both complete → triggerAutoDraft() OR user presses Enter
+2. User presses ⌥Space again → stopSessionAndDraft()
    │
-   ├─→ CapturedContext.draftingPrompt(userInstructions:) assembles full prompt
-   ├─→ StyleEngine.buildSystemPrompt() adds style profile
-   ├─→ PlatformFormatter adds formatting instructions to system prompt
-   └─→ AnthropicAPI.draft() → result → PlatformFormatter.postProcess()
-       └─→ draftedText (displayed in output TextEditor, editable by user)
-       └─→ originalDraft (frozen snapshot for style learning)
+   ├─→ Stop voice recording → get voiceText
+   ├─→ await visionTask?.value  ← waits for vision to complete (or 8s timeout)
+   ├─→ Build prompt: CapturedContext.draftingPrompt(userInstructions:)
+   ├─→ StyleEngine.buildSystemPrompt() + PlatformFormatter.formattingInstructions
+   └─→ AnthropicAPI.streamDraft() → tokens stream into overlay in real-time
+       └─→ Overlay transitions: listening → drafting → streaming → review
+       └─→ Auto-focus: TextEditor receives keyboard focus via @FocusState
 
-3. User edits draft (optional) → presses Enter or clicks "Paste to [App]"
+3. User reviews draft in overlay (editable TextEditor)
    │
-   ├─→ recordAcceptedExample()
-   │   ├─→ styleEngine.recordExample(aiDraft: originalDraft, userFinal: draftedText, platform)
-   │   ├─→ Training pair saved to style.md (AI_DRAFT vs USER_SENT + edit distance)
-   │   ├─→ feedbackStore.record() → appends JSON line to feedback.jsonl (orchestrator signal)
-   │   └─→ shouldRefineNow() → maybe triggers Sonnet refinement (last 20 examples)
+   ├─→ Enter → confirmAndInject()
+   │   ├─→ Hide overlay
+   │   ├─→ pasteWithClipboardRestore() → save clipboard, set draft, ⌘V, restore after 500ms
+   │   ├─→ styleEngine.recordExample(aiDraft:, userFinal:, platform:)
+   │   ├─→ feedbackStore.record() → append to feedback.jsonl
+   │   └─→ shouldRefineNow() → maybe trigger Sonnet refinement
    │
-   └─→ pasteToApp() → activate source app → poll isActive → simulate ⌘V
+   ├─→ Escape → cancelSession() → hide overlay, discard draft
+   │
+   └─→ ⌥Space → cancelSession() → hide overlay, discard draft
 ```
 
-### Plain Draft Pipeline (no screenshot)
+### No-Context Fallback
 
-```
-User types/speaks in input → Enter → DraftEngine.draftMessage()
-└─→ StyleEngine.buildSystemPrompt() + raw text → AnthropicAPI.draft() → output
-```
+If vision times out (> 8s) or fails, the fallback prompt asks Claude to "clean up and polish the dictation" rather than "write a reply" — the latter confuses Claude when there's no conversation context.
+
+### Refusal Detection
+
+`looksLikeRefusal()` checks if a draft contains phrases like "I need the actual message" or "could you provide". If detected, the training pair is NOT recorded to prevent poisoning the style profile.
 
 ## Common Modifications Playbook
 
@@ -105,27 +114,27 @@ User types/speaks in input → Enter → DraftEngine.draftMessage()
 ### To add new metadata to training pairs:
 
 1. **`Sources/Style/StyleEngine.swift`** — Add the field to the `exampleBlock` string in `recordExample()`, update `extractRecentEditDistances()` if it's a parseable metric
-2. **`Sources/UI/ContentView.swift`** — Pass the new data into `recordExample()` from `recordAcceptedExample()` (~line 587)
+2. **`Sources/UI/FloatingOverlay.swift`** — Pass the new data into `recordExample()` from `confirmAndInject()` in `DraftSessionController`
 3. **`Sources/Style/StyleEngine.swift`** — Update `buildRefinementPrompt()` to tell Sonnet about the new field
 4. **`Sources/Style/CLAUDE.md`** — Update the file format example
 
 ### To change the refinement logic:
 
 1. **`Sources/Style/StyleEngine.swift`** — Modify `shouldRefineNow()` for frequency, `extractRecentExamplesText(last:)` for window size, `buildRefinementPrompt()` for what Sonnet sees
-2. **`Sources/UI/ContentView.swift`** — The call site at `recordAcceptedExample()` (~line 597) just calls `shouldRefineNow()` — usually no changes needed here
+2. **`Sources/UI/FloatingOverlay.swift`** — The call site in `DraftSessionController.confirmAndInject()` calls `shouldRefineNow()` — usually no changes needed here
 
 ### To modify the vision extraction prompt:
 
-1. **`~/Library/Application Support/Draft/prompts.json`** — Edit the `context_extraction` key directly (or let the orchestrator agent do it). Preserve `{USER_NAME}` and `{APP_NAME}` placeholders.
+1. **`~/Library/Application Support/Draft/prompts.json`** — Edit the `context_extraction` key directly (or let the analysis engine do it). Preserve `{USER_NAME}` and `{APP_NAME}` placeholders.
 2. **`Sources/Prompts/PromptStore.swift`** — If changing placeholders or adding new ones, update `contextExtractionPrompt(userName:appName:)` and `DefaultPrompts.contextExtraction`.
 3. **`Sources/Capture/CapturedContext.swift`** — If adding new labeled fields, update `parse()` and the struct properties
 4. **`Sources/Capture/CLAUDE.md`** — Update CapturedContext struct docs
 
-### To add a new UI feature/tab:
+### To modify the overlay UI:
 
-1. **`Sources/UI/ContentView.swift`** — Add to the `TabView` in `ContentView.body` (~line 17)
-2. Define the new view in a separate file in `Sources/UI/`
-3. **`Sources/UI/CLAUDE.md`** — Document the new view and its purpose
+1. **`Sources/UI/FloatingOverlay.swift`** — All overlay views, state machine, session controller, and panel management
+2. **`Sources/UI/CLAUDE.md`** — Document any new states, views, or behaviors
+3. **Test** — Full flow: ⌥Space → speak → ⌥Space → stream → Enter → paste. Verify auto-focus, Enter/Escape, and cancel behavior.
 
 ## Git & GitHub
 
@@ -146,10 +155,13 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - **Sandbox disabled** (`com.apple.security.app-sandbox: false`) — required for microphone + screen capture
 - **Carbon RegisterEventHotKey** for global hotkey — OS-level interception, works in any app
 - **Synchronous screenshot in hotkey callback** — captures frontmost app + screenshot before window focus shifts to Draft
+- **Non-activating NSPanel** — the floating overlay doesn't steal focus from the target app, so paste-back works without re-activation
+- **Token-by-token streaming** — `AnthropicAPI.streamDraft()` returns `AsyncThrowingStream<String, Error>`, first token appears ~200ms after request
 - **Plain-text vision extraction** — Haiku Vision returns labeled sections (PLATFORM/TALKING TO/FORMALITY/CONVERSATION), parsed by `CapturedContext.parse()`. No JSON — simpler and handles variable-length conversations
 - **Source app stored on capture** — The exact `NSRunningApplication` is saved at hotkey time, so paste-back targets the right app even if focus changes
-- **Externalized prompts** — All system prompts live in `~/Library/Application Support/Draft/prompts.json`, loaded by `PromptStore`. An orchestrator agent can rewrite prompts without recompiling. Engines read from `promptStore` with hardcoded fallbacks in `DefaultPrompts`.
-- **Feedback logging** — Every accepted draft appends a JSON line to `~/Library/Application Support/Draft/feedback.jsonl` with raw text, AI draft, user's accepted version, action (copy/paste), and example count. The orchestrator agent reads this to understand which drafts work and which need improvement.
+- **Externalized prompts** — All system prompts live in `~/Library/Application Support/Draft/prompts.json`, loaded by `PromptStore`. The analysis engine can rewrite prompts without recompiling. Engines read from `promptStore` with hardcoded fallbacks in `DefaultPrompts`.
+- **Feedback logging** — Every accepted draft appends a JSON line to `~/Library/Application Support/Draft/feedback.jsonl` with raw text, AI draft, user's accepted version, action (copy/paste), and example count. The analysis engine reads this to understand which drafts work and which need improvement.
+- **Native analysis engine** — Replaced the Python subprocess with Swift-native `AnalysisEngine` using DispatchSource file watching, eliminating subprocess crashes, cold start latency, and port conflicts. See `Sources/Analysis/CLAUDE.md`.
 
 ## Project-Wide Learnings
 
@@ -165,7 +177,11 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 10. **Pro audio interfaces break SFSpeechRecognizer** — USB interfaces like BEACN Mic (96kHz/4ch) cause error 1110 "no speech detected." Fix: force mono tap format (`AVAudioFormat(standardFormatWithSampleRate: nativeRate, channels: 1)`) — AVAudioEngine handles the channel mixdown automatically
 11. **iMessage `text` stores U+FFFC for attachment-only messages** — 558 out of 625 messages can be this invisible placeholder character. Filter by `trimmed.count < 2`, not word count
 12. **Prompts are externalized to JSON** — `PromptStore` reads `prompts.json` on launch and provides prompts to all engines. `DefaultPrompts` enum holds the hardcoded source-of-truth defaults (used on first run or if file is corrupt). Each engine holds an optional `promptStore` reference with fallback to `DefaultPrompts`. The `{STYLE_SUMMARY}`, `{USER_NAME}`, and `{APP_NAME}` placeholders in prompt templates are replaced at runtime by PromptStore methods.
-13. **AnthropicAPI is a thin HTTP client** — model and prompts are passed by callers, not hardcoded in the API layer. `AnthropicAPI.draft(model:systemPrompt:)` and `extractStructuredContext(model:systemPrompt:)` require explicit parameters. Only `sonnetModel` remains as a constant (used by StyleEngine for refinement).
+13. **AnthropicAPI is a thin HTTP client** — model and prompts are passed by callers, not hardcoded in the API layer. `AnthropicAPI.draft(model:systemPrompt:)`, `streamDraft()`, and `extractStructuredContext(model:systemPrompt:)` require explicit parameters. Only `sonnetModel` remains as a constant (used by StyleEngine and AnalysisEngine for refinement/analysis).
+14. **Vision race condition requires explicit await** — Vision processing runs as a parallel Task; `stopSessionAndDraft()` must `await visionTask?.value` before reading `lastCapturedContext`. Without this, fast speakers get no context. Vision timeout is 8 seconds (4s was too aggressive — typical calls take 2-6s).
+15. **`@FocusState` only works in View structs** — cannot be added to `ObservableObject` classes. Must bind with `.focused($isReviewFocused)` on the TextEditor and set `true` in `.onAppear` with a 50ms delay (lets the panel finish becoming key first).
+16. **Non-activating panels need dynamic key status** — `FloatingOverlayPanel.canBecomeKey` returns a mutable `allowKeyStatus` flag. During listening/drafting it's `false` (keyboard stays with target app), during review it's `true` (TextEditor needs input). Without this, either keyboard input or paste-back breaks.
+17. **Clipboard safety on inject** — `pasteWithClipboardRestore()` saves the user's clipboard, sets the draft text, simulates ⌘V, then restores after 500ms. The non-activating panel means the target app stays frontmost — no activation polling needed.
 
 ## Frameworks Linked
 
@@ -173,7 +189,7 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - `AVFoundation` — Audio engine / microphone
 - `Speech` — Apple Speech recognition
 - `Security` — Keychain access
-- `AppKit` — macOS-specific (NSPasteboard, NSWorkspace, NSRunningApplication)
+- `AppKit` — macOS-specific (NSPasteboard, NSWorkspace, NSRunningApplication, NSPanel)
 - `Carbon` — Global hotkey registration (RegisterEventHotKey)
 - `CoreGraphics` — Window capture (CGWindowListCreateImage)
 - `Combine` — Required by SwiftUI internally

@@ -67,6 +67,7 @@ Monitor in real time: `tail -f ~/draft-debug.log | grep SPEECH`
 @Published var isListening: Bool
 @Published var statusMessage: String
 @Published var speechFinished: Bool      // True after 2.5s extended silence — signals "done talking"
+@Published var audioLevel: Float         // 0.0 to 1.0, RMS audio level — drives AudioWaveformView animation
 
 var displayText: String                  // finalTranscript + volatileText
 var hasText: Bool

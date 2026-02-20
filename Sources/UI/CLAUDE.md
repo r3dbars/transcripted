@@ -2,142 +2,145 @@
 
 ## What This Does
 
-SwiftUI views for the Draft app — input area, voice controls, context capture, Draft button, polished output display, style profile viewer, style onboarding, and auth setup.
+SwiftUI views for the Draft app. The primary UI is a **floating overlay** (non-activating NSPanel) that appears over the user's current app for the hotkey → speak → draft → review → inject flow. A **menubar popover** hosts the Style Profile and Agent tabs for configuration.
 
 ## Key Files
 
-- `ContentView.swift` — Main app view with `ContentView` (owns all engines, onboarding gates) and `DraftTab` (the primary drafting interface)
-- `StyleOnboardingView.swift` — 5-step onboarding flow: intro (name) → source choice → (iMessage preview OR paste samples) → profile result
-- `APIKeyEntryView.swift` — Auth setup overlay with segmented picker (API key or Claude subscription token)
-- `AgentTab.swift` — Third tab showing insight cards from the orchestrator agent (Apply/Skip)
-- `OrchestratorBridge.swift` — Manages Python agent subprocess, SSE subscription, Apply/Skip POST callbacks
-- `InsightCard.swift` — Model for insight cards (suggestionId, promptKey, saw, why, currentValue, proposedValue, status)
-- `PreviousAppTracker.swift` — Tracks which app the user was in before switching to Draft
-- `AppLogger.swift` — Debug logger with in-app log panel and file output
+- `FloatingOverlay.swift` (609 lines) — The core v2 UI: `FloatingOverlayPanel` (NSPanel), `FloatingOverlayController` (state machine), `OverlayContentView` (SwiftUI views for listening/streaming/review), `DraftSessionController` (full session orchestration)
+- `MenuBarPanel.swift` (98 lines) — Menubar popover with TabView (Style + Agent), onboarding gates, settings gear
+- `StyleProfileView.swift` (49 lines) — Extracted style tab showing style.md contents
+- `AgentTab.swift` (423 lines) — Agent insight cards (Apply/Skip) + streaming chat interface
+- `StyleOnboardingView.swift` (664 lines) — 5-step onboarding: intro → source choice → (iMessage/paste) → result
+- `APIKeyEntryView.swift` (231 lines) — Auth setup overlay: name + API key or subscription token
+- `InsightCard.swift` (71 lines) — Model for insight cards + shared `toolDefinition` and `from()` factory (used by both StreamingChatEngine and AnalysisEngine)
+- `AudioWaveformView.swift` (27 lines) — Animated waveform bars driven by `SpeechEngine.audioLevel`
+- `ChatMessage.swift` (32 lines) — Model for chat messages in AgentTab
+- `AppLogger.swift` (92 lines) — Debug logger writing to `~/draft-debug.log` with timestamps
+- `PreviousAppTracker.swift` (25 lines) — Tracks last non-Draft app for paste-back fallback
 
-## App Launch Flow (Sequential Gates)
-
-```
-Launch
-  ↓
-Has credentials? ──No──→ APIKeyEntryView (overlay — name + auth picker)
-  │ Yes
-  ↓
-Completed style onboarding? ──No──→ StyleOnboardingView (overlay)
-  │ Yes
-  ↓
-Main App (TabView: Draft tab + Style tab + Agent tab)
-```
-
-Both gates are overlays on top of the TabView. Once cleared, they don't reappear (credentials in Keychain, onboarding flag in UserDefaults).
-
-## ContentView.swift Section Map (719 lines)
-
-Use this to jump to the right area when modifying ContentView:
+## Architecture Overview
 
 ```
-Lines   1-51   ContentView          — @StateObject engines, TabView, onboarding overlays, .task init
-Lines  53-72   DraftTab (struct)    — @ObservedObject declarations, @State vars, @FocusState
-Lines  74-301  DraftTab body        — Header, context bar, inputAreaView, voice indicator, controls, outputAreaView, debug log
-Lines 302-404  .onChange handlers   — Speech sync (303-317), draft completion (318-329), input tracking (330-336), context capture wiring (338-404)
-Lines 407-426  triggerAutoDraft()   — Parallel pipeline completion → auto-draft
-Lines 428-464  inputAreaView        — Input TextEditor with placeholder, Enter key handler
-Lines 466-544  outputAreaView       — Output TextEditor with Copy/Paste buttons, Enter key handler
-Lines 546-571  triggerDraft()       — Manual draft trigger (Enter or button), context-aware vs. plain
-Lines 573-604  Accept & Style       — acceptAndCopy(), acceptAndPasteToSourceApp(), recordAcceptedExample()
-Lines 606-670  Paste to App         — pasteTargetApp, pasteToApp(), waitForActivation() polling
-Lines 673-718  StyleProfileView     — Second tab showing style.md contents
+FloatingOverlay (hotkey flow)          MenuBarPanel (configuration)
+┌──────────────────────────┐          ┌───────────────────────────┐
+│ FloatingOverlayPanel     │          │ TabView                   │
+│ (NSPanel, non-activating)│          │ ├── StyleProfileView      │
+│                          │          │ └── AgentTab              │
+│ States:                  │          │                           │
+│ idle → listening →       │          │ Onboarding gates:         │
+│ drafting → streaming →   │          │ APIKeyEntryView (overlay) │
+│ review                   │          │ StyleOnboardingView       │
+├──────────────────────────┤          └───────────────────────────┘
+│ DraftSessionController   │
+│ (orchestrates full flow) │
+└──────────────────────────┘
 ```
 
-`ContentView` owns all engines as `@StateObject` and wires them together:
-- `SpeechEngine`, `DraftEngine`, `StyleEngine`, `AppLogger`, `PreviousAppTracker`, `ContextCaptureEngine`
+## FloatingOverlay — The Primary UI (v2)
 
-`DraftTab` is an extracted struct that receives all engines as `@ObservedObject` and contains the main drafting UI.
+### Panel Architecture
 
-## Layout Structure
+`FloatingOverlayPanel` is an NSPanel subclass with these key properties:
+- **Non-activating** (`.nonactivatingPanel`) — the target app stays frontmost, so paste works without re-activation
+- **Dynamic key status** — `canBecomeKey` returns `allowKeyStatus`, which is `false` during listening/drafting (keyboard stays with target app) and `true` during review (TextEditor needs keyboard input)
+- **Floating level** — always above other windows, across all spaces
+
+### State Machine
 
 ```
-┌─────────────────────────────────────────┐
-│ Draft           [Capturing...]    ⚙️    │  ← Header + capture status + settings
-├─────────────────────────────────────────┤
-│ Context              [Capture Screen]   │  ← Context label + capture button + ⌥Space hint
-├─────────────────────────────────────────┤
-│ PLATFORM: Slack                         │
-│ TALKING TO: Sarah Graham                │
-│ FORMALITY: casual                       │  ← Input TextEditor with labeled context sections
-│                                         │
-│ CONVERSATION:                           │
-│ Sarah: Hey, are you free for lunch?     │
-│ You: ...                                │
-│                                         │
-│ YOUR INSTRUCTIONS:                      │
-│ [voice transcription / typed text]      │
-├─────────────────────────────────────────┤
-│ 🔴 "listening text here..."             │  ← Voice indicator (when recording)
-├─────────────────────────────────────────┤
-│ [⌘R Record] [✨ Draft]        [Clear]  │  ← Controls
-├─────────────────────────────────────────┤
-│ Drafted Message     [Copy] [Paste to…] │
-│ "Polished text from Haiku..."           │  ← Output area (purple tint, editable)
-├─────────────────────────────────────────┤
-│ ▶ Debug Log (N)                         │  ← Collapsible debug panel
-└─────────────────────────────────────────┘
+idle → listening → drafting → streaming → review → idle
+                                              ↓
+                                           (cancel)
+                                              ↓
+                                            idle
 ```
 
-Second tab: **Style Profile** — shows style.md contents (summary + examples).
+| State | Trigger | UI | Key Status |
+|-------|---------|-----|------------|
+| `idle` | Session end/cancel | Hidden | false |
+| `listening` | ⌥Space (start) | Waveform + live transcription | false |
+| `drafting` | ⌥Space (stop) | Spinner + "Drafting..." | false |
+| `streaming` | First API token | Purple dot + tokens appearing | false |
+| `review` | Stream complete | Editable TextEditor + hint bar | true |
 
-## Keyboard Shortcuts
+### Auto-Focus in Review Mode
 
-- **Enter** (in input area) — Triggers Draft (sends to Haiku)
-- **Enter** (in output area) — Pastes drafted message to source app
-- **Shift+Enter** — Inserts newline (in both text areas)
-- **⌘R** — Toggle Record/Stop voice input
-- **Option+Space** — Global hotkey: capture screen context (works from any app)
+When the review view appears, `@FocusState` automatically transfers keyboard focus to the TextEditor via `.onAppear` with a 50ms delay (lets the panel finish becoming key first). This means the user can immediately hit Enter to inject or start editing — no clicking required.
 
-### Enter Key Implementation
+### Positioning
 
-Uses `.onKeyPress(keys: [.return], phases: .down)` on both TextEditors. The `keys:phases:` variant is required (not the simpler `onKeyPress(.return)`) because it passes the full `KeyPress` object with `.modifiers` — needed to distinguish Enter from Shift+Enter.
+`show(near:)` uses `AccessibilityBridge.focusedTextFieldRect(for:)` to position the overlay near the user's cursor in the target app. Falls back to screen center if no text field is detected.
 
-Input and output TextEditors are extracted into `inputAreaView` and `outputAreaView` `@ViewBuilder` computed properties. This was necessary because Swift's type-checker couldn't handle the complexity of inline `.onKeyPress` closures within the main `body`.
+### Dynamic Sizing
 
-### Auto-Focus Output
+`resizePanel(to:)` grows the panel upward (bottom edge anchored) as streaming text grows. Height range: 120px (listening) to 280px (review).
 
-When `drafter.draftedText` changes (draft completes), `isOutputFocused` is set to `true` via `.onChange(of:)`, moving the cursor into the output TextEditor automatically. This enables the flow: speak → Enter → (draft appears) → cursor is already in output → edit → Enter → pasted.
+## DraftSessionController — Session Orchestration
 
-## Source App Paste-Back
+Lives inside `FloatingOverlay.swift`. Manages the complete flow:
 
-### How It Works
+### Session Lifecycle
 
-1. **Hotkey callback** stores `contextCapture.sourceApp` (the exact `NSRunningApplication` that was screenshotted)
-2. **`pasteTargetApp`** computed property: returns `contextCapture.sourceApp ?? previousAppTracker.previousApp`
-3. **Button label** shows the actual app name: "Paste to Messages", "Paste to Slack", etc.
-4. **Paste flow:**
-   - Copy text to `NSPasteboard`
-   - Activate the target app via `app.activate()`
-   - **Poll for activation** via `waitForActivation(of:attempt:then:)` — checks `app.isActive` every 100ms, up to 15 attempts (1.5s timeout)
-   - Once active, simulate ⌘V via `CGEvent`
-5. **Record example** — After pasting, calls `styleEngine.recordExample()` to save for style learning
+```
+startSession()          — ⌥Space first press: clear state, show overlay, start voice + vision in parallel
+stopSessionAndDraft()   — ⌥Space second press: stop voice, await vision, build prompt, stream draft
+confirmAndInject()      — Enter in review: hide overlay, paste to target app, record training pair
+cancelSession()         — Escape or ⌥Space during review: hide overlay, discard draft
+```
 
-### Why Polling Instead of Fixed Delay
+### Vision Race Condition Fix
 
-A fixed 300ms delay was unreliable — app activation timing varies by system load, app state, and whether the app needs to come to the foreground from minimized. Polling `app.isActive` at 100ms intervals adapts to the actual activation speed.
+Vision processing (`processVision()`) runs in a parallel `Task` stored as `visionTask`. When the user stops speaking, `stopSessionAndDraft()` **awaits `visionTask?.value`** before checking `lastCapturedContext`. This ensures vision results are available even when the user speaks quickly. The vision call has an 8-second timeout via `AnthropicAPI.withTimeout(seconds: 8)`.
 
-## Parallel Voice + Vision Pipeline
+### No-Context Fallback
 
-When the hotkey fires:
-1. `onHotkeyFired` callback starts voice recording immediately
-2. Vision processing runs in parallel (takes 1-3 seconds)
-3. When context arrives via `onContextCaptured`, it's injected into `inputText` as labeled sections
-4. Voice transcription continues appending after "YOUR INSTRUCTIONS:" label
-5. User can speak their instructions while Haiku is still analyzing the screenshot
+If vision fails or times out, the fallback prompt asks Claude to "clean up and polish the dictation" rather than "write a reply" — the latter confuses Claude when there's no conversation context.
 
-## State Coordination
+### Refusal Detection
 
-- Speech output syncs to `inputText` via `.onChange(of:)` — `finalTranscript` and `volatileText` both update the TextEditor
-- Context capture fills `inputText` via `onContextCaptured` callback, prepends labeled sections
-- `@FocusState` on both TextEditors for cursor management
-- Style training pairs recorded when user hits Copy or "Paste to [App]" (AI draft vs. user's edited version + platform + edit distance)
-- Style summary auto-regenerates via graduated frequency: every 3 examples early on (1-20), then every 5-10 once the profile stabilizes (determined by `styleEngine.shouldRefineNow()`)
+`looksLikeRefusal()` checks if a draft contains phrases like "I need the actual message" or "could you provide". If detected, the training pair is NOT recorded to prevent poisoning the style profile.
+
+### Clipboard Safety
+
+`pasteWithClipboardRestore()` saves the user's clipboard contents before setting the draft text, simulates Cmd+V, then restores the original clipboard after 500ms. The target app stays frontmost (overlay is non-activating), so no app activation polling is needed.
+
+## Three-Way Hotkey Routing
+
+The Carbon hotkey callback in `ContextCaptureEngine.swift` routes to `DraftSessionController`:
+
+| Session State | ⌥Space Action |
+|---------------|---------------|
+| Not in session | `startSession(imageData:sourceApp:)` |
+| Listening/drafting/streaming | `stopSessionAndDraft()` |
+| Review | `cancelSession()` |
+
+## Keyboard Shortcuts (Overlay)
+
+- **Enter** — Inject draft to target app (review mode)
+- **Shift+Enter** — Insert newline (review mode)
+- **Escape** — Cancel session (review mode)
+- **⌥Space** — Start session / stop recording / cancel during review
+
+### Key Implementation Detail
+
+Uses `.onKeyPress(keys: [.return], phases: .down)` (not the simpler `onKeyPress(.return)`) because the `keys:phases:` variant passes the full `KeyPress` object with `.modifiers` — needed to distinguish Enter from Shift+Enter.
+
+## MenuBarPanel — Configuration UI
+
+Menubar popover with:
+- **Style tab** (`StyleProfileView`) — read-only display of style.md contents
+- **Agent tab** (`AgentTab`) — insight cards from AnalysisEngine, streaming chat interface
+- **Onboarding gates** — sequential overlays: `APIKeyEntryView` → `StyleOnboardingView`
+- **Settings gear** — popover with name field, auth switch, quit button
+
+## InsightCard
+
+Model struct for agent-proposed prompt changes. Key addition: **shared `toolDefinition` and `from()` factory** used by both `StreamingChatEngine` and `AnalysisEngine` — eliminates tool definition duplication.
+
+```swift
+static let toolDefinition: [String: Any]                    // Anthropic tool schema for propose_prompt_change
+static func from(toolId: String, input: [String: Any]) -> InsightCard?  // Parse tool call into card
+```
 
 ## StyleOnboardingView
 
@@ -149,20 +152,10 @@ When the hotkey fires:
 ```
 
 1. **Intro** — Welcome message, name input field (saved to UserDefaults for vision identity)
-2. **Source Choice** — Two cards: "Import from iMessages" (recommended, reads ~/Library/Messages/chat.db) or "Paste Samples Manually"
-3a. **iMessage Preview** — Read-only ScrollView showing loaded messages, privacy notice, message count, "Analyze These Messages" button. Includes expandable "Add Slack, email, or other writing samples" section for supplementary paste — combined text is sent together for a richer profile. Handles errors: FDA denied (link to System Settings + retry), no database/empty (fallback to manual paste)
+2. **Source Choice** — Two cards: "Import from iMessages" (recommended) or "Paste Samples Manually"
+3a. **iMessage Preview** — Read-only ScrollView showing loaded messages, privacy notice, "Analyze These Messages" button. Includes expandable "Add Slack, email, or other writing samples" section.
 3b. **Samples** — Large TextEditor for pasting writing samples, word count indicator, "Build My Profile" button
-4. **Result** — Shows generated profile, "Looks Good" to accept, "Add More & Regenerate" goes back to source choice
-
-Uses `iMessageReader` actor for database access, `StyleEngine.importBulkSamples()` for analysis, and `StyleEngine.completeOnboarding()` on accept/skip.
-
-## PreviousAppTracker
-
-Observes `NSWorkspace.didDeactivateApplicationNotification` to remember the last non-Draft app. Used as fallback when no source app is stored from a hotkey capture:
-- Manual capture button (captures previous app's window)
-- Paste fallback if no hotkey capture happened
-
-Hardcoded bundle ID fallback (`com.justinbetker.draft`) since `Bundle.main.bundleIdentifier` can be nil for swiftc-built apps.
+4. **Result** — Shows generated profile, "Looks Good" to accept, "Add More & Regenerate" goes back
 
 ## Auth Setup Flow
 
@@ -173,16 +166,22 @@ Hardcoded bundle ID fallback (`com.justinbetker.draft`) since `Bundle.main.bundl
 5. "Connect" saves to Keychain → overlay dismisses
 6. Gear icon → popover shows current auth mode + "Switch Auth Method" → clears Keychain → overlay reappears
 
+## PreviousAppTracker
+
+Observes `NSWorkspace.didDeactivateApplicationNotification` to remember the last non-Draft app. Used as fallback for source app in paste-back. Hardcoded bundle ID fallback (`com.justinbetker.draft`) since `Bundle.main.bundleIdentifier` can be nil for swiftc-built apps.
+
 ## Verification
 
 After modifying UI components, verify with these checks:
 
-- **Full flow:** ⌥Space over Slack → speak instructions → Enter → edit draft → Enter → message pasted back to Slack
-- **Keyboard shortcuts:** Enter in input triggers draft, Enter in output triggers paste, Shift+Enter inserts newline in both, ⌘R toggles recording
-- **Auto-focus:** After draft completes, cursor should be in the output TextEditor (ready for edit → Enter)
-- **Parallel pipeline:** ⌥Space → speak → vision context should appear at top of input while voice text appends below "YOUR INSTRUCTIONS:"
-- **Paste-back:** "Paste to [App]" button should show correct app name. Pasting should activate the target app and simulate ⌘V.
-- **Onboarding gates:** Gear → "Switch Auth Method" → auth overlay appears. Reset onboarding flag → style onboarding appears. Both block the main UI.
-- **Style tab:** Shows style.md contents. After accepting drafts, example count badge should increment.
-- **Debug log:** Expand the debug panel at the bottom → all events should be logged with timestamps. Also available at `~/draft-debug.log`
+- **Full overlay flow:** ⌥Space over Slack → speak → ⌥Space → tokens stream → draft appears editable → Enter → text pasted to Slack
+- **Auto-focus:** After draft streams in, cursor should be blinking in the TextEditor without clicking
+- **Enter/Escape:** Enter injects, Escape cancels, Shift+Enter inserts newline
+- **Vision context:** Check debug log — `"vision complete"` should appear BEFORE `"streaming draft"`, and `context: yes` in the streaming log
+- **Cancel during review:** ⌥Space while draft is showing → overlay hides, nothing injected
+- **Paste-back:** Draft injected into correct target app (overlay is non-activating)
+- **Onboarding gates:** Gear → "Switch Auth Method" → auth overlay appears
+- **Style tab:** Shows style.md contents in menubar popover
+- **Agent tab:** Insight cards appear with Apply/Skip buttons; chat interface works
+- **Debug log:** `tail -f ~/draft-debug.log | grep "SESSION\|REVIEW"` shows all events
 - **Build:** `bash build.sh` — must compile cleanly (only warning: CGWindowListCreateImage deprecation)

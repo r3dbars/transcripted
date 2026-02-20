@@ -2,24 +2,30 @@
 
 ## What This Does
 
-Captures a screenshot of the user's current app window, sends it to Haiku Vision to extract the full conversation thread, and stores the source app reference for paste-back. Triggered by a global hotkey (Option+Space) that works from any app.
+Captures a screenshot of the user's current app window, sends it to Haiku Vision to extract the full conversation thread, and stores the source app reference for paste-back. Triggered by a global hotkey (Option+Space) that works from any app. In v2, the hotkey callback routes through `DraftSessionController` for three-way session control (start/stop/cancel).
 
 ## Key Files
 
-- `ContextCaptureEngine.swift` — Hotkey registration, screenshot orchestration, API call, source app storage
+- `ContextCaptureEngine.swift` — Hotkey registration (Carbon), screenshot capture, three-way routing to DraftSessionController, legacy `processCapture()` for compatibility
 - `CapturedContext.swift` — Structured data extracted from a screenshot (platform, talkingTo, formality, conversation) + parser + prompt builder
 - `ScreenCapture.swift` — Low-level window capture via CGWindowListCreateImage
 
-## How It Works
+## How It Works (v2 — Floating Overlay)
 
 1. **Hotkey fires** — Carbon `RegisterEventHotKey` intercepts Option+Space at OS level
 2. **Synchronous capture** — The C callback captures TWO things IMMEDIATELY (before any async dispatch):
    - `frontApp` — the `NSRunningApplication` reference (stored for paste-back later)
    - `imageData` — the screenshot PNG of that app's frontmost window
-3. **Parallel activation** — `Task { @MainActor }` brings Draft to front AND fires `onHotkeyFired` callback (ContentView uses this to start voice recording in parallel with vision processing)
-4. **Vision processing** — Screenshot sent to Haiku Vision with user's name and app name as hints
-5. **Context parsed** — Haiku's plain-text response → `CapturedContext.parse()` → structured data
-6. **Context delivered** — `onContextCaptured` callback fills ContentView's input with labeled sections
+3. **Three-way routing** — `Task { @MainActor }` checks `DraftSessionController` state and routes:
+
+| Session State | ⌥Space Action |
+|---------------|---------------|
+| Not in session | `startSession(imageData:sourceApp:)` — shows overlay, starts voice + vision in parallel |
+| Listening/drafting/streaming | `stopSessionAndDraft()` — stops voice, awaits vision, streams draft |
+| Review | `cancelSession()` — hides overlay, discards draft |
+
+4. **Vision runs in parallel** — `DraftSessionController.startSession()` fires vision processing as a parallel `Task` stored as `visionTask`. Voice recording runs simultaneously.
+5. **Vision awaited before drafting** — `stopSessionAndDraft()` calls `await visionTask?.value` before checking `lastCapturedContext`, ensuring vision results are available even when the user speaks quickly.
 
 ## Critical Design Decision: Sync Capture in C Callback
 
@@ -31,11 +37,35 @@ private func hotkeyHandler(...) -> OSStatus {
     let frontApp = NSWorkspace.shared.frontmostApplication
     let imageData = frontApp.flatMap { ScreenCapture.captureFrontmostWindow(of: $0) }
     Task { @MainActor in
-        await _sharedEngine?.processCapture(imageData: imageData, sourceApp: frontApp)
+        guard let session = _sharedSessionController else { return }
+        if session.isInSession {
+            if session.overlayController.state == .review {
+                session.cancelSession()
+            } else {
+                session.stopSessionAndDraft()
+            }
+        } else {
+            session.startSession(imageData: imageData, sourceApp: frontApp)
+        }
     }
     return noErr
 }
 ```
+
+### Global References
+
+The C callback can't capture Swift closures, so two `weak` module-level references bridge the gap:
+- `_sharedEngine` — set by `registerHotkey()`, used for legacy `processCapture()` path
+- `_sharedSessionController` — set via `ContextCaptureEngine.sessionController` didSet, used for v2 routing
+
+## Vision Race Condition Fix
+
+Vision API calls typically take 2-6 seconds. If the user speaks quickly (< 2s), `stopSessionAndDraft()` would fire before vision completes. The fix:
+
+1. `startSession()` stores the vision Task handle as `visionTask`
+2. `stopSessionAndDraft()` calls `await visionTask?.value` before reading `lastCapturedContext`
+3. Vision has an 8-second timeout via `AnthropicAPI.withTimeout(seconds: 8)`
+4. If vision times out, a no-context fallback prompt asks Claude to "clean up and polish the dictation" (not "write a reply" — that confuses Claude without conversation context)
 
 ## CapturedContext Struct
 
@@ -61,6 +91,10 @@ struct CapturedContext {
 
 **`parse()`** is a line-by-line parser using `hasPrefix` checks. An `inConversation` flag captures everything after the "CONVERSATION:" header until end of text.
 
+## Legacy Interface: `processCapture()`
+
+`processCapture(imageData:sourceApp:)` is the v1 capture pipeline that runs vision extraction directly and calls `onContextCaptured`. It is **preserved for compatibility** but unused in the v2 floating overlay flow — `DraftSessionController` handles vision processing internally. The `onContextCaptured` and `onHotkeyFired` callbacks are marked as legacy.
+
 ## Hotkey Details
 
 - **Shortcut:** Option+Space (`optionKey`, `kVK_Space`)
@@ -80,13 +114,14 @@ struct CapturedContext {
 @Published var captureError: String?
 @Published var sourceApp: NSRunningApplication?  // The app that was screenshotted
 
-var onContextCaptured: ((CapturedContext) -> Void)?  // Fires when vision processing completes
-var onHotkeyFired: (() -> Void)?                     // Fires immediately on hotkey (before vision)
-var promptStore: PromptStore?                        // Set by ContentView — provides model + context extraction prompt
+var onContextCaptured: ((CapturedContext) -> Void)?  // Legacy — unused in v2
+var onHotkeyFired: (() -> Void)?                     // Legacy — unused in v2
+var promptStore: PromptStore?                        // Set by DraftAppState — provides model + context extraction prompt
+var sessionController: DraftSessionController?       // Set by DraftAppDelegate — wires hotkey to v2 session
 
 func registerHotkey()
 func unregisterHotkey()
-func processCapture(imageData: Data?, sourceApp: NSRunningApplication?) async
+func processCapture(imageData: Data?, sourceApp: NSRunningApplication?) async  // Legacy v1 path
 func manualCapture(app: NSRunningApplication?) async
 
 // ScreenCapture
@@ -97,9 +132,11 @@ static func captureFrontmostWindow(of app: NSRunningApplication) -> Data?
 
 After modifying capture or context extraction, verify with these checks:
 
-- **Hotkey capture:** Open Slack/iMessage → press ⌥Space → check debug log for `📸 CONTEXT RAW` showing platform, talkingTo, formality, and conversation text
-- **Source app stored:** After capture, the "Paste to [App]" button should show the correct app name
-- **Manual capture:** Click "Capture Screen" button → should capture the previous app (not Draft itself)
-- **Permission denied:** If Screen Recording permission is missing, should show error message (not crash). Look for `❌ CAPTURE ERROR` in debug log
+- **Three-way routing:** ⌥Space starts session → ⌥Space stops and drafts → ⌥Space during review cancels
+- **Vision race condition:** Speak quickly (< 2s) after ⌥Space → debug log should show `"vision complete"` BEFORE `"streaming draft"`, with `context: yes`
+- **Vision timeout:** If vision takes > 8s, fallback prompt fires → draft should still appear (without context)
+- **Hotkey capture:** Open Slack/iMessage → press ⌥Space → check debug log for vision processing
+- **Source app stored:** After capture, paste-back should target the correct app
+- **Permission denied:** If Screen Recording permission is missing, should show error message (not crash)
 - **Parse accuracy:** Check that `CapturedContext.parse()` correctly splits the labeled sections — `platform` should be lowercase, `talkingTo` should be the name from the header (not from message content)
-- **Console output:** `🔍 VISION RAW RESPONSE` in Xcode/terminal console shows the full Haiku Vision response for debugging prompt issues
+- **Debug log:** `tail -f ~/draft-debug.log | grep "SESSION\|VISION"` shows all capture/session events
