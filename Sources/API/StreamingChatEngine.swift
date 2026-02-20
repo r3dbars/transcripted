@@ -283,7 +283,7 @@ class StreamingChatEngine: ObservableObject {
                         "stream": true,
                         "system": systemPrompt,
                         "messages": history,
-                        "tools": [Self.proposePromptChangeTool]
+                        "tools": [InsightCard.toolDefinition]
                     ]
                     request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -367,53 +367,10 @@ class StreamingChatEngine: ObservableObject {
     private func handleProposePromptChange(toolId: String, rawInput: String) {
         guard let data = rawInput.data(using: .utf8),
               let input = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let promptKey = input["prompt_key"] as? String
+              let card = InsightCard.from(toolId: toolId, input: input)
         else { return }
-
-        let card = InsightCard(
-            suggestionId: toolId,
-            promptKey: promptKey,
-            saw: input["saw"] as? String ?? "",
-            why: input["why"] as? String ?? "",
-            currentValue: input["current_value"] as? String ?? "",
-            proposedValue: input["proposed_value"] as? String ?? "",
-            changeDescription: input["why"] as? String ?? ""
-        )
         onInsightProposed?(card)
     }
-
-    // MARK: - Tool Definition
-
-    private static let proposePromptChangeTool: [String: Any] = [
-        "name": "propose_prompt_change",
-        "description": "Propose a prompt change as an insight card for the user to review. The card appears in the Suggestions section above the chat with Apply/Skip buttons.",
-        "input_schema": [
-            "type": "object",
-            "properties": [
-                "prompt_key": [
-                    "type": "string",
-                    "description": "Which key in prompts.json to change"
-                ],
-                "saw": [
-                    "type": "string",
-                    "description": "Evidence from feedback data supporting this change"
-                ],
-                "why": [
-                    "type": "string",
-                    "description": "Reasoning about what the current prompt is getting wrong"
-                ],
-                "current_value": [
-                    "type": "string",
-                    "description": "Relevant section of the current prompt value"
-                ],
-                "proposed_value": [
-                    "type": "string",
-                    "description": "Full new value for the prompt key"
-                ]
-            ],
-            "required": ["prompt_key", "saw", "why", "proposed_value"]
-        ]
-    ]
 
     // MARK: - Helpers
 

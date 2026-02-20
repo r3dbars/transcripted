@@ -47,12 +47,14 @@ class FloatingOverlayController: ObservableObject {
         case idle
         case listening
         case drafting
+        case streaming  // tokens arriving, not yet editable
         case review
     }
 
     @Published var state: OverlayState = .idle
     @Published var isVisible = false
     @Published var reviewText: String = ""
+    @Published var streamingText: String = ""
 
     /// Closures for Enter/Escape in review mode — set by DraftSessionController
     var onConfirm: (() -> Void)?
@@ -128,12 +130,44 @@ class FloatingOverlayController: ObservableObject {
         }
     }
 
+    func startStreaming(near sourceApp: NSRunningApplication? = nil) {
+        streamingText = ""
+        state = .streaming
+        // Show panel if not visible
+        if !isVisible {
+            show(near: sourceApp)
+        }
+        // Resize to initial streaming size
+        resizePanel(to: NSSize(width: 400, height: 160))
+        // Not key-capable yet (still receiving tokens)
+        panel?.allowKeyStatus = false
+    }
+
+    func appendStreamToken(_ token: String) {
+        streamingText += token
+        // Dynamically resize as text grows
+        let lineCount = max(1, streamingText.components(separatedBy: "\n").count)
+        let charEstimate = CGFloat(streamingText.count) / 45.0
+        let lines = max(CGFloat(lineCount), charEstimate)
+        let estimatedHeight = max(160, min(280, lines * 20 + 100))
+        if let panel = panel, abs(panel.frame.height - estimatedHeight) > 20 {
+            resizePanel(to: NSSize(width: 400, height: estimatedHeight))
+        }
+    }
+
+    func finishStreaming() {
+        // Transfer to editable review
+        showReview(text: streamingText)
+        streamingText = ""
+    }
+
     func hide() {
         panel?.allowKeyStatus = false
         panel?.orderOut(nil)
         isVisible = false
         state = .idle
         reviewText = ""
+        streamingText = ""
     }
 
     private func resizePanel(to size: NSSize) {
@@ -155,6 +189,8 @@ struct OverlayContentView: View {
     var body: some View {
         if controller.state == .review {
             reviewView
+        } else if controller.state == .streaming {
+            streamingView
         } else {
             listenDraftView
         }
@@ -217,6 +253,30 @@ struct OverlayContentView: View {
     }
 
     @ViewBuilder
+    private var streamingView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                // Subtle pulsing dot while tokens arrive
+                Circle()
+                    .fill(Color.purple.opacity(0.8))
+                    .frame(width: 6, height: 6)
+                Text("Drafting...")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            }
+            Text(controller.streamingText)
+                .font(.system(size: 13))
+                .foregroundColor(.white)
+                .lineLimit(nil)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .frame(width: 400)
+        .background(Color.black.opacity(0.88))
+    }
+
+    @ViewBuilder
     private var reviewView: some View {
         VStack(spacing: 0) {
             TextEditor(text: $controller.reviewText)
@@ -264,6 +324,7 @@ class DraftSessionController: ObservableObject {
 
     private var lastCapturedContext: CapturedContext?
     private var sessionSourceApp: NSRunningApplication?
+    private var streamingTask: Task<Void, Never>?
 
     /// Start a new recording session — called on first hotkey press
     func startSession(imageData: Data?, sourceApp: NSRunningApplication?) {
@@ -299,7 +360,6 @@ class DraftSessionController: ObservableObject {
         appState.speech.stopListening()
         overlayController.state = .drafting
 
-        // Collect final voice text
         let voiceText = (appState.speech.finalTranscript + appState.speech.volatileText)
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -310,24 +370,82 @@ class DraftSessionController: ObservableObject {
         }
 
         let platform = PlatformFormatter.detect(from: sessionSourceApp)
-        appState.logger.log("✨ SESSION | drafting [\(platform.rawValue)] — \(voiceText.count) chars")
+        appState.logger.log("✨ SESSION | streaming draft [\(platform.rawValue)] — \(voiceText.count) chars")
 
-        // Build input text with context if available
-        var inputText = voiceText
-        if let context = lastCapturedContext, context.hasConversation {
-            inputText = context.displayText + "\n\nYOUR INSTRUCTIONS:\n" + voiceText
-            appState.drafter.draftWithContext(voiceText: inputText, context: context, platform: platform)
-        } else {
-            appState.drafter.draftMessage(from: inputText)
-        }
+        streamingTask = Task {
+            guard let auth = AuthCredential.load() else {
+                cancelSession()
+                return
+            }
 
-        // Watch for draft completion, then show review
-        Task {
-            await waitForDraftAndShowReview(platform: platform)
+            var systemPrompt = appState.styleEngine.buildSystemPrompt()
+            if !platform.formattingInstructions.isEmpty {
+                systemPrompt += "\n\n" + platform.formattingInstructions
+            }
+
+            let userMessage: String
+            if let context = lastCapturedContext, context.hasConversation {
+                userMessage = context.draftingPrompt(userInstructions: voiceText)
+            } else {
+                userMessage = "The user said: \"\(voiceText.trimmingCharacters(in: .whitespacesAndNewlines))\"\n\nWrite the reply. Output ONLY the reply text, nothing else."
+            }
+
+            let model = appState.promptStore.config.model
+            let stream = AnthropicAPI.streamDraft(
+                rawText: userMessage,
+                auth: auth,
+                model: model,
+                systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt
+            )
+
+            var fullText = ""
+            var gotFirstToken = false
+
+            do {
+                for try await token in stream {
+                    guard !Task.isCancelled else { break }
+                    if !gotFirstToken {
+                        gotFirstToken = true
+                        overlayController.startStreaming(near: sessionSourceApp)
+                    }
+                    fullText += token
+                    overlayController.appendStreamToken(token)
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                appState.logger.log("❌ SESSION | stream error: \(error.localizedDescription)")
+                overlayController.hide()
+                isInSession = false
+                return
+            }
+
+            guard !Task.isCancelled, !fullText.isEmpty else {
+                if !Task.isCancelled {
+                    appState.logger.log("❌ SESSION | empty draft")
+                    overlayController.hide()
+                    isInSession = false
+                }
+                return
+            }
+
+            let processed = platform.postProcess(fullText)
+            appState.drafter.originalDraft = processed
+            appState.drafter.lastRawText = voiceText
+
+            overlayController.onConfirm = { [weak self] in
+                self?.confirmAndInject(platform: platform)
+            }
+            overlayController.onCancel = { [weak self] in
+                self?.cancelSession()
+            }
+            overlayController.finishStreaming()
+            appState.logger.log("👁 REVIEW | streaming complete, \(processed.count) chars")
         }
     }
 
     func cancelSession() {
+        streamingTask?.cancel()
+        streamingTask = nil
         if appState.speech.isListening {
             appState.speech.stopListening()
         }
@@ -351,47 +469,21 @@ class DraftSessionController: ObservableObject {
         let extractionPrompt = appState.promptStore.contextExtractionPrompt(userName: userName, appName: appName)
 
         do {
-            let context = try await AnthropicAPI.extractStructuredContext(
-                imageData: imageData,
-                auth: auth,
-                model: model,
-                systemPrompt: extractionPrompt
-            )
-            lastCapturedContext = context
-            appState.logger.log("📸 SESSION | vision complete — platform=\(context.platform ?? "nil") talkingTo=\(context.talkingTo ?? "nil")")
-        } catch {
-            appState.logger.log("⚠️ SESSION | vision failed: \(error.localizedDescription), proceeding voice-only")
-        }
-    }
-
-    private func waitForDraftAndShowReview(platform: PlatformFormatter) async {
-        // Poll for draft completion (check every 100ms, up to 30s)
-        for _ in 0..<300 {
-            if !appState.drafter.isDrafting {
-                break
+            // 4-second timeout — if vision is slow, proceed voice-only rather than stalling
+            let context = try await AnthropicAPI.withTimeout(seconds: 4) {
+                try await AnthropicAPI.extractStructuredContext(
+                    imageData: imageData,
+                    auth: auth,
+                    model: model,
+                    systemPrompt: extractionPrompt
+                )
             }
-            try? await Task.sleep(nanoseconds: 100_000_000)
+            lastCapturedContext = context
+            appState.logger.log("📸 SESSION | vision complete — platform=\(context.platform ?? "nil")")
+        } catch {
+            appState.logger.log("⚠️ SESSION | vision timeout/error: \(error.localizedDescription), proceeding voice-only")
+            // Proceed without context — voiceText alone is enough to draft
         }
-
-        guard !appState.drafter.draftedText.isEmpty else {
-            appState.logger.log("❌ SESSION | draft failed or empty")
-            overlayController.hide()
-            isInSession = false
-            return
-        }
-
-        let draftedText = appState.drafter.draftedText
-        appState.logger.log("👁 REVIEW | showing draft for review (\(draftedText.count) chars)")
-
-        // Wire Enter/Escape closures before showing review
-        overlayController.onConfirm = { [weak self] in
-            self?.confirmAndInject(platform: platform)
-        }
-        overlayController.onCancel = { [weak self] in
-            self?.cancelSession()
-        }
-
-        overlayController.showReview(text: draftedText)
     }
 
     /// Called by Enter key in review — injects the (possibly edited) text
