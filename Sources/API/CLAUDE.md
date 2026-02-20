@@ -148,6 +148,14 @@ static func draft(
     maxTokens: Int = 1024
 ) async throws -> String
 
+static func streamDraft(
+    rawText: String,
+    auth: AuthCredential,
+    model: String,                 // Required — no default
+    systemPrompt: String? = nil,
+    maxTokens: Int = 1024
+) -> AsyncThrowingStream<String, Error>  // Token-by-token streaming (used by DraftSessionController)
+
 static func extractStructuredContext(
     imageData: Data,
     auth: AuthCredential,
@@ -155,11 +163,24 @@ static func extractStructuredContext(
     systemPrompt: String           // Context extraction prompt (from PromptStore)
 ) async throws -> CapturedContext
 
+/// Run an async operation with a deadline. Throws CancellationError on timeout.
+static func withTimeout<T: Sendable>(seconds: Double, operation: () async throws -> T) async throws -> T
+
 // KeychainHelper
 static func save(key: String, value: String) -> Bool
 static func load(key: String) -> String?
 static func delete(key: String) -> Bool
 ```
+
+### streamDraft() — Token-by-Token Streaming
+
+Used by `DraftSessionController` for real-time text rendering in the floating overlay. Returns an `AsyncThrowingStream<String, Error>` that yields individual text deltas as they arrive from the SSE stream. First token appears ~200ms after request (vs 1-2s for the non-streaming `draft()` response).
+
+Implementation parses Anthropic's SSE format: filters for `data:` lines, decodes JSON, extracts `content_block_delta` events with `text_delta` type. Uses `URLSession.shared.bytes(for:)` for the streaming HTTP connection.
+
+### withTimeout() — Async Deadline
+
+Generic timeout wrapper using `withThrowingTaskGroup`. Races the operation against a `Task.sleep` timer — whichever finishes first wins, the other is cancelled. Used by `DraftSessionController` to cap vision processing at 8 seconds.
 
 ## Verification
 

@@ -185,6 +185,7 @@ class FloatingOverlayController: ObservableObject {
 struct OverlayContentView: View {
     @ObservedObject var speech: SpeechEngine
     @ObservedObject var controller: FloatingOverlayController
+    @FocusState private var isReviewFocused: Bool
 
     var body: some View {
         if controller.state == .review {
@@ -280,6 +281,7 @@ struct OverlayContentView: View {
     private var reviewView: some View {
         VStack(spacing: 0) {
             TextEditor(text: $controller.reviewText)
+                .focused($isReviewFocused)
                 .font(.system(size: 13))
                 .foregroundColor(.white)
                 .scrollContentBackground(.hidden)
@@ -310,6 +312,12 @@ struct OverlayContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.opacity(0.88))
+        .onAppear {
+            // Small delay lets the panel finish becoming key before we claim focus
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                isReviewFocused = true
+            }
+        }
     }
 }
 
@@ -325,6 +333,7 @@ class DraftSessionController: ObservableObject {
     private var lastCapturedContext: CapturedContext?
     private var sessionSourceApp: NSRunningApplication?
     private var streamingTask: Task<Void, Never>?
+    private var visionTask: Task<Void, Never>?
 
     /// Start a new recording session — called on first hotkey press
     func startSession(imageData: Data?, sourceApp: NSRunningApplication?) {
@@ -348,8 +357,8 @@ class DraftSessionController: ObservableObject {
 
         appState.logger.log("🚀 SESSION | started, voice recording + vision in parallel")
 
-        // Start vision processing in parallel
-        Task {
+        // Start vision processing in parallel (stored so we can await it before drafting)
+        visionTask = Task {
             await processVision(imageData: imageData, sourceApp: sourceApp)
         }
     }
@@ -370,13 +379,18 @@ class DraftSessionController: ObservableObject {
         }
 
         let platform = PlatformFormatter.detect(from: sessionSourceApp)
-        appState.logger.log("✨ SESSION | streaming draft [\(platform.rawValue)] — \(voiceText.count) chars")
 
         streamingTask = Task {
             guard let auth = AuthCredential.load() else {
                 cancelSession()
                 return
             }
+
+            // Wait for vision to complete (or its 8-second timeout) before checking context
+            await visionTask?.value
+            visionTask = nil
+
+            appState.logger.log("✨ SESSION | streaming draft [\(platform.rawValue)] — \(voiceText.count) chars, context: \(lastCapturedContext?.hasConversation == true ? "yes" : "no")")
 
             var systemPrompt = appState.styleEngine.buildSystemPrompt()
             if !platform.formattingInstructions.isEmpty {
@@ -387,7 +401,7 @@ class DraftSessionController: ObservableObject {
             if let context = lastCapturedContext, context.hasConversation {
                 userMessage = context.draftingPrompt(userInstructions: voiceText)
             } else {
-                userMessage = "The user said: \"\(voiceText.trimmingCharacters(in: .whitespacesAndNewlines))\"\n\nWrite the reply. Output ONLY the reply text, nothing else."
+                userMessage = "The user dictated the following message. Clean it up, fix grammar, and make it sound natural while preserving their intent and tone. Do NOT add greetings, sign-offs, or change the meaning. Output ONLY the cleaned-up message.\n\nDICTATED:\n\(voiceText.trimmingCharacters(in: .whitespacesAndNewlines))"
             }
 
             let model = appState.promptStore.config.model
@@ -444,6 +458,8 @@ class DraftSessionController: ObservableObject {
     }
 
     func cancelSession() {
+        visionTask?.cancel()
+        visionTask = nil
         streamingTask?.cancel()
         streamingTask = nil
         if appState.speech.isListening {
@@ -469,8 +485,8 @@ class DraftSessionController: ObservableObject {
         let extractionPrompt = appState.promptStore.contextExtractionPrompt(userName: userName, appName: appName)
 
         do {
-            // 4-second timeout — if vision is slow, proceed voice-only rather than stalling
-            let context = try await AnthropicAPI.withTimeout(seconds: 4) {
+            // 8-second timeout — vision calls typically take 2-6s; 4s was too tight and caused frequent timeouts
+            let context = try await AnthropicAPI.withTimeout(seconds: 8) {
                 try await AnthropicAPI.extractStructuredContext(
                     imageData: imageData,
                     auth: auth,
@@ -486,6 +502,21 @@ class DraftSessionController: ObservableObject {
         }
     }
 
+    /// Detect if a draft is Claude refusing/asking for clarification rather than an actual message
+    private func looksLikeRefusal(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let refusalPhrases = [
+            "i need the actual",
+            "i need more context",
+            "could you provide",
+            "i'd need to see",
+            "please provide",
+            "i can't write",
+            "i don't have enough"
+        ]
+        return refusalPhrases.contains { lower.contains($0) }
+    }
+
     /// Called by Enter key in review — injects the (possibly edited) text
     private func confirmAndInject(platform: PlatformFormatter) {
         guard isInSession else { return }
@@ -498,19 +529,23 @@ class DraftSessionController: ObservableObject {
         // Paste to target app
         pasteWithClipboardRestore(editedText)
 
-        // Record with REAL edit data — this is the whole point
-        appState.styleEngine.recordExample(
-            aiDraft: originalDraft,
-            userFinal: editedText,
-            platform: platform.rawValue
-        )
-        appState.feedbackStore.record(
-            rawText: appState.speech.finalTranscript,
-            draftedText: originalDraft,
-            acceptedText: editedText,
-            action: .paste,
-            exampleCount: appState.styleEngine.exampleCount
-        )
+        // Record with REAL edit data — but skip refusals to avoid poisoning style training
+        if !looksLikeRefusal(originalDraft) {
+            appState.styleEngine.recordExample(
+                aiDraft: originalDraft,
+                userFinal: editedText,
+                platform: platform.rawValue
+            )
+            appState.feedbackStore.record(
+                rawText: appState.speech.finalTranscript,
+                draftedText: originalDraft,
+                acceptedText: editedText,
+                action: .paste,
+                exampleCount: appState.styleEngine.exampleCount
+            )
+        } else {
+            appState.logger.log("⚠️ STYLE | skipping refusal example — not recording as training data")
+        }
 
         // Check if style refinement is needed
         if appState.styleEngine.shouldRefineNow(), let auth = appState.drafter.getAuth() {
