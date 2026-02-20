@@ -46,13 +46,6 @@ struct AgentTab: View {
                 .padding(.bottom, 20)
         }
         .transaction { $0.animation = nil }
-        .onAppear {
-            // Wire insight callback: cards proposed via native chat appear in the
-            // same suggestions list as cards from background analysis.
-            chatEngine.onInsightProposed = { [weak orchestrator] card in
-                orchestrator?.addInsight(card)
-            }
-        }
     }
 
     // MARK: - Header
