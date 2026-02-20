@@ -25,6 +25,7 @@ class DraftAppState: ObservableObject {
         drafter.promptStore = promptStore
         styleEngine.promptStore = promptStore
         contextCapture.promptStore = promptStore
+        chatEngine.promptStore = promptStore
 
         // Start orchestrator agent subprocess
         orchestrator.logger = logger

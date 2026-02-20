@@ -59,6 +59,8 @@ class StreamingChatEngine: ObservableObject {
     // Conversation history for multi-turn context (Anthropic messages format)
     private var history: [[String: Any]] = []
 
+    var promptStore: PromptStore?
+
     private let dataDir: URL
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
     private static let apiVersion = "2023-06-01"
@@ -73,6 +75,8 @@ class StreamingChatEngine: ObservableObject {
     // MARK: - Public Interface
 
     func send(text: String, auth: AuthCredential) async {
+        guard !isResponding else { return }
+
         let userMessage = ChatMessage(role: .user, text: text)
         messages.append(userMessage)
         history.append(["role": "user", "content": text])
@@ -147,6 +151,7 @@ class StreamingChatEngine: ObservableObject {
         var pendingToolName = ""
         var pendingToolInputBuffer = ""
         var encounteredToolUse = false
+        var lastCompletedToolId = ""
 
         do {
             for try await event in streamRequest(systemPrompt: systemPrompt, auth: auth) {
@@ -165,6 +170,7 @@ class StreamingChatEngine: ObservableObject {
                     pendingToolInputBuffer += partial
 
                 case .toolUseStop:
+                    lastCompletedToolId = pendingToolId
                     if pendingToolName == "propose_prompt_change" {
                         handleProposePromptChange(
                             toolId: pendingToolId,
@@ -201,20 +207,21 @@ class StreamingChatEngine: ObservableObject {
             }
             // We already handled tool calls above — record a minimal tool_use block for history.
             // (We only support propose_prompt_change, so we can use a generic result.)
+            let toolId = lastCompletedToolId.isEmpty ? "tool_\(UUID().uuidString.prefix(8))" : lastCompletedToolId
             assistantContent.append([
                 "type": "tool_use",
-                "id": pendingToolId.isEmpty ? "tool_\(UUID().uuidString.prefix(8))" : pendingToolId,
+                "id": toolId,
                 "name": "propose_prompt_change",
                 "input": [:]
             ])
             history.append(["role": "assistant", "content": assistantContent])
 
-            // Add tool result
+            // Add tool result — tool_use_id MUST match the id above
             history.append([
                 "role": "user",
                 "content": [[
                     "type": "tool_result",
-                    "tool_use_id": pendingToolId.isEmpty ? "tool_\(UUID().uuidString.prefix(8))" : pendingToolId,
+                    "tool_use_id": toolId,
                     "content": "Card emitted successfully."
                 ]]
             ])
@@ -269,8 +276,9 @@ class StreamingChatEngine: ObservableObject {
                     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     auth.apply(to: &request)
 
+                    let model = self.promptStore?.config.model ?? DefaultPrompts.model
                     let body: [String: Any] = [
-                        "model": "claude-haiku-4-20250514",
+                        "model": model,
                         "max_tokens": 2048,
                         "stream": true,
                         "system": systemPrompt,
