@@ -33,4 +33,39 @@ struct InsightCard: Identifiable {
         default: return promptKey
         }
     }
+
+    // MARK: - Shared Tool Definition
+
+    /// Anthropic tool schema for propose_prompt_change — used by both
+    /// StreamingChatEngine (chat) and AnalysisEngine (background analysis).
+    static let toolDefinition: [String: Any] = [
+        "name": "propose_prompt_change",
+        "description": "Propose a focused prompt improvement based on feedback patterns.",
+        "input_schema": [
+            "type": "object",
+            "properties": [
+                "prompt_key": ["type": "string", "description": "Key in prompts.json to change"],
+                "saw": ["type": "string", "description": "Evidence from feedback data"],
+                "why": ["type": "string", "description": "Why the current prompt is wrong"],
+                "current_value": ["type": "string", "description": "Current prompt value (relevant section)"],
+                "proposed_value": ["type": "string", "description": "Full new value for the key"]
+            ],
+            "required": ["prompt_key", "saw", "why", "proposed_value"]
+        ]
+    ]
+
+    /// Create an InsightCard from a tool call's parsed JSON input.
+    /// Returns nil if the required `prompt_key` field is missing.
+    static func from(toolId: String, input: [String: Any]) -> InsightCard? {
+        guard let promptKey = input["prompt_key"] as? String else { return nil }
+        return InsightCard(
+            suggestionId: toolId,
+            promptKey: promptKey,
+            saw: input["saw"] as? String ?? "",
+            why: input["why"] as? String ?? "",
+            currentValue: input["current_value"] as? String ?? "",
+            proposedValue: input["proposed_value"] as? String ?? "",
+            changeDescription: input["why"] as? String ?? ""
+        )
+    }
 }

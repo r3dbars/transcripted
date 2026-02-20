@@ -35,14 +35,6 @@ class DraftAppState: ObservableObject {
             analysisEngine?.addInsight(card)
         }
 
-        // Pre-warm the Anthropic API connection to eliminate TLS handshake
-        // latency on the first real draft. Fire-and-forget.
-        if let auth = AuthCredential.load() {
-            Task.detached(priority: .background) {
-                await AnthropicAPI.pingWarmup(auth: auth)
-            }
-        }
-
         // Listen for prompt changes applied by the analysis engine
         if promptsObserver == nil {
             promptsObserver = NotificationCenter.default.addObserver(

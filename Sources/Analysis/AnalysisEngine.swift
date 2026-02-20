@@ -117,7 +117,6 @@ class AnalysisEngine: ObservableObject {
 
     private func scheduleDebounce() {
         debounceTask?.cancel()
-        let pending = pendingNewCount
         debounceTask = Task { [weak self] in
             guard let self = self else { return }
             try? await Task.sleep(nanoseconds: UInt64(self.debounceSeconds * 1_000_000_000))
@@ -127,7 +126,6 @@ class AnalysisEngine: ObservableObject {
             self.pendingNewCount = 0
             await self.runAnalysis(newEntryCount: count)
         }
-        _ = pending  // suppress warning
     }
 
     // MARK: - Analysis
@@ -145,7 +143,7 @@ class AnalysisEngine: ObservableObject {
             and propose 1–3 focused prompt changes using the propose_prompt_change tool.
             """
 
-        let tools: [[String: Any]] = [proposePropmpChangeTool]
+        let tools: [[String: Any]] = [InsightCard.toolDefinition]
 
         do {
             let result = try await callAPIWithToolUse(
@@ -237,18 +235,9 @@ class AnalysisEngine: ObservableObject {
                       let name = block["name"] as? String,
                       name == "propose_prompt_change",
                       let input = block["input"] as? [String: Any],
-                      let promptKey = input["prompt_key"] as? String
+                      let card = InsightCard.from(toolId: toolId, input: input)
                 else { continue }
 
-                let card = InsightCard(
-                    suggestionId: toolId,
-                    promptKey: promptKey,
-                    saw: input["saw"] as? String ?? "",
-                    why: input["why"] as? String ?? "",
-                    currentValue: input["current_value"] as? String ?? "",
-                    proposedValue: input["proposed_value"] as? String ?? "",
-                    changeDescription: input["why"] as? String ?? ""
-                )
                 cards.append(card)
 
                 toolResults.append([
@@ -266,24 +255,6 @@ class AnalysisEngine: ObservableObject {
 
         return cards
     }
-
-    // MARK: - Tool Definition
-
-    private let proposePropmpChangeTool: [String: Any] = [
-        "name": "propose_prompt_change",
-        "description": "Propose a focused prompt improvement based on feedback patterns.",
-        "input_schema": [
-            "type": "object",
-            "properties": [
-                "prompt_key": ["type": "string", "description": "Key in prompts.json to change"],
-                "saw": ["type": "string", "description": "Evidence from feedback data"],
-                "why": ["type": "string", "description": "Why the current prompt is wrong"],
-                "current_value": ["type": "string", "description": "Current prompt value (relevant section)"],
-                "proposed_value": ["type": "string", "description": "Full new value for the key"]
-            ],
-            "required": ["prompt_key", "saw", "why", "proposed_value"]
-        ]
-    ]
 
     // MARK: - File I/O
 

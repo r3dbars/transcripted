@@ -151,20 +151,6 @@ struct AnthropicAPI {
         }
     }
 
-    // MARK: - Connection Warmup
-
-    /// Fire a minimal 1-token request on app launch to pre-establish the TLS connection.
-    /// Eliminates the ~200-400ms TLS handshake penalty on the first real draft.
-    static func pingWarmup(auth: AuthCredential) async {
-        _ = try? await draft(
-            rawText: "hi",
-            auth: auth,
-            model: sonnetModel,
-            systemPrompt: nil,
-            maxTokens: 1
-        )
-    }
-
     // MARK: - Vision Context Extraction
 
     /// Extract full conversation context from a screenshot as plain text, parsed into CapturedContext
