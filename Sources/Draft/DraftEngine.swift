@@ -23,7 +23,7 @@ class DraftEngine: ObservableObject {
     var promptStore: PromptStore?
 
     /// The raw text from the user's last draft request — exposed for FeedbackStore logging.
-    private(set) var lastRawText = ""
+    var lastRawText = ""
 
     func checkCredential() {
         hasCredential = AuthCredential.load() != nil

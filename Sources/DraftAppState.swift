@@ -13,7 +13,7 @@ class DraftAppState: ObservableObject {
     let logger = AppLogger()
     let previousAppTracker = PreviousAppTracker()
     let contextCapture = ContextCaptureEngine()
-    let orchestrator = OrchestratorBridge()
+    let analysisEngine = AnalysisEngine()
     let chatEngine = StreamingChatEngine()
 
     private var promptsObserver: NSObjectProtocol?
@@ -27,11 +27,15 @@ class DraftAppState: ObservableObject {
         contextCapture.promptStore = promptStore
         chatEngine.promptStore = promptStore
 
-        // Start orchestrator agent subprocess
-        orchestrator.logger = logger
-        orchestrator.start()
+        // Start native analysis engine (replaces Python agent subprocess)
+        analysisEngine.start()
 
-        // Listen for prompt changes from the agent
+        // Wire chat engine → analysis engine for insight card passthrough
+        chatEngine.onInsightProposed = { [weak analysisEngine] card in
+            analysisEngine?.addInsight(card)
+        }
+
+        // Listen for prompt changes applied by the analysis engine
         if promptsObserver == nil {
             promptsObserver = NotificationCenter.default.addObserver(
                 forName: .promptsDidChange,
@@ -40,16 +44,16 @@ class DraftAppState: ObservableObject {
             ) { [weak self] _ in
                 Task { @MainActor [weak self] in
                     self?.promptStore.reload()
-                    self?.logger.log("🤖 AGENT | prompts.json reloaded after agent change")
+                    self?.logger.log("🤖 AGENT | prompts.json reloaded after analysis change")
                 }
             }
         }
 
-        logger.log("🚀 APP LAUNCHED | auth: \(drafter.authModeName), style: \(styleEngine.exampleCount) examples, model: \(promptStore.config.model), hotkey registered, agent started")
+        logger.log("🚀 APP LAUNCHED | auth: \(drafter.authModeName), style: \(styleEngine.exampleCount) examples, model: \(promptStore.config.model), hotkey registered, analysis engine started")
     }
 
     func shutdown() {
-        orchestrator.stop()
+        analysisEngine.stop()
         contextCapture.unregisterHotkey()
         if let observer = promptsObserver {
             NotificationCenter.default.removeObserver(observer)

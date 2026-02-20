@@ -1,8 +1,36 @@
-# Orchestrator Agent
+# ⚠️ DEPRECATED — DO NOT USE
 
-## What This Does
+The Python orchestrator agent has been replaced by native Swift `AnalysisEngine`
+(see `Sources/Analysis/AnalysisEngine.swift`).
 
-Autonomous Python agent that watches `feedback.jsonl` for new accepted drafts, uses Claude Agent SDK (Sonnet) to analyze feedback patterns, and proposes prompt improvements as insight cards streamed to Draft's Agent tab via SSE.
+The files in this directory are preserved for reference only. The Python subprocess
+is no longer launched by the app. Do not modify these files.
+
+## Why replaced?
+
+- Subprocess crashes were the #1 reliability failure mode
+- Python cold start added 2-5s startup latency
+- Port 19832 could conflict with other processes
+- Required a venv with external dependencies
+- Native Swift implementation does everything in-process with zero overhead
+
+## What replaced what?
+
+| Python | Swift |
+|--------|-------|
+| agent/watcher.py | DispatchSource in AnalysisEngine |
+| agent/orchestrator.py | AnalysisEngine.runAnalysis() |
+| agent/server.py SSE | @Published var insights |
+| agent/chat.py | StreamingChatEngine |
+| OrchestratorBridge.swift | AnalysisEngine.swift |
+
+---
+
+# Original Documentation (preserved for reference)
+
+## What This Did
+
+Autonomous Python agent that watched `feedback.jsonl` for new accepted drafts, used Claude Agent SDK (Sonnet) to analyze feedback patterns, and proposed prompt improvements as insight cards streamed to Draft's Agent tab via SSE.
 
 ## Architecture
 
@@ -22,54 +50,3 @@ prompts.py       — Agent system prompt (personality + rules)
 - **Apply**: `POST /apply` — writes change to `prompts.json`, logs to `suggestion_log.jsonl`
 - **Skip**: `POST /skip` — logs to `suggestion_log.jsonl` for meta-learning
 - **Health**: `GET /health` — returns status, PID, uptime, last analysis time
-
-## Tools — Minimal Architecture
-
-Only 1 custom MCP tool. File reading uses Claude Code's built-in tools (Read, Bash, Glob).
-
-| Tool | Purpose |
-|------|---------|
-| `propose_prompt_change` | Emit an insight card to SSE queue |
-
-All other file access (feedback.jsonl, prompts.json, style.md, suggestion_log.jsonl) is handled
-by Claude Code's built-in Read tool. The system prompt tells the agent where the files live.
-The agent figures out how to read and analyze them on its own.
-
-## Data Files
-
-All in `~/Library/Application Support/Draft/`:
-- `feedback.jsonl` — Read by agent. Written by Swift (FeedbackStore).
-- `prompts.json` — Read and written by agent (on Apply). Read by Swift (PromptStore).
-- `style.md` — Read by agent (context only). Written by Swift (StyleEngine).
-- `suggestion_log.jsonl` — Written by agent. Tracks Apply/Skip decisions.
-
-## Trigger Policy
-
-- Watcher polls every 5 seconds
-- Debounce: 30 seconds of quiet after last new entry
-- Minimum 3 new entries to trigger analysis
-- Budget cap: $0.50 per analysis run (Sonnet)
-
-## Setup
-
-```bash
-cd /Users/****/Draft
-pip install -r agent/requirements.txt
-```
-
-## Running Standalone
-
-```bash
-cd /Users/****/Draft
-python3 -m agent.main
-```
-
-Test SSE: `curl -N http://127.0.0.1:19832/events`
-Test health: `curl http://127.0.0.1:19832/health`
-
-## Critical Rules
-
-- NEVER remove `{STYLE_SUMMARY}`, `{USER_NAME}`, `{APP_NAME}` placeholders from prompts
-- `propose_prompt_change` does NOT write to disk — it only pushes to the SSE queue
-- Actual writes happen only via `/apply` endpoint (user clicked Apply)
-- The agent reads `suggestion_log.jsonl` before proposing to avoid re-proposing skipped suggestions
