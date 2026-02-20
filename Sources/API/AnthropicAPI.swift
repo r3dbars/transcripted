@@ -242,6 +242,20 @@ struct AnthropicAPI {
 
     // MARK: - Shared Response Parsing
 
+    /// Run an async operation with a deadline. Throws CancellationError on timeout.
+    static func withTimeout<T: Sendable>(seconds: Double, operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw CancellationError()
+            }
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
+        }
+    }
+
     private static func parseResponse(data: Data, response: URLResponse, auth: AuthCredential) throws -> String {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AnthropicAPIError.invalidResponse
