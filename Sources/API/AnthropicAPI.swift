@@ -50,6 +50,7 @@ enum AnthropicAPIError: LocalizedError {
     case apiError(String)
     case networkError(String)
     case subscriptionTokenExpired  // 401 when using subscription token
+    case timeout  // Request exceeded the deadline
 
     var errorDescription: String? {
         switch self {
@@ -60,6 +61,8 @@ enum AnthropicAPIError: LocalizedError {
         case .networkError(let msg): return "Network error: \(msg)"
         case .subscriptionTokenExpired:
             return "Claude subscription token expired — run `claude setup-token` and update in settings"
+        case .timeout:
+            return "Request exceeded the deadline"
         }
     }
 }
@@ -85,6 +88,81 @@ struct AnthropicAPI {
             messages: [AnthropicMessage(role: "user", content: rawText)]
         )
         return try await sendRequest(body: body, auth: auth)
+    }
+
+    // MARK: - Streaming Draft
+
+    /// Stream a draft response token by token. Used by DraftSessionController for
+    /// real-time text rendering in the overlay (first token ~200ms vs 1-2s for full response).
+    static func streamDraft(
+        rawText: String,
+        auth: AuthCredential,
+        model: String,
+        systemPrompt: String? = nil,
+        maxTokens: Int = 1024
+    ) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    var request = URLRequest(url: endpoint)
+                    request.httpMethod = "POST"
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
+                    auth.apply(to: &request)
+
+                    var body: [String: Any] = [
+                        "model": model,
+                        "max_tokens": maxTokens,
+                        "stream": true,
+                        "messages": [["role": "user", "content": rawText]]
+                    ]
+                    if let system = systemPrompt { body["system"] = system }
+                    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                        var errData = Data()
+                        for try await byte in bytes { errData.append(byte) }
+                        let msg = (try? JSONDecoder().decode(AnthropicErrorResponse.self, from: errData))?.error.message
+                            ?? "HTTP \(http.statusCode)"
+                        continuation.finish(throwing: AnthropicAPIError.apiError(msg))
+                        return
+                    }
+
+                    for try await line in bytes.lines {
+                        if line.hasPrefix("data: ") {
+                            let json = String(line.dropFirst(6))
+                            if json == "[DONE]" { break }
+                            guard let data = json.data(using: .utf8),
+                                  let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                                  dict["type"] as? String == "content_block_delta",
+                                  let delta = dict["delta"] as? [String: Any],
+                                  delta["type"] as? String == "text_delta",
+                                  let text = delta["text"] as? String
+                            else { continue }
+                            continuation.yield(text)
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
+    // MARK: - Connection Warmup
+
+    /// Fire a minimal 1-token request on app launch to pre-establish the TLS connection.
+    /// Eliminates the ~200-400ms TLS handshake penalty on the first real draft.
+    static func pingWarmup(auth: AuthCredential) async {
+        _ = try? await draft(
+            rawText: "hi",
+            auth: auth,
+            model: sonnetModel,
+            systemPrompt: nil,
+            maxTokens: 1
+        )
     }
 
     // MARK: - Vision Context Extraction

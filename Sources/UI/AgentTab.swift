@@ -1,20 +1,19 @@
 // AgentTab.swift
-// Third tab showing insight cards + free-form chat with the orchestrator agent.
+// Third tab showing insight cards + free-form chat with the native analysis engine.
 //
-// Chat now uses StreamingChatEngine (native Swift streaming) instead of routing
-// through the Python agent subprocess. This removes the Python cold-start penalty
-// and the SSE relay hop from interactive chat, making responses feel instant.
+// Chat uses StreamingChatEngine (native Swift streaming) for direct Anthropic API
+// access — no Python subprocess, no SSE relay hop, no cold start.
 //
-// Background analysis (OrchestratorBridge) still runs in Python — it needs the
-// Claude Agent SDK for multi-step analysis with file tools. Insight cards from
-// analysis appear in the Suggestions section the same as before.
+// Background analysis uses AnalysisEngine (native Swift, DispatchSource file watching)
+// which replaces the Python orchestrator entirely. Insight cards from analysis
+// appear in the Suggestions section the same as before.
 //
 // Layout: header → collapsible suggestions → chat thread → input bar.
 
 import SwiftUI
 
 struct AgentTab: View {
-    @ObservedObject var orchestrator: OrchestratorBridge
+    @ObservedObject var orchestrator: AnalysisEngine
     @ObservedObject var chatEngine: StreamingChatEngine
     var auth: AuthCredential?
 
