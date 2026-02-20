@@ -1,14 +1,23 @@
 // AgentTab.swift
 // Third tab showing insight cards + free-form chat with the orchestrator agent.
 //
+// Chat now uses StreamingChatEngine (native Swift streaming) instead of routing
+// through the Python agent subprocess. This removes the Python cold-start penalty
+// and the SSE relay hop from interactive chat, making responses feel instant.
+//
+// Background analysis (OrchestratorBridge) still runs in Python — it needs the
+// Claude Agent SDK for multi-step analysis with file tools. Insight cards from
+// analysis appear in the Suggestions section the same as before.
+//
 // Layout: header → collapsible suggestions → chat thread → input bar.
-// Chat messages stream via SSE from the Python agent. Insight cards from both
-// autonomous analysis and chat-triggered proposals appear in the suggestions section.
 
 import SwiftUI
 
 struct AgentTab: View {
     @ObservedObject var orchestrator: OrchestratorBridge
+    @ObservedObject var chatEngine: StreamingChatEngine
+    var auth: AuthCredential?
+
     @State private var chatInput = ""
     @State private var isInsightsExpanded = true
     @State private var expandedTools: Set<String> = []
@@ -22,8 +31,9 @@ struct AgentTab: View {
                 .padding(.bottom, 12)
 
             // Insight cards section (collapsible, only if cards exist)
-            if !orchestrator.insights.isEmpty {
-                insightsSection
+            let allInsights = orchestrator.insights
+            if !allInsights.isEmpty {
+                insightsSection(insights: allInsights)
                     .padding(.horizontal, 20)
 
                 Divider()
@@ -48,31 +58,46 @@ struct AgentTab: View {
 
             Spacer()
 
-            // Status indicator
-            HStack(spacing: 6) {
-                if orchestrator.isAnalyzing {
-                    ProgressView()
-                        .scaleEffect(0.5)
-                        .frame(width: 10, height: 10)
-                } else {
-                    Circle()
-                        .fill(orchestrator.isConnected ? Color.green : Color.orange)
-                        .frame(width: 8, height: 8)
+            // Status indicators
+            HStack(spacing: 12) {
+                // Chat status
+                if chatEngine.isResponding {
+                    HStack(spacing: 4) {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .frame(width: 10, height: 10)
+                        Text("Thinking...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
-                Text(orchestrator.agentStatus)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+
+                // Background analysis status
+                HStack(spacing: 6) {
+                    if orchestrator.isAnalyzing {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .frame(width: 10, height: 10)
+                    } else {
+                        Circle()
+                            .fill(orchestrator.isConnected ? Color.green : Color.orange)
+                            .frame(width: 8, height: 8)
+                    }
+                    Text(orchestrator.agentStatus)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
         }
     }
 
     // MARK: - Suggestions (Collapsible)
 
-    private var insightsSection: some View {
+    private func insightsSection(insights: [InsightCard]) -> some View {
         DisclosureGroup(isExpanded: $isInsightsExpanded) {
             ScrollView {
                 VStack(spacing: 12) {
-                    ForEach(orchestrator.insights.reversed()) { card in
+                    ForEach(insights.reversed()) { card in
                         insightCardView(card)
                     }
                 }
@@ -83,7 +108,7 @@ struct AgentTab: View {
             HStack(spacing: 4) {
                 Text("Suggestions")
                     .font(.headline)
-                Text("(\(orchestrator.insights.count))")
+                Text("(\(insights.count))")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -94,44 +119,41 @@ struct AgentTab: View {
 
     private var chatSection: some View {
         VStack(spacing: 8) {
-            // Message thread — always render the ScrollView with LazyVStack
-            // (no if/else structural switch, which causes implicit transition animations)
             ZStack {
-                if orchestrator.chatMessages.isEmpty {
+                if chatEngine.messages.isEmpty {
                     chatEmptyState
                 }
 
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 8) {
-                            ForEach(orchestrator.chatMessages) { msg in
+                            ForEach(chatEngine.messages) { msg in
                                 chatBubble(msg)
                                     .id(msg.id)
                             }
 
                             // Typing indicator while waiting for first token
-                            if orchestrator.isChatResponding,
-                               !orchestrator.chatMessages.contains(where: { $0.isStreaming }) {
+                            if chatEngine.isResponding,
+                               !chatEngine.messages.contains(where: { $0.isStreaming && $0.role == .assistant }) {
                                 typingIndicator
                                     .id("typing")
                             }
                         }
                         .padding(.vertical, 4)
                     }
-                    .opacity(orchestrator.chatMessages.isEmpty ? 0 : 1)
-                    .onChange(of: orchestrator.chatMessages.count) { _, _ in
-                        if let last = orchestrator.chatMessages.last {
+                    .opacity(chatEngine.messages.isEmpty ? 0 : 1)
+                    .onChange(of: chatEngine.messages.count) { _, _ in
+                        if let last = chatEngine.messages.last {
                             proxy.scrollTo(last.id, anchor: .bottom)
                         }
                     }
                 }
             }
 
-            // Input bar
             chatInputBar
         }
-        .animation(nil, value: orchestrator.chatMessages.count)
-        .animation(nil, value: orchestrator.isChatResponding)
+        .animation(nil, value: chatEngine.messages.count)
+        .animation(nil, value: chatEngine.isResponding)
     }
 
     private var chatEmptyState: some View {
@@ -164,20 +186,20 @@ struct AgentTab: View {
                 .textFieldStyle(.roundedBorder)
                 .focused($isChatInputFocused)
                 .onSubmit { sendChat() }
-                .disabled(orchestrator.isChatResponding || !orchestrator.isConnected)
+                .disabled(chatEngine.isResponding || auth == nil)
 
             Button(action: { sendChat() }) {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.title2)
             }
             .disabled(chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                      || orchestrator.isChatResponding
-                      || !orchestrator.isConnected)
+                      || chatEngine.isResponding
+                      || auth == nil)
             .buttonStyle(.plain)
             .foregroundColor(.purple)
 
-            if !orchestrator.chatMessages.isEmpty {
-                Button(action: { orchestrator.clearChat() }) {
+            if !chatEngine.messages.isEmpty {
+                Button(action: { chatEngine.clear() }) {
                     Image(systemName: "trash")
                         .font(.body)
                 }
@@ -192,14 +214,12 @@ struct AgentTab: View {
     @ViewBuilder
     private func chatBubble(_ message: ChatMessage) -> some View {
         if message.role == .tool {
-            // Clickable tool indicator — expands to show detail
             toolIndicator(message)
         } else {
             HStack {
                 if message.role == .user { Spacer(minLength: 60) }
 
                 VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
-                    // Plain text during streaming (fast); markdown only after complete
                     messageText(message.text)
                         .font(.body)
                         .padding(.horizontal, 12)
@@ -233,13 +253,7 @@ struct AgentTab: View {
         }
     }
 
-    // MARK: - Message Text Rendering
-
     private func messageText(_ text: String) -> some View {
-        // Plain Text only — AttributedString(markdown:) created a NEW object every
-        // SwiftUI evaluation pass, and SwiftUI couldn't diff them efficiently.
-        // Combined with .textSelection(.enabled) (NSTextView) and dynamic NSColor
-        // backgrounds, this produced an infinite layout feedback loop (99% CPU).
         Text(text)
     }
 
@@ -295,17 +309,18 @@ struct AgentTab: View {
 
     private func sendChat() {
         let text = chatInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty, let auth = auth else { return }
         chatInput = ""
-        orchestrator.sendChatMessage(text)
+        Task {
+            await chatEngine.send(text: text, auth: auth)
+        }
     }
 
-    // MARK: - Insight Card (unchanged from original)
+    // MARK: - Insight Card
 
     @ViewBuilder
     private func insightCardView(_ card: InsightCard) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Card header — prompt key label + status badge
             HStack {
                 Text(card.promptKeyLabel)
                     .font(.caption)
@@ -331,7 +346,6 @@ struct AgentTab: View {
                 }
             }
 
-            // SAW section
             VStack(alignment: .leading, spacing: 4) {
                 Text("SAW")
                     .font(.caption2)
@@ -342,7 +356,6 @@ struct AgentTab: View {
                     .foregroundColor(.primary)
             }
 
-            // WHY section
             VStack(alignment: .leading, spacing: 4) {
                 Text("WHY")
                     .font(.caption2)
@@ -353,7 +366,6 @@ struct AgentTab: View {
                     .foregroundColor(.primary)
             }
 
-            // CHANGE section — diff view
             VStack(alignment: .leading, spacing: 4) {
                 Text("CHANGE")
                     .font(.caption2)
@@ -368,7 +380,6 @@ struct AgentTab: View {
                     .cornerRadius(6)
             }
 
-            // Action buttons (only for pending cards)
             if card.status == .pending {
                 HStack(spacing: 12) {
                     Button(action: { orchestrator.apply(card) }) {

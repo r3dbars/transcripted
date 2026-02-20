@@ -20,7 +20,7 @@ from claude_agent_sdk import (
     ToolUseBlock,
 )
 
-from .agent_lock import agent_lock
+from .agent_lock import analysis_lock
 from .prompts import ORCHESTRATOR_SYSTEM_PROMPT
 from .tools import DRAFT_DATA_DIR, draft_tools_server, card_queue
 from .server import set_analysis_state
@@ -41,7 +41,7 @@ async def run_analysis(new_entry_count: int, total_lines: int) -> None:
     cost = 0.0
     turns = 0
 
-    async with agent_lock:
+    async with analysis_lock:
         # Strip Claude Code session env vars so the Agent SDK CLI doesn't refuse to start
         os.environ.pop("CLAUDECODE", None)
         os.environ.pop("CLAUDE_CODE_SESSION", None)

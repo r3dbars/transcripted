@@ -15,7 +15,11 @@ struct MenuBarPanelView: View {
                 StyleProfileView(styleEngine: appState.styleEngine)
                     .tabItem { Label("Style", systemImage: "person.text.rectangle") }
 
-                AgentTab(orchestrator: appState.orchestrator)
+                AgentTab(
+                    orchestrator: appState.orchestrator,
+                    chatEngine: appState.chatEngine,
+                    auth: AuthCredential.load()
+                )
                     .tabItem { Label("Agent", systemImage: "brain.head.profile") }
             }
             .transaction { $0.animation = nil }
