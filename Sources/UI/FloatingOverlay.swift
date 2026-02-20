@@ -41,22 +41,6 @@ class FloatingOverlayPanel: NSPanel {
 
 // MARK: - Overlay Controller
 
-// MARK: - Timeout Helper
-
-/// Run an async operation with a deadline. Throws `CancellationError` if it times out.
-func withTimeout<T: Sendable>(seconds: Double, operation: @escaping @Sendable () async throws -> T) async throws -> T {
-    try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask { try await operation() }
-        group.addTask {
-            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            throw CancellationError()
-        }
-        let result = try await group.next()!
-        group.cancelAll()
-        return result
-    }
-}
-
 @MainActor
 class FloatingOverlayController: ObservableObject {
     enum OverlayState {
@@ -340,6 +324,7 @@ class DraftSessionController: ObservableObject {
 
     private var lastCapturedContext: CapturedContext?
     private var sessionSourceApp: NSRunningApplication?
+    private var streamingTask: Task<Void, Never>?
 
     /// Start a new recording session — called on first hotkey press
     func startSession(imageData: Data?, sourceApp: NSRunningApplication?) {
@@ -387,7 +372,7 @@ class DraftSessionController: ObservableObject {
         let platform = PlatformFormatter.detect(from: sessionSourceApp)
         appState.logger.log("✨ SESSION | streaming draft [\(platform.rawValue)] — \(voiceText.count) chars")
 
-        Task {
+        streamingTask = Task {
             guard let auth = AuthCredential.load() else {
                 cancelSession()
                 return
@@ -418,6 +403,7 @@ class DraftSessionController: ObservableObject {
 
             do {
                 for try await token in stream {
+                    guard !Task.isCancelled else { break }
                     if !gotFirstToken {
                         gotFirstToken = true
                         overlayController.startStreaming(near: sessionSourceApp)
@@ -426,16 +412,19 @@ class DraftSessionController: ObservableObject {
                     overlayController.appendStreamToken(token)
                 }
             } catch {
+                guard !Task.isCancelled else { return }
                 appState.logger.log("❌ SESSION | stream error: \(error.localizedDescription)")
                 overlayController.hide()
                 isInSession = false
                 return
             }
 
-            guard !fullText.isEmpty else {
-                appState.logger.log("❌ SESSION | empty draft")
-                overlayController.hide()
-                isInSession = false
+            guard !Task.isCancelled, !fullText.isEmpty else {
+                if !Task.isCancelled {
+                    appState.logger.log("❌ SESSION | empty draft")
+                    overlayController.hide()
+                    isInSession = false
+                }
                 return
             }
 
@@ -455,6 +444,8 @@ class DraftSessionController: ObservableObject {
     }
 
     func cancelSession() {
+        streamingTask?.cancel()
+        streamingTask = nil
         if appState.speech.isListening {
             appState.speech.stopListening()
         }
@@ -479,7 +470,7 @@ class DraftSessionController: ObservableObject {
 
         do {
             // 4-second timeout — if vision is slow, proceed voice-only rather than stalling
-            let context = try await withTimeout(seconds: 4) {
+            let context = try await AnthropicAPI.withTimeout(seconds: 4) {
                 try await AnthropicAPI.extractStructuredContext(
                     imageData: imageData,
                     auth: auth,
