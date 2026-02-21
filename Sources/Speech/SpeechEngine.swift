@@ -34,6 +34,9 @@ class SpeechEngine: ObservableObject {
     private var doneTimer: Timer?
     private let doneThreshold: TimeInterval = 2.5
 
+    // Graceful stop: wait for isFinal instead of canceling immediately
+    private var pendingGracefulStop = false
+
     // Tracks how much of the current task's cumulative text we've already committed
     private var committedPrefixLength = 0
     private var committedPrefixContent = ""   // The actual text content at commit time — for content shift detection
@@ -169,7 +172,11 @@ class SpeechEngine: ObservableObject {
                 sumOfSquares += sample * sample
             }
             let rms = sqrt(sumOfSquares / Float(max(1, frameLength)))
-            let normalized = min(1.0, rms * 5.0)
+            // Logarithmic (dB) scaling for real dynamic range across whisper → loud speech
+            let dB = rms > 0.0001 ? 20.0 * log10(rms) : -60.0
+            let floorDB: Float = -50.0   // silence threshold
+            let ceilDB: Float = -6.0     // loud speech ceiling
+            let normalized = max(0.0, min(1.0, (dB - floorDB) / (ceilDB - floorDB)))
 
             Task { @MainActor [weak self] in
                 self?.audioLevel = normalized
@@ -214,6 +221,56 @@ class SpeechEngine: ObservableObject {
         lastSeenFullText = ""
         lastVolatileSnapshot = ""
         statusMessage = "Ready — tap Record"
+    }
+
+    /// Graceful stop: signals end-of-audio and waits for the recognizer to process remaining buffer.
+    /// Returns after isFinal fires (capturing every last word) or after 500ms timeout.
+    func stopListeningGracefully() async {
+        guard isListening else { return }
+        log("⏹️ GRACEFUL STOP | requesting...")
+
+        silenceTimer?.invalidate()
+        silenceTimer = nil
+        doneTimer?.invalidate()
+        doneTimer = nil
+
+        // Stop feeding new audio, but DON'T cancel the task yet
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        recognitionRequest?.endAudio()
+        audioLevel = 0
+
+        // Signal that the next isFinal should commit text and NOT restart
+        pendingGracefulStop = true
+
+        // Poll until isFinal callback clears the flag (up to 500ms)
+        for _ in 0..<10 {
+            try? await Task.sleep(nanoseconds: 50_000_000)  // 50ms
+            if !pendingGracefulStop { break }
+        }
+
+        // If isFinal never fired (timeout), commit volatile text and clean up manually
+        if pendingGracefulStop {
+            log("⚠️ GRACEFUL STOP | timeout — committing volatile text manually")
+            pendingGracefulStop = false
+            if !volatileText.isEmpty {
+                finalTranscript += volatileText + " "
+                volatileText = ""
+            }
+        }
+
+        // Final cleanup
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognitionRequest = nil
+        isListening = false
+
+        committedPrefixLength = 0
+        committedPrefixContent = ""
+        lastSeenFullText = ""
+        lastVolatileSnapshot = ""
+        statusMessage = "Ready — tap Record"
+        log("✅ GRACEFUL STOP | done. final=\"\(finalTranscript.suffix(60))\"")
     }
 
     func clear() {
@@ -285,9 +342,14 @@ class SpeechEngine: ObservableObject {
                 let fullText = result.bestTranscription.formattedString
 
                 if result.isFinal {
-                    self.log("🏁 isFinal | fullText(\(fullText.count))")
+                    self.log("🏁 isFinal | fullText(\(fullText.count)) | gracefulStop=\(self.pendingGracefulStop)")
                     self.commitRemainingText(from: fullText)
-                    self.restartRecognitionTask()
+                    if self.pendingGracefulStop {
+                        // Graceful stop path: commit and signal completion (don't restart)
+                        self.pendingGracefulStop = false
+                    } else {
+                        self.restartRecognitionTask()
+                    }
                 } else {
                     // Detect Apple Speech buffer reset or content revision
                     if fullText.count < self.committedPrefixLength {
@@ -324,7 +386,15 @@ class SpeechEngine: ObservableObject {
                 let nsError = error as NSError
                 self.log("❌ ERROR code=\(nsError.code) | \(error.localizedDescription)")
 
-                if nsError.code == 203 || nsError.code == 216 {
+                if self.pendingGracefulStop {
+                    // Graceful stop in progress — commit whatever we have and signal done
+                    self.log("⏹️ GRACEFUL STOP | error during shutdown, committing volatile text")
+                    if !self.volatileText.isEmpty {
+                        self.finalTranscript += self.volatileText + " "
+                        self.volatileText = ""
+                    }
+                    self.pendingGracefulStop = false
+                } else if nsError.code == 203 || nsError.code == 216 {
                     if !self.volatileText.isEmpty {
                         self.finalTranscript += self.volatileText + " "
                         self.volatileText = ""

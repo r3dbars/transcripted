@@ -29,6 +29,7 @@ struct FeedbackEntry: Codable {
     let acceptedText: String     // What user actually sent (edited or identical)
     let action: AcceptAction
     let exampleCount: Int        // Style examples at time of accept
+    let formality: String?       // Detected register: casual/professional/formal (from vision)
 
     enum CodingKeys: String, CodingKey {
         case timestamp
@@ -37,6 +38,7 @@ struct FeedbackEntry: Codable {
         case acceptedText = "accepted_text"
         case action
         case exampleCount = "example_count"
+        case formality
     }
 }
 
@@ -65,7 +67,8 @@ class FeedbackStore: ObservableObject {
         draftedText: String,
         acceptedText: String,
         action: AcceptAction,
-        exampleCount: Int
+        exampleCount: Int,
+        formality: String? = nil
     ) {
         let entry = FeedbackEntry(
             timestamp: isoFormatter.string(from: Date()),
@@ -73,7 +76,8 @@ class FeedbackStore: ObservableObject {
             draftedText: draftedText,
             acceptedText: acceptedText,
             action: action,
-            exampleCount: exampleCount
+            exampleCount: exampleCount,
+            formality: formality
         )
 
         guard let data = try? encoder.encode(entry),
