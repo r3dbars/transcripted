@@ -146,22 +146,29 @@ class StyleEngine: ObservableObject {
     // MARK: - Training Pair Recording
 
     /// Record a training pair — what the AI drafted vs. what the user actually sent
-    func recordExample(aiDraft: String, userFinal: String, platform: String) {
+    func recordExample(aiDraft: String, userFinal: String, platform: String,
+                       userInstructions: String? = nil, formality: String? = nil) {
         exampleCount += 1
         let distance = wordEditDistance(aiDraft, userFinal)
         let distanceStr = String(format: "%.2f", distance)
 
-        let exampleBlock = """
+        // Build example block with optional metadata fields
+        var exampleBlock = "\n### Example \(exampleCount)\nPLATFORM: \(platform)"
+        if let formality = formality, !formality.isEmpty {
+            exampleBlock += "\nFORMALITY: \(formality)"
+        }
+        if let instructions = userInstructions,
+           !instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            exampleBlock += "\nUSER_INSTRUCTIONS:\n\(instructions.trimmingCharacters(in: .whitespacesAndNewlines))"
+        }
+        exampleBlock += """
+        \nEDIT_DISTANCE: \(distanceStr)
+        AI_DRAFT:
+        \(aiDraft.trimmingCharacters(in: .whitespacesAndNewlines))
 
-            ### Example \(exampleCount)
-            PLATFORM: \(platform)
-            EDIT_DISTANCE: \(distanceStr)
-            AI_DRAFT:
-            \(aiDraft.trimmingCharacters(in: .whitespacesAndNewlines))
-
-            USER_SENT:
-            \(userFinal.trimmingCharacters(in: .whitespacesAndNewlines))
-            """
+        USER_SENT:
+        \(userFinal.trimmingCharacters(in: .whitespacesAndNewlines))
+        """
 
         if styleFileContents.isEmpty {
             // First example — create the file structure
@@ -280,6 +287,25 @@ class StyleEngine: ObservableObject {
                 - USER_SENT: what the user actually sent (after editing the AI's draft)
                 - EDIT_DISTANCE: how much they changed it (0 = kept as-is, 1 = completely rewritten)
 
+                Some examples may also include:
+                - USER_INSTRUCTIONS: what the user TOLD the AI to do (their spoken voice instructions)
+                - FORMALITY: the detected communication register (casual/professional/formal)
+                Not all examples have these fields — older examples may only have PLATFORM, EDIT_DISTANCE, \
+                AI_DRAFT, and USER_SENT. Use the additional fields when available.
+
+                ⚠️ INSTRUCTION vs. STYLE SEPARATION (when USER_INSTRUCTIONS is present):
+                1. Read USER_INSTRUCTIONS to understand what the user asked for
+                2. Compare AI_DRAFT to USER_INSTRUCTIONS — did the AI follow the instructions?
+                3. Compare USER_SENT to AI_DRAFT — what did the user change?
+                4. If the user's changes ALIGN with instructions the AI missed → this is an INSTRUCTION \
+                error, NOT a style signal. Do not derive style patterns from these changes.
+                5. If the user's changes go BEYOND what their instructions specified → these reveal TRUE \
+                style preferences. The gap between "what they asked for" and "what they actually wrote" \
+                is the purest style signal.
+
+                Use FORMALITY to build context-aware patterns. NEVER rules should be context-specific \
+                when formality data is available: "NEVER X in professional Slack" not just "NEVER X."
+
                 ⚠️ CRITICAL SOURCE RULES — read these before analyzing ANY example:
                 1. USER_SENT is the SOLE source of truth for this person's writing style. \
                 EVERY positive pattern (signature phrases, tone, metrics) must come from USER_SENT text ONLY.
@@ -363,6 +389,25 @@ class StyleEngine: ObservableObject {
             The training data below shows pairs: what an AI drafted (AI_DRAFT) vs. what the user actually \
             sent (USER_SENT). The EDIT_DISTANCE shows how much they changed it (0 = kept, 1 = rewrote). \
             High edit distance examples (0.3+) are the STRONGEST signals — pay extra attention to these.
+
+            Some examples may also include:
+            - USER_INSTRUCTIONS: what the user TOLD the AI to do (their spoken voice instructions)
+            - FORMALITY: the detected communication register (casual/professional/formal)
+            Not all examples have these — older ones only have PLATFORM/EDIT_DISTANCE/AI_DRAFT/USER_SENT.
+
+            ⚠️ INSTRUCTION vs. STYLE SEPARATION (when USER_INSTRUCTIONS is present):
+            1. Read USER_INSTRUCTIONS to understand what the user asked for
+            2. Compare AI_DRAFT to USER_INSTRUCTIONS — did the AI follow the instructions?
+            3. Compare USER_SENT to AI_DRAFT — what did the user change?
+            4. If the user's changes ALIGN with instructions the AI missed → INSTRUCTION error, NOT style
+            5. If the user's changes go BEYOND what instructions specified → TRUE style preferences
+
+            If USER_INSTRUCTIONS shows users repeatedly give an instruction the AI ignores \
+            (e.g., "keep it brief" but AI writes long), add to ALWAYS: "Default to brevity \
+            unless user explicitly asks for detail."
+
+            Use FORMALITY to make NEVER rules context-aware: "NEVER X in professional Slack" \
+            not just "NEVER X."
 
             Analyze the patterns in what the user changes:
             - Consistent length changes (compare AI_DRAFT word count vs. USER_SENT word count)

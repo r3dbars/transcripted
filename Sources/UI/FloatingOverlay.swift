@@ -1,8 +1,30 @@
 // FloatingOverlay.swift
-// Non-activating floating panel for the hotkey → speak → draft → inject flow
+// Non-activating floating panel for the hotkey -> speak -> draft -> inject flow
+// Saga-inspired dark overlay with mint green accent and mode-switching bubbles
 
 import SwiftUI
 import AppKit
+
+// MARK: - Design Tokens
+
+private let panelBg       = Color(red: 0.10, green: 0.10, blue: 0.12)  // #1A1A1F  near-black
+private let contentBg     = Color(red: 0.14, green: 0.14, blue: 0.16)  // #242428  dark card
+private let bubbleBg      = Color(red: 0.18, green: 0.18, blue: 0.20)  // #2E2E33  bubble fill
+private let accentGreen   = Color(red: 0.07, green: 0.94, blue: 0.58)  // #13EF95  mint green
+private let textPrimary   = Color.white
+private let textSecondary = Color(white: 0.55)                          // gray labels
+private let textMuted     = Color(white: 0.35)                          // placeholder
+private let recordingRed  = Color.red
+
+// MARK: - Layout Constants
+
+private let overlayPanelWidth: CGFloat     = 480
+private let overlayPanelMinHeight: CGFloat = 160
+private let overlayPanelMaxHeight: CGFloat = 340
+private let overlaySidebarWidth: CGFloat   = 60
+private let overlayBubbleSize: CGFloat     = 40
+private let overlayCornerRadius: CGFloat   = 16
+private let overlayContentPadding: CGFloat = 16
 
 // MARK: - NSPanel Subclass
 
@@ -22,7 +44,7 @@ class FloatingOverlayPanel: NSPanel {
             backing: .buffered,
             defer: true
         )
-        self.level = .floating
+        self.level = .popUpMenu  // Above .floating (3) — ensures visibility over Electron apps, status bars, etc.
         self.isFloatingPanel = true
         self.becomesKeyOnlyIfNeeded = true
         self.backgroundColor = .clear
@@ -43,15 +65,21 @@ class FloatingOverlayPanel: NSPanel {
 
 @MainActor
 class FloatingOverlayController: ObservableObject {
+    enum SessionMode {
+        case draft      // Option+Space: screenshot + voice + AI rewrite + review
+        case dictation  // Option+D: voice + light polish + auto-paste
+    }
+
     enum OverlayState {
         case idle
-        case listening
-        case drafting
-        case streaming  // tokens arriving, not yet editable
-        case review
+        case listening    // Recording (both modes)
+        case drafting     // Processing (vision+draft for draft mode, polish for dictation)
+        case streaming    // Tokens arriving (draft mode only)
+        case review       // Editable draft (draft mode only)
     }
 
     @Published var state: OverlayState = .idle
+    @Published var activeMode: SessionMode = .draft
     @Published var isVisible = false
     @Published var reviewText: String = ""
     @Published var streamingText: String = ""
@@ -59,13 +87,17 @@ class FloatingOverlayController: ObservableObject {
     /// Closures for Enter/Escape in review mode — set by DraftSessionController
     var onConfirm: (() -> Void)?
     var onCancel: (() -> Void)?
+    /// Closure for bubble-tap mode switching — set by DraftSessionController
+    var onSwitchMode: ((SessionMode) -> Void)?
 
     private var panel: FloatingOverlayPanel?
     private var hostingView: NSHostingView<AnyView>?
 
+    private var dragHandleView: PanelDragView?
+
     func setup(speech: SpeechEngine) {
         let panel = FloatingOverlayPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 120),
+            contentRect: NSRect(x: 0, y: 0, width: overlayPanelWidth, height: overlayPanelMinHeight),
             styleMask: [],
             backing: .buffered,
             defer: true
@@ -77,38 +109,55 @@ class FloatingOverlayController: ObservableObject {
         hosting.autoresizingMask = [.width, .height]
         panel.contentView?.addSubview(hosting)
 
+        // Add drag handle at the top of the panel — pure AppKit, outside SwiftUI hierarchy.
+        // This avoids NSViewRepresentable bridging which can crash during nested run loops
+        // (DesignLibrary + swift_task_isCurrentExecutorWithFlagsImpl during layout passes).
+        let headerHeight: CGFloat = 40
+        let contentBounds = panel.contentView?.bounds ?? .zero
+        let dragView = PanelDragView()
+        dragView.panel = panel
+        dragView.frame = NSRect(
+            x: overlaySidebarWidth,
+            y: contentBounds.height - headerHeight,
+            width: contentBounds.width - overlaySidebarWidth,
+            height: headerHeight
+        )
+        dragView.autoresizingMask = [.width, .minYMargin]  // Stay at top, stretch width
+        panel.contentView?.addSubview(dragView, positioned: .above, relativeTo: hosting)
+        self.dragHandleView = dragView
+
         // Round corners on the panel's content view
         panel.contentView?.wantsLayer = true
-        panel.contentView?.layer?.cornerRadius = 20
+        panel.contentView?.layer?.cornerRadius = overlayCornerRadius
         panel.contentView?.layer?.masksToBounds = true
 
         self.panel = panel
         self.hostingView = hosting
     }
 
-    func show(near sourceApp: NSRunningApplication?) {
+    /// Unified show method — positions the panel near the user's cursor/text field
+    func showPanel(near sourceApp: NSRunningApplication?) {
         guard let panel = panel else { return }
 
-        // Try to position near the focused text field
         let targetRect = sourceApp.flatMap { AccessibilityBridge.focusedTextFieldRect(for: $0) }
 
         if let rect = targetRect, let screen = NSScreen.main {
             let screenHeight = screen.frame.height
             let flippedY = screenHeight - rect.origin.y
-            let overlayWidth: CGFloat = 400
-            let x = max(10, rect.midX - overlayWidth / 2)
+            let x = max(10, rect.midX - overlayPanelWidth / 2)
             let y = flippedY + 12
             panel.setFrameOrigin(NSPoint(x: x, y: y))
         } else {
-            if let screen = NSScreen.main {
-                let x = screen.frame.midX - 200
-                let y = screen.frame.midY + 50
-                panel.setFrameOrigin(NSPoint(x: x, y: y))
-            }
+            // Fallback: position near mouse cursor
+            let mousePos = NSEvent.mouseLocation
+            let x = max(10, mousePos.x - overlayPanelWidth / 2)
+            let y = max(10, mousePos.y + 20)
+            panel.setFrameOrigin(NSPoint(x: x, y: y))
         }
 
-        panel.setContentSize(NSSize(width: 400, height: 120))
-        panel.orderFront(nil)
+        panel.setContentSize(NSSize(width: overlayPanelWidth, height: overlayPanelMinHeight))
+        panel.allowKeyStatus = false
+        panel.orderFrontRegardless()
         isVisible = true
     }
 
@@ -118,10 +167,10 @@ class FloatingOverlayController: ObservableObject {
 
         // Resize: grow upward from bottom edge to fit text
         let lineCount = max(1, text.components(separatedBy: "\n").count)
-        let charEstimate = CGFloat(text.count) / 45.0  // ~45 chars per line at 400pt width
+        let charEstimate = CGFloat(text.count) / 50.0  // ~50 chars per line at 480pt width
         let lines = max(CGFloat(lineCount), charEstimate)
-        let estimatedHeight = max(160, min(280, lines * 20 + 100))
-        resizePanel(to: NSSize(width: 400, height: estimatedHeight))
+        let estimatedHeight = max(overlayPanelMinHeight, min(overlayPanelMaxHeight, lines * 20 + 120))
+        resizePanel(to: NSSize(width: overlayPanelWidth, height: estimatedHeight))
 
         // Make key-capable so TextEditor receives input
         if let panel = panel {
@@ -135,10 +184,10 @@ class FloatingOverlayController: ObservableObject {
         state = .streaming
         // Show panel if not visible
         if !isVisible {
-            show(near: sourceApp)
+            showPanel(near: sourceApp)
         }
         // Resize to initial streaming size
-        resizePanel(to: NSSize(width: 400, height: 160))
+        resizePanel(to: NSSize(width: overlayPanelWidth, height: overlayPanelMinHeight))
         // Not key-capable yet (still receiving tokens)
         panel?.allowKeyStatus = false
     }
@@ -147,11 +196,11 @@ class FloatingOverlayController: ObservableObject {
         streamingText += token
         // Dynamically resize as text grows
         let lineCount = max(1, streamingText.components(separatedBy: "\n").count)
-        let charEstimate = CGFloat(streamingText.count) / 45.0
+        let charEstimate = CGFloat(streamingText.count) / 50.0
         let lines = max(CGFloat(lineCount), charEstimate)
-        let estimatedHeight = max(160, min(280, lines * 20 + 100))
+        let estimatedHeight = max(overlayPanelMinHeight, min(overlayPanelMaxHeight, lines * 20 + 120))
         if let panel = panel, abs(panel.frame.height - estimatedHeight) > 20 {
-            resizePanel(to: NSSize(width: 400, height: estimatedHeight))
+            resizePanel(to: NSSize(width: overlayPanelWidth, height: estimatedHeight))
         }
     }
 
@@ -180,6 +229,28 @@ class FloatingOverlayController: ObservableObject {
     }
 }
 
+// MARK: - Drag Handle (AppKit-level, outside SwiftUI hierarchy)
+
+/// Transparent NSView that initiates a native window drag on mouseDown.
+/// Uses NSWindow.performDrag(with:) which respects .nonactivatingPanel automatically.
+/// Lives as a pure AppKit subview of the panel's content view — NOT an NSViewRepresentable.
+/// This avoids executor isolation crashes during nested run loop body evaluations.
+private class PanelDragView: NSView {
+    weak var panel: NSPanel?
+
+    override func mouseDown(with event: NSEvent) {
+        if let panel = panel {
+            panel.performDrag(with: event)
+        } else {
+            super.mouseDown(with: event)
+        }
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .openHand)
+    }
+}
+
 // MARK: - SwiftUI Overlay Content
 
 struct OverlayContentView: View {
@@ -188,136 +259,351 @@ struct OverlayContentView: View {
     @FocusState private var isReviewFocused: Bool
 
     var body: some View {
-        if controller.state == .review {
-            reviewView
-        } else if controller.state == .streaming {
-            streamingView
-        } else {
-            listenDraftView
+        HStack(spacing: 0) {
+            // Left sidebar with mode bubbles
+            sidebarView
+
+            // Thin vertical separator
+            Rectangle()
+                .fill(Color.white.opacity(0.06))
+                .frame(width: 1)
+
+            // Right content area
+            VStack(spacing: 0) {
+                headerBar
+                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+                contentArea
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+                bottomToolbar
+            }
+        }
+        .background(panelBg)
+    }
+
+    // MARK: - Sidebar
+
+    @ViewBuilder
+    private var sidebarView: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            modeBubble(
+                mode: .draft,
+                symbol: "pencil.line",
+                label: "Draft"
+            )
+            modeBubble(
+                mode: .dictation,
+                symbol: "waveform",
+                label: "Dictate"
+            )
+            Spacer()
+        }
+        .frame(width: overlaySidebarWidth)
+        .background(panelBg)
+    }
+
+    @ViewBuilder
+    private func modeBubble(
+        mode: FloatingOverlayController.SessionMode,
+        symbol: String,
+        label: String
+    ) -> some View {
+        let isActive = controller.activeMode == mode && controller.state != .idle
+
+        Button(action: {
+            controller.onSwitchMode?(mode)
+        }) {
+            VStack(spacing: 4) {
+                ZStack {
+                    Circle()
+                        .fill(isActive ? accentGreen.opacity(0.15) : bubbleBg)
+                        .frame(width: overlayBubbleSize, height: overlayBubbleSize)
+
+                    if isActive {
+                        Circle()
+                            .strokeBorder(accentGreen, lineWidth: 2)
+                            .frame(width: overlayBubbleSize, height: overlayBubbleSize)
+                    }
+
+                    Image(systemName: symbol)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(isActive ? accentGreen : textSecondary)
+                }
+
+                Text(label)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(isActive ? accentGreen : textMuted)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Header Bar
+
+    @ViewBuilder
+    private var headerBar: some View {
+        HStack {
+            // Mode label
+            Group {
+                switch (controller.state, controller.activeMode) {
+                case (.listening, .draft):
+                    Label("Draft Mode", systemImage: "pencil.line")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(textSecondary)
+                case (.listening, .dictation):
+                    Label("Dictation", systemImage: "waveform")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(textSecondary)
+                case (.drafting, .dictation):
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .tint(accentGreen)
+                        Text("Polishing...")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(textSecondary)
+                    }
+                case (.drafting, _), (.streaming, _):
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .tint(accentGreen)
+                        Text("Drafting...")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(textSecondary)
+                    }
+                case (.review, _):
+                    Text("Review Draft")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(textSecondary)
+                default:
+                    Text("Draft")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(textMuted)
+                }
+            }
+
+            // Subtle drag grip indicator
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 8))
+                .foregroundColor(textMuted.opacity(0.5))
+
+            Spacer()
+
+            // Shortcut hint
+            Group {
+                switch (controller.state, controller.activeMode) {
+                case (.listening, .draft):
+                    Text("\u{2325}Space to stop")
+                        .font(.system(size: 10))
+                        .foregroundColor(textMuted)
+                case (.listening, .dictation):
+                    Text("\u{2325}D to stop")
+                        .font(.system(size: 10))
+                        .foregroundColor(textMuted)
+                case (.review, _):
+                    Text("Esc cancel")
+                        .font(.system(size: 10))
+                        .foregroundColor(textMuted)
+                default:
+                    EmptyView()
+                }
+            }
+        }
+        .padding(.horizontal, overlayContentPadding)
+        .padding(.vertical, 10)
+    }
+
+    // MARK: - Central Content Area
+
+    @ViewBuilder
+    private var contentArea: some View {
+        switch controller.state {
+        case .listening:
+            listeningContent
+        case .drafting:
+            draftingContent
+        case .streaming:
+            streamingContent
+        case .review:
+            reviewContent
+        case .idle:
+            idleContent
         }
     }
 
     @ViewBuilder
-    private var listenDraftView: some View {
-        HStack(spacing: 12) {
-            // Left: audio waveform
-            if controller.state == .listening {
-                AudioWaveformView(level: speech.audioLevel)
-            } else {
-                // Drafting spinner
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(.white)
-                    .frame(width: 32, height: 44)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                // State label
-                HStack(spacing: 6) {
-                    if controller.state == .listening {
-                        Circle()
-                            .fill(.red)
-                            .frame(width: 8, height: 8)
-                        Text("Listening...")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    } else {
-                        Text("Drafting...")
-                            .font(.caption)
-                            .foregroundColor(.gray)
+    private var listeningContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !speech.displayText.isEmpty {
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: false) {
+                        Text(speech.displayText)
+                            .foregroundColor(textPrimary)
+                            .font(.system(size: 13))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .id("transcription")
+                    }
+                    .onChange(of: speech.displayText) { _, _ in
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            proxy.scrollTo("transcription", anchor: .bottom)
+                        }
                     }
                 }
-
-                // Transcription
-                if !speech.displayText.isEmpty {
-                    HStack(spacing: 0) {
-                        Text(speech.finalTranscript)
-                            .foregroundColor(.white)
-                        Text(speech.volatileText)
-                            .foregroundColor(.gray.opacity(0.7))
-                    }
-                    .font(.system(size: 13))
-                    .lineLimit(3)
-                } else if controller.state == .listening {
+            } else {
+                HStack(spacing: 8) {
+                    AudioWaveformView(level: speech.audioLevel, compact: true)
                     Text("Start speaking...")
                         .font(.system(size: 13))
-                        .foregroundColor(.gray.opacity(0.5))
+                        .foregroundColor(textMuted)
                         .italic()
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        .frame(width: 400, height: 120)
-        .background(Color.black.opacity(0.88))
+        .padding(.horizontal, overlayContentPadding)
+        .padding(.vertical, 12)
     }
 
     @ViewBuilder
-    private var streamingView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                // Subtle pulsing dot while tokens arrive
-                Circle()
-                    .fill(Color.purple.opacity(0.8))
-                    .frame(width: 6, height: 6)
-                Text("Drafting...")
-                    .font(.caption)
-                    .foregroundColor(.gray)
-            }
+    private var draftingContent: some View {
+        VStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(accentGreen)
+            Text(controller.activeMode == .dictation ? "Polishing your dictation..." : "Processing...")
+                .font(.system(size: 12))
+                .foregroundColor(textMuted)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(overlayContentPadding)
+    }
+
+    @ViewBuilder
+    private var streamingContent: some View {
+        ScrollView(.vertical, showsIndicators: false) {
             Text(controller.streamingText)
                 .font(.system(size: 13))
-                .foregroundColor(.white)
+                .foregroundColor(textPrimary)
                 .lineLimit(nil)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
-        .frame(width: 400)
-        .background(Color.black.opacity(0.88))
+        .padding(.horizontal, overlayContentPadding)
+        .padding(.vertical, 12)
     }
 
     @ViewBuilder
-    private var reviewView: some View {
-        VStack(spacing: 0) {
-            TextEditor(text: $controller.reviewText)
-                .focused($isReviewFocused)
-                .font(.system(size: 13))
-                .foregroundColor(.white)
-                .scrollContentBackground(.hidden)
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .onKeyPress(keys: [.return], phases: .down) { keyPress in
-                    if keyPress.modifiers.contains(.shift) {
-                        return .ignored  // Shift+Enter inserts newline
-                    }
-                    controller.onConfirm?()
-                    return .handled
+    private var reviewContent: some View {
+        TextEditor(text: $controller.reviewText)
+            .focused($isReviewFocused)
+            .font(.system(size: 13))
+            .foregroundColor(textPrimary)
+            .scrollContentBackground(.hidden)
+            .padding(.horizontal, overlayContentPadding - 4)
+            .padding(.vertical, 8)
+            .onKeyPress(keys: [.return], phases: .down) { keyPress in
+                if keyPress.modifiers.contains(.shift) {
+                    return .ignored  // Shift+Enter inserts newline
                 }
-                .onKeyPress(keys: [.escape], phases: .down) { _ in
-                    controller.onCancel?()
-                    return .handled
+                controller.onConfirm?()
+                return .handled
+            }
+            .onKeyPress(keys: [.escape], phases: .down) { _ in
+                controller.onCancel?()
+                return .handled
+            }
+            .onAppear {
+                // Small delay lets the panel finish becoming key before we claim focus
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    isReviewFocused = true
                 }
+            }
+    }
 
-            // Hint bar
-            HStack {
-                Text("Enter to send · ⇧Enter newline · Esc cancel")
-                    .font(.caption2)
-                    .foregroundColor(.gray.opacity(0.6))
-                Spacer()
+    @ViewBuilder
+    private var idleContent: some View {
+        Text("Press \u{2325}Space or \u{2325}D to start")
+            .font(.system(size: 12))
+            .foregroundColor(textMuted)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Bottom Toolbar
+
+    @ViewBuilder
+    private var bottomToolbar: some View {
+        HStack {
+            // Left: status indicator
+            Group {
+                switch controller.state {
+                case .listening:
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(recordingRed)
+                            .frame(width: 6, height: 6)
+                            .modifier(PulsingDotModifier())
+                        Text("Recording")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(textSecondary)
+                    }
+                case .drafting, .streaming:
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(accentGreen)
+                            .frame(width: 6, height: 6)
+                        Text("Working...")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(textSecondary)
+                    }
+                case .review:
+                    Text("\u{21A9} Enter to send")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(textSecondary)
+                default:
+                    EmptyView()
+                }
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
-            .padding(.top, 4)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.opacity(0.88))
-        .onAppear {
-            // Small delay lets the panel finish becoming key before we claim focus
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                isReviewFocused = true
+
+            Spacer()
+
+            // Right: keyboard shortcut hints
+            Group {
+                switch (controller.state, controller.activeMode) {
+                case (.listening, .draft):
+                    Text("\u{2325}Space stop \u{00B7} Esc cancel")
+                        .font(.system(size: 10))
+                        .foregroundColor(textMuted)
+                case (.listening, .dictation):
+                    Text("\u{2325}D stop \u{00B7} Esc cancel")
+                        .font(.system(size: 10))
+                        .foregroundColor(textMuted)
+                case (.review, _):
+                    Text("\u{21E7}\u{21A9} newline \u{00B7} Esc cancel")
+                        .font(.system(size: 10))
+                        .foregroundColor(textMuted)
+                default:
+                    EmptyView()
+                }
             }
         }
+        .padding(.horizontal, overlayContentPadding)
+        .padding(.vertical, 8)
+    }
+}
+
+// MARK: - Pulsing Dot Animation
+
+private struct PulsingDotModifier: ViewModifier {
+    @State private var isPulsing = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(isPulsing ? 0.4 : 1.0)
+            .animation(
+                .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
+                value: isPulsing
+            )
+            .onAppear { isPulsing = true }
     }
 }
 
@@ -326,18 +612,60 @@ struct OverlayContentView: View {
 @MainActor
 class DraftSessionController: ObservableObject {
     @Published var isInSession = false
+    @Published var isDictating = false
 
     var appState: DraftAppState!
-    var overlayController: FloatingOverlayController!
+    var overlayController: FloatingOverlayController! {
+        didSet {
+            overlayController?.onSwitchMode = { [weak self] mode in
+                self?.switchToMode(mode)
+            }
+        }
+    }
 
     private var lastCapturedContext: CapturedContext?
     private var sessionSourceApp: NSRunningApplication?
     private var streamingTask: Task<Void, Never>?
     private var visionTask: Task<Void, Never>?
 
+    // MARK: - Mode Switching (Bubble Taps)
+
+    /// Called when a sidebar bubble is tapped
+    func switchToMode(_ newMode: FloatingOverlayController.SessionMode) {
+        if newMode == overlayController.activeMode {
+            // Tapped the currently active mode — act as stop/toggle
+            if newMode == .draft {
+                if overlayController.state == .review {
+                    cancelSession()
+                } else if isInSession {
+                    stopSessionAndDraft()
+                }
+            } else {
+                if isDictating {
+                    stopDictationAndPaste()
+                }
+            }
+            return
+        }
+
+        // Switching to a different mode — cancel current, start new
+        if isInSession { cancelSession() }
+        if isDictating { cancelDictation() }
+
+        if newMode == .draft {
+            let frontApp = NSWorkspace.shared.frontmostApplication
+            let imageData = frontApp.flatMap { ScreenCapture.captureFrontmostWindow(of: $0) }
+            startSession(imageData: imageData, sourceApp: frontApp)
+        } else {
+            startDictation(sourceApp: sessionSourceApp ?? NSWorkspace.shared.frontmostApplication)
+        }
+    }
+
+    // MARK: - Draft Mode (Option+Space)
+
     /// Start a new recording session — called on first hotkey press
     func startSession(imageData: Data?, sourceApp: NSRunningApplication?) {
-        guard !isInSession else { return }
+        guard !isInSession, !isDictating else { return }
         isInSession = true
         sessionSourceApp = sourceApp
 
@@ -351,11 +679,12 @@ class DraftSessionController: ObservableObject {
         appState.drafter.clear()
 
         // Show overlay and start recording
+        overlayController.activeMode = .draft
         overlayController.state = .listening
-        overlayController.show(near: sourceApp)
+        overlayController.showPanel(near: sourceApp)
         appState.speech.startListening()
 
-        appState.logger.log("🚀 SESSION | started, voice recording + vision in parallel")
+        appState.logger.log("SESSION | started, voice recording + vision in parallel")
 
         // Start vision processing in parallel (stored so we can await it before drafting)
         visionTask = Task {
@@ -366,21 +695,23 @@ class DraftSessionController: ObservableObject {
     /// Stop recording and trigger drafting — called on second hotkey press
     func stopSessionAndDraft() {
         guard isInSession else { return }
-        appState.speech.stopListening()
         overlayController.state = .drafting
 
-        let voiceText = (appState.speech.finalTranscript + appState.speech.volatileText)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !voiceText.isEmpty else {
-            appState.logger.log("⚠️ SESSION | no voice input, cancelling")
-            cancelSession()
-            return
-        }
-
-        let platform = PlatformFormatter.detect(from: sessionSourceApp)
-
         streamingTask = Task {
+            // Wait for recognizer to process remaining audio buffer (captures last words)
+            await appState.speech.stopListeningGracefully()
+
+            let voiceText = (appState.speech.finalTranscript + appState.speech.volatileText)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !voiceText.isEmpty else {
+                appState.logger.log("SESSION | no voice input, cancelling")
+                cancelSession()
+                return
+            }
+
+            let platform = PlatformFormatter.detect(from: sessionSourceApp)
+
             guard let auth = AuthCredential.load() else {
                 cancelSession()
                 return
@@ -390,7 +721,7 @@ class DraftSessionController: ObservableObject {
             await visionTask?.value
             visionTask = nil
 
-            appState.logger.log("✨ SESSION | streaming draft [\(platform.rawValue)] — \(voiceText.count) chars, context: \(lastCapturedContext?.hasConversation == true ? "yes" : "no")")
+            appState.logger.log("SESSION | streaming draft [\(platform.rawValue)] — \(voiceText.count) chars, context: \(lastCapturedContext?.hasConversation == true ? "yes" : "no")")
 
             var systemPrompt = appState.styleEngine.buildSystemPrompt()
             if !platform.formattingInstructions.isEmpty {
@@ -427,7 +758,7 @@ class DraftSessionController: ObservableObject {
                 }
             } catch {
                 guard !Task.isCancelled else { return }
-                appState.logger.log("❌ SESSION | stream error: \(error.localizedDescription)")
+                appState.logger.log("SESSION | stream error: \(error.localizedDescription)")
                 overlayController.hide()
                 isInSession = false
                 return
@@ -435,7 +766,7 @@ class DraftSessionController: ObservableObject {
 
             guard !Task.isCancelled, !fullText.isEmpty else {
                 if !Task.isCancelled {
-                    appState.logger.log("❌ SESSION | empty draft")
+                    appState.logger.log("SESSION | empty draft")
                     overlayController.hide()
                     isInSession = false
                 }
@@ -453,7 +784,7 @@ class DraftSessionController: ObservableObject {
                 self?.cancelSession()
             }
             overlayController.finishStreaming()
-            appState.logger.log("👁 REVIEW | streaming complete, \(processed.count) chars")
+            appState.logger.log("REVIEW | streaming complete, \(processed.count) chars")
         }
     }
 
@@ -468,14 +799,115 @@ class DraftSessionController: ObservableObject {
         appState.speech.clear()
         overlayController.hide()
         isInSession = false
-        appState.logger.log("❌ SESSION | cancelled")
+        appState.logger.log("SESSION | cancelled")
+    }
+
+    // MARK: - Dictation Mode (Option+D)
+
+    /// Start dictation — show overlay and begin voice recording (no screenshot/vision)
+    func startDictation(sourceApp: NSRunningApplication?) {
+        guard !isDictating, !isInSession else { return }
+        isDictating = true
+        sessionSourceApp = sourceApp
+
+        if let app = sourceApp {
+            appState.contextCapture.sourceApp = app
+        }
+
+        appState.speech.clear()
+        overlayController.activeMode = .dictation
+        overlayController.state = .listening
+        overlayController.showPanel(near: sourceApp)
+        appState.speech.startListening()
+
+        appState.logger.log("DICTATION | started")
+    }
+
+    /// Stop dictation, apply light polish, and paste silently
+    func stopDictationAndPaste() {
+        guard isDictating, overlayController.state == .listening else { return }
+        overlayController.state = .drafting
+
+        Task {
+            // Wait for recognizer to process remaining audio buffer (captures last words)
+            await appState.speech.stopListeningGracefully()
+
+            let voiceText = (appState.speech.finalTranscript + appState.speech.volatileText)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !voiceText.isEmpty else {
+                appState.logger.log("DICTATION | no voice input, cancelling")
+                cancelDictation()
+                return
+            }
+
+            appState.logger.log("DICTATION | polishing \(voiceText.count) chars")
+
+            let polished = await polishDictation(voiceText)
+            overlayController.hide()
+            pasteWithClipboardRestore(polished)
+            isDictating = false
+            appState.logger.log("DICTATION | pasted \(polished.count) chars")
+        }
+    }
+
+    /// Cancel dictation without pasting
+    func cancelDictation() {
+        if appState.speech.isListening {
+            appState.speech.stopListening()
+        }
+        appState.speech.clear()
+        overlayController.hide()
+        isDictating = false
+        appState.logger.log("DICTATION | cancelled")
+    }
+
+    /// Apply light polish (punctuation, capitalization, grammar) to raw dictation.
+    /// Falls back to raw text if API call fails — dictation must NEVER lose text.
+    private func polishDictation(_ rawText: String) async -> String {
+        guard let auth = AuthCredential.load() else {
+            appState.logger.log("DICTATION | no auth, pasting raw text")
+            return rawText
+        }
+
+        let polishPrompt = """
+            Fix punctuation, capitalization, and obvious grammar errors in this dictation. \
+            Do NOT rephrase, reorganize, or change wording. Preserve the user's exact words. \
+            Do NOT add greetings, sign-offs, or extra text. Output ONLY the corrected text.
+            """
+
+        let model = appState.promptStore.config.model
+
+        do {
+            let polished = try await AnthropicAPI.withTimeout(seconds: 5) {
+                try await AnthropicAPI.draft(
+                    rawText: "DICTATED:\n\(rawText)",
+                    auth: auth,
+                    model: model,
+                    systemPrompt: polishPrompt,
+                    maxTokens: 1024
+                )
+            }
+
+            // Sanity check: reject if length ratio is suspicious (hallucination or truncation)
+            let ratio = Double(polished.count) / Double(max(1, rawText.count))
+            if ratio < 0.5 || ratio > 2.0 {
+                appState.logger.log("DICTATION | polish length suspicious (ratio \(String(format: "%.2f", ratio))), using raw")
+                return rawText
+            }
+
+            return polished.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            appState.logger.log("DICTATION | polish failed: \(error.localizedDescription), pasting raw text")
+            return rawText
+        }
     }
 
     // MARK: - Private
 
     private func processVision(imageData: Data?, sourceApp: NSRunningApplication?) async {
         guard let auth = AuthCredential.load(), let imageData = imageData else {
-            appState.logger.log("⚠️ SESSION | no auth or screenshot, proceeding voice-only")
+            appState.logger.log("SESSION | no auth or screenshot, proceeding voice-only")
             return
         }
 
@@ -495,9 +927,9 @@ class DraftSessionController: ObservableObject {
                 )
             }
             lastCapturedContext = context
-            appState.logger.log("📸 SESSION | vision complete — platform=\(context.platform ?? "nil")")
+            appState.logger.log("SESSION | vision complete — platform=\(context.platform ?? "nil")")
         } catch {
-            appState.logger.log("⚠️ SESSION | vision timeout/error: \(error.localizedDescription), proceeding voice-only")
+            appState.logger.log("SESSION | vision timeout/error: \(error.localizedDescription), proceeding voice-only")
             // Proceed without context — voiceText alone is enough to draft
         }
     }
@@ -531,32 +963,40 @@ class DraftSessionController: ObservableObject {
 
         // Record with REAL edit data — but skip refusals to avoid poisoning style training
         if !looksLikeRefusal(originalDraft) {
+            // Capture voice instructions + vision metadata for richer training signal
+            let voiceInstructions = appState.speech.finalTranscript
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let formalityLevel = lastCapturedContext?.formality
+
             appState.styleEngine.recordExample(
                 aiDraft: originalDraft,
                 userFinal: editedText,
-                platform: platform.rawValue
+                platform: platform.rawValue,
+                userInstructions: voiceInstructions.isEmpty ? nil : voiceInstructions,
+                formality: formalityLevel
             )
             appState.feedbackStore.record(
-                rawText: appState.speech.finalTranscript,
+                rawText: voiceInstructions,
                 draftedText: originalDraft,
                 acceptedText: editedText,
                 action: .paste,
-                exampleCount: appState.styleEngine.exampleCount
+                exampleCount: appState.styleEngine.exampleCount,
+                formality: formalityLevel
             )
         } else {
-            appState.logger.log("⚠️ STYLE | skipping refusal example — not recording as training data")
+            appState.logger.log("STYLE | skipping refusal example — not recording as training data")
         }
 
         // Check if style refinement is needed
         if appState.styleEngine.shouldRefineNow(), let auth = appState.drafter.getAuth() {
             Task {
                 await appState.styleEngine.regenerateStyleSummary(auth: auth)
-                appState.logger.log("✅ STYLE | summary updated")
+                appState.logger.log("STYLE | summary updated")
             }
         }
 
         isInSession = false
-        appState.logger.log("✅ SESSION | confirmed and injected (\(editedText.count) chars)")
+        appState.logger.log("SESSION | confirmed and injected (\(editedText.count) chars)")
     }
 
     private func pasteWithClipboardRestore(_ text: String) {
@@ -581,7 +1021,7 @@ class DraftSessionController: ObservableObject {
         guard AXIsProcessTrusted() else {
             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
             _ = AXIsProcessTrustedWithOptions(options)
-            appState.logger.log("⚠️ SESSION | requesting Accessibility permission")
+            appState.logger.log("SESSION | requesting Accessibility permission")
             return
         }
 

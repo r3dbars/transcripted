@@ -310,9 +310,14 @@ private let analysisSystemPromptBase = """
 You are Draft's writing quality optimizer. Analyze the feedback data and propose prompt changes.
 
 Each feedback entry has:
-- raw_text: user's spoken/typed input
+- raw_text: user's spoken voice instructions (what they ASKED the AI to do)
 - drafted_text: what Claude produced
 - accepted_text: what the user actually sent (after editing)
+- formality: (optional) detected communication register (casual/professional/formal)
+
+Use raw_text (voice instructions) to distinguish instruction-following errors from style errors. \
+If the user asked for X and the AI didn't do X, propose a prompt change to improve instruction-following. \
+If the user's edits go beyond what they asked for, that reveals style patterns — propose style-related changes.
 
 High edit distance = the AI got it wrong. Find recurring patterns in what users change.
 
