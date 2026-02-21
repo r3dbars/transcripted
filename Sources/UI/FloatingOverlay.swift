@@ -139,23 +139,57 @@ class FloatingOverlayController: ObservableObject {
     func showPanel(near sourceApp: NSRunningApplication?) {
         guard let panel = panel else { return }
 
-        let targetRect = sourceApp.flatMap { AccessibilityBridge.focusedTextFieldRect(for: $0) }
+        let rawTargetRect = sourceApp.flatMap { AccessibilityBridge.focusedTextFieldRect(for: $0) }
+        let panelSize = NSSize(width: overlayPanelWidth, height: overlayPanelMinHeight)
 
-        if let rect = targetRect, let screen = NSScreen.main {
-            let screenHeight = screen.frame.height
-            let flippedY = screenHeight - rect.origin.y
-            let x = max(10, rect.midX - overlayPanelWidth / 2)
-            let y = flippedY + 12
-            panel.setFrameOrigin(NSPoint(x: x, y: y))
+        // Validate the accessibility rect — terminal emulators (iTerm2) report their entire
+        // scrollback buffer as the text area rect (e.g., 4032px tall on a 982px screen).
+        // Reject any rect taller/wider than the current screen — it's not a real visible field.
+        let mousePos = NSEvent.mouseLocation
+        let currentScreen = NSScreen.screens.first { NSMouseInRect(mousePos, $0.frame, false) }
+            ?? NSScreen.main
+        let screenSize = currentScreen?.frame.size ?? NSSize(width: 1920, height: 1080)
+        let targetRect: CGRect?
+        if let raw = rawTargetRect,
+           raw.height > 0, raw.height <= screenSize.height,
+           raw.width > 0, raw.width <= screenSize.width {
+            targetRect = raw
         } else {
-            // Fallback: position near mouse cursor
-            let mousePos = NSEvent.mouseLocation
-            let x = max(10, mousePos.x - overlayPanelWidth / 2)
-            let y = max(10, mousePos.y + 20)
-            panel.setFrameOrigin(NSPoint(x: x, y: y))
+            targetRect = nil  // Fall through to mouse-cursor positioning
         }
 
-        panel.setContentSize(NSSize(width: overlayPanelWidth, height: overlayPanelMinHeight))
+        var origin: NSPoint
+        if let rect = targetRect, let screen = NSScreen.main {
+            // Primary path: position above the focused text field
+            let screenHeight = screen.frame.height
+            let flippedY = screenHeight - rect.origin.y
+            origin = NSPoint(
+                x: rect.midX - panelSize.width / 2,
+                y: flippedY + 12
+            )
+        } else {
+            // Fallback: position near mouse cursor (terminal apps, oversized text areas)
+            origin = NSPoint(
+                x: mousePos.x - panelSize.width / 2,
+                y: mousePos.y + 20
+            )
+        }
+
+        // Clamp to the screen the mouse is on — prevents off-screen positioning
+        // on multi-monitor setups or when cursor is near the top/edge of a display
+        if let visibleFrame = currentScreen?.visibleFrame {
+            origin.x = max(visibleFrame.minX + 10,
+                           min(origin.x, visibleFrame.maxX - panelSize.width - 10))
+            if origin.y + panelSize.height > visibleFrame.maxY {
+                origin.y = (targetRect != nil)
+                    ? origin.y - panelSize.height - 24  // Below text field
+                    : mousePos.y - panelSize.height - 10  // Below cursor
+            }
+            origin.y = max(visibleFrame.minY + 10, origin.y)
+        }
+
+        panel.setFrameOrigin(origin)
+        panel.setContentSize(panelSize)
         panel.allowKeyStatus = false
         panel.orderFrontRegardless()
         isVisible = true
