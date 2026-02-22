@@ -13,7 +13,8 @@ import Foundation
 // MARK: - Prompt Config (serialized to prompts.json)
 
 struct PromptConfig: Codable {
-    var model: String
+    var model: String                 // Chat + context capture (Haiku — fast, background use)
+    var draftModel: String            // Message drafting (Sonnet — quality output the user sees)
     var draftingSystem: String        // Fallback when no style examples yet
     var contextExtraction: String     // Vision prompt for screenshot → conversation text
     var ghostwritingSystem: String    // Full drafting prompt — use {STYLE_SUMMARY} placeholder
@@ -23,6 +24,7 @@ struct PromptConfig: Codable {
 
     enum CodingKeys: String, CodingKey {
         case model
+        case draftModel = "draft_model"
         case draftingSystem = "drafting_system"
         case contextExtraction = "context_extraction"
         case ghostwritingSystem = "ghostwriting_system"
@@ -34,6 +36,7 @@ struct PromptConfig: Codable {
     static var defaults: PromptConfig {
         PromptConfig(
             model: DefaultPrompts.model,
+            draftModel: DefaultPrompts.sonnetModel,
             draftingSystem: DefaultPrompts.draftingSystem,
             contextExtraction: DefaultPrompts.contextExtraction,
             ghostwritingSystem: DefaultPrompts.ghostwritingSystem,
@@ -48,7 +51,7 @@ struct PromptConfig: Codable {
 
 enum DefaultPrompts {
     static let model = "claude-haiku-4-5-20251001"
-    static let sonnetModel = "claude-sonnet-4-20250514"
+    static let sonnetModel = "claude-sonnet-4-6-20250514"
 
     static let draftingSystem = """
         You are a writing assistant. Take the user's rough spoken text and rewrite it as a clear, \

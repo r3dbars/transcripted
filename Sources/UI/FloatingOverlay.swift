@@ -95,7 +95,10 @@ class FloatingOverlayController: ObservableObject {
 
     private var dragHandleView: PanelDragView?
 
-    func setup(speech: SpeechEngine) {
+    var whisperEngine: WhisperEngine?
+
+    func setup(speech: SpeechEngine, whisperEngine: WhisperEngine) {
+        self.whisperEngine = whisperEngine
         let panel = FloatingOverlayPanel(
             contentRect: NSRect(x: 0, y: 0, width: overlayPanelWidth, height: overlayPanelMinHeight),
             styleMask: [],
@@ -103,7 +106,7 @@ class FloatingOverlayController: ObservableObject {
             defer: true
         )
 
-        let content = OverlayContentView(speech: speech, controller: self)
+        let content = OverlayContentView(speech: speech, whisperEngine: whisperEngine, controller: self)
         let hosting = NSHostingView(rootView: AnyView(content))
         hosting.frame = panel.contentView?.bounds ?? .zero
         hosting.autoresizingMask = [.width, .height]
@@ -289,6 +292,7 @@ private class PanelDragView: NSView {
 
 struct OverlayContentView: View {
     @ObservedObject var speech: SpeechEngine
+    @ObservedObject var whisperEngine: WhisperEngine
     @ObservedObject var controller: FloatingOverlayController
     @FocusState private var isReviewFocused: Bool
 
@@ -467,10 +471,25 @@ struct OverlayContentView: View {
         }
     }
 
+    /// True when Whisper is the active dictation engine and we're in dictation mode
+    private var isWhisperDictation: Bool {
+        controller.activeMode == .dictation && whisperEngine.isRecording
+    }
+
     @ViewBuilder
     private var listeningContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if !speech.displayText.isEmpty {
+            if isWhisperDictation {
+                // Whisper mode: waveform only (no live text — batch transcription on stop)
+                VStack(spacing: 8) {
+                    AudioWaveformView(level: whisperEngine.audioLevel, compact: false)
+                        .frame(height: 40)
+                    Text("Recording... press ⌥D to stop")
+                        .font(.system(size: 12))
+                        .foregroundColor(textMuted)
+                }
+                .frame(maxWidth: .infinity)
+            } else if !speech.displayText.isEmpty {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
                         Text(speech.displayText)
@@ -505,7 +524,8 @@ struct OverlayContentView: View {
             ProgressView()
                 .controlSize(.small)
                 .tint(accentGreen)
-            Text(controller.activeMode == .dictation ? "Polishing your dictation..." : "Processing...")
+            Text(whisperEngine.isTranscribing ? "Transcribing..." :
+                 controller.activeMode == .dictation ? "Processing..." : "Processing...")
                 .font(.system(size: 12))
                 .foregroundColor(textMuted)
         }
@@ -769,7 +789,7 @@ class DraftSessionController: ObservableObject {
                 userMessage = "The user dictated the following message. Clean it up, fix grammar, and make it sound natural while preserving their intent and tone. Do NOT add greetings, sign-offs, or change the meaning. Output ONLY the cleaned-up message.\n\nDICTATED:\n\(voiceText.trimmingCharacters(in: .whitespacesAndNewlines))"
             }
 
-            let model = appState.promptStore.config.model
+            let model = appState.promptStore.config.draftModel
             let stream = AnthropicAPI.streamDraft(
                 rawText: userMessage,
                 auth: auth,
@@ -848,45 +868,71 @@ class DraftSessionController: ObservableObject {
             appState.contextCapture.sourceApp = app
         }
 
-        appState.speech.clear()
         overlayController.activeMode = .dictation
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
-        appState.speech.startListening()
 
-        appState.logger.log("DICTATION | started")
+        if appState.transcriptionEngine == .whisper && appState.whisperEngine.isModelLoaded {
+            appState.whisperEngine.startRecording()
+            appState.logger.log("DICTATION | started (Whisper)")
+        } else {
+            appState.speech.clear()
+            appState.speech.startListening()
+            appState.logger.log("DICTATION | started (Apple Speech)")
+        }
     }
 
-    /// Stop dictation, apply light polish, and paste silently
+    /// Stop dictation and paste — branches on Apple Speech vs Whisper engine
     func stopDictationAndPaste() {
         guard isDictating, overlayController.state == .listening else { return }
         overlayController.state = .drafting
 
-        Task {
-            // Wait for recognizer to process remaining audio buffer (captures last words)
-            await appState.speech.stopListeningGracefully()
+        if appState.whisperEngine.isRecording {
+            // Whisper path: stop recording, transcribe batch, paste
+            appState.whisperEngine.stopRecording()
+            Task {
+                let voiceText = await appState.whisperEngine.transcribe()
 
-            let voiceText = (appState.speech.finalTranscript + appState.speech.volatileText)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let text = voiceText, !text.isEmpty else {
+                    appState.logger.log("DICTATION | Whisper: no transcription, cancelling")
+                    cancelDictation()
+                    return
+                }
 
-            guard !voiceText.isEmpty else {
-                appState.logger.log("DICTATION | no voice input, cancelling")
-                cancelDictation()
-                return
+                appState.logger.log("DICTATION | Whisper: pasting \(text.count) chars")
+                overlayController.hide()
+                pasteWithClipboardRestore(text)
+                isDictating = false
+                appState.logger.log("DICTATION | Whisper: pasted \(text.count) chars")
             }
+        } else {
+            // Apple Speech path: graceful stop, paste raw text
+            Task {
+                await appState.speech.stopListeningGracefully()
 
-            appState.logger.log("DICTATION | polishing \(voiceText.count) chars")
+                let voiceText = (appState.speech.finalTranscript + appState.speech.volatileText)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            let polished = await polishDictation(voiceText)
-            overlayController.hide()
-            pasteWithClipboardRestore(polished)
-            isDictating = false
-            appState.logger.log("DICTATION | pasted \(polished.count) chars")
+                guard !voiceText.isEmpty else {
+                    appState.logger.log("DICTATION | no voice input, cancelling")
+                    cancelDictation()
+                    return
+                }
+
+                appState.logger.log("DICTATION | pasting raw \(voiceText.count) chars (no AI)")
+                overlayController.hide()
+                pasteWithClipboardRestore(voiceText)
+                isDictating = false
+                appState.logger.log("DICTATION | pasted \(voiceText.count) chars")
+            }
         }
     }
 
     /// Cancel dictation without pasting
     func cancelDictation() {
+        if appState.whisperEngine.isRecording {
+            appState.whisperEngine.cancel()
+        }
         if appState.speech.isListening {
             appState.speech.stopListening()
         }
@@ -910,7 +956,7 @@ class DraftSessionController: ObservableObject {
             Do NOT add greetings, sign-offs, or extra text. Output ONLY the corrected text.
             """
 
-        let model = appState.promptStore.config.model
+        let model = appState.promptStore.config.draftModel
 
         do {
             let polished = try await AnthropicAPI.withTimeout(seconds: 5) {

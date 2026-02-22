@@ -68,7 +68,7 @@ class DraftEngine: ObservableObject {
         lastRawText = rawText
 
         let customPrompt = styleEngine?.buildSystemPrompt()
-        let model = promptStore?.config.model ?? DefaultPrompts.model
+        let model = promptStore?.config.draftModel ?? DefaultPrompts.sonnetModel
 
         Task {
             do {
@@ -112,7 +112,7 @@ class DraftEngine: ObservableObject {
 
         Task {
             do {
-                let draftModel = self.promptStore?.config.model ?? DefaultPrompts.model
+                let draftModel = self.promptStore?.config.draftModel ?? DefaultPrompts.sonnetModel
                 let result = try await AnthropicAPI.draft(
                     rawText: userMessage,
                     auth: auth,

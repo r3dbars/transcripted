@@ -69,7 +69,7 @@ enum AnthropicAPIError: LocalizedError {
 
 struct AnthropicAPI {
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
-    static let sonnetModel = "claude-sonnet-4-20250514"
+    static let sonnetModel = "claude-sonnet-4-6-20250514"
     private static let apiVersion = "2023-06-01"
 
     // MARK: - Text Drafting

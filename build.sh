@@ -45,7 +45,15 @@ swiftc \
     -framework Speech \
     -framework Security \
     -framework Carbon \
+    -framework Metal \
+    -framework MetalKit \
+    -framework Accelerate \
     -lsqlite3 \
+    -lc++ \
+    -Iinclude \
+    -Llibs \
+    -lwhisper -lggml-base -lggml-cpu -lggml-metal -lggml-blas -lggml \
+    -import-objc-header Sources/Speech/WhisperBridge.h \
     $(find Sources -name '*.swift') \
     -parse-as-library \
     -target arm64-apple-macos14.0 \

@@ -276,7 +276,7 @@ class StreamingChatEngine: ObservableObject {
                     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     auth.apply(to: &request)
 
-                    let model = self.promptStore?.config.model ?? DefaultPrompts.model
+                    let model = self.promptStore?.config.draftModel ?? DefaultPrompts.sonnetModel
                     let body: [String: Any] = [
                         "model": model,
                         "max_tokens": 2048,
