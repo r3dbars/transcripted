@@ -3,30 +3,6 @@
 
 import SwiftUI
 
-// MARK: - Transcription Engine Selection
-
-enum TranscriptionEngine: String, CaseIterable {
-    case appleSpeech = "apple"
-    case whisper = "whisper"
-
-    var displayName: String {
-        switch self {
-        case .appleSpeech: return "Apple Speech"
-        case .whisper: return "Whisper"
-        }
-    }
-
-    static var stored: TranscriptionEngine {
-        guard let raw = UserDefaults.standard.string(forKey: "transcription-engine"),
-              let engine = TranscriptionEngine(rawValue: raw) else { return .appleSpeech }
-        return engine
-    }
-
-    func save() {
-        UserDefaults.standard.set(rawValue, forKey: "transcription-engine")
-    }
-}
-
 @MainActor
 class DraftAppState: ObservableObject {
     let speech = SpeechEngine()
@@ -41,7 +17,6 @@ class DraftAppState: ObservableObject {
     let chatEngine = StreamingChatEngine()
     let whisperEngine = WhisperEngine()
     let modelManager = ModelManager()
-    @Published var transcriptionEngine: TranscriptionEngine = .stored
 
     private var promptsObserver: NSObjectProtocol?
 
@@ -76,25 +51,15 @@ class DraftAppState: ObservableObject {
             }
         }
 
-        // Pre-load Whisper model if selected and available
-        if transcriptionEngine == .whisper, let path = modelManager.modelPath {
+        // Load Whisper model (sole transcription engine)
+        if let path = modelManager.modelPath {
             _ = whisperEngine.loadModel(path: path)
-        }
-
-        logger.log("🚀 APP LAUNCHED | auth: \(drafter.authModeName), style: \(styleEngine.exampleCount) examples, model: \(promptStore.config.model), engine: \(transcriptionEngine.displayName), hotkey registered, analysis engine started")
-    }
-
-    func switchTranscriptionEngine(to engine: TranscriptionEngine) {
-        transcriptionEngine = engine
-        engine.save()
-        if engine == .whisper {
-            if let path = modelManager.modelPath, !whisperEngine.isModelLoaded {
-                _ = whisperEngine.loadModel(path: path)
-            }
+            logger.log("🎙️ WHISPER | model loaded from \(path)")
         } else {
-            whisperEngine.unloadModel()
+            logger.log("⚠️ WHISPER | model not found — run build-whisper.sh to download")
         }
-        logger.log("🔄 ENGINE | switched to \(engine.displayName)")
+
+        logger.log("🚀 APP LAUNCHED | auth: \(drafter.authModeName), style: \(styleEngine.exampleCount) examples, model: \(promptStore.config.model), engine: Whisper, hotkey registered, analysis engine started")
     }
 
     func shutdown() {

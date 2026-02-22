@@ -97,7 +97,7 @@ class FloatingOverlayController: ObservableObject {
 
     var whisperEngine: WhisperEngine?
 
-    func setup(speech: SpeechEngine, whisperEngine: WhisperEngine) {
+    func setup(whisperEngine: WhisperEngine) {
         self.whisperEngine = whisperEngine
         let panel = FloatingOverlayPanel(
             contentRect: NSRect(x: 0, y: 0, width: overlayPanelWidth, height: overlayPanelMinHeight),
@@ -106,7 +106,7 @@ class FloatingOverlayController: ObservableObject {
             defer: true
         )
 
-        let content = OverlayContentView(speech: speech, whisperEngine: whisperEngine, controller: self)
+        let content = OverlayContentView(whisperEngine: whisperEngine, controller: self)
         let hosting = NSHostingView(rootView: AnyView(content))
         hosting.frame = panel.contentView?.bounds ?? .zero
         hosting.autoresizingMask = [.width, .height]
@@ -291,7 +291,6 @@ private class PanelDragView: NSView {
 // MARK: - SwiftUI Overlay Content
 
 struct OverlayContentView: View {
-    @ObservedObject var speech: SpeechEngine
     @ObservedObject var whisperEngine: WhisperEngine
     @ObservedObject var controller: FloatingOverlayController
     @FocusState private var isReviewFocused: Bool
@@ -471,49 +470,18 @@ struct OverlayContentView: View {
         }
     }
 
-    /// True when Whisper is the active dictation engine and we're in dictation mode
-    private var isWhisperDictation: Bool {
-        controller.activeMode == .dictation && whisperEngine.isRecording
-    }
-
     @ViewBuilder
     private var listeningContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if isWhisperDictation {
-                // Whisper mode: waveform only (no live text — batch transcription on stop)
-                VStack(spacing: 8) {
-                    AudioWaveformView(level: whisperEngine.audioLevel, compact: false)
-                        .frame(height: 40)
-                    Text("Recording... press ⌥D to stop")
-                        .font(.system(size: 12))
-                        .foregroundColor(textMuted)
-                }
-                .frame(maxWidth: .infinity)
-            } else if !speech.displayText.isEmpty {
-                ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: false) {
-                        Text(speech.displayText)
-                            .foregroundColor(textPrimary)
-                            .font(.system(size: 13))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .id("transcription")
-                    }
-                    .onChange(of: speech.displayText) { _, _ in
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            proxy.scrollTo("transcription", anchor: .bottom)
-                        }
-                    }
-                }
-            } else {
-                HStack(spacing: 8) {
-                    AudioWaveformView(level: speech.audioLevel, compact: true)
-                    Text("Start speaking...")
-                        .font(.system(size: 13))
-                        .foregroundColor(textMuted)
-                        .italic()
-                }
-            }
+        VStack(spacing: 8) {
+            AudioWaveformView(level: whisperEngine.audioLevel, compact: false)
+                .frame(height: 40)
+            Text(controller.activeMode == .dictation
+                 ? "Recording... press \u{2325}D to stop"
+                 : "Recording... press \u{2325}Space to stop")
+                .font(.system(size: 12))
+                .foregroundColor(textMuted)
         }
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, overlayContentPadding)
         .padding(.vertical, 12)
     }
@@ -524,8 +492,7 @@ struct OverlayContentView: View {
             ProgressView()
                 .controlSize(.small)
                 .tint(accentGreen)
-            Text(whisperEngine.isTranscribing ? "Transcribing..." :
-                 controller.activeMode == .dictation ? "Processing..." : "Processing...")
+            Text(whisperEngine.isTranscribing ? "Transcribing..." : "Processing...")
                 .font(.system(size: 12))
                 .foregroundColor(textMuted)
         }
@@ -729,16 +696,15 @@ class DraftSessionController: ObservableObject {
         }
 
         lastCapturedContext = nil
-        appState.speech.clear()
         appState.drafter.clear()
 
         // Show overlay and start recording
         overlayController.activeMode = .draft
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
-        appState.speech.startListening()
+        appState.whisperEngine.startRecording()
 
-        appState.logger.log("SESSION | started, voice recording + vision in parallel")
+        appState.logger.log("SESSION | started (Whisper), voice recording + vision in parallel")
 
         // Start vision processing in parallel (stored so we can await it before drafting)
         visionTask = Task {
@@ -752,10 +718,9 @@ class DraftSessionController: ObservableObject {
         overlayController.state = .drafting
 
         streamingTask = Task {
-            // Wait for recognizer to process remaining audio buffer (captures last words)
-            await appState.speech.stopListeningGracefully()
-
-            let voiceText = (appState.speech.finalTranscript + appState.speech.volatileText)
+            // Stop Whisper recording and batch-transcribe
+            appState.whisperEngine.stopRecording()
+            let voiceText = (await appState.whisperEngine.transcribe() ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard !voiceText.isEmpty else {
@@ -847,10 +812,9 @@ class DraftSessionController: ObservableObject {
         visionTask = nil
         streamingTask?.cancel()
         streamingTask = nil
-        if appState.speech.isListening {
-            appState.speech.stopListening()
+        if appState.whisperEngine.isRecording {
+            appState.whisperEngine.cancel()
         }
-        appState.speech.clear()
         overlayController.hide()
         isInSession = false
         appState.logger.log("SESSION | cancelled")
@@ -872,59 +836,30 @@ class DraftSessionController: ObservableObject {
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
 
-        if appState.transcriptionEngine == .whisper && appState.whisperEngine.isModelLoaded {
-            appState.whisperEngine.startRecording()
-            appState.logger.log("DICTATION | started (Whisper)")
-        } else {
-            appState.speech.clear()
-            appState.speech.startListening()
-            appState.logger.log("DICTATION | started (Apple Speech)")
-        }
+        appState.whisperEngine.startRecording()
+        appState.logger.log("DICTATION | started (Whisper)")
     }
 
-    /// Stop dictation and paste — branches on Apple Speech vs Whisper engine
+    /// Stop dictation and paste — Whisper batch transcription
     func stopDictationAndPaste() {
         guard isDictating, overlayController.state == .listening else { return }
         overlayController.state = .drafting
 
-        if appState.whisperEngine.isRecording {
-            // Whisper path: stop recording, transcribe batch, paste
-            appState.whisperEngine.stopRecording()
-            Task {
-                let voiceText = await appState.whisperEngine.transcribe()
+        appState.whisperEngine.stopRecording()
+        Task {
+            let voiceText = await appState.whisperEngine.transcribe()
 
-                guard let text = voiceText, !text.isEmpty else {
-                    appState.logger.log("DICTATION | Whisper: no transcription, cancelling")
-                    cancelDictation()
-                    return
-                }
-
-                appState.logger.log("DICTATION | Whisper: pasting \(text.count) chars")
-                overlayController.hide()
-                pasteWithClipboardRestore(text)
-                isDictating = false
-                appState.logger.log("DICTATION | Whisper: pasted \(text.count) chars")
+            guard let text = voiceText, !text.isEmpty else {
+                appState.logger.log("DICTATION | no transcription, cancelling")
+                cancelDictation()
+                return
             }
-        } else {
-            // Apple Speech path: graceful stop, paste raw text
-            Task {
-                await appState.speech.stopListeningGracefully()
 
-                let voiceText = (appState.speech.finalTranscript + appState.speech.volatileText)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-
-                guard !voiceText.isEmpty else {
-                    appState.logger.log("DICTATION | no voice input, cancelling")
-                    cancelDictation()
-                    return
-                }
-
-                appState.logger.log("DICTATION | pasting raw \(voiceText.count) chars (no AI)")
-                overlayController.hide()
-                pasteWithClipboardRestore(voiceText)
-                isDictating = false
-                appState.logger.log("DICTATION | pasted \(voiceText.count) chars")
-            }
+            appState.logger.log("DICTATION | pasting \(text.count) chars")
+            overlayController.hide()
+            pasteWithClipboardRestore(text)
+            isDictating = false
+            appState.logger.log("DICTATION | pasted \(text.count) chars")
         }
     }
 
@@ -933,10 +868,6 @@ class DraftSessionController: ObservableObject {
         if appState.whisperEngine.isRecording {
             appState.whisperEngine.cancel()
         }
-        if appState.speech.isListening {
-            appState.speech.stopListening()
-        }
-        appState.speech.clear()
         overlayController.hide()
         isDictating = false
         appState.logger.log("DICTATION | cancelled")
@@ -1044,7 +975,7 @@ class DraftSessionController: ObservableObject {
         // Record with REAL edit data — but skip refusals to avoid poisoning style training
         if !looksLikeRefusal(originalDraft) {
             // Capture voice instructions + vision metadata for richer training signal
-            let voiceInstructions = appState.speech.finalTranscript
+            let voiceInstructions = appState.drafter.lastRawText
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let formalityLevel = lastCapturedContext?.formality
 
