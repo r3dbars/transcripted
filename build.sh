@@ -12,6 +12,17 @@ rm -rf "$BUILD_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
+# Bundle Whisper model
+MODEL_SRC="$HOME/Library/Application Support/Draft/models/ggml-large-v3-turbo-q5_0.bin"
+if [ -f "$MODEL_SRC" ]; then
+    echo "Bundling Whisper model..."
+    mkdir -p "$APP_BUNDLE/Contents/Resources/models"
+    cp "$MODEL_SRC" "$APP_BUNDLE/Contents/Resources/models/"
+else
+    echo "⚠️  Whisper model not found at $MODEL_SRC"
+    echo "   Run build-whisper.sh first to download the model."
+fi
+
 # Copy Info.plist
 cp Info.plist "$APP_BUNDLE/Contents/"
 

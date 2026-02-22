@@ -35,7 +35,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate {
         appState.contextCapture.sessionController = sessionController
 
         // Set up the floating overlay panel
-        overlayController.setup(speech: appState.speech, whisperEngine: appState.whisperEngine)
+        overlayController.setup(whisperEngine: appState.whisperEngine)
 
         // Set up menubar status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
