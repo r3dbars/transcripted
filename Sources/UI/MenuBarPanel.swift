@@ -70,6 +70,68 @@ struct MenuBarPanelView: View {
 
             Divider()
 
+            // Transcription engine picker
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Dictation Engine")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Picker("", selection: Binding(
+                    get: { appState.transcriptionEngine },
+                    set: { appState.switchTranscriptionEngine(to: $0) }
+                )) {
+                    ForEach(TranscriptionEngine.allCases, id: \.self) { engine in
+                        Text(engine.displayName).tag(engine)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+
+                if appState.transcriptionEngine == .whisper {
+                    if appState.modelManager.isModelAvailable {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                                .font(.caption)
+                            Text("Whisper model ready")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    } else if appState.modelManager.isDownloading {
+                        VStack(spacing: 4) {
+                            ProgressView(value: appState.modelManager.downloadProgress)
+                                .frame(width: 220)
+                            HStack {
+                                Text("Downloading model (\(Int(appState.modelManager.downloadProgress * 100))%)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Button("Cancel") { appState.modelManager.cancelDownload() }
+                                    .font(.caption2)
+                            }
+                            .frame(width: 220)
+                        }
+                    } else if let error = appState.modelManager.downloadError {
+                        VStack(spacing: 4) {
+                            Text(error)
+                                .font(.caption2)
+                                .foregroundColor(.red)
+                                .lineLimit(2)
+                            Button("Retry Download") {
+                                appState.modelManager.downloadModel()
+                            }
+                            .font(.caption2)
+                        }
+                    } else {
+                        // Auto-download when Whisper is selected and model is missing
+                        ProgressView()
+                            .controlSize(.small)
+                            .onAppear { appState.modelManager.downloadModel() }
+                    }
+                }
+            }
+
+            Divider()
+
             VStack(spacing: 4) {
                 Text("Credentials stored in macOS Keychain")
                     .font(.caption)
