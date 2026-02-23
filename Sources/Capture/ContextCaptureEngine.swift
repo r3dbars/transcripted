@@ -15,7 +15,7 @@ private func hotkeyHandler(
     event: EventRef?,
     userData: UnsafeMutableRawPointer?
 )-> OSStatus {
-    // Extract which hotkey fired (id: 1 = ⌥Space draft, id: 2 = ⌥D dictation)
+    // Extract which hotkey fired (id: 1 = ⌥D draft, id: 2 = ⌥Space dictation)
     guard let event = event else { return noErr }
     var hotkeyID = EventHotKeyID()
     let status = GetEventParameter(
@@ -115,12 +115,12 @@ class ContextCaptureEngine: ObservableObject {
             &eventHandlerRef
         )
 
-        // Option+Space — Draft mode
+        // Option+D — Draft mode (screenshot + voice → AI draft)
         let draftHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 1)  // 'DRFT'
         let modifiers: UInt32 = UInt32(optionKey)
 
         RegisterEventHotKey(
-            UInt32(kVK_Space),
+            UInt32(kVK_ANSI_D),
             modifiers,
             draftHotkeyID,
             GetApplicationEventTarget(),
@@ -128,10 +128,10 @@ class ContextCaptureEngine: ObservableObject {
             &hotkeyRef
         )
 
-        // Option+D — Dictation mode
+        // Option+Space — Dictation mode (voice → text → paste)
         let dictationHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 2)  // 'DRFT'
         RegisterEventHotKey(
-            UInt32(kVK_ANSI_D),
+            UInt32(kVK_Space),
             modifiers,
             dictationHotkeyID,
             GetApplicationEventTarget(),
