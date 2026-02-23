@@ -6,7 +6,7 @@ Native Swift replacement for the Python orchestrator agent. Watches `~/Library/A
 
 ## Key File
 
-- `AnalysisEngine.swift` (340 lines) — `@MainActor ObservableObject` with DispatchSource file watching, debounced Sonnet analysis, and InsightCard management
+- `AnalysisEngine.swift` (~350 lines) — `@MainActor ObservableObject` with DispatchSource file watching, debounced Sonnet analysis, InsightCard management, and proper deinit cleanup
 
 ## How It Works
 
@@ -61,6 +61,8 @@ The suggestion log prevents re-proposing recently skipped changes.
 
 Uses `AnthropicAPI.sonnetModel` for the model and `JSONSerialization` for the request body (tool use requires mixed-type arrays that `Codable` can't handle cleanly).
 
+Analysis failures are now logged (`print("⚠️ ANALYSIS | analysis failed: ...")`) instead of silently swallowed — makes debugging visible when the API call fails.
+
 ### Apply / Skip Actions
 
 | Action | What Happens |
@@ -91,6 +93,8 @@ var agentStatus: String     // "Analyzing feedback..." or "Watching for feedback
 
 func start()                // Begin watching feedback.jsonl (called by DraftAppState.initialize)
 func stop()                 // Stop watching, cancel pending tasks
+
+// deinit cancels fileSource and debounceTask — prevents leaked file descriptor + DispatchSource after dealloc
 func addInsight(_ card: InsightCard)  // Add card from external source (StreamingChatEngine passthrough)
 func apply(_ card: InsightCard)       // Write change to prompts.json + notify
 func skip(_ card: InsightCard)        // Log skip to suggestion_log.jsonl

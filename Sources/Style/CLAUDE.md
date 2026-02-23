@@ -152,6 +152,10 @@ func completeOnboarding()                        // Sets hasCompletedOnboarding 
 - **User's name:** `UserDefaults` key `"user-display-name"` (set during onboarding, used for vision extraction too)
 - **Format:** Markdown with structured sections, written atomically on every change
 
+## Error Handling
+
+`saveStyleFile()` uses `do/catch` with `print("⚠️ STYLE | failed to save style.md: ...")` instead of silent `try?`. This makes write failures visible in the debug log (e.g., disk full, permissions changed, directory missing).
+
 ## Verification
 
 After modifying StyleEngine, verify with these checks:

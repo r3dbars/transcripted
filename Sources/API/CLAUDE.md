@@ -182,6 +182,8 @@ Implementation parses Anthropic's SSE format: filters for `data:` lines, decodes
 
 Generic timeout wrapper using `withThrowingTaskGroup`. Races the operation against a `Task.sleep` timer — whichever finishes first wins, the other is cancelled. Used by `DraftSessionController` to cap vision processing at 8 seconds.
 
+**Reliability fix:** `group.next()` result is now guarded with `guard let` instead of force-unwrapped (`group.next()!`). The force-unwrap could crash if both the operation and the sleep timer throw simultaneously.
+
 ## Verification
 
 After modifying AnthropicAPI or AuthCredential, verify with these checks:

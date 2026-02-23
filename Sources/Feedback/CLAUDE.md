@@ -36,5 +36,14 @@ It then rewrites `prompts.json` to improve future drafts.
 
 - JSONL (not JSON array) so the file can be appended atomically without parsing the whole thing
 - `FeedbackStore` is not `@MainActor` — file writes are synchronous on whatever thread calls `record()`
-- No read methods — this is a write-only append log. The orchestrator agent reads the file directly.
+- No read methods — this is a write-only append log. The analysis engine reads the file directly.
 - `accepted_text` != `drafted_text` when the user edits the draft in the TextEditor before hitting Copy/Paste — this edit delta is the richest feedback signal
+
+## Error Handling
+
+All failure paths now log warnings instead of failing silently:
+- `print("⚠️ FEEDBACK | failed to encode feedback entry")` — if `JSONEncoder` fails
+- `print("⚠️ FEEDBACK | failed to open feedback.jsonl for writing")` — if `FileHandle` open fails
+- `print("⚠️ FEEDBACK | failed to create feedback.jsonl: ...")` — if initial file creation fails
+
+This makes feedback logging failures visible in the debug log rather than silently dropping training data.

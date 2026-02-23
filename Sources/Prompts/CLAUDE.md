@@ -16,7 +16,8 @@ Prompts are now editable without recompiling. The orchestrator agent (a Python s
 
 | Key | Used by | Placeholders |
 |-----|---------|-------------|
-| `model` | All API calls — change model here | — |
+| `model` | Vision extraction, style analysis | — |
+| `draft_model` | Message drafting (Sonnet — quality output the user sees) | — |
 | `drafting_system` | DraftEngine fallback when no style examples yet | — |
 | `context_extraction` | Vision prompt for screenshot → conversation | `{USER_NAME}`, `{APP_NAME}` |
 | `ghostwriting_system` | Main drafting prompt with style profile | `{STYLE_SUMMARY}` |
@@ -43,4 +44,8 @@ If `prompts.json` is missing or corrupt, `PromptStore` initializes with hardcode
 
 ## Model Selection
 
-The `model` key in `prompts.json` controls which model is used for drafting and vision extraction (default: `claude-haiku-4-5-20251001`). Style refinement always uses Sonnet (`claude-sonnet-4-20250514`) regardless of this setting — it needs deeper reasoning.
+Two model keys in `prompts.json`:
+- `model` — Used for vision extraction and general API calls (default: `claude-haiku-4-5-20251001`)
+- `draft_model` — Used for message drafting, the text the user actually sees (default: `claude-sonnet-4-20250514`)
+
+Style refinement and analysis always use Sonnet (`AnthropicAPI.sonnetModel`) regardless of these settings — they need deeper reasoning.

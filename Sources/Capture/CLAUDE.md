@@ -27,19 +27,26 @@ Captures a screenshot of the user's current app window, sends it to Haiku Vision
 4. **Vision runs in parallel** — `DraftSessionController.startSession()` fires vision processing as a parallel `Task` stored as `visionTask`. Voice recording runs simultaneously.
 5. **Vision awaited before drafting** — `stopSessionAndDraft()` calls `await visionTask?.value` before checking `lastCapturedContext`, ensuring vision results are available even when the user speaks quickly.
 
+## Hotkey IDs
+
+- **ID 1** — ⌥D (Draft mode): screenshot + voice + AI rewrite + review
+- **ID 2** — ⌥Space (Dictation mode): voice only → light polish → auto-paste
+
+Both use signature `0x44524654` ('DRFT').
+
 ## Critical Design Decision: Sync Capture in C Callback
 
 The screenshot AND the frontmost app reference MUST be captured synchronously inside `hotkeyHandler()` before any `Task { @MainActor }` dispatch. If deferred to async, macOS shifts window focus to Draft, and you capture Draft's own window instead of the target app. The stored `sourceApp` would also be wrong.
 
 ```swift
 private func hotkeyHandler(...) -> OSStatus {
-    // CORRECT: capture BOTH while target app is still frontmost
+    // hotkeyID.id == 1: ⌥D (Draft)
     let frontApp = NSWorkspace.shared.frontmostApplication
     let imageData = frontApp.flatMap { ScreenCapture.captureFrontmostWindow(of: $0) }
     Task { @MainActor in
         guard let session = _sharedSessionController else { return }
         if session.isInSession {
-            if session.overlayController.state == .review {
+            if session.overlayController?.state == .review {  // Optional chaining — overlayController is Optional
                 session.cancelSession()
             } else {
                 session.stopSessionAndDraft()
@@ -95,9 +102,32 @@ struct CapturedContext {
 
 `processCapture(imageData:sourceApp:)` is the v1 capture pipeline that runs vision extraction directly and calls `onContextCaptured`. It is **preserved for compatibility** but unused in the v2 floating overlay flow — `DraftSessionController` handles vision processing internally. The `onContextCaptured` and `onHotkeyFired` callbacks are marked as legacy.
 
+## Reliability Hardening
+
+### Double Registration Guard
+
+`registerHotkey()` checks `eventHandlerRef == nil` before registering. Without this, double-calling stacks Carbon hotkeys — each press fires the callback multiple times.
+
+### deinit Cleanup
+
+```swift
+deinit {
+    if let ref = hotkeyRef { UnregisterEventHotKey(ref) }
+    if let ref = dictationHotkeyRef { UnregisterEventHotKey(ref) }
+    if let ref = eventHandlerRef { RemoveEventHandler(ref) }
+}
+```
+
+Carbon hotkeys are global OS-level resources. Without explicit cleanup in `deinit`, they persist after Swift object deallocation and fire into freed memory.
+
+### Optional Chaining for overlayController
+
+Since `DraftSessionController.overlayController` is now `Optional` (not IUO), the hotkey callback uses `session.overlayController?.state` with optional chaining.
+
 ## Hotkey Details
 
-- **Shortcut:** Option+Space (`optionKey`, `kVK_Space`)
+- **Draft shortcut:** Option+D (`optionKey`, `kVK_ANSI_D`) — hotkey ID 1
+- **Dictation shortcut:** Option+Space (`optionKey`, `kVK_Space`) — hotkey ID 2
 - **Registration:** Carbon `RegisterEventHotKey` with signature `0x44524654` ('DRFT')
 - **Why Carbon:** `NSEvent.addGlobalMonitorForEvents` is a passive observer — apps can consume events before the monitor sees them. Carbon hotkeys intercept at OS level (same mechanism as Alfred/Raycast).
 
