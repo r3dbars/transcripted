@@ -40,6 +40,11 @@ class AnalysisEngine: ObservableObject {
         dataDir = appSupport.appendingPathComponent("Draft", isDirectory: true)
     }
 
+    deinit {
+        fileSource?.cancel()
+        debounceTask?.cancel()
+    }
+
     func start() {
         dataDir.ensureExists()
         // Count existing entries (don't trigger analysis on startup)
@@ -158,7 +163,7 @@ class AnalysisEngine: ObservableObject {
                 insights.append(card)
             }
         } catch {
-            // Analysis failed silently — will retry on next feedback batch
+            print("⚠️ ANALYSIS | analysis failed: \(error.localizedDescription)")
         }
     }
 

@@ -19,8 +19,11 @@ class DraftAppState: ObservableObject {
     let modelManager = ModelManager()
 
     private var promptsObserver: NSObjectProtocol?
+    private var isInitialized = false
 
     func initialize() async {
+        guard !isInitialized else { return }
+        isInitialized = true
         _ = await speech.requestPermissions()
         drafter.checkCredential()
         drafter.styleEngine = styleEngine

@@ -17,6 +17,9 @@ class WhisperEngine: ObservableObject {
     private let audioEngine = AVAudioEngine()
     private var sampleBuffer: [Float] = []
     private var nativeSampleRate: Double = 48000
+    // Lock-protected buffer for audio thread → MainActor sample transfer (avoids ~47 Task creations/sec)
+    private let pendingSamplesLock = NSLock()
+    private var pendingSamples: [Float] = []
     // Accessed from both the audio thread and MainActor — benign race (worst case: extra/missed level update)
     private nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
     private var isEnginePrewarmed = false
@@ -39,6 +42,10 @@ class WhisperEngine: ObservableObject {
 
     /// Load the GGML model file into memory. Call once (e.g., at app launch if Whisper is selected).
     func loadModel(path: String) -> Bool {
+        guard !isRecording, !isTranscribing else {
+            print("⚠️ WHISPER | cannot load model while recording or transcribing")
+            return false
+        }
         if whisperContext != nil { unloadModel() }
 
         let params = whisper_context_default_params()
@@ -53,6 +60,10 @@ class WhisperEngine: ObservableObject {
     }
 
     func unloadModel() {
+        guard !isRecording, !isTranscribing else {
+            print("⚠️ WHISPER | cannot unload model while recording or transcribing")
+            return
+        }
         if let ctx = whisperContext {
             whisper_free(ctx)
             whisperContext = nil
@@ -163,6 +174,15 @@ class WhisperEngine: ObservableObject {
 
     func startRecording() {
         guard !isRecording else { return }
+        guard isModelLoaded else {
+            print("⚠️ WHISPER | cannot start recording — model not loaded")
+            return
+        }
+        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        guard micStatus == .authorized else {
+            print("⚠️ WHISPER | microphone permission not granted (status: \(micStatus.rawValue))")
+            return
+        }
         sampleBuffer.removeAll(keepingCapacity: true)
         // Pre-allocate for ~2 minutes of audio to avoid geometric reallocation during recording
         sampleBuffer.reserveCapacity(Int(nativeSampleRate * 120))
@@ -182,11 +202,12 @@ class WhisperEngine: ObservableObject {
             // Consumer 1: Apple Speech (live display)
             self.liveRequest?.append(buffer)
 
-            // Consumer 2: Whisper sample buffer (batch transcription)
+            // Consumer 2: Whisper sample buffer — lock-protected intermediate buffer
+            // (avoids creating ~47 Task objects/sec; flushed in stopRecording/transcribe)
             let samples = Array(UnsafeBufferPointer(start: channelData, count: frameLength))
-            Task { @MainActor [weak self] in
-                self?.sampleBuffer.append(contentsOf: samples)
-            }
+            self.pendingSamplesLock.lock()
+            self.pendingSamples.append(contentsOf: samples)
+            self.pendingSamplesLock.unlock()
 
             // Consumer 3: Audio level metering (~20Hz throttled) for waveform animation
             let now = CFAbsoluteTimeGetCurrent()
@@ -234,6 +255,11 @@ class WhisperEngine: ObservableObject {
         stopLiveSpeech()
         // Remove tap but keep engine running — stays warm for next session
         audioEngine.inputNode.removeTap(onBus: 0)
+        // Flush any pending samples from the audio thread before we read sampleBuffer
+        pendingSamplesLock.lock()
+        sampleBuffer.append(contentsOf: pendingSamples)
+        pendingSamples.removeAll(keepingCapacity: true)
+        pendingSamplesLock.unlock()
         isRecording = false
         audioLevel = 0
         print("⏹️ WHISPER | recording stopped, engine stays warm (\(sampleBuffer.count) samples, \(String(format: "%.1f", Double(sampleBuffer.count) / nativeSampleRate))s)")
@@ -344,6 +370,15 @@ class WhisperEngine: ObservableObject {
 
     /// Transcribe the accumulated audio buffer. Returns the full transcription text, or nil on failure.
     func transcribe() async -> String? {
+        guard !isTranscribing else {
+            print("⚠️ WHISPER | transcription already in progress, skipping")
+            return nil
+        }
+        // Flush any remaining samples from the audio thread
+        pendingSamplesLock.lock()
+        sampleBuffer.append(contentsOf: pendingSamples)
+        pendingSamples.removeAll(keepingCapacity: true)
+        pendingSamplesLock.unlock()
         guard !sampleBuffer.isEmpty else {
             print("⚠️ WHISPER | no audio to transcribe")
             return nil
@@ -366,14 +401,18 @@ class WhisperEngine: ObservableObject {
 
     // MARK: - Inference (off main thread)
 
-    /// Wrapper to pass OpaquePointer across concurrency boundaries (whisper_context is thread-safe).
+    /// Wrapper to pass OpaquePointer across concurrency boundaries.
     private struct SendablePointer: @unchecked Sendable { let ptr: OpaquePointer }
 
-    /// Runs whisper_full() on a background thread via withCheckedContinuation.
+    /// Serial queue for whisper inference — whisper_context is NOT safe for concurrent whisper_full() calls
+    /// (the Metal backend shares command buffers internally, concurrent access → ggml_abort).
+    private static let inferenceQueue = DispatchQueue(label: "com.draft.whisper-inference", qos: .userInitiated)
+
+    /// Runs whisper_full() on a dedicated serial queue via withCheckedContinuation.
     private nonisolated static func runWhisperInference(ctx: OpaquePointer, samples: [Float], inputRate: Double) async -> String? {
         let sendable = SendablePointer(ptr: ctx)
         return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
+            inferenceQueue.async {
                 let result = Self.whisperInferenceSync(ctx: sendable.ptr, samples: samples, inputRate: inputRate)
                 continuation.resume(returning: result)
             }
@@ -446,8 +485,10 @@ class WhisperEngine: ObservableObject {
     deinit {
         if let observer = configChangeObserver {
             NotificationCenter.default.removeObserver(observer)
-            configChangeObserver = nil
         }
+        // Stop audio engine to release mic (tap callback uses [weak self], safe if self is nil)
+        audioEngine.inputNode.removeTap(onBus: 0)
+        audioEngine.stop()
         // Note: deinit runs on whatever thread — whisper_free is thread-safe
         if let ctx = whisperContext {
             whisper_free(ctx)

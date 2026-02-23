@@ -41,7 +41,7 @@ private func hotkeyHandler(
                 session.cancelDictation()
                 session.startSession(imageData: imageData, sourceApp: frontApp)
             } else if session.isInSession {
-                if session.overlayController.state == .review {
+                if session.overlayController?.state == .review {
                     session.cancelSession()
                 } else {
                     session.stopSessionAndDraft()
@@ -102,6 +102,10 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     func registerHotkey() {
+        guard eventHandlerRef == nil else {
+            print("⚠️ CAPTURE | hotkey already registered")
+            return
+        }
         _sharedEngine = self
 
         // Register for kEventHotKeyPressed
@@ -138,6 +142,12 @@ class ContextCaptureEngine: ObservableObject {
             0,
             &dictationHotkeyRef
         )
+    }
+
+    deinit {
+        if let ref = hotkeyRef { UnregisterEventHotKey(ref) }
+        if let ref = dictationHotkeyRef { UnregisterEventHotKey(ref) }
+        if let ref = eventHandlerRef { RemoveEventHandler(ref) }
     }
 
     func unregisterHotkey() {

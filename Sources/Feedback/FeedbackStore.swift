@@ -81,17 +81,27 @@ class FeedbackStore: ObservableObject {
         )
 
         guard let data = try? encoder.encode(entry),
-              let line = String(data: data, encoding: .utf8) else { return }
+              let line = String(data: data, encoding: .utf8) else {
+            print("⚠️ FEEDBACK | failed to encode feedback entry")
+            return
+        }
 
         let lineWithNewline = (line + "\n").data(using: .utf8) ?? Data()
 
         if FileManager.default.fileExists(atPath: feedbackURL.path) {
-            guard let handle = try? FileHandle(forWritingTo: feedbackURL) else { return }
+            guard let handle = try? FileHandle(forWritingTo: feedbackURL) else {
+                print("⚠️ FEEDBACK | failed to open feedback.jsonl for writing")
+                return
+            }
             defer { try? handle.close() }
             handle.seekToEndOfFile()
             handle.write(lineWithNewline)
         } else {
-            try? lineWithNewline.write(to: feedbackURL)
+            do {
+                try lineWithNewline.write(to: feedbackURL)
+            } catch {
+                print("⚠️ FEEDBACK | failed to create feedback.jsonl: \(error.localizedDescription)")
+            }
         }
     }
 
