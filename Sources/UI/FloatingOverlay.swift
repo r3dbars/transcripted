@@ -98,6 +98,10 @@ class FloatingOverlayController: ObservableObject {
     var whisperEngine: WhisperEngine?
 
     func setup(whisperEngine: WhisperEngine) {
+        guard panel == nil else {
+            print("⚠️ OVERLAY | setup() called twice — ignoring")
+            return
+        }
         self.whisperEngine = whisperEngine
         let panel = FloatingOverlayPanel(
             contentRect: NSRect(x: 0, y: 0, width: overlayPanelWidth, height: overlayPanelMinHeight),
@@ -205,6 +209,7 @@ class FloatingOverlayController: ObservableObject {
         panel.setFrameOrigin(origin)
         panel.setContentSize(panelSize)
         panel.allowKeyStatus = false
+        panel.ignoresMouseEvents = false  // Re-enable after hide animations
 
         // Spring entrance: start transparent + slightly scaled down
         panel.alphaValue = 0
@@ -251,6 +256,7 @@ class FloatingOverlayController: ObservableObject {
     }
 
     func startStreaming(near sourceApp: NSRunningApplication? = nil) {
+        guard state == .drafting || state == .listening else { return }
         streamingText = ""
         state = .streaming
         // Show panel if not visible
@@ -264,6 +270,7 @@ class FloatingOverlayController: ObservableObject {
     }
 
     func appendStreamToken(_ token: String) {
+        guard state == .streaming else { return }
         streamingText += token
         // Dynamically resize as text grows
         let lineCount = max(1, streamingText.components(separatedBy: "\n").count)
@@ -276,6 +283,7 @@ class FloatingOverlayController: ObservableObject {
     }
 
     func finishStreaming() {
+        guard state == .streaming else { return }
         // Transfer to editable review
         showReview(text: streamingText)
         streamingText = ""
@@ -284,6 +292,7 @@ class FloatingOverlayController: ObservableObject {
     /// Confirm animation: scale down + fade (content "sends" toward target app)
     func hideWithConfirmAnimation(completion: (() -> Void)? = nil) {
         guard let panel = panel else { completion?(); _performHide(); return }
+        panel.ignoresMouseEvents = true  // Prevent gesture dispatch during teardown
 
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.14
@@ -307,6 +316,7 @@ class FloatingOverlayController: ObservableObject {
     /// Cancel animation: horizontal shake + fade (signals "nothing happened")
     func hideWithCancelAnimation() {
         guard let panel = panel else { _performHide(); return }
+        panel.ignoresMouseEvents = true  // Prevent gesture dispatch during teardown
 
         // Horizontal shake using the window frame (not layer — layers don't move windows)
         let baseX = panel.frame.origin.x
@@ -314,7 +324,8 @@ class FloatingOverlayController: ObservableObject {
         let stepDuration = 0.068  // ~340ms total for 5 steps
 
         for (i, offset) in offsets.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(i)) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(i)) { [weak panel] in
+                guard let panel = panel else { return }
                 var frame = panel.frame
                 frame.origin.x = baseX + offset
                 panel.setFrame(frame, display: false)
@@ -322,7 +333,8 @@ class FloatingOverlayController: ObservableObject {
         }
 
         // Fade out after shake completes
-        DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(offsets.count)) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(offsets.count)) { [weak self, weak panel] in
+            guard let panel = panel else { self?._performHide(); return }
             NSAnimationContext.runAnimationGroup({ ctx in
                 ctx.duration = 0.14
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -334,6 +346,7 @@ class FloatingOverlayController: ObservableObject {
     }
 
     private func _performHide() {
+        guard isVisible else { return }  // Prevent double-hide during animation overlap
         panel?.allowKeyStatus = false
         panel?.orderOut(nil)
         panel?.alphaValue = 1.0  // Reset for next show
@@ -436,6 +449,7 @@ struct OverlayContentView: View {
         let isActive = controller.activeMode == mode && controller.state != .idle
 
         Button(action: {
+            guard controller.state != .idle, controller.isVisible else { return }
             controller.onSwitchMode?(mode)
         }) {
             VStack(spacing: 4) {
@@ -760,8 +774,8 @@ class DraftSessionController: ObservableObject {
     @Published var isInSession = false
     @Published var isDictating = false
 
-    var appState: DraftAppState!
-    var overlayController: FloatingOverlayController! {
+    var appState: DraftAppState?
+    var overlayController: FloatingOverlayController? {
         didSet {
             overlayController?.onSwitchMode = { [weak self] mode in
                 self?.switchToMode(mode)
@@ -778,6 +792,7 @@ class DraftSessionController: ObservableObject {
 
     /// Called when a sidebar bubble is tapped
     func switchToMode(_ newMode: FloatingOverlayController.SessionMode) {
+        guard appState != nil, let overlayController = overlayController else { return }
         if newMode == overlayController.activeMode {
             // Tapped the currently active mode — act as stop/toggle
             if newMode == .draft {
@@ -811,6 +826,7 @@ class DraftSessionController: ObservableObject {
 
     /// Start a new recording session — called on first hotkey press
     func startSession(imageData: Data?, sourceApp: NSRunningApplication?) {
+        guard let appState = appState, let overlayController = overlayController else { return }
         guard !isInSession, !isDictating else { return }
         isInSession = true
         sessionSourceApp = sourceApp
@@ -832,6 +848,7 @@ class DraftSessionController: ObservableObject {
         appState.logger.log("SESSION | started (Whisper, \(appState.whisperEngine.inputDeviceName)), voice recording + vision in parallel")
 
         // Start vision processing in parallel (stored so we can await it before drafting)
+        visionTask?.cancel()
         visionTask = Task {
             await processVision(imageData: imageData, sourceApp: sourceApp)
         }
@@ -839,9 +856,11 @@ class DraftSessionController: ObservableObject {
 
     /// Stop recording and trigger drafting — called on second hotkey press
     func stopSessionAndDraft() {
+        guard let appState = appState, let overlayController = overlayController else { return }
         guard isInSession else { return }
         overlayController.state = .drafting
 
+        streamingTask?.cancel()
         streamingTask = Task {
             // Stop Whisper recording and batch-transcribe
             appState.whisperEngine.stopRecording()
@@ -933,6 +952,7 @@ class DraftSessionController: ObservableObject {
     }
 
     func cancelSession() {
+        guard let appState = appState, let overlayController = overlayController else { return }
         visionTask?.cancel()
         visionTask = nil
         streamingTask?.cancel()
@@ -949,6 +969,7 @@ class DraftSessionController: ObservableObject {
 
     /// Start dictation — show overlay and begin voice recording (no screenshot/vision)
     func startDictation(sourceApp: NSRunningApplication?) {
+        guard let appState = appState, let overlayController = overlayController else { return }
         guard !isDictating, !isInSession else { return }
         isDictating = true
         sessionSourceApp = sourceApp
@@ -967,6 +988,7 @@ class DraftSessionController: ObservableObject {
 
     /// Stop dictation and paste — Whisper batch transcription
     func stopDictationAndPaste() {
+        guard let appState = appState, let overlayController = overlayController else { return }
         guard isDictating, overlayController.state == .listening else { return }
         overlayController.state = .drafting
 
@@ -991,6 +1013,7 @@ class DraftSessionController: ObservableObject {
 
     /// Cancel dictation without pasting
     func cancelDictation() {
+        guard let appState = appState, let overlayController = overlayController else { return }
         if appState.whisperEngine.isRecording {
             appState.whisperEngine.cancel()
         }
@@ -1002,6 +1025,7 @@ class DraftSessionController: ObservableObject {
     /// Apply light polish (punctuation, capitalization, grammar) to raw dictation.
     /// Falls back to raw text if API call fails — dictation must NEVER lose text.
     private func polishDictation(_ rawText: String) async -> String {
+        guard let appState = appState else { return rawText }
         guard let auth = AuthCredential.load() else {
             appState.logger.log("DICTATION | no auth, pasting raw text")
             return rawText
@@ -1043,6 +1067,7 @@ class DraftSessionController: ObservableObject {
     // MARK: - Private
 
     private func processVision(imageData: Data?, sourceApp: NSRunningApplication?) async {
+        guard let appState = appState else { return }
         guard let auth = AuthCredential.load(), let imageData = imageData else {
             appState.logger.log("SESSION | no auth or screenshot, proceeding voice-only")
             return
@@ -1088,6 +1113,7 @@ class DraftSessionController: ObservableObject {
 
     /// Called by Enter key in review — injects the (possibly edited) text
     private func confirmAndInject(platform: PlatformFormatter) {
+        guard let appState = appState, let overlayController = overlayController else { return }
         guard isInSession else { return }
         let editedText = overlayController.reviewText
         let originalDraft = appState.drafter.originalDraft
@@ -1136,6 +1162,7 @@ class DraftSessionController: ObservableObject {
     }
 
     private func pasteWithClipboardRestore(_ text: String) {
+        guard let appState = appState else { return }
         let pasteboard = NSPasteboard.general
 
         // Save current clipboard contents

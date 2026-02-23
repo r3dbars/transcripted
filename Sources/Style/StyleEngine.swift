@@ -572,7 +572,11 @@ class StyleEngine: ObservableObject {
     }
 
     private func saveStyleFile() {
-        try? styleFileContents.write(to: styleFileURL, atomically: true, encoding: .utf8)
+        do {
+            try styleFileContents.write(to: styleFileURL, atomically: true, encoding: .utf8)
+        } catch {
+            print("⚠️ STYLE | failed to save style.md: \(error.localizedDescription)")
+        }
     }
 
     private func extractExamplesText() -> String {

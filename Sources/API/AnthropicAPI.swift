@@ -236,7 +236,10 @@ struct AnthropicAPI {
                 try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
                 throw CancellationError()
             }
-            let result = try await group.next()!
+            guard let result = try await group.next() else {
+                group.cancelAll()
+                throw CancellationError()
+            }
             group.cancelAll()
             return result
         }
