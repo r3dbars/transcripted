@@ -4,6 +4,7 @@
 
 import AVFoundation
 import Foundation
+import Speech
 
 @MainActor
 class WhisperEngine: ObservableObject {
@@ -15,6 +16,15 @@ class WhisperEngine: ObservableObject {
     private var sampleBuffer: [Float] = []
     private var nativeSampleRate: Double = 48000
     private var lastLevelUpdate: CFAbsoluteTime = 0
+    private var isEnginePrewarmed = false
+
+    // Live Apple Speech (display-only — Whisper owns the final transcript)
+    @Published var liveTranscript: String = ""
+    private var committedLiveText: String = ""  // Accumulates across task restarts
+    private var liveSpeechRecognizer: SFSpeechRecognizer?
+    private var liveRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var liveTask: SFSpeechRecognitionTask?
+    private var isLiveSpeechActive = false  // Guards against restart after explicit stop
 
     // Whisper context — loaded once, reused across transcriptions
     private var whisperContext: OpaquePointer?  // whisper_context *
@@ -46,6 +56,26 @@ class WhisperEngine: ObservableObject {
 
     var isModelLoaded: Bool { whisperContext != nil }
 
+    // MARK: - Pre-warm
+
+    /// Pre-warm the audio engine: prepare + start with NO tap installed.
+    /// No orange mic dot appears (no tap = no audio capture). Next startRecording() is instant.
+    func prewarm() {
+        guard !isEnginePrewarmed, !isRecording else { return }
+        do {
+            let inputNode = audioEngine.inputNode
+            let nativeFormat = inputNode.outputFormat(forBus: 0)
+            nativeSampleRate = nativeFormat.sampleRate
+
+            audioEngine.prepare()
+            try audioEngine.start()
+            isEnginePrewarmed = true
+            print("🔥 WHISPER | engine pre-warmed (rate=\(nativeSampleRate)Hz)")
+        } catch {
+            print("⚠️ WHISPER | prewarm failed: \(error.localizedDescription), will cold-start on record")
+        }
+    }
+
     // MARK: - Recording
 
     func startRecording() {
@@ -64,13 +94,16 @@ class WhisperEngine: ObservableObject {
                   let channelData = buffer.floatChannelData?[0] else { return }
             let frameLength = Int(buffer.frameLength)
 
-            // Accumulate raw samples
+            // Consumer 1: Apple Speech (live display)
+            self.liveRequest?.append(buffer)
+
+            // Consumer 2: Whisper sample buffer (batch transcription)
             let samples = Array(UnsafeBufferPointer(start: channelData, count: frameLength))
             Task { @MainActor [weak self] in
                 self?.sampleBuffer.append(contentsOf: samples)
             }
 
-            // RMS audio level (~20Hz throttled) for waveform animation
+            // Consumer 3: Audio level metering (~20Hz throttled) for waveform animation
             let now = CFAbsoluteTimeGetCurrent()
             guard now - (self.lastLevelUpdate) > 0.05 else { return }
             self.lastLevelUpdate = now
@@ -91,23 +124,116 @@ class WhisperEngine: ObservableObject {
             }
         }
 
-        do {
-            audioEngine.prepare()
-            try audioEngine.start()
+        // If pre-warmed, engine is already running — just the tap install above is enough.
+        // Otherwise, cold-start the engine now.
+        if isEnginePrewarmed {
             isRecording = true
-            print("🎤 WHISPER | recording started (rate=\(nativeSampleRate)Hz)")
-        } catch {
-            print("❌ WHISPER | audio engine failed: \(error.localizedDescription)")
+            liveTranscript = ""
+            committedLiveText = ""
+            startLiveSpeech()
+            print("🎤 WHISPER | recording started (pre-warmed, rate=\(nativeSampleRate)Hz)")
+        } else {
+            do {
+                audioEngine.prepare()
+                try audioEngine.start()
+                isRecording = true
+                isEnginePrewarmed = true  // Now warm for next time
+                liveTranscript = ""
+                committedLiveText = ""
+                startLiveSpeech()
+                print("🎤 WHISPER | recording started (cold-start, rate=\(nativeSampleRate)Hz)")
+            } catch {
+                print("❌ WHISPER | audio engine failed: \(error.localizedDescription)")
+            }
         }
     }
 
     func stopRecording() {
         guard isRecording else { return }
-        audioEngine.stop()
+        stopLiveSpeech()
+        // Remove tap but keep engine running — stays warm for next session
         audioEngine.inputNode.removeTap(onBus: 0)
         isRecording = false
         audioLevel = 0
-        print("⏹️ WHISPER | recording stopped (\(sampleBuffer.count) samples, \(String(format: "%.1f", Double(sampleBuffer.count) / nativeSampleRate))s)")
+        print("⏹️ WHISPER | recording stopped, engine stays warm (\(sampleBuffer.count) samples, \(String(format: "%.1f", Double(sampleBuffer.count) / nativeSampleRate))s)")
+    }
+
+    // MARK: - Live Apple Speech (display-only)
+
+    private func startLiveSpeech() {
+        // Initialize recognizer lazily
+        if liveSpeechRecognizer == nil {
+            liveSpeechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+        }
+        guard let recognizer = liveSpeechRecognizer, recognizer.isAvailable else {
+            print("⚠️ WHISPER | Apple Speech unavailable, skipping live transcript")
+            return
+        }
+
+        isLiveSpeechActive = true
+        startLiveSpeechTask(recognizer: recognizer)
+        print("👂 WHISPER | live Apple Speech started")
+    }
+
+    /// Creates a fresh recognition request/task. Called on initial start AND on auto-restart
+    /// after Apple Speech dies (silence timeout, error 203/216, isFinal).
+    private func startLiveSpeechTask(recognizer: SFSpeechRecognizer) {
+        // Clean up previous task if any
+        liveRequest?.endAudio()
+        liveTask?.cancel()
+
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        if #available(macOS 13.0, *), recognizer.supportsOnDeviceRecognition {
+            request.requiresOnDeviceRecognition = true
+        }
+        liveRequest = request
+
+        liveTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            if let result = result {
+                let partialText = result.bestTranscription.formattedString
+                Task { @MainActor [weak self] in
+                    guard let self = self else { return }
+                    // Combine committed text (from previous tasks) with current partial
+                    let combined = self.committedLiveText.isEmpty
+                        ? partialText
+                        : self.committedLiveText + " " + partialText
+                    self.liveTranscript = combined
+                }
+
+                // isFinal = task is done (silence or timeout) — commit and restart
+                if result.isFinal {
+                    let finalText = result.bestTranscription.formattedString
+                    Task { @MainActor [weak self] in
+                        guard let self = self, self.isLiveSpeechActive else { return }
+                        if !finalText.trimmingCharacters(in: .whitespaces).isEmpty {
+                            self.committedLiveText = self.committedLiveText.isEmpty
+                                ? finalText
+                                : self.committedLiveText + " " + finalText
+                        }
+                        print("👂 WHISPER | live speech task ended (isFinal), restarting")
+                        self.startLiveSpeechTask(recognizer: recognizer)
+                    }
+                }
+            } else if let error = error {
+                // Task died (error 203/216 = normal timeout, or other) — commit volatile text and restart
+                Task { @MainActor [weak self] in
+                    guard let self = self, self.isLiveSpeechActive else { return }
+                    print("👂 WHISPER | live speech error (restarting): \(error.localizedDescription)")
+                    self.startLiveSpeechTask(recognizer: recognizer)
+                }
+            }
+        }
+    }
+
+    private func stopLiveSpeech() {
+        isLiveSpeechActive = false
+        liveRequest?.endAudio()
+        liveTask?.cancel()
+        liveRequest = nil
+        liveTask = nil
+        // Do NOT clear liveTranscript or committedLiveText — needed for lock-in animation
+        print("👂 WHISPER | live Apple Speech stopped")
     }
 
     // MARK: - Transcription
@@ -200,9 +326,17 @@ class WhisperEngine: ObservableObject {
     // MARK: - Cleanup
 
     func cancel() {
-        if isRecording { stopRecording() }
+        if isRecording {
+            stopLiveSpeech()
+            audioEngine.inputNode.removeTap(onBus: 0)
+            isRecording = false
+            audioLevel = 0
+        }
         sampleBuffer.removeAll()
         isTranscribing = false
+        liveTranscript = ""
+        committedLiveText = ""
+        // Engine stays warm — don't call audioEngine.stop()
     }
 
     deinit {

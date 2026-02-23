@@ -337,7 +337,8 @@ class SpeechEngine: ObservableObject {
 
     private func handleRecognitionResult(_ result: SFSpeechRecognitionResult?, error: Error?) {
         if let result = result {
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
                 self.callbackCount += 1
                 let fullText = result.bestTranscription.formattedString
 
@@ -382,7 +383,8 @@ class SpeechEngine: ObservableObject {
         }
 
         if let error = error {
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
                 let nsError = error as NSError
                 self.log("❌ ERROR code=\(nsError.code) | \(error.localizedDescription)")
 
@@ -415,7 +417,7 @@ class SpeechEngine: ObservableObject {
         lastVolatileSnapshot = volatileText
 
         silenceTimer = Timer.scheduledTimer(withTimeInterval: silenceThreshold, repeats: false) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.commitVolatileOnSilence()
             }
         }
@@ -429,7 +431,7 @@ class SpeechEngine: ObservableObject {
         speechFinished = false
 
         doneTimer = Timer.scheduledTimer(withTimeInterval: doneThreshold, repeats: false) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self = self, self.isListening, self.hasText else { return }
                 self.log("🏁 DONE TIMER | speech finished after \(self.doneThreshold)s silence")
                 self.speechFinished = true

@@ -5,11 +5,11 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Design Tokens
+// MARK: - Design Tokens (semi-transparent for glassmorphism blur)
 
-private let panelBg       = Color(red: 0.10, green: 0.10, blue: 0.12)  // #1A1A1F  near-black
-private let contentBg     = Color(red: 0.14, green: 0.14, blue: 0.16)  // #242428  dark card
-private let bubbleBg      = Color(red: 0.18, green: 0.18, blue: 0.20)  // #2E2E33  bubble fill
+private let panelBg       = Color.black.opacity(0.58)                   // translucent for blur
+private let contentBg     = Color.black.opacity(0.14)                   // subtle content tint
+private let bubbleBg      = Color.white.opacity(0.07)                   // frosted bubble fill
 private let accentGreen   = Color(red: 0.07, green: 0.94, blue: 0.58)  // #13EF95  mint green
 private let textPrimary   = Color.white
 private let textSecondary = Color(white: 0.55)                          // gray labels
@@ -106,11 +106,22 @@ class FloatingOverlayController: ObservableObject {
             defer: true
         )
 
+        // Glassmorphism: NSVisualEffectView behind SwiftUI content
+        let blurView = NSVisualEffectView()
+        blurView.material = .hudWindow
+        blurView.blendingMode = .behindWindow
+        blurView.state = .active
+        blurView.wantsLayer = true
+        blurView.layer?.cornerRadius = overlayCornerRadius
+        blurView.frame = panel.contentView?.bounds ?? .zero
+        blurView.autoresizingMask = [.width, .height]
+        panel.contentView?.addSubview(blurView)
+
         let content = OverlayContentView(whisperEngine: whisperEngine, controller: self)
         let hosting = NSHostingView(rootView: AnyView(content))
         hosting.frame = panel.contentView?.bounds ?? .zero
         hosting.autoresizingMask = [.width, .height]
-        panel.contentView?.addSubview(hosting)
+        panel.contentView?.addSubview(hosting, positioned: .above, relativeTo: blurView)
 
         // Add drag handle at the top of the panel — pure AppKit, outside SwiftUI hierarchy.
         // This avoids NSViewRepresentable bridging which can crash during nested run loops
@@ -194,7 +205,30 @@ class FloatingOverlayController: ObservableObject {
         panel.setFrameOrigin(origin)
         panel.setContentSize(panelSize)
         panel.allowKeyStatus = false
+
+        // Spring entrance: start transparent + slightly scaled down
+        panel.alphaValue = 0
         panel.orderFrontRegardless()
+
+        if let contentLayer = panel.contentView?.layer {
+            // Scale from 0.88 → 1.0 with spring physics
+            let spring = CASpringAnimation(keyPath: "transform.scale")
+            spring.fromValue = 0.88
+            spring.toValue = 1.0
+            spring.damping = 18
+            spring.stiffness = 280
+            spring.initialVelocity = 3
+            spring.duration = spring.settlingDuration
+            contentLayer.add(spring, forKey: "entranceScale")
+        }
+
+        // Fade in over 200ms
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.2
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1.0
+        })
+
         isVisible = true
     }
 
@@ -248,8 +282,67 @@ class FloatingOverlayController: ObservableObject {
     }
 
     func hide() {
+        _performHide()
+    }
+
+    /// Confirm animation: scale down + fade (content "sends" toward target app)
+    func hideWithConfirmAnimation(completion: (() -> Void)? = nil) {
+        guard let panel = panel else { completion?(); _performHide(); return }
+
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.14
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            panel.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            completion?()
+            self?._performHide()
+        })
+
+        if let contentLayer = panel.contentView?.layer {
+            let shrink = CABasicAnimation(keyPath: "transform.scale")
+            shrink.fromValue = 1.0
+            shrink.toValue = 0.93
+            shrink.duration = 0.14
+            shrink.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            contentLayer.add(shrink, forKey: "confirmShrink")
+        }
+    }
+
+    /// Cancel animation: horizontal shake + fade (signals "nothing happened")
+    func hideWithCancelAnimation(completion: (() -> Void)? = nil) {
+        guard let panel = panel else { completion?(); _performHide(); return }
+
+        // Horizontal shake using the window frame (not layer — layers don't move windows)
+        let baseX = panel.frame.origin.x
+        let offsets: [CGFloat] = [7, -5, 3, -1, 0]
+        let stepDuration = 0.068  // ~340ms total for 5 steps
+
+        for (i, offset) in offsets.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(i)) {
+                var frame = panel.frame
+                frame.origin.x = baseX + offset
+                panel.setFrame(frame, display: false)
+            }
+        }
+
+        // Fade out after shake completes
+        DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(offsets.count)) { [weak self] in
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.14
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                panel.animator().alphaValue = 0
+            }, completionHandler: {
+                completion?()
+                self?._performHide()
+            })
+        }
+    }
+
+    private func _performHide() {
         panel?.allowKeyStatus = false
         panel?.orderOut(nil)
+        panel?.alphaValue = 1.0  // Reset for next show
+        panel?.contentView?.layer?.removeAllAnimations()
         isVisible = false
         state = .idle
         reviewText = ""
@@ -294,6 +387,7 @@ struct OverlayContentView: View {
     @ObservedObject var whisperEngine: WhisperEngine
     @ObservedObject var controller: FloatingOverlayController
     @FocusState private var isReviewFocused: Bool
+    @State private var lockInScale: CGFloat = 1.0
 
     var body: some View {
         HStack(spacing: 0) {
@@ -316,6 +410,19 @@ struct OverlayContentView: View {
             }
         }
         .background(panelBg)
+        .onChange(of: whisperEngine.isTranscribing) {
+            if !whisperEngine.isTranscribing {
+                // Whisper finished — spring pulse "lock-in" (1.0 → 1.022 → 1.0)
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.5)) {
+                    lockInScale = 1.022
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        lockInScale = 1.0
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Sidebar
@@ -385,13 +492,19 @@ struct OverlayContentView: View {
             Group {
                 switch (controller.state, controller.activeMode) {
                 case (.listening, .draft):
-                    Label("Draft Mode", systemImage: "pencil.line")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(textSecondary)
+                    HStack(spacing: 8) {
+                        Label("Draft Mode", systemImage: "pencil.line")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(textSecondary)
+                        AudioWaveformView(level: whisperEngine.audioLevel, compact: true)
+                    }
                 case (.listening, .dictation):
-                    Label("Dictation", systemImage: "waveform")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(textSecondary)
+                    HStack(spacing: 8) {
+                        Label("Dictation", systemImage: "waveform")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(textSecondary)
+                        AudioWaveformView(level: whisperEngine.audioLevel, compact: true)
+                    }
                 case (.drafting, .dictation):
                     HStack(spacing: 6) {
                         ProgressView()
@@ -472,16 +585,29 @@ struct OverlayContentView: View {
 
     @ViewBuilder
     private var listeningContent: some View {
-        VStack(spacing: 8) {
-            AudioWaveformView(level: whisperEngine.audioLevel, compact: false)
-                .frame(height: 40)
-            Text(controller.activeMode == .dictation
-                 ? "Recording... press \u{2325}D to stop"
-                 : "Recording... press \u{2325}Space to stop")
-                .font(.system(size: 12))
-                .foregroundColor(textMuted)
+        Group {
+            if !whisperEngine.liveTranscript.isEmpty {
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: false) {
+                        AnimatedTranscriptView(text: whisperEngine.liveTranscript)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .id("transcript")
+                    }
+                    .onChange(of: whisperEngine.liveTranscript) {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            proxy.scrollTo("transcript", anchor: .bottom)
+                        }
+                    }
+                }
+            } else {
+                Text(controller.activeMode == .dictation
+                     ? "Recording... press \u{2325}D to stop"
+                     : "Recording... press \u{2325}Space to stop")
+                    .font(.system(size: 12))
+                    .foregroundColor(textMuted)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
-        .frame(maxWidth: .infinity)
         .padding(.horizontal, overlayContentPadding)
         .padding(.vertical, 12)
     }
@@ -489,12 +615,32 @@ struct OverlayContentView: View {
     @ViewBuilder
     private var draftingContent: some View {
         VStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-                .tint(accentGreen)
-            Text(whisperEngine.isTranscribing ? "Transcribing..." : "Processing...")
-                .font(.system(size: 12))
-                .foregroundColor(textMuted)
+            if whisperEngine.isTranscribing, !whisperEngine.liveTranscript.isEmpty {
+                // Show live transcript at reduced opacity with blur (provisional feel)
+                ScrollView(.vertical, showsIndicators: false) {
+                    AnimatedTranscriptView(text: whisperEngine.liveTranscript)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .opacity(0.45)
+                .blur(radius: 0.5)
+                .scaleEffect(lockInScale)
+
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(accentGreen)
+                    Text("Refining...")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(textSecondary)
+                }
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(accentGreen)
+                Text(whisperEngine.isTranscribing ? "Transcribing..." : "Processing...")
+                    .font(.system(size: 12))
+                    .foregroundColor(textMuted)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(overlayContentPadding)
@@ -778,7 +924,7 @@ class DraftSessionController: ObservableObject {
             } catch {
                 guard !Task.isCancelled else { return }
                 appState.logger.log("SESSION | stream error: \(error.localizedDescription)")
-                overlayController.hide()
+                overlayController.hideWithCancelAnimation()
                 isInSession = false
                 return
             }
@@ -786,7 +932,7 @@ class DraftSessionController: ObservableObject {
             guard !Task.isCancelled, !fullText.isEmpty else {
                 if !Task.isCancelled {
                     appState.logger.log("SESSION | empty draft")
-                    overlayController.hide()
+                    overlayController.hideWithCancelAnimation()
                     isInSession = false
                 }
                 return
@@ -815,7 +961,7 @@ class DraftSessionController: ObservableObject {
         if appState.whisperEngine.isRecording {
             appState.whisperEngine.cancel()
         }
-        overlayController.hide()
+        overlayController.hideWithCancelAnimation()
         isInSession = false
         appState.logger.log("SESSION | cancelled")
     }
@@ -856,8 +1002,9 @@ class DraftSessionController: ObservableObject {
             }
 
             appState.logger.log("DICTATION | pasting \(text.count) chars")
-            overlayController.hide()
-            pasteWithClipboardRestore(text)
+            overlayController.hideWithConfirmAnimation { [weak self] in
+                self?.pasteWithClipboardRestore(text)
+            }
             isDictating = false
             appState.logger.log("DICTATION | pasted \(text.count) chars")
         }
@@ -868,7 +1015,7 @@ class DraftSessionController: ObservableObject {
         if appState.whisperEngine.isRecording {
             appState.whisperEngine.cancel()
         }
-        overlayController.hide()
+        overlayController.hideWithCancelAnimation()
         isDictating = false
         appState.logger.log("DICTATION | cancelled")
     }
@@ -966,11 +1113,10 @@ class DraftSessionController: ObservableObject {
         let editedText = overlayController.reviewText
         let originalDraft = appState.drafter.originalDraft
 
-        // Hide overlay first (resets key status)
-        overlayController.hide()
-
-        // Paste to target app
-        pasteWithClipboardRestore(editedText)
+        // Confirm animation, then paste to target app
+        overlayController.hideWithConfirmAnimation { [weak self] in
+            self?.pasteWithClipboardRestore(editedText)
+        }
 
         // Record with REAL edit data — but skip refusals to avoid poisoning style training
         if !looksLikeRefusal(originalDraft) {
