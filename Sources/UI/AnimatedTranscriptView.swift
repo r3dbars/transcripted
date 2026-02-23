@@ -33,12 +33,6 @@ struct AnimatedTranscriptView: View {
                 highWaterMark = words.count
             }
         }
-        .onAppear {
-            // Initial words get animated in
-            if words.count > highWaterMark {
-                highWaterMark = words.count
-            }
-        }
     }
 }
 
