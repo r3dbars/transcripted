@@ -55,7 +55,7 @@ class DraftAppState: ObservableObject {
         if let path = modelManager.modelPath {
             _ = whisperEngine.loadModel(path: path)
             whisperEngine.prewarm()
-            logger.log("🎙️ WHISPER | model loaded + engine pre-warmed from \(path)")
+            logger.log("🎙️ WHISPER | model loaded + engine pre-warmed (\(whisperEngine.inputDeviceName), \(path))")
         } else {
             logger.log("⚠️ WHISPER | model not found — run build-whisper.sh to download")
         }

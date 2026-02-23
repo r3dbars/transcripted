@@ -3,6 +3,7 @@
 // No time limit, no streaming text — just waveform during recording, then full transcription.
 
 import AVFoundation
+import CoreAudio
 import Foundation
 import Speech
 
@@ -25,6 +26,7 @@ class WhisperEngine: ObservableObject {
     private var liveRequest: SFSpeechAudioBufferRecognitionRequest?
     private var liveTask: SFSpeechRecognitionTask?
     private var isLiveSpeechActive = false  // Guards against restart after explicit stop
+    private var configChangeObserver: NSObjectProtocol?
 
     // Whisper context — loaded once, reused across transcriptions
     private var whisperContext: OpaquePointer?  // whisper_context *
@@ -56,6 +58,31 @@ class WhisperEngine: ObservableObject {
 
     var isModelLoaded: Bool { whisperContext != nil }
 
+    /// Current input device name (e.g., "MacBook Pro Microphone", "AirPods Pro")
+    var inputDeviceName: String {
+        var deviceID = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
+        )
+        guard status == noErr else { return "Unknown" }
+
+        var name: CFString = "" as CFString
+        var nameSize = UInt32(MemoryLayout<CFString>.size)
+        var nameAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceNameCFString,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectGetPropertyData(deviceID, &nameAddress, 0, nil, &nameSize, &name)
+        return name as String
+    }
+
     // MARK: - Pre-warm
 
     /// Pre-warm the audio engine: prepare + start with NO tap installed.
@@ -70,9 +97,53 @@ class WhisperEngine: ObservableObject {
             audioEngine.prepare()
             try audioEngine.start()
             isEnginePrewarmed = true
-            print("🔥 WHISPER | engine pre-warmed (rate=\(nativeSampleRate)Hz)")
+            print("🔥 WHISPER | engine pre-warmed (\(inputDeviceName), \(nativeSampleRate)Hz)")
         } catch {
             print("⚠️ WHISPER | prewarm failed: \(error.localizedDescription), will cold-start on record")
+        }
+
+        // Observe audio device changes (e.g., switching to AirPods) — re-warm with new device
+        if configChangeObserver == nil {
+            configChangeObserver = NotificationCenter.default.addObserver(
+                forName: .AVAudioEngineConfigurationChange,
+                object: audioEngine,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.handleAudioConfigChange()
+                }
+            }
+        }
+    }
+
+    /// Audio device changed (AirPods connected, USB mic plugged in, etc.)
+    /// Stop the engine and re-warm with the new device's format.
+    private func handleAudioConfigChange() {
+        let wasRecording = isRecording
+        if wasRecording {
+            // Mid-recording device switch — stop cleanly, user will need to restart
+            stopLiveSpeech()
+            audioEngine.inputNode.removeTap(onBus: 0)
+            isRecording = false
+            audioLevel = 0
+        }
+
+        // Engine is now invalid — stop and re-warm with new device
+        audioEngine.stop()
+        isEnginePrewarmed = false
+
+        let newFormat = audioEngine.inputNode.outputFormat(forBus: 0)
+        print("🔄 WHISPER | audio device changed → \(inputDeviceName) (\(newFormat.sampleRate)Hz), re-warming")
+
+        // Re-warm immediately
+        do {
+            nativeSampleRate = newFormat.sampleRate
+            audioEngine.prepare()
+            try audioEngine.start()
+            isEnginePrewarmed = true
+            print("🔥 WHISPER | engine re-warmed after device change (\(inputDeviceName), \(nativeSampleRate)Hz)")
+        } catch {
+            print("⚠️ WHISPER | re-warm failed after device change: \(error.localizedDescription)")
         }
     }
 
@@ -131,7 +202,7 @@ class WhisperEngine: ObservableObject {
             liveTranscript = ""
             committedLiveText = ""
             startLiveSpeech()
-            print("🎤 WHISPER | recording started (pre-warmed, rate=\(nativeSampleRate)Hz)")
+            print("🎤 WHISPER | recording started (pre-warmed, \(inputDeviceName), \(nativeSampleRate)Hz)")
         } else {
             do {
                 audioEngine.prepare()
@@ -141,7 +212,7 @@ class WhisperEngine: ObservableObject {
                 liveTranscript = ""
                 committedLiveText = ""
                 startLiveSpeech()
-                print("🎤 WHISPER | recording started (cold-start, rate=\(nativeSampleRate)Hz)")
+                print("🎤 WHISPER | recording started (cold-start, \(inputDeviceName), \(nativeSampleRate)Hz)")
             } catch {
                 print("❌ WHISPER | audio engine failed: \(error.localizedDescription)")
             }
@@ -340,6 +411,9 @@ class WhisperEngine: ObservableObject {
     }
 
     deinit {
+        if let observer = configChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
         // Note: deinit runs on whatever thread — whisper_free is thread-safe
         if let ctx = whisperContext {
             whisper_free(ctx)

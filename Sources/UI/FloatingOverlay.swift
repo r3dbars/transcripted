@@ -850,7 +850,7 @@ class DraftSessionController: ObservableObject {
         overlayController.showPanel(near: sourceApp)
         appState.whisperEngine.startRecording()
 
-        appState.logger.log("SESSION | started (Whisper), voice recording + vision in parallel")
+        appState.logger.log("SESSION | started (Whisper, \(appState.whisperEngine.inputDeviceName)), voice recording + vision in parallel")
 
         // Start vision processing in parallel (stored so we can await it before drafting)
         visionTask = Task {
@@ -983,7 +983,7 @@ class DraftSessionController: ObservableObject {
         overlayController.showPanel(near: sourceApp)
 
         appState.whisperEngine.startRecording()
-        appState.logger.log("DICTATION | started (Whisper)")
+        appState.logger.log("DICTATION | started (Whisper, \(appState.whisperEngine.inputDeviceName))")
     }
 
     /// Stop dictation and paste — Whisper batch transcription
