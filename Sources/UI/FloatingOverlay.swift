@@ -66,8 +66,8 @@ class FloatingOverlayPanel: NSPanel {
 @MainActor
 class FloatingOverlayController: ObservableObject {
     enum SessionMode {
-        case draft      // Option+Space: screenshot + voice + AI rewrite + review
-        case dictation  // Option+D: voice + light polish + auto-paste
+        case draft      // Option+D: screenshot + voice + AI rewrite + review
+        case dictation  // Option+Space: voice + light polish + auto-paste
     }
 
     enum OverlayState {
@@ -281,10 +281,6 @@ class FloatingOverlayController: ObservableObject {
         streamingText = ""
     }
 
-    func hide() {
-        _performHide()
-    }
-
     /// Confirm animation: scale down + fade (content "sends" toward target app)
     func hideWithConfirmAnimation(completion: (() -> Void)? = nil) {
         guard let panel = panel else { completion?(); _performHide(); return }
@@ -309,8 +305,8 @@ class FloatingOverlayController: ObservableObject {
     }
 
     /// Cancel animation: horizontal shake + fade (signals "nothing happened")
-    func hideWithCancelAnimation(completion: (() -> Void)? = nil) {
-        guard let panel = panel else { completion?(); _performHide(); return }
+    func hideWithCancelAnimation() {
+        guard let panel = panel else { _performHide(); return }
 
         // Horizontal shake using the window frame (not layer — layers don't move windows)
         let baseX = panel.frame.origin.x
@@ -332,7 +328,6 @@ class FloatingOverlayController: ObservableObject {
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
                 panel.animator().alphaValue = 0
             }, completionHandler: {
-                completion?()
                 self?._performHide()
             })
         }
@@ -387,8 +382,6 @@ struct OverlayContentView: View {
     @ObservedObject var whisperEngine: WhisperEngine
     @ObservedObject var controller: FloatingOverlayController
     @FocusState private var isReviewFocused: Bool
-    @State private var lockInScale: CGFloat = 1.0
-
     var body: some View {
         HStack(spacing: 0) {
             // Left sidebar with mode bubbles
@@ -410,19 +403,6 @@ struct OverlayContentView: View {
             }
         }
         .background(panelBg)
-        .onChange(of: whisperEngine.isTranscribing) {
-            if !whisperEngine.isTranscribing {
-                // Whisper finished — spring pulse "lock-in" (1.0 → 1.022 → 1.0)
-                withAnimation(.spring(response: 0.25, dampingFraction: 0.5)) {
-                    lockInScale = 1.022
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        lockInScale = 1.0
-                    }
-                }
-            }
-        }
     }
 
     // MARK: - Sidebar
@@ -545,11 +525,11 @@ struct OverlayContentView: View {
             Group {
                 switch (controller.state, controller.activeMode) {
                 case (.listening, .draft):
-                    Text("\u{2325}Space to stop")
+                    Text("\u{2325}D to stop")
                         .font(.system(size: 10))
                         .foregroundColor(textMuted)
                 case (.listening, .dictation):
-                    Text("\u{2325}D to stop")
+                    Text("\u{2325}Space to stop")
                         .font(.system(size: 10))
                         .foregroundColor(textMuted)
                 case (.review, _):
@@ -601,8 +581,8 @@ struct OverlayContentView: View {
                 }
             } else {
                 Text(controller.activeMode == .dictation
-                     ? "Recording... press \u{2325}D to stop"
-                     : "Recording... press \u{2325}Space to stop")
+                     ? "Recording... press \u{2325}Space to stop"
+                     : "Recording... press \u{2325}D to stop")
                     .font(.system(size: 12))
                     .foregroundColor(textMuted)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -623,7 +603,6 @@ struct OverlayContentView: View {
                 }
                 .opacity(0.45)
                 .blur(radius: 0.5)
-                .scaleEffect(lockInScale)
 
                 HStack(spacing: 6) {
                     ProgressView()
@@ -737,11 +716,11 @@ struct OverlayContentView: View {
             Group {
                 switch (controller.state, controller.activeMode) {
                 case (.listening, .draft):
-                    Text("\u{2325}Space stop \u{00B7} Esc cancel")
+                    Text("\u{2325}D stop \u{00B7} Esc cancel")
                         .font(.system(size: 10))
                         .foregroundColor(textMuted)
                 case (.listening, .dictation):
-                    Text("\u{2325}D stop \u{00B7} Esc cancel")
+                    Text("\u{2325}Space stop \u{00B7} Esc cancel")
                         .font(.system(size: 10))
                         .foregroundColor(textMuted)
                 case (.review, _):
@@ -828,7 +807,7 @@ class DraftSessionController: ObservableObject {
         }
     }
 
-    // MARK: - Draft Mode (Option+Space)
+    // MARK: - Draft Mode (Option+D)
 
     /// Start a new recording session — called on first hotkey press
     func startSession(imageData: Data?, sourceApp: NSRunningApplication?) {
@@ -966,7 +945,7 @@ class DraftSessionController: ObservableObject {
         appState.logger.log("SESSION | cancelled")
     }
 
-    // MARK: - Dictation Mode (Option+D)
+    // MARK: - Dictation Mode (Option+Space)
 
     /// Start dictation — show overlay and begin voice recording (no screenshot/vision)
     func startDictation(sourceApp: NSRunningApplication?) {
