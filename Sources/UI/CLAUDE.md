@@ -6,7 +6,7 @@ SwiftUI views for the Draft app. The primary UI is a **floating overlay** (non-a
 
 ## Key Files
 
-- `FloatingOverlay.swift` (609 lines) — The core v2 UI: `FloatingOverlayPanel` (NSPanel), `FloatingOverlayController` (state machine), `OverlayContentView` (SwiftUI views for listening/streaming/review), `DraftSessionController` (full session orchestration)
+- `FloatingOverlay.swift` (~1250 lines) — The core v2 UI: `FloatingOverlayPanel` (NSPanel), `FloatingOverlayController` (state machine + global Escape monitor), `OverlayContentView` (SwiftUI views for listening/streaming/review), `DraftSessionController` (full session orchestration)
 - `MenuBarPanel.swift` (98 lines) — Menubar popover with TabView (Style + Agent), onboarding gates, settings gear
 - `StyleProfileView.swift` (49 lines) — Extracted style tab showing style.md contents
 - `AgentTab.swift` (423 lines) — Agent insight cards (Apply/Skip) + streaming chat interface
@@ -49,19 +49,19 @@ FloatingOverlay (hotkey flow)          MenuBarPanel (configuration)
 
 ```
 idle → listening → drafting → streaming → review → idle
-                                              ↓
-                                           (cancel)
-                                              ↓
-                                            idle
+  ↑         ↓          ↓           ↓          ↓
+  └─────── (Escape cancels from any active state) ──┘
 ```
 
-| State | Trigger | UI | Key Status |
-|-------|---------|-----|------------|
-| `idle` | Session end/cancel | Hidden | false |
-| `listening` | ⌥Space (start) | Waveform + live transcription | false |
-| `drafting` | ⌥Space (stop) | Spinner + "Drafting..." | false |
-| `streaming` | First API token | Purple dot + tokens appearing | false |
-| `review` | Stream complete | Editable TextEditor + hint bar | true |
+| State | Trigger | UI | Key Status | Escape Handling |
+|-------|---------|-----|------------|-----------------|
+| `idle` | Session end/cancel | Hidden | false | — |
+| `listening` | ⌥D/⌥Space (start) | Waveform + live transcription | false | Global monitor → cancel |
+| `drafting` | ⌥D/⌥Space (stop) | Spinner + "Drafting..." | false | Global monitor → cancel |
+| `streaming` | First API token | Green dot + tokens appearing | false | Global monitor → cancel |
+| `review` | Stream complete | Editable TextEditor + hint bar | true | SwiftUI .onKeyPress → cancel |
+
+**State transition guards:** `startStreaming()` requires `.drafting` or `.listening`, `appendStreamToken()` requires `.streaming`, `finishStreaming()` requires `.streaming`. This prevents the overlay from entering `.review` when not actually streaming.
 
 ### Auto-Focus in Review Mode
 
@@ -79,13 +79,33 @@ When the review view appears, `@FocusState` automatically transfers keyboard foc
 
 Lives inside `FloatingOverlay.swift`. Manages the complete flow:
 
+### Property Safety
+
+`appState` and `overlayController` are **Optional** (not IUOs). Every public method starts with:
+```swift
+guard let appState = appState, let overlayController = overlayController else { return }
+```
+This prevents crashes if a hotkey fires before `applicationDidFinishLaunching` wires them.
+
+### Task Lifecycle
+
+`visionTask` and `streamingTask` are always **cancelled before replacement**:
+```swift
+visionTask?.cancel()
+visionTask = Task { ... }
+```
+Without this, rapid hotkey taps create orphaned tasks that both write to the overlay.
+
 ### Session Lifecycle
 
 ```
-startSession()          — ⌥Space first press: clear state, show overlay, start voice + vision in parallel
-stopSessionAndDraft()   — ⌥Space second press: stop voice, await vision, build prompt, stream draft
-confirmAndInject()      — Enter in review: hide overlay, paste to target app, record training pair
-cancelSession()         — Escape or ⌥Space during review: hide overlay, discard draft
+startSession()          — ⌥D first press: clear state, show overlay, start voice + vision in parallel
+stopSessionAndDraft()   — ⌥D second press: stop voice, await vision, build prompt, stream draft
+confirmAndInject()      — Enter in review: hide overlay (shrink animation), paste to target app, record training pair
+cancelSession()         — Escape or ⌥D during any state: hide overlay (shake animation), discard draft
+startDictation()        — ⌥Space first press: show overlay, start voice recording (no screenshot)
+stopDictationAndPaste() — ⌥Space second press: stop voice, transcribe, polish, paste
+cancelDictation()       — Escape during dictation: hide overlay (shake animation), discard
 ```
 
 ### Vision Race Condition Fix
@@ -108,22 +128,47 @@ If vision fails or times out, the fallback prompt asks Claude to "clean up and p
 
 The Carbon hotkey callback in `ContextCaptureEngine.swift` routes to `DraftSessionController`:
 
-| Session State | ⌥Space Action |
-|---------------|---------------|
+**⌥D (Draft mode — hotkey ID 1):**
+
+| Session State | Action |
+|---------------|--------|
 | Not in session | `startSession(imageData:sourceApp:)` |
 | Listening/drafting/streaming | `stopSessionAndDraft()` |
 | Review | `cancelSession()` |
+
+**⌥Space (Dictation mode — hotkey ID 2):**
+
+| Session State | Action |
+|---------------|--------|
+| Not dictating | `startDictation(sourceApp:)` |
+| Dictating | `stopDictationAndPaste()` |
 
 ## Keyboard Shortcuts (Overlay)
 
 - **Enter** — Inject draft to target app (review mode)
 - **Shift+Enter** — Insert newline (review mode)
-- **Escape** — Cancel session (review mode)
-- **⌥Space** — Start session / stop recording / cancel during review
+- **Escape** — Cancel session/dictation (works in ALL states: listening, drafting, streaming, review)
+- **⌥D** — Start draft / stop recording / cancel during review
+- **⌥Space** — Start dictation / stop and paste
 
-### Key Implementation Detail
+### Key Implementation Details
 
-Uses `.onKeyPress(keys: [.return], phases: .down)` (not the simpler `onKeyPress(.return)`) because the `keys:phases:` variant passes the full `KeyPress` object with `.modifiers` — needed to distinguish Enter from Shift+Enter.
+**Enter vs Shift+Enter:** Uses `.onKeyPress(keys: [.return], phases: .down)` (not the simpler `onKeyPress(.return)`) because the `keys:phases:` variant passes the full `KeyPress` object with `.modifiers` — needed to distinguish Enter from Shift+Enter.
+
+**Escape in non-key states:** The panel is non-key during listening/drafting/streaming (`allowKeyStatus = false`), so SwiftUI `.onKeyPress` can't receive keyboard events. A **global event monitor** (`NSEvent.addGlobalMonitorForEvents(matching: .keyDown)`) intercepts Escape (keyCode 53) and routes to `cancelSession()`/`cancelDictation()` via the `onEscapeDuringSession` closure. The monitor is installed when the overlay shows and removed when it hides. In review mode, the panel is key-capable and SwiftUI's `.onKeyPress` handles Escape directly.
+
+## Animation System
+
+Two hide animations signal different outcomes:
+
+- **Confirm** (`hideWithConfirmAnimation`) — Scale down + fade. Signals "your text was sent."
+- **Cancel** (`hideWithCancelAnimation`) — Horizontal shake + fade. Signals "nothing happened."
+
+Both set `panel.ignoresMouseEvents = true` before animating to prevent gesture dispatch crashes during teardown. Shake animation closures capture `[weak panel]` to prevent crashes if the panel deallocates during the ~340ms animation sequence.
+
+### Double-Setup Guard
+
+`FloatingOverlayController.setup()` guards with `panel == nil` — calling it twice would leak the old NSPanel and NSHostingView.
 
 ## MenuBarPanel — Configuration UI
 
@@ -174,14 +219,19 @@ Observes `NSWorkspace.didDeactivateApplicationNotification` to remember the last
 
 After modifying UI components, verify with these checks:
 
-- **Full overlay flow:** ⌥Space over Slack → speak → ⌥Space → tokens stream → draft appears editable → Enter → text pasted to Slack
+- **Full draft flow:** ⌥D over Slack → speak → ⌥D → tokens stream → draft appears editable → Enter → text pasted to Slack
+- **Full dictation flow:** ⌥Space → speak → ⌥Space → text pasted directly
 - **Auto-focus:** After draft streams in, cursor should be blinking in the TextEditor without clicking
 - **Enter/Escape:** Enter injects, Escape cancels, Shift+Enter inserts newline
+- **Escape during listening:** ⌥D to start → Escape → overlay shakes and disappears (no crash)
+- **Escape during dictation:** ⌥Space to start → Escape → overlay shakes and disappears
+- **Escape during streaming:** ⌥D → speak → ⌥D → while tokens streaming, Escape → cancels cleanly
+- **Double hotkey tap:** Rapidly press ⌥D twice → should not create parallel streaming tasks
 - **Vision context:** Check debug log — `"vision complete"` should appear BEFORE `"streaming draft"`, and `context: yes` in the streaming log
-- **Cancel during review:** ⌥Space while draft is showing → overlay hides, nothing injected
+- **Cancel during review:** ⌥D while draft is showing → overlay hides (shake animation), nothing injected
 - **Paste-back:** Draft injected into correct target app (overlay is non-activating)
 - **Onboarding gates:** Gear → "Switch Auth Method" → auth overlay appears
 - **Style tab:** Shows style.md contents in menubar popover
 - **Agent tab:** Insight cards appear with Apply/Skip buttons; chat interface works
-- **Debug log:** `tail -f ~/draft-debug.log | grep "SESSION\|REVIEW"` shows all events
-- **Build:** `bash build.sh` — must compile cleanly (only warning: CGWindowListCreateImage deprecation)
+- **Debug log:** `tail -f ~/draft-debug.log | grep "SESSION\|DICTATION\|REVIEW"` shows all events
+- **Build:** `bash build.sh` — must compile cleanly (pre-existing warnings only: CGWindowListCreateImage deprecation, `_performHide()` actor isolation in animation callbacks)

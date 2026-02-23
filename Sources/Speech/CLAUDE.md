@@ -1,91 +1,129 @@
-# Speech Engine
+# Speech — WhisperEngine (Primary) + SpeechEngine (Legacy)
 
 ## What This Does
 
-Continuous speech recognition using Apple's `SFSpeechRecognizer`. Captures everything the user says without dropping words, even across long recording sessions.
+Audio recording and transcription. **WhisperEngine** is the sole transcription engine — it records audio, provides live streaming text via Apple Speech (display-only), and batch-transcribes via whisper.cpp (large-v3-turbo) for the final transcript. SpeechEngine is legacy code preserved for reference.
 
-## Key File
+## Key Files
 
-- `SpeechEngine.swift` — `@MainActor ObservableObject` with `finalTranscript` (confirmed text) and `volatileText` (current unfinalized speech)
+- `WhisperEngine.swift` (~500 lines) — `@MainActor ObservableObject`: audio recording, NSLock-batched sample collection, live Apple Speech display, Whisper batch inference on serial DispatchQueue, audio level metering
+- `SpeechEngine.swift` — Legacy Apple-only speech engine (unused in v2 — WhisperEngine is sole engine)
 
-## Critical Gotchas (Hard-Won Knowledge)
+## Architecture
 
-### 1. `isFinal` Does NOT Fire Between Sentences
-
-Apple's `SFSpeechRecognitionTask` only fires `isFinal` when:
-- The ~60-second task times out (error code 203 or 216)
-- `endAudio()` is called
-- The task completes/dies
-
-**It does NOT fire when the user pauses between sentences.** This means you cannot rely on `isFinal` for sentence boundaries. We use a silence timer instead.
-
-### 2. Apple Speech Has Undocumented Buffer Resets
-
-Mid-session, Apple Speech silently resets `bestTranscription.formattedString` from hundreds of characters back to single digits — WITHOUT firing `isFinal`. If you're tracking a committed prefix offset, this will cause your prefix to exceed the new buffer length, resulting in empty volatile text = lost words.
-
-**Detection:** `if fullText.count < committedPrefixLength` → reset prefix to 0.
-
-This behavior was discovered through debug logging and is not documented anywhere by Apple.
-
-### 3. Error Codes 203 and 216 Are Normal
-
-These fire at ~60 seconds and mean "recognition task timed out." The correct response is to commit any remaining volatile text and restart the recognition task. The audio engine and its tap stay running — only the request/task need to be recreated.
-
-### 4. Multi-Channel Audio Interfaces Break SFSpeechRecognizer
-
-Pro audio interfaces like BEACN Mic (96kHz/4 channels) cause SFSpeechRecognizer error 1110 ("no speech detected"). The recognizer expects mono audio and can't parse multi-channel input.
-
-**Fix:** Force the audio tap to mono at the hardware's native sample rate:
-
-```swift
-let nativeFormat = inputNode.outputFormat(forBus: 0)
-let monoFormat = AVAudioFormat(standardFormatWithSampleRate: nativeFormat.sampleRate, channels: 1)!
-inputNode.installTap(onBus: 0, bufferSize: 1024, format: monoFormat) { ... }
+```
+Audio Input (AVAudioEngine tap, mono at native sample rate)
+    │
+    ├─→ Consumer 1: Apple Speech (live display only — SFSpeechAudioBufferRecognitionRequest)
+    │   └─→ liveTranscript — shown in overlay during recording
+    │
+    ├─→ Consumer 2: Whisper sample buffer (NSLock-protected pendingSamples)
+    │   └─→ Flushed into sampleBuffer on stopRecording() or transcribe()
+    │   └─→ Batch inference via whisper_full() on serial inferenceQueue
+    │   └─→ Returns final transcript text
+    │
+    └─→ Consumer 3: Audio level metering (~20Hz throttled)
+        └─→ audioLevel (0.0–1.0) — drives waveform animation in overlay
 ```
 
-AVAudioEngine handles the channel mixdown automatically. **Do NOT force 16kHz** — mismatching the sample rate causes the tap to crash with an ObjC exception.
+## Critical Design Decisions
 
-## Logging
+### NSLock for Audio Thread → MainActor Transfer
 
-`log()` writes to both stdout AND `~/draft-debug.log` with ISO8601 timestamps and a `SPEECH` prefix. Permission diagnostics (speech auth status, mic auth status, recognizer availability) and audio format details (native sample rate, channel count, tap format) are logged on every `startListening()` call.
+The audio render callback runs on a real-time thread with ~10ms deadlines. Originally, each callback created a `Task { @MainActor }` to append samples (~47 Tasks/second). This was replaced with an NSLock-protected intermediate buffer:
 
-Monitor in real time: `tail -f ~/draft-debug.log | grep SPEECH`
+```swift
+// Audio callback (real-time thread):
+self.pendingSamplesLock.lock()
+self.pendingSamples.append(contentsOf: samples)
+self.pendingSamplesLock.unlock()
 
-## How It Works
+// MainActor (stopRecording/transcribe):
+pendingSamplesLock.lock()
+sampleBuffer.append(contentsOf: pendingSamples)
+pendingSamples.removeAll(keepingCapacity: true)
+pendingSamplesLock.unlock()
+```
 
-1. **Silence-based commitment** — Timer watches `volatileText`. When unchanged for 1.5 seconds, commits to `finalTranscript` and advances `committedPrefixLength` to `lastSeenFullTextLength`.
-2. **"Done speaking" detection** — A separate timer (`doneThreshold: 2.5s`) sets `speechFinished = true` after extended silence. ContentView uses this to know the user has finished talking (distinct from mid-sentence pauses).
-3. **Prefix-based extraction** — Each partial result: extract `fullText[committedPrefixLength...]` as the new volatile portion.
-4. **Auto-restart on task death** — When `isFinal` or error 203/216, commit remaining text and create a fresh recognition task.
-5. **Buffer reset detection** — If `fullText.count < committedPrefixLength`, Apple reset its buffer; snap prefix back to 0.
+**Why NSLock over actors:** Actor isolation involves scheduling on an executor with unpredictable latency. NSLock's `lock()`/`unlock()` is a single syscall with deterministic ~1μs overhead. Swift 6 warns about NSLock in async context — this is a false positive here since the lock protects a buffer between the audio thread and MainActor, not between two async contexts.
+
+### Serial Inference Queue
+
+`whisper_context` is NOT safe for concurrent `whisper_full()` calls — the Metal backend shares command buffers internally. A private serial `DispatchQueue` (`com.draft.whisper-inference`) prevents the `ggml_abort` crash that occurs with concurrent access.
+
+### State Transition Guards
+
+- `loadModel()`: refuses if `isRecording` or `isTranscribing` (unloading during Metal inference = use-after-free)
+- `unloadModel()`: same guard — model can't be freed while inference queue uses it
+- `startRecording()`: requires `isModelLoaded` (prevents recording without a model) AND `AVCaptureDevice.authorizationStatus(for: .audio) == .authorized` (prevents ObjC exception if mic permission revoked at runtime)
+- `transcribe()`: guards against `isTranscribing` to prevent concurrent inference
+
+### Audio Engine Pre-warming
+
+`prewarm()` starts and immediately stops the audio engine on launch. This forces macOS to initialize the audio graph and allocate Core Audio buffers upfront, reducing first-recording latency from ~300ms to near-zero.
+
+### Device Change Handling
+
+Observes `.AVAudioEngineConfigurationChange` notification to detect when audio devices change (e.g., USB mic plugged/unplugged). On change, the engine re-reads the native sample rate and re-warms if needed.
+
+### deinit Cleanup
+
+```swift
+deinit {
+    NotificationCenter.default.removeObserver(configChangeObserver)
+    audioEngine.inputNode.removeTap(onBus: 0)   // Release mic (green dot goes away)
+    audioEngine.stop()
+    whisper_free(whisperContext)                   // Free model memory
+}
+```
+
+Without the audio engine cleanup, the microphone green dot persists after the engine deallocates.
 
 ## Public Interface
 
 ```swift
-@Published var finalTranscript: String   // Confirmed text (append-only)
-@Published var volatileText: String      // Current unfinalized speech
-@Published var isListening: Bool
-@Published var statusMessage: String
-@Published var speechFinished: Bool      // True after 2.5s extended silence — signals "done talking"
-@Published var audioLevel: Float         // 0.0 to 1.0, RMS audio level — drives AudioWaveformView animation
+@Published var isRecording: Bool
+@Published var isTranscribing: Bool
+@Published var audioLevel: Float          // 0.0–1.0 RMS for waveform
+@Published var liveTranscript: String     // Apple Speech display-only text
 
-var displayText: String                  // finalTranscript + volatileText
-var hasText: Bool
+var isModelLoaded: Bool
+var inputDeviceName: String               // Current mic name for logging
 
-func requestPermissions() async -> Bool
-func startListening()
-func stopListening()
-func clear()
+func loadModel(path: String) -> Bool      // Load GGML model (guarded)
+func unloadModel()                        // Free model (guarded)
+func prewarm()                            // Pre-initialize audio engine
+func startRecording()                     // Start mic tap + Apple Speech + sample collection
+func stopRecording()                      // Stop tap, flush pending samples
+func cancel()                             // Stop without transcribing
+func transcribe() async -> String?        // Batch Whisper inference (serial queue)
 ```
+
+## Critical Gotchas
+
+### 1. Multi-Channel Audio Interfaces
+
+Pro audio interfaces like BEACN Mic (96kHz/4ch) cause Apple Speech error 1110. Fix: force mono tap format at native sample rate — AVAudioEngine handles channel mixdown automatically. **Do NOT force 16kHz** — sample rate mismatch crashes with an ObjC exception.
+
+### 2. Apple Speech Live Transcript Resets
+
+Apple Speech silently resets `bestTranscription.formattedString` mid-session. The live transcript tracks `committedLiveText` and detects resets to avoid losing display text. This is display-only — Whisper owns the final transcript.
+
+### 3. Microphone Permission Can Be Revoked at Runtime
+
+`startRecording()` checks `AVCaptureDevice.authorizationStatus(for: .audio)` before `installTap()`. Without this check, revoking mic permission while the app is open causes `installTap()` to throw an unrecoverable ObjC exception.
 
 ## Verification
 
-After modifying SpeechEngine, verify with these checks:
+After modifying WhisperEngine, verify with these checks:
 
-- **Basic recording:** Speak a sentence, pause 2s, speak another → both should appear (first in white, second transitions from blue → white)
-- **Task chaining:** Record for 60+ seconds → should seamlessly chain recognition tasks (watch for `🔄 RESTART TASK` in console)
-- **Stop mid-sentence:** Stop while speaking → volatile text commits to final
-- **Done detection:** Speak, then wait 2.5s → `speechFinished` should become true (check `🏁 DONE TIMER` in console)
-- **Buffer reset:** Long recordings may trigger `🔀 BUFFER RESET` in console — text should NOT be lost
-- **Multi-channel mic:** Plug in a multi-channel audio interface → record → should work normally (check `🎤 AUDIO FORMAT native` in debug log for channel count, `🎤 AUDIO FORMAT tap` should show `channels=1`)
-- **Debug log:** `tail -f ~/draft-debug.log | grep SPEECH` shows all speech events in real time (includes permission diagnostics, audio format, and all recognition callbacks)
+- **Basic recording:** ⌥D → speak → ⌥D → draft appears with correct transcription
+- **Long recording:** Record 60+ seconds → Apple Speech live text chains tasks seamlessly, Whisper batch transcription returns full text
+- **Model load/unload:** Check `WHISPER | model loaded` in debug log on launch
+- **State guards:** Try calling `unloadModel()` while recording → should log warning and refuse
+- **Mic permission:** Revoke mic permission in System Settings → press hotkey → should log warning, not crash
+- **Audio device change:** Plug/unplug USB mic during idle → should log device change and re-warm
+- **Memory:** Record for 60+ seconds → check Activity Monitor for no memory growth from Task creation (batched samples eliminate ~47 Tasks/sec)
+- **Quit cleanup:** Quit app during recording → green mic dot should disappear immediately
+- **Debug log:** `tail -f ~/draft-debug.log | grep WHISPER` shows all whisper events
+- **Build:** `bash build.sh` — pre-existing warnings only (NSLock in async context is intentional)

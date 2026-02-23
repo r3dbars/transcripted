@@ -10,7 +10,7 @@ A macOS utility that captures rough spoken (or typed) thoughts and uses Claude H
 Sources/
 ├── DraftApp.swift           ← @main entry point only
 ├── DraftAppState.swift      ← Centralized engine ownership (lives in AppDelegate, survives window cycles)
-├── Speech/                  ← Voice capture engine (Apple SFSpeechRecognizer)
+├── Speech/                  ← WhisperEngine (batch transcription) + SpeechEngine (legacy Apple Speech)
 ├── API/                     ← Anthropic API client (text + vision + streaming) + AuthCredential + Keychain
 ├── Draft/                   ← DraftEngine + PlatformFormatter — orchestrates drafting (v1 interface)
 ├── Style/                   ← StyleEngine — learns user's writing voice + onboarding
@@ -45,15 +45,16 @@ This compiles all Swift files from `Sources/`, signs the app bundle, and launche
 - **Combined onboarding** — iMessage import path includes optional "Add Slack, email, or other writing samples" section to supplement with additional sources for a richer profile
 - **iMessage import** — Optional onboarding path that reads `~/Library/Messages/chat.db` for zero-effort style profile generation (requires Full Disk Access)
 - **Paste to source app** — Injects the polished message into the exact app that was screenshotted, with clipboard save/restore
-- **Frictionless keyboard flow** — ⌥Space to start → speak → ⌥Space to draft → Enter to inject → no clicking required
+- **Frictionless keyboard flow** — ⌥D to start draft → speak → ⌥D to draft → Enter to inject → Escape to cancel at any time. ⌥Space for dictation → speak → ⌥Space to paste. No clicking required
 - **Native analysis engine** — Swift-native AnalysisEngine watches feedback via DispatchSource, uses Sonnet to analyze patterns, and proposes prompt improvements as InsightCards in the Agent tab
+- **Reliability hardened** — All force-unwraps guarded, stale Tasks cancelled before replacement, deinits on all engines (Carbon hotkeys, audio engine, file watchers), NSLock-batched audio samples, global Escape monitor, streaming state guards
 
 ## End-to-End Data Flow
 
 ### Hotkey → Draft → Inject Pipeline (v2 — Floating Overlay)
 
 ```
-1. User presses ⌥Space in Slack/iMessage/etc.
+1. User presses ⌥D in Slack/iMessage/etc. (draft mode)
    │
    ├─→ [SYNC in C callback] Capture frontApp + screenshot (before focus shifts)
    │
@@ -71,7 +72,7 @@ This compiles all Swift files from `Sources/`, signs the app bundle, and launche
                              }
                          └─→ Returns CapturedContext → stored as lastCapturedContext
 
-2. User presses ⌥Space again → stopSessionAndDraft()
+2. User presses ⌥D again → stopSessionAndDraft()
    │
    ├─→ Stop voice recording → get voiceText
    ├─→ await visionTask?.value  ← waits for vision to complete (or 8s timeout)
@@ -90,9 +91,9 @@ This compiles all Swift files from `Sources/`, signs the app bundle, and launche
    │   ├─→ feedbackStore.record() → append to feedback.jsonl
    │   └─→ shouldRefineNow() → maybe trigger Sonnet refinement
    │
-   ├─→ Escape → cancelSession() → hide overlay, discard draft
+   ├─→ Escape → cancelSession() → shake animation + hide overlay, discard draft
    │
-   └─→ ⌥Space → cancelSession() → hide overlay, discard draft
+   └─→ ⌥D → cancelSession() → shake animation + hide overlay, discard draft
 ```
 
 ### No-Context Fallback
@@ -162,6 +163,12 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - **Externalized prompts** — All system prompts live in `~/Library/Application Support/Draft/prompts.json`, loaded by `PromptStore`. The analysis engine can rewrite prompts without recompiling. Engines read from `promptStore` with hardcoded fallbacks in `DefaultPrompts`.
 - **Feedback logging** — Every accepted draft appends a JSON line to `~/Library/Application Support/Draft/feedback.jsonl` with raw text, AI draft, user's accepted version, action (copy/paste), and example count. The analysis engine reads this to understand which drafts work and which need improvement.
 - **Native analysis engine** — Replaced the Python subprocess with Swift-native `AnalysisEngine` using DispatchSource file watching, eliminating subprocess crashes, cold start latency, and port conflicts. See `Sources/Analysis/CLAUDE.md`.
+- **Guarded optionals over IUOs** — `DraftSessionController.appState` and `overlayController` are `Optional`, not `!`. Every public method starts with `guard let` to handle pre-wiring hotkey races. Never use implicitly unwrapped optionals for properties set after init.
+- **Task cancellation before replacement** — Always `task?.cancel()` before `task = Task { ... }`. Orphaned tasks keep running and writing to shared state.
+- **Global Escape monitor** — `NSEvent.addGlobalMonitorForEvents` intercepts Escape during non-key panel states (listening/drafting). Installed when overlay shows, removed on hide. The panel can't receive keyboard events when `allowKeyStatus = false`, so SwiftUI `.onKeyPress` won't fire — the global monitor bridges that gap.
+- **NSLock for audio thread ↔ MainActor** — Audio render thread has strict ~10ms deadlines; actor isolation has unpredictable scheduling latency. NSLock provides deterministic ~1μs overhead for the shared sample buffer.
+- **Serial dispatch queue for whisper inference** — `whisper_context` is NOT safe for concurrent `whisper_full()` calls (Metal backend shares command buffers). A serial `DispatchQueue` prevents the ggml_abort crash.
+- **All engines have deinits** — `ContextCaptureEngine` (Carbon hotkeys), `AnalysisEngine` (DispatchSource + debounce task), `WhisperEngine` (audio engine stop + model free). Missing deinits leak OS-level resources.
 
 ## Project-Wide Learnings
 
@@ -182,6 +189,12 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 15. **`@FocusState` only works in View structs** — cannot be added to `ObservableObject` classes. Must bind with `.focused($isReviewFocused)` on the TextEditor and set `true` in `.onAppear` with a 50ms delay (lets the panel finish becoming key first).
 16. **Non-activating panels need dynamic key status** — `FloatingOverlayPanel.canBecomeKey` returns a mutable `allowKeyStatus` flag. During listening/drafting it's `false` (keyboard stays with target app), during review it's `true` (TextEditor needs input). Without this, either keyboard input or paste-back breaks.
 17. **Clipboard safety on inject** — `pasteWithClipboardRestore()` saves the user's clipboard, sets the draft text, simulates ⌘V, then restores after 500ms. The non-activating panel means the target app stays frontmost — no activation polling needed.
+18. **Global event monitors are observe-only** — `NSEvent.addGlobalMonitorForEvents` can see but not consume events destined for other apps. Escape also reaches the frontmost app, but that's benign (Escape in a text field is harmless). For events that need to be consumed, use Carbon `RegisterEventHotKey` instead.
+19. **CoreFoundation `as?` casts always succeed** — Conditional downcasts to CF bridged types (`AXUIElement`, `AXValue`) always succeed at the compiler level. The compiler rejects `as?` with an error. Use `as!` for CF types — it's compiler-guaranteed safe.
+20. **DraftAppState.initialize() is idempotent** — Protected by an `isInitialized` flag. Safe to call multiple times (SwiftUI lifecycle can trigger re-initialization). Without the guard, observers stack, analysis engine double-starts, and hotkeys double-register.
+21. **Whisper model load/unload must guard recording state** — `loadModel()` and `unloadModel()` refuse to run while `isRecording` or `isTranscribing`. Unloading during Metal inference causes use-after-free. `startRecording()` requires `isModelLoaded` — prevents recording without a model.
+22. **Microphone permission can be revoked at runtime** — Check `AVCaptureDevice.authorizationStatus(for: .audio)` before `installTap()`. Without the check, revoking mic permission while the app is open throws an unrecoverable ObjC exception on next hotkey press.
+23. **Hotkey labels in ContextCaptureEngine** — ⌥D = hotkey ID 1 (draft mode: screenshot + voice + AI), ⌥Space = hotkey ID 2 (dictation mode: voice only). Both use signature `0x44524654` ('DRFT').
 
 ## Frameworks Linked
 
