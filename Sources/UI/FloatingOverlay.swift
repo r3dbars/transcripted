@@ -89,11 +89,14 @@ class FloatingOverlayController: ObservableObject {
     var onCancel: (() -> Void)?
     /// Closure for bubble-tap mode switching — set by DraftSessionController
     var onSwitchMode: ((SessionMode) -> Void)?
+    /// Closure for Escape during non-review states (listening/drafting/streaming) — set by DraftSessionController
+    var onEscapeDuringSession: (() -> Void)?
 
     private var panel: FloatingOverlayPanel?
     private var hostingView: NSHostingView<AnyView>?
 
     private var dragHandleView: PanelDragView?
+    private var escapeMonitor: Any?
 
     var whisperEngine: WhisperEngine?
 
@@ -235,6 +238,7 @@ class FloatingOverlayController: ObservableObject {
         })
 
         isVisible = true
+        installEscapeMonitor()
     }
 
     func showReview(text: String) {
@@ -347,6 +351,7 @@ class FloatingOverlayController: ObservableObject {
 
     private func _performHide() {
         guard isVisible else { return }  // Prevent double-hide during animation overlap
+        removeEscapeMonitor()
         panel?.allowKeyStatus = false
         panel?.orderOut(nil)
         panel?.alphaValue = 1.0  // Reset for next show
@@ -355,6 +360,30 @@ class FloatingOverlayController: ObservableObject {
         state = .idle
         reviewText = ""
         streamingText = ""
+    }
+
+    // MARK: - Global Escape Monitor
+
+    /// Installs a global key monitor that intercepts Escape while the overlay is visible.
+    /// Needed because the panel is non-key during listening/drafting, so SwiftUI .onKeyPress won't fire.
+    private func installEscapeMonitor() {
+        guard escapeMonitor == nil else { return }
+        escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return }  // 53 = Escape
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                // Only handle during listening/drafting/streaming — review has its own SwiftUI handler
+                guard self.state == .listening || self.state == .drafting || self.state == .streaming else { return }
+                self.onEscapeDuringSession?()
+            }
+        }
+    }
+
+    private func removeEscapeMonitor() {
+        if let monitor = escapeMonitor {
+            NSEvent.removeMonitor(monitor)
+            escapeMonitor = nil
+        }
     }
 
     private func resizePanel(to size: NSSize) {
@@ -779,6 +808,14 @@ class DraftSessionController: ObservableObject {
         didSet {
             overlayController?.onSwitchMode = { [weak self] mode in
                 self?.switchToMode(mode)
+            }
+            overlayController?.onEscapeDuringSession = { [weak self] in
+                guard let self = self else { return }
+                if self.isInSession {
+                    self.cancelSession()
+                } else if self.isDictating {
+                    self.cancelDictation()
+                }
             }
         }
     }
