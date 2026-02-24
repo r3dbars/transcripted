@@ -470,13 +470,27 @@ class WhisperEngine: ObservableObject {
         }
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let audioDuration = Double(resampled.count) / 16000.0
+        let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
         print("✅ WHISPER | transcribed \(nSegments) segments in \(String(format: "%.2f", elapsed))s: \"\(trimmed.prefix(80))...\"")
-        if trimmed.isEmpty {
-            // Can't call EventReporter from nonisolated static — use Task to hop to MainActor
-            Task { @MainActor in
+
+        // Log transcription timing to EventReporter (print() goes to /dev/null when launched via open)
+        Task { @MainActor in
+            if trimmed.isEmpty {
                 EventReporter.shared.capture(level: .warning, engine: "whisper", event: "transcription_empty",
                     message: "Whisper returned no text after \(String(format: "%.1f", elapsed))s inference",
                     context: ["segments": "\(nSegments)", "samples": "\(samples.count)"])
+            } else {
+                EventReporter.shared.capture(level: .info, engine: "whisper", event: "transcription_complete",
+                    message: "Transcribed \(nSegments) segments in \(String(format: "%.2f", elapsed))s",
+                    context: [
+                        "elapsed_s": String(format: "%.3f", elapsed),
+                        "audio_duration_s": String(format: "%.1f", audioDuration),
+                        "rtf": String(format: "%.3f", rtf),
+                        "segments": "\(nSegments)",
+                        "chars": "\(trimmed.count)",
+                        "input_samples": "\(samples.count)",
+                    ])
             }
         }
         return trimmed.isEmpty ? nil : trimmed

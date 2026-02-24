@@ -15,7 +15,7 @@ class DraftAppState: ObservableObject {
     let contextCapture = ContextCaptureEngine()
     let analysisEngine = AnalysisEngine()
     let chatEngine = StreamingChatEngine()
-    let whisperEngine = WhisperEngine()
+    let sttRouter = STTRouter()
     let modelManager = ModelManager()
 
     private var promptsObserver: NSObjectProtocol?
@@ -54,23 +54,35 @@ class DraftAppState: ObservableObject {
             }
         }
 
-        // Load Whisper model (sole transcription engine)
+        // Load Whisper model (always available as fallback)
         if let path = modelManager.modelPath {
-            _ = whisperEngine.loadModel(path: path)
-            whisperEngine.prewarm()
-            logger.log("🎙️ WHISPER | model loaded + engine pre-warmed (\(whisperEngine.inputDeviceName), \(path))")
+            _ = sttRouter.whisperEngine.loadModel(path: path)
+            sttRouter.whisperEngine.prewarm()
+            logger.log("🎙️ WHISPER | model loaded + engine pre-warmed (\(sttRouter.whisperEngine.inputDeviceName), \(path))")
         } else {
             logger.log("⚠️ WHISPER | model not found — run build-whisper.sh to download")
         }
 
-        logger.log("🚀 APP LAUNCHED | auth: \(drafter.authModeName), style: \(styleEngine.exampleCount) examples, model: \(promptStore.config.model), engine: Whisper, hotkey registered, analysis engine started")
+        // If Parakeet is the active engine, start model download in background
+        // (don't block app startup — Whisper is always available as fallback)
+        #if PARAKEET_AVAILABLE
+        if sttRouter.activeChoice == .parakeet {
+            Task {
+                await sttRouter.parakeetEngine.initialize()
+                sttRouter.parakeetEngine.prewarm()
+            }
+        }
+        #endif
+
+        logger.log("🚀 APP LAUNCHED | auth: \(drafter.authModeName), style: \(styleEngine.exampleCount) examples, model: \(promptStore.config.model), engine: \(sttRouter.activeChoice.rawValue), hotkey registered, analysis engine started")
 
         // Wire EventReporter with live engine state for context enrichment
         EventReporter.shared.setEngineStateSummary { [weak self] in
             guard let self else { return [:] }
             return [
-                "whisper_loaded": "\(whisperEngine.isModelLoaded)",
-                "whisper_recording": "\(whisperEngine.isRecording)",
+                "stt_engine": sttRouter.activeChoice.rawValue,
+                "whisper_loaded": "\(sttRouter.whisperEngine.isModelLoaded)",
+                "stt_recording": "\(sttRouter.isRecording)",
                 "style_examples": "\(styleEngine.exampleCount)",
                 "auth_mode": drafter.authModeName,
             ]
@@ -80,12 +92,16 @@ class DraftAppState: ObservableObject {
                 "auth": drafter.authModeName,
                 "style_examples": "\(styleEngine.exampleCount)",
                 "model": promptStore.config.model,
+                "stt_engine": sttRouter.activeChoice.rawValue,
             ])
     }
 
     func shutdown() {
         analysisEngine.stop()
-        whisperEngine.unloadModel()
+        sttRouter.whisperEngine.unloadModel()
+        #if PARAKEET_AVAILABLE
+        sttRouter.parakeetEngine.cleanup()
+        #endif
         contextCapture.unregisterHotkey()
         if let observer = promptsObserver {
             NotificationCenter.default.removeObserver(observer)
