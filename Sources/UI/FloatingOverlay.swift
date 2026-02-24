@@ -91,14 +91,14 @@ class FloatingOverlayController: ObservableObject {
     private var dragHandleView: PanelDragView?
     private var escapeMonitor: Any?
 
-    var whisperEngine: WhisperEngine?
+    var sttRouter: STTRouter?
 
-    func setup(whisperEngine: WhisperEngine) {
+    func setup(sttRouter: STTRouter) {
         guard panel == nil else {
             print("⚠️ OVERLAY | setup() called twice — ignoring")
             return
         }
-        self.whisperEngine = whisperEngine
+        self.sttRouter = sttRouter
         let panel = FloatingOverlayPanel(
             contentRect: NSRect(x: 0, y: 0, width: overlayPanelWidth, height: overlayPanelMinHeight),
             styleMask: [],
@@ -117,7 +117,7 @@ class FloatingOverlayController: ObservableObject {
         blurView.autoresizingMask = [.width, .height]
         panel.contentView?.addSubview(blurView)
 
-        let content = OverlayContentView(whisperEngine: whisperEngine, controller: self)
+        let content = OverlayContentView(sttRouter: sttRouter, controller: self)
         let hosting = NSHostingView(rootView: AnyView(content))
         hosting.frame = panel.contentView?.bounds ?? .zero
         hosting.autoresizingMask = [.width, .height]
@@ -414,7 +414,7 @@ private class PanelDragView: NSView {
 // MARK: - SwiftUI Overlay Content
 
 struct OverlayContentView: View {
-    @ObservedObject var whisperEngine: WhisperEngine
+    @ObservedObject var sttRouter: STTRouter
     @ObservedObject var controller: FloatingOverlayController
     @FocusState private var isReviewFocused: Bool
     var body: some View {
@@ -477,7 +477,7 @@ struct OverlayContentView: View {
             // Scrolling waveform during listening; spacer otherwise
             if controller.state == .listening {
                 ScrollingWaveformView(
-                    level: whisperEngine.audioLevel,
+                    level: sttRouter.audioLevel,
                     isActive: true
                 )
                 .frame(maxWidth: .infinity, maxHeight: 20)
@@ -529,14 +529,14 @@ struct OverlayContentView: View {
     @ViewBuilder
     private var listeningContent: some View {
         Group {
-            if !whisperEngine.liveTranscript.isEmpty {
+            if !sttRouter.liveTranscript.isEmpty {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
-                        AnimatedTranscriptView(text: whisperEngine.liveTranscript)
+                        AnimatedTranscriptView(text: sttRouter.liveTranscript)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .id("transcript")
                     }
-                    .onChange(of: whisperEngine.liveTranscript) {
+                    .onChange(of: sttRouter.liveTranscript) {
                         withAnimation(.easeOut(duration: 0.15)) {
                             proxy.scrollTo("transcript", anchor: .bottom)
                         }
@@ -558,10 +558,10 @@ struct OverlayContentView: View {
     @ViewBuilder
     private var draftingContent: some View {
         VStack(spacing: 8) {
-            if whisperEngine.isTranscribing, !whisperEngine.liveTranscript.isEmpty {
+            if sttRouter.isTranscribing, !sttRouter.liveTranscript.isEmpty {
                 // Show live transcript at reduced opacity with blur (provisional feel)
                 ScrollView(.vertical, showsIndicators: false) {
-                    AnimatedTranscriptView(text: whisperEngine.liveTranscript)
+                    AnimatedTranscriptView(text: sttRouter.liveTranscript)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .opacity(0.45)
@@ -579,7 +579,7 @@ struct OverlayContentView: View {
                 ProgressView()
                     .controlSize(.small)
                     .tint(accentGreen)
-                Text(whisperEngine.isTranscribing ? "Transcribing..." : "Processing...")
+                Text(sttRouter.isTranscribing ? "Transcribing..." : "Processing...")
                     .font(.system(size: 12))
                     .foregroundColor(textMuted)
             }
@@ -701,9 +701,9 @@ class DraftSessionController: ObservableObject {
         overlayController.activeMode = .draft
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
-        appState.whisperEngine.startRecording()
+        appState.sttRouter.startRecording()
 
-        appState.logger.log("SESSION | started (Whisper, \(appState.whisperEngine.inputDeviceName)), voice recording + vision in parallel")
+        appState.logger.log("SESSION | started (\(appState.sttRouter.activeChoice.rawValue), \(appState.sttRouter.inputDeviceName)), voice recording + vision in parallel")
 
         // Start vision processing in parallel (stored so we can await it before drafting)
         visionTask?.cancel()
@@ -721,8 +721,8 @@ class DraftSessionController: ObservableObject {
         streamingTask?.cancel()
         streamingTask = Task {
             // Stop Whisper recording and batch-transcribe
-            appState.whisperEngine.stopRecording()
-            let voiceText = (await appState.whisperEngine.transcribe() ?? "")
+            appState.sttRouter.stopRecording()
+            let voiceText = (await appState.sttRouter.transcribe() ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard !voiceText.isEmpty else {
@@ -819,8 +819,8 @@ class DraftSessionController: ObservableObject {
         visionTask = nil
         streamingTask?.cancel()
         streamingTask = nil
-        if appState.whisperEngine.isRecording {
-            appState.whisperEngine.cancel()
+        if appState.sttRouter.isRecording {
+            appState.sttRouter.cancel()
         }
         overlayController.hideWithCancelAnimation()
         isInSession = false
@@ -844,8 +844,8 @@ class DraftSessionController: ObservableObject {
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
 
-        appState.whisperEngine.startRecording()
-        appState.logger.log("DICTATION | started (Whisper, \(appState.whisperEngine.inputDeviceName))")
+        appState.sttRouter.startRecording()
+        appState.logger.log("DICTATION | started (\(appState.sttRouter.activeChoice.rawValue), \(appState.sttRouter.inputDeviceName))")
     }
 
     /// Stop dictation and paste — Whisper batch transcription
@@ -854,9 +854,9 @@ class DraftSessionController: ObservableObject {
         guard isDictating, overlayController.state == .listening else { return }
         overlayController.state = .drafting
 
-        appState.whisperEngine.stopRecording()
+        appState.sttRouter.stopRecording()
         Task {
-            let voiceText = await appState.whisperEngine.transcribe()
+            let voiceText = await appState.sttRouter.transcribe()
 
             guard let text = voiceText, !text.isEmpty else {
                 appState.logger.log("DICTATION | no transcription, cancelling")
@@ -876,8 +876,8 @@ class DraftSessionController: ObservableObject {
     /// Cancel dictation without pasting
     func cancelDictation() {
         guard let appState = appState, let overlayController = overlayController else { return }
-        if appState.whisperEngine.isRecording {
-            appState.whisperEngine.cancel()
+        if appState.sttRouter.isRecording {
+            appState.sttRouter.cancel()
         }
         overlayController.hideWithCancelAnimation()
         isDictating = false

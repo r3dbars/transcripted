@@ -23,6 +23,16 @@ else
     echo "   Run build-whisper.sh first to download the model."
 fi
 
+# Bundle Parakeet CoreML models (if downloaded)
+PARAKEET_SRC="$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml"
+if [ -d "$PARAKEET_SRC/Encoder.mlmodelc" ]; then
+    echo "Bundling Parakeet models..."
+    mkdir -p "$APP_BUNDLE/Contents/Resources/parakeet-models"
+    cp -R "$PARAKEET_SRC" "$APP_BUNDLE/Contents/Resources/parakeet-models/"
+else
+    echo "⚠️  Parakeet models not found — Parakeet engine will attempt runtime download"
+fi
+
 # Copy Info.plist
 cp Info.plist "$APP_BUNDLE/Contents/"
 
@@ -43,6 +53,16 @@ cat > "$BUILD_DIR/Draft.entitlements" << 'EOF'
 </dict>
 </plist>
 EOF
+
+# FluidAudio (optional — Parakeet STT engine)
+# Run build-fluidaudio.sh first to build these artifacts
+FLUID_FLAGS=""
+if [ -f "fluidaudio-libs/libFluidAudioAll.a" ] && [ -d "fluidaudio-modules/FluidAudio.swiftmodule" ]; then
+    echo "FluidAudio found — enabling Parakeet engine"
+    FLUID_FLAGS="-DPARAKEET_AVAILABLE -Ifluidaudio-modules -Ifluidaudio-modules/FastClusterWrapper -Ifluidaudio-modules/MachTaskSelfWrapper -Ifluidaudio-modules/yyjson -Lfluidaudio-libs -lFluidAudioAll -framework CoreML -framework CoreAudio"
+else
+    echo "FluidAudio not found — Whisper only (run build-fluidaudio.sh to enable Parakeet)"
+fi
 
 # Compile
 echo "Compiling..."
@@ -65,6 +85,7 @@ swiftc \
     -Llibs \
     -lwhisper -lggml-base -lggml-cpu -lggml-metal -lggml-blas -lggml \
     -import-objc-header Sources/Speech/WhisperBridge.h \
+    $FLUID_FLAGS \
     $(find Sources -name '*.swift') \
     -parse-as-library \
     -target arm64-apple-macos14.0 \
