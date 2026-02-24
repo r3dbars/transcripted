@@ -780,6 +780,8 @@ class DraftSessionController: ObservableObject {
             } catch {
                 guard !Task.isCancelled else { return }
                 appState.logger.log("SESSION | stream error: \(error.localizedDescription)")
+                EventReporter.shared.capture(level: .error, engine: "overlay", event: "stream_draft_failed",
+                    message: error.localizedDescription)
                 overlayController.hideWithCancelAnimation()
                 isInSession = false
                 return
@@ -788,6 +790,8 @@ class DraftSessionController: ObservableObject {
             guard !Task.isCancelled, !fullText.isEmpty else {
                 if !Task.isCancelled {
                     appState.logger.log("SESSION | empty draft")
+                    EventReporter.shared.capture(level: .warning, engine: "overlay", event: "draft_empty",
+                        message: "Draft was empty after streaming completed")
                     overlayController.hideWithCancelAnimation()
                     isInSession = false
                 }
@@ -918,6 +922,8 @@ class DraftSessionController: ObservableObject {
             return polished.trimmingCharacters(in: .whitespacesAndNewlines)
         } catch {
             appState.logger.log("DICTATION | polish failed: \(error.localizedDescription), pasting raw text")
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "polish_failed",
+                message: error.localizedDescription)
             return rawText
         }
     }
@@ -950,6 +956,8 @@ class DraftSessionController: ObservableObject {
             appState.logger.log("SESSION | vision complete — platform=\(context.platform ?? "nil")")
         } catch {
             appState.logger.log("SESSION | vision timeout/error: \(error.localizedDescription), proceeding voice-only")
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "vision_timeout",
+                message: error.localizedDescription)
             // Proceed without context — voiceText alone is enough to draft
         }
     }
@@ -1005,6 +1013,9 @@ class DraftSessionController: ObservableObject {
             )
         } else {
             appState.logger.log("STYLE | skipping refusal example — not recording as training data")
+            EventReporter.shared.capture(level: .info, engine: "overlay", event: "refusal_detected",
+                message: "Draft contained refusal pattern — skipping training pair",
+                context: ["draft_length": "\(originalDraft.count)"])
         }
 
         // Check if style refinement is needed

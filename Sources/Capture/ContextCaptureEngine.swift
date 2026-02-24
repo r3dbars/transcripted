@@ -184,6 +184,8 @@ class ContextCaptureEngine: ObservableObject {
 
         guard let auth = AuthCredential.load() else {
             captureError = "No credentials — add your API key or Claude subscription token in settings"
+            EventReporter.shared.capture(level: .warning, engine: "capture", event: "capture_auth_missing",
+                message: "No auth credential configured for vision extraction")
             isCapturing = false
             return
         }
@@ -213,8 +215,12 @@ class ContextCaptureEngine: ObservableObject {
             onContextCaptured?(context)
         } catch AnthropicAPIError.subscriptionTokenExpired {
             captureError = "Subscription token expired — run `claude setup-token` and update in Settings"
+            EventReporter.shared.capture(level: .error, engine: "capture", event: "vision_extraction_failed",
+                message: "Subscription token expired")
         } catch {
             captureError = error.localizedDescription
+            EventReporter.shared.capture(level: .error, engine: "capture", event: "vision_extraction_failed",
+                message: error.localizedDescription)
         }
 
         isCapturing = false

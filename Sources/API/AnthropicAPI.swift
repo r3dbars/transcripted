@@ -125,6 +125,10 @@ struct AnthropicAPI {
                         for try await byte in bytes { errData.append(byte) }
                         let msg = (try? JSONDecoder().decode(AnthropicErrorResponse.self, from: errData))?.error.message
                             ?? "HTTP \(http.statusCode)"
+                        Task { @MainActor in
+                            EventReporter.shared.capture(level: .error, engine: "anthropic", event: "api_stream_error",
+                                message: msg, context: ["status_code": "\(http.statusCode)"])
+                        }
                         continuation.finish(throwing: AnthropicAPIError.apiError(msg))
                         return
                     }
@@ -252,6 +256,10 @@ struct AnthropicAPI {
 
         // Distinguish expired subscription tokens from invalid API keys
         if httpResponse.statusCode == 401 {
+            Task { @MainActor in
+                EventReporter.shared.capture(level: .error, engine: "anthropic", event: "api_auth_failure",
+                    message: "HTTP 401 Unauthorized", context: ["auth_mode": auth.modeName])
+            }
             if case .subscriptionToken = auth {
                 throw AnthropicAPIError.subscriptionTokenExpired
             }
@@ -259,10 +267,17 @@ struct AnthropicAPI {
         }
 
         if httpResponse.statusCode != 200 {
+            let errorMessage: String
             if let errorResponse = try? JSONDecoder().decode(AnthropicErrorResponse.self, from: data) {
-                throw AnthropicAPIError.apiError(errorResponse.error.message)
+                errorMessage = errorResponse.error.message
+            } else {
+                errorMessage = "HTTP \(httpResponse.statusCode)"
             }
-            throw AnthropicAPIError.apiError("HTTP \(httpResponse.statusCode)")
+            Task { @MainActor in
+                EventReporter.shared.capture(level: .error, engine: "anthropic", event: "api_http_error",
+                    message: errorMessage, context: ["status_code": "\(httpResponse.statusCode)"])
+            }
+            throw AnthropicAPIError.apiError(errorMessage)
         }
 
         let apiResponse = try JSONDecoder().decode(AnthropicResponse.self, from: data)

@@ -77,8 +77,12 @@ class DraftEngine: ObservableObject {
                 self.originalDraft = result
             } catch AnthropicAPIError.subscriptionTokenExpired {
                 self.error = "Subscription token expired — run `claude setup-token` and update in Settings"
+                EventReporter.shared.capture(level: .error, engine: "draft", event: "subscription_expired",
+                    message: "Subscription token expired during plain draft")
             } catch {
                 self.error = error.localizedDescription
+                EventReporter.shared.capture(level: .error, engine: "draft", event: "draft_failed",
+                    message: error.localizedDescription)
             }
             self.isDrafting = false
         }
@@ -125,8 +129,12 @@ class DraftEngine: ObservableObject {
                 self.originalDraft = processed
             } catch AnthropicAPIError.subscriptionTokenExpired {
                 self.error = "Subscription token expired — run `claude setup-token` and update in Settings"
+                EventReporter.shared.capture(level: .error, engine: "draft", event: "subscription_expired",
+                    message: "Subscription token expired during context-aware draft")
             } catch {
                 self.error = error.localizedDescription
+                EventReporter.shared.capture(level: .error, engine: "draft", event: "draft_failed",
+                    message: error.localizedDescription)
             }
             self.isDrafting = false
         }

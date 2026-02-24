@@ -19,6 +19,7 @@ Sources/
 ├── Messages/                ← iMessage database reader (SQLite, onboarding import)
 ├── Capture/                 ← Screen capture, context extraction, hotkey registration, three-way routing
 ├── Analysis/                ← AnalysisEngine — native Swift feedback analyzer (replaces Python agent)
+├── Observability/           ← EventReporter — centralized error/warning/info tracking (events.jsonl)
 └── UI/                      ← FloatingOverlay (primary UI), MenuBarPanel, onboarding, Agent tab
 agent/                       ← ⚠️ DEPRECATED — Python orchestrator replaced by Sources/Analysis/
 ```
@@ -48,6 +49,81 @@ This compiles all Swift files from `Sources/`, signs the app bundle, and launche
 - **Frictionless keyboard flow** — ⌥D to start draft → speak → ⌥D to draft → Enter to inject → Escape to cancel at any time. ⌥Space for dictation → speak → ⌥Space to paste. No clicking required
 - **Native analysis engine** — Swift-native AnalysisEngine watches feedback via DispatchSource, uses Sonnet to analyze patterns, and proposes prompt improvements as InsightCards in the Agent tab
 - **Reliability hardened** — All force-unwraps guarded, stale Tasks cancelled before replacement, deinits on all engines (Carbon hotkeys, audio engine, file watchers), NSLock-batched audio samples, global Escape monitor, streaming state guards
+- **Observability** — `EventReporter` captures 35 structured events across all 12 engines to `events.jsonl`. See "Diagnosing Issues" below.
+
+## Diagnosing Issues (When Something Weird Happens)
+
+When the user reports something went wrong, broke, or felt off — **always check `events.jsonl` first.** This is the structured event log that captures every error, warning, and notable event across the entire app.
+
+### Step 1: Check recent errors
+
+```bash
+# Last 50 events, errors only
+tail -50 ~/Library/Application\ Support/Draft/events.jsonl | grep '"level":"error"'
+
+# Last 50 events, errors AND warnings
+tail -50 ~/Library/Application\ Support/Draft/events.jsonl | grep -E '"level":"(error|warning)"'
+```
+
+### Step 2: Check a specific engine
+
+If the user describes the problem area (e.g., "voice didn't work", "draft was weird", "nothing happened when I pressed the hotkey"), filter by engine:
+
+| User says | Engine to check |
+|-----------|----------------|
+| "Voice/mic didn't work" | `whisper`, `speech` |
+| "Draft was bad/empty/refused" | `overlay`, `draft` |
+| "Nothing happened on hotkey" | `capture`, `overlay` |
+| "API error / auth issue" | `anthropic`, `draft` |
+| "Style seems off" | `style` |
+| "Paste didn't work" | `overlay` |
+| "Screen capture failed" | `capture` |
+
+```bash
+grep '"engine":"whisper"' ~/Library/Application\ Support/Draft/events.jsonl | tail -20
+```
+
+### Step 3: Check the debug log for timeline
+
+`events.jsonl` gives structured data; the debug log gives the full narrative:
+
+```bash
+tail -200 ~/draft-debug.log | grep -E "SESSION|WHISPER|VISION|STYLE|DICTATION"
+```
+
+### Step 4: Cross-reference and diagnose
+
+Read both logs together. Common patterns:
+
+| events.jsonl event | Likely cause | Fix direction |
+|--------------------|-------------|---------------|
+| `prewarm_failed` | Audio device issue or model missing | Check mic permissions, re-download model |
+| `api_http_error` + status 401 | Auth expired | Regenerate API key or subscription token |
+| `api_http_error` + status 529 | Anthropic overloaded | Transient — retry |
+| `vision_timeout` | Slow network or complex screenshot | Increase timeout or check network |
+| `draft_empty` | API returned nothing | Check prompt, check auth |
+| `stream_draft_failed` | Network interruption during streaming | Check connectivity |
+| `refusal_detected` | Claude refused to ghostwrite | Check prompt for missing context signals |
+| `subscription_expired` | OAuth token expired | Run `claude setup-token` and update |
+| `style_refinement_failed` | Sonnet call failed during refinement | Check auth and API status |
+| `mic_not_authorized` | User revoked mic permission at runtime | Re-grant in System Settings |
+
+### Step 5: Suggest a fix or investigate further
+
+After identifying the error, either:
+- **Fix it directly** if the cause is clear (code change, prompt tweak, permission issue)
+- **Read the relevant CLAUDE.md** in the engine's `Sources/` subfolder for component-specific knowledge
+- **Read the source file** at the capture point to understand the full error handling path
+
+### Event File Location
+
+```
+~/Library/Application Support/Draft/events.jsonl    ← Structured errors/warnings/info (JSONL)
+~/draft-debug.log                                    ← Narrative action log (text)
+~/Library/Application Support/Draft/feedback.jsonl   ← Accepted draft training pairs
+~/Library/Application Support/Draft/style.md         ← Current style profile
+~/Library/Application Support/Draft/prompts.json     ← Current prompt values
+```
 
 ## End-to-End Data Flow
 

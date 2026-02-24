@@ -271,6 +271,8 @@ class StyleEngine: ObservableObject {
             }
         } catch {
             print("⚠️ Style summary regeneration failed: \(error)")
+            EventReporter.shared.capture(level: .error, engine: "style", event: "style_refinement_failed",
+                message: error.localizedDescription)
         }
     }
 
@@ -565,7 +567,13 @@ class StyleEngine: ObservableObject {
 
     private func loadStyleFile() {
         if FileManager.default.fileExists(atPath: styleFileURL.path) {
-            styleFileContents = (try? String(contentsOf: styleFileURL, encoding: .utf8)) ?? ""
+            do {
+                styleFileContents = try String(contentsOf: styleFileURL, encoding: .utf8)
+            } catch {
+                styleFileContents = ""
+                EventReporter.shared.capture(level: .warning, engine: "style", event: "style_file_read_failed",
+                    message: error.localizedDescription)
+            }
             // Count examples by counting "### Example" occurrences
             exampleCount = styleFileContents.components(separatedBy: "### Example").count - 1
         }
@@ -576,6 +584,8 @@ class StyleEngine: ObservableObject {
             try styleFileContents.write(to: styleFileURL, atomically: true, encoding: .utf8)
         } catch {
             print("⚠️ STYLE | failed to save style.md: \(error.localizedDescription)")
+            EventReporter.shared.capture(level: .error, engine: "style", event: "style_file_write_failed",
+                message: error.localizedDescription)
         }
     }
 

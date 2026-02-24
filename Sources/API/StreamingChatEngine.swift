@@ -191,6 +191,8 @@ class StreamingChatEngine: ObservableObject {
             }
         } catch {
             updateLastMessage(id: msgId, text: "Error: \(error.localizedDescription)", streaming: false)
+            EventReporter.shared.capture(level: .error, engine: "chat", event: "chat_api_failed",
+                message: error.localizedDescription)
             return
         }
 
@@ -368,7 +370,12 @@ class StreamingChatEngine: ObservableObject {
         guard let data = rawInput.data(using: .utf8),
               let input = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let card = InsightCard.from(toolId: toolId, input: input)
-        else { return }
+        else {
+            EventReporter.shared.capture(level: .warning, engine: "chat", event: "tool_parse_failed",
+                message: "Failed to parse propose_prompt_change tool input",
+                context: ["tool_id": toolId, "input_length": "\(rawInput.count)"])
+            return
+        }
         onInsightProposed?(card)
     }
 
