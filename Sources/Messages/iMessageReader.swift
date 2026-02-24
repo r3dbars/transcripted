@@ -58,7 +58,15 @@ actor iMessageReader {
             let errMsg = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
             sqlite3_close(db)
             if errMsg.contains("unable to open") || errMsg.contains("permission") || errMsg.contains("not authorized") || errMsg.contains("authorization") {
+                Task { @MainActor in
+                    EventReporter.shared.capture(level: .error, engine: "imessage", event: "imessage_db_open_failed",
+                        message: "Access denied: \(errMsg)")
+                }
                 throw ReaderError.accessDenied
+            }
+            Task { @MainActor in
+                EventReporter.shared.capture(level: .error, engine: "imessage", event: "imessage_db_open_failed",
+                    message: errMsg)
             }
             throw ReaderError.queryFailed(errMsg)
         }
@@ -77,7 +85,12 @@ actor iMessageReader {
 
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
-            throw ReaderError.queryFailed(String(cString: sqlite3_errmsg(db)))
+            let errMsg = String(cString: sqlite3_errmsg(db))
+            Task { @MainActor in
+                EventReporter.shared.capture(level: .error, engine: "imessage", event: "imessage_query_failed",
+                    message: errMsg)
+            }
+            throw ReaderError.queryFailed(errMsg)
         }
         defer { sqlite3_finalize(stmt) }
 

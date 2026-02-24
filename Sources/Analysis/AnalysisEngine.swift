@@ -91,7 +91,11 @@ class AnalysisEngine: ObservableObject {
         }
 
         fileDescriptor = open(feedbackURL.path, O_EVTONLY)
-        guard fileDescriptor >= 0 else { return }
+        guard fileDescriptor >= 0 else {
+            EventReporter.shared.capture(level: .error, engine: "analysis", event: "file_watch_failed",
+                message: "Failed to open file descriptor for feedback.jsonl")
+            return
+        }
 
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fileDescriptor,
@@ -164,6 +168,8 @@ class AnalysisEngine: ObservableObject {
             }
         } catch {
             print("⚠️ ANALYSIS | analysis failed: \(error.localizedDescription)")
+            EventReporter.shared.capture(level: .error, engine: "analysis", event: "analysis_failed",
+                message: error.localizedDescription)
         }
     }
 
@@ -296,7 +302,11 @@ class AnalysisEngine: ObservableObject {
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: entry),
               let line = String(data: data, encoding: .utf8)
-        else { return }
+        else {
+            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "suggestion_write_failed",
+                message: "Failed to encode suggestion log entry", context: ["action": action, "suggestion_id": card.suggestionId])
+            return
+        }
         let lineWithNewline = (line + "\n").data(using: .utf8) ?? Data()
         if FileManager.default.fileExists(atPath: suggestionLogURL.path),
            let handle = try? FileHandle(forWritingTo: suggestionLogURL) {

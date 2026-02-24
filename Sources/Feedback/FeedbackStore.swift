@@ -83,6 +83,10 @@ class FeedbackStore: ObservableObject {
         guard let data = try? encoder.encode(entry),
               let line = String(data: data, encoding: .utf8) else {
             print("⚠️ FEEDBACK | failed to encode feedback entry")
+            Task { @MainActor in
+                EventReporter.shared.capture(level: .error, engine: "feedback", event: "feedback_encode_failed",
+                    message: "Failed to JSON-encode feedback entry")
+            }
             return
         }
 
@@ -91,6 +95,10 @@ class FeedbackStore: ObservableObject {
         if FileManager.default.fileExists(atPath: feedbackURL.path) {
             guard let handle = try? FileHandle(forWritingTo: feedbackURL) else {
                 print("⚠️ FEEDBACK | failed to open feedback.jsonl for writing")
+                Task { @MainActor in
+                    EventReporter.shared.capture(level: .error, engine: "feedback", event: "feedback_file_open_failed",
+                        message: "Failed to open feedback.jsonl for writing")
+                }
                 return
             }
             defer { try? handle.close() }
@@ -101,6 +109,10 @@ class FeedbackStore: ObservableObject {
                 try lineWithNewline.write(to: feedbackURL)
             } catch {
                 print("⚠️ FEEDBACK | failed to create feedback.jsonl: \(error.localizedDescription)")
+                Task { @MainActor in
+                    EventReporter.shared.capture(level: .error, engine: "feedback", event: "feedback_file_create_failed",
+                        message: error.localizedDescription)
+                }
             }
         }
     }

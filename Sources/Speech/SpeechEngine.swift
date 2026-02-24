@@ -122,6 +122,8 @@ class SpeechEngine: ObservableObject {
         guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
             log("❌ SPEECH | recognizer not available (isAvailable=false)")
             statusMessage = "Speech recognizer not available"
+            EventReporter.shared.capture(level: .error, engine: "speech", event: "recognizer_unavailable",
+                message: "SFSpeechRecognizer not available")
             return
         }
         guard !isListening else {
@@ -191,6 +193,8 @@ class SpeechEngine: ObservableObject {
         } catch {
             log("❌ AUDIO ENGINE FAILED | \(error.localizedDescription)")
             statusMessage = "Audio engine failed: \(error.localizedDescription)"
+            EventReporter.shared.capture(level: .error, engine: "speech", event: "audio_engine_start_failed",
+                message: error.localizedDescription)
         }
     }
 
@@ -387,6 +391,8 @@ class SpeechEngine: ObservableObject {
                 guard let self = self else { return }
                 let nsError = error as NSError
                 self.log("❌ ERROR code=\(nsError.code) | \(error.localizedDescription)")
+                EventReporter.shared.capture(level: .warning, engine: "speech", event: "recognition_error",
+                    message: error.localizedDescription, context: ["error_code": "\(nsError.code)"])
 
                 if self.pendingGracefulStop {
                     // Graceful stop in progress — commit whatever we have and signal done

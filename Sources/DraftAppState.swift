@@ -64,6 +64,23 @@ class DraftAppState: ObservableObject {
         }
 
         logger.log("🚀 APP LAUNCHED | auth: \(drafter.authModeName), style: \(styleEngine.exampleCount) examples, model: \(promptStore.config.model), engine: Whisper, hotkey registered, analysis engine started")
+
+        // Wire EventReporter with live engine state for context enrichment
+        EventReporter.shared.setEngineStateSummary { [weak self] in
+            guard let self else { return [:] }
+            return [
+                "whisper_loaded": "\(whisperEngine.isModelLoaded)",
+                "whisper_recording": "\(whisperEngine.isRecording)",
+                "style_examples": "\(styleEngine.exampleCount)",
+                "auth_mode": drafter.authModeName,
+            ]
+        }
+        EventReporter.shared.capture(level: .info, engine: "app", event: "app_launched",
+            message: "Draft initialized", context: [
+                "auth": drafter.authModeName,
+                "style_examples": "\(styleEngine.exampleCount)",
+                "model": promptStore.config.model,
+            ])
     }
 
     func shutdown() {

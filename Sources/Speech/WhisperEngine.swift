@@ -129,6 +129,8 @@ class WhisperEngine: ObservableObject {
             }
         } catch {
             print("⚠️ WHISPER | prewarm failed: \(error.localizedDescription), will cold-start on record")
+            EventReporter.shared.capture(level: .error, engine: "whisper", event: "prewarm_failed",
+                message: error.localizedDescription, context: ["audio_device": inputDeviceName])
         }
     }
 
@@ -167,6 +169,8 @@ class WhisperEngine: ObservableObject {
             }
         } catch {
             print("⚠️ WHISPER | re-warm failed after device change: \(error.localizedDescription)")
+            EventReporter.shared.capture(level: .error, engine: "whisper", event: "device_change_rewarm_failed",
+                message: error.localizedDescription, context: ["audio_device": inputDeviceName])
         }
     }
 
@@ -176,11 +180,15 @@ class WhisperEngine: ObservableObject {
         guard !isRecording else { return }
         guard isModelLoaded else {
             print("⚠️ WHISPER | cannot start recording — model not loaded")
+            EventReporter.shared.capture(level: .warning, engine: "whisper", event: "model_not_loaded",
+                message: "Recording attempted without model loaded")
             return
         }
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         guard micStatus == .authorized else {
             print("⚠️ WHISPER | microphone permission not granted (status: \(micStatus.rawValue))")
+            EventReporter.shared.capture(level: .error, engine: "whisper", event: "mic_not_authorized",
+                message: "Microphone permission status: \(micStatus.rawValue)")
             return
         }
         sampleBuffer.removeAll(keepingCapacity: true)
@@ -463,6 +471,14 @@ class WhisperEngine: ObservableObject {
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         print("✅ WHISPER | transcribed \(nSegments) segments in \(String(format: "%.2f", elapsed))s: \"\(trimmed.prefix(80))...\"")
+        if trimmed.isEmpty {
+            // Can't call EventReporter from nonisolated static — use Task to hop to MainActor
+            Task { @MainActor in
+                EventReporter.shared.capture(level: .warning, engine: "whisper", event: "transcription_empty",
+                    message: "Whisper returned no text after \(String(format: "%.1f", elapsed))s inference",
+                    context: ["segments": "\(nSegments)", "samples": "\(samples.count)"])
+            }
+        }
         return trimmed.isEmpty ? nil : trimmed
     }
 
