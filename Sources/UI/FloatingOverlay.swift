@@ -1,6 +1,6 @@
 // FloatingOverlay.swift
 // Non-activating floating panel for the hotkey -> speak -> draft -> inject flow
-// Saga-inspired dark overlay with mint green accent and mode-switching bubbles
+// Non-activating floating panel with mint green accent
 
 import SwiftUI
 import AppKit
@@ -8,21 +8,16 @@ import AppKit
 // MARK: - Design Tokens (semi-transparent for glassmorphism blur)
 
 private let panelBg       = Color.black.opacity(0.58)                   // translucent for blur
-private let contentBg     = Color.black.opacity(0.14)                   // subtle content tint
-private let bubbleBg      = Color.white.opacity(0.07)                   // frosted bubble fill
 private let accentGreen   = Color(red: 0.07, green: 0.94, blue: 0.58)  // #13EF95  mint green
 private let textPrimary   = Color.white
 private let textSecondary = Color(white: 0.55)                          // gray labels
 private let textMuted     = Color(white: 0.35)                          // placeholder
-private let recordingRed  = Color.red
 
 // MARK: - Layout Constants
 
 private let overlayPanelWidth: CGFloat     = 480
 private let overlayPanelMinHeight: CGFloat = 160
 private let overlayPanelMaxHeight: CGFloat = 340
-private let overlaySidebarWidth: CGFloat   = 60
-private let overlayBubbleSize: CGFloat     = 40
 private let overlayCornerRadius: CGFloat   = 16
 private let overlayContentPadding: CGFloat = 16
 
@@ -87,8 +82,6 @@ class FloatingOverlayController: ObservableObject {
     /// Closures for Enter/Escape in review mode — set by DraftSessionController
     var onConfirm: (() -> Void)?
     var onCancel: (() -> Void)?
-    /// Closure for bubble-tap mode switching — set by DraftSessionController
-    var onSwitchMode: ((SessionMode) -> Void)?
     /// Closure for Escape during non-review states (listening/drafting/streaming) — set by DraftSessionController
     var onEscapeDuringSession: (() -> Void)?
 
@@ -138,9 +131,9 @@ class FloatingOverlayController: ObservableObject {
         let dragView = PanelDragView()
         dragView.panel = panel
         dragView.frame = NSRect(
-            x: overlaySidebarWidth,
+            x: 0,
             y: contentBounds.height - headerHeight,
-            width: contentBounds.width - overlaySidebarWidth,
+            width: contentBounds.width,
             height: headerHeight
         )
         dragView.autoresizingMask = [.width, .minYMargin]  // Stay at top, stretch width
@@ -425,85 +418,15 @@ struct OverlayContentView: View {
     @ObservedObject var controller: FloatingOverlayController
     @FocusState private var isReviewFocused: Bool
     var body: some View {
-        HStack(spacing: 0) {
-            // Left sidebar with mode bubbles
-            sidebarView
-
-            // Thin vertical separator
-            Rectangle()
-                .fill(Color.white.opacity(0.06))
-                .frame(width: 1)
-
-            // Right content area
-            VStack(spacing: 0) {
-                headerBar
-                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
-                contentArea
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
-                bottomToolbar
-            }
+        VStack(spacing: 0) {
+            headerBar
+            Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+            contentArea
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+            bottomToolbar
         }
         .background(panelBg)
-    }
-
-    // MARK: - Sidebar
-
-    @ViewBuilder
-    private var sidebarView: some View {
-        VStack(spacing: 12) {
-            Spacer()
-            modeBubble(
-                mode: .draft,
-                symbol: "pencil.line",
-                label: "Draft"
-            )
-            modeBubble(
-                mode: .dictation,
-                symbol: "waveform",
-                label: "Dictate"
-            )
-            Spacer()
-        }
-        .frame(width: overlaySidebarWidth)
-        .background(panelBg)
-    }
-
-    @ViewBuilder
-    private func modeBubble(
-        mode: FloatingOverlayController.SessionMode,
-        symbol: String,
-        label: String
-    ) -> some View {
-        let isActive = controller.activeMode == mode && controller.state != .idle
-
-        Button(action: {
-            guard controller.state != .idle, controller.isVisible else { return }
-            controller.onSwitchMode?(mode)
-        }) {
-            VStack(spacing: 4) {
-                ZStack {
-                    Circle()
-                        .fill(isActive ? accentGreen.opacity(0.15) : bubbleBg)
-                        .frame(width: overlayBubbleSize, height: overlayBubbleSize)
-
-                    if isActive {
-                        Circle()
-                            .strokeBorder(accentGreen, lineWidth: 2)
-                            .frame(width: overlayBubbleSize, height: overlayBubbleSize)
-                    }
-
-                    Image(systemName: symbol)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(isActive ? accentGreen : textSecondary)
-                }
-
-                Text(label)
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundColor(isActive ? accentGreen : textMuted)
-            }
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Header Bar
@@ -515,19 +438,13 @@ struct OverlayContentView: View {
             Group {
                 switch (controller.state, controller.activeMode) {
                 case (.listening, .draft):
-                    HStack(spacing: 8) {
-                        Label("Draft Mode", systemImage: "pencil.line")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(textSecondary)
-                        AudioWaveformView(level: whisperEngine.audioLevel, compact: true)
-                    }
+                    Text("Draft")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(textSecondary)
                 case (.listening, .dictation):
-                    HStack(spacing: 8) {
-                        Label("Dictation", systemImage: "waveform")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(textSecondary)
-                        AudioWaveformView(level: whisperEngine.audioLevel, compact: true)
-                    }
+                    Text("Dictate")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(textSecondary)
                 case (.drafting, .dictation):
                     HStack(spacing: 6) {
                         ProgressView()
@@ -547,7 +464,7 @@ struct OverlayContentView: View {
                             .foregroundColor(textSecondary)
                     }
                 case (.review, _):
-                    Text("Review Draft")
+                    Text("Draft")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(textSecondary)
                 default:
@@ -557,12 +474,17 @@ struct OverlayContentView: View {
                 }
             }
 
-            // Subtle drag grip indicator
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 8))
-                .foregroundColor(textMuted.opacity(0.5))
-
-            Spacer()
+            // Scrolling waveform during listening; spacer otherwise
+            if controller.state == .listening {
+                ScrollingWaveformView(
+                    level: whisperEngine.audioLevel,
+                    isActive: true
+                )
+                .frame(maxWidth: .infinity, maxHeight: 20)
+                .padding(.horizontal, 8)
+            } else {
+                Spacer()
+            }
 
             // Shortcut hint
             Group {
@@ -576,9 +498,7 @@ struct OverlayContentView: View {
                         .font(.system(size: 10))
                         .foregroundColor(textMuted)
                 case (.review, _):
-                    Text("Esc cancel")
-                        .font(.system(size: 10))
-                        .foregroundColor(textMuted)
+                    EmptyView()
                 default:
                     EmptyView()
                 }
@@ -721,80 +641,18 @@ struct OverlayContentView: View {
 
     @ViewBuilder
     private var bottomToolbar: some View {
-        HStack {
-            // Left: status indicator
-            Group {
-                switch controller.state {
-                case .listening:
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(recordingRed)
-                            .frame(width: 6, height: 6)
-                            .modifier(PulsingDotModifier())
-                        Text("Recording")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(textSecondary)
-                    }
-                case .drafting, .streaming:
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(accentGreen)
-                            .frame(width: 6, height: 6)
-                        Text("Working...")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(textSecondary)
-                    }
-                case .review:
-                    Text("\u{21A9} Enter to send")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(textSecondary)
-                default:
-                    EmptyView()
-                }
-            }
-
-            Spacer()
-
-            // Right: keyboard shortcut hints
-            Group {
-                switch (controller.state, controller.activeMode) {
-                case (.listening, .draft):
-                    Text("\u{2325}D stop \u{00B7} Esc cancel")
-                        .font(.system(size: 10))
-                        .foregroundColor(textMuted)
-                case (.listening, .dictation):
-                    Text("\u{2325}Space stop \u{00B7} Esc cancel")
-                        .font(.system(size: 10))
-                        .foregroundColor(textMuted)
-                case (.review, _):
-                    Text("\u{21E7}\u{21A9} newline \u{00B7} Esc cancel")
-                        .font(.system(size: 10))
-                        .foregroundColor(textMuted)
-                default:
-                    EmptyView()
-                }
-            }
+        // Only show bottom toolbar in review mode — listening/drafting/streaming
+        // status is already communicated by the header bar (waveform, spinner, etc.)
+        if controller.state == .review {
+            Text("\u{21A9} send \u{00B7} Esc cancel")
+                .font(.system(size: 10))
+                .foregroundColor(textMuted)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
         }
-        .padding(.horizontal, overlayContentPadding)
-        .padding(.vertical, 8)
     }
 }
 
-// MARK: - Pulsing Dot Animation
-
-private struct PulsingDotModifier: ViewModifier {
-    @State private var isPulsing = false
-
-    func body(content: Content) -> some View {
-        content
-            .opacity(isPulsing ? 0.4 : 1.0)
-            .animation(
-                .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
-                value: isPulsing
-            )
-            .onAppear { isPulsing = true }
-    }
-}
 
 // MARK: - Draft Session Controller
 
@@ -806,9 +664,6 @@ class DraftSessionController: ObservableObject {
     var appState: DraftAppState?
     var overlayController: FloatingOverlayController? {
         didSet {
-            overlayController?.onSwitchMode = { [weak self] mode in
-                self?.switchToMode(mode)
-            }
             overlayController?.onEscapeDuringSession = { [weak self] in
                 guard let self = self else { return }
                 if self.isInSession {
@@ -824,40 +679,6 @@ class DraftSessionController: ObservableObject {
     private var sessionSourceApp: NSRunningApplication?
     private var streamingTask: Task<Void, Never>?
     private var visionTask: Task<Void, Never>?
-
-    // MARK: - Mode Switching (Bubble Taps)
-
-    /// Called when a sidebar bubble is tapped
-    func switchToMode(_ newMode: FloatingOverlayController.SessionMode) {
-        guard appState != nil, let overlayController = overlayController else { return }
-        if newMode == overlayController.activeMode {
-            // Tapped the currently active mode — act as stop/toggle
-            if newMode == .draft {
-                if overlayController.state == .review {
-                    cancelSession()
-                } else if isInSession {
-                    stopSessionAndDraft()
-                }
-            } else {
-                if isDictating {
-                    stopDictationAndPaste()
-                }
-            }
-            return
-        }
-
-        // Switching to a different mode — cancel current, start new
-        if isInSession { cancelSession() }
-        if isDictating { cancelDictation() }
-
-        if newMode == .draft {
-            let frontApp = NSWorkspace.shared.frontmostApplication
-            let imageData = frontApp.flatMap { ScreenCapture.captureFrontmostWindow(of: $0) }
-            startSession(imageData: imageData, sourceApp: frontApp)
-        } else {
-            startDictation(sourceApp: sessionSourceApp ?? NSWorkspace.shared.frontmostApplication)
-        }
-    }
 
     // MARK: - Draft Mode (Option+D)
 
