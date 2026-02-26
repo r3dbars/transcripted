@@ -58,7 +58,7 @@ private class WaveformState {
 // MARK: - Scrolling Waveform View
 
 struct ScrollingWaveformView: View {
-    let level: Float       // 0.0–1.0, from whisperEngine.audioLevel
+    let level: Float       // 0.0–1.0, from parakeetEngine.audioLevel
     let isActive: Bool     // true while recording
 
     // Bar geometry
@@ -69,7 +69,7 @@ struct ScrollingWaveformView: View {
     private let maxBarHeight: CGFloat = 14     // loud speech
     private let cornerRadius: CGFloat = 1
 
-    // Sampling rate matches WhisperEngine's 20Hz audioLevel throttle
+    // Sampling rate matches ParakeetEngine's 20Hz audioLevel throttle
     private let sampleInterval: TimeInterval = 0.05
 
     @State private var state = WaveformState()

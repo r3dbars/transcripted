@@ -16,7 +16,7 @@ Same directory as `feedback.jsonl` and `prompts.json`. Claude Code reads this fi
 {
   "timestamp": "2026-02-24T10:30:00.123Z",
   "level": "error",
-  "engine": "whisper",
+  "engine": "parakeet",
   "event": "prewarm_failed",
   "message": "The operation couldn't be completed",
   "context": {"audio_device": "MacBook Pro Microphone"},
@@ -30,7 +30,7 @@ Same directory as `feedback.jsonl` and `prompts.json`. Claude Code reads this fi
 | Field | Type | Values |
 |-------|------|--------|
 | `level` | string | `"error"` \| `"warning"` \| `"info"` |
-| `engine` | string | `whisper`, `speech`, `anthropic`, `draft`, `capture`, `style`, `feedback`, `analysis`, `chat`, `overlay`, `imessage`, `app` |
+| `engine` | string | `parakeet`, `speech`, `anthropic`, `draft`, `capture`, `style`, `feedback`, `analysis`, `chat`, `overlay`, `imessage`, `app` |
 | `event` | string | Machine-readable snake_case identifier (e.g., `prewarm_failed`, `api_http_error`) |
 | `message` | string | Human-readable description (often `error.localizedDescription`) |
 | `context` | dict? | Optional key-value pairs — error codes, device names, state flags |
@@ -55,7 +55,7 @@ Any engine (MainActor)
 
 - **EventFileWriter** is an `actor` — serializes all file writes automatically (same pattern as `AppLogFileWriter` in `AppLogger.swift`)
 - **Fire-and-forget** — `capture()` never blocks the caller
-- **Engine state enrichment** — every event gets live state from `DraftAppState` (whisper loaded, auth mode, style examples)
+- **Engine state enrichment** — every event gets live state from `DraftAppState` (parakeet loaded, auth mode, style examples)
 
 ## Adding New Capture Points
 
@@ -65,7 +65,7 @@ Any engine (MainActor)
 ```swift
 EventReporter.shared.capture(
     level: .error,
-    engine: "whisper",
+    engine: "parakeet",
     event: "prewarm_failed",
     message: error.localizedDescription,
     context: ["audio_device": deviceName]
@@ -84,7 +84,7 @@ EventReporter.shared.capture(
 tail -100 ~/Library/Application\ Support/Draft/events.jsonl | grep '"level":"error"'
 
 # All events from a specific engine
-grep '"engine":"whisper"' ~/Library/Application\ Support/Draft/events.jsonl
+grep '"engine":"parakeet"' ~/Library/Application\ Support/Draft/events.jsonl
 
 # Pretty-print all events
 cat ~/Library/Application\ Support/Draft/events.jsonl | python3 -m json.tool --json-lines
@@ -109,11 +109,12 @@ Only `.error` level events are forwarded to Sentry. Warnings and info stay local
 | Engine | Event | Level | Trigger |
 |--------|-------|-------|---------|
 | `app` | `app_launched` | info | DraftAppState.initialize() completes |
-| `whisper` | `prewarm_failed` | error | Audio engine won't start |
-| `whisper` | `mic_not_authorized` | error | Microphone permission denied/revoked |
-| `whisper` | `model_not_loaded` | warning | Recording attempted without model |
-| `whisper` | `device_change_rewarm_failed` | error | Audio device switch fails |
-| `whisper` | `transcription_empty` | warning | Whisper returns no text |
+| `parakeet` | `prewarm_failed` | error | Audio engine won't start |
+| `parakeet` | `mic_not_authorized` | error | Microphone permission denied/revoked |
+| `parakeet` | `model_not_ready` | warning | Recording attempted before model loaded |
+| `parakeet` | `models_loaded` | info | Parakeet ASR models initialized |
+| `parakeet` | `model_init_failed` | error | CoreML model initialization failed |
+| `parakeet` | `transcription_empty` | warning | Parakeet returns no text |
 | `speech` | `audio_engine_start_failed` | error | AVAudioEngine.start() throws |
 | `speech` | `recognizer_unavailable` | error | SFSpeechRecognizer not available |
 | `speech` | `recognition_error` | warning | Recognition task error callback |

@@ -1,5 +1,5 @@
 // AudioResampler.swift
-// Resamples Float32 mono audio from native sample rate to 16kHz for Whisper.
+// Resamples Float32 mono audio from native sample rate to 16kHz for Parakeet.
 // Pure Swift — linear interpolation, no dependencies.
 
 import Foundation

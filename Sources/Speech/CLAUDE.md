@@ -1,16 +1,14 @@
-# Speech — Dual STT Engines (Parakeet default, Whisper fallback)
+# Speech — Parakeet STT Engine
 
 ## What This Does
 
-Audio recording and transcription via two engines. **ParakeetEngine** (CoreML, 4-8x faster) is the default. **WhisperEngine** (whisper.cpp) serves as the fallback when Parakeet models aren't available or still loading. `STTRouter` routes all calls to the active engine and falls back to Whisper automatically.
+Audio recording and transcription via **ParakeetEngine** — a CoreML-based STT engine using FluidAudio's Parakeet TDT V3 (~0.2s latency). `STTRouter` wraps ParakeetEngine with Combine property forwarding for SwiftUI binding.
 
 ## Key Files
 
-- `WhisperEngine.swift` (~500 lines) — `@MainActor ObservableObject`: audio recording, NSLock-batched sample collection, live Apple Speech display, Whisper batch inference on serial DispatchQueue, audio level metering
-- `ParakeetEngine.swift` (~490 lines) — CoreML-based alternative STT engine using FluidAudio's Parakeet TDT V3 (4-8x faster than Whisper)
-- `STTRouter.swift` (~190 lines) — Dual-engine router with Combine property forwarding, defaults to Parakeet with automatic Whisper fallback
-- `ModelManager.swift` — Whisper model path resolution
-- `AudioResampler.swift` — Sample rate conversion utility
+- `ParakeetEngine.swift` (~490 lines) — `@MainActor ObservableObject`: AVAudioEngine tap, NSLock-batched sample collection, live Apple Speech display, CoreML batch inference via FluidAudio AsrManager, audio level metering
+- `STTRouter.swift` (~50 lines) — Thin wrapper forwarding `@Published` properties from ParakeetEngine via Combine
+- `AudioResampler.swift` — Sample rate conversion (native → 16kHz for Parakeet)
 
 ## Architecture
 
@@ -20,9 +18,10 @@ Audio Input (AVAudioEngine tap, mono at native sample rate)
     ├─→ Consumer 1: Apple Speech (live display only — SFSpeechAudioBufferRecognitionRequest)
     │   └─→ liveTranscript — shown in overlay during recording
     │
-    ├─→ Consumer 2: Whisper sample buffer (NSLock-protected pendingSamples)
+    ├─→ Consumer 2: Parakeet sample buffer (NSLock-protected pendingSamples)
     │   └─→ Flushed into sampleBuffer on stopRecording() or transcribe()
-    │   └─→ Batch inference via whisper_full() on serial inferenceQueue
+    │   └─→ Resampled to 16kHz via AudioResampler
+    │   └─→ Batch inference via AsrManager.transcribe()
     │   └─→ Returns final transcript text
     │
     └─→ Consumer 3: Audio level metering (~20Hz throttled)
@@ -33,33 +32,11 @@ Audio Input (AVAudioEngine tap, mono at native sample rate)
 
 ### NSLock for Audio Thread → MainActor Transfer
 
-The audio render callback runs on a real-time thread with ~10ms deadlines. Originally, each callback created a `Task { @MainActor }` to append samples (~47 Tasks/second). This was replaced with an NSLock-protected intermediate buffer:
+The audio render callback runs on a real-time thread with ~10ms deadlines. NSLock provides deterministic ~1μs overhead for the shared sample buffer between the audio thread and MainActor. Swift 6 warns about NSLock in async context — this is a false positive since the lock protects a buffer between threads, not between two async contexts.
 
-```swift
-// Audio callback (real-time thread):
-self.pendingSamplesLock.lock()
-self.pendingSamples.append(contentsOf: samples)
-self.pendingSamplesLock.unlock()
+### Model Initialization
 
-// MainActor (stopRecording/transcribe):
-pendingSamplesLock.lock()
-sampleBuffer.append(contentsOf: pendingSamples)
-pendingSamples.removeAll(keepingCapacity: true)
-pendingSamplesLock.unlock()
-```
-
-**Why NSLock over actors:** Actor isolation involves scheduling on an executor with unpredictable latency. NSLock's `lock()`/`unlock()` is a single syscall with deterministic ~1μs overhead. Swift 6 warns about NSLock in async context — this is a false positive here since the lock protects a buffer between the audio thread and MainActor, not between two async contexts.
-
-### Serial Inference Queue
-
-`whisper_context` is NOT safe for concurrent `whisper_full()` calls — the Metal backend shares command buffers internally. A private serial `DispatchQueue` (`com.draft.whisper-inference`) prevents the `ggml_abort` crash that occurs with concurrent access.
-
-### State Transition Guards
-
-- `loadModel()`: refuses if `isRecording` or `isTranscribing` (unloading during Metal inference = use-after-free)
-- `unloadModel()`: same guard — model can't be freed while inference queue uses it
-- `startRecording()`: requires `isModelLoaded` (prevents recording without a model) AND `AVCaptureDevice.authorizationStatus(for: .audio) == .authorized` (prevents ObjC exception if mic permission revoked at runtime)
-- `transcribe()`: guards against `isTranscribing` to prevent concurrent inference
+`ParakeetEngine.initialize()` loads CoreML models either from the app bundle (`Contents/Resources/parakeet-models/`) or via HuggingFace download (~600MB). The `modelDownloadState` published property drives a progress bar in settings. Model loading is async and non-blocking — the app starts immediately.
 
 ### Audio Engine Pre-warming
 
@@ -73,34 +50,13 @@ Observes `.AVAudioEngineConfigurationChange` notification to detect when audio d
 
 ```swift
 deinit {
-    NotificationCenter.default.removeObserver(configChangeObserver)
     audioEngine.inputNode.removeTap(onBus: 0)   // Release mic (green dot goes away)
     audioEngine.stop()
-    whisper_free(whisperContext)                   // Free model memory
+    asrManager?.cleanup()
 }
 ```
 
 Without the audio engine cleanup, the microphone green dot persists after the engine deallocates.
-
-## Public Interface
-
-```swift
-@Published var isRecording: Bool
-@Published var isTranscribing: Bool
-@Published var audioLevel: Float          // 0.0–1.0 RMS for waveform
-@Published var liveTranscript: String     // Apple Speech display-only text
-
-var isModelLoaded: Bool
-var inputDeviceName: String               // Current mic name for logging
-
-func loadModel(path: String) -> Bool      // Load GGML model (guarded)
-func unloadModel()                        // Free model (guarded)
-func prewarm()                            // Pre-initialize audio engine
-func startRecording()                     // Start mic tap + Apple Speech + sample collection
-func stopRecording()                      // Stop tap, flush pending samples
-func cancel()                             // Stop without transcribing
-func transcribe() async -> String?        // Batch Whisper inference (serial queue)
-```
 
 ## Critical Gotchas
 
@@ -110,7 +66,7 @@ Pro audio interfaces like BEACN Mic (96kHz/4ch) cause Apple Speech error 1110. F
 
 ### 2. Apple Speech Live Transcript Resets
 
-Apple Speech silently resets `bestTranscription.formattedString` mid-session. The live transcript tracks `committedLiveText` and detects resets to avoid losing display text. This is display-only — Whisper owns the final transcript.
+Apple Speech silently resets `bestTranscription.formattedString` mid-session. The live transcript tracks `committedLiveText` and detects resets to avoid losing display text. This is display-only — Parakeet owns the final transcript.
 
 ### 3. Microphone Permission Can Be Revoked at Runtime
 
@@ -118,15 +74,13 @@ Apple Speech silently resets `bestTranscription.formattedString` mid-session. Th
 
 ## Verification
 
-After modifying WhisperEngine, verify with these checks:
+After modifying ParakeetEngine, verify with these checks:
 
 - **Basic recording:** ⌥D → speak → ⌥D → draft appears with correct transcription
-- **Long recording:** Record 60+ seconds → Apple Speech live text chains tasks seamlessly, Whisper batch transcription returns full text
-- **Model load/unload:** Check `WHISPER | model loaded` in debug log on launch
-- **State guards:** Try calling `unloadModel()` while recording → should log warning and refuse
+- **Long recording:** Record 60+ seconds → Apple Speech live text chains tasks seamlessly, Parakeet batch transcription returns full text
+- **Model load:** Check `PARAKEET | models loaded` in debug log on launch
 - **Mic permission:** Revoke mic permission in System Settings → press hotkey → should log warning, not crash
 - **Audio device change:** Plug/unplug USB mic during idle → should log device change and re-warm
-- **Memory:** Record for 60+ seconds → check Activity Monitor for no memory growth from Task creation (batched samples eliminate ~47 Tasks/sec)
 - **Quit cleanup:** Quit app during recording → green mic dot should disappear immediately
-- **Debug log:** `tail -f ~/draft-debug.log | grep WHISPER` shows all whisper events
+- **Debug log:** `tail -f ~/draft-debug.log | grep PARAKEET` shows all parakeet events
 - **Build:** `bash build.sh` — pre-existing warnings only (NSLock in async context is intentional)
