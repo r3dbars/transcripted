@@ -12,18 +12,7 @@ rm -rf "$BUILD_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
-# Bundle Whisper model
-MODEL_SRC="$HOME/Library/Application Support/Draft/models/ggml-large-v3-turbo-q5_0.bin"
-if [ -f "$MODEL_SRC" ]; then
-    echo "Bundling Whisper model..."
-    mkdir -p "$APP_BUNDLE/Contents/Resources/models"
-    cp "$MODEL_SRC" "$APP_BUNDLE/Contents/Resources/models/"
-else
-    echo "⚠️  Whisper model not found at $MODEL_SRC"
-    echo "   Run build-whisper.sh first to download the model."
-fi
-
-# Bundle Parakeet CoreML models (if downloaded)
+# Bundle Parakeet CoreML models
 PARAKEET_SRC="$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml"
 if [ -d "$PARAKEET_SRC/Encoder.mlmodelc" ]; then
     echo "Bundling Parakeet models..."
@@ -54,15 +43,15 @@ cat > "$BUILD_DIR/Draft.entitlements" << 'EOF'
 </plist>
 EOF
 
-# FluidAudio (optional — Parakeet STT engine)
+# FluidAudio (required — Parakeet STT engine)
 # Run build-fluidaudio.sh first to build these artifacts
-FLUID_FLAGS=""
-if [ -f "fluidaudio-libs/libFluidAudioAll.a" ] && [ -d "fluidaudio-modules/FluidAudio.swiftmodule" ]; then
-    echo "FluidAudio found — enabling Parakeet engine"
-    FLUID_FLAGS="-DPARAKEET_AVAILABLE -Ifluidaudio-modules -Ifluidaudio-modules/FastClusterWrapper -Ifluidaudio-modules/MachTaskSelfWrapper -Ifluidaudio-modules/yyjson -Lfluidaudio-libs -lFluidAudioAll -framework CoreML -framework CoreAudio"
-else
-    echo "FluidAudio not found — Whisper only (run build-fluidaudio.sh to enable Parakeet)"
+if [ ! -f "fluidaudio-libs/libFluidAudioAll.a" ] || [ ! -d "fluidaudio-modules/FluidAudio.swiftmodule" ]; then
+    echo "❌ FluidAudio not found — required for Parakeet STT engine"
+    echo "   Run build-fluidaudio.sh first to build FluidAudio."
+    exit 1
 fi
+echo "FluidAudio found"
+FLUID_FLAGS="-Ifluidaudio-modules -Ifluidaudio-modules/FastClusterWrapper -Ifluidaudio-modules/MachTaskSelfWrapper -Ifluidaudio-modules/yyjson -Lfluidaudio-libs -lFluidAudioAll -framework CoreML -framework CoreAudio"
 
 # Compile
 echo "Compiling..."
@@ -81,10 +70,6 @@ swiftc \
     -framework Accelerate \
     -lsqlite3 \
     -lc++ \
-    -Iinclude \
-    -Llibs \
-    -lwhisper -lggml-base -lggml-cpu -lggml-metal -lggml-blas -lggml \
-    -import-objc-header Sources/Speech/WhisperBridge.h \
     $FLUID_FLAGS \
     $(find Sources -name '*.swift') \
     -parse-as-library \

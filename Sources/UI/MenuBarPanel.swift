@@ -8,7 +8,6 @@ struct MenuBarPanelView: View {
 
     @State private var showSettings = false
     @State private var settingsName = UserDefaults.standard.string(forKey: "user-display-name") ?? ""
-    @State private var sttEngine: STTEngineChoice = STTEngineChoice(rawValue: UserDefaults.standard.string(forKey: "stt-engine") ?? "parakeet") ?? .parakeet
 
     var body: some View {
         ZStack {
@@ -76,20 +75,10 @@ struct MenuBarPanelView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                Picker("", selection: $sttEngine) {
-                    Text("Whisper").tag(STTEngineChoice.whisper)
-                    if appState.sttRouter.isParakeetAvailable {
-                        Text("Parakeet (CoreML)").tag(STTEngineChoice.parakeet)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 220)
-                .onChange(of: sttEngine) {
-                    appState.sttRouter.switchEngine(to: sttEngine)
-                    appState.logger.log("🔄 STT | switched to \(sttEngine.rawValue)")
-                }
+                Text("Parakeet (CoreML)")
+                    .font(.body)
+                    .frame(width: 220, alignment: .leading)
 
-                #if PARAKEET_AVAILABLE
                 if case .downloading(let progress) = appState.sttRouter.parakeetEngine.modelDownloadState {
                     ProgressView(value: progress)
                         .frame(width: 220)
@@ -102,11 +91,8 @@ struct MenuBarPanelView: View {
                         .font(.caption2)
                         .foregroundColor(.red)
                 }
-                #endif
 
-                Text(sttEngine == .whisper
-                    ? "whisper.cpp — local, ~3s latency"
-                    : "CoreML Parakeet — local, ~0.2s latency")
+                Text("CoreML Parakeet — local, ~0.2s latency")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }

@@ -51,7 +51,7 @@ class DraftSessionController: ObservableObject {
         overlayController.showPanel(near: sourceApp)
         appState.sttRouter.startRecording()
 
-        appState.logger.log("SESSION | started (\(appState.sttRouter.activeChoice.rawValue), \(appState.sttRouter.inputDeviceName)), voice recording + vision in parallel")
+        appState.logger.log("SESSION | started (parakeet, \(appState.sttRouter.inputDeviceName)), voice recording + vision in parallel")
 
         // Start vision processing in parallel (stored so we can await it before drafting)
         visionTask?.cancel()
@@ -193,10 +193,10 @@ class DraftSessionController: ObservableObject {
         overlayController.showPanel(near: sourceApp)
 
         appState.sttRouter.startRecording()
-        appState.logger.log("DICTATION | started (\(appState.sttRouter.activeChoice.rawValue), \(appState.sttRouter.inputDeviceName))")
+        appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
     }
 
-    /// Stop dictation and paste — Whisper batch transcription
+    /// Stop dictation and paste — Parakeet batch transcription
     func stopDictationAndPaste() {
         guard let appState = appState, let overlayController = overlayController else { return }
         guard isDictating, overlayController.state == .listening else { return }

@@ -1,11 +1,7 @@
 // ParakeetEngine.swift
 // FluidAudio-based STT engine — CoreML Parakeet TDT V3 for fast, accurate transcription.
-// Mirrors WhisperEngine's interface: AVAudioEngine tap → NSLock-batched samples → resampled to 16kHz
-// → AsrManager.transcribe() for batch inference. Live Apple Speech provides display-only streaming text.
-//
-// Entire file guarded by PARAKEET_AVAILABLE — compiles to nothing when FluidAudio isn't linked.
-
-#if PARAKEET_AVAILABLE
+// AVAudioEngine tap → NSLock-batched samples → resampled to 16kHz → AsrManager.transcribe()
+// for batch inference. Live Apple Speech provides display-only streaming text.
 
 import AVFoundation
 import Combine
@@ -410,7 +406,7 @@ class ParakeetEngine: ObservableObject {
 
         let startTime = CFAbsoluteTimeGetCurrent()
 
-        // Resample to 16kHz (same resampler as WhisperEngine)
+        // Resample to 16kHz for Parakeet inference
         let resampled = AudioResampler.resample(samples, from: inputRate, to: 16000)
         print("🔄 PARAKEET | resampled \(samples.count) → \(resampled.count) samples")
 
@@ -487,5 +483,3 @@ class ParakeetEngine: ObservableObject {
         asrManager?.cleanup()
     }
 }
-
-#endif

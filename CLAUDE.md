@@ -10,7 +10,7 @@ A macOS utility that captures rough spoken (or typed) thoughts and uses Claude H
 Sources/
 ├── DraftApp.swift           ← @main entry point only
 ├── DraftAppState.swift      ← Centralized engine ownership (lives in AppDelegate, survives window cycles)
-├── Speech/                  ← WhisperEngine (batch transcription) + ParakeetEngine (CoreML alt) + STTRouter
+├── Speech/                  ← ParakeetEngine (CoreML STT) + STTRouter
 ├── API/                     ← Anthropic API client (text + vision + streaming) + AuthCredential + Keychain
 ├── Draft/                   ← DraftEngine + PlatformFormatter — orchestrates drafting (v1 interface)
 ├── Style/                   ← StyleEngine — learns user's writing voice + onboarding
@@ -71,7 +71,7 @@ If the user describes the problem area (e.g., "voice didn't work", "draft was we
 
 | User says | Engine to check |
 |-----------|----------------|
-| "Voice/mic didn't work" | `whisper`, `speech` |
+| "Voice/mic didn't work" | `parakeet`, `speech` |
 | "Draft was bad/empty/refused" | `overlay`, `draft` |
 | "Nothing happened on hotkey" | `capture`, `overlay` |
 | "API error / auth issue" | `anthropic`, `draft` |
@@ -80,7 +80,7 @@ If the user describes the problem area (e.g., "voice didn't work", "draft was we
 | "Screen capture failed" | `capture` |
 
 ```bash
-grep '"engine":"whisper"' ~/Library/Application\ Support/Draft/events.jsonl | tail -20
+grep '"engine":"parakeet"' ~/Library/Application\ Support/Draft/events.jsonl | tail -20
 ```
 
 ### Step 3: Check the debug log for timeline
@@ -88,7 +88,7 @@ grep '"engine":"whisper"' ~/Library/Application\ Support/Draft/events.jsonl | ta
 `events.jsonl` gives structured data; the debug log gives the full narrative:
 
 ```bash
-tail -200 ~/draft-debug.log | grep -E "SESSION|WHISPER|VISION|STYLE|DICTATION"
+tail -200 ~/draft-debug.log | grep -E "SESSION|PARAKEET|VISION|STYLE|DICTATION"
 ```
 
 ### Step 4: Cross-reference and diagnose
@@ -245,8 +245,7 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - **Task cancellation before replacement** — Always `task?.cancel()` before `task = Task { ... }`. Orphaned tasks keep running and writing to shared state.
 - **Global Escape monitor** — `NSEvent.addGlobalMonitorForEvents` intercepts Escape during non-key panel states (listening/drafting). Installed when overlay shows, removed on hide. The panel can't receive keyboard events when `allowKeyStatus = false`, so SwiftUI `.onKeyPress` won't fire — the global monitor bridges that gap.
 - **NSLock for audio thread ↔ MainActor** — Audio render thread has strict ~10ms deadlines; actor isolation has unpredictable scheduling latency. NSLock provides deterministic ~1μs overhead for the shared sample buffer.
-- **Serial dispatch queue for whisper inference** — `whisper_context` is NOT safe for concurrent `whisper_full()` calls (Metal backend shares command buffers). A serial `DispatchQueue` prevents the ggml_abort crash.
-- **All engines have deinits** — `ContextCaptureEngine` (Carbon hotkeys), `AnalysisEngine` (DispatchSource + debounce task), `WhisperEngine` (audio engine stop + model free). Missing deinits leak OS-level resources.
+- **All engines have deinits** — `ContextCaptureEngine` (Carbon hotkeys), `AnalysisEngine` (DispatchSource + debounce task), `ParakeetEngine` (audio engine stop + AsrManager cleanup). Missing deinits leak OS-level resources.
 
 ## Project-Wide Learnings
 
@@ -256,7 +255,6 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 
 - **Apple Speech buffer resets are undocumented** — → See `Sources/Speech/CLAUDE.md` § "Critical Gotchas"
 - **Pro audio interfaces break SFSpeechRecognizer** — USB interfaces like BEACN Mic (96kHz/4ch) cause error 1110. Fix: force mono tap format. → See `Sources/Speech/CLAUDE.md` § "Critical Gotchas"
-- **Whisper model load/unload must guard recording state** — Unloading during Metal inference causes use-after-free. → See `Sources/Speech/CLAUDE.md` § "State Transition Guards"
 - **Microphone permission can be revoked at runtime** — Check `AVCaptureDevice.authorizationStatus` before `installTap()`. → See `Sources/Speech/CLAUDE.md` § "Critical Gotchas"
 
 ### SwiftUI & AppKit
@@ -300,7 +298,7 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 
 - `SwiftUI` — UI
 - `AVFoundation` — Audio engine / microphone
-- `Speech` — Apple Speech recognition (used by WhisperEngine/ParakeetEngine for live display)
+- `Speech` — Apple Speech recognition (used by ParakeetEngine for live display)
 - `Security` — Keychain access
 - `AppKit` — macOS-specific (NSPasteboard, NSWorkspace, NSRunningApplication, NSPanel)
 - `Carbon` — Global hotkey registration (RegisterEventHotKey)
