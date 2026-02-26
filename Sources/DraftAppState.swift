@@ -5,7 +5,6 @@ import SwiftUI
 
 @MainActor
 class DraftAppState: ObservableObject {
-    let speech = SpeechEngine()
     let drafter = DraftEngine()
     let styleEngine = StyleEngine()
     let promptStore = PromptStore()
@@ -24,7 +23,6 @@ class DraftAppState: ObservableObject {
     func initialize() async {
         guard !isInitialized else { return }
         isInitialized = true
-        _ = await speech.requestPermissions()
         drafter.checkCredential()
         drafter.styleEngine = styleEngine
         drafter.promptStore = promptStore
