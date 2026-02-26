@@ -8,7 +8,7 @@ struct MenuBarPanelView: View {
 
     @State private var showSettings = false
     @State private var settingsName = UserDefaults.standard.string(forKey: "user-display-name") ?? ""
-    @State private var sttEngine: STTEngineChoice = STTEngineChoice(rawValue: UserDefaults.standard.string(forKey: "stt-engine") ?? "whisper") ?? .whisper
+    @State private var sttEngine: STTEngineChoice = STTEngineChoice(rawValue: UserDefaults.standard.string(forKey: "stt-engine") ?? "parakeet") ?? .parakeet
 
     var body: some View {
         ZStack {
