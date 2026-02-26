@@ -64,8 +64,8 @@ class STTRouter: ObservableObject {
     }
 
     init() {
-        let saved = UserDefaults.standard.string(forKey: "stt-engine") ?? "whisper"
-        let choice = STTEngineChoice(rawValue: saved) ?? .whisper
+        let saved = UserDefaults.standard.string(forKey: "stt-engine") ?? "parakeet"
+        let choice = STTEngineChoice(rawValue: saved) ?? .parakeet
 
         // If Parakeet was selected but isn't available in this build, fall back to Whisper
         #if !PARAKEET_AVAILABLE

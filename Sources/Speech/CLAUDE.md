@@ -1,14 +1,14 @@
-# Speech — WhisperEngine (Primary STT Engine)
+# Speech — Dual STT Engines (Parakeet default, Whisper fallback)
 
 ## What This Does
 
-Audio recording and transcription. **WhisperEngine** is the sole transcription engine — it records audio, provides live streaming text via Apple Speech (display-only), and batch-transcribes via whisper.cpp (large-v3-turbo) for the final transcript.
+Audio recording and transcription via two engines. **ParakeetEngine** (CoreML, 4-8x faster) is the default. **WhisperEngine** (whisper.cpp) serves as the fallback when Parakeet models aren't available or still loading. `STTRouter` routes all calls to the active engine and falls back to Whisper automatically.
 
 ## Key Files
 
 - `WhisperEngine.swift` (~500 lines) — `@MainActor ObservableObject`: audio recording, NSLock-batched sample collection, live Apple Speech display, Whisper batch inference on serial DispatchQueue, audio level metering
 - `ParakeetEngine.swift` (~490 lines) — CoreML-based alternative STT engine using FluidAudio's Parakeet TDT V3 (4-8x faster than Whisper)
-- `STTRouter.swift` (~190 lines) — Dual-engine router with Combine property forwarding, automatic Whisper fallback
+- `STTRouter.swift` (~190 lines) — Dual-engine router with Combine property forwarding, defaults to Parakeet with automatic Whisper fallback
 - `ModelManager.swift` — Whisper model path resolution
 - `AudioResampler.swift` — Sample rate conversion utility
 
