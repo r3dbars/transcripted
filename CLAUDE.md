@@ -10,7 +10,7 @@ A macOS utility that captures rough spoken (or typed) thoughts and uses Claude H
 Sources/
 ├── DraftApp.swift           ← @main entry point only
 ├── DraftAppState.swift      ← Centralized engine ownership (lives in AppDelegate, survives window cycles)
-├── Speech/                  ← WhisperEngine (batch transcription) + SpeechEngine (legacy Apple Speech)
+├── Speech/                  ← WhisperEngine (batch transcription) + ParakeetEngine (CoreML alt) + STTRouter
 ├── API/                     ← Anthropic API client (text + vision + streaming) + AuthCredential + Keychain
 ├── Draft/                   ← DraftEngine + PlatformFormatter — orchestrates drafting (v1 interface)
 ├── Style/                   ← StyleEngine — learns user's writing voice + onboarding
@@ -20,7 +20,7 @@ Sources/
 ├── Capture/                 ← Screen capture, context extraction, hotkey registration, three-way routing
 ├── Analysis/                ← AnalysisEngine — native Swift feedback analyzer (replaces Python agent)
 ├── Observability/           ← EventReporter — centralized error/warning/info tracking (events.jsonl)
-└── UI/                      ← FloatingOverlay (primary UI), MenuBarPanel, onboarding, Agent tab
+└── UI/                      ← Floating overlay (6 files), MenuBarPanel, onboarding, Agent tab
 agent/                       ← ⚠️ DEPRECATED — Python orchestrator replaced by Sources/Analysis/
 ```
 
@@ -138,7 +138,7 @@ After identifying the error, either:
        │
        ├─→ Show floating overlay (listening state, waveform animation)
        │
-       ├─→ [PARALLEL A] Start voice recording (SpeechEngine.startListening())
+       ├─→ [PARALLEL A] Start voice recording (STTRouter.startRecording())
        │                 └─→ User speaks instructions while vision processes
        │                 └─→ Live transcription shown in overlay
        │
@@ -191,14 +191,14 @@ If vision times out (> 8s) or fails, the fallback prompt asks Claude to "clean u
 ### To add new metadata to training pairs:
 
 1. **`Sources/Style/StyleEngine.swift`** — Add the field to the `exampleBlock` string in `recordExample()`, update `extractRecentEditDistances()` if it's a parseable metric
-2. **`Sources/UI/FloatingOverlay.swift`** — Pass the new data into `recordExample()` from `confirmAndInject()` in `DraftSessionController`
+2. **`Sources/UI/DraftSessionController.swift`** — Pass the new data into `recordExample()` from `confirmAndInject()`
 3. **`Sources/Style/StyleEngine.swift`** — Update `buildRefinementPrompt()` to tell Sonnet about the new field
 4. **`Sources/Style/CLAUDE.md`** — Update the file format example
 
 ### To change the refinement logic:
 
 1. **`Sources/Style/StyleEngine.swift`** — Modify `shouldRefineNow()` for frequency, `extractRecentExamplesText(last:)` for window size, `buildRefinementPrompt()` for what Sonnet sees
-2. **`Sources/UI/FloatingOverlay.swift`** — The call site in `DraftSessionController.confirmAndInject()` calls `shouldRefineNow()` — usually no changes needed here
+2. **`Sources/UI/DraftSessionController.swift`** — The call site in `confirmAndInject()` calls `shouldRefineNow()` — usually no changes needed here
 
 ### To modify the vision extraction prompt:
 
@@ -209,9 +209,11 @@ If vision times out (> 8s) or fails, the fallback prompt asks Claude to "clean u
 
 ### To modify the overlay UI:
 
-1. **`Sources/UI/FloatingOverlay.swift`** — All overlay views, state machine, session controller, and panel management
-2. **`Sources/UI/CLAUDE.md`** — Document any new states, views, or behaviors
-3. **Test** — Full flow: ⌥Space → speak → ⌥Space → stream → Enter → paste. Verify auto-focus, Enter/Escape, and cancel behavior.
+1. **`Sources/UI/OverlayContentView.swift`** — SwiftUI views for all 5 overlay states
+2. **`Sources/UI/FloatingOverlayController.swift`** — State machine, animations, panel lifecycle
+3. **`Sources/UI/DraftSessionController.swift`** — Session orchestration (draft + dictation flows)
+4. **`Sources/UI/CLAUDE.md`** — Document any new states, views, or behaviors
+5. **Test** — Full flow: ⌥D → speak → ⌥D → stream → Enter → paste. Verify auto-focus, Enter/Escape, and cancel behavior.
 
 ## Git & GitHub
 
@@ -248,35 +250,57 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 
 ## Project-Wide Learnings
 
-1. **Apple Speech buffer resets are undocumented** — see `Sources/Speech/CLAUDE.md`
-2. **No official Anthropic Swift SDK** — raw URLSession with Codable + JSONSerialization for vision
-3. **`swiftc` multi-file compilation** — `$(find Sources -name '*.swift')` in build.sh
-4. **Global hotkey timing is critical** — screenshot AND frontmost app reference must be captured synchronously in the C callback before any `Task { @MainActor }` dispatch, or window focus shifts and you capture Draft instead of the target app
-5. **Claude subscription auth requires the `oauth-2025-04-20` beta header** — without `anthropic-beta: oauth-2025-04-20`, the API rejects OAuth tokens (`sk-ant-oat...`) from non-Claude-Code apps with a 401. This header is set automatically by `AuthCredential.apply(to:)`. Users generate tokens via `claude setup-token` (Claude Code CLI). Tokens expire and must be regenerated. Future: full PKCE OAuth flow (like OpenClaw's macOS app) would let users log in directly without the CLI.
-6. **Auth is abstracted behind `AuthCredential`** — never pass raw `apiKey: String` around. Use `AuthCredential.load()` and `auth.apply(to: &request)`. Switching modes clears the other credential from Keychain.
-7. **SwiftUI `.onKeyPress` needs the `keys:phases:` variant** — the single-key form `onKeyPress(.return)` doesn't expose modifiers, so you can't distinguish Enter from Shift+Enter. Use `onKeyPress(keys: [.return], phases: .down)` which passes the full `KeyPress` object
-8. **SwiftUI type-checker has limits** — complex `body` with inline closures can exceed Swift's type-check timeout. Fix: extract views into separate `@ViewBuilder` computed properties
-9. **Haiku confuses message content with metadata** — the vision prompt must explicitly say "look at the conversation HEADER/TITLE BAR for the contact name, NOT names mentioned inside messages"
-10. **Pro audio interfaces break SFSpeechRecognizer** — USB interfaces like BEACN Mic (96kHz/4ch) cause error 1110 "no speech detected." Fix: force mono tap format (`AVAudioFormat(standardFormatWithSampleRate: nativeRate, channels: 1)`) — AVAudioEngine handles the channel mixdown automatically
-11. **iMessage `text` stores U+FFFC for attachment-only messages** — 558 out of 625 messages can be this invisible placeholder character. Filter by `trimmed.count < 2`, not word count
-12. **Prompts are externalized to JSON** — `PromptStore` reads `prompts.json` on launch and provides prompts to all engines. `DefaultPrompts` enum holds the hardcoded source-of-truth defaults (used on first run or if file is corrupt). Each engine holds an optional `promptStore` reference with fallback to `DefaultPrompts`. The `{STYLE_SUMMARY}`, `{USER_NAME}`, and `{APP_NAME}` placeholders in prompt templates are replaced at runtime by PromptStore methods.
-13. **AnthropicAPI is a thin HTTP client** — model and prompts are passed by callers, not hardcoded in the API layer. `AnthropicAPI.draft(model:systemPrompt:)`, `streamDraft()`, and `extractStructuredContext(model:systemPrompt:)` require explicit parameters. Only `sonnetModel` remains as a constant (used by StyleEngine and AnalysisEngine for refinement/analysis).
-14. **Vision race condition requires explicit await** — Vision processing runs as a parallel Task; `stopSessionAndDraft()` must `await visionTask?.value` before reading `lastCapturedContext`. Without this, fast speakers get no context. Vision timeout is 8 seconds (4s was too aggressive — typical calls take 2-6s).
-15. **`@FocusState` only works in View structs** — cannot be added to `ObservableObject` classes. Must bind with `.focused($isReviewFocused)` on the TextEditor and set `true` in `.onAppear` with a 50ms delay (lets the panel finish becoming key first).
-16. **Non-activating panels need dynamic key status** — `FloatingOverlayPanel.canBecomeKey` returns a mutable `allowKeyStatus` flag. During listening/drafting it's `false` (keyboard stays with target app), during review it's `true` (TextEditor needs input). Without this, either keyboard input or paste-back breaks.
-17. **Clipboard safety on inject** — `pasteWithClipboardRestore()` saves the user's clipboard, sets the draft text, simulates ⌘V, then restores after 500ms. The non-activating panel means the target app stays frontmost — no activation polling needed.
-18. **Global event monitors are observe-only** — `NSEvent.addGlobalMonitorForEvents` can see but not consume events destined for other apps. Escape also reaches the frontmost app, but that's benign (Escape in a text field is harmless). For events that need to be consumed, use Carbon `RegisterEventHotKey` instead.
-19. **CoreFoundation `as?` casts always succeed** — Conditional downcasts to CF bridged types (`AXUIElement`, `AXValue`) always succeed at the compiler level. The compiler rejects `as?` with an error. Use `as!` for CF types — it's compiler-guaranteed safe.
-20. **DraftAppState.initialize() is idempotent** — Protected by an `isInitialized` flag. Safe to call multiple times (SwiftUI lifecycle can trigger re-initialization). Without the guard, observers stack, analysis engine double-starts, and hotkeys double-register.
-21. **Whisper model load/unload must guard recording state** — `loadModel()` and `unloadModel()` refuse to run while `isRecording` or `isTranscribing`. Unloading during Metal inference causes use-after-free. `startRecording()` requires `isModelLoaded` — prevents recording without a model.
-22. **Microphone permission can be revoked at runtime** — Check `AVCaptureDevice.authorizationStatus(for: .audio)` before `installTap()`. Without the check, revoking mic permission while the app is open throws an unrecoverable ObjC exception on next hotkey press.
-23. **Hotkey labels in ContextCaptureEngine** — ⌥D = hotkey ID 1 (draft mode: screenshot + voice + AI), ⌥Space = hotkey ID 2 (dictation mode: voice only). Both use signature `0x44524654` ('DRFT').
+> Each Sources/ subfolder has its own CLAUDE.md with component-specific details. Items marked "→ See ..." are summarized here but documented in depth in the subfolder. Cross-cutting items that span multiple components are kept in full.
+
+### Audio & Speech
+
+- **Apple Speech buffer resets are undocumented** — → See `Sources/Speech/CLAUDE.md` § "Critical Gotchas"
+- **Pro audio interfaces break SFSpeechRecognizer** — USB interfaces like BEACN Mic (96kHz/4ch) cause error 1110. Fix: force mono tap format. → See `Sources/Speech/CLAUDE.md` § "Critical Gotchas"
+- **Whisper model load/unload must guard recording state** — Unloading during Metal inference causes use-after-free. → See `Sources/Speech/CLAUDE.md` § "State Transition Guards"
+- **Microphone permission can be revoked at runtime** — Check `AVCaptureDevice.authorizationStatus` before `installTap()`. → See `Sources/Speech/CLAUDE.md` § "Critical Gotchas"
+
+### SwiftUI & AppKit
+
+- **`.onKeyPress` needs the `keys:phases:` variant** — the single-key form `onKeyPress(.return)` doesn't expose modifiers, so you can't distinguish Enter from Shift+Enter. Use `onKeyPress(keys: [.return], phases: .down)` which passes the full `KeyPress` object
+- **SwiftUI type-checker has limits** — complex `body` with inline closures can exceed Swift's type-check timeout. Fix: extract views into separate `@ViewBuilder` computed properties
+- **`@FocusState` only works in View structs** — cannot be added to `ObservableObject` classes. Must bind with `.focused($isReviewFocused)` on the TextEditor and set `true` in `.onAppear` with a 50ms delay (lets the panel finish becoming key first)
+- **Non-activating panels need dynamic key status** — `FloatingOverlayPanel.canBecomeKey` returns a mutable `allowKeyStatus` flag. During listening/drafting it's `false`, during review it's `true`. Without this, either keyboard input or paste-back breaks
+- **CoreFoundation `as?` casts always succeed** — Conditional downcasts to CF bridged types (`AXUIElement`, `AXValue`) always succeed at the compiler level. Use `as!` for CF types — it's compiler-guaranteed safe
+- **Global event monitors are observe-only** — `NSEvent.addGlobalMonitorForEvents` can see but not consume events. For events that need to be consumed, use Carbon `RegisterEventHotKey` instead
+- **Clipboard safety on inject** — `pasteWithClipboardRestore()` saves the user's clipboard, sets the draft text, simulates ⌘V, then restores after 500ms. The non-activating panel means the target app stays frontmost
+
+### API & Auth
+
+- **No official Anthropic Swift SDK** — raw URLSession with Codable + JSONSerialization for vision. → See `Sources/API/CLAUDE.md`
+- **Claude subscription auth requires the `oauth-2025-04-20` beta header** — without it, the API rejects OAuth tokens (`sk-ant-oat...`) with a 401. Set automatically by `AuthCredential.apply(to:)`. Users generate tokens via `claude setup-token`. Tokens expire and must be regenerated
+- **Auth is abstracted behind `AuthCredential`** — never pass raw `apiKey: String` around. Use `AuthCredential.load()` and `auth.apply(to: &request)`. → See `Sources/API/CLAUDE.md`
+- **AnthropicAPI is a thin HTTP client** — model and prompts are passed by callers, not hardcoded. Only `sonnetModel` remains as a constant. → See `Sources/API/CLAUDE.md`
+
+### Vision & Context Capture
+
+- **Global hotkey timing is critical** — screenshot AND frontmost app reference must be captured synchronously in the C callback before any `Task { @MainActor }` dispatch, or window focus shifts and you capture Draft instead of the target app. → See `Sources/Capture/CLAUDE.md`
+- **Haiku confuses message content with metadata** — the vision prompt must explicitly say "look at the conversation HEADER/TITLE BAR for the contact name, NOT names mentioned inside messages"
+- **Vision race condition requires explicit await** — `stopSessionAndDraft()` must `await visionTask?.value` before reading `lastCapturedContext`. Vision timeout is 8 seconds (4s was too aggressive — typical calls take 2-6s)
+- **Hotkey labels in ContextCaptureEngine** — ⌥D = hotkey ID 1 (draft mode), ⌥Space = hotkey ID 2 (dictation mode). Both use signature `0x44524654` ('DRFT'). → See `Sources/Capture/CLAUDE.md`
+
+### Concurrency & Initialization
+
+- **DraftAppState.initialize() is idempotent** — Protected by an `isInitialized` flag. Without the guard, observers stack, analysis engine double-starts, and hotkeys double-register
+
+### Data & iMessage
+
+- **iMessage `text` stores U+FFFC for attachment-only messages** — Filter by `trimmed.count < 2`, not word count. → See `Sources/Messages/CLAUDE.md`
+- **Prompts are externalized to JSON** — `PromptStore` reads `prompts.json` on launch. `DefaultPrompts` enum holds hardcoded fallbacks. → See `Sources/Prompts/CLAUDE.md`
+
+### Build System
+
+- **`swiftc` multi-file compilation** — `$(find Sources -name '*.swift')` in build.sh. All files in the module see each other's `internal` types without imports
 
 ## Frameworks Linked
 
 - `SwiftUI` — UI
 - `AVFoundation` — Audio engine / microphone
-- `Speech` — Apple Speech recognition
+- `Speech` — Apple Speech recognition (used by WhisperEngine/ParakeetEngine for live display)
 - `Security` — Keychain access
 - `AppKit` — macOS-specific (NSPasteboard, NSWorkspace, NSRunningApplication, NSPanel)
 - `Carbon` — Global hotkey registration (RegisterEventHotKey)

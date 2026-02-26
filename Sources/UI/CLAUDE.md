@@ -6,14 +6,19 @@ SwiftUI views for the Draft app. The primary UI is a **floating overlay** (non-a
 
 ## Key Files
 
-- `FloatingOverlay.swift` (~1250 lines) — The core v2 UI: `FloatingOverlayPanel` (NSPanel), `FloatingOverlayController` (state machine + global Escape monitor), `OverlayContentView` (SwiftUI views for listening/streaming/review), `DraftSessionController` (full session orchestration)
+- `FloatingOverlayPanel.swift` (~35 lines) — NSPanel subclass (non-activating, dynamic key status)
+- `FloatingOverlayController.swift` (~335 lines) — State machine, animations, panel lifecycle, global Escape monitor
+- `OverlayContentView.swift` (~245 lines) — SwiftUI views for all 5 overlay states (idle/listening/drafting/streaming/review)
+- `DraftSessionController.swift` (~430 lines) — Session orchestration for draft mode (⌥D) and dictation mode (⌥Space)
+- `OverlayTokens.swift` (~20 lines) — Design tokens: colors (panelBg, accentGreen, text colors) and layout constants (panel width/height, corner radius, padding)
+- `PanelDragView.swift` (~23 lines) — AppKit drag helper (mouseDown → performDrag)
 - `MenuBarPanel.swift` (98 lines) — Menubar popover with TabView (Style + Agent), onboarding gates, settings gear
 - `StyleProfileView.swift` (49 lines) — Extracted style tab showing style.md contents
 - `AgentTab.swift` (423 lines) — Agent insight cards (Apply/Skip) + streaming chat interface
 - `StyleOnboardingView.swift` (664 lines) — 5-step onboarding: intro → source choice → (iMessage/paste) → result
 - `APIKeyEntryView.swift` (231 lines) — Auth setup overlay: name + API key or subscription token
 - `InsightCard.swift` (71 lines) — Model for insight cards + shared `toolDefinition` and `from()` factory (used by both StreamingChatEngine and AnalysisEngine)
-- `AudioWaveformView.swift` (27 lines) — Animated waveform bars driven by `SpeechEngine.audioLevel`
+- `AudioWaveformView.swift` (27 lines) — Animated waveform bars driven by `STTRouter.audioLevel`
 - `ChatMessage.swift` (32 lines) — Model for chat messages in AgentTab
 - `AppLogger.swift` (92 lines) — Debug logger writing to `~/draft-debug.log` with timestamps
 - `PreviousAppTracker.swift` (25 lines) — Tracks last non-Draft app for paste-back fallback
@@ -77,7 +82,7 @@ When the review view appears, `@FocusState` automatically transfers keyboard foc
 
 ## DraftSessionController — Session Orchestration
 
-Lives inside `FloatingOverlay.swift`. Manages the complete flow:
+Lives in `DraftSessionController.swift`. Manages the complete flow:
 
 ### Property Safety
 

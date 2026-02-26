@@ -17,6 +17,7 @@ debug.log
 # Secrets / credentials
 .env
 .env.local
+.envrc
 *.pem
 *.key
 

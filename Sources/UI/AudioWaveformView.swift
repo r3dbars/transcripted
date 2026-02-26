@@ -6,7 +6,7 @@
 import SwiftUI
 
 struct AudioWaveformView: View {
-    let level: Float  // 0.0 to 1.0 (logarithmic from SpeechEngine)
+    let level: Float  // 0.0 to 1.0 (logarithmic from STTRouter/WhisperEngine)
     var compact: Bool = false
 
     // Dynamic layout based on mode
