@@ -281,13 +281,22 @@ class AnalysisEngine: ObservableObject {
     }
 
     private func writePromptChange(key: String, value: String) {
-        guard let data = try? Data(contentsOf: promptsURL),
-              var dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return }
-        dict[key] = value
-        guard let newData = try? JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys])
-        else { return }
-        try? newData.write(to: promptsURL)
+        do {
+            let data = try Data(contentsOf: promptsURL)
+            guard var dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                print("⚠️ ANALYSIS | prompts.json is not a dictionary")
+                EventReporter.shared.capture(level: .error, engine: "analysis", event: "prompt_write_failed",
+                    message: "prompts.json root is not a dictionary", context: ["key": key])
+                return
+            }
+            dict[key] = value
+            let newData = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys])
+            try newData.write(to: promptsURL)
+        } catch {
+            print("⚠️ ANALYSIS | failed to write prompt change for key '\(key)': \(error.localizedDescription)")
+            EventReporter.shared.capture(level: .error, engine: "analysis", event: "prompt_write_failed",
+                message: error.localizedDescription, context: ["key": key])
+        }
     }
 
     private func logSuggestion(card: InsightCard, action: String) {
@@ -307,13 +316,19 @@ class AnalysisEngine: ObservableObject {
             return
         }
         let lineWithNewline = (line + "\n").data(using: .utf8) ?? Data()
-        if FileManager.default.fileExists(atPath: suggestionLogURL.path),
-           let handle = try? FileHandle(forWritingTo: suggestionLogURL) {
-            defer { try? handle.close() }
-            handle.seekToEndOfFile()
-            handle.write(lineWithNewline)
-        } else {
-            try? lineWithNewline.write(to: suggestionLogURL)
+        do {
+            if FileManager.default.fileExists(atPath: suggestionLogURL.path) {
+                let handle = try FileHandle(forWritingTo: suggestionLogURL)
+                defer { try? handle.close() }
+                handle.seekToEndOfFile()
+                handle.write(lineWithNewline)
+            } else {
+                try lineWithNewline.write(to: suggestionLogURL)
+            }
+        } catch {
+            print("⚠️ ANALYSIS | failed to write suggestion log: \(error.localizedDescription)")
+            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "suggestion_write_failed",
+                message: error.localizedDescription, context: ["action": action, "suggestion_id": card.suggestionId])
         }
     }
 }
