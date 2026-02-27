@@ -62,24 +62,6 @@ class PillStateManager: ObservableObject {
     /// Flag to prevent rapid state changes during animations
     @Published private(set) var isTransitioning = false
 
-    // MARK: - Meeting Detection State
-
-    /// True when MeetingDetector has detected a likely meeting
-    @Published var meetingDetected = false
-
-    /// Reference to the meeting detector for dismiss coordination
-    private weak var meetingDetector: MeetingDetector?
-
-    /// Set the meeting detector reference for dismiss coordination
-    func setMeetingDetector(_ detector: MeetingDetector) {
-        self.meetingDetector = detector
-    }
-
-    /// Dismiss the meeting detection prompt and start cooldown
-    func dismissMeetingDetection() {
-        meetingDetector?.dismiss()
-        meetingDetected = false
-    }
     /// PHASE 4 FIX: Use unified timing from DesignTokens to prevent animation/cooldown mismatch
     private let transitionCooldown: TimeInterval = PillAnimationTiming.cooldownDuration
 

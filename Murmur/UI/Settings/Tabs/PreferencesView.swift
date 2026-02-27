@@ -11,11 +11,11 @@ struct PreferencesView: View {
     @AppStorage("transcriptSaveLocation") private var saveLocation: String = ""
     @AppStorage("userName") private var userName: String = ""
     @AppStorage("useAuroraRecording") private var useAuroraRecording: Bool = false
-    @AppStorage("enableMeetingDetection") private var enableMeetingDetection: Bool = true
     @AppStorage("taskService") private var taskService: String = "reminders"
     @AppStorage("todoistAPIKey") private var todoistAPIKey: String = ""
     @AppStorage("deepgramAPIKey") private var deepgramAPIKey: String = ""
     @AppStorage("geminiAPIKey") private var geminiAPIKey: String = ""
+    @AppStorage("remindersListId") private var remindersListId: String = ""
 
     // Sound is stored differently (inverted logic)
     @State private var enableSounds: Bool = true
@@ -29,6 +29,10 @@ struct PreferencesView: View {
     @State private var deepgramVerified: Bool?
     @State private var todoistVerified: Bool?
     @State private var geminiVerified: Bool?
+
+    // MARK: - Reminders Lists
+    @State private var availableRemindersLists: [RemindersList] = []
+    @State private var isLoadingRemindersLists = false
 
     var body: some View {
         ScrollView {
@@ -44,9 +48,6 @@ struct PreferencesView: View {
 
                 // Appearance Section
                 appearanceSection
-
-                // Recording Section
-                recordingSection
 
                 // Task Integration Section
                 taskIntegrationSection
@@ -146,21 +147,6 @@ struct PreferencesView: View {
         }
     }
 
-    // MARK: - Recording Section
-
-    private var recordingSection: some View {
-        SettingsSectionCard(
-            icon: "video.fill",
-            title: "Recording"
-        ) {
-            SettingsToggleRow(
-                title: "Meeting Detection",
-                description: "Auto-detect video calls and prompt to record",
-                isOn: $enableMeetingDetection
-            )
-        }
-    }
-
     // MARK: - Task Integration Section
 
     private var taskIntegrationSection: some View {
@@ -172,6 +158,14 @@ struct PreferencesView: View {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 // Task service picker
                 taskServicePicker
+
+                // Apple Reminders list picker (if selected)
+                if taskService == "reminders" {
+                    Divider()
+                        .background(Color.panelCharcoalSurface)
+
+                    remindersListPicker
+                }
 
                 // Todoist API key (if selected)
                 if taskService == "todoist" {
@@ -194,6 +188,94 @@ struct PreferencesView: View {
                         .font(.caption)
                         .foregroundColor(.accentBlueLight)
                 }
+
+            }
+        }
+    }
+
+    // MARK: - Reminders List Picker
+
+    private var remindersListPicker: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Reminders List")
+                .font(.bodyMedium)
+                .foregroundColor(.panelTextPrimary)
+
+            if isLoadingRemindersLists {
+                HStack(spacing: Spacing.xs) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Loading lists...")
+                        .font(.caption)
+                        .foregroundColor(.panelTextMuted)
+                }
+            } else if availableRemindersLists.isEmpty {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundColor(.warningAmber)
+                    Text("Grant Reminders access to see your lists")
+                        .font(.caption)
+                        .foregroundColor(.panelTextMuted)
+                }
+                .onAppear {
+                    loadRemindersLists()
+                }
+            } else {
+                Picker("", selection: $remindersListId) {
+                    Text("Default List").tag("")
+                    ForEach(availableRemindersLists) { list in
+                        HStack {
+                            Circle()
+                                .fill(list.color != nil ? Color(cgColor: list.color!) : Color.gray)
+                                .frame(width: 8, height: 8)
+                            Text(list.title + (list.isDefault ? " (System Default)" : ""))
+                        }
+                        .tag(list.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(.panelTextPrimary)
+            }
+
+            // Status text
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.attentionGreen)
+                Text(selectedRemindersListText)
+                    .font(.caption)
+                    .foregroundColor(.panelTextSecondary)
+            }
+        }
+        .onAppear {
+            loadRemindersLists()
+        }
+    }
+
+    private var selectedRemindersListText: String {
+        if remindersListId.isEmpty {
+            return "Tasks go to your default Reminders list"
+        }
+        if let list = availableRemindersLists.first(where: { $0.id == remindersListId }) {
+            return "Tasks go to \"\(list.title)\""
+        }
+        return "Tasks go to Apple Reminders"
+    }
+
+    private func loadRemindersLists() {
+        guard !isLoadingRemindersLists else { return }
+        isLoadingRemindersLists = true
+
+        Task {
+            let service = RemindersService()
+            let hasAccess = await service.requestAccess()
+
+            await MainActor.run {
+                if hasAccess {
+                    availableRemindersLists = service.getRemindersLists()
+                } else {
+                    availableRemindersLists = []
+                }
+                isLoadingRemindersLists = false
             }
         }
     }
@@ -265,6 +347,7 @@ struct PreferencesView: View {
                     }
                 }
                 .buttonStyle(.plain)
+
             }
         }
     }

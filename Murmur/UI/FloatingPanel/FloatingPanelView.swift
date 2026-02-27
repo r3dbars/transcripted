@@ -12,6 +12,9 @@ struct FloatingPanelView: View {
     // User preference for aurora recording indicator
     @AppStorage("useAuroraRecording") private var useAuroraRecording: Bool = false
 
+    // Accessibility
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     // Toast notification state
     @State private var showErrorToast = false
     @State private var currentError: ContextualError?
@@ -23,12 +26,11 @@ struct FloatingPanelView: View {
 
     // MARK: - Computed Properties
 
-    /// Dynamic frame width based on state and meeting detection
+    /// Dynamic frame width based on state
     private var frameWidth: CGFloat {
         if pillStateManager.state == .reviewing {
             return PillDimensions.trayWidth + 40
         } else {
-            // Both meeting detected overlay and recording pill use same width (180px)
             return PillDimensions.recordingWidth + 40
         }
     }
@@ -62,28 +64,10 @@ struct FloatingPanelView: View {
                 }
             }
 
-            // MARK: - Meeting Detection Overlay (replaces idle pill when detected)
-            if pillStateManager.meetingDetected && pillStateManager.state == .idle {
-                MeetingDetectedOverlay(
-                    onRecord: {
-                        pillStateManager.dismissMeetingDetection()
-                        audio.start()
-                    },
-                    onDismiss: {
-                        pillStateManager.dismissMeetingDetection()
-                    }
-                )
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.95).combined(with: .opacity),
-                    removal: .opacity
-                ))
+            // MARK: - Pill Content (centered, morphs between states)
+            pillContent
+                .animation(.pillMorph, value: pillStateManager.state)
                 .padding(.bottom, 10)
-            } else {
-                // MARK: - Pill Content (centered, morphs between states)
-                pillContent
-                    .animation(.pillMorph, value: pillStateManager.state)
-                    .padding(.bottom, 10)
-            }
         }
         .frame(width: frameWidth)
         .frame(maxHeight: .infinity, alignment: .bottom)

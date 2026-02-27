@@ -922,6 +922,12 @@ struct PillAnimationTiming {
 
     /// Toast notification display duration
     static let toastDuration: Double = 5.0
+
+    /// State transition duration - slightly longer for smooth cross-fade between pill states
+    static let stateTransitionDuration: Double = 0.2
+
+    /// Settle delay - time before idle view collapses after appearing
+    static let settleDelay: Double = 0.2
 }
 
 // MARK: - Pill Animation Presets (Dynamic Island-style morphing)

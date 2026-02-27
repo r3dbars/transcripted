@@ -1,91 +1,45 @@
 import SwiftUI
 
-/// Main dashboard view displaying stats, activity, and recent transcripts
-/// "Night Studio" aesthetic with premium cards and staggered animations
-@available(macOS 14.0, *)
+/// Simplified dashboard view - stats and recent transcripts only
+/// No gamification, no achievements, no heat maps - just what matters
+@available(macOS 26.0, *)
 struct DashboardView: View {
 
     @ObservedObject var statsService: StatsService
-    @StateObject private var achievementManager = AchievementManager.shared
-    @State private var viewAppeared = false
+    var failedTranscriptionManager: FailedTranscriptionManager?
+    var taskManager: TranscriptionTaskManager?
 
-    /// Determine if stats are "glowing" (above average performance)
-    private var isGlowingUp: Bool {
-        // Glow when user has high engagement: 7+ day streak or 10+ recordings this month
-        statsService.currentStreak >= 7 || statsService.last30DaysRecordings >= 10
-    }
+    @State private var viewAppeared = false
+    @State private var retryingIds: Set<UUID> = []
 
     var body: some View {
-        ZStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.lg) {
-                    // Header (immediate)
-                    headerSection
-                        .staggeredAppear(delay: 0)
+        ScrollView {
+            VStack(alignment: .leading, spacing: Spacing.lg) {
+                // Header with Open Folder button
+                headerSection
+                    .staggeredAppear(delay: 0)
 
-                    // Stats cards row with optional glow effect (100ms delay)
-                    ZStack {
-                        // "The Glow Up" - warm glow behind stats when performing well
-                        if isGlowingUp {
-                            GlowUpEffect(isActive: isGlowingUp, color: .recordingCoral)
-                                .frame(height: 200)
-                                .offset(y: 20)
-                                .allowsHitTesting(false)
-                        }
-
-                        statsCardsSection
-                    }
+                // Simple stats row
+                statsSection
                     .staggeredAppear(delay: 0.1)
 
-                    // Motivational message (150ms delay)
-                    motivationalSection
+                // Failed transcriptions (only show if there are failures)
+                if let manager = failedTranscriptionManager, manager.count > 0 {
+                    failedTranscriptionsSection
                         .staggeredAppear(delay: 0.15)
+                }
 
-                    // Activity section - expanded full width heat map (200ms delay)
-                    VStack(alignment: .leading, spacing: Spacing.md) {
-                        Text("Activity")
-                            .font(.caption)
-                            .foregroundColor(.panelTextMuted)
-                            .textCase(.uppercase)
-                            .tracking(1)
-
-                        HeatMapView(statsService: statsService)
-                            .frame(maxWidth: .infinity)
-                    }
+                // Recent transcripts
+                RecentTranscriptsView(transcripts: statsService.recentTranscripts)
+                    .frame(maxWidth: .infinity)
                     .staggeredAppear(delay: 0.2)
-
-                    // Recent transcripts (250ms delay)
-                    RecentTranscriptsView(transcripts: statsService.recentTranscripts)
-                        .frame(maxWidth: .infinity)
-                        .staggeredAppear(delay: 0.25)
-                }
-                .padding(Spacing.lg)
             }
-            .background(Color.panelCharcoal)
-
-            // Achievement overlay
-            if let achievement = achievementManager.pendingAchievement {
-                AchievementView(achievement: achievement) {
-                    achievementManager.dismissAchievement()
-                }
-                .transition(.opacity)
-                .zIndex(100)
-            }
+            .padding(Spacing.lg)
         }
+        .background(Color.panelCharcoal)
         .onAppear {
             viewAppeared = true
-            // Check for achievements when view appears
-            checkForAchievements()
         }
-    }
-
-    private func checkForAchievements() {
-        achievementManager.checkAchievements(
-            totalRecordings: statsService.totalRecordings,
-            currentStreak: statsService.currentStreak,
-            totalActionItems: statsService.totalActionItems,
-            totalHours: statsService.totalHoursTranscribed
-        )
     }
 
     // MARK: - Header
@@ -97,12 +51,33 @@ struct DashboardView: View {
                     .font(.headingLarge)
                     .foregroundColor(.panelTextPrimary)
 
-                Text("Your transcription activity at a glance")
+                Text("Your transcription activity")
                     .font(.bodySmall)
                     .foregroundColor(.panelTextSecondary)
             }
 
             Spacer()
+
+            // Open folder button
+            Button {
+                openTranscriptsFolder()
+            } label: {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 12))
+                    Text("Open Folder")
+                        .font(.bodySmall)
+                }
+                .foregroundColor(.panelTextSecondary)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xs)
+                .background {
+                    RoundedRectangle(cornerRadius: Radius.lawsButton)
+                        .fill(Color.panelCharcoalSurface)
+                }
+            }
+            .buttonStyle(.plain)
+            .help("Open transcripts folder in Finder")
 
             // Refresh button
             Button {
@@ -119,9 +94,9 @@ struct DashboardView: View {
         }
     }
 
-    // MARK: - Stats Cards
+    // MARK: - Simple Stats
 
-    private var statsCardsSection: some View {
+    private var statsSection: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             // Period label
             Text("Last 30 days")
@@ -130,194 +105,208 @@ struct DashboardView: View {
                 .textCase(.uppercase)
                 .tracking(1)
 
-            // Stats row
-            HStack(spacing: Spacing.md) {
-                // Main stats
-                StatsCardView(
-                    icon: "clock.fill",
-                    value: statsService.formattedLast30DaysDuration,
-                    label: "Time Transcribed"
-                )
-
-                StatsCardView(
-                    icon: "doc.text.fill",
+            // Simple inline stats
+            HStack(spacing: Spacing.lg) {
+                statItem(
                     value: "\(statsService.last30DaysRecordings)",
-                    label: "Meetings"
+                    label: "meetings"
                 )
 
-                StatsCardView(
-                    icon: "checkmark.circle.fill",
+                Text("•")
+                    .foregroundColor(.panelTextMuted)
+
+                statItem(
+                    value: statsService.formattedLast30DaysDuration,
+                    label: "recorded"
+                )
+
+                Text("•")
+                    .foregroundColor(.panelTextMuted)
+
+                statItem(
                     value: "\(statsService.last30DaysActionItems)",
-                    label: "Action Items",
-                    accentColor: .attentionGreen
+                    label: "tasks"
                 )
-
-                // Streak card
-                StreakCardView(
-                    streak: statsService.currentStreak,
-                    isActive: statsService.currentStreak > 0
-                )
-            }
-        }
-    }
-
-    // MARK: - Motivational Message
-
-    @ViewBuilder
-    private var motivationalSection: some View {
-        if !statsService.motivationalMessage.isEmpty {
-            HStack(spacing: Spacing.sm) {
-                Text(statsService.motivationalMessage)
-                    .font(.bodyMedium)
-                    .foregroundColor(.accentBlueLight)
-                    .italic()
             }
             .padding(Spacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
-                RoundedRectangle(cornerRadius: Radius.lawsButton, style: .continuous)
-                    .fill(Color.accentBlue.opacity(0.1))
+                RoundedRectangle(cornerRadius: Radius.lawsCard)
+                    .fill(Color.panelCharcoalElevated)
             }
         }
     }
-}
 
-// MARK: - All Time Stats (Optional additional section)
-
-@available(macOS 14.0, *)
-struct AllTimeStatsSection: View {
-
-    @ObservedObject var statsService: StatsService
-
-    @State private var isExpanded = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
-            // Header with toggle
-            Button {
-                withAnimation(.lawsStateChange) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                HStack {
-                    Text("All Time Stats")
-                        .font(.headingSmall)
-                        .foregroundColor(.panelTextPrimary)
-
-                    Spacer()
-
-                    Image(systemName: "chevron.down")
-                        .font(.caption)
-                        .foregroundColor(.panelTextSecondary)
-                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
-                }
-            }
-            .buttonStyle(.plain)
-
-            if isExpanded {
-                // All time stats grid
-                LazyVGrid(columns: [
-                    GridItem(.flexible()),
-                    GridItem(.flexible()),
-                    GridItem(.flexible())
-                ], spacing: Spacing.md) {
-                    StatPill(label: "Total Recordings", value: "\(statsService.totalRecordings)")
-                    StatPill(label: "Total Hours", value: statsService.formattedTotalHours)
-                    StatPill(label: "Avg Duration", value: statsService.formattedAverageDuration)
-                    StatPill(label: "Action Items", value: "\(statsService.totalActionItems)")
-                    StatPill(label: "Longest Streak", value: "\(statsService.longestStreak) days")
-                    StatPill(label: "Current Streak", value: "\(statsService.currentStreak) days")
-                }
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-        .padding(Spacing.md)
-        .background {
-            RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
-                .fill(Color.panelCharcoalElevated)
-        }
-    }
-}
-
-// MARK: - Stat Pill
-
-@available(macOS 14.0, *)
-struct StatPill: View {
-
-    let label: String
-    let value: String
-
-    var body: some View {
-        VStack(spacing: Spacing.xs) {
+    private func statItem(value: String, label: String) -> some View {
+        HStack(spacing: Spacing.xs) {
             Text(value)
                 .font(.headingMedium)
                 .foregroundColor(.panelTextPrimary)
 
             Text(label)
-                .font(.caption)
-                .foregroundColor(.panelTextMuted)
+                .font(.bodySmall)
+                .foregroundColor(.panelTextSecondary)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, Spacing.sm)
     }
-}
 
-// MARK: - Empty Dashboard State
+    // MARK: - Failed Transcriptions
 
-@available(macOS 14.0, *)
-struct EmptyDashboardView: View {
+    @ViewBuilder
+    private var failedTranscriptionsSection: some View {
+        if let manager = failedTranscriptionManager {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                // Section header
+                HStack {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.warningAmber)
+                        Text("Failed Transcriptions")
+                            .font(.bodyMedium)
+                            .foregroundColor(.panelTextPrimary)
+                        Text("(\(manager.count))")
+                            .font(.bodySmall)
+                            .foregroundColor(.panelTextMuted)
+                    }
 
-    var body: some View {
-        VStack(spacing: Spacing.xl) {
-            // Illustration
-            ZStack {
-                Circle()
-                    .fill(Color.panelCharcoalSurface)
-                    .frame(width: 120, height: 120)
+                    Spacer()
 
-                Image(systemName: "waveform.and.mic")
-                    .font(.system(size: 48))
-                    .foregroundColor(.panelTextMuted)
+                    // Retry all button
+                    if taskManager != nil, !manager.failedTranscriptions.isEmpty {
+                        Button {
+                            retryAllFailed()
+                        } label: {
+                            HStack(spacing: Spacing.xs) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 11))
+                                Text("Retry All")
+                                    .font(.caption)
+                            }
+                            .foregroundColor(.accentBlueLight)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!retryingIds.isEmpty)
+                    }
+                }
+
+                // Failed items list
+                VStack(spacing: Spacing.xs) {
+                    ForEach(manager.failedTranscriptions.prefix(3)) { failed in
+                        failedTranscriptionRow(failed)
+                    }
+
+                    // Show "and X more" if there are more than 3
+                    if manager.count > 3 {
+                        Text("and \(manager.count - 3) more...")
+                            .font(.caption)
+                            .foregroundColor(.panelTextMuted)
+                            .padding(.top, Spacing.xs)
+                    }
+                }
+                .padding(Spacing.md)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    RoundedRectangle(cornerRadius: Radius.lawsCard)
+                        .fill(Color.panelCharcoalElevated)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: Radius.lawsCard)
+                                .stroke(Color.warningAmber.opacity(0.3), lineWidth: 1)
+                        }
+                }
             }
+        }
+    }
 
-            // Text
-            VStack(spacing: Spacing.sm) {
-                Text("No recordings yet")
-                    .font(.headingMedium)
+    private func failedTranscriptionRow(_ failed: FailedTranscription) -> some View {
+        HStack(spacing: Spacing.sm) {
+            // Timestamp
+            VStack(alignment: .leading, spacing: 2) {
+                Text(failed.formattedTimestamp)
+                    .font(.bodySmall)
                     .foregroundColor(.panelTextPrimary)
 
-                Text("Start your first recording to see your stats and activity here.")
-                    .font(.bodyMedium)
-                    .foregroundColor(.panelTextSecondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 300)
-            }
-
-            // Hint
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "lightbulb.fill")
-                    .font(.caption)
-                    .foregroundColor(.warningAmber)
-
-                Text("Click the floating pill near your dock to start recording")
+                Text(failed.shortErrorMessage)
                     .font(.caption)
                     .foregroundColor(.panelTextMuted)
+                    .lineLimit(1)
             }
-            .padding(Spacing.sm)
-            .background {
-                RoundedRectangle(cornerRadius: Radius.lawsButton)
-                    .fill(Color.warningAmber.opacity(0.1))
+
+            Spacer()
+
+            // Retry button
+            if retryingIds.contains(failed.id) {
+                ProgressView()
+                    .scaleEffect(0.6)
+                    .frame(width: 20, height: 20)
+            } else if taskManager != nil {
+                Button {
+                    retryFailed(failed.id)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12))
+                        .foregroundColor(.accentBlueLight)
+                }
+                .buttonStyle(.plain)
+                .help("Retry this transcription")
+            }
+
+            // Delete button
+            Button {
+                failedTranscriptionManager?.deleteFailedTranscription(id: failed.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10))
+                    .foregroundColor(.panelTextMuted)
+            }
+            .buttonStyle(.plain)
+            .help("Delete failed transcription")
+        }
+        .padding(.vertical, Spacing.xs)
+    }
+
+    private func retryFailed(_ id: UUID) {
+        retryingIds.insert(id)
+
+        Task {
+            let success = await taskManager?.retryFailedTranscription(failedId: id) ?? false
+
+            await MainActor.run {
+                retryingIds.remove(id)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(Spacing.xxl)
+    }
+
+    private func retryAllFailed() {
+        guard let manager = failedTranscriptionManager else { return }
+
+        for failed in manager.failedTranscriptions {
+            retryFailed(failed.id)
+        }
+    }
+
+    // MARK: - Actions
+
+    private func openTranscriptsFolder() {
+        let transcriptsFolder: URL
+        if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
+           !customPath.isEmpty {
+            transcriptsFolder = URL(fileURLWithPath: customPath)
+        } else {
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            transcriptsFolder = documentsPath.appendingPathComponent("Transcripted")
+        }
+        try? FileManager.default.createDirectory(at: transcriptsFolder, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(transcriptsFolder)
     }
 }
 
 // MARK: - Preview
 
-@available(macOS 14.0, *)
+@available(macOS 26.0, *)
 #Preview {
-    DashboardView(statsService: StatsService.shared)
-        .frame(width: 620, height: 600)
+    DashboardView(
+        statsService: StatsService.shared,
+        failedTranscriptionManager: nil,
+        taskManager: nil
+    )
+    .frame(width: 620, height: 600)
 }

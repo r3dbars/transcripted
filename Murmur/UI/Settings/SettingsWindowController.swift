@@ -3,13 +3,15 @@ import SwiftUI
 
 /// Window controller for the redesigned settings window
 /// Manages the NSWindow lifecycle and hosts the SwiftUI settings view
-@available(macOS 14.0, *)
+@available(macOS 26.0, *)
 final class SettingsWindowController: NSWindowController {
 
     // MARK: - Properties
 
     private let statsService: StatsService
     private let navigationState: SettingsNavigationState
+    private let failedTranscriptionManager: FailedTranscriptionManager?
+    private let taskManager: TranscriptionTaskManager?
 
     // MARK: - Window Dimensions
 
@@ -18,9 +20,15 @@ final class SettingsWindowController: NSWindowController {
 
     // MARK: - Initialization
 
-    init(statsService: StatsService = .shared) {
+    init(
+        statsService: StatsService = .shared,
+        failedTranscriptionManager: FailedTranscriptionManager? = nil,
+        taskManager: TranscriptionTaskManager? = nil
+    ) {
         self.statsService = statsService
         self.navigationState = SettingsNavigationState()
+        self.failedTranscriptionManager = failedTranscriptionManager
+        self.taskManager = taskManager
 
         // Create the window
         let window = NSWindow(
@@ -30,7 +38,7 @@ final class SettingsWindowController: NSWindowController {
                 width: Self.windowWidth,
                 height: Self.windowHeight
             ),
-            styleMask: [.titled, .closable, .miniaturizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -57,9 +65,9 @@ final class SettingsWindowController: NSWindowController {
         // Center on screen
         window.center()
 
-        // Prevent resize
-        window.minSize = NSSize(width: Self.windowWidth, height: Self.windowHeight)
-        window.maxSize = NSSize(width: Self.windowWidth, height: Self.windowHeight)
+        // Allow resize within bounds
+        window.minSize = NSSize(width: 700, height: 500)
+        window.maxSize = NSSize(width: 1200, height: 900)
 
         // Window level and behavior
         window.level = .normal
@@ -74,7 +82,9 @@ final class SettingsWindowController: NSWindowController {
 
         let settingsView = SettingsContainerView(
             statsService: statsService,
-            navigationState: navigationState
+            navigationState: navigationState,
+            failedTranscriptionManager: failedTranscriptionManager,
+            taskManager: taskManager
         )
 
         let hostingView = NSHostingView(rootView: settingsView)
@@ -114,7 +124,7 @@ final class SettingsWindowController: NSWindowController {
 
 // MARK: - Window Delegate
 
-@available(macOS 14.0, *)
+@available(macOS 26.0, *)
 extension SettingsWindowController: NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {

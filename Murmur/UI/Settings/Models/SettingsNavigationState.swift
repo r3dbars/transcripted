@@ -4,9 +4,7 @@ import Combine
 /// Navigation tab options for the settings window
 enum SettingsTab: String, CaseIterable, Identifiable {
     case dashboard = "Dashboard"
-    case transcripts = "Transcripts"
     case preferences = "Preferences"
-    case help = "Help"
 
     var id: String { rawValue }
 
@@ -14,9 +12,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .dashboard: return "chart.bar.fill"
-        case .transcripts: return "doc.text.fill"
         case .preferences: return "gearshape.fill"
-        case .help: return "questionmark.circle.fill"
         }
     }
 
@@ -24,9 +20,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var accessibilityLabel: String {
         switch self {
         case .dashboard: return "Dashboard with stats and activity"
-        case .transcripts: return "Browse all transcripts"
         case .preferences: return "App preferences and settings"
-        case .help: return "Help and support"
         }
     }
 }
@@ -47,9 +41,6 @@ final class SettingsNavigationState: ObservableObject {
 
     /// Migration status message
     @Published var migrationStatus: String = ""
-
-    /// Search query for transcripts tab
-    @Published var transcriptSearchQuery: String = ""
 
     /// Whether to show migration complete alert
     @Published var showMigrationComplete: Bool = false
