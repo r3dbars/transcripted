@@ -29,7 +29,6 @@ class STTRouter: ObservableObject {
 
     // MARK: - Recording
 
-    @discardableResult
     func startRecording() -> Bool {
         if parakeetEngine.isModelLoaded {
             return parakeetEngine.startRecording()

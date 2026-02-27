@@ -213,7 +213,6 @@ class ParakeetEngine: ObservableObject {
 
     // MARK: - Recording
 
-    @discardableResult
     func startRecording() -> Bool {
         guard !isRecording else { return true }
         guard isModelLoaded else {

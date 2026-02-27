@@ -283,9 +283,13 @@ class PromptStore: ObservableObject {
 
     /// Reload prompts from disk — call after the orchestrator agent rewrites prompts.json.
     func reload() {
-        guard let data = try? Data(contentsOf: storeURL),
-              let loaded = try? JSONDecoder().decode(PromptConfig.self, from: data) else { return }
-        config = loaded
+        do {
+            let data = try Data(contentsOf: storeURL)
+            let loaded = try JSONDecoder().decode(PromptConfig.self, from: data)
+            config = loaded
+        } catch {
+            print("⚠️ PROMPTS | failed to reload prompts.json: \(error.localizedDescription)")
+        }
     }
 
     /// Returns the ghostwriting system prompt with the user's style summary injected.
@@ -324,9 +328,13 @@ class PromptStore: ObservableObject {
     }
 
     private static func write(config: PromptConfig, to url: URL) {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(config) else { return }
-        try? data.write(to: url)
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(config)
+            try data.write(to: url)
+        } catch {
+            print("⚠️ PROMPTS | failed to write prompts.json: \(error.localizedDescription)")
+        }
     }
 }
