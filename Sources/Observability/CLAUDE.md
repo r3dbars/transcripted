@@ -115,6 +115,10 @@ Only `.error` level events are forwarded to Sentry. Warnings and info stay local
 | `parakeet` | `models_loaded` | info | Parakeet ASR models initialized |
 | `parakeet` | `model_init_failed` | error | CoreML model initialization failed |
 | `parakeet` | `transcription_empty` | warning | Parakeet returns no text |
+| `parakeet` | `audio_format_failed` | error | AVAudioFormat creation failed |
+| `parakeet` | `audio_engine_start_failed` | error | AVAudioEngine.start() throws during recording |
+| `parakeet` | `asr_manager_unavailable` | error | ASR manager not available for transcription |
+| `parakeet` | `recording_interrupted` | warning | Audio device changed during recording |
 | `speech` | `audio_engine_start_failed` | error | AVAudioEngine.start() throws |
 | `speech` | `recognizer_unavailable` | error | SFSpeechRecognizer not available |
 | `speech` | `recognition_error` | warning | Recognition task error callback |
@@ -143,5 +147,7 @@ Only `.error` level events are forwarded to Sentry. Warnings and info stay local
 | `overlay` | `polish_failed` | warning | Dictation polish API fails |
 | `overlay` | `vision_timeout` | warning | Vision exceeded 8s timeout |
 | `overlay` | `refusal_detected` | info | Draft contained refusal pattern |
+| `overlay` | `no_voice_input` | warning | Empty transcription after recording |
+| `overlay` | `auth_missing` | error | No API credential when drafting |
 | `imessage` | `imessage_db_open_failed` | error | Can't open chat.db |
 | `imessage` | `imessage_query_failed` | error | SQLite query fails |

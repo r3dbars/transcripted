@@ -41,15 +41,15 @@ private actor EventFileWriter {
     }()
 
     init() {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!
-        let storageDir = appSupport.appendingPathComponent("Draft", isDirectory: true)
+        let storageDir = FileManager.default.draftAppSupportDir
         fileURL = storageDir.appendingPathComponent("events.jsonl")
 
         // Ensure directory exists
-        try? FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
+        } catch {
+            print("⚠️ EVENT | failed to create directory \(storageDir.path): \(error.localizedDescription)")
+        }
     }
 
     func append(_ event: ObservabilityEvent) {

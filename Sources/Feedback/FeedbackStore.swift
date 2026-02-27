@@ -48,11 +48,7 @@ class FeedbackStore: ObservableObject {
     private let isoFormatter: ISO8601DateFormatter
 
     init() {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!
-        let storageDir = appSupport.appendingPathComponent("Draft", isDirectory: true)
+        let storageDir = FileManager.default.draftAppSupportDir
         feedbackURL = storageDir.appendingPathComponent("feedback.jsonl")
 
         encoder = JSONEncoder()

@@ -66,10 +66,7 @@ class StreamingChatEngine: ObservableObject {
     private static let apiVersion = "2023-06-01"
 
     init() {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first!
-        dataDir = appSupport.appendingPathComponent("Draft", isDirectory: true)
+        dataDir = FileManager.default.draftAppSupportDir
     }
 
     // MARK: - Public Interface

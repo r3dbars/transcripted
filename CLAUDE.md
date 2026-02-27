@@ -305,3 +305,4 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - `CoreGraphics` — Window capture (CGWindowListCreateImage)
 - `Combine` — Required by SwiftUI internally
 - `SQLite3` (via `-lsqlite3`) — iMessage database reading for style onboarding
+- `Metal` / `MetalKit` / `Accelerate` — Indirect dependencies via FluidAudio (CoreML Parakeet inference)

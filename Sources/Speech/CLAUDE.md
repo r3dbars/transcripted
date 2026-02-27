@@ -44,7 +44,11 @@ The audio render callback runs on a real-time thread with ~10ms deadlines. NSLoc
 
 ### Device Change Handling
 
-Observes `.AVAudioEngineConfigurationChange` notification to detect when audio devices change (e.g., USB mic plugged/unplugged). On change, the engine re-reads the native sample rate and re-warms if needed.
+Observes `.AVAudioEngineConfigurationChange` notification to detect when audio devices change (e.g., USB mic plugged/unplugged). On change, the engine re-reads the native sample rate and re-warms if needed. If re-warm fails while recording was active, `recordingInterrupted` is set to `true` — DraftSessionController observes this and cancels the session with a user-visible error.
+
+### startRecording() Returns Bool
+
+`startRecording()` returns `false` on failure (model not loaded, mic unauthorized, audio format creation failed, engine start failed). On engine start failure, the audio tap is explicitly removed to prevent a double-install ObjC exception on the next call. Callers (STTRouter, DraftSessionController) check the return value and show error UI.
 
 ### deinit Cleanup
 

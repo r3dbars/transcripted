@@ -36,8 +36,7 @@ class AnalysisEngine: ObservableObject {
     private let debounceSeconds: Double = 30
 
     init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        dataDir = appSupport.appendingPathComponent("Draft", isDirectory: true)
+        dataDir = FileManager.default.draftAppSupportDir
     }
 
     deinit {
@@ -354,6 +353,10 @@ extension Notification.Name {
 
 private extension URL {
     func ensureExists() {
-        try? FileManager.default.createDirectory(at: self, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: self, withIntermediateDirectories: true)
+        } catch {
+            print("⚠️ ANALYSIS | failed to create directory \(self.path): \(error.localizedDescription)")
+        }
     }
 }

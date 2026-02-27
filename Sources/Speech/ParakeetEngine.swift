@@ -25,6 +25,7 @@ class ParakeetEngine: ObservableObject {
     @Published var audioLevel: Float = 0
     @Published var liveTranscript: String = ""
     @Published var modelDownloadState: ParakeetModelState = .notLoaded
+    @Published var recordingInterrupted = false
 
     private let audioEngine = AVAudioEngine()
     private var sampleBuffer: [Float] = []
@@ -198,27 +199,32 @@ class ParakeetEngine: ObservableObject {
             print("⚠️ PARAKEET | re-warm failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "device_change_rewarm_failed",
                 message: error.localizedDescription, context: ["audio_device": inputDeviceName])
+            if wasRecording {
+                recordingInterrupted = true
+            }
         }
     }
 
     // MARK: - Recording
 
-    func startRecording() {
-        guard !isRecording else { return }
+    @discardableResult
+    func startRecording() -> Bool {
+        guard !isRecording else { return true }
         guard isModelLoaded else {
             print("⚠️ PARAKEET | cannot start recording — model not loaded")
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "model_not_loaded",
                 message: "Recording attempted without model loaded")
-            return
+            return false
         }
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         guard micStatus == .authorized else {
             print("⚠️ PARAKEET | microphone permission not granted (status: \(micStatus.rawValue))")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "mic_not_authorized",
                 message: "Microphone permission status: \(micStatus.rawValue)")
-            return
+            return false
         }
 
+        recordingInterrupted = false
         sampleBuffer.removeAll(keepingCapacity: true)
         sampleBuffer.reserveCapacity(Int(nativeSampleRate * 120))
 
@@ -226,7 +232,12 @@ class ParakeetEngine: ObservableObject {
         let nativeFormat = inputNode.outputFormat(forBus: 0)
         nativeSampleRate = nativeFormat.sampleRate
 
-        let monoFormat = AVAudioFormat(standardFormatWithSampleRate: nativeSampleRate, channels: 1)!
+        guard let monoFormat = AVAudioFormat(standardFormatWithSampleRate: nativeSampleRate, channels: 1) else {
+            print("❌ PARAKEET | failed to create mono audio format at \(nativeSampleRate)Hz")
+            EventReporter.shared.capture(level: .error, engine: "parakeet", event: "audio_format_failed",
+                message: "AVAudioFormat creation failed", context: ["sample_rate": "\(nativeSampleRate)"])
+            return false
+        }
 
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: monoFormat) { [weak self] buffer, _ in
             guard let self = self,
@@ -269,8 +280,11 @@ class ParakeetEngine: ObservableObject {
                 try audioEngine.start()
                 isEnginePrewarmed = true
             } catch {
+                inputNode.removeTap(onBus: 0)  // Clean up tap to prevent double-install crash
                 print("❌ PARAKEET | audio engine failed: \(error.localizedDescription)")
-                return
+                EventReporter.shared.capture(level: .error, engine: "parakeet",
+                    event: "audio_engine_start_failed", message: error.localizedDescription)
+                return false
             }
         }
 
@@ -279,6 +293,7 @@ class ParakeetEngine: ObservableObject {
         committedLiveText = ""
         startLiveSpeech()
         print("🎤 PARAKEET | recording started (\(inputDeviceName), \(nativeSampleRate)Hz)")
+        return true
     }
 
     func stopRecording() {
@@ -397,6 +412,8 @@ class ParakeetEngine: ObservableObject {
         }
         guard let manager = asrManager, manager.isAvailable else {
             print("❌ PARAKEET | ASR manager not available")
+            EventReporter.shared.capture(level: .error, engine: "parakeet", event: "asr_manager_unavailable",
+                message: "ASR manager not available for transcription")
             return nil
         }
 

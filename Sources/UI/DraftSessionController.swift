@@ -3,13 +3,18 @@
 
 import SwiftUI
 import AppKit
+import Combine
 
 @MainActor
 class DraftSessionController: ObservableObject {
     @Published var isInSession = false
     @Published var isDictating = false
 
-    var appState: DraftAppState?
+    private var interruptionSubscription: AnyCancellable?
+
+    var appState: DraftAppState? {
+        didSet { setupInterruptionObserver() }
+    }
     var overlayController: FloatingOverlayController? {
         didSet {
             overlayController?.onEscapeDuringSession = { [weak self] in
@@ -27,6 +32,22 @@ class DraftSessionController: ObservableObject {
     private var sessionSourceApp: NSRunningApplication?
     private var streamingTask: Task<Void, Never>?
     private var visionTask: Task<Void, Never>?
+
+    private func setupInterruptionObserver() {
+        guard let appState = appState else { return }
+        interruptionSubscription = appState.sttRouter.parakeetEngine.$recordingInterrupted
+            .filter { $0 }
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                if self.isInSession {
+                    self.overlayController?.showError("Audio device changed")
+                    self.cancelSession()
+                } else if self.isDictating {
+                    self.overlayController?.showError("Audio device changed")
+                    self.cancelDictation()
+                }
+            }
+    }
 
     // MARK: - Draft Mode (Option+D)
 
@@ -49,7 +70,13 @@ class DraftSessionController: ObservableObject {
         overlayController.activeMode = .draft
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
-        appState.sttRouter.startRecording()
+
+        guard appState.sttRouter.startRecording() else {
+            appState.logger.log("SESSION | recording failed to start")
+            overlayController.showError("Microphone unavailable")
+            isInSession = false
+            return
+        }
 
         appState.logger.log("SESSION | started (parakeet, \(appState.sttRouter.inputDeviceName)), voice recording + vision in parallel")
 
@@ -75,14 +102,21 @@ class DraftSessionController: ObservableObject {
 
             guard !voiceText.isEmpty else {
                 appState.logger.log("SESSION | no voice input, cancelling")
-                cancelSession()
+                EventReporter.shared.capture(level: .warning, engine: "overlay", event: "no_voice_input",
+                    message: "Voice text empty after recording")
+                overlayController.showError("No speech detected")
+                isInSession = false
                 return
             }
 
             let platform = PlatformFormatter.detect(from: sessionSourceApp)
 
             guard let auth = AuthCredential.load() else {
-                cancelSession()
+                appState.logger.log("SESSION | no auth credential, cancelling")
+                EventReporter.shared.capture(level: .error, engine: "overlay", event: "auth_missing",
+                    message: "No API credential configured")
+                overlayController.showError("No API key configured")
+                isInSession = false
                 return
             }
 
@@ -192,7 +226,12 @@ class DraftSessionController: ObservableObject {
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
 
-        appState.sttRouter.startRecording()
+        guard appState.sttRouter.startRecording() else {
+            appState.logger.log("DICTATION | recording failed to start")
+            overlayController.showError("Microphone unavailable")
+            isDictating = false
+            return
+        }
         appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
     }
 
@@ -208,7 +247,10 @@ class DraftSessionController: ObservableObject {
 
             guard let text = voiceText, !text.isEmpty else {
                 appState.logger.log("DICTATION | no transcription, cancelling")
-                cancelDictation()
+                EventReporter.shared.capture(level: .warning, engine: "overlay", event: "no_voice_input",
+                    message: "Dictation transcription empty")
+                overlayController.showError("No speech detected")
+                isDictating = false
                 return
             }
 

@@ -18,8 +18,8 @@ struct DraftApp: App {
 
 @MainActor
 class DraftAppDelegate: NSObject, NSApplicationDelegate {
-    var statusItem: NSStatusItem!
-    var popover: NSPopover!
+    var statusItem: NSStatusItem?
+    var popover: NSPopover?
 
     let appState = DraftAppState()
     let overlayController = FloatingOverlayController()
@@ -39,19 +39,20 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate {
 
         // Set up menubar status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
+        if let button = statusItem?.button {
             button.image = NSImage(systemSymbolName: "pencil.and.outline", accessibilityDescription: "Draft")
             button.action = #selector(togglePopover)
             button.target = self
         }
 
         // Set up popover for Style + Agent panel
-        popover = NSPopover()
-        popover.contentSize = NSSize(width: 500, height: 480)
-        popover.behavior = .transient
-        popover.contentViewController = NSHostingController(
+        let pop = NSPopover()
+        pop.contentSize = NSSize(width: 500, height: 480)
+        pop.behavior = .transient
+        pop.contentViewController = NSHostingController(
             rootView: MenuBarPanelView(appState: appState)
         )
+        popover = pop
 
         // Initialize engines
         Task { @MainActor in
@@ -71,7 +72,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func togglePopover() {
-        guard let button = statusItem.button else { return }
+        guard let button = statusItem?.button, let popover = popover else { return }
         if popover.isShown {
             popover.performClose(nil)
         } else {
