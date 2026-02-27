@@ -77,6 +77,12 @@ class DraftSessionController: ObservableObject {
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
 
+        if !appState.sttRouter.isModelLoaded {
+            appState.logger.log("SESSION | model not loaded yet")
+            overlayController.showError("Voice model loading…")
+            isInSession = false
+            return
+        }
         guard appState.sttRouter.startRecording() else {
             appState.logger.log("SESSION | recording failed to start")
             overlayController.showError("Microphone unavailable")
@@ -236,6 +242,12 @@ class DraftSessionController: ObservableObject {
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
 
+        if !appState.sttRouter.isModelLoaded {
+            appState.logger.log("DICTATION | model not loaded yet")
+            overlayController.showError("Voice model loading…")
+            isDictating = false
+            return
+        }
         guard appState.sttRouter.startRecording() else {
             appState.logger.log("DICTATION | recording failed to start")
             overlayController.showError("Microphone unavailable")
