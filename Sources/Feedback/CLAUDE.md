@@ -8,7 +8,7 @@
 ~/Library/Application Support/Draft/feedback.jsonl
 ```
 
-One JSON object per line, appended on every Copy or Paste action.
+One JSON object per line, appended on every Copy or Paste action. It also parses the feedback log to compute aggregate usage statistics displayed in the MenuBarPanel.
 
 ## Schema
 
@@ -19,9 +19,24 @@ One JSON object per line, appended on every Copy or Paste action.
   "drafted_text": "what Claude produced",
   "accepted_text": "what was actually copied/pasted (may differ if user edited the draft)",
   "action": "copy" | "paste",
-  "example_count": 5
+  "example_count": 5,
+  "formality": "casual"
 }
 ```
+
+The `formality` field is optional — present when vision extraction detected a register (casual/professional/formal).
+
+## UsageStats
+
+```swift
+struct UsageStats {
+    var wordsDictated: Int = 0
+    var messagesDrafted: Int = 0
+    var minutesSaved: Int = 0
+}
+```
+
+Computed by `refreshStats()` from the feedback log. `minutesSaved` is estimated at ~40 WPM average typing speed (`wordsAccepted / 40`). These stats are displayed in the MenuBarPanel stats section.
 
 ## Why
 
@@ -32,18 +47,31 @@ The orchestrator agent reads `feedback.jsonl` to understand:
 
 It then rewrites `prompts.json` to improve future drafts.
 
+The `UsageStats` give the user a quick sense of how much value Draft has provided (words dictated, messages drafted, time saved).
+
 ## Design Notes
 
 - JSONL (not JSON array) so the file can be appended atomically without parsing the whole thing
-- `FeedbackStore` is not `@MainActor` — file writes are synchronous on whatever thread calls `record()`
-- No read methods — this is a write-only append log. The analysis engine reads the file directly.
+- `FeedbackStore` conforms to `ObservableObject` with a `@Published var stats` property so SwiftUI views (MenuBarPanel) can reactively display usage statistics
+- File writes via `record()` are synchronous on whatever thread calls them
+- File reads via `refreshStats()` parse the entire JSONL file, decode each line with a `JSONDecoder`, and aggregate into a `UsageStats` value. Lines that fail to decode are silently skipped
 - `accepted_text` != `drafted_text` when the user edits the draft in the TextEditor before hitting Copy/Paste — this edit delta is the richest feedback signal
+- Both an `encoder` (for writing) and `decoder` (for reading) are initialized once and reused
+
+## Public API
+
+| Method | Purpose |
+|--------|---------|
+| `record(rawText:draftedText:acceptedText:action:exampleCount:formality:)` | Append a feedback entry to `feedback.jsonl` |
+| `refreshStats()` | Parse `feedback.jsonl` and update the `@Published stats` property |
 
 ## Error Handling
 
-All failure paths now log warnings instead of failing silently:
-- `print("⚠️ FEEDBACK | failed to encode feedback entry")` — if `JSONEncoder` fails
-- `print("⚠️ FEEDBACK | failed to open feedback.jsonl for writing")` — if `FileHandle` open fails
-- `print("⚠️ FEEDBACK | failed to create feedback.jsonl: ...")` — if initial file creation fails
+All failure paths log warnings via both `print()` and `EventReporter`:
+- `feedback_encode_failed` — if `JSONEncoder` fails to encode the entry
+- `feedback_file_open_failed` — if `FileHandle` cannot open `feedback.jsonl` for appending
+- `feedback_file_create_failed` — if initial file creation fails
 
-This makes feedback logging failures visible in the debug log rather than silently dropping training data.
+`refreshStats()` resets stats to zero defaults if the file is missing or unreadable. Malformed lines are skipped without error.
+
+This makes feedback logging failures visible in the debug log and `events.jsonl` rather than silently dropping training data.

@@ -1,5 +1,6 @@
 // StyleProfileView.swift
-// Second tab in MenuBarPanel — shows the user's style.md profile
+// DEPRECATED: Style display is now inlined in MenuBarPanel.swift (single-pane layout).
+// This file is kept for reference but no longer used.
 
 import SwiftUI
 

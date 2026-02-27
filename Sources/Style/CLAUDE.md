@@ -6,7 +6,7 @@ Learns the user's writing style through training pairs (AI draft vs. what the us
 
 ## Key File
 
-- `StyleEngine.swift` — `@MainActor ObservableObject` managing style.md, training pair collection, incremental refinement, and onboarding state
+- `StyleEngine.swift` (605 lines) — `@MainActor ObservableObject` managing style.md, training pair collection, incremental refinement, and onboarding state
 
 ## How It Works
 
@@ -18,8 +18,8 @@ Solves the **cold start problem** — without onboarding, the first 10+ drafts a
 2. User chooses a source: **Import from iMessages** (recommended) or **Paste Samples Manually**
 3. iMessage path: `iMessageReader` reads `~/Library/Messages/chat.db` (requires Full Disk Access, no date filter, no SQL word filter — just `is_from_me = 1` with `LIMIT 2000`, Swift-level `shouldSkip()` filters to 2+ character messages), shows preview, user approves. Includes optional "Add Slack, email, or other writing samples" expandable section — if provided, combined text (iMessages + supplement) is sent together.
 4. Manual path: User pastes real writing samples (Slack messages, texts, emails — messy is fine)
-5. Either path calls `importBulkSamples()` which sends text to **Sonnet** with a specialized `bulkAnalysisPrompt`. When iMessage + supplementary text are combined, the joined text is passed as a single string.
-6. Sonnet returns a comprehensive 400-600 word style profile analyzing 10 dimensions
+5. Either path calls `importBulkSamples()` which reads the user's display name from UserDefaults (`"user-display-name"`) and sends text to **Sonnet** with a specialized `bulkAnalysisPrompt(userName:)`. The name helps Sonnet identify which messages belong to the user vs. other participants. When iMessage + supplementary text are combined, the joined text is passed as a single string.
+6. Sonnet returns a comprehensive 500-800 word style profile analyzing 9 dimensions (sections listed under Profile Structure below)
 7. **Only the generated profile is saved** — raw samples/messages are discarded after analysis
 8. User can review, add more samples and regenerate, or accept
 9. "Skip for Now" is always available — the incremental system works without onboarding
@@ -27,12 +27,14 @@ Solves the **cold start problem** — without onboarding, the first 10+ drafts a
 ### Training Pair Collection
 
 Every time the user accepts a draft (Copy or "Paste to Source App"), `recordExample()` saves a **training pair**:
+- `PLATFORM` — detected from the target app (slack/imessage/email/etc.)
+- `FORMALITY` (optional) — detected communication register (casual/professional/formal), included when available
+- `USER_INSTRUCTIONS` (optional) — the user's spoken voice instructions, included when non-empty
+- `EDIT_DISTANCE` — word-overlap ratio (0 = identical, 1 = completely different)
 - `AI_DRAFT` — what the AI produced (snapshotted from `DraftEngine.originalDraft`)
 - `USER_SENT` — what the user actually sent (may be edited version)
-- `PLATFORM` — detected from the target app (slack/imessage/email/etc.)
-- `EDIT_DISTANCE` — word-overlap ratio (0 = identical, 1 = completely different)
 
-The diff between AI_DRAFT and USER_SENT is the core learning signal — it reveals exactly where the style profile is wrong.
+The diff between AI_DRAFT and USER_SENT is the core learning signal — it reveals exactly where the style profile is wrong. The optional `USER_INSTRUCTIONS` field enables instruction-vs-style separation during refinement: if the user's edits align with instructions the AI missed, that's an instruction error, not a style signal.
 
 ### Graduated Refinement
 
@@ -50,20 +52,28 @@ Refinement frequency adapts based on example count and profile quality:
 
 ### Incremental (Not Rebuild)
 
-Sonnet gets the current profile + recent training pairs with a refinement prompt:
+`buildRefinementPrompt(currentProfile:)` (a `private static` method) builds the Sonnet prompt with two branches:
 
-- **Has existing profile:** "Here's the current profile. Here are training pairs showing what the AI got wrong. Fix the profile based on these patterns."
+- **Has existing profile:** "Here's the current profile. Here are training pairs showing what the AI got wrong. Fix the profile based on these patterns." Includes contamination auditing: Sonnet is told to REMOVE patterns from the current profile that were incorrectly attributed from AI_DRAFT text.
 - **No existing profile:** "Build a profile from these training pairs. The USER_SENT versions are ground truth."
 
-The profile gets surgically adjusted based on actual errors, not reconstructed. The profile can't regress because Sonnet is told to preserve what's working.
+Both branches include:
+- **Critical Source Rules** — 5 rules enforcing that USER_SENT is the sole source of truth and AI_DRAFT patterns must not be attributed to the user (the refinement branch adds a 6th rule: audit the current profile for contamination from AI_DRAFT)
+- **Instruction vs. Style Separation** — when USER_INSTRUCTIONS is present, distinguishes between instruction errors (AI missed what the user asked for) and true style preferences (user changes beyond what they instructed)
+- **Formality-aware rules** — when FORMALITY data is available, NEVER rules should be context-specific (e.g., "NEVER X in professional Slack" not just "NEVER X")
+- **Evidence Rule** — every claimed pattern must include 1-2 direct quotes from USER_SENT as proof
+
+The profile gets surgically adjusted based on actual errors, not reconstructed. Sonnet is told to PRESERVE patterns from the current profile that have USER_SENT evidence, REMOVE contaminated patterns, and FIX dimensions where training pairs show clear errors.
 
 ### Application — Ghostwriting System Prompt
 
-`buildSystemPrompt()` assembles a structured system prompt with three components:
+`buildSystemPrompt()` first calls `extractStyleSummary()` to get the profile. If the summary is empty (no profile yet, or still the placeholder text `"(Will be generated after 5 examples)"`), it falls back to `promptStore?.config.draftingSystem ?? DefaultPrompts.draftingSystem` — a generic drafting prompt with no style personalization.
+
+When a style profile exists, it assembles a structured system prompt with three components:
 
 1. **Style profile** — extracted from `## Style Summary`, wrapped in `<style_profile>` XML tags
 2. **Reference samples** — 2-3 diverse USER_SENT examples from training pairs, wrapped in `<reference_messages>` with platform tags. Extracted by `extractReferenceSamples(count:)` which walks backwards (most recent first) and prioritizes different platforms for diversity.
-3. **Instructions** — explicit rules in `<instructions>` tags: match platform register, use signature phrases, respect NEVER list, match message length, don't write like an AI assistant.
+3. **Instructions** — explicit rules in `<instructions>` tags: match platform register, use signature phrases, respect NEVER list, match message length, don't write like an AI assistant. Also includes `<the_test>` framing: "If someone who knows this person well read your output, could they tell it wasn't written by them?"
 
 The XML structure lets Haiku parse the profile sections independently (per Anthropic's prompt engineering guidance). The reference samples provide "ground truth" — descriptions tell Haiku what patterns to follow, but samples demonstrate the actual rhythm and cadence.
 
@@ -119,6 +129,9 @@ iMessage: [...]
 
 ### Example 1
 PLATFORM: slack
+FORMALITY: casual
+USER_INSTRUCTIONS:
+say yeah I'm down for lunch tomorrow
 EDIT_DISTANCE: 0.42
 AI_DRAFT:
 Hey Sarah! That sounds great, I'm totally in for lunch tomorrow.
@@ -126,6 +139,8 @@ Hey Sarah! That sounds great, I'm totally in for lunch tomorrow.
 USER_SENT:
 hey! yeah totally down for lunch tmrw 👍
 ```
+
+`FORMALITY` and `USER_INSTRUCTIONS` are optional — older examples or examples without voice instructions omit them.
 
 No onboarding samples section — raw pastes are discarded after initial profile generation.
 
@@ -138,23 +153,35 @@ No onboarding samples section — raw pastes are discarded after initial profile
 var promptStore: PromptStore?                   // Set by ContentView — provides fallback drafting prompt
 
 func buildSystemPrompt() -> String              // Returns style-aware or PromptStore fallback prompt
-func recordExample(aiDraft: String, userFinal: String, platform: String)  // Saves training pair
+func recordExample(aiDraft: String, userFinal: String, platform: String,
+                   userInstructions: String? = nil, formality: String? = nil)  // Saves training pair
 func shouldRefineNow() -> Bool                   // Graduated refinement scheduling
 func regenerateStyleSummary(auth: AuthCredential) async // Recency-weighted Sonnet refinement (last 20 examples)
 func importBulkSamples(rawText: String, auth: AuthCredential) async throws -> String  // Onboarding
 func completeOnboarding()                        // Sets hasCompletedOnboarding = true
 ```
 
+## Initialization
+
+`init()` reads `hasCompletedOnboarding` from UserDefaults, creates the App Support directory if missing, and calls `loadStyleFile()` which reads `style.md` from disk and counts existing examples by splitting on `"### Example"` to restore `exampleCount` across app relaunches.
+
 ## Storage
 
 - **Style data:** `~/Library/Application Support/Draft/style.md`
 - **Onboarding flag:** `UserDefaults` key `"style-onboarding-completed"`
-- **User's name:** `UserDefaults` key `"user-display-name"` (set during onboarding, used for vision extraction too)
+- **User's name:** `UserDefaults` key `"user-display-name"` (set during onboarding, used for vision extraction and bulk analysis)
 - **Format:** Markdown with structured sections, written atomically on every change
+
+## Dead Code Note
+
+`extractExamplesText()` (private, extracts ALL examples) is defined but never called. It was superseded by `extractRecentExamplesText(last:)` which only sends recent examples to Sonnet. Safe to remove.
 
 ## Error Handling
 
-`saveStyleFile()` uses `do/catch` with `print("⚠️ STYLE | failed to save style.md: ...")` instead of silent `try?`. This makes write failures visible in the debug log (e.g., disk full, permissions changed, directory missing).
+Both `saveStyleFile()` and `loadStyleFile()` use `do/catch` with `print("⚠️ STYLE | ...")` for debug log visibility, plus `EventReporter.shared.capture()` for structured observability:
+- `saveStyleFile()` — logs to print and reports `style_file_write_failed` (level: error)
+- `loadStyleFile()` — reports `style_file_read_failed` (level: warning) via EventReporter (no print, since the file may legitimately not exist yet)
+- `regenerateStyleSummary()` — prints warning and reports `style_refinement_failed` (level: error) on Sonnet call failure
 
 ## Verification
 

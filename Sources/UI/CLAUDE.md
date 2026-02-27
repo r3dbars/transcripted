@@ -2,26 +2,26 @@
 
 ## What This Does
 
-SwiftUI views for the Draft app. The primary UI is a **floating overlay** (non-activating NSPanel) that appears over the user's current app for the hotkey → speak → draft → review → inject flow. A **menubar popover** hosts the Style Profile and Agent tabs for configuration.
+SwiftUI views for the Draft app. The primary UI is a **floating overlay** (non-activating NSPanel) that appears over the user's current app for the hotkey → speak → draft → review → inject flow. A **menubar popover** hosts a single-pane layout with status, usage stats, shortcut pills, writing style, and agent section.
 
 ## Key Files
 
-- `FloatingOverlayPanel.swift` (~35 lines) — NSPanel subclass (non-activating, dynamic key status)
-- `FloatingOverlayController.swift` (~335 lines) — State machine, animations, panel lifecycle, global Escape monitor
-- `OverlayContentView.swift` (~245 lines) — SwiftUI views for all 5 overlay states (idle/listening/drafting/streaming/review)
-- `DraftSessionController.swift` (~430 lines) — Session orchestration for draft mode (⌥D) and dictation mode (⌥Space)
-- `OverlayTokens.swift` (~20 lines) — Design tokens: colors (panelBg, accentGreen, text colors) and layout constants (panel width/height, corner radius, padding)
+- `FloatingOverlayPanel.swift` (~38 lines) — NSPanel subclass (non-activating, dynamic key status)
+- `FloatingOverlayController.swift` (~363 lines) — State machine, animations, panel lifecycle, global Escape monitor
+- `OverlayContentView.swift` (~253 lines) — SwiftUI views for all 5 overlay states (idle/listening/drafting/streaming/review)
+- `DraftSessionController.swift` (~494 lines) — Session orchestration for draft mode (⌥D) and dictation mode (⌥Space)
+- `OverlayTokens.swift` (~49 lines) — Design tokens: `OverlayTokens` for floating overlay (translucent dark), `MenuTokens` for menubar panel (system-adaptive colors, layout constants)
 - `PanelDragView.swift` (~23 lines) — AppKit drag helper (mouseDown → performDrag)
-- `MenuBarPanel.swift` (127 lines) — Menubar popover with TabView (Style + Agent), onboarding gates, settings gear
-- `StyleProfileView.swift` (49 lines) — Extracted style tab showing style.md contents
-- `AgentTab.swift` (423 lines) — Agent insight cards (Apply/Skip) + streaming chat interface
+- `MenuBarPanel.swift` (~335 lines) — Single-pane menubar popover (440x520): header (status dot), usage stats, shortcut pills, writing style (compact/expandable), agent section, onboarding gates, settings gear
+- `StyleProfileView.swift` (~51 lines) — DEPRECATED: style display is now inlined in MenuBarPanel.swift. Kept for reference only.
+- `AgentTab.swift` (~277 lines) — `AgentSection` struct: simplified insight cards (Apply/Skip) + streaming chat interface
 - `StyleOnboardingView.swift` (664 lines) — 5-step onboarding: intro → source choice → (iMessage/paste) → result
 - `APIKeyEntryView.swift` (231 lines) — Auth setup overlay: name + API key or subscription token
 - `InsightCard.swift` (71 lines) — Model for insight cards + shared `toolDefinition` and `from()` factory (used by both StreamingChatEngine and AnalysisEngine)
 - `AudioWaveformView.swift` (63 lines) — Animated waveform bars driven by `STTRouter.audioLevel`
 - `ScrollingWaveformView.swift` (147 lines) — Real-time scrolling waveform for overlay header bar, Canvas + TimelineView at 60fps, ring buffer for audio level samples
 - `AnimatedTranscriptView.swift` (81 lines) — Animated live transcript text display during recording
-- `ChatMessage.swift` (32 lines) — Model for chat messages in AgentTab
+- `ChatMessage.swift` (32 lines) — Model for chat messages in AgentSection
 - `AppLogger.swift` (92 lines) — Debug logger writing to `~/draft-debug.log` with timestamps
 - `PreviousAppTracker.swift` (25 lines) — Tracks last non-Draft app for paste-back fallback
 
@@ -30,17 +30,17 @@ SwiftUI views for the Draft app. The primary UI is a **floating overlay** (non-a
 ```
 FloatingOverlay (hotkey flow)          MenuBarPanel (configuration)
 ┌──────────────────────────┐          ┌───────────────────────────┐
-│ FloatingOverlayPanel     │          │ TabView                   │
-│ (NSPanel, non-activating)│          │ ├── StyleProfileView      │
-│                          │          │ └── AgentTab              │
-│ States:                  │          │                           │
-│ idle → listening →       │          │ Onboarding gates:         │
-│ drafting → streaming →   │          │ APIKeyEntryView (overlay) │
-│ review                   │          │ StyleOnboardingView       │
-├──────────────────────────┤          └───────────────────────────┘
-│ DraftSessionController   │
-│ (orchestrates full flow) │
-└──────────────────────────┘
+│ FloatingOverlayPanel     │          │ Single-pane ScrollView    │
+│ (NSPanel, non-activating)│          │ ├── Header (status dot)   │
+│                          │          │ ├── Stats (words/msgs)    │
+│ States:                  │          │ ├── Shortcuts (⌥D / ⌥Space)│
+│ idle → listening →       │          │ ├── Writing Style (card)  │
+│ drafting → streaming →   │          │ └── AgentSection (cards+chat)│
+│ review                   │          │                           │
+├──────────────────────────┤          │ Onboarding gates:         │
+│ DraftSessionController   │          │ APIKeyEntryView (overlay) │
+│ (orchestrates full flow) │          │ StyleOnboardingView       │
+└──────────────────────────┘          └───────────────────────────┘
 ```
 
 ## FloatingOverlay — The Primary UI (v2)
@@ -179,15 +179,23 @@ Both set `panel.ignoresMouseEvents = true` before animating to prevent gesture d
 
 ## MenuBarPanel — Configuration UI
 
-Menubar popover with:
-- **Style tab** (`StyleProfileView`) — read-only display of style.md contents
-- **Agent tab** (`AgentTab`) — insight cards from AnalysisEngine, streaming chat interface
-- **Onboarding gates** — sequential overlays: `APIKeyEntryView` → `StyleOnboardingView`
-- **Settings gear** — popover with name field, auth switch, quit button
+Single-pane menubar popover (440x520, `MenuTokens` design tokens) with a continuous ScrollView. No tabs — all content is visible in one vertical flow:
+
+1. **Header** — "Draft" title + status dot (green = model loaded, orange = loading)
+2. **Stats** — Three-column HStack: words dictated, messages drafted, time saved. Data from `FeedbackStore.stats`, refreshed on `.onAppear`
+3. **Shortcuts** — Pill-shaped badges showing `⌥D Draft` and `⌥Space Dictation`
+4. **Writing Style** — Section header with example count badge + expandable card. Shows compact 4-line preview of `style.md` (extracted from "## Style Summary" section), expands to full scrollable content with "Show more/Show less" toggle. Empty state: "Accept a draft to start learning your style"
+5. **Agent** — `AgentSection` (from `AgentTab.swift`): insight cards + streaming chat interface
+
+Additional features:
+- **Onboarding gates** — sequential ZStack overlays: `APIKeyEntryView` → `StyleOnboardingView`
+- **Settings gear** — top-right overlay button with popover: name field, transcription engine info (Parakeet CoreML with download progress), auth mode display + "Switch Auth Method", Quit button
 
 ## InsightCard
 
-Model struct for agent-proposed prompt changes. Key addition: **shared `toolDefinition` and `from()` factory** used by both `StreamingChatEngine` and `AnalysisEngine` — eliminates tool definition duplication.
+Model struct for agent-proposed prompt changes. The card UI in `AgentSection` is simplified: shows only the `promptKeyLabel`, `changeDescription`, and Apply/Skip buttons (no SAW/WHY/CHANGE labels). The full data (saw, why, currentValue, proposedValue) is still stored for programmatic use by `AnalysisEngine.apply()`.
+
+Key addition: **shared `toolDefinition` and `from()` factory** used by both `StreamingChatEngine` and `AnalysisEngine` — eliminates tool definition duplication.
 
 ```swift
 static let toolDefinition: [String: Any]                    // Anthropic tool schema for propose_prompt_change
@@ -238,7 +246,8 @@ After modifying UI components, verify with these checks:
 - **Cancel during review:** ⌥D while draft is showing → overlay hides (shake animation), nothing injected
 - **Paste-back:** Draft injected into correct target app (overlay is non-activating)
 - **Onboarding gates:** Gear → "Switch Auth Method" → auth overlay appears
-- **Style tab:** Shows style.md contents in menubar popover
-- **Agent tab:** Insight cards appear with Apply/Skip buttons; chat interface works
+- **Stats section:** Opens menubar panel → words dictated, messages drafted, time saved are visible
+- **Style section:** Shows style.md preview in expandable card; "Show more" expands full content
+- **Agent section:** Insight cards appear with Apply/Skip buttons; chat interface works
 - **Debug log:** `tail -f ~/draft-debug.log | grep "SESSION\|DICTATION\|REVIEW"` shows all events
 - **Build:** `bash build.sh` — must compile cleanly (pre-existing warnings only: CGWindowListCreateImage deprecation, `_performHide()` actor isolation in animation callbacks)

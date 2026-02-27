@@ -15,12 +15,12 @@ Sources/
 ├── Draft/                   ← DraftEngine + PlatformFormatter — orchestrates drafting (v1 interface)
 ├── Style/                   ← StyleEngine — learns user's writing voice + onboarding
 ├── Prompts/                 ← PromptStore — externalized prompts (prompts.json)
-├── Feedback/                ← FeedbackStore — accept/edit signal logging (feedback.jsonl)
+├── Feedback/                ← FeedbackStore — accept/edit signal logging (feedback.jsonl) + UsageStats
 ├── Messages/                ← iMessage database reader (SQLite, onboarding import)
 ├── Capture/                 ← Screen capture, context extraction, hotkey registration, three-way routing
 ├── Analysis/                ← AnalysisEngine — native Swift feedback analyzer (replaces Python agent)
 ├── Observability/           ← EventReporter — centralized error/warning/info tracking (events.jsonl)
-└── UI/                      ← Floating overlay (6 files), MenuBarPanel, onboarding, Agent tab
+└── UI/                      ← Floating overlay (6 files), MenuBarPanel (single-pane), onboarding, AgentSection
 agent/                       ← ⚠️ DEPRECATED — Python orchestrator replaced by Sources/Analysis/
 ```
 
@@ -47,7 +47,8 @@ This compiles all Swift files from `Sources/`, signs the app bundle, and launche
 - **iMessage import** — Optional onboarding path that reads `~/Library/Messages/chat.db` for zero-effort style profile generation (requires Full Disk Access)
 - **Paste to source app** — Injects the polished message into the exact app that was screenshotted, with clipboard save/restore
 - **Frictionless keyboard flow** — ⌥D to start draft → speak → ⌥D to draft → Enter to inject → Escape to cancel at any time. ⌥Space for dictation → speak → ⌥Space to paste. No clicking required
-- **Native analysis engine** — Swift-native AnalysisEngine watches feedback via DispatchSource, uses Sonnet to analyze patterns, and proposes prompt improvements as InsightCards in the Agent tab
+- **Menu bar dashboard** — Single-pane menubar popover (440x520) with status, usage stats (words dictated, messages drafted, time saved), shortcut pills, compact/expandable writing style, and agent section (insight cards + chat). System-adaptive colors via `MenuTokens`
+- **Native analysis engine** — Swift-native AnalysisEngine watches feedback via DispatchSource, uses Sonnet to analyze patterns, and proposes prompt improvements as InsightCards in the agent section
 - **Reliability hardened** — All force-unwraps guarded, stale Tasks cancelled before replacement, deinits on all engines (Carbon hotkeys, audio engine, file watchers), NSLock-batched audio samples, global Escape monitor, streaming state guards
 - **Observability** — `EventReporter` captures 35 structured events across all 12 engines to `events.jsonl`. See "Diagnosing Issues" below.
 
@@ -215,6 +216,15 @@ If vision times out (> 8s) or fails, the fallback prompt asks Claude to "clean u
 4. **`Sources/UI/CLAUDE.md`** — Document any new states, views, or behaviors
 5. **Test** — Full flow: ⌥D → speak → ⌥D → stream → Enter → paste. Verify auto-focus, Enter/Escape, and cancel behavior.
 
+### To modify the menubar panel:
+
+1. **`Sources/UI/MenuBarPanel.swift`** — Single-pane ScrollView with sections: header, stats, shortcuts, style, agent. All layout in one file.
+2. **`Sources/UI/AgentTab.swift`** — `AgentSection` struct: insight cards (Apply/Skip) + streaming chat. Embedded in MenuBarPanel via composition.
+3. **`Sources/UI/OverlayTokens.swift`** — `MenuTokens` enum: system-adaptive colors and layout constants. All menubar panel styling flows through these tokens.
+4. **`Sources/Feedback/FeedbackStore.swift`** — `refreshStats()` computes `UsageStats` from `feedback.jsonl`; `@Published var stats` drives the stats section reactively.
+5. **`Sources/UI/CLAUDE.md`** — Document any new sections or layout changes
+6. **Test** — Open menubar popover, verify stats update on appear, style card expands/collapses, insight cards show Apply/Skip, chat input works, settings gear opens popover.
+
 ## Git & GitHub
 
 Before committing or pushing, always switch to the **r3dbars** GitHub account:
@@ -239,8 +249,10 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - **Plain-text vision extraction** — Haiku Vision returns labeled sections (PLATFORM/TALKING TO/FORMALITY/CONVERSATION), parsed by `CapturedContext.parse()`. No JSON — simpler and handles variable-length conversations
 - **Source app stored on capture** — The exact `NSRunningApplication` is saved at hotkey time, so paste-back targets the right app even if focus changes
 - **Externalized prompts** — All system prompts live in `~/Library/Application Support/Draft/prompts.json`, loaded by `PromptStore`. The analysis engine can rewrite prompts without recompiling. Engines read from `promptStore` with hardcoded fallbacks in `DefaultPrompts`.
-- **Feedback logging** — Every accepted draft appends a JSON line to `~/Library/Application Support/Draft/feedback.jsonl` with raw text, AI draft, user's accepted version, action (copy/paste), and example count. The analysis engine reads this to understand which drafts work and which need improvement.
+- **Feedback logging + usage stats** — Every accepted draft appends a JSON line to `~/Library/Application Support/Draft/feedback.jsonl` with raw text, AI draft, user's accepted version, action (copy/paste), example count, and formality. `FeedbackStore.refreshStats()` parses the log to compute aggregate usage stats (words dictated, messages drafted, time saved) displayed in the menubar panel.
 - **Native analysis engine** — Replaced the Python subprocess with Swift-native `AnalysisEngine` using DispatchSource file watching, eliminating subprocess crashes, cold start latency, and port conflicts. See `Sources/Analysis/CLAUDE.md`.
+- **MenuTokens design system** — `MenuTokens` enum in `OverlayTokens.swift` provides system-adaptive colors (using `NSColor` semantic colors like `controlBackgroundColor`, `tertiaryLabelColor`) and layout constants for the menubar panel. No hardcoded brand colors — all colors adapt to light/dark mode automatically. Separate from `OverlayTokens` which uses translucent dark colors for the floating overlay.
+- **Single-pane menubar panel** — Replaced the TabView (Style + Agent tabs) with a single ScrollView containing sections: header (status dot), usage stats, shortcut pills, writing style (compact/expandable), and agent (insight cards + chat). `StyleProfileView` is deprecated — style display is inlined in `MenuBarPanel.swift`.
 - **Guarded optionals over IUOs** — `DraftSessionController.appState` and `overlayController` are `Optional`, not `!`. Every public method starts with `guard let` to handle pre-wiring hotkey races. Never use implicitly unwrapped optionals for properties set after init.
 - **Task cancellation before replacement** — Always `task?.cancel()` before `task = Task { ... }`. Orphaned tasks keep running and writing to shared state.
 - **Global Escape monitor** — `NSEvent.addGlobalMonitorForEvents` intercepts Escape during non-key panel states (listening/drafting). Installed when overlay shows, removed on hide. The panel can't receive keyboard events when `allowKeyStatus = false`, so SwiftUI `.onKeyPress` won't fire — the global monitor bridges that gap.
