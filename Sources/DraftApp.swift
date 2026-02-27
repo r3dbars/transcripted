@@ -76,8 +76,13 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate {
         if popover.isShown {
             popover.performClose(nil)
         } else {
+            // Recreate the hosting controller each time to guarantee a fresh SwiftUI
+            // view tree. A long-lived NSHostingController accumulates stale observation
+            // state across show/hide cycles, eventually crashing in body evaluation.
+            popover.contentViewController = NSHostingController(
+                rootView: MenuBarPanelView(appState: appState)
+            )
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            // Bring popover to front
             NSApp.activate(ignoringOtherApps: true)
         }
     }
