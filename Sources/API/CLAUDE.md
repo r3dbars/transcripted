@@ -2,13 +2,14 @@
 
 ## What This Does
 
-Handles communication with the Anthropic Messages API (text drafting + vision context extraction), auth credential management, and secure Keychain storage.
+Handles communication with the Anthropic Messages API (text drafting, vision context extraction, and multi-turn streaming chat), auth credential management, and secure Keychain storage.
 
 ## Key Files
 
-- `AnthropicAPI.swift` — URLSession-based HTTP client for Claude (text + vision)
-- `AuthCredential.swift` — Auth abstraction: API key or Claude subscription token
-- `KeychainHelper.swift` — Simple Keychain wrapper (save/load/delete)
+- `AnthropicAPI.swift` (~290 lines) — URLSession-based HTTP client for Claude (text drafting, streaming drafts, vision extraction, timeout utility)
+- `AuthCredential.swift` (~75 lines) — Auth abstraction: API key or Claude subscription token, with Keychain load/save/clear
+- `KeychainHelper.swift` (~55 lines) — Simple macOS Keychain wrapper (save/load/delete) using Security framework
+- `StreamingChatEngine.swift` (~390 lines) — Multi-turn streaming chat engine for the Agent tab; handles conversation history, context injection (style/prompts/feedback/suggestion log), and `propose_prompt_change` tool use
 
 ---
 
@@ -78,7 +79,7 @@ Anthropic provides SDKs for Python, TypeScript, Java, etc. — but NOT Swift. We
 ### Models
 
 - **Haiku** (`claude-haiku-4-5-20251001`) — Default for text drafting and vision extraction. Fastest/cheapest, ideal where latency matters. **Model is not hardcoded in AnthropicAPI** — callers pass `model:` explicitly (read from `PromptStore` or `DefaultPrompts`).
-- **Sonnet** (`claude-sonnet-4-20250514`) — Used for style analysis (deeper reasoning needed for writing profiles). Exposed as `AnthropicAPI.sonnetModel` so other components can reference it.
+- **Sonnet** (`claude-sonnet-4-6-20250514`) — Used for style analysis (deeper reasoning needed for writing profiles). Exposed as `AnthropicAPI.sonnetModel` so other components (StyleEngine, AnalysisEngine) can reference it. The Agent tab chat reads its model from `promptStore?.config.draftModel` with a fallback to `DefaultPrompts.sonnetModel`.
 
 ### Two API Modes
 
@@ -103,6 +104,8 @@ Anthropic provides SDKs for Python, TypeScript, Java, etc. — but NOT Swift. We
 3. Raw text response → `CapturedContext.parse(from:)` splits into struct fields
 4. No JSON involved — simpler and handles variable-length conversations
 
+**Debug mode**: Set `DRAFT_DEBUG_VISION_RESPONSE=1` environment variable to print the raw Haiku vision response to console (disabled by default to avoid hot-path I/O).
+
 ### Vision Prompt Design (Hard-Won Knowledge)
 
 - **App name hint**: Pass the actual OS app name (e.g., "Messages") so Haiku doesn't guess wrong from UI chrome alone
@@ -111,10 +114,21 @@ Anthropic provides SDKs for Python, TypeScript, Java, etc. — but NOT Swift. We
 
 ### Error Handling
 
-- **401 + API key** → `.apiError("Invalid credentials")`
-- **401 + subscription token** → `.subscriptionTokenExpired` (tells user to re-run `claude setup-token`)
-- **429** → Rate limited
-- **500/529** → Server overloaded
+`AnthropicAPIError` enum cases:
+- `.noCredential` — No API key or subscription token configured
+- `.invalidResponse` — Response is not a valid HTTP response
+- `.emptyResponse` — API returned 200 but no content blocks
+- `.apiError(String)` — General API error with message (HTTP errors, rate limits, etc.)
+- `.networkError(String)` — URLSession network failure
+- `.subscriptionTokenExpired` — 401 when using subscription token (tells user to re-run `claude setup-token`)
+- `.timeout` — Request exceeded the deadline (from `withTimeout()`)
+
+HTTP status code handling in `parseResponse()`:
+- **401 + API key** → `.apiError("Invalid credentials (HTTP 401)")`
+- **401 + subscription token** → `.subscriptionTokenExpired`
+- **Other non-200** → `.apiError(message)` where message is decoded from `AnthropicErrorResponse` or falls back to "HTTP {code}"
+
+All non-200 responses and auth failures are reported via `EventReporter` (async `@MainActor` dispatch).
 
 ---
 
@@ -129,16 +143,16 @@ Anthropic provides SDKs for Python, TypeScript, Java, etc. — but NOT Swift. We
 ## Public Interface
 
 ```swift
-// AuthCredential
+// AuthCredential (enum, Sendable)
 static func load() -> AuthCredential?
 static func saveAPIKey(_ key: String) -> Bool
 static func saveSubscriptionToken(_ token: String) -> Bool
 static func clear()
 func apply(to request: inout URLRequest)
-var modeName: String
+var modeName: String  // "API Key" or "Claude Subscription"
 
-// AnthropicAPI
-static let sonnetModel: String  // "claude-sonnet-4-20250514"
+// AnthropicAPI (struct, all static methods)
+static let sonnetModel: String  // "claude-sonnet-4-6-20250514"
 
 static func draft(
     rawText: String,
@@ -164,12 +178,23 @@ static func extractStructuredContext(
 ) async throws -> CapturedContext
 
 /// Run an async operation with a deadline. Throws CancellationError on timeout.
-static func withTimeout<T: Sendable>(seconds: Double, operation: () async throws -> T) async throws -> T
+static func withTimeout<T: Sendable>(
+    seconds: Double,
+    operation: @escaping @Sendable () async throws -> T
+) async throws -> T
 
-// KeychainHelper
+// KeychainHelper (struct, all static methods)
 static func save(key: String, value: String) -> Bool
 static func load(key: String) -> String?
-static func delete(key: String) -> Bool
+@discardableResult static func delete(key: String) -> Bool
+
+// StreamingChatEngine (@MainActor class, ObservableObject)
+@Published var messages: [ChatMessage]     // ChatMessage defined in UI/ChatMessage.swift
+@Published var isResponding: Bool          // Guards against concurrent sends
+var onInsightProposed: ((InsightCard) -> Void)?  // Fires when Claude calls propose_prompt_change
+var promptStore: PromptStore?              // Used to read model config (draftModel)
+func send(text: String, auth: AuthCredential) async  // No-ops if isResponding == true
+func clear()                               // Resets messages, history, and isResponding
 ```
 
 ### streamDraft() — Token-by-Token Streaming
@@ -184,15 +209,36 @@ Generic timeout wrapper using `withThrowingTaskGroup`. Races the operation again
 
 **Reliability fix:** `group.next()` result is now guarded with `guard let` instead of force-unwrapped (`group.next()!`). The force-unwrap could crash if both the operation and the sleep timer throw simultaneously.
 
+### StreamingChatEngine — Multi-Turn Agent Chat
+
+Powers the Agent tab's conversational interface. Goes directly to the Anthropic streaming API (no Python subprocess, no relay hop).
+
+**Context injection:** On every `send()`, the system prompt is built by concatenating `chatSystemPromptBase` with loaded context files from `~/Library/Application Support/Draft/`:
+- `style.md` — current style profile (wrapped in `<style_profile>` tags)
+- `prompts.json` — current prompt configuration (wrapped in `<prompts_json>` tags)
+- `feedback.jsonl` — last 25 lines of accepted draft training pairs (wrapped in `<recent_feedback_jsonl>` tags)
+- `suggestion_log.jsonl` — last 10 lines of suggestion history (wrapped in `<recent_suggestion_log_jsonl>` tags)
+
+**Model selection:** Reads from `promptStore?.config.draftModel`, falling back to `DefaultPrompts.sonnetModel` (`claude-sonnet-4-6-20250514`).
+
+**Tool use:** Declares a single tool (`InsightCard.toolDefinition` from `UI/InsightCard.swift`) for `propose_prompt_change`. When Claude calls it, the engine parses the tool input JSON, creates an `InsightCard` via `InsightCard.from(toolId:input:)`, and fires `onInsightProposed`. A tool result (`"Card emitted successfully."`) is sent back in a follow-up turn so Claude can respond naturally after the tool call.
+
+**Conversation turn flow:** `runConversationTurn()` streams the response, collecting text deltas and tool use events. If a tool was called, it appends the assistant message (with tool_use block) and tool_result to history, then calls `runFollowUpTurn()` for Claude's verbal follow-up. Pure text responses are appended directly to history.
+
+**SSE parsing:** Handles `content_block_start` (tool use detection), `content_block_delta` (text and tool input JSON deltas), `content_block_stop`, `message_stop`, and `error` event types. Sets `Accept: text/event-stream` header.
+
+**Error reporting:** Errors during streaming are reported to `EventReporter` with engine `"chat"` and events `chat_api_failed` (API/network errors) and `tool_parse_failed` (malformed tool input).
+
 ## Verification
 
 After modifying AnthropicAPI or AuthCredential, verify with these checks:
 
 - **Text drafting:** Type text in input → hit Draft → check debug log for `✅ DRAFTED` with character count
-- **Vision extraction:** Press ⌥Space over a messaging app → check console for `🔍 VISION RAW RESPONSE` showing the labeled sections (PLATFORM/TALKING TO/FORMALITY/CONVERSATION)
+- **Vision extraction:** Press ⌥Space over a messaging app → set `DRAFT_DEBUG_VISION_RESPONSE=1` env var and check console for `VISION RAW RESPONSE` showing the labeled sections (PLATFORM/TALKING TO/FORMALITY/CONVERSATION)
 - **Style refinement:** Accept 3 drafts → check for `🔄 STYLE | refinement triggered` in debug log (confirms Sonnet calls work)
 - **API key auth:** Enter `sk-ant-...` → verify `x-api-key` header in debug output
 - **Subscription token auth:** Enter token → verify `Authorization: Bearer` header, test expired token shows clear re-auth message
 - **Auth switching:** Settings → Switch Auth Method → clears Keychain → overlay reappears with segmented picker
 - **Error handling:** Temporarily break credentials → verify the UI shows an error message, not a crash
 - **Model selection:** Drafting should use Haiku (fast), style analysis should use Sonnet — check the `model` field in console output
+- **Agent tab chat:** Send a message in the Agent tab → verify streaming text appears token by token, propose_prompt_change tool calls produce InsightCards in the Suggestions section

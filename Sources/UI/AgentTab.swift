@@ -1,137 +1,136 @@
-// AgentTab.swift
-// Third tab showing insight cards + free-form chat with the native analysis engine.
+// AgentTab.swift → AgentSection
+// Agent section for the single-pane menubar panel.
+// Shows insight cards (pending only) + chat thread + input bar.
 //
 // Chat uses StreamingChatEngine (native Swift streaming) for direct Anthropic API
-// access — no Python subprocess, no SSE relay hop, no cold start.
-//
-// Background analysis uses AnalysisEngine (native Swift, DispatchSource file watching)
-// which replaces the Python orchestrator entirely. Insight cards from analysis
-// appear in the Suggestions section the same as before.
-//
-// Layout: header → collapsible suggestions → chat thread → input bar.
+// access. Background analysis uses AnalysisEngine (native Swift, DispatchSource).
 
 import SwiftUI
 
-struct AgentTab: View {
+struct AgentSection: View {
     @ObservedObject var orchestrator: AnalysisEngine
     @ObservedObject var chatEngine: StreamingChatEngine
     var auth: AuthCredential?
 
     @State private var chatInput = ""
-    @State private var isInsightsExpanded = true
     @State private var expandedTools: Set<String> = []
     @FocusState private var isChatInputFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            headerView
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .padding(.bottom, 12)
+        VStack(alignment: .leading, spacing: 12) {
+            agentHeader
 
-            // Insight cards section (collapsible, only if cards exist)
-            let allInsights = orchestrator.insights
-            if !allInsights.isEmpty {
-                insightsSection(insights: allInsights)
-                    .padding(.horizontal, 20)
-
-                Divider()
-                    .padding(.vertical, 8)
+            // Pending insight cards (inline, no DisclosureGroup)
+            let pending = orchestrator.insights.filter { $0.status == .pending }
+            if !pending.isEmpty {
+                ForEach(pending) { card in
+                    insightCardView(card)
+                }
             }
 
-            // Chat section (always visible)
             chatSection
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
         }
         .transaction { $0.animation = nil }
     }
 
     // MARK: - Header
 
-    private var headerView: some View {
+    private var agentHeader: some View {
         HStack {
             Text("Agent")
-                .font(.title2)
-                .fontWeight(.semibold)
+                .font(.headline)
 
             Spacer()
 
-            // Status indicators
-            HStack(spacing: 12) {
-                // Chat status
+            HStack(spacing: 6) {
                 if chatEngine.isResponding {
-                    HStack(spacing: 4) {
-                        ProgressView()
-                            .scaleEffect(0.5)
-                            .frame(width: 10, height: 10)
-                        Text("Thinking...")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                // Background analysis status
-                HStack(spacing: 6) {
-                    if orchestrator.isAnalyzing {
-                        ProgressView()
-                            .scaleEffect(0.5)
-                            .frame(width: 10, height: 10)
-                    } else {
-                        Circle()
-                            .fill(orchestrator.isConnected ? Color.green : Color.orange)
-                            .frame(width: 8, height: 8)
-                    }
+                    ProgressView()
+                        .scaleEffect(0.5)
+                        .frame(width: 10, height: 10)
+                    Text("Thinking...")
+                        .font(.caption)
+                        .foregroundColor(MenuTokens.textSecondary)
+                } else if orchestrator.isAnalyzing {
+                    ProgressView()
+                        .scaleEffect(0.5)
+                        .frame(width: 10, height: 10)
+                    Text("Analyzing...")
+                        .font(.caption)
+                        .foregroundColor(MenuTokens.textSecondary)
+                } else {
+                    Circle()
+                        .fill(orchestrator.isConnected ? MenuTokens.statusGreen : MenuTokens.statusOrange)
+                        .frame(width: MenuTokens.statusDotSize, height: MenuTokens.statusDotSize)
                     Text(orchestrator.agentStatus)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(MenuTokens.textSecondary)
                 }
             }
         }
     }
 
-    // MARK: - Suggestions (Collapsible)
+    // MARK: - Simplified Insight Card
 
-    private func insightsSection(insights: [InsightCard]) -> some View {
-        DisclosureGroup(isExpanded: $isInsightsExpanded) {
-            ScrollView {
-                VStack(spacing: 12) {
-                    ForEach(insights.reversed()) { card in
-                        insightCardView(card)
+    @ViewBuilder
+    private func insightCardView(_ card: InsightCard) -> some View {
+        // Capture card ID (value type) instead of the full card object to prevent
+        // stale closure captures when the insights array mutates during button dispatch.
+        let cardId = card.id
+        VStack(alignment: .leading, spacing: 8) {
+            Text(card.promptKeyLabel)
+                .font(.caption)
+                .foregroundColor(MenuTokens.textSecondary)
+
+            Text(card.changeDescription)
+                .font(.callout)
+
+            HStack(spacing: 10) {
+                Spacer()
+
+                Button("Skip") {
+                    guard let live = orchestrator.insights.first(where: { $0.id == cardId }) else { return }
+                    orchestrator.skip(live)
+                }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundColor(MenuTokens.textSecondary)
+
+                Button(action: {
+                    guard let live = orchestrator.insights.first(where: { $0.id == cardId }) else { return }
+                    orchestrator.apply(live)
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark")
+                        Text("Apply")
                     }
                 }
-                .padding(.top, 4)
-            }
-            .frame(maxHeight: 200)
-        } label: {
-            HStack(spacing: 4) {
-                Text("Suggestions")
-                    .font(.headline)
-                Text("(\(insights.count))")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                .buttonStyle(.borderedProminent)
+                .tint(MenuTokens.statusGreen)
+                .controlSize(.small)
             }
         }
+        .padding(MenuTokens.cardPadding)
+        .background(MenuTokens.cardBackground)
+        .cornerRadius(MenuTokens.cardCornerRadius)
+        .overlay(
+            RoundedRectangle(cornerRadius: MenuTokens.cardCornerRadius)
+                .stroke(MenuTokens.cardBorder, lineWidth: 1)
+        )
     }
 
     // MARK: - Chat
 
     private var chatSection: some View {
         VStack(spacing: 8) {
-            ZStack {
-                if chatEngine.messages.isEmpty {
-                    chatEmptyState
-                }
-
+            if !chatEngine.messages.isEmpty {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 6) {
                             ForEach(chatEngine.messages) { msg in
                                 chatBubble(msg)
                                     .id(msg.id)
                             }
 
-                            // Typing indicator while waiting for first token
                             if chatEngine.isResponding,
                                !chatEngine.messages.contains(where: { $0.isStreaming && $0.role == .assistant }) {
                                 typingIndicator
@@ -140,7 +139,7 @@ struct AgentTab: View {
                         }
                         .padding(.vertical, 4)
                     }
-                    .opacity(chatEngine.messages.isEmpty ? 0 : 1)
+                    .frame(maxHeight: 160)
                     .onChange(of: chatEngine.messages.count) { _, _ in
                         if let last = chatEngine.messages.last {
                             proxy.scrollTo(last.id, anchor: .bottom)
@@ -155,18 +154,6 @@ struct AgentTab: View {
         .animation(nil, value: chatEngine.isResponding)
     }
 
-    private var chatEmptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 28))
-                .foregroundColor(.secondary.opacity(0.5))
-            Text("Ask about your drafts, style, or prompts")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-        }
-        .padding(.vertical, 40)
-    }
-
     private var typingIndicator: some View {
         HStack(spacing: 4) {
             ProgressView()
@@ -174,7 +161,7 @@ struct AgentTab: View {
                 .frame(width: 10, height: 10)
             Text("Thinking...")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(MenuTokens.textSecondary)
         }
         .padding(.leading, 4)
     }
@@ -195,15 +182,15 @@ struct AgentTab: View {
                       || chatEngine.isResponding
                       || auth == nil)
             .buttonStyle(.plain)
-            .foregroundColor(.purple)
+            .foregroundColor(MenuTokens.sendButton)
 
             if !chatEngine.messages.isEmpty {
                 Button(action: { chatEngine.clear() }) {
                     Image(systemName: "trash")
-                        .font(.body)
+                        .font(.caption)
                 }
                 .buttonStyle(.plain)
-                .foregroundColor(.secondary)
+                .foregroundColor(MenuTokens.textSecondary)
             }
         }
     }
@@ -218,42 +205,24 @@ struct AgentTab: View {
             HStack {
                 if message.role == .user { Spacer(minLength: 60) }
 
-                VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
-                    messageText(message.text)
-                        .font(.body)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(
-                            message.role == .user
-                                ? Color.purple.opacity(0.15)
-                                : Color.secondary.opacity(0.08)
-                        )
-                        .cornerRadius(12)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(
-                                    message.role == .user
-                                        ? Color.purple.opacity(0.2)
-                                        : Color.gray.opacity(0.2),
-                                    lineWidth: 1
-                                )
-                        )
-
-                    if message.isStreaming {
-                        ProgressView()
-                            .scaleEffect(0.4)
-                            .frame(width: 8, height: 8)
-                    }
-                }
-                .frame(maxWidth: 400, alignment: message.role == .user ? .trailing : .leading)
+                Text(message.text)
+                    .font(.callout)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        message.role == .user
+                            ? MenuTokens.userBubbleBg
+                            : MenuTokens.assistantBubbleBg
+                    )
+                    .cornerRadius(MenuTokens.bubbleCornerRadius)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MenuTokens.bubbleCornerRadius)
+                            .stroke(MenuTokens.cardBorder, lineWidth: 0.5)
+                    )
 
                 if message.role == .assistant { Spacer(minLength: 60) }
             }
         }
-    }
-
-    private func messageText(_ text: String) -> some View {
-        Text(text)
     }
 
     // MARK: - Tool Indicator
@@ -277,14 +246,14 @@ struct AgentTab: View {
                 HStack(spacing: 4) {
                     Image(systemName: "wrench.and.screwdriver")
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(MenuTokens.textSecondary)
                     Text(message.text)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(MenuTokens.textSecondary)
                     if message.toolDetail != nil {
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                             .font(.system(size: 8))
-                            .foregroundColor(.secondary.opacity(0.6))
+                            .foregroundColor(MenuTokens.textSecondary.opacity(0.6))
                     }
                 }
             }
@@ -293,10 +262,10 @@ struct AgentTab: View {
             if isExpanded, let detail = message.toolDetail {
                 Text(detail)
                     .font(.system(.caption2, design: .monospaced))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(MenuTokens.textSecondary)
                     .padding(6)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.gray.opacity(0.1))
+                    .background(MenuTokens.cardBackground)
                     .cornerRadius(4)
             }
         }
@@ -313,111 +282,5 @@ struct AgentTab: View {
         Task {
             await chatEngine.send(text: text, auth: auth)
         }
-    }
-
-    // MARK: - Insight Card
-
-    @ViewBuilder
-    private func insightCardView(_ card: InsightCard) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(card.promptKeyLabel)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.purple.opacity(0.15))
-                    .cornerRadius(4)
-
-                Spacer()
-
-                switch card.status {
-                case .applied:
-                    Label("Applied", systemImage: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundColor(.green)
-                case .skipped:
-                    Label("Skipped", systemImage: "xmark.circle")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                case .pending:
-                    EmptyView()
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("SAW")
-                    .font(.caption2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.orange)
-                Text(card.saw)
-                    .font(.caption)
-                    .foregroundColor(.primary)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("WHY")
-                    .font(.caption2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.blue)
-                Text(card.why)
-                    .font(.caption)
-                    .foregroundColor(.primary)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("CHANGE")
-                    .font(.caption2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.purple)
-                Text(card.changeDescription)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundColor(.primary)
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.purple.opacity(0.05))
-                    .cornerRadius(6)
-            }
-
-            if card.status == .pending {
-                HStack(spacing: 12) {
-                    Button(action: { orchestrator.apply(card) }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark")
-                            Text("Apply")
-                        }
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 14)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.green)
-                    .controlSize(.small)
-
-                    Button(action: { orchestrator.skip(card) }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "forward")
-                            Text("Skip")
-                        }
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 14)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            }
-        }
-        .padding(14)
-        .background(Color.secondary.opacity(0.08))
-        .cornerRadius(10)
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(
-                    card.status == .applied ? Color.green.opacity(0.3) :
-                    card.status == .skipped ? Color.gray.opacity(0.2) :
-                    Color.purple.opacity(0.2),
-                    lineWidth: 1
-                )
-        )
-        .opacity(card.status == .skipped ? 0.6 : 1.0)
     }
 }

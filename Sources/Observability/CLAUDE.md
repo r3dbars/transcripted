@@ -2,7 +2,7 @@
 
 ## What This Is
 
-`EventReporter` is the centralized event tracking system. Every meaningful error, warning, and operational event across all 12 engines flows through `EventReporter.shared.capture()` and is written to:
+`EventReporter` is the centralized event tracking system. Every meaningful error, warning, and operational event across all 11 engines flows through `EventReporter.shared.capture()` and is written to:
 
 ```
 ~/Library/Application Support/Draft/events.jsonl
@@ -30,7 +30,7 @@ Same directory as `feedback.jsonl` and `prompts.json`. Claude Code reads this fi
 | Field | Type | Values |
 |-------|------|--------|
 | `level` | string | `"error"` \| `"warning"` \| `"info"` |
-| `engine` | string | `parakeet`, `speech`, `anthropic`, `draft`, `capture`, `style`, `feedback`, `analysis`, `chat`, `overlay`, `imessage`, `app` |
+| `engine` | string | `parakeet`, `anthropic`, `draft`, `capture`, `style`, `feedback`, `analysis`, `chat`, `overlay`, `imessage`, `app` |
 | `event` | string | Machine-readable snake_case identifier (e.g., `prewarm_failed`, `api_http_error`) |
 | `message` | string | Human-readable description (often `error.localizedDescription`) |
 | `context` | dict? | Optional key-value pairs — error codes, device names, state flags |
@@ -106,6 +106,8 @@ Only `.error` level events are forwarded to Sentry. Warnings and info stay local
 
 ## Event Catalog
 
+43 unique events across 11 engines (53 total capture call sites).
+
 | Engine | Event | Level | Trigger |
 |--------|-------|-------|---------|
 | `app` | `app_launched` | info | DraftAppState.initialize() completes |
@@ -116,25 +118,20 @@ Only `.error` level events are forwarded to Sentry. Warnings and info stay local
 | `parakeet` | `models_loaded` | info | Parakeet ASR models initialized |
 | `parakeet` | `model_init_failed` | error | CoreML model initialization failed |
 | `parakeet` | `transcription_empty` | warning | Parakeet returns no text |
-| `parakeet` | `transcription_complete` | info | Successful transcription with word count |
+| `parakeet` | `transcription_complete` | info | Successful transcription with word count and timing |
 | `parakeet` | `transcription_failed` | error | AsrManager.transcribe() throws |
 | `parakeet` | `audio_format_failed` | error | AVAudioFormat creation failed |
 | `parakeet` | `audio_engine_start_failed` | error | AVAudioEngine.start() throws during recording |
 | `parakeet` | `asr_manager_unavailable` | error | ASR manager not available for transcription |
 | `parakeet` | `device_change_rewarm_failed` | error | Audio engine re-warm failed after device change |
 | `parakeet` | `recording_interrupted` | warning | Audio device changed during recording |
-| `speech` | `audio_engine_start_failed` | error | AVAudioEngine.start() throws |
-| `speech` | `recognizer_unavailable` | error | SFSpeechRecognizer not available |
-| `speech` | `recognition_error` | warning | Recognition task error callback |
-| `anthropic` | `api_http_error` | error | Non-200 HTTP response |
-| `anthropic` | `api_auth_failure` | error | 401 Unauthorized |
-| `anthropic` | `api_stream_error` | error | Streaming connection fails |
-| `anthropic` | `api_timeout` | warning | Request exceeds timeout |
+| `anthropic` | `api_http_error` | error | Non-200 HTTP response (includes status_code in context) |
+| `anthropic` | `api_auth_failure` | error | 401 Unauthorized (includes auth_mode in context) |
+| `anthropic` | `api_stream_error` | error | Streaming connection fails (includes status_code in context) |
 | `draft` | `draft_failed` | error | DraftEngine API call fails |
-| `draft` | `subscription_expired` | error | OAuth token expired |
+| `draft` | `subscription_expired` | error | OAuth token expired during draft |
 | `capture` | `vision_extraction_failed` | error | Vision API call fails |
 | `capture` | `capture_auth_missing` | warning | No auth credential configured |
-| `capture` | `hotkey_registration_failed` | error | Carbon RegisterEventHotKey fails |
 | `style` | `style_refinement_failed` | error | Sonnet refinement call fails |
 | `style` | `style_file_write_failed` | error | Can't write style.md |
 | `style` | `style_file_read_failed` | warning | Can't read style.md |
@@ -142,14 +139,15 @@ Only `.error` level events are forwarded to Sentry. Warnings and info stay local
 | `feedback` | `feedback_file_open_failed` | error | Can't open feedback.jsonl |
 | `feedback` | `feedback_file_create_failed` | error | Can't create feedback.jsonl |
 | `analysis` | `analysis_failed` | error | Sonnet analysis call fails |
-| `analysis` | `suggestion_write_failed` | warning | Can't write suggestion log |
-| `analysis` | `file_watch_failed` | error | DispatchSource setup fails |
+| `analysis` | `prompt_write_failed` | error | Can't write updated prompt to prompts.json |
+| `analysis` | `suggestion_write_failed` | warning | Can't write suggestion log entry |
+| `analysis` | `file_watch_failed` | error | DispatchSource setup fails (can't open feedback.jsonl fd) |
 | `chat` | `chat_api_failed` | error | Chat API call fails |
-| `chat` | `tool_parse_failed` | warning | Tool JSON parsing fails |
+| `chat` | `tool_parse_failed` | warning | Tool JSON parsing fails (propose_prompt_change input) |
 | `overlay` | `stream_draft_failed` | error | Streaming draft throws |
 | `overlay` | `draft_empty` | warning | Stream produced no text |
 | `overlay` | `polish_failed` | warning | Dictation polish API fails |
-| `overlay` | `vision_timeout` | warning | Vision exceeded 8s timeout |
+| `overlay` | `vision_timeout` | warning | Vision exceeded timeout |
 | `overlay` | `refusal_detected` | info | Draft contained refusal pattern |
 | `overlay` | `no_voice_input` | warning | Empty transcription after recording |
 | `overlay` | `auth_missing` | error | No API credential when drafting |

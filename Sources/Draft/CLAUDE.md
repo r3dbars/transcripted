@@ -16,16 +16,20 @@ Orchestrates the "rough text → polished message" workflow. Connects the speech
 **Context-Aware Drafting** (`draftWithContext()`) — the primary mode:
 1. Receives voice text + `CapturedContext` (from screenshot) + detected `PlatformFormatter`
 2. Builds system prompt: style profile + platform formatting instructions
-3. CapturedContext assembles the user message via `draftingPrompt(userInstructions:)` — conversation context + voice instructions with explicit priority hierarchy
-4. Calls `AnthropicAPI.draft()` with assembled prompt
-5. Applies `platform.postProcess()` as a safety net for formatting fixes
-6. Stores result in `draftedText`
+3. CapturedContext assembles the user message via `draftingPrompt(userInstructions:)` — conversation context + voice instructions with explicit priority hierarchy. If no context, falls back to a plain "write the reply" prompt with the voice text quoted.
+4. Resolves model from `promptStore?.config.draftModel` (falls back to `DefaultPrompts.sonnetModel`)
+5. Calls `AnthropicAPI.draft()` with assembled prompt
+6. Applies `platform.postProcess()` as a safety net for formatting fixes
+7. Stores result in both `draftedText` and `originalDraft` (snapshot for style learning)
+8. On failure, reports to `EventReporter` (`draft_failed` or `subscription_expired` event)
 
 **Plain Drafting** (`draftMessage()`) — fallback when no screen context:
 1. Takes raw text directly
 2. Gets style-aware system prompt from `styleEngine.buildSystemPrompt()`
-3. Calls `AnthropicAPI.draft()` with the style prompt
-4. Stores result in `draftedText`
+3. Resolves model from `promptStore?.config.draftModel` (falls back to `DefaultPrompts.sonnetModel`)
+4. Calls `AnthropicAPI.draft()` with the style prompt
+5. Stores result in both `draftedText` and `originalDraft`
+6. On failure, reports to `EventReporter` (`draft_failed` or `subscription_expired` event)
 
 ### PlatformFormatter
 
@@ -60,20 +64,21 @@ com.microsoft.teams         → .teams
 
 ```swift
 // DraftEngine
-@Published var draftedText: String    // Haiku's polished output (mutated by TextEditor edits)
-@Published var originalDraft: String  // Snapshot of AI output before user edits (for style learning)
-@Published var isDrafting: Bool       // Loading state
-@Published var error: String?         // Error message if API fails
-var hasCredential: Bool               // Whether Keychain has a credential stored
-var styleEngine: StyleEngine?         // Set by ContentView after init
-var promptStore: PromptStore?         // Set by ContentView after init — provides model + prompts
-var lastRawText: String               // The raw user input from the last draft (for FeedbackStore)
-var authModeName: String              // "API Key", "Claude Subscription", or "None"
+@Published var draftedText: String       // Haiku's polished output (mutated by TextEditor edits)
+@Published var originalDraft: String     // Snapshot of AI output before user edits (for style learning)
+@Published var isDrafting: Bool          // Loading state
+@Published var error: String?            // Error message if API fails
+@Published var hasCredential: Bool       // Whether Keychain has a credential stored
+var styleEngine: StyleEngine?            // Set by ContentView after init
+var promptStore: PromptStore?            // Set by ContentView after init — provides model + prompts
+var lastRawText: String                  // The raw user input from the last draft (for FeedbackStore)
+var authModeName: String                 // Computed: "API Key", "Claude Subscription", or "None"
 
+func checkCredential()                   // Refreshes hasCredential from Keychain
 func saveAPIKey(_ key: String) -> Bool
 func saveSubscriptionToken(_ token: String) -> Bool
 func clearCredential()
-func getAuth() -> AuthCredential?     // For style summary regeneration
+func getAuth() -> AuthCredential?        // For style summary regeneration
 func draftMessage(from rawText: String)                                          // Plain drafting
 func draftWithContext(voiceText: String, context: CapturedContext?, platform: PlatformFormatter)  // Context-aware
 func clear()
@@ -86,18 +91,22 @@ func postProcess(_ text: String) -> String  // Post-draft formatting fixes
 
 ## Dependencies
 
-- `AnthropicAPI` (from API/)
+- `AnthropicAPI` (from API/) — HTTP client for draft calls
+- `AnthropicAPIError` (from API/) — typed errors including `.subscriptionTokenExpired`
 - `AuthCredential` (from API/) — loads/saves auth credentials, applies headers
 - `KeychainHelper` (from API/) — used indirectly via AuthCredential
 - `StyleEngine` (from Style/) — optional reference for personalized prompts
+- `PromptStore` (from Prompts/) — provides configurable draft model via `config.draftModel`
+- `DefaultPrompts` (from Prompts/) — fallback model constant (`sonnetModel`)
 - `CapturedContext` (from Capture/) — structured conversation context
 - `PlatformFormatter` (local) — platform-specific formatting
+- `EventReporter` (from Observability/) — error/warning event logging
 
 ## Design Notes
 
 DraftEngine is intentionally separate from SpeechEngine. They don't know about each other — the UI coordinates them. StyleEngine is injected as an optional reference, keeping the dependency lightweight. PlatformFormatter is detected at draft time from the paste target app.
 
-**v2 note:** In the floating overlay flow, `DraftSessionController` (in `Sources/UI/FloatingOverlay.swift`) calls `AnthropicAPI.streamDraft()` directly instead of going through `DraftEngine.draftWithContext()`. DraftEngine's `draftWithContext()` and `draftMessage()` are the v1 interface, preserved for compatibility. The platform formatting logic in `PlatformFormatter` is still used by both paths.
+**v2 note:** In the floating overlay flow, `DraftSessionController` (in `Sources/UI/DraftSessionController.swift`) calls `AnthropicAPI.streamDraft()` directly instead of going through `DraftEngine.draftWithContext()`. DraftEngine's `draftWithContext()` and `draftMessage()` are the v1 interface, preserved for compatibility. The platform formatting logic in `PlatformFormatter` is still used by both paths.
 
 ## Verification
 

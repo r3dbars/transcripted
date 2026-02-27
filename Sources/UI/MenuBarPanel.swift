@@ -1,5 +1,7 @@
 // MenuBarPanel.swift
-// Menubar popover content — Style + Agent tabs with onboarding gates
+// Single-pane menubar popover — SuperWhisper-inspired minimal layout.
+// Sections: header → stats → shortcuts → style → agent (with chat).
+// Onboarding overlays (auth + style) gate all content as before.
 
 import SwiftUI
 
@@ -8,21 +10,34 @@ struct MenuBarPanelView: View {
 
     @State private var showSettings = false
     @State private var settingsName = UserDefaults.standard.string(forKey: "user-display-name") ?? ""
+    @State private var isStyleExpanded = false
+    @State private var popoverGeneration = 0  // Increments on each appear to force clean view state
 
     var body: some View {
         ZStack {
-            TabView {
-                StyleProfileView(styleEngine: appState.styleEngine)
-                    .tabItem { Label("Style", systemImage: "person.text.rectangle") }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    headerSection
+                    sectionDivider
 
-                AgentTab(
-                    orchestrator: appState.analysisEngine,
-                    chatEngine: appState.chatEngine,
-                    auth: appState.drafter.getAuth()
-                )
-                .tabItem { Label("Agent", systemImage: "brain.head.profile") }
+                    statsSection
+                    sectionDivider
+
+                    shortcutsSection
+                    sectionDivider
+
+                    styleSection
+                    sectionDivider
+
+                    AgentSection(
+                        orchestrator: appState.analysisEngine,
+                        chatEngine: appState.chatEngine,
+                        auth: appState.drafter.getAuth()
+                    )
+                    .padding(.vertical, MenuTokens.sectionSpacing / 2)
+                }
+                .padding(.horizontal, MenuTokens.innerPadding)
             }
-            .transaction { $0.animation = nil }
 
             // Onboarding overlays (sequential gates)
             if !appState.drafter.hasCredential {
@@ -31,17 +46,222 @@ struct MenuBarPanelView: View {
                 StyleOnboardingView(styleEngine: appState.styleEngine, draftEngine: appState.drafter)
             }
         }
-        .frame(width: 500, height: 480)
+        .frame(width: MenuTokens.panelWidth, height: MenuTokens.panelHeight)
         .overlay(alignment: .topTrailing) {
-            Button(action: { showSettings.toggle() }) {
-                Image(systemName: "gearshape")
-                    .font(.body)
+            settingsGearButton
+        }
+        .onAppear {
+            popoverGeneration += 1
+            appState.feedbackStore.refreshStats()
+        }
+        .id(popoverGeneration)
+    }
+
+    // MARK: - Header
+
+    private var headerSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Draft")
+                .font(.title3)
+                .fontWeight(.semibold)
+
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(appState.sttRouter.isModelLoaded ? MenuTokens.statusGreen : MenuTokens.statusOrange)
+                    .frame(width: MenuTokens.statusDotSize, height: MenuTokens.statusDotSize)
+                Text(appState.sttRouter.isModelLoaded ? "Ready" : "Loading model...")
+                    .font(.caption)
+                    .foregroundColor(MenuTokens.textSecondary)
             }
-            .buttonStyle(.plain)
-            .padding(12)
-            .popover(isPresented: $showSettings) {
-                settingsPopover
+        }
+        .padding(.top, MenuTokens.innerPadding)
+        .padding(.bottom, MenuTokens.sectionSpacing / 2)
+    }
+
+    // MARK: - Stats
+
+    private var statsSection: some View {
+        HStack {
+            statColumn(value: formatNumber(appState.feedbackStore.stats.wordsDictated), label: "words\ndictated")
+            Spacer()
+            statColumn(value: "\(appState.feedbackStore.stats.messagesDrafted)", label: "messages\ndrafted")
+            Spacer()
+            statColumn(value: formatMinutes(appState.feedbackStore.stats.minutesSaved), label: "saved")
+                .help(savedTooltip)
+        }
+        .padding(.vertical, MenuTokens.sectionSpacing / 2)
+    }
+
+    private func statColumn(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.title2)
+                .fontWeight(.semibold)
+            Text(label)
+                .font(.caption)
+                .foregroundColor(MenuTokens.textSecondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func formatNumber(_ n: Int) -> String {
+        if n >= 1000 {
+            let k = Double(n) / 1000.0
+            return String(format: "%.1fk", k)
+        }
+        return "\(n)"
+    }
+
+    private func formatMinutes(_ m: Int) -> String {
+        if m >= 60 {
+            let h = Double(m) / 60.0
+            return String(format: "%.1f hr", h)
+        }
+        return "\(m) min"
+    }
+
+    private var savedTooltip: String {
+        let s = appState.feedbackStore.stats
+        return """
+        You dictated \(formatNumber(s.wordsDictated)) words across \(s.messagesDrafted) messages.
+        Draft composed \(formatNumber(s.wordsDrafted)) words and you sent \(formatNumber(s.wordsAccepted)) words.
+        At ~40 WPM typing, that's \(formatMinutes(s.minutesSaved)) you didn't have to type.
+        """
+    }
+
+    // MARK: - Shortcuts
+
+    private var shortcutsSection: some View {
+        HStack(spacing: 12) {
+            shortcutPill(key: "⌥D", label: "Draft")
+            shortcutPill(key: "⌥Space", label: "Dictation")
+            Spacer()
+        }
+        .padding(.vertical, MenuTokens.sectionSpacing / 2)
+    }
+
+    private func shortcutPill(key: String, label: String) -> some View {
+        HStack(spacing: 4) {
+            Text(key)
+                .font(.system(.caption, design: .monospaced))
+                .fontWeight(.bold)
+            Text(label)
+                .font(.caption)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(MenuTokens.pillBackground)
+        .cornerRadius(MenuTokens.pillCornerRadius)
+        .overlay(
+            RoundedRectangle(cornerRadius: MenuTokens.pillCornerRadius)
+                .stroke(MenuTokens.pillBorder, lineWidth: 1)
+        )
+    }
+
+    // MARK: - Writing Style
+
+    private var styleSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Writing Style")
+                    .font(.headline)
+                Spacer()
+                Text("\(appState.styleEngine.exampleCount) ex.")
+                    .font(.caption)
+                    .foregroundColor(MenuTokens.textSecondary)
             }
+
+            styleCard
+        }
+        .padding(.vertical, MenuTokens.sectionSpacing / 2)
+    }
+
+    @ViewBuilder
+    private var styleCard: some View {
+        if appState.styleEngine.exampleCount == 0 {
+            Text("Accept a draft to start learning your style")
+                .font(.callout)
+                .foregroundColor(MenuTokens.textMuted)
+                .padding(MenuTokens.cardPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(MenuTokens.cardBackground)
+                .cornerRadius(MenuTokens.cardCornerRadius)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                if isStyleExpanded {
+                    ScrollView {
+                        Text(appState.styleEngine.styleFileContents)
+                            .font(.system(.callout, design: .monospaced))
+                            .foregroundColor(MenuTokens.textSecondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 180)
+                } else {
+                    Text(compactStylePreview)
+                        .font(.system(.callout, design: .monospaced))
+                        .foregroundColor(MenuTokens.textSecondary)
+                        .lineLimit(MenuTokens.compactStyleLines)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                HStack {
+                    Spacer()
+                    Button(isStyleExpanded ? "Show less" : "Show more") {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isStyleExpanded.toggle()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundColor(MenuTokens.textSecondary)
+                }
+                .padding(.top, 6)
+            }
+            .padding(MenuTokens.cardPadding)
+            .background(MenuTokens.cardBackground)
+            .cornerRadius(MenuTokens.cardCornerRadius)
+            .overlay(
+                RoundedRectangle(cornerRadius: MenuTokens.cardCornerRadius)
+                    .stroke(MenuTokens.cardBorder, lineWidth: 1)
+            )
+        }
+    }
+
+    private var compactStylePreview: String {
+        let contents = appState.styleEngine.styleFileContents
+        // Try to extract the Style Summary section
+        if let range = contents.range(of: "## Style Summary") {
+            let afterHeader = contents[range.upperBound...]
+            let lines = afterHeader.split(separator: "\n", omittingEmptySubsequences: false)
+            let meaningful = lines.drop(while: { $0.trimmingCharacters(in: .whitespaces).isEmpty })
+            return meaningful.prefix(6).joined(separator: "\n")
+        }
+        // Fallback: first lines of the file
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false)
+        return lines.prefix(4).joined(separator: "\n")
+    }
+
+    // MARK: - Divider
+
+    private var sectionDivider: some View {
+        Divider()
+            .padding(.vertical, 2)
+    }
+
+    // MARK: - Settings
+
+    private var settingsGearButton: some View {
+        Button(action: { showSettings.toggle() }) {
+            Image(systemName: "gearshape")
+                .font(.body)
+                .foregroundColor(MenuTokens.textSecondary)
+        }
+        .buttonStyle(.plain)
+        .padding(12)
+        .popover(isPresented: $showSettings) {
+            settingsPopover
         }
     }
 

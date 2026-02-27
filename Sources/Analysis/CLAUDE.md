@@ -2,11 +2,11 @@
 
 ## What This Does
 
-Native Swift replacement for the Python orchestrator agent. Watches `~/Library/Application Support/Draft/feedback.jsonl` for new accepted drafts, uses Claude Sonnet to analyze editing patterns, and proposes prompt improvements as InsightCards displayed in the Agent tab. Runs entirely in-process — no subprocess, no SSE relay, no port conflicts.
+Native Swift replacement for the Python orchestrator agent. Watches `~/Library/Application Support/Draft/feedback.jsonl` for new accepted drafts, uses Claude Sonnet to analyze editing patterns, and proposes prompt improvements as InsightCards displayed in AgentSection (menubar panel). Runs entirely in-process — no subprocess, no SSE relay, no port conflicts.
 
 ## Key File
 
-- `AnalysisEngine.swift` (~350 lines) — `@MainActor ObservableObject` with DispatchSource file watching, debounced Sonnet analysis, InsightCard management, and proper deinit cleanup
+- `AnalysisEngine.swift` (~377 lines) — `@MainActor ObservableObject` with DispatchSource file watching, debounced Sonnet analysis, InsightCard management, EventReporter observability, and proper deinit cleanup
 
 ## How It Works
 
@@ -34,7 +34,7 @@ scheduleDebounce() → [30s] → runAnalysis(newEntryCount:)
   → buildAnalysisSystemPrompt()     ← injects feedback + prompts + style + suggestion log
   → callAPIWithToolUse()            ← Sonnet with propose_prompt_change tool
   → InsightCards added to @Published insights array
-  → AgentTab displays cards with Apply/Skip buttons
+  → AgentSection displays cards with Apply/Skip buttons
 ```
 
 ### System Prompt Construction
@@ -61,7 +61,7 @@ The suggestion log prevents re-proposing recently skipped changes.
 
 Uses `AnthropicAPI.sonnetModel` for the model and `JSONSerialization` for the request body (tool use requires mixed-type arrays that `Codable` can't handle cleanly).
 
-Analysis failures are now logged (`print("⚠️ ANALYSIS | analysis failed: ...")`) instead of silently swallowed — makes debugging visible when the API call fails.
+Analysis failures are logged via both `print("⚠️ ANALYSIS | analysis failed: ...")` and `EventReporter.shared.capture(level: .error, engine: "analysis", event: "analysis_failed", ...)` — makes debugging visible in both console and `events.jsonl` when the API call fails.
 
 ### Apply / Skip Actions
 
@@ -79,13 +79,13 @@ Analysis failures are now logged (`print("⚠️ ANALYSIS | analysis failed: ...
 All in `~/Library/Application Support/Draft/`:
 
 - **feedback.jsonl** — Append-only log of accepted drafts (written by FeedbackStore, watched by AnalysisEngine)
-- **suggestion_log.jsonl** — Append-only log of apply/skip actions with timestamps, suggestion IDs, and rationale
+- **suggestion_log.jsonl** — Append-only log of apply/skip actions with timestamp, suggestion_id, prompt_key, action, saw, and why fields
 - **prompts.json** — Current prompt values (read for analysis context, written on Apply)
 
 ## Public Interface
 
 ```swift
-@Published var insights: [InsightCard]   // Cards displayed in AgentTab
+@Published var insights: [InsightCard]   // Cards displayed in AgentSection
 @Published var isAnalyzing: Bool         // True during Sonnet API call
 
 var isConnected: Bool       // Always true (native — no subprocess to monitor)
@@ -109,7 +109,7 @@ Posted when `apply()` writes to `prompts.json`. `DraftAppState` observes this no
 After modifying AnalysisEngine, verify with these checks:
 
 - **File watching:** Accept 5+ drafts → check debug log for analysis trigger after ~30s debounce
-- **InsightCards appear:** After analysis completes, Agent tab should show cards with Apply/Skip buttons
+- **InsightCards appear:** After analysis completes, AgentSection should show cards with Apply/Skip buttons
 - **Apply works:** Click Apply on a card → check `prompts.json` for the updated key → check `suggestion_log.jsonl` for the apply entry
 - **Skip logged:** Click Skip → check `suggestion_log.jsonl` for the skip entry with rationale
 - **No startup trigger:** Relaunch app with existing feedback.jsonl → should NOT trigger analysis on startup (only new entries count)

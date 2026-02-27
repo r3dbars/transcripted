@@ -47,7 +47,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate {
 
         // Set up popover for Style + Agent panel
         let pop = NSPopover()
-        pop.contentSize = NSSize(width: 500, height: 480)
+        pop.contentSize = NSSize(width: MenuTokens.panelWidth, height: MenuTokens.panelHeight)
         pop.behavior = .transient
         pop.contentViewController = NSHostingController(
             rootView: MenuBarPanelView(appState: appState)

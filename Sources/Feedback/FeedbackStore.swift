@@ -42,9 +42,20 @@ struct FeedbackEntry: Codable {
     }
 }
 
+struct UsageStats {
+    var wordsDictated: Int = 0
+    var messagesDrafted: Int = 0
+    var minutesSaved: Int = 0
+    var wordsDrafted: Int = 0
+    var wordsAccepted: Int = 0
+}
+
 class FeedbackStore: ObservableObject {
+    @Published var stats = UsageStats()
+
     private let feedbackURL: URL
     private let encoder: JSONEncoder
+    private let decoder = JSONDecoder()
     private let isoFormatter: ISO8601DateFormatter
 
     init() {
@@ -113,4 +124,37 @@ class FeedbackStore: ObservableObject {
         }
     }
 
+    /// Parse feedback.jsonl and compute aggregate usage stats.
+    func refreshStats() {
+        guard FileManager.default.fileExists(atPath: feedbackURL.path),
+              let data = try? Data(contentsOf: feedbackURL),
+              let content = String(data: data, encoding: .utf8) else {
+            stats = UsageStats()
+            return
+        }
+
+        var wordsDictated = 0
+        var wordsDrafted = 0
+        var wordsAccepted = 0
+        var messageCount = 0
+
+        for line in content.split(separator: "\n") where !line.isEmpty {
+            guard let lineData = line.data(using: .utf8),
+                  let entry = try? decoder.decode(FeedbackEntry.self, from: lineData) else {
+                continue
+            }
+            messageCount += 1
+            wordsDictated += entry.rawText.split(separator: " ").count
+            wordsDrafted += entry.draftedText.split(separator: " ").count
+            wordsAccepted += entry.acceptedText.split(separator: " ").count
+        }
+
+        stats = UsageStats(
+            wordsDictated: wordsDictated,
+            messagesDrafted: messageCount,
+            minutesSaved: (wordsDrafted + wordsAccepted) / 40,  // composing + typing at ~40 WPM
+            wordsDrafted: wordsDrafted,
+            wordsAccepted: wordsAccepted
+        )
+    }
 }

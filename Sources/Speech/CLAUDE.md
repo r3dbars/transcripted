@@ -2,13 +2,13 @@
 
 ## What This Does
 
-Audio recording and transcription via **ParakeetEngine** — a CoreML-based STT engine using FluidAudio's Parakeet TDT V3 (~0.2s latency). `STTRouter` wraps ParakeetEngine with Combine property forwarding for SwiftUI binding.
+Audio recording and transcription via **ParakeetEngine** — a CoreML-based STT engine using FluidAudio's Parakeet TDT V3 (~0.2s latency). `STTRouter` wraps ParakeetEngine with Combine property forwarding and model-readiness gating for SwiftUI binding.
 
 ## Key Files
 
-- `ParakeetEngine.swift` (~490 lines) — `@MainActor ObservableObject`: AVAudioEngine tap, NSLock-batched sample collection, live Apple Speech display, CoreML batch inference via FluidAudio AsrManager, audio level metering
-- `STTRouter.swift` (~50 lines) — Thin wrapper forwarding `@Published` properties from ParakeetEngine via Combine
-- `AudioResampler.swift` — Sample rate conversion (native → 16kHz for Parakeet)
+- `ParakeetEngine.swift` (~507 lines) — `@MainActor ObservableObject`: AVAudioEngine tap, NSLock-batched sample collection, live Apple Speech display with restart rate limiting, CoreML batch inference via FluidAudio AsrManager, audio level metering, device change handling, `ParakeetModelState` enum for download/load progress
+- `STTRouter.swift` (~54 lines) — Wrapper forwarding 5 `@Published` properties (`isRecording`, `isTranscribing`, `audioLevel`, `liveTranscript`, `recordingInterrupted`) from ParakeetEngine via Combine `assign(to:)`. Gates `startRecording()` on `isModelLoaded` and logs a warning via `EventReporter` if the model is not ready. Passes through `isModelLoaded` and `inputDeviceName` as computed properties. Also exposes `stopRecording()`, `transcribe()`, and `cancel()` as direct pass-throughs to ParakeetEngine.
+- `AudioResampler.swift` (~28 lines) — Pure Swift linear-interpolation sample rate conversion (native → 16kHz for Parakeet). No dependencies. Stateless `enum` with a single `resample(_:from:to:)` static method.
 
 ## Architecture
 
@@ -34,33 +34,58 @@ Audio Input (AVAudioEngine tap, mono at native sample rate)
 
 The audio render callback runs on a real-time thread with ~10ms deadlines. NSLock provides deterministic ~1μs overhead for the shared sample buffer between the audio thread and MainActor. Swift 6 warns about NSLock in async context — this is a false positive since the lock protects a buffer between threads, not between two async contexts.
 
+### ParakeetModelState Enum
+
+`ParakeetModelState` tracks model lifecycle: `.notLoaded` → `.downloading(progress:)` → `.loading` → `.ready` (or `.failed(String)`). The `.downloading` case carries a `Double` progress value for UI progress bars. Published as `modelDownloadState` on `ParakeetEngine`.
+
 ### Model Initialization
 
-`ParakeetEngine.initialize()` loads CoreML models either from the app bundle (`Contents/Resources/parakeet-models/`) or via HuggingFace download (~600MB). The `modelDownloadState` published property drives a progress bar in settings. Model loading is async and non-blocking — the app starts immediately.
+`ParakeetEngine.initialize()` loads CoreML models either from the app bundle (`Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/`) or via HuggingFace download (~600MB). Bundle detection checks for the `Encoder.mlmodelc` file existence. The `modelDownloadState` published property drives a progress bar in settings. Model loading is async and non-blocking — the app starts immediately. Guarded by `asrManager == nil` to prevent double initialization.
 
 ### Audio Engine Pre-warming
 
-`prewarm()` starts and immediately stops the audio engine on launch. This forces macOS to initialize the audio graph and allocate Core Audio buffers upfront, reducing first-recording latency from ~300ms to near-zero.
+`prewarm()` starts the audio engine on launch (guarded by `isEnginePrewarmed` flag). This forces macOS to initialize the audio graph and allocate Core Audio buffers upfront, reducing first-recording latency from ~300ms to near-zero. Also registers the `.AVAudioEngineConfigurationChange` observer for device changes (observer is installed once and stored in `configChangeObserver`).
 
 ### Device Change Handling
 
-Observes `.AVAudioEngineConfigurationChange` notification to detect when audio devices change (e.g., USB mic plugged/unplugged). On change, the engine re-reads the native sample rate and re-warms if needed. If re-warm fails while recording was active, `recordingInterrupted` is set to `true` — DraftSessionController observes this and cancels the session with a user-visible error.
+Observes `.AVAudioEngineConfigurationChange` notification to detect when audio devices change (e.g., USB mic plugged/unplugged). On change, the engine stops any active recording (removes tap, stops live speech), re-reads the native sample rate, and re-warms. If re-warm fails while recording was active, `recordingInterrupted` is set to `true` — DraftSessionController observes this and cancels the session with a user-visible error. If re-warm succeeds but was recording, attempts to restart recording automatically.
+
+### inputDeviceName Computed Property
+
+Uses CoreAudio `AudioObjectGetPropertyData` to read the default input device ID and its `kAudioDevicePropertyDeviceNameCFString`. Returns `"Unknown"` on any failure. Used in debug logging and EventReporter context for all recording/prewarm events.
 
 ### startRecording() Returns Bool
 
-`startRecording()` returns `false` on failure (model not loaded, mic unauthorized, audio format creation failed, engine start failed). On engine start failure, the audio tap is explicitly removed to prevent a double-install ObjC exception on the next call. Callers (STTRouter, DraftSessionController) check the return value and show error UI.
+`startRecording()` returns `false` on failure (model not loaded, mic unauthorized, audio format creation failed, engine start failed). Pre-allocates sample buffer capacity for 120 seconds of audio at native sample rate. On engine start failure, the audio tap is explicitly removed to prevent a double-install ObjC exception on the next call. Callers (STTRouter, DraftSessionController) check the return value and show error UI.
+
+### transcribe() Returns Optional String
+
+`transcribe()` is an async method that performs batch Parakeet inference on accumulated audio. Guards: returns `nil` if already transcribing, if sample buffer is empty, or if `asrManager` is unavailable. Flushes any remaining `pendingSamples` into `sampleBuffer` under lock before inference. Resamples to 16kHz via `AudioResampler`, then calls `manager.transcribe(_:source:)`. Logs RTF (real-time factor = inference time / audio duration) and character count to `EventReporter`. On empty result, logs a warning and returns `nil`. Always clears `sampleBuffer` and resets `isTranscribing` on both success and failure paths.
+
+### Live Speech Restart Rate Limiting
+
+Apple Speech recognition tasks can end unexpectedly (e.g., after silence or an internal error). When a task completes or errors during active recording, `startLiveSpeechTask()` automatically restarts it. To prevent infinite restart loops, a rate limiter allows at most 5 restarts within any 10-second window (`liveRestartCount` / `liveRestartWindowStart`). If exceeded, live speech stops gracefully — Parakeet still owns the final transcript so this is display-only degradation.
+
+### cancel() and cleanup()
+
+`cancel()` stops recording (removes tap, stops live speech), clears all buffers and transcript state, and resets `isTranscribing` to `false`. Used when the user cancels a session mid-recording.
+
+`cleanup()` cancels the init task, releases the `AsrManager`, and resets `modelDownloadState` to `.notLoaded`. Used during app shutdown to free CoreML resources.
 
 ### deinit Cleanup
 
 ```swift
 deinit {
+    if let observer = configChangeObserver {
+        NotificationCenter.default.removeObserver(observer)   // Remove device change observer
+    }
     audioEngine.inputNode.removeTap(onBus: 0)   // Release mic (green dot goes away)
     audioEngine.stop()
     asrManager?.cleanup()
 }
 ```
 
-Without the audio engine cleanup, the microphone green dot persists after the engine deallocates.
+Without the audio engine cleanup, the microphone green dot persists after the engine deallocates. The `configChangeObserver` removal prevents dangling notification callbacks.
 
 ## Critical Gotchas
 
