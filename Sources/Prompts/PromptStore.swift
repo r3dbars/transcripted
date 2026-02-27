@@ -262,14 +262,14 @@ class PromptStore: ObservableObject {
     let storageDir: URL
 
     init() {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!
-        storageDir = appSupport.appendingPathComponent("Draft", isDirectory: true)
+        storageDir = FileManager.default.draftAppSupportDir
         storeURL = storageDir.appendingPathComponent("prompts.json")
 
-        try? FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
+        } catch {
+            print("⚠️ PROMPTS | failed to create directory \(storageDir.path): \(error.localizedDescription)")
+        }
 
         if FileManager.default.fileExists(atPath: storeURL.path),
            let data = try? Data(contentsOf: storeURL),

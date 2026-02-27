@@ -24,6 +24,7 @@ class FloatingOverlayController: ObservableObject {
     @Published var isVisible = false
     @Published var reviewText: String = ""
     @Published var streamingText: String = ""
+    @Published var errorMessage: String = ""
 
     /// Closures for Enter/Escape in review mode — set by DraftSessionController
     var onConfirm: (() -> Void)?
@@ -288,6 +289,21 @@ class FloatingOverlayController: ObservableObject {
         }
     }
 
+    /// Show a brief error message in the overlay, then auto-hide after 1.5 seconds.
+    func showError(_ message: String) {
+        errorMessage = message
+        state = .drafting  // Reuse drafting state visually (spinner area)
+        if !isVisible {
+            showPanel(near: nil)
+        }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard let self = self, !self.errorMessage.isEmpty else { return }
+            self.errorMessage = ""
+            self.hideWithCancelAnimation()
+        }
+    }
+
     private func _performHide() {
         guard isVisible else { return }  // Prevent double-hide during animation overlap
         removeEscapeMonitor()
@@ -299,6 +315,7 @@ class FloatingOverlayController: ObservableObject {
         state = .idle
         reviewText = ""
         streamingText = ""
+        errorMessage = ""
     }
 
     // MARK: - Global Escape Monitor

@@ -19,15 +19,15 @@ class StyleEngine: ObservableObject {
     init() {
         hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "style-onboarding-completed")
 
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!
-        storageDir = appSupport.appendingPathComponent("Draft", isDirectory: true)
+        storageDir = FileManager.default.draftAppSupportDir
         styleFileURL = storageDir.appendingPathComponent("style.md")
 
         // Create directory if needed
-        try? FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
+        } catch {
+            print("⚠️ STYLE | failed to create directory \(storageDir.path): \(error.localizedDescription)")
+        }
 
         // Load existing file
         loadStyleFile()

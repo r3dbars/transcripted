@@ -148,7 +148,15 @@ struct OverlayContentView: View {
     @ViewBuilder
     private var draftingContent: some View {
         VStack(spacing: 8) {
-            if sttRouter.isTranscribing, !sttRouter.liveTranscript.isEmpty {
+            if !controller.errorMessage.isEmpty {
+                // Error message — shown briefly before overlay auto-hides
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 18))
+                    .foregroundColor(.yellow)
+                Text(controller.errorMessage)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(OverlayTokens.textSecondary)
+            } else if sttRouter.isTranscribing, !sttRouter.liveTranscript.isEmpty {
                 // Show live transcript at reduced opacity with blur (provisional feel)
                 ScrollView(.vertical, showsIndicators: false) {
                     AnimatedTranscriptView(text: sttRouter.liveTranscript)
