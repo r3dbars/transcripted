@@ -50,12 +50,12 @@ struct UsageStats {
     var wordsAccepted: Int = 0
 }
 
+@MainActor
 class FeedbackStore: ObservableObject {
     @Published var stats = UsageStats()
 
     private let feedbackURL: URL
     private let encoder: JSONEncoder
-    private let decoder = JSONDecoder()
     private let isoFormatter: ISO8601DateFormatter
 
     init() {
@@ -125,14 +125,26 @@ class FeedbackStore: ObservableObject {
     }
 
     /// Parse feedback.jsonl and compute aggregate usage stats.
+    /// File I/O runs on a background thread to avoid blocking the main actor.
     func refreshStats() {
-        guard FileManager.default.fileExists(atPath: feedbackURL.path),
-              let data = try? Data(contentsOf: feedbackURL),
+        let url = feedbackURL
+        Task {
+            let computed = await Task.detached {
+                FeedbackStore.parseStats(url: url)
+            }.value
+            self.stats = computed
+        }
+    }
+
+    /// Pure computation: read and parse feedback.jsonl (runs off main actor).
+    nonisolated private static func parseStats(url: URL) -> UsageStats {
+        guard FileManager.default.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
               let content = String(data: data, encoding: .utf8) else {
-            stats = UsageStats()
-            return
+            return UsageStats()
         }
 
+        let decoder = JSONDecoder()
         var wordsDictated = 0
         var wordsDrafted = 0
         var wordsAccepted = 0
@@ -149,10 +161,10 @@ class FeedbackStore: ObservableObject {
             wordsAccepted += entry.acceptedText.split(separator: " ").count
         }
 
-        stats = UsageStats(
+        return UsageStats(
             wordsDictated: wordsDictated,
             messagesDrafted: messageCount,
-            minutesSaved: (wordsDrafted + wordsAccepted) / 40,  // composing + typing at ~40 WPM
+            minutesSaved: (wordsDrafted + wordsAccepted) / 40,
             wordsDrafted: wordsDrafted,
             wordsAccepted: wordsAccepted
         )

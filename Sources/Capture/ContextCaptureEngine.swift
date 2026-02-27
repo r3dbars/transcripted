@@ -30,7 +30,7 @@ private func hotkeyHandler(
     guard status == noErr else { return noErr }
 
     if hotkeyID.id == 1 {
-        // ⌥Space — Draft mode: capture screenshot SYNCHRONOUSLY before focus shifts
+        // ⌥D — Draft mode: capture screenshot SYNCHRONOUSLY before focus shifts
         let frontApp = NSWorkspace.shared.frontmostApplication
         let imageData: Data? = frontApp.flatMap { ScreenCapture.captureFrontmostWindow(of: $0) }
 
@@ -51,7 +51,7 @@ private func hotkeyHandler(
             }
         }
     } else if hotkeyID.id == 2 {
-        // ⌥D — Dictation mode: NO screenshot needed (pure voice-to-text)
+        // ⌥Space — Dictation mode: NO screenshot needed (pure voice-to-text)
         let frontApp = NSWorkspace.shared.frontmostApplication
 
         Task { @MainActor in

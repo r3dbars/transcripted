@@ -33,10 +33,12 @@ struct UsageStats {
     var wordsDictated: Int = 0
     var messagesDrafted: Int = 0
     var minutesSaved: Int = 0
+    var wordsDrafted: Int = 0
+    var wordsAccepted: Int = 0
 }
 ```
 
-Computed by `refreshStats()` from the feedback log. `minutesSaved` is estimated at ~40 WPM average typing speed (`wordsAccepted / 40`). These stats are displayed in the MenuBarPanel stats section.
+Computed by `refreshStats()` from the feedback log. `minutesSaved` is estimated at ~40 WPM average typing speed: `(wordsDrafted + wordsAccepted) / 40`. This accounts for both the words Claude drafted (which the user would have had to type themselves) and the words in the final accepted version (the actual typing savings). These stats are displayed in the MenuBarPanel stats section, where the "saved" label has a hover tooltip breaking down `wordsDrafted` and `wordsAccepted`.
 
 ## Why
 
