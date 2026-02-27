@@ -1,0 +1,16 @@
+# Transcripted Local Inference Server
+# Install: pip install -r requirements.txt
+# Requires Python 3.10+
+
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+soundfile>=0.12.1
+numpy>=1.26.0
+
+# NeMo ASR (Parakeet + Sortformer)
+# Installs torch automatically; GPU optional but recommended
+nemo_toolkit[asr]>=1.23.0
+
+# Audio processing
+scipy>=1.12.0
+librosa>=0.10.1
