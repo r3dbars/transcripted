@@ -8,7 +8,6 @@ A native macOS app that automatically records, transcribes, and organizes voice 
 - Floating pill UI - Dynamic Island-style interface that doesn't interrupt your workflow
 - Dual audio capture - Records both microphone and system audio (Zoom, Meet, Teams, etc.)
 - Deepgram transcription - Multichannel audio with speaker diarization
-- Meeting detection - Automatically prompts to record when video calls are detected
 - Real-time status - Visual feedback during recording and processing
 
 **AI-Powered Action Items**
@@ -49,7 +48,6 @@ On first launch, Transcripted requests:
 | Permission | Purpose | Required |
 |------------|---------|----------|
 | Microphone | Capture your voice | Yes |
-| Speech Recognition | On-device transcription | Yes |
 | Screen Recording | Capture system audio from meetings | For system audio |
 | Reminders | Create tasks from action items | Optional |
 
@@ -57,48 +55,68 @@ On first launch, Transcripted requests:
 
 ```
 Murmur/
-├── Core/                           # Business logic
-│   ├── Audio.swift                 # Microphone capture via AVAudioEngine
-│   ├── SystemAudioCapture.swift    # System audio via CoreAudio process taps
-│   ├── Transcription.swift         # Deepgram multichannel transcription
-│   ├── TranscriptionTaskManager.swift  # Background transcription queue
-│   ├── ActionItemExtractor.swift   # Gemini AI integration
-│   ├── DateParser.swift            # Natural language date parsing
-│   └── TranscriptSaver.swift       # Markdown output
+├── Core/                                  # Business logic (21 files)
+│   ├── Audio.swift                        # Microphone capture via AVAudioEngine
+│   ├── SystemAudioCapture.swift           # System audio via CoreAudio process taps
+│   ├── Transcription.swift                # Deepgram multichannel transcription
+│   ├── TranscriptionTaskManager.swift     # Background transcription queue
+│   ├── ActionItemExtractor.swift          # Gemini AI integration
+│   ├── DateParser.swift                   # Natural language date parsing
+│   ├── TranscriptSaver.swift              # Markdown output
+│   ├── TranscriptScanner.swift            # Transcript file discovery & parsing
+│   ├── StatsDatabase.swift                # SQLite stats persistence
+│   ├── StatsService.swift                 # Recording & transcription statistics
+│   └── ...                                # Additional core utilities
 │
-├── Services/                       # External integrations
-│   ├── DeepgramService.swift       # Cloud transcription with diarization
-│   ├── RemindersService.swift      # Apple Reminders
-│   └── TodoistService.swift        # Todoist API
+├── Services/                              # External integrations (3 files)
+│   ├── DeepgramService.swift              # Cloud transcription with diarization
+│   ├── RemindersService.swift             # Apple Reminders
+│   └── TodoistService.swift               # Todoist API
 │
 ├── UI/
-│   ├── FloatingPanel/              # Floating pill UI
-│   │   ├── FloatingPanelController.swift   # Window management
-│   │   ├── FloatingPanelView.swift         # Main SwiftUI view
-│   │   ├── PillStateManager.swift          # State machine
-│   │   ├── Components/
-│   │   │   ├── PillViews.swift             # Idle, Recording, Processing states
-│   │   │   ├── WaveformViews.swift         # Audio visualizers
-│   │   │   ├── CelebrationViews.swift      # Success animations
-│   │   │   ├── ErrorViews.swift            # Error handling UI
-│   │   │   ├── AttentionPromptView.swift   # Notifications
-│   │   │   └── ReviewTrayView.swift        # Action item review
-│   │   └── Helpers/
-│   │       └── LawsComponents.swift        # UI primitives
-│   ├── Settings.swift              # Preferences window
-│   ├── ActionItemReviewView.swift  # Task approval UI
-│   └── FailedTranscriptionsView.swift  # Retry queue
+│   ├── FloatingPanel/                     # Floating pill UI
+│   │   ├── FloatingPanelController.swift  # Window management
+│   │   ├── FloatingPanelView.swift        # Main SwiftUI view
+│   │   ├── PillStateManager.swift         # State machine
+│   │   └── Components/                    # 10 component files
+│   │       ├── PillViews.swift            # Idle, Recording, Processing states
+│   │       ├── WaveformViews.swift        # Audio visualizers
+│   │       ├── CelebrationViews.swift     # Success animations
+│   │       ├── ErrorViews.swift           # Error handling UI
+│   │       ├── AttentionPromptView.swift  # Notifications
+│   │       ├── ReviewTrayView.swift       # Action item review
+│   │       └── ...                        # Additional components
+│   │
+│   └── Settings/                          # Preferences (sidebar navigation)
+│       ├── SettingsWindowController.swift  # Window management
+│       ├── SettingsContainerView.swift     # Main container
+│       ├── SettingsSidebarView.swift       # Sidebar navigation
+│       ├── Tabs/
+│       │   ├── DashboardView.swift        # Stats, recent transcripts
+│       │   └── PreferencesView.swift      # API keys, storage, appearance
+│       ├── Components/
+│       │   ├── RecentTranscriptsView.swift # Recent transcript list
+│       │   └── SettingsSectionCard.swift   # Reusable card component
+│       └── Models/
+│           └── SettingsNavigationState.swift  # Tab state
 │
 ├── Design/
-│   ├── DesignTokens.swift          # Colors, spacing, animations
-│   └── PremiumComponents.swift     # Shared UI components
+│   ├── DesignTokens.swift                 # Colors, spacing, animations
+│   └── PremiumComponents.swift            # Shared UI components
 │
-├── Onboarding/                     # First-run experience
-│   ├── OnboardingState.swift
-│   ├── OnboardingWindow.swift
-│   └── Steps/                      # Welcome, Permissions, etc.
+├── Onboarding/                            # First-run experience (4 steps)
+│   ├── OnboardingState.swift              # State management
+│   ├── OnboardingContainerView.swift      # Container view
+│   ├── OnboardingWindow.swift             # Window controller
+│   ├── Steps/
+│   │   ├── WelcomeStep.swift
+│   │   ├── HowItWorksStep.swift
+│   │   ├── PermissionsStep.swift
+│   │   └── ReadyStep.swift
+│   └── Animations/
+│       └── ParticleExplosionView.swift    # Celebration effects
 │
-└── TranscriptedApp.swift           # App entry point
+└── TranscriptedApp.swift                  # App entry point
 ```
 
 ## Transcription
@@ -122,7 +140,11 @@ Settings are stored in UserDefaults:
 | `deepgramAPIKey` | Deepgram API key for transcription |
 | `geminiAPIKey` | Gemini API key for action item extraction |
 | `taskService` | "reminders" or "todoist" |
+| `todoistAPIKey` | Todoist API key (if using Todoist) |
 | `userName` | Your name for task attribution |
+| `remindersListId` | Apple Reminders list for action items |
+| `enableUISounds` | Enable/disable UI sound effects |
+| `useAuroraRecording` | Use Aurora recording mode |
 
 ## Privacy & Security
 

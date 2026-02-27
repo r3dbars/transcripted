@@ -95,7 +95,10 @@ TranscriptedApp.swift (AppDelegate)
 ├── Audio                    → Recording state, audio levels
 ├── TranscriptionTaskManager → Background transcription queue, progress tracking
 ├── FailedTranscriptionManager → Retry queue with persistent storage
+├── FailedActionItemManager  → Retry queue for failed action item delivery
 ├── RecordingValidator       → Pre-recording system checks
+├── StatsService             → Recording statistics and streak tracking
+├── StatsDatabase            → SQLite persistence for stats
 └── FloatingPanelController  → UI coordination
 ```
 
@@ -103,8 +106,9 @@ TranscriptedApp.swift (AppDelegate)
 
 When enabled, transcripts are processed for action items:
 ```
-Murmur/Core/ActionItemExtractor.swift → Sends transcript to Gemini 2.0 Flash Lite API
-                                      → Extracts tasks, owners, priorities, due dates
+Murmur/Core/ActionItemExtractor.swift → Sends transcript to Gemini 2.5 Pro API (two-pass pipeline)
+                                      → Pass 1: Speaker identification
+                                      → Pass 2: Action item extraction (tasks, owners, priorities, due dates)
 
 Murmur/Core/DateParser.swift          → Parses natural language dates ("next Friday", "EOW")
                                       → Uses NSDataDetector + custom fallbacks
@@ -128,22 +132,41 @@ FloatingPanel/
 │   ├── CelebrationViews.swift      # Success animations (checkmarks, confetti)
 │   ├── ErrorViews.swift            # Error banners with recovery hints
 │   ├── AttentionPromptView.swift   # Notification prompts (silence warning)
-│   └── ReviewTrayView.swift        # Action item review tray
+│   ├── ReviewTrayView.swift        # Action item review tray
+│   ├── AuroraIdleView.swift        # Aurora animation for idle state
+│   ├── AuroraRecordingView.swift   # Aurora animation for recording state
+│   ├── AuroraProcessingView.swift  # Aurora animation for processing state
+│   └── AuroraSuccessView.swift     # Aurora animation for success state
 └── Helpers/
     └── LawsComponents.swift        # Reusable UI primitives (buttons, status text)
 ```
 
+Settings window (`Murmur/UI/Settings/`):
+```
+Settings/
+├── SettingsWindowController.swift          # NSWindowController, 800x600 fixed window
+├── SettingsContainerView.swift             # Sidebar + content layout
+├── SettingsSidebarView.swift               # Left sidebar navigation
+├── Models/
+│   └── SettingsNavigationState.swift       # Tab state (Dashboard, Preferences)
+├── Tabs/
+│   ├── DashboardView.swift                 # Stats, recent transcripts
+│   └── PreferencesView.swift               # API keys, storage, task service, appearance
+└── Components/
+    ├── RecentTranscriptsView.swift          # Recent transcript list
+    └── SettingsSectionCard.swift            # Reusable card component
+```
+
 Other UI files:
-- **SettingsView** (`Murmur/UI/Settings.swift`) - Tabbed settings (Recording, AI Features, Advanced)
 - **ActionItemReviewView** (`Murmur/UI/ActionItemReviewView.swift`) - Task approval workflow
-- **FailedTranscriptionsView** - UI for retry queue management
+- **FailedTranscriptionsView** (`Murmur/UI/FailedTranscriptionsView.swift`) - UI for retry queue management
 
 ### Onboarding Flow
 
-Six-step onboarding managed by `Murmur/Onboarding/OnboardingState.swift`:
-1. Welcome → 2. Value Proposition → 3. How It Works → 4. Permissions → 5. Demo → 6. Ready
+Four-step onboarding managed by `Murmur/Onboarding/OnboardingState.swift`:
+1. Welcome → 2. How It Works → 3. Permissions → 4. Ready
 
-Permissions requested: Microphone + Speech Recognition (required), Screen Recording (for system audio), Reminders (optional)
+Permissions requested: Microphone (required), Screen Recording (for system audio), Reminders (optional)
 
 ## Design System
 
@@ -177,7 +200,11 @@ User settings stored in `UserDefaults`:
 | `todoistAPIKey` | Todoist API key (if using Todoist) |
 | `userName` | User's name for action item attribution |
 | `hasCompletedOnboarding` | Onboarding completion flag |
-| `enableMeetingDetection` | Enable/disable meeting detection prompt |
+| `remindersListId` | Selected Apple Reminders list ID |
+| `enableUISounds` | Enable/disable recording sounds |
+| `useAuroraRecording` | Enable aurora animation |
+| `floatingPanelX` | Saved pill X position |
+| `floatingPanelY` | Saved pill Y position |
 
 ## Debug Features
 
@@ -193,8 +220,7 @@ To test failed transcription retry:
 
 ### macOS Version Annotations
 The app uses `@available(macOS 26.0, *)` annotations throughout, targeting macOS 14.2+ due to:
-- `AudioHardwareCreateProcessTap` API for system audio
-- `SpeechAnalyzer` with `.audioTimeRange` attribute options
+- `AudioHardwareCreateProcessTap` API for system audio capture
 
 ### Audio Format Handling
 - Mic audio: Uses hardware format from `inputNode.inputFormat(forBus: 1)` (NOT `outputFormat`)
@@ -221,11 +247,77 @@ Timeline entries: `[MM:SS] [Mic/SysAudio/Speaker X] Text`
 
 ```
 Murmur/
-├── Core/              # Audio, transcription, clipboard, validators
-├── Design/            # DesignTokens, PremiumComponents
-├── Onboarding/        # Steps/, Animations/, OnboardingState
-├── Services/          # RemindersService, TodoistService, DeepgramService
-├── UI/                # FloatingPanel, Settings, FailedTranscriptionsView
-├── TranscriptedApp.swift   # App entry point (AppDelegate pattern)
+├── Core/                          # 21 files
+│   ├── Audio.swift                # Microphone capture via AVAudioEngine
+│   ├── AudioPreprocessor.swift    # Audio preprocessing utilities
+│   ├── SystemAudioCapture.swift   # System audio via CoreAudio process taps
+│   ├── Transcription.swift        # Deepgram multichannel transcription
+│   ├── TranscriptionTaskManager.swift  # Background transcription queue
+│   ├── TranscriptSaver.swift      # Markdown output with YAML frontmatter
+│   ├── TranscriptScanner.swift    # Transcript file discovery
+│   ├── TranscriptUtils.swift      # Transcript helper utilities
+│   ├── ActionItemExtractor.swift  # Gemini AI two-pass action item pipeline
+│   ├── DateParser.swift           # Natural language date parsing
+│   ├── DateFormattingHelper.swift # Date formatting utilities
+│   ├── Clipboard.swift            # Clipboard operations
+│   ├── CoreAudioUtils.swift       # CoreAudio helper utilities
+│   ├── RecordingValidator.swift   # Pre-recording system checks
+│   ├── FailedTranscription.swift  # Failed transcription model
+│   ├── FailedTranscriptionManager.swift  # Retry queue with persistent storage
+│   ├── FailedActionItemManager.swift     # Retry queue for failed action items
+│   ├── ServiceResult.swift        # Generic service result type
+│   ├── StatsService.swift         # Recording statistics and streak tracking
+│   └── StatsDatabase.swift        # SQLite persistence for stats
+├── Design/                        # Visual design system
+│   ├── DesignTokens.swift         # Colors, spacing, animation presets
+│   └── PremiumComponents.swift    # Reusable premium UI components
+├── Onboarding/                    # Four-step onboarding flow
+│   ├── OnboardingState.swift      # State management for onboarding
+│   ├── OnboardingContainerView.swift  # Container view for steps
+│   ├── OnboardingWindow.swift     # Onboarding window controller
+│   ├── Steps/
+│   │   ├── WelcomeStep.swift      # Step 1: Welcome
+│   │   ├── HowItWorksStep.swift   # Step 2: How It Works
+│   │   ├── PermissionsStep.swift  # Step 3: Permissions
+│   │   └── ReadyStep.swift        # Step 4: Ready
+│   └── Animations/
+│       └── ParticleExplosionView.swift  # Celebration particle effects
+├── Services/                      # External service integrations
+│   ├── DeepgramService.swift      # Deepgram transcription API
+│   ├── RemindersService.swift     # Apple Reminders integration
+│   └── TodoistService.swift       # Todoist API integration
+├── UI/
+│   ├── FloatingPanel/             # Floating pill UI
+│   │   ├── FloatingPanelController.swift  # NSWindowController
+│   │   ├── FloatingPanelView.swift        # Main SwiftUI composition
+│   │   ├── PillStateManager.swift         # State machine
+│   │   ├── Components/
+│   │   │   ├── PillViews.swift            # Pill state views
+│   │   │   ├── WaveformViews.swift        # Audio visualizers
+│   │   │   ├── CelebrationViews.swift     # Success animations
+│   │   │   ├── ErrorViews.swift           # Error banners
+│   │   │   ├── AttentionPromptView.swift  # Silence warning
+│   │   │   ├── ReviewTrayView.swift       # Action item review tray
+│   │   │   ├── AuroraIdleView.swift       # Aurora idle animation
+│   │   │   ├── AuroraRecordingView.swift  # Aurora recording animation
+│   │   │   ├── AuroraProcessingView.swift # Aurora processing animation
+│   │   │   └── AuroraSuccessView.swift    # Aurora success animation
+│   │   └── Helpers/
+│   │       └── LawsComponents.swift       # Reusable UI primitives
+│   ├── Settings/                  # Settings sidebar+tabs system
+│   │   ├── SettingsWindowController.swift  # NSWindowController, 800x600
+│   │   ├── SettingsContainerView.swift     # Sidebar + content layout
+│   │   ├── SettingsSidebarView.swift       # Left sidebar navigation
+│   │   ├── Models/
+│   │   │   └── SettingsNavigationState.swift  # Tab state
+│   │   ├── Tabs/
+│   │   │   ├── DashboardView.swift        # Stats, recent transcripts
+│   │   │   └── PreferencesView.swift      # API keys, storage, appearance
+│   │   └── Components/
+│   │       ├── RecentTranscriptsView.swift # Recent transcript list
+│   │       └── SettingsSectionCard.swift   # Reusable card component
+│   ├── ActionItemReviewView.swift # Task approval workflow
+│   └── FailedTranscriptionsView.swift  # Retry queue management UI
+├── TranscriptedApp.swift          # App entry point (AppDelegate pattern)
 └── Transcripted.entitlements
 ```

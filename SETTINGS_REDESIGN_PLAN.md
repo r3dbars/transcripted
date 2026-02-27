@@ -1,5 +1,13 @@
 # Settings Redesign Plan: Monologue-Inspired Dashboard
 
+> **STATUS: PARTIALLY IMPLEMENTED (Feb 2026)**
+> This was the original planning document. The actual implementation simplified the design:
+> - Dashboard and Preferences tabs were implemented
+> - TranscriptsView and HelpView were **not** built (descoped)
+> - Meeting Detection toggle was **removed** (MeetingDetector deleted from codebase)
+> - The old unified `Settings.swift` was deleted and replaced by the `Settings/` directory
+> - See `CLAUDE.md` for the current architecture
+
 ## Overview
 
 Transform the current 3-tab settings panel into a full-featured dashboard with sidebar navigation, inspired by Monologue's elegant design. This redesign will feature a stats dashboard, transcript browser, comprehensive settings, and help section while maintaining Transcripted's dark charcoal/coral brand aesthetic.
