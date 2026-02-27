@@ -11,7 +11,6 @@ struct MenuBarPanelView: View {
     @State private var showSettings = false
     @State private var settingsName = UserDefaults.standard.string(forKey: "user-display-name") ?? ""
     @State private var isStyleExpanded = false
-    @State private var popoverGeneration = 0  // Increments on each appear to force clean view state
 
     var body: some View {
         ZStack {
@@ -51,10 +50,8 @@ struct MenuBarPanelView: View {
             settingsGearButton
         }
         .onAppear {
-            popoverGeneration += 1
             appState.feedbackStore.refreshStats()
         }
-        .id(popoverGeneration)
     }
 
     // MARK: - Header
