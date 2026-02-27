@@ -1,4 +1,4 @@
-# Murmur - Product & Business Report
+# Transcripted - Product & Business Report
 
 > A comprehensive overview for stakeholders, investors, and team members unfamiliar with the product.
 
@@ -24,11 +24,11 @@
 
 ## Executive Summary
 
-**Murmur** is a native macOS application that automatically records, transcribes, and organizes voice conversations from meetings and calls. Unlike cloud-based alternatives, Murmur processes all audio **on-device** using Apple's Speech Recognition framework, ensuring complete privacy while delivering professional-grade transcripts.
+**Transcripted** is a native macOS application that records, transcribes, and organizes voice conversations from meetings and calls. Transcripted uses **Deepgram Nova-3** cloud transcription API for high-accuracy, multichannel transcription with speaker diarization, delivering professional-grade transcripts with minimal latency.
 
 ### Key Value Proposition
 
-> "Never miss a word from your meetings. Murmur silently captures everything, transcribes it locally, and organizes it beautifully—all without your conversations leaving your computer."
+> "Never miss a word from your meetings. Transcripted captures everything, transcribes it with Deepgram Nova-3, and organizes it beautifully—giving you accurate, speaker-labeled transcripts in seconds."
 
 ### At a Glance
 
@@ -37,7 +37,7 @@
 | **Platform** | macOS 14.2+ (Sonoma and later) |
 | **Category** | Productivity / Meeting Tools |
 | **Pricing Model** | Freemium with Cloud Sync subscription |
-| **Primary Differentiator** | On-device transcription (privacy-first) |
+| **Primary Differentiator** | Deepgram Nova-3 cloud transcription with speaker diarization |
 | **Development Stage** | Beta / Early Production |
 | **Target Launch** | Q1 2025 |
 
@@ -63,37 +63,37 @@ Modern knowledge workers spend an average of **23 hours per week in meetings**. 
 | **Meeting recordings** | Large files, no searchable text, time-consuming to review |
 | **AI meeting bots** | Intrusive, requires meeting permissions, "bot in the call" stigma |
 
-### The Murmur Difference
+### The Transcripted Difference
 
-Murmur operates **invisibly in the background**:
+Transcripted operates **invisibly in the background**:
 
 1. **No bot joins your call** — captures system audio directly from your Mac
-2. **No data leaves your device** — transcription happens locally via Apple's frameworks
-3. **No manual intervention** — automatically detects meeting apps and prompts to record
-4. **No subscription required** — core features work completely offline
+2. **High-accuracy cloud transcription** — powered by Deepgram Nova-3 with multichannel support and speaker diarization
+3. **One-click recording** — start and stop via the floating pill interface
+4. **Two-pass AI pipeline** — Gemini 2.5 Pro extracts action items and summaries automatically
 
 ---
 
 ## Product Overview
 
-### What Murmur Does
+### What Transcripted Does
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         MURMUR WORKFLOW                         │
+│                      TRANSCRIPTED WORKFLOW                       │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│   📱 Meeting App Opens     →    🎤 Recording Starts             │
-│   (Zoom, Teams, Slack)          (Mic + System Audio)            │
+│   🟢 User Clicks Pill      →    🎤 Recording Starts             │
+│   (Floating pill UI)             (Mic + System Audio)            │
 │                                                                 │
 │   🔇 Silence Detected      →    ⏹️ Smart Stop Prompt            │
 │   (After 2 minutes)             ("Still recording?")            │
 │                                                                 │
-│   🎙️ Audio Captured        →    📝 On-Device Transcription      │
-│   (Dual-stream WAV)             (Apple Speech Recognition)      │
+│   🎙️ Audio Captured        →    📝 Deepgram Nova-3 Transcription│
+│   (Dual-stream WAV)             (Cloud API, speaker diarization)│
 │                                                                 │
-│   ✅ Transcript Saved      →    ☁️ Optional Cloud Sync          │
-│   (Markdown + timestamps)       (For teams & backup)            │
+│   🤖 Gemini 2.5 Pro        →    ✅ Transcript Saved             │
+│   (Action items + summary)       (Markdown + timestamps)         │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -105,15 +105,15 @@ Murmur operates **invisibly in the background**:
    - Records system audio (what others say in meetings)
    - Keeps them separate for clear attribution
 
-2. **Intelligent Meeting Detection**
-   - Automatically detects when you open Zoom, Teams, Slack, FaceTime, Discord, or Webex
-   - Prompts: "Start recording?" with one-click activation
-   - 60-second cooldown prevents prompt spam
+2. **One-Click Recording via Floating Pill**
+   - Minimal always-on-screen pill interface for instant recording
+   - Single click to start/stop — no navigation required
+   - Visual waveform and timer during active recording
 
-3. **Privacy-First Transcription**
-   - Uses Apple's on-device Speech Recognition
-   - No audio ever sent to external servers
-   - Works completely offline
+3. **Deepgram Nova-3 Cloud Transcription**
+   - High-accuracy transcription via Deepgram Nova-3 cloud API
+   - Multichannel support for separate mic and system audio streams
+   - Speaker diarization for automatic speaker labeling
 
 4. **Smart Recording Management**
    - Monitors for prolonged silence (2+ minutes)
@@ -126,7 +126,7 @@ Murmur operates **invisibly in the background**:
    - Speaker attribution (You vs. Others)
    - Ready for search, sharing, or AI summarization
 
-6. **Optional Cloud Synchronization**
+6. **Optional Cloud Synchronization** **Planned — Not Yet Implemented**
    - Sync transcripts across devices
    - Team sharing capabilities
    - Secure JWT authentication
@@ -158,14 +158,14 @@ Murmur operates **invisibly in the background**:
 | **Value** | Async-first culture, documented decisions, reduced meeting fatigue |
 
 #### 3. The Privacy-Conscious Professional
-> **"I need transcription but can't have sensitive data going to cloud services."**
+> **"I need transcription but don't want a bot in my calls or my data stored on someone else's servers."**
 
 | Attribute | Detail |
 |-----------|--------|
 | **Job Title** | Lawyer, Therapist, Healthcare Worker, Executive |
-| **Pain Points** | HIPAA/compliance concerns, client confidentiality, data security |
-| **Use Case** | Record consultations with full privacy, local-only storage |
-| **Value** | Professional transcription without compliance risk |
+| **Pain Points** | "Bot in the call" stigma, data retention by third parties, compliance concerns |
+| **Use Case** | Record consultations discreetly, transcripts stored locally on their Mac |
+| **Value** | No meeting bot, local transcript storage, audio deleted after transcription |
 
 #### 4. The Researcher/Interviewer
 > **"I conduct user interviews and need accurate, timestamped transcripts."**
@@ -202,8 +202,8 @@ Murmur operates **invisibly in the background**:
 │   🆓 FREE TIER                    💎 PRO TIER ($9.99/mo)        │
 │   ────────────────                ─────────────────────         │
 │   ✓ Unlimited local recording     ✓ Everything in Free          │
-│   ✓ On-device transcription       ✓ Cloud sync & backup         │
-│   ✓ Meeting app detection         ✓ Search across transcripts   │
+│   ✓ Deepgram Nova-3 transcription ✓ Cloud sync & backup         │
+│   ✓ Gemini AI action items        ✓ Search across transcripts   │
 │   ✓ Markdown export               ✓ AI-powered summaries*       │
 │   ✓ 7-day transcript retention    ✓ Unlimited retention         │
 │   ✗ Cloud sync                    ✓ Team sharing*               │
@@ -239,7 +239,7 @@ Murmur operates **invisibly in the background**:
 1. **Free tier must be genuinely useful** — Core transcription works forever, no artificial limits on quality
 2. **Paid tier adds convenience, not necessity** — Cloud sync, search, AI features
 3. **No predatory practices** — No "transcription credits," no per-minute charges
-4. **Privacy is not a premium feature** — On-device processing available to all tiers
+4. **Core features available to all** — Deepgram transcription and Gemini AI available on all tiers
 
 ### Customer Acquisition Strategy
 
@@ -262,9 +262,9 @@ Murmur operates **invisibly in the background**:
                         PRIVACY
                           ▲
                           │
-         Murmur ●         │
-    (On-device,           │
-     Native Mac)          │
+         Transcripted ●         │
+    (Local storage,        │
+     No bot, Native Mac)   │
                           │
     ──────────────────────┼──────────────────────► FEATURES
     MINIMAL               │                        MAXIMUM
@@ -281,20 +281,20 @@ Murmur operates **invisibly in the background**:
 
 ### Competitive Analysis
 
-| Competitor | Strengths | Weaknesses | Murmur Advantage |
+| Competitor | Strengths | Weaknesses | Transcripted Advantage |
 |------------|-----------|------------|------------------|
-| **Otter.ai** | Full-featured, integrations, AI summaries | Cloud-only, privacy concerns, $16.99/mo | Privacy-first, no subscription required for core |
+| **Otter.ai** | Full-featured, integrations, AI summaries | Cloud-only, privacy concerns, $16.99/mo | Native Mac app, no bot joins call, Gemini AI pipeline |
 | **Fireflies.ai** | Great AI, CRM integrations | Bot joins call (awkward), expensive at scale | Invisible operation, no bot stigma |
 | **Grain** | Video clips, collaborative | Video-focused, overkill for audio | Lightweight, audio-optimized |
-| **Rev** | Human transcription option | Slow (24hr), expensive ($1.50/min) | Instant, free on-device |
+| **Rev** | Human transcription option | Slow (24hr), expensive ($1.50/min) | Instant, high-accuracy Deepgram Nova-3 |
 | **Apple Voice Memos** | Free, built-in | No transcription, basic | Full transcription with timestamps |
 | **Descript** | Powerful editing | Complex UI, learning curve, $24/mo | Simple single-purpose tool |
 
 ### Competitive Moat
 
-1. **Privacy as a Feature** — In an era of data breaches and AI training concerns, local-first is increasingly valuable
-2. **Native Mac Experience** — Built with SwiftUI, integrates with macOS features (Notifications, Keychain, Accessibility)
-3. **Meeting Detection Intelligence** — Proactive prompts reduce friction vs. "remember to hit record"
+1. **Native Mac Experience** — Built with SwiftUI, integrates with macOS features (Notifications, Keychain, Accessibility)
+2. **Deepgram Nova-3 Accuracy** — Industry-leading transcription with multichannel support and speaker diarization
+3. **Two-Pass Gemini AI Pipeline** — Automatic action item extraction and summarization via Gemini 2.5 Pro
 4. **Dual-Stream Architecture** — Unique capture of both microphone and system audio with attribution
 
 ---
@@ -305,12 +305,12 @@ Murmur operates **invisibly in the background**:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        MURMUR ARCHITECTURE                      │
+│                        TRANSCRIPTED ARCHITECTURE                      │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐       │
-│  │  Audio.swift│     │SystemAudio  │     │MeetingApp   │       │
-│  │  (Mic Input)│     │Capture.swift│     │Monitor.swift│       │
+│  │  Audio.swift│     │SystemAudio  │     │Deepgram     │       │
+│  │  (Mic Input)│     │Capture.swift│     │Service.swift│       │
 │  └──────┬──────┘     └──────┬──────┘     └──────┬──────┘       │
 │         │                   │                   │               │
 │         ▼                   ▼                   ▼               │
@@ -324,7 +324,7 @@ Murmur operates **invisibly in the background**:
 │  ┌───────────┐   ┌───────────┐   ┌───────────┐                 │
 │  │Transcriptn│   │Transcript │   │CloudSync  │                 │
 │  │.swift     │   │Saver.swift│   │Manager    │                 │
-│  │(Speech AI)│   │(Markdown) │   │(Optional) │                 │
+│  │(Deepgram) │   │(Markdown) │   │(Planned)  │                 │
 │  └───────────┘   └───────────┘   └───────────┘                 │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────┐       │
@@ -342,7 +342,7 @@ Murmur operates **invisibly in the background**:
 | **Swift + SwiftUI** | Native performance, system integration, future-proof |
 | **AVFoundation for mic** | Reliable, well-documented, handles format conversion |
 | **CoreAudio for system audio** | Only way to capture system-wide audio on macOS |
-| **Apple Speech Framework** | On-device, privacy-preserving, no API costs |
+| **Deepgram Nova-3 API** | High accuracy, multichannel, speaker diarization |
 | **Markdown output** | Universal format, works with any tool, version-controllable |
 | **Keychain for auth** | macOS-native secure storage, no custom encryption needed |
 
@@ -353,7 +353,7 @@ Murmur operates **invisibly in the background**:
 | **Language** | Swift 5.9+ |
 | **UI Framework** | SwiftUI |
 | **Audio Capture** | AVFoundation, CoreAudio |
-| **Transcription** | Apple Speech Framework |
+| **Transcription** | Deepgram Nova-3 Cloud API |
 | **Storage** | FileManager (local), REST API (cloud) |
 | **Authentication** | JWT tokens, Keychain storage |
 | **State Management** | Combine, @Published properties |
@@ -373,34 +373,29 @@ The primary interface is a **glassmorphic floating panel** that lives at the edg
 |-------|------------|----------|
 | **Docked/Idle** | Thin dark pill (8px), nearly invisible | Default state |
 | **Docked/Recording** | Expanded pill (36px) with waveform + timer | During recording |
-| **Expanded** | Full panel with all controls | Mouse hover, meeting detection |
-| **Attention Prompt** | Overlay with action buttons | Meeting app opens, silence detected |
+| **Expanded** | Full panel with all controls | Mouse hover |
+| **Attention Prompt** | Overlay with action buttons | Silence detected |
 
 **Design Philosophy:**
 - **Invisible when not needed** — Stays out of your way during work
 - **Glanceable status** — Recording state visible at a glance
 - **One-click actions** — Start/stop recording without navigation
 
-### 2. Meeting App Detection
+### 2. Two-Pass Gemini AI Pipeline
 
-Automatically monitors for these applications:
+After transcription completes, Transcripted runs a two-pass AI analysis using Gemini 2.5 Pro:
 
-| App | Bundle ID | Detection |
-|-----|-----------|-----------|
-| Zoom | `us.zoom.xos` | Launch + Activate |
-| Microsoft Teams | `com.microsoft.teams` | Launch + Activate |
-| Teams (New) | `com.microsoft.teams2` | Launch + Activate |
-| Slack | `com.tinyspeck.slackmacgap` | Launch + Activate |
-| FaceTime | `com.apple.FaceTime` | Launch + Activate |
-| Discord | `com.hnc.Discord` | Launch + Activate |
-| Webex | `com.webex.meetingmanager` | Launch + Activate |
+| Pass | Purpose | Output |
+|------|---------|--------|
+| **Pass 1** | Extract action items, decisions, and key topics | Structured action item list |
+| **Pass 2** | Generate summary and highlight important moments | Executive summary with timestamps |
 
 **Behavior:**
-1. App launches or comes to foreground
-2. 3-second delay (let app fully load)
-3. Show attention prompt with animated green ring
-4. Auto-dismiss after 10 seconds if no action
-5. 60-second cooldown before re-prompting
+1. Transcription completes via Deepgram Nova-3
+2. First Gemini pass extracts action items and decisions
+3. Second Gemini pass generates summary
+4. Results embedded in transcript Markdown file
+5. Automatic retry on failure with exponential backoff
 
 ### 3. Dual-Stream Recording
 
@@ -436,32 +431,26 @@ Audio File (WAV)
       │
       ▼
 ┌─────────────────────────────┐
-│  Split into 45-second       │  (Apple Speech API limit)
-│  chunks                     │
+│  Upload to Deepgram Nova-3  │  (Cloud API, multichannel)
+│  with speaker diarization   │
 └─────────────┬───────────────┘
               │
               ▼
 ┌─────────────────────────────┐
-│  SFSpeechRecognizer         │  (On-device processing)
-│  recognitionTask            │
-└─────────────┬───────────────┘
-              │
-              ▼
-┌─────────────────────────────┐
-│  Extract word timestamps    │  (From AttributedString)
-│  from results               │
+│  Receive transcript with    │  (Speaker labels + timestamps)
+│  word-level timestamps      │
 └─────────────┬───────────────┘
               │
               ▼
 ┌─────────────────────────────┐
 │  Group into sentences       │  (Punctuation + pause detection)
-│  (1-second silence = break) │
+│  with speaker attribution   │
 └─────────────┬───────────────┘
               │
               ▼
 ┌─────────────────────────────┐
-│  Merge mic + system         │  (Sorted by timestamp)
-│  transcripts                │
+│  Gemini 2.5 Pro Pass 1      │  (Action items + decisions)
+│  Gemini 2.5 Pro Pass 2      │  (Summary generation)
 └─────────────┬───────────────┘
               │
               ▼
@@ -521,7 +510,7 @@ word_count: 4,247
 
 ---
 
-*Generated by Murmur • Duration: 45:30 • 4,247 words*
+*Generated by Transcripted • Duration: 45:30 • 4,247 words*
 ```
 
 ---
@@ -537,31 +526,21 @@ word_count: 4,247
 │                                                                 │
 │  Step 1: Welcome                                                │
 │  ─────────────────                                              │
-│  "Welcome to Murmur"                                            │
+│  "Welcome to Transcripted"                                      │
 │  Brief introduction, warm tone                                  │
 │                                                                 │
-│  Step 2: Value Proposition                                      │
-│  ─────────────────────────                                      │
-│  "Your meetings, transcribed automatically"                     │
-│  Key benefits highlighted                                       │
-│                                                                 │
-│  Step 3: How It Works                                           │
+│  Step 2: How It Works                                           │
 │  ────────────────────                                           │
 │  Visual explanation of the capture + transcribe flow            │
 │                                                                 │
-│  Step 4: Permissions                                            │
+│  Step 3: Permissions                                            │
 │  ───────────────────                                            │
 │  Request: Microphone access                                     │
-│  Request: Speech recognition                                    │
-│  Request: System audio (Screen Recording permission)            │
+│  Request: Screen Recording (system audio capture)               │
 │                                                                 │
-│  Step 5: Demo                                                   │
-│  ─────────                                                      │
-│  Quick interactive demo of recording                            │
-│                                                                 │
-│  Step 6: Ready!                                                 │
+│  Step 4: Ready!                                                 │
 │  ────────────                                                   │
-│  "You're all set. Open any meeting app to get started."         │
+│  "You're all set. Click the pill to start recording."           │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -569,23 +548,23 @@ word_count: 4,247
 ### Daily User Journey
 
 ```
-Morning: User opens Zoom for standup
+Morning: User has a meeting starting
          ↓
-         Murmur detects Zoom, shows prompt
+         User clicks the floating pill to start recording
          ↓
-         User clicks "Record" (one click)
+         Pill expands to show waveform + timer
          ↓
-         Panel minimizes to edge, shows recording indicator
+         Meeting ends, user clicks Stop on the pill
          ↓
-         Meeting ends, user clicks Stop
+         Audio uploaded to Deepgram Nova-3 for transcription
          ↓
-         Spinner shows processing (5-15 seconds)
+         Gemini 2.5 Pro extracts action items + summary
          ↓
          Checkmark animation, notification: "Transcript saved"
          ↓
          User clicks notification to open Markdown file
          ↓
-         Transcript ready in Obsidian/Notes/any text editor
+         Transcript with action items ready in ~/Documents/Transcripted/
 ```
 
 ### Accessibility Features
@@ -609,19 +588,21 @@ Morning: User opens Zoom for standup
 │                     PRIVACY BY DESIGN                           │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│   YOUR MAC                           OPTIONAL CLOUD             │
+│   YOUR MAC                           CLOUD SERVICES             │
 │   ────────                           ──────────────             │
 │                                                                 │
 │   🎤 Audio Capture ──────────┐                                  │
-│                              │                                  │
-│   🧠 Transcription ◄─────────┘       ☁️ Transcript Sync         │
-│   (100% On-Device)                   (Text only, encrypted)     │
-│                              │                                  │
-│   📁 Local Storage ◄─────────┘       🔐 Auth via Keychain       │
-│   (Your Documents folder)            (Secure token storage)     │
+│                              │       ☁️ Deepgram Nova-3          │
+│   📁 Local Storage ◄─────────┤       (Transcription API)        │
+│   (Your Documents folder)    │                                  │
+│                              │       🤖 Gemini 2.5 Pro          │
+│   🔐 Auth via Keychain       │       (AI summarization)         │
+│   (Secure token storage)     │                                  │
 │                                                                 │
-│   ❌ Audio NEVER uploaded            ❌ No third-party analytics │
-│   ❌ No usage tracking               ❌ No advertising           │
+│   ✅ Audio sent to Deepgram for transcription only              │
+│   ✅ Transcripts stored locally in ~/Documents/Transcripted/    │
+│   ❌ No third-party analytics        ❌ No advertising           │
+│   ❌ No usage tracking                                          │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -630,7 +611,7 @@ Morning: User opens Zoom for standup
 
 | Data Type | Storage | Shared? | Retention |
 |-----------|---------|---------|-----------|
-| **Audio files** | Local only | Never | Deleted after transcription |
+| **Audio files** | Local + sent to Deepgram for transcription | Deepgram API only | Deleted locally after transcription |
 | **Transcripts** | Local + optional cloud | User choice | User controlled |
 | **Auth tokens** | macOS Keychain | Never | Until logout |
 | **Preferences** | UserDefaults | Never | Persistent |
@@ -640,9 +621,9 @@ Morning: User opens Zoom for standup
 
 | Regulation | Status |
 |------------|--------|
-| **GDPR** | Compliant — No EU data transfer for core features |
+| **GDPR** | Review required — Audio sent to Deepgram and text sent to Gemini cloud APIs |
 | **CCPA** | Compliant — No personal data sale |
-| **HIPAA** | Compatible — On-device processing supports compliance |
+| **HIPAA** | Review required — Audio is sent to Deepgram cloud API for transcription |
 | **SOC 2** | Cloud tier: In progress |
 
 ### Permissions Required
@@ -650,8 +631,8 @@ Morning: User opens Zoom for standup
 | Permission | Purpose | Required? |
 |------------|---------|-----------|
 | **Microphone** | Record user's voice | Yes |
-| **Speech Recognition** | On-device transcription | Yes |
 | **Screen Recording** | System audio capture | Yes |
+| **Internet** | Deepgram Nova-3 cloud transcription and Gemini AI | Yes |
 | **Accessibility** | Global hotkeys (future) | Optional |
 
 ---
@@ -672,8 +653,8 @@ Morning: User opens Zoom for standup
 
 | Feature | Description |
 |---------|-------------|
-| **Speaker Diarization** | Identify and label different speakers automatically |
-| **Action Item Extraction** | AI detects commitments and to-dos |
+| **Speaker Diarization** | Identify and label different speakers automatically — **Shipped** (via Deepgram multichannel) |
+| **Action Item Extraction** | AI detects commitments and to-dos — **Shipped** (via Gemini 2.5 Pro two-pass pipeline) |
 | **Calendar Integration** | Auto-name transcripts based on calendar events |
 | **Notion/Roam Export** | Direct integration with popular note apps |
 | **Team Workspaces** | Shared transcript libraries |
@@ -691,10 +672,10 @@ Morning: User opens Zoom for standup
 ### Integration Ecosystem
 
 ```
-                    ┌─────────────┐
-                    │   MURMUR    │
-                    │   (Core)    │
-                    └──────┬──────┘
+                    ┌────────────────┐
+                    │  TRANSCRIPTED  │
+                    │    (Core)      │
+                    └───────┬────────┘
                            │
        ┌───────────────────┼───────────────────┐
        │                   │                   │
@@ -733,14 +714,14 @@ Morning: User opens Zoom for standup
 | **Transcription accuracy** | 90%+ (measured by user feedback) |
 | **Processing time** | <1 minute per 10 minutes of audio |
 | **Crash-free sessions** | 99.5%+ |
-| **Meeting detection accuracy** | 95%+ |
-| **Cloud sync success rate** | 99%+ |
+| **Deepgram API success rate** | 99%+ |
+| **Gemini AI pipeline success rate** | 95%+ |
 
 ### User Feedback Channels
 
 1. **In-app feedback** — Settings → Send Feedback
 2. **App Store reviews** — Monitored and responded to
-3. **Twitter/X** — @MurmurApp (planned)
+3. **Twitter/X** — @TranscriptedApp (planned)
 4. **Discord community** — For power users (planned)
 5. **Email support** — support@transcripted.app
 
@@ -756,7 +737,7 @@ Morning: User opens Zoom for standup
 | **Architecture** | Apple Silicon (M1+) and Intel |
 | **RAM** | 4GB minimum, 8GB recommended |
 | **Storage** | 100MB app + transcript storage |
-| **Internet** | Not required (except cloud sync) |
+| **Internet** | Required for Deepgram transcription and Gemini AI |
 
 ### Audio Specifications
 
@@ -776,7 +757,7 @@ Morning: User opens Zoom for standup
 | **Metadata** | YAML frontmatter |
 | **Timestamps** | MM:SS format, per-segment |
 
-### API Specifications (Cloud Sync)
+### API Specifications (Cloud Sync) — **Planned — Not Yet Implemented**
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
@@ -788,35 +769,32 @@ Morning: User opens Zoom for standup
 ### File System Structure
 
 ```
-~/Documents/
-└── Murmur Transcripts/
-    ├── Call_2024-11-29_14-32-45.md
-    ├── Call_2024-11-29_16-00-00.md
-    └── ...
-
-~/Documents/Murmur/
-└── failed_transcriptions.json  (retry queue)
+~/Documents/Transcripted/
+├── Call_2024-11-29_14-32-45.md
+├── Call_2024-11-29_16-00-00.md
+├── failed_transcriptions.json  (retry queue)
+└── ...
 ```
 
 ---
 
 ## Conclusion
 
-**Murmur** represents a new approach to meeting transcription: privacy-first, friction-free, and genuinely useful. By leveraging Apple's on-device capabilities and focusing relentlessly on user experience, we've built a tool that knowledge workers will love and trust.
+**Transcripted** represents a new approach to meeting transcription: friction-free, AI-powered, and genuinely useful. By combining Deepgram Nova-3 cloud transcription with a two-pass Gemini 2.5 Pro AI pipeline, and focusing relentlessly on user experience, we've built a tool that knowledge workers will love and trust.
 
-The market opportunity is substantial, the technical foundation is solid, and the product-market fit signals are strong. With a clear monetization path through cloud sync and AI features, Murmur is positioned to become the default meeting companion for privacy-conscious Mac users.
+The market opportunity is substantial, the technical foundation is solid, and the product-market fit signals are strong. With a clear monetization path through cloud sync and AI features, Transcripted is positioned to become the default meeting companion for Mac users who want accurate transcripts with automatic action items.
 
 ---
 
-*Document Version: 1.0*
-*Last Updated: November 29, 2024*
+*Document Version: 2.0*
+*Last Updated: February 27, 2026*
 *Author: Product & Engineering Team*
 
 ---
 
 ## Contact
 
-For questions about this document or Murmur:
+For questions about this document or Transcripted:
 
 - **Product**: product@transcripted.app
 - **Technical**: engineering@transcripted.app

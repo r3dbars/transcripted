@@ -307,8 +307,18 @@
 | Property | Value |
 |----------|-------|
 | **Style** | Standard macOS window (native, not frosted) |
-| **Size** | ~520×580px (current size) |
-| **Layout** | Tabbed interface (Recording, AI Features, Advanced) |
+| **Size** | 800×600px (fixed) |
+| **Layout** | Sidebar with Dashboard + Preferences tabs |
+
+#### Dashboard Tab
+- Transcription statistics (total count, total duration, etc.)
+- Recent transcripts list with quick access
+
+#### Preferences Tab
+- API keys configuration (Deepgram, Gemini)
+- Storage settings (output directory)
+- Task service selection (Reminders, Todoist)
+- Appearance options (aurora animation, sound feedback)
 
 ### Quick Settings in Pill
 
@@ -507,23 +517,23 @@ withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
 
 ## 13. Project Plan
 
-### Phase 1: Foundation (Weeks 1-2)
-- [ ] Create new `FloatingPill` SwiftUI component
-- [ ] Implement pill positioning above dock
-- [ ] Build frosted glass background
-- [ ] Create dormant waveform visualizer
+### Phase 1: Foundation (Weeks 1-2) -- COMPLETED
+- [x] Create new `FloatingPill` SwiftUI component
+- [x] Implement pill positioning above dock
+- [x] Build frosted glass background
+- [x] Create dormant waveform visualizer
 
-### Phase 2: Core Interactions (Weeks 3-4)
-- [ ] Implement morph animation (idle ↔ recording)
-- [ ] Build dual-audio interlaced visualizer
-- [ ] Add recording timer and stop button
-- [ ] Implement start/stop chimes
+### Phase 2: Core Interactions (Weeks 3-4) -- COMPLETED
+- [x] Implement morph animation (idle ↔ recording)
+- [x] Build dual-audio interlaced visualizer
+- [x] Add recording timer and stop button
+- [x] Implement start/stop chimes
 
-### Phase 3: Processing & Feedback (Weeks 5-6)
-- [ ] Create progressive status indicators
-- [ ] Build "smooth grow upward" animation for tray
-- [ ] Implement task review UI in tray
-- [ ] Add celebration animations (badge + glow)
+### Phase 3: Processing & Feedback (Weeks 5-6) -- COMPLETED
+- [x] Create progressive status indicators
+- [x] Build "smooth grow upward" animation for tray
+- [x] Implement task review UI in tray
+- [x] Add celebration animations (badge + glow)
 
 ### Phase 4: Polish & Integration (Weeks 7-8)
 - [ ] Update onboarding to frosted glass style
@@ -628,6 +638,7 @@ withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
 | Date | Version | Changes |
 |------|---------|---------|
 | 2024-12-29 | 1.0 | Initial specification created from comprehensive questionnaire |
+| 2026-02-27 | 1.1 | Updated Settings to sidebar layout (Dashboard + Preferences, 800x600 fixed); removed meeting detection trigger; marked Phases 1-3 as completed |
 
 ---
 

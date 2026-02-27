@@ -1,19 +1,19 @@
 # Transcripted - Launch TODO
 
 ## Branding
-- [ ] Rename app to "Transcripted"
+- [x] Rename app to "Transcripted"
 - [ ] Design "TS" logo (app icon + menu bar icon)
 - [ ] Landing page + domain
 
 ## UI/UX
-- [ ] Fix settings menu
-- [ ] Redo onboarding
+- [x] Fix settings menu
+- [x] Redo onboarding
 - [ ] Remove BYOK (API key fields)
 
 ## Integrations
 - [ ] Things 3
 - [ ] Todoist (verify working)
-- [ ] Apple Reminders (done)
+- [x] Apple Reminders
 
 ## Payments
 - [ ] Lemon Squeezy setup ($12/mo, 14-day trial)
@@ -37,3 +37,12 @@
 - Transcript search
 - Notion/Obsidian export
 - Team features
+
+## Settings Redesign (In Progress)
+- [x] Dashboard tab with stats overview
+- [x] Preferences tab with sidebar navigation
+- [x] Remove old Settings.swift
+- [x] Remove deprecated views (HelpView, TranscriptsView, AchievementView, etc.)
+- [ ] Complete stats database integration
+- [ ] Finish heat map visualization
+- [ ] Add transcript browser to dashboard

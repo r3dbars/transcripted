@@ -22,8 +22,12 @@ Record → WAV files → Transcription → Speaker ID → Save → Action Items 
 | Orchestration | `Core/TranscriptionTaskManager.swift` | Background transcription queue, progress |
 | UI State | `UI/FloatingPanel/PillStateManager.swift` | State machine: idle→recording→processing→reviewing |
 | Action Items | `Core/ActionItemExtractor.swift` | Two-pass Gemini: speaker ID, then extraction |
-| Transcription | `Core/Transcription.swift` | Provider abstraction (Apple/Deepgram/AssemblyAI) |
+| Transcription | `Core/Transcription.swift` | Deepgram multichannel cloud transcription |
 | Transcript Output | `Core/TranscriptSaver.swift` | Markdown with YAML frontmatter |
+| StatsDatabase | `Core/StatsDatabase.swift` | SQLite persistence for recording sessions and activity |
+| StatsService | `Core/StatsService.swift` | Calculates hours, streaks, heat map data |
+| TranscriptScanner | `Core/TranscriptScanner.swift` | Scans folder for transcript metadata |
+| FailedActionItemManager | `Core/FailedActionItemManager.swift` | Retry queue for action item delivery failures |
 
 ### State Machine (PillStateManager)
 ```
@@ -43,11 +47,11 @@ This is why the app uses `@available(macOS 26.0, *)` throughout.
 ## Transcription Pipeline
 
 ### Providers
-| Provider | Type | Key Feature |
-|----------|------|-------------|
-| Apple | On-device | Privacy-first, 45-sec chunks |
-| AssemblyAI | Cloud | Speaker diarization, sentiment, chapters |
-| Deepgram | Cloud | Nova-2, low latency |
+| Provider | Type | Status | Key Feature |
+|----------|------|--------|-------------|
+| Deepgram | Cloud | **Active** | Nova-3 multichannel with speaker diarization |
+| Apple | On-device | **Legacy/Unused** | Was used pre-Deepgram migration |
+| AssemblyAI | Cloud | **Legacy/Unused** | Was evaluated, not currently integrated |
 
 ### Multichannel vs Single-Source
 - **Both mic + system available**: Merge to stereo → single API call (50% fewer calls)
@@ -256,6 +260,8 @@ If you see these warnings but want to confirm audio capture is working:
 
 ---
 
+> **HISTORICAL NOTE (Feb 2026):** The `MeetingDetector` component described below was removed from the codebase as part of a settings redesign. The architectural lesson about concurrent CoreAudio taps remains valid.
+
 ## Dual SystemAudioCapture Conflict Bug (Jan 6, 2026)
 
 ### Symptom
@@ -291,9 +297,9 @@ If you see these warnings but want to confirm audio capture is working:
 4. Wired up dependency in `TranscriptedApp.setupMeetingDetection()`
 
 ### Files Modified
-- `Murmur/Core/MeetingDetector.swift` - Added `stopPassiveMonitorForRecording()` method
+- `Murmur/Core/MeetingDetector.swift` **[DELETED]** - Added `stopPassiveMonitorForRecording()` method
 - `Murmur/Core/Audio.swift` - Added `meetingDetector` reference and call before capture
-- `Murmur/TranscriptedApp.swift` - Wire up `audio.setMeetingDetector(meetingDetector!)`
+- `Murmur/TranscriptedApp.swift` **[SIMPLIFIED]** - Wire up `audio.setMeetingDetector(meetingDetector!)`
 
 ### Key Lesson
 **CoreAudio process taps and aggregate devices are system resources.** Having multiple concurrent taps for the same processes can cause resource conflicts. When one tap is destroyed during cleanup, it can affect others. Always ensure only one tap is active at a time.
