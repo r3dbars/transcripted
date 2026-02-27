@@ -184,12 +184,36 @@ Single-pane menubar popover (440x520, `MenuTokens` design tokens) with a continu
 1. **Header** — "Draft" title + status dot (green = model loaded, orange = loading)
 2. **Stats** — Three-column HStack: words dictated, messages drafted, time saved. Data from `FeedbackStore.stats`, refreshed on `.onAppear`
 3. **Shortcuts** — Pill-shaped badges showing `⌥D Draft` and `⌥Space Dictation`
-4. **Writing Style** — Section header with example count badge + expandable card. Shows compact 4-line preview of `style.md` (extracted from "## Style Summary" section), expands to full scrollable content with "Show more/Show less" toggle. Empty state: "Accept a draft to start learning your style"
+4. **Writing Style** — Section header with example count badge + expandable card. Shows compact preview of `style.md` (extracted from "## Style Summary" section, up to 6 lines), expands to full scrollable content with "Show more/Show less" toggle. Empty state: "Accept a draft to start learning your style"
 5. **Agent** — `AgentSection` (from `AgentTab.swift`): insight cards + streaming chat interface
 
 Additional features:
 - **Onboarding gates** — sequential ZStack overlays: `APIKeyEntryView` → `StyleOnboardingView`
 - **Settings gear** — top-right overlay button with popover: name field, transcription engine info (Parakeet CoreML with download progress), auth mode display + "Switch Auth Method", Quit button
+
+### NSHostingController Lifecycle
+
+The `NSHostingController` is **recreated on every popover open** inside `DraftAppDelegate.togglePopover()` in `DraftApp.swift`:
+
+```swift
+@objc func togglePopover() {
+    guard let button = statusItem?.button, let popover = popover else { return }
+    if popover.isShown {
+        popover.performClose(nil)
+    } else {
+        // Recreate the hosting controller each time to guarantee a fresh SwiftUI
+        // view tree. A long-lived NSHostingController accumulates stale observation
+        // state across show/hide cycles, eventually crashing in body evaluation.
+        popover.contentViewController = NSHostingController(
+            rootView: MenuBarPanelView(appState: appState)
+        )
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+```
+
+This guarantees a fresh SwiftUI view tree on each open. A long-lived `NSHostingController` accumulates stale observation state across show/hide cycles and can crash in body evaluation. Do NOT cache the hosting controller or use `.id()` tricks (e.g., a `popoverGeneration` counter) — a `.id()` change on the root view triggers an infinite `.onAppear` → re-layout → `.onAppear` loop. Just recreate the controller.
 
 ## InsightCard
 
@@ -201,6 +225,25 @@ Key addition: **shared `toolDefinition` and `from()` factory** used by both `Str
 static let toolDefinition: [String: Any]                    // Anthropic tool schema for propose_prompt_change
 static func from(toolId: String, input: [String: Any]) -> InsightCard?  // Parse tool call into card
 ```
+
+## AgentSection — Defensive Card ID Capture
+
+`AgentSection` (in `AgentTab.swift`) captures the card's `id` value type into a local `let cardId` variable before the button closures, rather than closing over the full `card` struct:
+
+```swift
+let cardId = card.id
+// ...
+Button("Skip") {
+    guard let live = orchestrator.insights.first(where: { $0.id == cardId }) else { return }
+    orchestrator.skip(live)
+}
+Button(action: {
+    guard let live = orchestrator.insights.first(where: { $0.id == cardId }) else { return }
+    orchestrator.apply(live)
+}) { ... }
+```
+
+**Why:** `orchestrator.insights` is a `@Published` array on an `ObservableObject`. When the array mutates (a card is applied/skipped, which triggers a re-render), button closures that closed over the full `card` struct may hold a reference to a now-stale or removed element. Capturing only the `id` and then doing a live lookup (`first(where:)`) inside the closure guarantees the button always acts on the current version of the card. The `guard let` protects against the card having already been removed between render and tap.
 
 ## StyleOnboardingView
 
@@ -249,5 +292,6 @@ After modifying UI components, verify with these checks:
 - **Stats section:** Opens menubar panel → words dictated, messages drafted, time saved are visible
 - **Style section:** Shows style.md preview in expandable card; "Show more" expands full content
 - **Agent section:** Insight cards appear with Apply/Skip buttons; chat interface works
+- **Rapid menubar clicking:** Click the menubar icon quickly multiple times — should NOT cause hangs, spinning beachballs, or crashes. Each open recreates the hosting controller cleanly; closing before re-opening calls `performClose` which is synchronous and safe.
 - **Debug log:** `tail -f ~/draft-debug.log | grep "SESSION\|DICTATION\|REVIEW"` shows all events
 - **Build:** `bash build.sh` — must compile cleanly (pre-existing warnings only: CGWindowListCreateImage deprecation, `_performHide()` actor isolation in animation callbacks)

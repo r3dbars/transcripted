@@ -258,6 +258,7 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - **Global Escape monitor** — `NSEvent.addGlobalMonitorForEvents` intercepts Escape during non-key panel states (listening/drafting). Installed when overlay shows, removed on hide. The panel can't receive keyboard events when `allowKeyStatus = false`, so SwiftUI `.onKeyPress` won't fire — the global monitor bridges that gap.
 - **NSLock for audio thread ↔ MainActor** — Audio render thread has strict ~10ms deadlines; actor isolation has unpredictable scheduling latency. NSLock provides deterministic ~1μs overhead for the shared sample buffer.
 - **All engines have deinits** — `ContextCaptureEngine` (Carbon hotkeys), `AnalysisEngine` (DispatchSource + debounce task), `ParakeetEngine` (audio engine stop + AsrManager cleanup). Missing deinits leak OS-level resources.
+- **Fresh NSHostingController per popover open** — Recreating the hosting controller on each menubar popover toggle prevents stale SwiftUI observation state from accumulating across show/hide cycles. A long-lived `NSHostingController` eventually crashes in `body` evaluation after hours of use.
 
 ## Project-Wide Learnings
 
@@ -278,6 +279,7 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - **CoreFoundation `as?` casts always succeed** — Conditional downcasts to CF bridged types (`AXUIElement`, `AXValue`) always succeed at the compiler level. Use `as!` for CF types — it's compiler-guaranteed safe
 - **Global event monitors are observe-only** — `NSEvent.addGlobalMonitorForEvents` can see but not consume events. For events that need to be consumed, use Carbon `RegisterEventHotKey` instead
 - **Clipboard safety on inject** — `pasteWithClipboardRestore()` saves the user's clipboard, sets the draft text, simulates ⌘V, then restores after 500ms. The non-activating panel means the target app stays frontmost
+- **`.onAppear` re-fires when `.id()` changes** — Never mutate the value driving `.id()` inside `.onAppear`, or you get an infinite view recreation loop that starves the main thread
 
 ### API & Auth
 

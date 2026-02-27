@@ -106,7 +106,7 @@ Only `.error` level events are forwarded to Sentry. Warnings and info stay local
 
 ## Event Catalog
 
-43 unique events across 11 engines (53 total capture call sites).
+43 unique events across 11 engines (51 total capture call sites).
 
 | Engine | Event | Level | Trigger |
 |--------|-------|-------|---------|

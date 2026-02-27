@@ -140,6 +140,7 @@ struct AgentSection: View {
                         .padding(.vertical, 4)
                     }
                     .frame(maxHeight: 160)
+                    .scrollBounceBehavior(.basedOnSize)
                     .onChange(of: chatEngine.messages.count) { _, _ in
                         if let last = chatEngine.messages.last {
                             proxy.scrollTo(last.id, anchor: .bottom)

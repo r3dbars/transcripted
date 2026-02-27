@@ -11,6 +11,7 @@ struct MenuBarPanelView: View {
     @State private var showSettings = false
     @State private var settingsName = UserDefaults.standard.string(forKey: "user-display-name") ?? ""
     @State private var isStyleExpanded = false
+    @State private var cachedStylePreview = ""
 
     var body: some View {
         ZStack {
@@ -51,6 +52,10 @@ struct MenuBarPanelView: View {
         }
         .onAppear {
             appState.feedbackStore.refreshStats()
+            cachedStylePreview = computeStylePreview()
+        }
+        .onChange(of: appState.styleEngine.styleFileContents) {
+            cachedStylePreview = computeStylePreview()
         }
     }
 
@@ -195,8 +200,9 @@ struct MenuBarPanelView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .frame(maxHeight: 180)
+                    .scrollBounceBehavior(.basedOnSize)
                 } else {
-                    Text(compactStylePreview)
+                    Text(cachedStylePreview)
                         .font(.system(.callout, design: .monospaced))
                         .foregroundColor(MenuTokens.textSecondary)
                         .lineLimit(MenuTokens.compactStyleLines)
@@ -226,7 +232,7 @@ struct MenuBarPanelView: View {
         }
     }
 
-    private var compactStylePreview: String {
+    private func computeStylePreview() -> String {
         let contents = appState.styleEngine.styleFileContents
         // Try to extract the Style Summary section
         if let range = contents.range(of: "## Style Summary") {

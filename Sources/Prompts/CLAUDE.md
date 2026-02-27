@@ -26,7 +26,7 @@ Prompts are now editable without recompiling. The native `AnalysisEngine` (in `S
 
 | Key | Used by | Placeholders |
 |-----|---------|-------------|
-| `model` | Vision extraction, style analysis | — |
+| `model` | Vision extraction (context capture via Haiku) | — |
 | `draft_model` | Message drafting (Sonnet — quality output the user sees) | — |
 | `drafting_system` | DraftEngine fallback when no style examples yet | — |
 | `context_extraction` | Vision prompt for screenshot → conversation | `{USER_NAME}`, `{APP_NAME}` |
@@ -64,7 +64,7 @@ If `prompts.json` is missing or corrupt, `PromptStore` initializes with hardcode
 ## Model Selection
 
 Two model keys in `prompts.json`:
-- `model` — Used for vision extraction and general API calls (default: `claude-haiku-4-5-20251001`)
+- `model` — Used for vision extraction / context capture (default: `claude-haiku-4-5-20251001`)
 - `draft_model` — Used for message drafting, the text the user actually sees (default: `claude-sonnet-4-6-20250514`)
 
 `DefaultPrompts` also exposes these as `DefaultPrompts.model` and `DefaultPrompts.sonnetModel` for use as fallbacks. Style refinement and analysis always use Sonnet (`AnthropicAPI.sonnetModel`) regardless of these settings — they need deeper reasoning.
