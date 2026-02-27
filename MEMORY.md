@@ -7,7 +7,7 @@ This file documents important lessons learned during development. Reference this
 ## Architecture Quick Reference
 
 ### What This App Does
-Transcripted captures mic + system audio, transcribes via cloud APIs, identifies speakers and extracts action items via Gemini, then sends tasks to Reminders/Todoist.
+Transcripted captures mic + system audio, transcribes locally via Parakeet TDT V3 (STT) + Sortformer (speaker diarization) using the FluidAudio library, identifies speakers and extracts action items via Gemini, then sends tasks to Reminders/Todoist.
 
 ### Core Data Flow
 ```
@@ -22,7 +22,8 @@ Record → WAV files → Transcription → Speaker ID → Save → Action Items 
 | Orchestration | `Core/TranscriptionTaskManager.swift` | Background transcription queue, progress |
 | UI State | `UI/FloatingPanel/PillStateManager.swift` | State machine: idle→recording→processing→reviewing |
 | Action Items | `Core/ActionItemExtractor.swift` | Two-pass Gemini: speaker ID, then extraction |
-| Transcription | `Core/Transcription.swift` | Deepgram multichannel cloud transcription |
+| Transcription | `Core/Transcription.swift` | Local Parakeet + Sortformer pipeline |
+| Speaker DB | `Services/SpeakerDatabase.swift` | Persistent voice fingerprints (SQLite, 256-dim embeddings) |
 | Transcript Output | `Core/TranscriptSaver.swift` | Markdown with YAML frontmatter |
 | StatsDatabase | `Core/StatsDatabase.swift` | SQLite persistence for recording sessions and activity |
 | StatsService | `Core/StatsService.swift` | Calculates hours, streaks, heat map data |
@@ -46,16 +47,27 @@ This is why the app uses `@available(macOS 26.0, *)` throughout.
 
 ## Transcription Pipeline
 
-### Providers
-| Provider | Type | Status | Key Feature |
-|----------|------|--------|-------------|
-| Deepgram | Cloud | **Active** | Nova-3 multichannel with speaker diarization |
-| Apple | On-device | **Legacy/Unused** | Was used pre-Deepgram migration |
-| AssemblyAI | Cloud | **Legacy/Unused** | Was evaluated, not currently integrated |
+### Engine: Parakeet + Sortformer (Local, via FluidAudio)
+| Component | Model | Purpose |
+|-----------|-------|---------|
+| Speech-to-text | Parakeet TDT V3 | CoreML, ~600MB, runs on Neural Engine |
+| Speaker diarization | Sortformer | CoreML, identifies speaker segments |
+| Voice fingerprints | WeSpeaker | 256-dim embeddings, persistent matching |
 
-### Multichannel vs Single-Source
-- **Both mic + system available**: Merge to stereo → single API call (50% fewer calls)
-- **Mic only**: Single source pipeline
+### Pipeline (batch, after recording stops)
+1. Load & resample audio to 16kHz mono (AudioResampler)
+2. Sortformer diarizes system audio → speaker segments with timestamps + embeddings
+3. Parakeet transcribes each speaker segment individually
+4. Parakeet transcribes full mic track (split into sentences for timestamps)
+5. Match speaker embeddings against SpeakerDatabase (cosine similarity)
+6. Merge mic + system utterances chronologically
+
+### Historical Providers (Removed)
+| Provider | Status | Notes |
+|----------|--------|-------|
+| Deepgram | **Removed (Feb 2026)** | Replaced by local Parakeet + Sortformer |
+| Apple | **Legacy/Unused** | Was used pre-Deepgram migration |
+| AssemblyAI | **Legacy/Unused** | Was evaluated, not integrated |
 
 ### DisplayStatus (Goal-Gradient Effect)
 ```
@@ -189,7 +201,7 @@ try capture.start { systemBuffer in
 ### Files Involved
 - `Murmur/Core/Audio.swift` - Main recording class, manages mic + system audio files
 - `Murmur/Core/SystemAudioCapture.swift` - CoreAudio process tap for system-wide audio
-- `Murmur/Core/AudioPreprocessor.swift` - Merges mic + system into stereo for transcription
+- `Murmur/Services/AudioResampler.swift` - Resamples audio to 16kHz for Parakeet/Sortformer
 
 ---
 

@@ -29,7 +29,7 @@ Avoid over-engineering. Only make changes that are directly requested or clearly
 
 ## Project Overview
 
-**Transcripted** is a native macOS application that automatically records, transcribes, and organizes voice conversations from meetings and calls. The app uses Deepgram for cloud transcription with multichannel speaker diarization. It extracts action items from transcripts using Gemini AI and sends them to Apple Reminders or Todoist.
+**Transcripted** is a native macOS application that automatically records, transcribes, and organizes voice conversations from meetings and calls. The app uses **Parakeet TDT V3** (local CoreML speech-to-text) and **Sortformer** (local CoreML speaker diarization) via the FluidAudio library — all transcription runs 100% on-device with no cloud API or internet required. It extracts action items from transcripts using Gemini AI and sends them to Apple Reminders or Todoist.
 
 ## Build & Run Commands
 
@@ -65,28 +65,31 @@ Murmur/Core/SystemAudioCapture.swift → System-wide audio via CoreAudio process
                                      → Creates aggregate device with tap
                                      → Captures all system audio including meeting apps
 
-Murmur/Core/Transcription.swift      → Deepgram multichannel transcription
-                                     → Merges mic + system audio into stereo
-                                     → Speaker diarization per channel
+Murmur/Core/Transcription.swift      → Local transcription via Parakeet + Sortformer
+                                     → Diarizes system audio, transcribes per-segment
+                                     → Speaker matching via persistent voice database
 
 Murmur/Core/TranscriptSaver.swift    → Outputs markdown with YAML frontmatter
                                      → Saves to ~/Documents/Transcripted/
 ```
 
-### Transcription Provider
+### Transcription Engine (Local)
 
-The app uses **Deepgram** for cloud transcription with multichannel support:
+The app uses **FluidAudio** for 100% local transcription — no cloud API, no internet, no cost:
 
-| Feature | Description |
-|---------|-------------|
-| Model | Nova-3 with smart formatting |
-| Multichannel | Mic (ch0) + System audio (ch1) in stereo |
-| Diarization | Speaker identification within each channel |
-| Retry | Exponential backoff (2s, 4s, 8s) for 408, 429, 500-504 |
+| Component | Model | Purpose |
+|-----------|-------|---------|
+| Speech-to-text | Parakeet TDT V3 (~600MB CoreML) | Transcribes audio to text on Neural Engine |
+| Speaker diarization | Sortformer (~CoreML) | Identifies who speaks when in system audio |
+| Voice fingerprints | WeSpeaker (256-dim embeddings) | Persistent speaker matching across sessions |
 
-**Service:** `Murmur/Services/DeepgramService.swift`
+**Services:** `Murmur/Services/ParakeetService.swift`, `Murmur/Services/SortformerService.swift`
+**Database:** `Murmur/Services/SpeakerDatabase.swift` (SQLite, voice embeddings)
+**Resampler:** `Murmur/Services/AudioResampler.swift` (48kHz → 16kHz for model input)
 
-**Note:** System audio is required for transcription. The app will prompt for Screen Recording permission.
+**Pipeline:** Record → Sortformer diarizes system audio → Parakeet transcribes each speaker segment → Parakeet transcribes mic → Match speakers to database → Merge utterances chronologically
+
+**Note:** Models are downloaded from HuggingFace on first launch if not bundled. System audio capture requires appropriate permissions.
 
 ### State Management
 
@@ -151,7 +154,7 @@ Settings/
 │   └── SettingsNavigationState.swift       # Tab state (Dashboard, Preferences)
 ├── Tabs/
 │   ├── DashboardView.swift                 # Stats, recent transcripts
-│   └── PreferencesView.swift               # API keys, storage, task service, appearance
+│   └── PreferencesView.swift               # Storage, model status, task service, appearance
 └── Components/
     ├── RecentTranscriptsView.swift          # Recent transcript list
     └── SettingsSectionCard.swift            # Reusable card component
@@ -194,7 +197,6 @@ User settings stored in `UserDefaults`:
 | Key | Description |
 |-----|-------------|
 | `transcriptSaveLocation` | Custom output folder path |
-| `deepgramAPIKey` | Deepgram API key for transcription |
 | `geminiAPIKey` | Gemini API key for action item extraction |
 | `taskService` | "reminders" or "todoist" |
 | `todoistAPIKey` | Todoist API key (if using Todoist) |
@@ -225,7 +227,7 @@ The app uses `@available(macOS 26.0, *)` annotations throughout, targeting macOS
 ### Audio Format Handling
 - Mic audio: Uses hardware format from `inputNode.inputFormat(forBus: 1)` (NOT `outputFormat`)
 - System audio: Native 48kHz (tap claims 96kHz but actual rate is 48kHz)
-- Transcription: Converts to Int16 format required by Speech framework
+- Transcription: Resampled to 16kHz mono for Parakeet/Sortformer input
 
 ### Transcript Format
 Output is markdown with YAML frontmatter:
@@ -240,18 +242,20 @@ word_count: N
 ```
 Timeline entries: `[MM:SS] [Mic/SysAudio/Speaker X] Text`
 
-### Cloud Service Retry Logic
-- **Deepgram**: Automatic retry with exponential backoff (2s, 4s, 8s) for status codes 408, 429, 500-504
+### Local Model Loading
+- **Parakeet + Sortformer**: Models loaded from app bundle on launch, or downloaded from HuggingFace on first run
+- Model states: `.notLoaded` → `.loading` → `.ready` (or `.failed`)
+- Initialization triggered in `setupApp()` via `taskManager?.transcription.initializeModels()`
 
 ## File Organization
 
 ```
 Murmur/
-├── Core/                          # 21 files
+├── Core/
 │   ├── Audio.swift                # Microphone capture via AVAudioEngine
-│   ├── AudioPreprocessor.swift    # Audio preprocessing utilities
 │   ├── SystemAudioCapture.swift   # System audio via CoreAudio process taps
-│   ├── Transcription.swift        # Deepgram multichannel transcription
+│   ├── Transcription.swift        # Local transcription via Parakeet + Sortformer
+│   ├── TranscriptionTypes.swift   # Engine-agnostic result types (TranscriptionResult, etc.)
 │   ├── TranscriptionTaskManager.swift  # Background transcription queue
 │   ├── TranscriptSaver.swift      # Markdown output with YAML frontmatter
 │   ├── TranscriptScanner.swift    # Transcript file discovery
@@ -282,8 +286,11 @@ Murmur/
 │   │   └── ReadyStep.swift        # Step 4: Ready
 │   └── Animations/
 │       └── ParticleExplosionView.swift  # Celebration particle effects
-├── Services/                      # External service integrations
-│   ├── DeepgramService.swift      # Deepgram transcription API
+├── Services/                      # Local engines + external integrations
+│   ├── ParakeetService.swift      # Local STT via FluidAudio (Parakeet TDT V3)
+│   ├── SortformerService.swift    # Local speaker diarization via FluidAudio
+│   ├── SpeakerDatabase.swift      # Persistent voice fingerprints (SQLite + 256-dim embeddings)
+│   ├── AudioResampler.swift       # Audio resampling (48kHz → 16kHz) and WAV loading
 │   ├── RemindersService.swift     # Apple Reminders integration
 │   └── TodoistService.swift       # Todoist API integration
 ├── UI/
