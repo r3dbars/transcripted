@@ -2,11 +2,13 @@ import SwiftUI
 
 /// Main container view for the settings window
 /// Displays sidebar navigation on the left and content area on the right
-@available(macOS 14.0, *)
+@available(macOS 26.0, *)
 struct SettingsContainerView: View {
 
     @ObservedObject var statsService: StatsService
     @ObservedObject var navigationState: SettingsNavigationState
+    var failedTranscriptionManager: FailedTranscriptionManager?
+    var taskManager: TranscriptionTaskManager?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -31,7 +33,7 @@ struct SettingsContainerView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(width: 800, height: 600)
+        .frame(minWidth: 700, maxWidth: 1200, minHeight: 500, maxHeight: 900)
         .background(Color.panelCharcoal)
         // Migration overlay
         .overlay {
@@ -56,22 +58,15 @@ struct SettingsContainerView: View {
     private var contentView: some View {
         switch navigationState.selectedTab {
         case .dashboard:
-            DashboardView(statsService: statsService)
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
-
-        case .transcripts:
-            TranscriptsView(
+            DashboardView(
                 statsService: statsService,
-                searchQuery: $navigationState.transcriptSearchQuery
+                failedTranscriptionManager: failedTranscriptionManager,
+                taskManager: taskManager
             )
             .transition(.opacity.combined(with: .move(edge: .trailing)))
 
         case .preferences:
             PreferencesView()
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
-
-        case .help:
-            HelpView()
                 .transition(.opacity.combined(with: .move(edge: .trailing)))
         }
     }
@@ -79,7 +74,7 @@ struct SettingsContainerView: View {
 
 // MARK: - Migration Overlay
 
-@available(macOS 14.0, *)
+@available(macOS 26.0, *)
 struct MigrationOverlayView: View {
     let progress: Double
     let status: String
@@ -145,7 +140,7 @@ struct MigrationOverlayView: View {
 
 // MARK: - Preview
 
-@available(macOS 14.0, *)
+@available(macOS 26.0, *)
 #Preview {
     SettingsContainerView(
         statsService: StatsService.shared,

@@ -15,6 +15,9 @@ struct AuroraSuccessView: View {
 
     let successType: SuccessType
 
+    // Accessibility
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @State private var checkScale: CGFloat = 0.3
     @State private var checkOpacity: CGFloat = 0
     @State private var textOpacity: CGFloat = 0
