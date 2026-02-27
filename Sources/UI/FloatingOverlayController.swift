@@ -289,15 +289,22 @@ class FloatingOverlayController: ObservableObject {
         }
     }
 
-    /// Show a brief error message in the overlay, then auto-hide after 1.5 seconds.
+    private var errorDismissTask: Task<Void, Never>?
+
+    /// Show a brief error message in the overlay, then auto-hide after ~1.5s (plus cancel animation).
     func showError(_ message: String) {
+        errorDismissTask?.cancel()
         errorMessage = message
-        state = .drafting  // Reuse drafting state visually (spinner area)
+        state = .drafting  // Reuse drafting state for error display
         if !isVisible {
             showPanel(near: nil)
         }
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+        errorDismissTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 1_500_000_000)
+            } catch {
+                return  // Cancelled — bail
+            }
             guard let self = self, !self.errorMessage.isEmpty else { return }
             self.errorMessage = ""
             self.hideWithCancelAnimation()
@@ -312,6 +319,8 @@ class FloatingOverlayController: ObservableObject {
         panel?.alphaValue = 1.0  // Reset for next show
         panel?.contentView?.layer?.removeAllAnimations()
         isVisible = false
+        errorDismissTask?.cancel()
+        errorDismissTask = nil
         state = .idle
         reviewText = ""
         streamingText = ""

@@ -35,16 +35,22 @@ class DraftSessionController: ObservableObject {
 
     private func setupInterruptionObserver() {
         guard let appState = appState else { return }
-        interruptionSubscription = appState.sttRouter.parakeetEngine.$recordingInterrupted
+        interruptionSubscription = appState.sttRouter.$recordingInterrupted
+            .removeDuplicates()
             .filter { $0 }
             .sink { [weak self] _ in
                 guard let self = self else { return }
                 if self.isInSession {
+                    // Clean up session state without hiding — let showError handle the dismiss
+                    self.visionTask?.cancel()
+                    self.visionTask = nil
+                    self.streamingTask?.cancel()
+                    self.streamingTask = nil
+                    self.isInSession = false
                     self.overlayController?.showError("Audio device changed")
-                    self.cancelSession()
                 } else if self.isDictating {
+                    self.isDictating = false
                     self.overlayController?.showError("Audio device changed")
-                    self.cancelDictation()
                 }
             }
     }
@@ -104,6 +110,8 @@ class DraftSessionController: ObservableObject {
                 appState.logger.log("SESSION | no voice input, cancelling")
                 EventReporter.shared.capture(level: .warning, engine: "overlay", event: "no_voice_input",
                     message: "Voice text empty after recording")
+                visionTask?.cancel()
+                visionTask = nil
                 overlayController.showError("No speech detected")
                 isInSession = false
                 return
@@ -115,6 +123,8 @@ class DraftSessionController: ObservableObject {
                 appState.logger.log("SESSION | no auth credential, cancelling")
                 EventReporter.shared.capture(level: .error, engine: "overlay", event: "auth_missing",
                     message: "No API credential configured")
+                visionTask?.cancel()
+                visionTask = nil
                 overlayController.showError("No API key configured")
                 isInSession = false
                 return

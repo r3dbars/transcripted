@@ -111,13 +111,17 @@ Only `.error` level events are forwarded to Sentry. Warnings and info stay local
 | `app` | `app_launched` | info | DraftAppState.initialize() completes |
 | `parakeet` | `prewarm_failed` | error | Audio engine won't start |
 | `parakeet` | `mic_not_authorized` | error | Microphone permission denied/revoked |
-| `parakeet` | `model_not_ready` | warning | Recording attempted before model loaded |
+| `parakeet` | `model_not_loaded` | warning | Recording attempted without model loaded |
+| `parakeet` | `model_not_ready` | warning | STTRouter: Parakeet model not loaded when startRecording called |
 | `parakeet` | `models_loaded` | info | Parakeet ASR models initialized |
 | `parakeet` | `model_init_failed` | error | CoreML model initialization failed |
 | `parakeet` | `transcription_empty` | warning | Parakeet returns no text |
+| `parakeet` | `transcription_complete` | info | Successful transcription with word count |
+| `parakeet` | `transcription_failed` | error | AsrManager.transcribe() throws |
 | `parakeet` | `audio_format_failed` | error | AVAudioFormat creation failed |
 | `parakeet` | `audio_engine_start_failed` | error | AVAudioEngine.start() throws during recording |
 | `parakeet` | `asr_manager_unavailable` | error | ASR manager not available for transcription |
+| `parakeet` | `device_change_rewarm_failed` | error | Audio engine re-warm failed after device change |
 | `parakeet` | `recording_interrupted` | warning | Audio device changed during recording |
 | `speech` | `audio_engine_start_failed` | error | AVAudioEngine.start() throws |
 | `speech` | `recognizer_unavailable` | error | SFSpeechRecognizer not available |

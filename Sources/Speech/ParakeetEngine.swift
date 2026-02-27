@@ -193,7 +193,11 @@ class ParakeetEngine: ObservableObject {
             print("🔥 PARAKEET | engine re-warmed after device change")
 
             if wasRecording {
-                startRecording()
+                if !startRecording() {
+                    recordingInterrupted = true
+                    EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_interrupted",
+                        message: "Re-record failed after device change", context: ["audio_device": inputDeviceName])
+                }
             }
         } catch {
             print("⚠️ PARAKEET | re-warm failed: \(error.localizedDescription)")
@@ -201,6 +205,8 @@ class ParakeetEngine: ObservableObject {
                 message: error.localizedDescription, context: ["audio_device": inputDeviceName])
             if wasRecording {
                 recordingInterrupted = true
+                EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_interrupted",
+                    message: "Recording interrupted by device change", context: ["audio_device": inputDeviceName])
             }
         }
     }
