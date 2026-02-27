@@ -118,10 +118,6 @@ class Audio: ObservableObject {
     // System audio capture
     private var systemAudioCapture: Any? // SystemAudioCapture (macOS 14.2+)
 
-    // MeetingDetector reference - needed to stop passive monitor before recording
-    // CRITICAL: Prevents dual-tap conflict that breaks system audio capture
-    private weak var meetingDetector: MeetingDetector?
-
     // Audio file recording
     private var systemAudioFile: AVAudioFile?
     private var micAudioFile: AVAudioFile?
@@ -152,12 +148,6 @@ class Audio: ObservableObject {
 
     init() {
         setup()
-    }
-
-    /// Set the MeetingDetector reference for passive monitor coordination
-    /// CRITICAL: Must be called before recording to prevent dual-tap conflict
-    func setMeetingDetector(_ detector: MeetingDetector) {
-        self.meetingDetector = detector
     }
 
     private func setup() {
@@ -303,13 +293,6 @@ class Audio: ObservableObject {
         guard let engine = engine, let inputNode = inputNode else {
             throw NSError(domain: "Audio", code: 1, userInfo: [NSLocalizedDescriptionKey: "Engine not initialized"])
         }
-
-        // CRITICAL: Stop MeetingDetector's passive audio monitor BEFORE creating our tap
-        // CoreAudio doesn't handle multiple concurrent process taps well - if MeetingDetector's
-        // passive tap is still running when we create ours, and then gets cleaned up later,
-        // it can break our recording's tap (causing system audio to go silent mid-recording).
-        // This was the root cause of the "system audio only captures for ~60s" bug.
-        meetingDetector?.stopPassiveMonitorForRecording()
 
         // Use system default microphone (whatever macOS has configured)
         // CRITICAL: Must use inputFormat(forBus: 1) to get ACTUAL hardware format
