@@ -85,7 +85,7 @@ struct SpeakerIdentificationResult: Codable {
 /// Individual speaker identified in the call
 struct IdentifiedSpeaker: Codable {
     let name: String
-    let speakerId: String?   // "0", "1", "2" - maps to Deepgram's speaker IDs
+    let speakerId: String?   // "0", "1", "2" - maps to Sortformer speaker IDs
     let confidence: String   // "high" or "medium"
     let evidence: String     // The quote/moment that revealed the name
 }
@@ -121,7 +121,7 @@ enum ActionItemExtractor {
     /// Create prompt for identifying multiple speakers
     /// - Parameters:
     ///   - userName: The configured user name
-    ///   - speakerIds: List of speaker IDs detected by AssemblyAI (e.g., ["A", "B", "C", "D"])
+    ///   - speakerIds: List of speaker IDs detected by Sortformer (e.g., ["0", "1", "2"])
     private static func speakerIdentificationPrompt(userName: String, speakerIds: [String] = []) -> String {
         let speakerCount = speakerIds.isEmpty ? "unknown number of" : "\(speakerIds.count)"
         let speakerList = speakerIds.isEmpty ? "" : "Detected speakers: \(speakerIds.map { "Speaker \($0)" }.joined(separator: ", "))"
@@ -368,10 +368,10 @@ enum ActionItemExtractor {
         return try await identifySpeakers(from: transcript, speakerIds: [], userName: userName, apiKey: apiKey)
     }
 
-    /// Identify speakers from transcript with known speaker IDs from Deepgram
+    /// Identify speakers from transcript with known speaker IDs from Sortformer
     /// - Parameters:
     ///   - transcript: The transcript text with speaker labels
-    ///   - speakerIds: List of speaker IDs detected by Deepgram (e.g., ["0", "1", "2"])
+    ///   - speakerIds: List of speaker IDs detected by Sortformer (e.g., ["0", "1", "2"])
     ///   - userName: The configured user name
     ///   - apiKey: Gemini API key
     /// - Returns: SpeakerIdentificationResult with mappings

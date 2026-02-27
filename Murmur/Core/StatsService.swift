@@ -253,15 +253,14 @@ final class StatsService: ObservableObject {
 @available(macOS 14.0, *)
 extension StatsService {
 
-    /// Create a RecordingMetadata from transcription result
+    /// Create a RecordingMetadata from local transcription result
     static func createMetadata(
-        from result: DeepgramMultichannelTranscriptionResult,
+        from result: TranscriptionResult,
         transcriptPath: String?,
         title: String?
     ) -> RecordingMetadata {
-        let dgResult = result.result
-        let totalWordCount = dgResult.metadata.micWordCount + dgResult.metadata.systemWordCount
-        let totalSpeakers = dgResult.metadata.micSpeakerCount + dgResult.metadata.systemSpeakerCount
+        let totalWordCount = result.micWordCount + result.systemWordCount
+        let totalSpeakers = result.micSpeakerCount + result.systemSpeakerCount
 
         return RecordingMetadata(
             date: Date(),

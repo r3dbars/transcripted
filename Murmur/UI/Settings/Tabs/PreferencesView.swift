@@ -13,7 +13,6 @@ struct PreferencesView: View {
     @AppStorage("useAuroraRecording") private var useAuroraRecording: Bool = false
     @AppStorage("taskService") private var taskService: String = "reminders"
     @AppStorage("todoistAPIKey") private var todoistAPIKey: String = ""
-    @AppStorage("deepgramAPIKey") private var deepgramAPIKey: String = ""
     @AppStorage("geminiAPIKey") private var geminiAPIKey: String = ""
     @AppStorage("remindersListId") private var remindersListId: String = ""
 
@@ -22,11 +21,9 @@ struct PreferencesView: View {
 
     // MARK: - Verification States
 
-    @State private var isVerifyingDeepgram = false
     @State private var isVerifyingTodoist = false
     @State private var isVerifyingGemini = false
 
-    @State private var deepgramVerified: Bool?
     @State private var todoistVerified: Bool?
     @State private var geminiVerified: Bool?
 
@@ -358,32 +355,57 @@ struct PreferencesView: View {
         SettingsSectionCard(
             icon: "sparkles",
             title: "AI Services",
-            subtitle: "API keys for transcription and AI features"
+            subtitle: "Local transcription models and AI features"
         ) {
             VStack(spacing: Spacing.lg) {
-                // Deepgram
+                // Local Transcription Models
                 VStack(alignment: .leading, spacing: Spacing.sm) {
-                    SettingsTextField(
-                        title: "Deepgram API Key",
-                        placeholder: "Enter your Deepgram API key",
-                        text: $deepgramAPIKey,
-                        isSecure: true,
-                        onVerify: verifyDeepgram
-                    )
+                    Text("Transcription Engine")
+                        .font(.bodyMedium)
+                        .foregroundColor(.panelTextPrimary)
 
-                    if let verified = deepgramVerified {
-                        verificationStatus(verified: verified, isVerifying: isVerifyingDeepgram)
+                    HStack(spacing: Spacing.sm) {
+                        Image(systemName: "cpu.fill")
+                            .foregroundColor(.attentionGreen)
+                        Text("Parakeet TDT V3 (Local)")
+                            .font(.bodySmall)
+                            .foregroundColor(.panelTextPrimary)
+                        Spacer()
+                        Text("On-device")
+                            .font(.caption)
+                            .foregroundColor(.panelTextMuted)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(Color.panelCharcoalSurface)
+                            .cornerRadius(4)
                     }
 
-                    Link("Get your API key from Deepgram →", destination: URL(string: "https://console.deepgram.com/")!)
+                    HStack(spacing: Spacing.sm) {
+                        Image(systemName: "person.2.fill")
+                            .foregroundColor(.attentionGreen)
+                        Text("Sortformer Speaker Diarization (Local)")
+                            .font(.bodySmall)
+                            .foregroundColor(.panelTextPrimary)
+                        Spacer()
+                        Text("On-device")
+                            .font(.caption)
+                            .foregroundColor(.panelTextMuted)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(Color.panelCharcoalSurface)
+                            .cornerRadius(4)
+                    }
+
+                    Text("Transcription runs 100% locally on your Mac. No cloud API, no internet required, no cost.")
                         .font(.caption)
-                        .foregroundColor(.accentBlueLight)
+                        .foregroundColor(.panelTextMuted)
+                        .padding(.top, Spacing.xs)
                 }
 
                 Divider()
                     .background(Color.panelCharcoalSurface)
 
-                // Gemini
+                // Gemini (still cloud-based for action items)
                 VStack(alignment: .leading, spacing: Spacing.sm) {
                     SettingsTextField(
                         title: "Gemini API Key",
@@ -397,7 +419,7 @@ struct PreferencesView: View {
                         verificationStatus(verified: verified, isVerifying: isVerifyingGemini)
                     }
 
-                    Text("Used for action item extraction from transcripts")
+                    Text("Used for speaker identification and action item extraction")
                         .font(.caption)
                         .foregroundColor(.panelTextMuted)
 
@@ -452,22 +474,6 @@ struct PreferencesView: View {
 
         if panel.runModal() == .OK, let url = panel.url {
             saveLocation = url.path
-        }
-    }
-
-    private func verifyDeepgram() {
-        isVerifyingDeepgram = true
-        deepgramVerified = nil
-
-        // Simple validation - just check if key looks valid
-        Task {
-            try? await Task.sleep(nanoseconds: 500_000_000)
-
-            await MainActor.run {
-                // Basic format check
-                deepgramVerified = deepgramAPIKey.count > 20
-                isVerifyingDeepgram = false
-            }
         }
     }
 

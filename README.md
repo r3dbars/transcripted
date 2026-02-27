@@ -1,13 +1,14 @@
 # Transcripted
 
-A native macOS app that automatically records, transcribes, and organizes voice conversations from meetings and calls. Built with Swift, SwiftUI, using Deepgram for cloud transcription with speaker diarization.
+A native macOS app that automatically records, transcribes, and organizes voice conversations from meetings and calls. Built with Swift, SwiftUI, using **Parakeet TDT V3** and **Sortformer** for 100% local transcription with speaker diarization — no cloud API, no internet required.
 
 ## Features
 
 **Recording & Transcription**
 - Floating pill UI - Dynamic Island-style interface that doesn't interrupt your workflow
 - Dual audio capture - Records both microphone and system audio (Zoom, Meet, Teams, etc.)
-- Deepgram transcription - Multichannel audio with speaker diarization
+- Local transcription - Parakeet TDT V3 (speech-to-text) + Sortformer (speaker diarization), runs on Neural Engine
+- Persistent speaker matching - Learns voices over time via 256-dim embeddings
 - Real-time status - Visual feedback during recording and processing
 
 **AI-Powered Action Items**
@@ -58,7 +59,7 @@ Murmur/
 ├── Core/                                  # Business logic (21 files)
 │   ├── Audio.swift                        # Microphone capture via AVAudioEngine
 │   ├── SystemAudioCapture.swift           # System audio via CoreAudio process taps
-│   ├── Transcription.swift                # Deepgram multichannel transcription
+│   ├── Transcription.swift                # Local transcription (Parakeet + Sortformer)
 │   ├── TranscriptionTaskManager.swift     # Background transcription queue
 │   ├── ActionItemExtractor.swift          # Gemini AI integration
 │   ├── DateParser.swift                   # Natural language date parsing
@@ -68,8 +69,11 @@ Murmur/
 │   ├── StatsService.swift                 # Recording & transcription statistics
 │   └── ...                                # Additional core utilities
 │
-├── Services/                              # External integrations (3 files)
-│   ├── DeepgramService.swift              # Cloud transcription with diarization
+├── Services/                              # Local engines + external integrations
+│   ├── ParakeetService.swift              # Local STT via FluidAudio
+│   ├── SortformerService.swift            # Local speaker diarization
+│   ├── SpeakerDatabase.swift              # Persistent voice fingerprints (SQLite)
+│   ├── AudioResampler.swift               # Audio resampling + WAV loading
 │   ├── RemindersService.swift             # Apple Reminders
 │   └── TodoistService.swift               # Todoist API
 │
@@ -121,14 +125,14 @@ Murmur/
 
 ## Transcription
 
-The app uses **Deepgram** for cloud transcription with:
+All transcription runs **100% locally** on your Mac — no cloud API, no internet, no per-call cost:
 
-- **Multichannel support** - Mic (channel 0) + System audio (channel 1) merged to stereo
-- **Speaker diarization** - Identifies multiple speakers within system audio
-- **Nova-3 model** - Latest Deepgram model with smart formatting
-- **Automatic retry** - Exponential backoff for transient failures
+- **Parakeet TDT V3** - NVIDIA's CoreML speech-to-text model (~600MB, runs on Neural Engine)
+- **Sortformer** - NVIDIA's CoreML speaker diarization (identifies who speaks when)
+- **Voice fingerprints** - WeSpeaker 256-dim embeddings stored in SQLite, learns voices over time
+- **Per-segment transcription** - Sortformer identifies speaker segments, Parakeet transcribes each individually
 
-**Note:** System audio (Screen Recording permission) is required for meeting transcription.
+Models are downloaded from HuggingFace on first launch if not bundled in the app.
 
 ## Configuration
 
@@ -137,7 +141,6 @@ Settings are stored in UserDefaults:
 | Key | Description |
 |-----|-------------|
 | `transcriptSaveLocation` | Custom output folder |
-| `deepgramAPIKey` | Deepgram API key for transcription |
 | `geminiAPIKey` | Gemini API key for action item extraction |
 | `taskService` | "reminders" or "todoist" |
 | `todoistAPIKey` | Todoist API key (if using Todoist) |
@@ -168,10 +171,10 @@ Settings are stored in UserDefaults:
 
 ### Transcription Failing
 
-- Check your Deepgram API key in Settings
-- Verify internet connection
+- Check that Parakeet + Sortformer models loaded successfully (Settings → AI Services)
+- Models download on first launch — ensure internet for initial setup
 - Check `~/Documents/Transcripted/failed_transcriptions.json` for queued retries
-- Ensure Screen Recording permission is granted (required for system audio)
+- Ensure appropriate audio capture permissions are granted
 
 ## License
 

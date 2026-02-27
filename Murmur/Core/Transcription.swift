@@ -3,7 +3,7 @@ import Foundation
 
 /// Maps speaker labels to identified names from Gemini
 struct SpeakerMapping {
-    let speakerId: String           // "0", "1", "2" for Deepgram speaker IDs
+    let speakerId: String           // "0", "1", "2" for speaker IDs
     var identifiedName: String?     // "John Smith" or nil if unidentified
     var confidence: String?         // "high" or "medium"
 
@@ -22,33 +22,7 @@ struct SpeakerMapping {
     }
 }
 
-// MARK: - Multichannel Result
-
-/// Wrapper for Deepgram multichannel result with duration and processing time
-struct DeepgramMultichannelTranscriptionResult {
-    let result: DeepgramMultichannelResult
-    let duration: TimeInterval
-    let processingTime: TimeInterval
-}
-
-/// Multichannel transcription result from Deepgram
-/// Provides convenient accessors for common properties
-struct MultichannelTranscriptionResult {
-    let deepgramResult: DeepgramMultichannelTranscriptionResult
-
-    var duration: TimeInterval { deepgramResult.duration }
-    var processingTime: TimeInterval { deepgramResult.processingTime }
-    var micUtteranceCount: Int { deepgramResult.result.micUtterances.count }
-    var systemUtteranceCount: Int { deepgramResult.result.systemUtterances.count }
-
-    /// All unique speaker IDs in the system audio channel (for Gemini speaker identification)
-    /// Deepgram provides speaker diarization within each channel
-    var systemSpeakerIds: Set<String> {
-        Set(deepgramResult.result.systemUtterances.map { String($0.speaker) })
-    }
-}
-
-// MARK: - Transcription Service
+// MARK: - Transcription Service (Local Pipeline)
 
 @available(macOS 26.0, *)
 @MainActor
@@ -58,35 +32,40 @@ class Transcription: ObservableObject {
     @Published var processingStatus: String = ""
     @Published var lastSavedFileURL: URL?
 
-    init() {}
+    let parakeet: ParakeetService
+    let sortformer: SortformerService
+    let speakerDB: SpeakerDatabase
 
-    // MARK: - Multichannel Transcription
+    init() {
+        self.parakeet = ParakeetService()
+        self.sortformer = SortformerService()
+        self.speakerDB = SpeakerDatabase.shared
+    }
 
-    /// Transcribe using multichannel mode - merges mic + system into stereo, single API call
-    /// This approach provides:
-    /// - 50% fewer API calls (1 instead of 2)
-    /// - Perfectly synchronized timestamps between mic and system audio
-    /// - Channel-based speaker attribution (no guessing who spoke)
-    /// - Speaker diarization within each channel (identifies multiple speakers in system audio)
-    /// - Lower memory usage (single file processing)
+    /// Initialize local models. Call once at app startup.
+    func initializeModels() async {
+        await parakeet.initialize()
+        await sortformer.initialize()
+    }
+
+    // MARK: - Local Multichannel Transcription
+
+    /// Transcribe mic + system audio using local Parakeet STT + Sortformer diarization.
     ///
-    /// - Parameters:
-    ///   - micURL: Microphone audio file URL
-    ///   - systemURL: System audio file URL (required for multichannel)
-    ///   - onProgress: Optional callback for progress updates (0.0 to 1.0)
-    /// - Returns: MultichannelTranscriptionResult with channel-separated utterances
-    /// Note: nonisolated to keep heavy async work (audio merging, API calls) off main thread
+    /// Pipeline:
+    /// 1. Load & resample both audio files to 16kHz mono
+    /// 2. Run Sortformer on system audio → speaker segments with timestamps + embeddings
+    /// 3. Transcribe each speaker segment individually with Parakeet
+    /// 4. Transcribe mic audio with Parakeet (full track, split by silence)
+    /// 5. Match speaker embeddings against persistent SpeakerDatabase
+    /// 6. Merge mic + system utterances chronologically
+    ///
+    /// Note: nonisolated to keep heavy compute off the main thread
     nonisolated func transcribeMultichannel(
         micURL: URL,
         systemURL: URL,
         onProgress: ((Double) -> Void)? = nil
-    ) async throws -> MultichannelTranscriptionResult {
-        let apiKey = UserDefaults.standard.string(forKey: "deepgramAPIKey") ?? ""
-        guard !apiKey.isEmpty else {
-            throw NSError(domain: "Transcription", code: 100, userInfo: [
-                NSLocalizedDescriptionKey: "Deepgram API key not configured. Please add your API key in Settings."
-            ])
-        }
+    ) async throws -> TranscriptionResult {
 
         await MainActor.run {
             self.isProcessing = true
@@ -95,7 +74,6 @@ class Transcription: ObservableObject {
         }
 
         let processingStartTime = Date()
-        var stereoTempURL: URL?
 
         do {
             // Get recording duration from original mic file
@@ -104,44 +82,119 @@ class Transcription: ObservableObject {
 
             onProgress?(0.0)
 
-            // Step 1: Merge mic + system audio into stereo file
+            // Step 1: Load and resample both audio files to 16kHz mono
             await MainActor.run {
-                self.processingStatus = "Merging audio channels..."
+                self.processingStatus = "Loading audio..."
             }
 
-            print("🔀 Deepgram Multichannel: Merging mic + system into stereo...")
-            stereoTempURL = try await AudioPreprocessor.prepareMergedStereoForCloud(
-                micURL: micURL,
-                systemURL: systemURL
-            )
+            print("Loading and resampling audio to 16kHz...")
+            let systemSamples = try AudioResampler.loadAndResample(url: systemURL, targetRate: 16000)
+            let micSamples = try AudioResampler.loadAndResample(url: micURL, targetRate: 16000)
 
-            onProgress?(0.20)
+            print("  System: \(systemSamples.count) samples (\(String(format: "%.1f", Double(systemSamples.count) / 16000))s)")
+            print("  Mic: \(micSamples.count) samples (\(String(format: "%.1f", Double(micSamples.count) / 16000))s)")
 
-            // Step 2: Transcribe with Deepgram multichannel + diarization
+            onProgress?(0.10)
+
+            // Step 2: Run Sortformer on system audio → speaker segments
             await MainActor.run {
-                self.processingStatus = "Uploading to Deepgram..."
+                self.processingStatus = "Identifying speakers..."
             }
 
-            guard let stereoURL = stereoTempURL else {
-                throw NSError(domain: "Transcription", code: 101, userInfo: [
-                    NSLocalizedDescriptionKey: "Failed to create merged stereo file"
-                ])
+            print("Running Sortformer diarization on system audio...")
+            let speakerSegments = try await sortformer.diarize(samples: systemSamples, sampleRate: 16000)
+
+            onProgress?(0.30)
+
+            // Step 3: Transcribe each speaker segment with Parakeet
+            await MainActor.run {
+                self.processingStatus = "Transcribing system audio..."
             }
 
-            let result = try await DeepgramService.transcribeMultichannel(
-                stereoAudioURL: stereoURL,
-                apiKey: apiKey,
-                onStatusUpdate: { status in
-                    Task { @MainActor in
-                        self.processingStatus = status.rawValue
+            var systemUtterances: [TranscriptionUtterance] = []
+            let totalSegments = speakerSegments.count
+
+            for (index, segment) in speakerSegments.enumerated() {
+                // Extract audio slice for this segment
+                let segmentSamples = AudioResampler.extractSlice(
+                    from: systemSamples,
+                    sampleRate: 16000,
+                    startTime: segment.startTime,
+                    endTime: segment.endTime
+                )
+
+                // Skip very short segments (< 0.5s of audio)
+                guard segmentSamples.count >= 8000 else { continue }
+
+                let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .system)
+
+                // Skip empty transcriptions
+                guard !text.isEmpty else { continue }
+
+                // Match speaker embedding against persistent database
+                var persistentId: UUID?
+                if let embedding = segment.embedding {
+                    if let match = speakerDB.matchSpeaker(embedding: embedding) {
+                        persistentId = match.id
+                        _ = speakerDB.addOrUpdateSpeaker(embedding: embedding, existingId: match.id)
+                    } else {
+                        let newProfile = speakerDB.addOrUpdateSpeaker(embedding: embedding)
+                        persistentId = newProfile.id
                     }
                 }
-            )
+
+                systemUtterances.append(TranscriptionUtterance(
+                    start: segment.startTime,
+                    end: segment.endTime,
+                    channel: 1,
+                    speakerId: segment.speakerId,
+                    persistentSpeakerId: persistentId,
+                    transcript: text
+                ))
+
+                // Update progress (30% to 65% during system transcription)
+                let segmentProgress = 0.30 + (Double(index + 1) / Double(max(1, totalSegments))) * 0.35
+                onProgress?(segmentProgress)
+            }
+
+            print("System audio: \(systemUtterances.count) utterances from \(Set(systemUtterances.map { $0.speakerId }).count) speakers")
+
+            // Step 4: Transcribe mic audio with Parakeet
+            await MainActor.run {
+                self.processingStatus = "Transcribing mic audio..."
+            }
+
+            print("Transcribing mic audio with Parakeet...")
+            let micText = try await parakeet.transcribeSegment(samples: micSamples, source: .microphone)
+
+            onProgress?(0.80)
+
+            // Create mic utterances — split by sentence/silence boundaries
+            var micUtterances: [TranscriptionUtterance] = []
+            if !micText.isEmpty {
+                // Split into chunks by sentence boundaries for better timestamps
+                let micDuration = Double(micSamples.count) / 16000.0
+                let sentences = splitIntoSentences(micText)
+                let timePerSentence = micDuration / Double(max(1, sentences.count))
+
+                for (i, sentence) in sentences.enumerated() {
+                    let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { continue }
+
+                    micUtterances.append(TranscriptionUtterance(
+                        start: Double(i) * timePerSentence,
+                        end: Double(i + 1) * timePerSentence,
+                        channel: 0,
+                        speakerId: 0,
+                        persistentSpeakerId: nil,
+                        transcript: trimmed
+                    ))
+                }
+            }
+
+            print("Mic audio: \(micUtterances.count) utterances")
 
             onProgress?(0.90)
-
-            // Step 3: Cleanup temp stereo file
-            AudioPreprocessor.cleanup(tempURL: stereoURL)
 
             let processingTime = Date().timeIntervalSince(processingStartTime)
 
@@ -152,32 +205,59 @@ class Transcription: ObservableObject {
 
             onProgress?(1.0)
 
-            print("✅ Deepgram Multichannel transcription complete:")
-            print("   • Mic utterances: \(result.micUtterances.count)")
-            print("   • System utterances: \(result.systemUtterances.count)")
-            print("   • System speakers: \(result.metadata.systemSpeakerCount) (diarization!)")
-            print("   • Processing time: \(String(format: "%.1f", processingTime))s")
+            print("Local transcription complete:")
+            print("   Mic utterances: \(micUtterances.count)")
+            print("   System utterances: \(systemUtterances.count)")
+            print("   System speakers: \(Set(systemUtterances.map { $0.speakerId }).count)")
+            print("   Processing time: \(String(format: "%.1f", processingTime))s")
 
-            let deepgramResult = DeepgramMultichannelTranscriptionResult(
-                result: result,
+            return TranscriptionResult(
+                micUtterances: micUtterances,
+                systemUtterances: systemUtterances,
                 duration: duration,
                 processingTime: processingTime
             )
 
-            return MultichannelTranscriptionResult(deepgramResult: deepgramResult)
-
         } catch {
-            // Cleanup temp file on failure
-            if let tempURL = stereoTempURL {
-                AudioPreprocessor.cleanup(tempURL: tempURL)
-            }
-
             await MainActor.run {
-                self.error = "Deepgram transcription failed: \(error.localizedDescription)"
+                self.error = "Transcription failed: \(error.localizedDescription)"
                 self.isProcessing = false
                 self.processingStatus = ""
             }
             throw error
         }
+    }
+
+    // MARK: - Text Splitting
+
+    /// Split text into sentences for approximate timestamp assignment
+    private nonisolated func splitIntoSentences(_ text: String) -> [String] {
+        // Split on sentence-ending punctuation
+        var sentences: [String] = []
+        var current = ""
+
+        for char in text {
+            current.append(char)
+            if char == "." || char == "!" || char == "?" {
+                let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    sentences.append(trimmed)
+                }
+                current = ""
+            }
+        }
+
+        // Don't lose trailing text without punctuation
+        let remaining = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !remaining.isEmpty {
+            sentences.append(remaining)
+        }
+
+        // If no sentence boundaries found, return the whole text
+        if sentences.isEmpty && !text.isEmpty {
+            sentences.append(text)
+        }
+
+        return sentences
     }
 }

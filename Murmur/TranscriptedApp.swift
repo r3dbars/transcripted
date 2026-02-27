@@ -86,6 +86,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         taskManager = TranscriptionTaskManager(failedTranscriptionManager: failedTranscriptionManager!)
         audio = Audio()
 
+        // Initialize local transcription models (Parakeet + Sortformer) in background
+        print("🔧 About to create model init Task...")
+        Task { @MainActor in
+            print("🔧 Task body executing - starting model initialization...")
+            if let tm = taskManager {
+                print("🔧 TaskManager exists, calling initializeModels()")
+                await tm.transcription.initializeModels()
+                print("🔧 Model initialization complete")
+            } else {
+                print("🔧 ERROR: taskManager is nil!")
+            }
+        }
+
         // Wire up recording completion callback
         audio?.onRecordingComplete = { [weak self] micURL, systemURL in
             self?.handleRecordingComplete(micURL: micURL, systemURL: systemURL)

@@ -46,8 +46,6 @@
 		A1000300 /* ActionItemExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000310 /* ActionItemExtractor.swift */; };
 		A1000301 /* DateParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000311 /* DateParser.swift */; };
 		A1000302 /* RemindersService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000312 /* RemindersService.swift */; };
-		A1000305 /* DeepgramService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000315 /* DeepgramService.swift */; };
-		A1000400 /* AudioPreprocessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000401 /* AudioPreprocessor.swift */; };
 		A1000600 /* ActionItemReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000601 /* ActionItemReviewView.swift */; };
 		A1000700 /* ServiceResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000701 /* ServiceResult.swift */; };
 		A1000800 /* FailedActionItemManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000801 /* FailedActionItemManager.swift */; };
@@ -66,6 +64,17 @@
 		A100091C /* AuroraIdleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100090C /* AuroraIdleView.swift */; };
 		A100091D /* AuroraProcessingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100090D /* AuroraProcessingView.swift */; };
 		A100091E /* AuroraSuccessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100090E /* AuroraSuccessView.swift */; };
+		A1002011 /* AudioResampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002001 /* AudioResampler.swift */; };
+		A1002012 /* ParakeetService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002002 /* ParakeetService.swift */; };
+		A1002013 /* SortformerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002003 /* SortformerService.swift */; };
+		A1002014 /* SpeakerDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002004 /* SpeakerDatabase.swift */; };
+		A1002015 /* TranscriptionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002005 /* TranscriptionTypes.swift */; };
+		FA000011 /* libFluidAudioAll.a in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000001 /* libFluidAudioAll.a */; };
+		FA000012 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000002 /* Metal.framework */; };
+		FA000013 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000003 /* MetalKit.framework */; };
+		FA000014 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000004 /* Accelerate.framework */; };
+		FA000015 /* CoreML.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000005 /* CoreML.framework */; };
+		FA000016 /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000006 /* CoreAudio.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -111,8 +120,6 @@
 		A1000310 /* ActionItemExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionItemExtractor.swift; sourceTree = "<group>"; };
 		A1000311 /* DateParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParser.swift; sourceTree = "<group>"; };
 		A1000312 /* RemindersService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemindersService.swift; sourceTree = "<group>"; };
-		A1000315 /* DeepgramService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepgramService.swift; sourceTree = "<group>"; };
-		A1000401 /* AudioPreprocessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPreprocessor.swift; sourceTree = "<group>"; };
 		A1000601 /* ActionItemReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionItemReviewView.swift; sourceTree = "<group>"; };
 		A1000701 /* ServiceResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceResult.swift; sourceTree = "<group>"; };
 		A1000801 /* FailedActionItemManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailedActionItemManager.swift; sourceTree = "<group>"; };
@@ -131,6 +138,17 @@
 		A100090C /* AuroraIdleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuroraIdleView.swift; sourceTree = "<group>"; };
 		A100090D /* AuroraProcessingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuroraProcessingView.swift; sourceTree = "<group>"; };
 		A100090E /* AuroraSuccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuroraSuccessView.swift; sourceTree = "<group>"; };
+		A1002001 /* AudioResampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioResampler.swift; sourceTree = "<group>"; };
+		A1002002 /* ParakeetService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParakeetService.swift; sourceTree = "<group>"; };
+		A1002003 /* SortformerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SortformerService.swift; sourceTree = "<group>"; };
+		A1002004 /* SpeakerDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDatabase.swift; sourceTree = "<group>"; };
+		A1002005 /* TranscriptionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTypes.swift; sourceTree = "<group>"; };
+		FA000001 /* libFluidAudioAll.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libFluidAudioAll.a; path = "fluidaudio-libs/libFluidAudioAll.a"; sourceTree = "<group>"; };
+		FA000002 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		FA000003 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
+		FA000004 /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
+		FA000005 /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
+		FA000006 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -138,6 +156,12 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FA000011 /* libFluidAudioAll.a in Frameworks */,
+				FA000012 /* Metal.framework in Frameworks */,
+				FA000013 /* MetalKit.framework in Frameworks */,
+				FA000014 /* Accelerate.framework in Frameworks */,
+				FA000015 /* CoreML.framework in Frameworks */,
+				FA000016 /* CoreAudio.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -149,7 +173,21 @@
 			children = (
 				A1000022 /* Murmur */,
 				A1000023 /* Products */,
+				FA000020 /* Frameworks */,
 			);
+			sourceTree = "<group>";
+		};
+		FA000020 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				FA000001 /* libFluidAudioAll.a */,
+				FA000002 /* Metal.framework */,
+				FA000003 /* MetalKit.framework */,
+				FA000004 /* Accelerate.framework */,
+				FA000005 /* CoreML.framework */,
+				FA000006 /* CoreAudio.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 		A1000022 /* Murmur */ = {
@@ -192,13 +230,13 @@
 				A1000057 /* FailedTranscriptionManager.swift */,
 				A1000310 /* ActionItemExtractor.swift */,
 				A1000311 /* DateParser.swift */,
-				A1000401 /* AudioPreprocessor.swift */,
 				A1000701 /* ServiceResult.swift */,
 				A1000801 /* FailedActionItemManager.swift */,
 				A1000802 /* DateFormattingHelper.swift */,
 				A1001001 /* StatsDatabase.swift */,
 				A1001002 /* StatsService.swift */,
 				A1001003 /* TranscriptScanner.swift */,
+				A1002005 /* TranscriptionTypes.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -343,7 +381,10 @@
 			children = (
 				A1000312 /* RemindersService.swift */,
 				957699D9D32FB594FDC17C0C /* TodoistService.swift */,
-				A1000315 /* DeepgramService.swift */,
+				A1002001 /* AudioResampler.swift */,
+				A1002002 /* ParakeetService.swift */,
+				A1002003 /* SortformerService.swift */,
+				A1002004 /* SpeakerDatabase.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -444,8 +485,6 @@
 				A1000301 /* DateParser.swift in Sources */,
 				A1000302 /* RemindersService.swift in Sources */,
 				177299A5CC91824348F205F7 /* TodoistService.swift in Sources */,
-				A1000305 /* DeepgramService.swift in Sources */,
-				A1000400 /* AudioPreprocessor.swift in Sources */,
 				A1000600 /* ActionItemReviewView.swift in Sources */,
 				A1000700 /* ServiceResult.swift in Sources */,
 				A1000800 /* FailedActionItemManager.swift in Sources */,
@@ -475,6 +514,11 @@
 				A1001135 /* PreferencesView.swift in Sources */,
 				A1001145 /* RecentTranscriptsView.swift in Sources */,
 				A1001147 /* SettingsSectionCard.swift in Sources */,
+				A1002011 /* AudioResampler.swift in Sources */,
+				A1002012 /* ParakeetService.swift in Sources */,
+				A1002013 /* SortformerService.swift in Sources */,
+				A1002014 /* SpeakerDatabase.swift in Sources */,
+				A1002015 /* TranscriptionTypes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -533,7 +577,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -590,7 +634,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
@@ -622,10 +666,24 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/fluidaudio-libs",
+				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lc++",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.transcripted.app;
 				PRODUCT_NAME = Transcripted;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_INCLUDE_PATHS = (
+					"$(SRCROOT)/fluidaudio-modules",
+					"$(SRCROOT)/fluidaudio-modules/FastClusterWrapper",
+					"$(SRCROOT)/fluidaudio-modules/MachTaskSelfWrapper",
+					"$(SRCROOT)/fluidaudio-modules/yyjson",
+				);
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -652,10 +710,24 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/fluidaudio-libs",
+				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lc++",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.transcripted.app;
 				PRODUCT_NAME = Transcripted;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_INCLUDE_PATHS = (
+					"$(SRCROOT)/fluidaudio-modules",
+					"$(SRCROOT)/fluidaudio-modules/FastClusterWrapper",
+					"$(SRCROOT)/fluidaudio-modules/MachTaskSelfWrapper",
+					"$(SRCROOT)/fluidaudio-modules/yyjson",
+				);
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
