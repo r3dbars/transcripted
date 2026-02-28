@@ -3,6 +3,7 @@
 // AVAudioEngine tap → NSLock-batched samples → resampled to 16kHz → AsrManager.transcribe()
 // for batch inference. Live Apple Speech provides display-only streaming text.
 
+import AppKit
 import AVFoundation
 import Combine
 import CoreAudio
@@ -34,6 +35,7 @@ class ParakeetEngine: ObservableObject {
     private var pendingSamples: [Float] = []
     private nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
     private var isEnginePrewarmed = false
+    private var wakeObserver: NSObjectProtocol?
 
     // Live Apple Speech (display-only — Parakeet owns the final transcript)
     private var committedLiveText: String = ""
@@ -161,6 +163,18 @@ class ParakeetEngine: ObservableObject {
                     }
                 }
             }
+
+            if wakeObserver == nil {
+                wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                    forName: NSWorkspace.didWakeNotification,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor [weak self] in
+                        self?.handleSystemWake()
+                    }
+                }
+            }
         } catch {
             print("⚠️ PARAKEET | prewarm failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "prewarm_failed",
@@ -208,6 +222,36 @@ class ParakeetEngine: ObservableObject {
                 EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_interrupted",
                     message: "Recording interrupted by device change", context: ["audio_device": inputDeviceName])
             }
+        }
+    }
+
+    private func handleSystemWake() {
+        print("🔄 PARAKEET | system wake detected, resetting audio engine")
+        EventReporter.shared.capture(level: .info, engine: "parakeet", event: "system_wake",
+            message: "System woke from sleep, resetting audio engine",
+            context: ["was_recording": "\(isRecording)", "was_prewarmed": "\(isEnginePrewarmed)"])
+
+        let wasRecording = isRecording
+        if isRecording {
+            stopLiveSpeech()
+            audioEngine.inputNode.removeTap(onBus: 0)
+            isRecording = false
+            audioLevel = 0
+        }
+
+        audioEngine.stop()
+        isEnginePrewarmed = false
+
+        if wasRecording {
+            recordingInterrupted = true
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_interrupted",
+                message: "Recording interrupted by system sleep/wake")
+        }
+
+        // Re-warm after a brief delay to let audio hardware reinitialize
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 500_000_000)  // 500ms
+            self?.prewarm()
         }
     }
 
@@ -279,8 +323,15 @@ class ParakeetEngine: ObservableObject {
             }
         }
 
-        if !isEnginePrewarmed {
+        if !isEnginePrewarmed || !audioEngine.isRunning {
             do {
+                if !audioEngine.isRunning && isEnginePrewarmed {
+                    print("🔄 PARAKEET | engine was prewarmed but not running (likely sleep/wake), restarting")
+                    EventReporter.shared.capture(level: .warning, engine: "parakeet",
+                        event: "engine_stale_restart",
+                        message: "Audio engine was prewarmed but not running — restarting",
+                        context: ["audio_device": inputDeviceName])
+                }
                 audioEngine.prepare()
                 try audioEngine.start()
                 isEnginePrewarmed = true
@@ -499,6 +550,9 @@ class ParakeetEngine: ObservableObject {
     deinit {
         if let observer = configChangeObserver {
             NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
