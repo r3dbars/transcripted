@@ -11,11 +11,19 @@ import Accelerate
 struct SpeakerProfile: Identifiable {
     let id: UUID
     var displayName: String?        // "Nate", "Travis", or nil if unnamed
+    var nameSource: String?         // "user_manual", "gemini_inferred", "gemini_override", nil
     var embedding: [Float]          // 256-dim average voice vector
     var firstSeen: Date
     var lastSeen: Date
     var callCount: Int
     var confidence: Double          // Improves with more data points
+    var disputeCount: Int           // Times Gemini disagreed with DB name
+}
+
+/// Result of matching an embedding against the speaker database
+struct SpeakerMatchResult {
+    let profile: SpeakerProfile
+    let similarity: Double          // Cosine similarity score (0.0–1.0)
 }
 
 @available(macOS 14.0, *)
@@ -46,9 +54,9 @@ final class SpeakerDatabase {
 
     private func openDatabase() {
         if sqlite3_open(dbPath.path, &db) != SQLITE_OK {
-            print("SpeakerDatabase: Failed to open database at \(dbPath.path)")
+            AppLogger.speakers.error("Failed to open database", ["path": dbPath.path])
         } else {
-            print("SpeakerDatabase: Opened at \(dbPath.path)")
+            AppLogger.speakers.info("Opened database", ["path": dbPath.path])
         }
     }
 
@@ -57,22 +65,32 @@ final class SpeakerDatabase {
         CREATE TABLE IF NOT EXISTS speakers (
             id TEXT PRIMARY KEY,
             display_name TEXT,
+            name_source TEXT DEFAULT NULL,
             embedding BLOB NOT NULL,
             first_seen TEXT NOT NULL,
             last_seen TEXT NOT NULL,
             call_count INTEGER NOT NULL DEFAULT 1,
             confidence REAL NOT NULL DEFAULT 0.5,
+            dispute_count INTEGER NOT NULL DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         """
         executeSQL(sql)
+        migrateSchema()
+    }
+
+    /// Add columns that may be missing from older databases
+    private func migrateSchema() {
+        // These are safe to run repeatedly — SQLite silently fails if column already exists
+        executeSQL("ALTER TABLE speakers ADD COLUMN name_source TEXT DEFAULT NULL;")
+        executeSQL("ALTER TABLE speakers ADD COLUMN dispute_count INTEGER NOT NULL DEFAULT 0;")
     }
 
     private func executeSQL(_ sql: String) {
         var errorMessage: UnsafeMutablePointer<CChar>?
         if sqlite3_exec(db, sql, nil, nil, &errorMessage) != SQLITE_OK {
             if let error = errorMessage {
-                print("SpeakerDatabase SQL Error: \(String(cString: error))")
+                AppLogger.speakers.error("SQL error", ["detail": String(cString: error)])
                 sqlite3_free(errorMessage)
             }
         }
@@ -81,14 +99,14 @@ final class SpeakerDatabase {
     // MARK: - Speaker Matching
 
     /// Match an embedding against all stored speakers using cosine similarity.
-    /// Returns the best match above threshold, or nil for a new speaker.
-    func matchSpeaker(embedding: [Float], threshold: Double = 0.7) -> SpeakerProfile? {
+    /// Returns the best match above threshold with similarity score, or nil for a new speaker.
+    func matchSpeaker(embedding: [Float], threshold: Double = 0.6) -> SpeakerMatchResult? {
         return queue.sync {
             matchSpeakerImpl(embedding: embedding, threshold: threshold)
         }
     }
 
-    private func matchSpeakerImpl(embedding: [Float], threshold: Double) -> SpeakerProfile? {
+    private func matchSpeakerImpl(embedding: [Float], threshold: Double) -> SpeakerMatchResult? {
         let allSpeakers = allSpeakersImpl()
         guard !allSpeakers.isEmpty else { return nil }
 
@@ -104,10 +122,11 @@ final class SpeakerDatabase {
         }
 
         if let match = bestMatch {
-            print("SpeakerDatabase: Matched speaker \(match.displayName ?? match.id.uuidString) (similarity: \(String(format: "%.3f", bestSimilarity)))")
+            AppLogger.speakers.info("Matched speaker", ["name": match.displayName ?? match.id.uuidString, "similarity": String(format: "%.3f", bestSimilarity)])
+            return SpeakerMatchResult(profile: match, similarity: bestSimilarity)
         }
 
-        return bestMatch
+        return nil
     }
 
     // MARK: - Speaker Management
@@ -126,7 +145,7 @@ final class SpeakerDatabase {
 
         if let existingId = existingId, let existing = getSpeakerImpl(id: existingId) {
             // Update: blend embedding with exponential moving average
-            let alpha: Float = 0.3  // Weight for new embedding (0.3 = gradual adaptation)
+            let alpha: Float = 0.15  // Weight for new embedding (0.15 = slow adaptation, preserves identity)
             let blended = zip(existing.embedding, embedding).map { old, new in
                 old * (1 - alpha) + new * alpha
             }
@@ -151,11 +170,13 @@ final class SpeakerDatabase {
             return SpeakerProfile(
                 id: existingId,
                 displayName: existing.displayName,
+                nameSource: existing.nameSource,
                 embedding: normalized,
                 firstSeen: existing.firstSeen,
                 lastSeen: Date(),
                 callCount: existing.callCount + 1,
-                confidence: newConfidence
+                confidence: newConfidence,
+                disputeCount: existing.disputeCount
             )
         } else {
             // New speaker
@@ -177,35 +198,68 @@ final class SpeakerDatabase {
             }
             sqlite3_finalize(statement)
 
-            print("SpeakerDatabase: Created new speaker \(newId)")
+            AppLogger.speakers.info("Created new speaker", ["id": "\(newId)"])
             return SpeakerProfile(
                 id: newId,
                 displayName: nil,
+                nameSource: nil,
                 embedding: normalized,
                 firstSeen: Date(),
                 lastSeen: Date(),
                 callCount: 1,
-                confidence: 0.5
+                confidence: 0.5,
+                disputeCount: 0
             )
         }
     }
 
-    /// Set the display name for a speaker (user-assigned or Gemini-inferred)
-    func setDisplayName(id: UUID, name: String) {
+    /// Set the display name for a speaker with provenance tracking
+    /// - Parameters:
+    ///   - id: Speaker profile UUID
+    ///   - name: Display name to set
+    ///   - source: Where the name came from ("user_manual", "gemini_inferred", "gemini_override")
+    func setDisplayName(id: UUID, name: String, source: String = "gemini_inferred") {
         queue.async { [weak self] in
-            self?.setDisplayNameImpl(id: id, name: name)
+            self?.setDisplayNameImpl(id: id, name: name, source: source)
         }
     }
 
-    private func setDisplayNameImpl(id: UUID, name: String) {
-        let sql = "UPDATE speakers SET display_name = ? WHERE id = ?;"
+    private func setDisplayNameImpl(id: UUID, name: String, source: String) {
+        let sql = "UPDATE speakers SET display_name = ?, name_source = ? WHERE id = ?;"
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
             sqlite3_bind_text(statement, 1, (name as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(statement, 2, (id.uuidString as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 2, (source as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 3, (id.uuidString as NSString).utf8String, -1, nil)
             sqlite3_step(statement)
         }
         sqlite3_finalize(statement)
+    }
+
+    /// Increment the dispute count for a speaker (Gemini disagreed with DB name)
+    func incrementDisputeCount(id: UUID) {
+        queue.async { [weak self] in
+            let sql = "UPDATE speakers SET dispute_count = dispute_count + 1 WHERE id = ?;"
+            var statement: OpaquePointer?
+            if sqlite3_prepare_v2(self?.db, sql, -1, &statement, nil) == SQLITE_OK {
+                sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, nil)
+                sqlite3_step(statement)
+            }
+            sqlite3_finalize(statement)
+        }
+    }
+
+    /// Reset dispute count (after user manual rename or name confirmed)
+    func resetDisputeCount(id: UUID) {
+        queue.async { [weak self] in
+            let sql = "UPDATE speakers SET dispute_count = 0 WHERE id = ?;"
+            var statement: OpaquePointer?
+            if sqlite3_prepare_v2(self?.db, sql, -1, &statement, nil) == SQLITE_OK {
+                sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, nil)
+                sqlite3_step(statement)
+            }
+            sqlite3_finalize(statement)
+        }
     }
 
     /// Get all stored speakers
@@ -215,7 +269,7 @@ final class SpeakerDatabase {
 
     private func allSpeakersImpl() -> [SpeakerProfile] {
         var speakers: [SpeakerProfile] = []
-        let sql = "SELECT id, display_name, embedding, first_seen, last_seen, call_count, confidence FROM speakers ORDER BY last_seen DESC;"
+        let sql = "SELECT id, display_name, name_source, embedding, first_seen, last_seen, call_count, confidence, dispute_count FROM speakers ORDER BY last_seen DESC;"
         var statement: OpaquePointer?
 
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
@@ -224,10 +278,11 @@ final class SpeakerDatabase {
             while sqlite3_step(statement) == SQLITE_ROW {
                 let idStr = String(cString: sqlite3_column_text(statement, 0))
                 let displayName: String? = sqlite3_column_text(statement, 1).map { String(cString: $0) }
+                let nameSource: String? = sqlite3_column_text(statement, 2).map { String(cString: $0) }
 
                 // Read embedding BLOB
-                let blobPtr = sqlite3_column_blob(statement, 2)
-                let blobSize = sqlite3_column_bytes(statement, 2)
+                let blobPtr = sqlite3_column_blob(statement, 3)
+                let blobSize = sqlite3_column_bytes(statement, 3)
                 var embedding: [Float] = []
                 if let ptr = blobPtr, blobSize > 0 {
                     let floatCount = Int(blobSize) / MemoryLayout<Float>.size
@@ -237,24 +292,32 @@ final class SpeakerDatabase {
                     ))
                 }
 
-                let firstSeenStr = String(cString: sqlite3_column_text(statement, 3))
-                let lastSeenStr = String(cString: sqlite3_column_text(statement, 4))
-                let callCount = Int(sqlite3_column_int(statement, 5))
-                let confidence = sqlite3_column_double(statement, 6)
+                let firstSeenStr = String(cString: sqlite3_column_text(statement, 4))
+                let lastSeenStr = String(cString: sqlite3_column_text(statement, 5))
+                let callCount = Int(sqlite3_column_int(statement, 6))
+                let confidence = sqlite3_column_double(statement, 7)
+                let disputeCount = Int(sqlite3_column_int(statement, 8))
 
                 speakers.append(SpeakerProfile(
                     id: UUID(uuidString: idStr) ?? UUID(),
                     displayName: displayName,
+                    nameSource: nameSource,
                     embedding: embedding,
                     firstSeen: isoFormatter.date(from: firstSeenStr) ?? Date(),
                     lastSeen: isoFormatter.date(from: lastSeenStr) ?? Date(),
                     callCount: callCount,
-                    confidence: confidence
+                    confidence: confidence,
+                    disputeCount: disputeCount
                 ))
             }
         }
         sqlite3_finalize(statement)
         return speakers
+    }
+
+    /// Get a single speaker by ID
+    func getSpeaker(id: UUID) -> SpeakerProfile? {
+        return queue.sync { getSpeakerImpl(id: id) }
     }
 
     private func getSpeakerImpl(id: UUID) -> SpeakerProfile? {
@@ -272,6 +335,145 @@ final class SpeakerDatabase {
             }
             sqlite3_finalize(statement)
         }
+    }
+
+    // MARK: - Duplicate Merging
+
+    /// Scan all profiles for likely duplicates and merge them.
+    /// Keeps the profile with more calls (better embedding). Transfers display name if the
+    /// weaker profile has one and the stronger doesn't. Call after each recording.
+    func mergeDuplicates(threshold: Double = 0.6) {
+        queue.sync {
+            mergeDuplicatesImpl(threshold: threshold)
+        }
+    }
+
+    private func mergeDuplicatesImpl(threshold: Double) {
+        let speakers = allSpeakersImpl()
+        guard speakers.count > 1 else { return }
+
+        var mergedIds: Set<UUID> = []
+        var mergeCount = 0
+
+        for i in 0..<speakers.count {
+            guard !mergedIds.contains(speakers[i].id) else { continue }
+
+            for j in (i + 1)..<speakers.count {
+                guard !mergedIds.contains(speakers[j].id) else { continue }
+
+                let similarity = cosineSimilarity(speakers[i].embedding, speakers[j].embedding)
+                guard similarity >= threshold else { continue }
+
+                // Determine which profile to keep (more calls = better data)
+                let keeper: SpeakerProfile
+                let absorbed: SpeakerProfile
+                if speakers[i].callCount >= speakers[j].callCount {
+                    keeper = speakers[i]
+                    absorbed = speakers[j]
+                } else {
+                    keeper = speakers[j]
+                    absorbed = speakers[i]
+                }
+
+                // Transfer display name if keeper doesn't have one
+                if keeper.displayName == nil, let name = absorbed.displayName {
+                    setDisplayNameImpl(id: keeper.id, name: name, source: absorbed.nameSource ?? "gemini_inferred")
+                }
+
+                // Delete the absorbed profile
+                let sql = "DELETE FROM speakers WHERE id = ?;"
+                var statement: OpaquePointer?
+                if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
+                    sqlite3_bind_text(statement, 1, (absorbed.id.uuidString as NSString).utf8String, -1, nil)
+                    sqlite3_step(statement)
+                }
+                sqlite3_finalize(statement)
+
+                mergedIds.insert(absorbed.id)
+                mergeCount += 1
+                AppLogger.speakers.info("Merged duplicate speaker", ["absorbed": absorbed.displayName ?? "unnamed", "keeper": keeper.displayName ?? "unnamed", "similarity": String(format: "%.3f", similarity)])
+            }
+        }
+
+        if mergeCount > 0 {
+            AppLogger.speakers.info("Duplicate merge complete", ["merged": "\(mergeCount)", "remaining": "\(speakers.count - mergeCount)"])
+        }
+    }
+
+    // MARK: - Name Variant Detection
+
+    /// Common English name variants (informal → formal and vice versa)
+    private static let nameVariants: [String: Set<String>] = [
+        "mike": ["michael", "mike", "mikey"],
+        "michael": ["michael", "mike", "mikey"],
+        "nate": ["nate", "nathan", "nathaniel"],
+        "nathan": ["nate", "nathan", "nathaniel"],
+        "nathaniel": ["nate", "nathan", "nathaniel"],
+        "dave": ["dave", "david"],
+        "david": ["dave", "david"],
+        "alex": ["alex", "alexander", "alexandra"],
+        "alexander": ["alex", "alexander"],
+        "alexandra": ["alex", "alexandra"],
+        "dan": ["dan", "daniel", "danny"],
+        "daniel": ["dan", "daniel", "danny"],
+        "danny": ["dan", "daniel", "danny"],
+        "matt": ["matt", "matthew"],
+        "matthew": ["matt", "matthew"],
+        "chris": ["chris", "christopher", "christine", "christina"],
+        "christopher": ["chris", "christopher"],
+        "christine": ["chris", "christine"],
+        "christina": ["chris", "christina"],
+        "nick": ["nick", "nicholas", "nic"],
+        "nicholas": ["nick", "nicholas", "nic"],
+        "rob": ["rob", "robert", "robbie", "bob", "bobby"],
+        "robert": ["rob", "robert", "robbie", "bob", "bobby"],
+        "bob": ["rob", "robert", "bob", "bobby"],
+        "ed": ["ed", "edward", "eddie"],
+        "edward": ["ed", "edward", "eddie"],
+        "joe": ["joe", "joseph", "joey"],
+        "joseph": ["joe", "joseph", "joey"],
+        "tom": ["tom", "thomas", "tommy"],
+        "thomas": ["tom", "thomas", "tommy"],
+        "sam": ["sam", "samuel", "samantha"],
+        "samuel": ["sam", "samuel"],
+        "samantha": ["sam", "samantha"],
+        "jen": ["jen", "jennifer", "jenny"],
+        "jennifer": ["jen", "jennifer", "jenny"],
+        "will": ["will", "william", "bill", "billy"],
+        "william": ["will", "william", "bill", "billy"],
+        "bill": ["will", "william", "bill", "billy"],
+        "jim": ["jim", "james", "jimmy"],
+        "james": ["jim", "james", "jimmy"],
+        "tony": ["tony", "anthony"],
+        "anthony": ["tony", "anthony"],
+        "steve": ["steve", "steven", "stephen"],
+        "steven": ["steve", "steven", "stephen"],
+        "stephen": ["steve", "steven", "stephen"],
+        "ben": ["ben", "benjamin", "benny"],
+        "benjamin": ["ben", "benjamin", "benny"],
+        "andy": ["andy", "andrew", "drew"],
+        "andrew": ["andy", "andrew", "drew"],
+        "drew": ["andy", "andrew", "drew"],
+        "marques": ["marques", "marquez"],
+        "marquez": ["marques", "marquez"],
+    ]
+
+    /// Check if two names are variants of each other (e.g., "Nate" and "Nathan")
+    static func areNameVariants(_ name1: String, _ name2: String) -> Bool {
+        let a = name1.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let b = name2.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Exact match (case-insensitive)
+        if a == b { return true }
+
+        // Check variant table
+        if let variants = nameVariants[a], variants.contains(b) { return true }
+        if let variants = nameVariants[b], variants.contains(a) { return true }
+
+        // Check if one contains the other (handles "Marques Brownlee" vs "Marques")
+        if a.contains(b) || b.contains(a) { return true }
+
+        return false
     }
 
     // MARK: - Math Utilities

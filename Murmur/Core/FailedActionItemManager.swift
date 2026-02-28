@@ -106,7 +106,7 @@ class FailedActionItemManager: ObservableObject {
 
     private func loadFailedExtractions() {
         guard FileManager.default.fileExists(atPath: storageURL.path) else {
-            print("[FailedActionItemManager] No existing failed extractions file")
+            AppLogger.actionItems.debug("No existing failed extractions file")
             return
         }
 
@@ -122,13 +122,13 @@ class FailedActionItemManager: ObservableObject {
             // Save back if we filtered any out
             if failedExtractions.count != loaded.count {
                 let removed = loaded.count - failedExtractions.count
-                print("[FailedActionItemManager] Removed \(removed) stale entries")
+                AppLogger.actionItems.info("Removed stale entries", ["count": "\(removed)"])
                 saveFailedExtractions()
             }
 
-            print("[FailedActionItemManager] Loaded \(failedExtractions.count) failed extractions")
+            AppLogger.actionItems.info("Loaded failed extractions", ["count": "\(failedExtractions.count)"])
         } catch {
-            print("[FailedActionItemManager] Error loading: \(error)")
+            AppLogger.actionItems.error("Error loading failed extractions", ["error": "\(error)"])
         }
     }
 
@@ -136,9 +136,9 @@ class FailedActionItemManager: ObservableObject {
         do {
             let data = try encoder.encode(failedExtractions)
             try data.write(to: storageURL, options: .atomic)
-            print("[FailedActionItemManager] Saved \(failedExtractions.count) failed extractions")
+            AppLogger.actionItems.info("Saved failed extractions", ["count": "\(failedExtractions.count)"])
         } catch {
-            print("[FailedActionItemManager] Error saving: \(error)")
+            AppLogger.actionItems.error("Error saving failed extractions", ["error": "\(error)"])
         }
     }
 
@@ -148,7 +148,7 @@ class FailedActionItemManager: ObservableObject {
     func addFailedExtraction(transcriptURL: URL, error: Error) {
         // Don't add duplicates for the same transcript
         if failedExtractions.contains(where: { $0.transcriptURL == transcriptURL }) {
-            print("[FailedActionItemManager] Duplicate entry for \(transcriptURL.lastPathComponent), skipping")
+            AppLogger.actionItems.warning("Duplicate entry, skipping", ["file": transcriptURL.lastPathComponent])
             return
         }
 
@@ -160,7 +160,7 @@ class FailedActionItemManager: ObservableObject {
         failedExtractions.append(failed)
         saveFailedExtractions()
 
-        print("[FailedActionItemManager] Added failed extraction: \(failed.transcriptFilename)")
+        AppLogger.actionItems.info("Added failed extraction", ["file": failed.transcriptFilename])
     }
 
     /// Remove a failed extraction (after successful retry or user dismissal)
@@ -172,7 +172,7 @@ class FailedActionItemManager: ObservableObject {
         let removed = failedExtractions.remove(at: index)
         saveFailedExtractions()
 
-        print("[FailedActionItemManager] Removed: \(removed.transcriptFilename)")
+        AppLogger.actionItems.info("Removed failed extraction", ["file": removed.transcriptFilename])
     }
 
     /// Increment retry count (call before attempting retry)
@@ -186,7 +186,7 @@ class FailedActionItemManager: ObservableObject {
         saveFailedExtractions()
 
         let extraction = failedExtractions[index]
-        print("[FailedActionItemManager] Retry \(extraction.retryCount)/\(Self.maxRetries) for \(extraction.transcriptFilename)")
+        AppLogger.actionItems.info("Incremented retry count", ["file": extraction.transcriptFilename, "retry": "\(extraction.retryCount)/\(Self.maxRetries)"])
     }
 
     /// Get extractions that are ready to retry (backoff elapsed)
@@ -210,7 +210,7 @@ class FailedActionItemManager: ObservableObject {
         }
 
         if !oldFailures.isEmpty {
-            print("[FailedActionItemManager] Cleaned up \(oldFailures.count) entries older than \(days) days")
+            AppLogger.actionItems.info("Cleaned up old failed extractions", ["count": "\(oldFailures.count)", "olderThanDays": "\(days)"])
         }
     }
 }

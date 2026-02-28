@@ -31,6 +31,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var onboardingWindowController: OnboardingWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Initialize logger (creates log directory, opens file handle)
+        _ = AppLogger.shared
+
         // Configure tooltip delay to 1 second
         UserDefaults.standard.set(1000, forKey: "NSInitialToolTipDelay")
 
@@ -87,15 +90,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         audio = Audio()
 
         // Initialize local transcription models (Parakeet + Sortformer) in background
-        print("🔧 About to create model init Task...")
+        AppLogger.app.info("Creating model init task")
         Task { @MainActor in
-            print("🔧 Task body executing - starting model initialization...")
+            AppLogger.app.info("Starting model initialization")
             if let tm = taskManager {
-                print("🔧 TaskManager exists, calling initializeModels()")
+                AppLogger.app.debug("TaskManager exists, calling initializeModels()")
                 await tm.transcription.initializeModels()
-                print("🔧 Model initialization complete")
+                AppLogger.app.info("Model initialization complete")
             } else {
-                print("🔧 ERROR: taskManager is nil!")
+                AppLogger.app.error("TaskManager is nil during model init")
             }
         }
 
@@ -116,7 +119,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     #if DEBUG
     @objc func resetOnboarding() {
         OnboardingState.resetOnboarding()
-        print("✓ Onboarding reset. Restart the app to see onboarding again.")
+        AppLogger.app.info("Onboarding reset — restart app to see onboarding")
     }
     #endif
 
@@ -171,16 +174,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Handle recording completion - trigger transcription
     func handleRecordingComplete(micURL: URL?, systemURL: URL?) {
         guard let micURL = micURL else {
-            print("❌ No mic audio file available")
+            AppLogger.app.error("No mic audio file available")
             return
         }
 
-        print("📝 Recording complete - starting transcription")
+        AppLogger.app.info("Recording complete — starting transcription")
 
         // Capture recording health info before it gets reset (Phase 3: Post-hoc transparency)
         let healthInfo = audio?.createHealthInfo()
         if let health = healthInfo {
-            print("📊 Recording health: quality=\(health.captureQuality.rawValue), gaps=\(health.audioGaps), switches=\(health.deviceSwitches)")
+            AppLogger.app.info("Recording health", ["quality": health.captureQuality.rawValue, "gaps": "\(health.audioGaps)", "switches": "\(health.deviceSwitches)"])
         }
 
         // Get output folder from settings
@@ -203,5 +206,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             outputFolder: outputFolder,
             healthInfo: healthInfo
         )
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        AppLogger.shared.flush()
     }
 }

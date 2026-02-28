@@ -2,13 +2,11 @@ import SwiftUI
 import AppKit
 
 /// Displays recent transcripts on the dashboard with timeline layout
-/// "Night Studio" aesthetic with grouped sections and premium styling
+/// Clean minimal design — no animated waveforms, no premium card wrapper
 @available(macOS 14.0, *)
 struct RecentTranscriptsView: View {
 
     let transcripts: [RecordingMetadata]
-
-    @State private var isHovered = false
 
     // Group transcripts by time period
     private var groupedTranscripts: [(title: String, items: [RecordingMetadata])] {
@@ -45,9 +43,10 @@ struct RecentTranscriptsView: View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             // Header
             HStack {
-                Text("Recent Transcripts")
-                    .font(.headingSmall)
-                    .foregroundColor(.panelTextPrimary)
+                Text("RECENT TRANSCRIPTS")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.panelTextMuted)
+                    .tracking(0.8)
 
                 Spacer()
 
@@ -56,12 +55,6 @@ struct RecentTranscriptsView: View {
                         .font(.caption)
                         .fontWeight(.medium)
                         .foregroundColor(.panelTextMuted)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background {
-                            Capsule()
-                                .fill(Color.panelCharcoalSurface)
-                        }
                 }
             }
 
@@ -81,15 +74,18 @@ struct RecentTranscriptsView: View {
             }
         }
         .padding(Spacing.md)
-        .premiumCard(isHovered: isHovered, glowColor: .accentBlue)
-        .onHover { hovering in
-            isHovered = hovering
+        .background {
+            RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
+                .fill(Color.panelCharcoalElevated)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
+                .stroke(Color.panelCharcoalSurface, lineWidth: 1)
         }
     }
 
     private var emptyState: some View {
         VStack(spacing: Spacing.md) {
-            // Illustration
             ZStack {
                 Circle()
                     .fill(Color.panelCharcoalSurface)
@@ -109,23 +105,6 @@ struct RecentTranscriptsView: View {
                     .font(.caption)
                     .foregroundColor(.panelTextMuted)
                     .multilineTextAlignment(.center)
-            }
-
-            // Hint pill
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "sparkles")
-                    .font(.caption)
-                    .foregroundColor(.recordingCoral)
-
-                Text("Start recording to get started")
-                    .font(.caption)
-                    .foregroundColor(.panelTextMuted)
-            }
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.xs)
-            .background {
-                Capsule()
-                    .fill(Color.recordingCoral.opacity(0.1))
             }
         }
         .frame(maxWidth: .infinity)
@@ -151,7 +130,7 @@ struct TimelineGroupView: View {
                 .foregroundColor(.panelTextMuted)
                 .textCase(.uppercase)
                 .tracking(0.5)
-                .padding(.leading, 28) // Align with content after timeline dot
+                .padding(.leading, 28)
 
             // Timeline items
             ForEach(Array(transcripts.enumerated()), id: \.element.id) { index, transcript in
@@ -175,33 +154,19 @@ struct TimelineRowView: View {
     let isLast: Bool
 
     @State private var isHovered = false
-    @State private var showOpenButton = false
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             // Timeline indicator
             VStack(spacing: 0) {
-                // Line above dot
                 Rectangle()
                     .fill(isFirst ? Color.clear : Color.panelCharcoalSurface)
                     .frame(width: 2, height: 12)
 
-                // Dot with pulse on hover
-                ZStack {
-                    // Glow effect when hovered
-                    if isHovered {
-                        Circle()
-                            .fill(Color.recordingCoral.opacity(0.3))
-                            .frame(width: 16, height: 16)
-                            .blur(radius: 4)
-                    }
+                Circle()
+                    .fill(isHovered ? Color.panelTextSecondary : Color.panelCharcoalSurface)
+                    .frame(width: 8, height: 8)
 
-                    Circle()
-                        .fill(isHovered ? Color.recordingCoral : Color.panelCharcoalSurface)
-                        .frame(width: 8, height: 8)
-                }
-
-                // Line below dot
                 Rectangle()
                     .fill(isLast ? Color.clear : Color.panelCharcoalSurface)
                     .frame(width: 2)
@@ -214,72 +179,37 @@ struct TimelineRowView: View {
                 revealInFinder()
             } label: {
                 HStack(spacing: Spacing.sm) {
-                    // Mini waveform thumbnail
-                    MiniWaveformView(isHovered: isHovered)
-                        .frame(width: 48, height: 32)
-
                     // Content
                     VStack(alignment: .leading, spacing: 4) {
-                        // Title
                         Text(transcript.displayTitle)
                             .font(.bodyMedium)
                             .fontWeight(.medium)
                             .foregroundColor(.panelTextPrimary)
                             .lineLimit(1)
 
-                        // Metadata pills
+                        // Metadata
                         HStack(spacing: Spacing.xs) {
-                            // Time
-                            MetadataPill(
-                                icon: "clock",
-                                text: formattedTime
-                            )
+                            MetadataPill(icon: "clock", text: formattedTime)
+                            MetadataPill(icon: "timer", text: transcript.formattedDuration)
 
-                            // Duration
-                            MetadataPill(
-                                icon: "timer",
-                                text: transcript.formattedDuration
-                            )
-
-                            // Speakers (if any)
                             if transcript.speakerCount > 0 {
-                                MetadataPill(
-                                    icon: "person.2",
-                                    text: "\(transcript.speakerCount)"
-                                )
+                                MetadataPill(icon: "person.2", text: "\(transcript.speakerCount)")
                             }
 
-                            // Words (optional, show if significant)
                             if transcript.wordCount > 100 {
-                                MetadataPill(
-                                    icon: "text.word.spacing",
-                                    text: formatWordCount(transcript.wordCount)
-                                )
+                                MetadataPill(icon: "text.word.spacing", text: formatWordCount(transcript.wordCount))
                             }
                         }
                     }
 
                     Spacer()
 
-                    // Slide-in Open button
-                    HStack(spacing: 4) {
-                        Text("Open")
-                            .font(.caption)
-                            .fontWeight(.medium)
-
+                    // Open indicator on hover
+                    if isHovered {
                         Image(systemName: "arrow.up.forward")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.panelTextMuted)
                     }
-                    .foregroundColor(.recordingCoral)
-                    .padding(.horizontal, Spacing.sm)
-                    .padding(.vertical, 6)
-                    .background {
-                        Capsule()
-                            .fill(Color.recordingCoral.opacity(0.15))
-                    }
-                    .opacity(isHovered ? 1 : 0)
-                    .offset(x: isHovered ? 0 : 20)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
                 }
                 .padding(Spacing.sm)
                 .background {
@@ -290,9 +220,7 @@ struct TimelineRowView: View {
             }
             .buttonStyle(.plain)
             .onHover { hovering in
-                withAnimation(.easeOut(duration: 0.2)) {
-                    isHovered = hovering
-                }
+                isHovered = hovering
             }
         }
     }
@@ -312,7 +240,6 @@ struct TimelineRowView: View {
 
     private func revealInFinder() {
         guard let path = transcript.transcriptPath else {
-            // Open the Transcripted folder if no specific path
             let url = TranscriptSaver.defaultSaveDirectory
             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: url.path)
             return
@@ -349,59 +276,6 @@ struct MetadataPill: View {
     }
 }
 
-// MARK: - Mini Waveform View
-
-@available(macOS 14.0, *)
-struct MiniWaveformView: View {
-
-    let isHovered: Bool
-
-    // Static waveform data (normalized 0-1)
-    private let waveformData: [CGFloat] = [
-        0.3, 0.5, 0.7, 0.4, 0.8, 0.6, 0.9, 0.5, 0.7, 0.4,
-        0.6, 0.8, 0.5, 0.7, 0.3, 0.6, 0.8, 0.4, 0.5, 0.7
-    ]
-
-    @State private var animationPhase: CGFloat = 0
-
-    var body: some View {
-        GeometryReader { geometry in
-            let width = geometry.size.width
-            let height = geometry.size.height
-            let barWidth: CGFloat = 2
-            let spacing: CGFloat = 1.5
-            let barCount = min(waveformData.count, Int(width / (barWidth + spacing)))
-
-            HStack(alignment: .center, spacing: spacing) {
-                ForEach(0..<barCount, id: \.self) { index in
-                    let normalizedHeight = waveformData[index % waveformData.count]
-                    let animatedHeight = isHovered
-                        ? normalizedHeight * (0.8 + 0.2 * sin(animationPhase + CGFloat(index) * 0.5))
-                        : normalizedHeight
-
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(isHovered ? Color.recordingCoral : Color.panelTextMuted.opacity(0.5))
-                        .frame(width: barWidth, height: max(2, height * animatedHeight * 0.8))
-                }
-            }
-            .frame(width: width, height: height, alignment: .center)
-        }
-        .background {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.panelCharcoal)
-        }
-        .onChange(of: isHovered) { _, hovering in
-            if hovering {
-                withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
-                    animationPhase = .pi * 2
-                }
-            } else {
-                animationPhase = 0
-            }
-        }
-    }
-}
-
 // MARK: - Compact Transcript Row (for smaller spaces)
 
 @available(macOS 14.0, *)
@@ -416,12 +290,10 @@ struct CompactTranscriptRow: View {
             revealInFinder()
         } label: {
             HStack(spacing: Spacing.sm) {
-                // Dot indicator
                 Circle()
-                    .fill(Color.recordingCoral)
+                    .fill(Color.panelTextMuted)
                     .frame(width: 6, height: 6)
 
-                // Title
                 Text(transcript.displayTitle)
                     .font(.bodySmall)
                     .foregroundColor(.panelTextPrimary)
@@ -429,7 +301,6 @@ struct CompactTranscriptRow: View {
 
                 Spacer()
 
-                // Duration
                 Text(transcript.formattedDuration)
                     .font(.caption)
                     .foregroundColor(.panelTextMuted)
@@ -479,20 +350,6 @@ struct CompactTranscriptRow: View {
                     speakerCount: 6,
                     title: "Client Kickoff - Acme Corp"
                 ),
-                RecordingMetadata(
-                    date: Date().addingTimeInterval(-172800),
-                    durationSeconds: 1920,
-                    wordCount: 2100,
-                    speakerCount: 3,
-                    title: "Product Review"
-                ),
-                RecordingMetadata(
-                    date: Date().addingTimeInterval(-604800),
-                    durationSeconds: 3600,
-                    wordCount: 4200,
-                    speakerCount: 5,
-                    title: "Quarterly Planning"
-                )
             ]
         )
 
