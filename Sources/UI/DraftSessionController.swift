@@ -302,8 +302,7 @@ class DraftSessionController: ObservableObject {
         let extractionPrompt = appState.promptStore.contextExtractionPrompt(userName: userName, appName: appName)
 
         do {
-            // 8-second timeout — vision calls typically take 2-6s; 4s was too tight and caused frequent timeouts
-            let context = try await AnthropicAPI.withTimeout(seconds: 8) {
+            let context = try await AnthropicAPI.withTimeout(seconds: DraftConstants.visionTimeoutSeconds) {
                 try await AnthropicAPI.extractStructuredContext(
                     imageData: imageData,
                     auth: auth,
@@ -422,8 +421,8 @@ class DraftSessionController: ObservableObject {
         let changeCountAfterSet = pasteboard.changeCount
         Task { @MainActor in
             let startTime = CFAbsoluteTimeGetCurrent()
-            while CFAbsoluteTimeGetCurrent() - startTime < 2.0 {
-                try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+            while CFAbsoluteTimeGetCurrent() - startTime < DraftConstants.clipboardRestoreTimeout {
+                try? await Task.sleep(nanoseconds: DraftConstants.clipboardPollInterval)
                 if pasteboard.changeCount != changeCountAfterSet { break }
             }
             pasteboard.clearContents()

@@ -3,82 +3,13 @@
 //
 // Accepts AuthCredential instead of a raw API key string, so both API key
 // and Claude subscription token auth work transparently.
+//
+// Types (AnthropicAPIError, request/response Codable structs, isRetryable)
+// live in AnthropicAPITypes.swift for testability.
 
 import Foundation
 
-// MARK: - Request/Response Types
-
-struct AnthropicMessage: Codable {
-    let role: String
-    let content: String
-}
-
-struct AnthropicRequest: Codable {
-    let model: String
-    let max_tokens: Int
-    let system: String?
-    let messages: [AnthropicMessage]
-}
-
-struct AnthropicContentBlock: Codable {
-    let type: String
-    let text: String
-}
-
-struct AnthropicResponse: Codable {
-    let id: String
-    let content: [AnthropicContentBlock]
-    let stop_reason: String?
-}
-
-struct AnthropicErrorDetail: Codable {
-    let type: String
-    let message: String
-}
-
-struct AnthropicErrorResponse: Codable {
-    let type: String
-    let error: AnthropicErrorDetail
-}
-
 // MARK: - API Client
-
-enum AnthropicAPIError: LocalizedError {
-    case noCredential
-    case invalidResponse
-    case emptyResponse
-    case apiError(String)
-    case networkError(String)
-    case subscriptionTokenExpired  // 401 when using subscription token
-    case timeout  // Request exceeded the deadline
-    case overloaded  // 529/503 — Anthropic API temporarily overloaded
-
-    var errorDescription: String? {
-        switch self {
-        case .noCredential: return "No API credentials configured"
-        case .invalidResponse: return "Invalid response from API"
-        case .emptyResponse: return "Empty response from API"
-        case .apiError(let msg): return msg
-        case .networkError(let msg): return "Network error: \(msg)"
-        case .subscriptionTokenExpired:
-            return "Claude subscription token expired — run `claude setup-token` and update in settings"
-        case .timeout:
-            return "Request exceeded the deadline"
-        case .overloaded:
-            return "Anthropic API is temporarily overloaded — try again in a moment"
-        }
-    }
-}
-
-extension AnthropicAPIError {
-    static func isRetryable(_ error: Error) -> Bool {
-        if let apiErr = error as? AnthropicAPIError, case .overloaded = apiErr { return true }
-        if let urlErr = error as? URLError {
-            return [.notConnectedToInternet, .networkConnectionLost, .timedOut].contains(urlErr.code)
-        }
-        return false
-    }
-}
 
 struct AnthropicAPI {
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
@@ -107,7 +38,7 @@ struct AnthropicAPI {
                 EventReporter.shared.capture(level: .warning, engine: "anthropic", event: "api_retry",
                     message: "Retrying draft after transient error: \(error.localizedDescription)")
             }
-            try await Task.sleep(nanoseconds: 2_000_000_000)
+            try await Task.sleep(nanoseconds: DraftConstants.apiRetryDelay)
             return try await sendRequest(body: body, auth: auth)
         }
     }
@@ -169,7 +100,7 @@ struct AnthropicAPI {
                             EventReporter.shared.capture(level: .warning, engine: "anthropic", event: "api_retry",
                                 message: "Retrying stream after transient error: \(error.localizedDescription)")
                         }
-                        try await Task.sleep(nanoseconds: 2_000_000_000)
+                        try await Task.sleep(nanoseconds: DraftConstants.apiRetryDelay)
                         (bytes, _) = try await connect()
                     }
 

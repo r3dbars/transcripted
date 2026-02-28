@@ -15,13 +15,12 @@ private actor AppLogFileWriter {
 
         let fm = FileManager.default
         if fm.fileExists(atPath: path) {
-            // Rotate if > 500KB: keep last 1000 lines
             if let attrs = try? fm.attributesOfItem(atPath: path),
-               let size = attrs[.size] as? UInt64, size > 500_000 {
+               let size = attrs[.size] as? UInt64, size > DraftConstants.logRotationThreshold {
                 if let data = fm.contents(atPath: path),
                    let content = String(data: data, encoding: .utf8) {
                     let lines = content.components(separatedBy: "\n")
-                    let kept = lines.suffix(1000).joined(separator: "\n")
+                    let kept = lines.suffix(DraftConstants.logRotationKeepLines).joined(separator: "\n")
                     try? kept.write(toFile: path, atomically: true, encoding: .utf8)
                 }
             }

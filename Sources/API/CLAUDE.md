@@ -6,7 +6,8 @@ Handles communication with the Anthropic Messages API (text drafting, vision con
 
 ## Key Files
 
-- `AnthropicAPI.swift` (338 lines) — URLSession-based HTTP client for Claude (text drafting, streaming drafts, vision extraction, timeout utility, retry logic for transient errors)
+- `AnthropicAPITypes.swift` (~80 lines) — Shared types: `AnthropicAPIError` enum (with `isRetryable()`), request/response Codable structs. Extracted for testability (no EventReporter dependency).
+- `AnthropicAPI.swift` (~260 lines) — URLSession-based HTTP client for Claude (text drafting, streaming drafts, vision extraction, timeout utility, retry logic for transient errors)
 - `AuthCredential.swift` (75 lines) — Auth abstraction: API key or Claude subscription token, with Keychain load/save/clear
 - `KeychainHelper.swift` (54 lines) — Simple macOS Keychain wrapper (save/load/delete) using Security framework
 - `StreamingChatEngine.swift` (386 lines) — Multi-turn streaming chat engine for the Agent tab; handles conversation history, context injection (style/prompts/feedback/suggestion log), and `propose_prompt_change` tool use

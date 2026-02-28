@@ -301,7 +301,7 @@ class FloatingOverlayController: ObservableObject {
         }
         errorDismissTask = Task { @MainActor [weak self] in
             do {
-                try await Task.sleep(nanoseconds: 1_500_000_000)
+                try await Task.sleep(nanoseconds: DraftConstants.errorDismissDelay)
             } catch {
                 return  // Cancelled — bail
             }
