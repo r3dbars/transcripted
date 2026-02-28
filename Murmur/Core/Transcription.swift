@@ -1,5 +1,6 @@
 import Foundation
 @preconcurrency import AVFoundation
+import Accelerate
 
 /// Maps speaker labels to identified names from Gemini
 struct SpeakerMapping {
@@ -87,12 +88,12 @@ class Transcription: ObservableObject {
                 self.processingStatus = "Loading audio..."
             }
 
-            print("Loading and resampling audio to 16kHz...")
+            AppLogger.transcription.info("Loading and resampling audio to 16kHz")
             let systemSamples = try AudioResampler.loadAndResample(url: systemURL, targetRate: 16000)
             let micSamples = try AudioResampler.loadAndResample(url: micURL, targetRate: 16000)
 
-            print("  System: \(systemSamples.count) samples (\(String(format: "%.1f", Double(systemSamples.count) / 16000))s)")
-            print("  Mic: \(micSamples.count) samples (\(String(format: "%.1f", Double(micSamples.count) / 16000))s)")
+            AppLogger.transcription.debug("System: \(systemSamples.count) samples (\(String(format: "%.1f", Double(systemSamples.count) / 16000))s)")
+            AppLogger.transcription.debug("Mic: \(micSamples.count) samples (\(String(format: "%.1f", Double(micSamples.count) / 16000))s)")
 
             onProgress?(0.10)
 
@@ -101,7 +102,7 @@ class Transcription: ObservableObject {
                 self.processingStatus = "Identifying speakers..."
             }
 
-            print("Running Sortformer diarization on system audio...")
+            AppLogger.transcription.info("Running Sortformer diarization on system audio")
             let speakerSegments = try await sortformer.diarize(samples: systemSamples, sampleRate: 16000)
 
             onProgress?(0.30)
@@ -113,6 +114,33 @@ class Transcription: ObservableObject {
 
             var systemUtterances: [TranscriptionUtterance] = []
             let totalSegments = speakerSegments.count
+
+            // Aggregate embeddings per Sortformer speaker ID for stable matching.
+            // Instead of matching each segment independently (noisy), we compute
+            // a mean embedding per speaker and match that once against the DB.
+            var embeddingsPerSpeaker: [Int: [[Float]]] = [:]
+            for segment in speakerSegments {
+                if let embedding = segment.embedding, !embedding.isEmpty {
+                    embeddingsPerSpeaker[segment.speakerId, default: []].append(embedding)
+                }
+            }
+
+            // Match each speaker's mean embedding against the DB once
+            var speakerMatchResults: [Int: (persistentId: UUID, similarity: Double)] = [:]
+            var speakerNewProfiles: [Int: UUID] = [:]
+
+            for (speakerId, embeddings) in embeddingsPerSpeaker {
+                let meanEmbedding = Self.computeMeanEmbedding(embeddings)
+                if let matchResult = speakerDB.matchSpeaker(embedding: meanEmbedding) {
+                    speakerMatchResults[speakerId] = (matchResult.profile.id, matchResult.similarity)
+                    _ = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: matchResult.profile.id)
+                    AppLogger.transcription.info("Speaker matched DB profile", ["speakerId": "\(speakerId)", "similarity": String(format: "%.3f", matchResult.similarity), "segmentsAveraged": "\(embeddings.count)"])
+                } else {
+                    let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding)
+                    speakerNewProfiles[speakerId] = newProfile.id
+                    AppLogger.transcription.info("Speaker new profile created", ["speakerId": "\(speakerId)", "segmentsAveraged": "\(embeddings.count)"])
+                }
+            }
 
             for (index, segment) in speakerSegments.enumerated() {
                 // Extract audio slice for this segment
@@ -131,16 +159,15 @@ class Transcription: ObservableObject {
                 // Skip empty transcriptions
                 guard !text.isEmpty else { continue }
 
-                // Match speaker embedding against persistent database
-                var persistentId: UUID?
-                if let embedding = segment.embedding {
-                    if let match = speakerDB.matchSpeaker(embedding: embedding) {
-                        persistentId = match.id
-                        _ = speakerDB.addOrUpdateSpeaker(embedding: embedding, existingId: match.id)
-                    } else {
-                        let newProfile = speakerDB.addOrUpdateSpeaker(embedding: embedding)
-                        persistentId = newProfile.id
-                    }
+                // Use the pre-computed per-speaker match result
+                let persistentId: UUID?
+                let similarity: Double?
+                if let match = speakerMatchResults[segment.speakerId] {
+                    persistentId = match.persistentId
+                    similarity = match.similarity
+                } else {
+                    persistentId = speakerNewProfiles[segment.speakerId]
+                    similarity = nil
                 }
 
                 systemUtterances.append(TranscriptionUtterance(
@@ -149,6 +176,7 @@ class Transcription: ObservableObject {
                     channel: 1,
                     speakerId: segment.speakerId,
                     persistentSpeakerId: persistentId,
+                    matchSimilarity: similarity,
                     transcript: text
                 ))
 
@@ -157,14 +185,14 @@ class Transcription: ObservableObject {
                 onProgress?(segmentProgress)
             }
 
-            print("System audio: \(systemUtterances.count) utterances from \(Set(systemUtterances.map { $0.speakerId }).count) speakers")
+            AppLogger.transcription.info("System audio transcribed", ["utterances": "\(systemUtterances.count)", "speakers": "\(Set(systemUtterances.map { $0.speakerId }).count)"])
 
             // Step 4: Transcribe mic audio with Parakeet
             await MainActor.run {
                 self.processingStatus = "Transcribing mic audio..."
             }
 
-            print("Transcribing mic audio with Parakeet...")
+            AppLogger.transcription.info("Transcribing mic audio with Parakeet")
             let micText = try await parakeet.transcribeSegment(samples: micSamples, source: .microphone)
 
             onProgress?(0.80)
@@ -187,12 +215,13 @@ class Transcription: ObservableObject {
                         channel: 0,
                         speakerId: 0,
                         persistentSpeakerId: nil,
+                        matchSimilarity: nil,
                         transcript: trimmed
                     ))
                 }
             }
 
-            print("Mic audio: \(micUtterances.count) utterances")
+            AppLogger.transcription.info("Mic audio transcribed", ["utterances": "\(micUtterances.count)"])
 
             onProgress?(0.90)
 
@@ -205,11 +234,12 @@ class Transcription: ObservableObject {
 
             onProgress?(1.0)
 
-            print("Local transcription complete:")
-            print("   Mic utterances: \(micUtterances.count)")
-            print("   System utterances: \(systemUtterances.count)")
-            print("   System speakers: \(Set(systemUtterances.map { $0.speakerId }).count)")
-            print("   Processing time: \(String(format: "%.1f", processingTime))s")
+            AppLogger.transcription.info("Local transcription complete", [
+                "micUtterances": "\(micUtterances.count)",
+                "systemUtterances": "\(systemUtterances.count)",
+                "systemSpeakers": "\(Set(systemUtterances.map { $0.speakerId }).count)",
+                "processingTime": "\(String(format: "%.1f", processingTime))s"
+            ])
 
             return TranscriptionResult(
                 micUtterances: micUtterances,
@@ -226,6 +256,37 @@ class Transcription: ObservableObject {
             }
             throw error
         }
+    }
+
+    // MARK: - Embedding Utilities
+
+    /// Compute the L2-normalized mean of multiple embeddings.
+    /// Averaging reduces per-segment noise, producing a more stable speaker fingerprint.
+    private nonisolated static func computeMeanEmbedding(_ embeddings: [[Float]]) -> [Float] {
+        guard let first = embeddings.first else { return [] }
+        let dim = first.count
+        guard dim > 0 else { return [] }
+
+        if embeddings.count == 1 { return first }
+
+        var sum = [Float](repeating: 0, count: dim)
+        for emb in embeddings {
+            for i in 0..<min(dim, emb.count) {
+                sum[i] += emb[i]
+            }
+        }
+
+        let scale = Float(embeddings.count)
+        var mean = sum.map { $0 / scale }
+
+        // L2 normalize
+        var norm: Float = 0
+        vDSP_dotpr(mean, 1, mean, 1, &norm, vDSP_Length(mean.count))
+        norm = sqrt(norm)
+        if norm > 0 {
+            vDSP_vsdiv(mean, 1, &norm, &mean, 1, vDSP_Length(mean.count))
+        }
+        return mean
     }
 
     // MARK: - Text Splitting

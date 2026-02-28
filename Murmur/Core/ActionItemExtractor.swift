@@ -136,14 +136,30 @@ enum ActionItemExtractor {
         ## HOW TO IDENTIFY SPEAKERS:
         1. **Greetings**: "Hi Jack", "Hey Sarah", "Good morning, Mike"
         2. **Self-introductions**: "It's Mike", "This is Sarah speaking", "Hey, it's Jack"
-        3. **Direct address**: "What do you think, Jack?", "Sarah, can you..."
-        4. **Referencing themselves**: "I'll send that - this is Jack by the way"
-        5. **Context clues**: If someone says "\(userName), your presentation was great" - the speaker is NOT \(userName)
+        3. **Direct address + response**: "What do you think, Jack?", "Sarah, can you..."
+           CRITICAL: When a speaker addresses someone by name, check who speaks NEXT.
+           The next speaker to respond is very likely that person. Example:
+             [00:30] [System/Speaker 0] Hey Andrew, what do you think about this?
+             [00:35] [System/Speaker 1] Yeah, I think we should go with option B.
+           → Speaker 1 is likely Andrew.
+        4. **Thank-you / sign-off attribution**: "Thanks Mike", "Good point Sarah"
+           Check who was speaking BEFORE. The previous speaker is likely that person. Example:
+             [01:20] [System/Speaker 2] ...so I think we should ship it next week.
+             [01:25] [System/Speaker 0] Great point Travis, I agree.
+           → Speaker 2 is likely Travis.
+        5. **Referencing themselves**: "I'll send that - this is Jack by the way"
+        6. **Context clues**: If someone says "\(userName), your presentation was great" - the speaker is NOT \(userName)
+        7. **Process of elimination**: If you identify some speakers and hear other names mentioned
+           in conversation, the remaining unidentified speaker is likely one of those names.
+           Example: If Speaker 0 is "Jack" and someone says "Mike" to the other speaker,
+           the remaining Speaker 1 is likely Mike.
+        8. **Known shows/podcasts**: If this appears to be a podcast or show (recurring hosts,
+           segment transitions, audience-facing tone), use your knowledge of known shows and hosts.
 
         ## IMPORTANT RULES:
         - Only identify speakers who are ACTIVELY ON the call (speaking)
         - Names mentioned about ABSENT people ("I talked to Sarah yesterday") are NOT speakers
-        - Look for TIMESTAMPS in the transcript to help match speaker IDs
+        - Use TIMESTAMPS to verify speaker correlations — a name followed by a response within a few seconds is strong evidence
         - If you can identify \(userName) (the recorder), note which Speaker ID they are
         - It's OK to only identify SOME speakers - don't guess if you're not confident
         - Most calls have 1-2 other people, but group calls may have more
@@ -342,21 +358,21 @@ enum ActionItemExtractor {
         if let preIdentified = preIdentifiedSpeakers {
             speakerResult = preIdentified
             let speakerNames = speakerResult.speakers.map { $0.name }
-            print("📋 Pass 1: Using \(speakerResult.speakers.count) pre-identified speakers: \(speakerNames.joined(separator: ", "))")
+            AppLogger.actionItems.info("Pass 1: Using pre-identified speakers", ["count": "\(speakerResult.speakers.count)", "names": speakerNames.joined(separator: ", ")])
         } else {
-            print("📋 Pass 1: Identifying speakers...")
+            AppLogger.actionItems.info("Pass 1: Identifying speakers")
             speakerResult = try await identifySpeakers(from: transcript, userName: effectiveUserName, apiKey: apiKey)
             let speakerNames = speakerResult.speakers.map { $0.name }
-            print("📋 Pass 1 complete: Found \(speakerResult.speakers.count) speakers: \(speakerNames.joined(separator: ", "))")
+            AppLogger.actionItems.info("Pass 1 complete", ["speakersFound": "\(speakerResult.speakers.count)", "names": speakerNames.joined(separator: ", ")])
         }
 
         // Apply speaker attributions locally (fast, no API call)
         let attributedTranscript = applyAttributions(to: transcript, speakers: speakerResult.speakers)
 
         // Pass 2: Extract action items from attributed transcript
-        print("📋 Pass 2: Extracting action items...")
+        AppLogger.actionItems.info("Pass 2: Extracting action items")
         let result = try await extractActionItems(from: attributedTranscript, userName: effectiveUserName, speakers: speakerResult.speakers, apiKey: apiKey)
-        print("📋 Pass 2 complete: Found \(result.actionItems.count) action items")
+        AppLogger.actionItems.info("Pass 2 complete", ["actionItems": "\(result.actionItems.count)"])
 
         return result
     }
@@ -374,15 +390,18 @@ enum ActionItemExtractor {
     ///   - speakerIds: List of speaker IDs detected by Sortformer (e.g., ["0", "1", "2"])
     ///   - userName: The configured user name
     ///   - apiKey: Gemini API key
+    ///   - speakerContext: Optional preamble with DB knowledge (e.g., "Speaker 0: Likely 'Nate' (92% match)")
     /// - Returns: SpeakerIdentificationResult with mappings
     static func identifySpeakers(
         from transcript: String,
         speakerIds: [String],
         userName: String,
-        apiKey: String
+        apiKey: String,
+        speakerContext: String = ""
     ) async throws -> SpeakerIdentificationResult {
         let prompt = speakerIdentificationPrompt(userName: userName, speakerIds: speakerIds)
-        let responseText = try await callGeminiAPI(prompt: prompt + "\n\n" + transcript, apiKey: apiKey, endpoint: pass1Endpoint)
+        let contextBlock = speakerContext.isEmpty ? "" : "\n\n\(speakerContext)\n"
+        let responseText = try await callGeminiAPI(prompt: prompt + contextBlock + "\n\n" + transcript, apiKey: apiKey, endpoint: pass1Endpoint)
 
         guard let jsonData = responseText.data(using: .utf8) else {
             throw ExtractionError.invalidJSON
@@ -392,7 +411,7 @@ enum ActionItemExtractor {
             return try JSONDecoder().decode(SpeakerIdentificationResult.self, from: jsonData)
         } catch {
             // If parsing fails, return empty speakers
-            print("⚠️ Pass 1 parsing failed, using empty speaker list: \(error)")
+            AppLogger.actionItems.warning("Pass 1 parsing failed, using empty speaker list", ["error": "\(error)"])
             return SpeakerIdentificationResult(speakers: [], userSpeakerId: nil)
         }
     }
@@ -454,7 +473,7 @@ enum ActionItemExtractor {
             return try JSONDecoder().decode(ExtractionResult.self, from: jsonData)
         } catch {
             // If parsing fails, return empty result
-            print("⚠️ Pass 2 parsing failed: \(error)")
+            AppLogger.actionItems.warning("Pass 2 parsing failed", ["error": "\(error)"])
             return ExtractionResult(actionItems: [], meetingTitle: nil, attendees: nil, meetingSummary: nil)
         }
     }

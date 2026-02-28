@@ -163,7 +163,7 @@ class TranscriptionTaskManager: ObservableObject {
             self.displayStatus = .gettingReady
         }
 
-        print("📝 Starting transcription task \(task.id) (active: \(activeCount))")
+        AppLogger.pipeline.info("Starting transcription task", ["taskId": "\(task.id)", "activeCount": "\(activeCount)"])
 
         // Create async task
         let asyncTask = Task {
@@ -193,7 +193,7 @@ class TranscriptionTaskManager: ObservableObject {
                 }
 
             } catch {
-                print("❌ Transcription task \(task.id) failed: \(error.localizedDescription)")
+                AppLogger.pipeline.error("Transcription task failed", ["taskId": "\(task.id)", "error": "\(error.localizedDescription)"])
 
                 await MainActor.run {
                     // Set failed status
@@ -270,7 +270,7 @@ class TranscriptionTaskManager: ObservableObject {
         healthInfo: RecordingHealthInfo?
     ) async throws -> URL {
 
-        print("Using local Parakeet + Sortformer pipeline")
+        AppLogger.pipeline.info("Using local Parakeet + Sortformer pipeline")
 
         // Phase 1: Transcribe with local models
         let result = try await transcription.transcribeMultichannel(
@@ -283,54 +283,191 @@ class TranscriptionTaskManager: ObservableObject {
             }
         )
 
-        print("Phase 1 complete: Local transcription done")
-        print("   Mic utterances: \(result.micUtteranceCount)")
-        print("   System utterances: \(result.systemUtteranceCount)")
+        AppLogger.pipeline.info("Phase 1 complete: Local transcription done", ["micUtterances": "\(result.micUtteranceCount)", "systemUtterances": "\(result.systemUtteranceCount)"])
 
-        // Phase 1.5: Identify speakers using Gemini (optional, graceful failure)
+        // Phase 1.5: Identify speakers — DB knowledge first, then Gemini if needed
         var speakerMappings: [String: SpeakerMapping] = [:]
+        var speakerSources: [String: String] = [:]  // "db" or "gemini" per speaker ID
         var speakerResult: SpeakerIdentificationResult? = nil
 
+        // Build DB knowledge snapshot: what do we already know about these speakers?
+        let speakerIds = Array(result.systemSpeakerIds).sorted()
+        let speakerDB = await MainActor.run { self.transcription.speakerDB }
+        var dbKnowledge: [(speakerId: String, profile: SpeakerProfile, similarity: Double)] = []
+
+        for utterance in result.systemUtterances {
+            let sid = String(utterance.speakerId)
+            // Only process each speaker ID once
+            guard !dbKnowledge.contains(where: { $0.speakerId == sid }) else { continue }
+            if let persistentId = utterance.persistentSpeakerId,
+               let similarity = utterance.matchSimilarity,
+               let profile = speakerDB.getSpeaker(id: persistentId) {
+                dbKnowledge.append((speakerId: sid, profile: profile, similarity: similarity))
+            }
+        }
+
+        // Check if ALL system speakers are already known with high confidence
+        let allSpeakersKnown = !speakerIds.isEmpty &&
+            speakerIds.allSatisfy { sid in
+                dbKnowledge.contains { $0.speakerId == sid && $0.profile.displayName != nil && $0.similarity > 0.85 && $0.profile.callCount > 3 }
+            }
+
         let geminiAPIKey = UserDefaults.standard.string(forKey: "geminiAPIKey") ?? ""
-        if !geminiAPIKey.isEmpty {
+
+        if allSpeakersKnown {
+            // Skip Gemini entirely — build mappings + synthetic SpeakerIdentificationResult from DB
+            AppLogger.speakers.info("All speakers known from DB, skipping Gemini", ["speakerCount": "\(speakerIds.count)"])
+
+            var identifiedSpeakers: [IdentifiedSpeaker] = []
+            for entry in dbKnowledge {
+                guard let name = entry.profile.displayName else { continue }
+                let key = "system_\(entry.speakerId)"
+                let confidence = entry.similarity > 0.85 && entry.profile.callCount > 3 ? "high" : "medium"
+                speakerMappings[key] = SpeakerMapping(
+                    speakerId: entry.speakerId,
+                    identifiedName: name,
+                    confidence: confidence
+                )
+                speakerSources[entry.speakerId] = "db"
+                identifiedSpeakers.append(IdentifiedSpeaker(
+                    name: name,
+                    speakerId: entry.speakerId,
+                    confidence: confidence,
+                    evidence: "Voice fingerprint match (\(String(format: "%.0f", entry.similarity * 100))%, \(entry.profile.callCount) calls)"
+                ))
+            }
+
+            speakerResult = SpeakerIdentificationResult(speakers: identifiedSpeakers, userSpeakerId: nil)
+            let resultToCache = speakerResult
+            await MainActor.run {
+                self.cachedSpeakerResult = resultToCache
+            }
+
+        } else if !geminiAPIKey.isEmpty {
+            // Call Gemini with DB preamble for context
             await MainActor.run {
                 self.displayStatus = .finishing
             }
 
             do {
-                // Format transcript for Gemini analysis
                 let transcriptText = Self.formatForSpeakerIdentification(result)
-
-                // Get unique speaker IDs from system audio
-                let speakerIds = Array(result.systemSpeakerIds).sorted()
-
-                // Get user name
                 let userName = UserDefaults.standard.string(forKey: "userName")
                 let effectiveUserName = (userName?.isEmpty ?? true) ? "You" : userName!
 
-                print("Identifying speakers with Gemini...")
+                // Build preamble from DB knowledge with trust tier framing
+                var preambleLines: [String] = []
+                if !dbKnowledge.isEmpty {
+                    preambleLines.append("Known speakers from voice fingerprint database:")
+                    for entry in dbKnowledge {
+                        let sim = String(format: "%.0f", entry.similarity * 100)
+                        if let name = entry.profile.displayName {
+                            let isUserSet = entry.profile.nameSource == "user_manual"
+                            if isUserSet || (entry.similarity > 0.85 && entry.profile.callCount > 3) {
+                                // LOCKED tier
+                                let source = isUserSet ? "user-confirmed" : "voice-confirmed"
+                                preambleLines.append("- Speaker \(entry.speakerId): LOCKED as \"\(name)\" (\(sim)% voice match, \(entry.profile.callCount) calls, \(source))")
+                                preambleLines.append("  → Do NOT rename this speaker unless you find very strong contradictory evidence.")
+                            } else if entry.similarity > 0.75 && entry.profile.callCount > 1 {
+                                // PROBABLE tier
+                                preambleLines.append("- Speaker \(entry.speakerId): Likely \"\(name)\" (\(sim)% voice match, \(entry.profile.callCount) calls)")
+                                preambleLines.append("  → Confirm or correct this name based on transcript evidence.")
+                            } else {
+                                // TENTATIVE tier
+                                preambleLines.append("- Speaker \(entry.speakerId): Possibly \"\(name)\" (\(sim)% voice match, \(entry.profile.callCount) call\(entry.profile.callCount == 1 ? "" : "s") — LOW CONFIDENCE)")
+                                preambleLines.append("  → This is a weak match. Look for transcript evidence to confirm or override.")
+                            }
+                        } else {
+                            preambleLines.append("- Speaker \(entry.speakerId): Recurring voice, no name yet (\(sim)% match to unnamed profile, \(entry.profile.callCount) calls)")
+                            preambleLines.append("  → Identify this person if possible from conversation context.")
+                        }
+                    }
+                    for sid in speakerIds where !dbKnowledge.contains(where: { $0.speakerId == sid }) {
+                        preambleLines.append("- Speaker \(sid): New speaker (no voice match in database)")
+                        preambleLines.append("  → Identify this person if possible from conversation context.")
+                    }
+                }
+                let speakerContext = preambleLines.joined(separator: "\n")
+
+                AppLogger.speakers.info("Identifying speakers with Gemini", ["dbKnownCount": "\(dbKnowledge.count)"])
                 speakerResult = try await ActionItemExtractor.identifySpeakers(
                     from: transcriptText,
                     speakerIds: speakerIds,
                     userName: effectiveUserName,
-                    apiKey: geminiAPIKey
+                    apiKey: geminiAPIKey,
+                    speakerContext: speakerContext
                 )
 
-                // Convert to mappings for TranscriptSaver
+                // Convert to mappings
                 speakerMappings = ActionItemExtractor.toSpeakerMappings(speakerResult!)
+                for speaker in speakerResult!.speakers {
+                    if let sid = speaker.speakerId {
+                        speakerSources[sid] = "gemini"
+                    }
+                }
 
                 let speakerNames = speakerResult!.speakers.map { $0.name }
-                print("Speaker identification: Found \(speakerResult!.speakers.count) speakers: \(speakerNames.joined(separator: ", "))")
+                AppLogger.speakers.info("Speaker identification complete", ["count": "\(speakerResult!.speakers.count)", "names": speakerNames.joined(separator: ", ")])
 
-                // Update SpeakerDatabase with Gemini-inferred names
+                // Update SpeakerDatabase with confidence-gated overwriting
                 for speaker in speakerResult!.speakers {
-                    // Find matching persistent speaker by speaker ID
                     let matchingUtterances = result.systemUtterances.filter {
                         String($0.speakerId) == speaker.speakerId
                     }
-                    if let persistentId = matchingUtterances.first?.persistentSpeakerId {
+                    guard let persistentId = matchingUtterances.first?.persistentSpeakerId else { continue }
+
+                    // Look up existing DB profile to check current name
+                    let existingProfile = speakerDB.getSpeaker(id: persistentId)
+
+                    if let existingName = existingProfile?.displayName {
+                        // Profile already has a name — apply confidence-gated logic
+                        let nameSource = existingProfile?.nameSource
+
+                        if nameSource == "user_manual" {
+                            // NEVER override user-set names
+                            AppLogger.speakers.info("Keeping user-set name", ["speakerId": "\(speaker.speakerId ?? "")", "existingName": existingName, "geminiSuggested": speaker.name])
+
+                        } else if SpeakerDatabase.areNameVariants(existingName, speaker.name) {
+                            // Names are variants (e.g., "Nate" / "Nathan") — not a conflict, reset disputes
+                            AppLogger.speakers.info("Name variant match", ["speakerId": "\(speaker.speakerId ?? "")", "existingName": existingName, "variantName": speaker.name])
+                            await MainActor.run {
+                                self.transcription.speakerDB.resetDisputeCount(id: persistentId)
+                            }
+
+                        } else if (existingProfile?.callCount ?? 0) > 5 && speaker.confidence != "high" {
+                            // Well-established name + non-high Gemini confidence → protect DB, log dispute
+                            AppLogger.speakers.info("Protecting established name", ["speakerId": "\(speaker.speakerId ?? "")", "existingName": existingName, "callCount": "\(existingProfile?.callCount ?? 0)", "geminiSuggested": speaker.name, "confidence": speaker.confidence])
+                            await MainActor.run {
+                                self.transcription.speakerDB.incrementDisputeCount(id: persistentId)
+                            }
+                            speakerSources[speaker.speakerId ?? ""] = "db"
+
+                        } else if (existingProfile?.callCount ?? 0) <= 2 {
+                            // Low call count — Gemini can freely override
+                            AppLogger.speakers.info("Overriding recent name", ["speakerId": "\(speaker.speakerId ?? "")", "oldName": existingName, "newName": speaker.name, "callCount": "\(existingProfile?.callCount ?? 0)"])
+                            await MainActor.run {
+                                self.transcription.speakerDB.setDisplayName(id: persistentId, name: speaker.name, source: "gemini_override")
+                            }
+
+                        } else if speaker.confidence == "high" {
+                            // High confidence from Gemini with moderate call count — override
+                            AppLogger.speakers.info("Gemini high-confidence override", ["speakerId": "\(speaker.speakerId ?? "")", "oldName": existingName, "newName": speaker.name])
+                            await MainActor.run {
+                                self.transcription.speakerDB.setDisplayName(id: persistentId, name: speaker.name, source: "gemini_override")
+                            }
+
+                        } else {
+                            // Medium confidence Gemini vs moderate DB — log dispute, keep DB
+                            AppLogger.speakers.info("Keeping DB name over Gemini suggestion", ["speakerId": "\(speaker.speakerId ?? "")", "existingName": existingName, "geminiSuggested": speaker.name, "confidence": "medium"])
+                            await MainActor.run {
+                                self.transcription.speakerDB.incrementDisputeCount(id: persistentId)
+                            }
+                            speakerSources[speaker.speakerId ?? ""] = "db"
+                        }
+                    } else {
+                        // Profile has no name — Gemini can set it freely
+                        AppLogger.speakers.info("Setting new name from Gemini", ["speakerId": "\(speaker.speakerId ?? "")", "name": speaker.name])
                         await MainActor.run {
-                            self.transcription.speakerDB.setDisplayName(id: persistentId, name: speaker.name)
+                            self.transcription.speakerDB.setDisplayName(id: persistentId, name: speaker.name, source: "gemini_inferred")
                         }
                     }
                 }
@@ -341,11 +478,31 @@ class TranscriptionTaskManager: ObservableObject {
                     self.cachedSpeakerResult = resultToCache
                 }
             } catch {
-                print("Speaker identification failed, using defaults: \(error.localizedDescription)")
+                AppLogger.speakers.error("Speaker identification failed, using defaults", ["error": "\(error.localizedDescription)"])
             }
         } else {
-            print("No Gemini API key, skipping speaker identification")
+            AppLogger.speakers.info("No Gemini API key, skipping speaker identification")
         }
+
+        // Fill gaps: use DB display names for any speaker IDs not yet in speakerMappings
+        for entry in dbKnowledge {
+            let key = "system_\(entry.speakerId)"
+            if speakerMappings[key] == nil, let name = entry.profile.displayName {
+                let confidence = entry.similarity > 0.85 && entry.profile.callCount > 3 ? "high" : "medium"
+                speakerMappings[key] = SpeakerMapping(
+                    speakerId: entry.speakerId,
+                    identifiedName: name,
+                    confidence: confidence
+                )
+                if speakerSources[entry.speakerId] == nil {
+                    speakerSources[entry.speakerId] = "db"
+                }
+                AppLogger.speakers.info("DB fallback for speaker", ["speakerId": entry.speakerId, "name": name, "confidence": confidence, "similarity": String(format: "%.0f", entry.similarity * 100)])
+            }
+        }
+
+        // Clean up duplicate speaker profiles that accumulated from noisy embeddings
+        speakerDB.mergeDuplicates()
 
         // Phase 2: Save transcript with speaker names
         await MainActor.run {
@@ -355,6 +512,7 @@ class TranscriptionTaskManager: ObservableObject {
         guard let savedURL = TranscriptSaver.saveTranscript(
             result,
             speakerMappings: speakerMappings,
+            speakerSources: speakerSources,
             directory: outputFolder,
             healthInfo: healthInfo
         ) else {
@@ -363,7 +521,7 @@ class TranscriptionTaskManager: ObservableObject {
             ])
         }
 
-        print("Phase 2 complete: Transcript saved to \(savedURL.lastPathComponent)")
+        AppLogger.pipeline.info("Phase 2 complete: Transcript saved", ["file": savedURL.lastPathComponent])
 
         // Cleanup audio files
         try? FileManager.default.removeItem(at: micURL)
@@ -376,20 +534,20 @@ class TranscriptionTaskManager: ObservableObject {
     /// Requires system audio for multichannel transcription
     func retryFailedTranscription(failedId: UUID) async -> Bool {
         guard let failed = failedTranscriptionManager.failedTranscriptions.first(where: { $0.id == failedId }) else {
-            print("❌ Failed transcription not found: \(failedId)")
+            AppLogger.pipeline.error("Failed transcription not found", ["failedId": "\(failedId)"])
             return false
         }
 
         // Verify audio files still exist
         guard failed.audioFilesExist() else {
-            print("❌ Audio files no longer exist for failed transcription: \(failedId)")
+            AppLogger.pipeline.error("Audio files no longer exist for failed transcription", ["failedId": "\(failedId)"])
             await MainActor.run {
                 failedTranscriptionManager.removeFailedTranscription(id: failedId)
             }
             return false
         }
 
-        print("🔄 Retrying failed transcription: \(failedId)")
+        AppLogger.pipeline.info("Retrying failed transcription", ["failedId": "\(failedId)"])
 
         // Increment retry count
         await MainActor.run {
@@ -412,7 +570,7 @@ class TranscriptionTaskManager: ObservableObject {
                 healthInfo: nil
             )
 
-            print("✅ Retry successful: \(transcriptURL.lastPathComponent)")
+            AppLogger.pipeline.info("Retry successful", ["file": transcriptURL.lastPathComponent])
 
             // Remove from failed queue (audio files already cleaned up by pipeline)
             await MainActor.run {
@@ -424,7 +582,7 @@ class TranscriptionTaskManager: ObservableObject {
             return true
 
         } catch {
-            print("❌ Retry failed: \(error.localizedDescription)")
+            AppLogger.pipeline.error("Retry failed", ["error": "\(error.localizedDescription)"])
             await MainActor.run {
                 self.displayStatus = .failed(message: "Retry failed")
                 self.scheduleStatusReset(delay: 15)
@@ -438,20 +596,20 @@ class TranscriptionTaskManager: ObservableObject {
     /// Retry a failed action item extraction by its ID
     func retryFailedActionItemExtraction(failedId: UUID) async -> Bool {
         guard let failed = await MainActor.run(body: { failedActionItemManager.failedExtractions.first(where: { $0.id == failedId }) }) else {
-            print("❌ Failed action item extraction not found: \(failedId)")
+            AppLogger.actionItems.error("Failed action item extraction not found", ["failedId": "\(failedId)"])
             return false
         }
 
         // Verify transcript file still exists
         guard failed.transcriptExists() else {
-            print("❌ Transcript file no longer exists for failed extraction: \(failedId)")
+            AppLogger.actionItems.error("Transcript file no longer exists for failed extraction", ["failedId": "\(failedId)"])
             await MainActor.run {
                 failedActionItemManager.removeFailedExtraction(id: failedId)
             }
             return false
         }
 
-        print("🔄 Retrying action item extraction: \(failed.transcriptFilename)")
+        AppLogger.actionItems.info("Retrying action item extraction", ["filename": failed.transcriptFilename])
 
         // Increment retry count (handles backoff timing)
         await MainActor.run {
@@ -471,7 +629,7 @@ class TranscriptionTaskManager: ObservableObject {
             let result = try await ActionItemExtractor.extract(from: content, apiKey: apiKey)
 
             if result.actionItems.isEmpty {
-                print("ℹ️ Retry successful but no action items found")
+                AppLogger.actionItems.info("Retry successful but no action items found")
                 await MainActor.run {
                     failedActionItemManager.removeFailedExtraction(id: failedId)
                 }
@@ -489,11 +647,11 @@ class TranscriptionTaskManager: ObservableObject {
                 failedActionItemManager.removeFailedExtraction(id: failedId)
             }
 
-            print("✅ Retry successful: \(result.actionItems.count) action items ready for review")
+            AppLogger.actionItems.info("Retry successful, action items ready for review", ["count": "\(result.actionItems.count)"])
             return true
 
         } catch {
-            print("❌ Action item extraction retry failed: \(error.localizedDescription)")
+            AppLogger.actionItems.error("Action item extraction retry failed", ["error": "\(error.localizedDescription)"])
             return false
         }
     }
@@ -513,7 +671,7 @@ class TranscriptionTaskManager: ObservableObject {
             }
         }
 
-        print("📋 Retry batch complete: \(succeeded) succeeded, \(failed) failed")
+        AppLogger.actionItems.info("Retry batch complete", ["succeeded": "\(succeeded)", "failed": "\(failed)"])
         return (succeeded, failed)
     }
 
@@ -522,7 +680,7 @@ class TranscriptionTaskManager: ObservableObject {
         activeTasks.removeValue(forKey: taskId)
         activeCount -= 1
 
-        print("✓ Task \(taskId) cleaned up (remaining: \(activeCount))")
+        AppLogger.pipeline.info("Task cleaned up", ["taskId": "\(taskId)", "remaining": "\(activeCount)"])
 
         // Show completion checkmark if this was the last task
         if activeCount == 0 {
@@ -539,7 +697,7 @@ class TranscriptionTaskManager: ObservableObject {
     func cancelAll() {
         for (taskId, task) in activeTasks {
             task.cancel()
-            print("🚫 Cancelled task \(taskId)")
+            AppLogger.pipeline.info("Cancelled task", ["taskId": "\(taskId)"])
         }
         activeTasks.removeAll()
         activeCount = 0
@@ -552,7 +710,7 @@ class TranscriptionTaskManager: ObservableObject {
     nonisolated private func extractAndSendActionItems(from transcriptURL: URL) async {
         let apiKey = UserDefaults.standard.string(forKey: "geminiAPIKey") ?? ""
         guard !apiKey.isEmpty else {
-            print("⚠️ Gemini API key not configured, skipping action item extraction")
+            AppLogger.actionItems.warning("Gemini API key not configured, skipping action item extraction")
             // Show "Transcript saved" status and reset after 10 seconds
             await MainActor.run {
                 self.displayStatus = .transcriptSaved
@@ -570,12 +728,12 @@ class TranscriptionTaskManager: ObservableObject {
                     self.deferredActionItems = selectedItems
                     self.pendingReview = nil
                 }
-                print("ℹ️ Deferred \(selectedItems.count) selected items to merge with next review")
+                AppLogger.actionItems.info("Deferred selected items to merge with next review", ["count": "\(selectedItems.count)"])
             } else {
                 await MainActor.run {
                     self.pendingReview = nil
                 }
-                print("ℹ️ Dismissed previous review (no items selected)")
+                AppLogger.actionItems.info("Dismissed previous review (no items selected)")
             }
         }
 
@@ -603,19 +761,16 @@ class TranscriptionTaskManager: ObservableObject {
 
             // Update transcript with Gemini-generated summary (if available)
             var currentURL = transcriptURL
-            print("📋 Gemini extraction result:")
-            print("   • Title: \(result.meetingTitle ?? "nil")")
-            if let summary = result.meetingSummary {
-                print("   • Summary: \(String(summary.prefix(100)))...")
-            } else {
-                print("   • Summary: nil")
-            }
-            print("   • Action items: \(result.actionItems.count)")
+            AppLogger.actionItems.info("Gemini extraction result", [
+                "title": result.meetingTitle ?? "nil",
+                "summaryLength": "\(result.meetingSummary?.count ?? 0)",
+                "actionItemCount": "\(result.actionItems.count)"
+            ])
 
             if let summary = result.meetingSummary, !summary.isEmpty {
                 TranscriptUtils.updateWithSummary(at: currentURL, summary: summary)
             } else {
-                print("⚠️ No summary returned from Gemini")
+                AppLogger.actionItems.warning("No summary returned from Gemini")
             }
 
             // Rename file with descriptive title (if available)
@@ -639,11 +794,11 @@ class TranscriptionTaskManager: ObservableObject {
                     )
                 }
                 await StatsService.shared.recordActionItems(records, for: currentURL.path)
-                print("📊 Recorded \(actionItemCount) action items to stats database")
+                AppLogger.stats.info("Recorded action items to stats database", ["count": "\(actionItemCount)"])
             }
 
             if result.actionItems.isEmpty {
-                print("ℹ️ No action items found in transcript")
+                AppLogger.actionItems.info("No action items found in transcript")
                 // Show transcript saved since no action items were found
                 await MainActor.run {
                     self.displayStatus = .transcriptSaved
@@ -662,7 +817,7 @@ class TranscriptionTaskManager: ObservableObject {
                 if deferredCount > 0 {
                     allItems = self.deferredActionItems + allItems
                     self.deferredActionItems = []  // Clear after merging
-                    print("📋 Merged \(deferredCount) deferred items into new review")
+                    AppLogger.actionItems.info("Merged deferred items into new review", ["deferredCount": "\(deferredCount)"])
                 }
 
                 // Create pending review with merged items
@@ -674,10 +829,10 @@ class TranscriptionTaskManager: ObservableObject {
                 self.displayStatus = .pendingReview(itemCount: allItems.count)
                 // Don't schedule reset - wait for user action
             }
-            print("📋 \(result.actionItems.count) action items ready for review")
+            AppLogger.actionItems.info("Action items ready for review", ["count": "\(result.actionItems.count)"])
 
         } catch {
-            print("❌ Action item extraction failed: \(error.localizedDescription)")
+            AppLogger.actionItems.error("Action item extraction failed", ["error": "\(error.localizedDescription)"])
 
             // PHASE 6: Track failure for retry
             await MainActor.run {
@@ -754,12 +909,12 @@ class TranscriptionTaskManager: ObservableObject {
             // Use Todoist
             let todoist = TodoistService()
             result = await todoist.createTasks(from: selectedItems)
-            print("✅ Todoist result: \(result.summary)")
+            AppLogger.actionItems.info("Todoist result", ["summary": result.summary])
         } else {
             // Use Apple Reminders (default)
             let reminders = RemindersService()
             guard await reminders.requestAccess() else {
-                print("⚠️ Reminders access denied")
+                AppLogger.actionItems.warning("Reminders access denied")
                 // Phase 2: Create a proper failure result for visibility
                 let failure = TaskCreationFailure(
                     taskTitle: "All tasks",
@@ -777,7 +932,7 @@ class TranscriptionTaskManager: ObservableObject {
                 return
             }
             result = await reminders.createReminders(from: selectedItems)
-            print("✅ Reminders result: \(result.summary)")
+            AppLogger.actionItems.info("Reminders result", ["summary": result.summary])
         }
 
         // Phase 2: Handle all result cases - success, partial, and failure
@@ -797,9 +952,9 @@ class TranscriptionTaskManager: ObservableObject {
                 self.showActionItemsAdded = true
                 self.displayStatus = .completed(taskCount: result.successCount)
                 // Log failures for debugging
-                print("⚠️ \(result.failureCount) tasks failed:")
+                AppLogger.actionItems.warning("Some tasks failed to create", ["failureCount": "\(result.failureCount)"])
                 for failure in result.failures {
-                    print("   - \(failure.taskTitle): \(failure.errorMessage)")
+                    AppLogger.actionItems.warning("Task creation failed", ["task": failure.taskTitle, "error": failure.errorMessage])
                 }
                 self.scheduleStatusReset()
             } else if result.allFailed {
@@ -822,7 +977,7 @@ class TranscriptionTaskManager: ObservableObject {
             self.displayStatus = .transcriptSaved
             self.scheduleStatusReset()
         }
-        print("ℹ️ Action item review skipped")
+        AppLogger.actionItems.info("Action item review skipped")
     }
 
     /// Schedule reset of displayStatus to .idle after delay
@@ -849,9 +1004,9 @@ class TranscriptionTaskManager: ObservableObject {
     func requestNotificationPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
             if granted {
-                print("✓ Notification permission granted")
+                AppLogger.app.info("Notification permission granted")
             } else if let error = error {
-                print("⚠️ Notification permission error: \(error.localizedDescription)")
+                AppLogger.app.warning("Notification permission error", ["error": "\(error.localizedDescription)"])
             }
         }
     }
@@ -876,9 +1031,9 @@ class TranscriptionTaskManager: ObservableObject {
 
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
-                print("⚠️ Failed to send notification: \(error.localizedDescription)")
+                AppLogger.app.warning("Failed to send notification", ["error": "\(error.localizedDescription)"])
             } else {
-                print("📢 Failure notification sent")
+                AppLogger.app.info("Failure notification sent")
             }
         }
     }

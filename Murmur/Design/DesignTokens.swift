@@ -349,22 +349,15 @@ struct CardStyle {
 // MARK: - Laws of UX Card View Modifier
 
 extension View {
-    /// Apply Laws of UX card styling with curved corners and subtle shadow
+    /// Apply minimal card styling — dark container with subtle border, no hover effects
     func lawsCard(isHovered: Bool = false) -> some View {
         self
-            .background(Color.surfaceCard)
+            .background(Color.panelCharcoalElevated)
             .clipShape(RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
-                    .stroke(CardStyle.borderColor, lineWidth: CardStyle.borderWidth)
+                    .stroke(Color.panelCharcoalSurface, lineWidth: 1)
             )
-            .shadow(
-                color: isHovered ? CardStyle.shadowHover.color : CardStyle.shadowCard.color,
-                radius: isHovered ? CardStyle.shadowHover.radius : CardStyle.shadowCard.radius,
-                x: isHovered ? CardStyle.shadowHover.x : CardStyle.shadowCard.x,
-                y: isHovered ? CardStyle.shadowHover.y : CardStyle.shadowCard.y
-            )
-            .scaleEffect(isHovered ? CardStyle.hoverScale : 1.0)
     }
 }
 
@@ -1064,10 +1057,9 @@ struct PremiumCardStyle {
 
 // MARK: - Premium Card View Modifier
 
-/// Transforms flat cards into premium glass slabs with depth and glow effects
+/// Minimal card modifier — flat dark container with subtle border
 @available(macOS 14.0, *)
 struct PremiumCardModifier: ViewModifier {
-    @Environment(\.accessibilityReduceMotion) var reduceMotion
     let isHovered: Bool
     let glowColor: Color
     let cornerRadius: CGFloat
@@ -1084,66 +1076,14 @@ struct PremiumCardModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            // Base gradient fill
             .background {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                PremiumCardStyle.gradientTop,
-                                PremiumCardStyle.gradientBottom
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
+                    .fill(Color.panelCharcoalElevated)
             }
-            // Inner highlight (top edge light reflection)
-            .overlay(alignment: .top) {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(PremiumCardStyle.highlightOpacity),
-                                Color.clear
-                            ],
-                            startPoint: .top,
-                            endPoint: .center
-                        )
-                    )
-                    .frame(height: 40)
-                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            }
-            // Subtle gradient border
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(PremiumCardStyle.borderOpacityTop),
-                                Color.white.opacity(PremiumCardStyle.borderOpacityBottom)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 1
-                    )
+                    .stroke(Color.panelCharcoalSurface, lineWidth: 1)
             }
-            // Glow effect on hover
-            .shadow(
-                color: isHovered ? glowColor.opacity(PremiumCardStyle.hoverGlowOpacity) : Color.clear,
-                radius: PremiumCardStyle.hoverGlowRadius,
-                y: 0
-            )
-            // Standard shadow
-            .shadow(
-                color: isHovered ? PremiumCardStyle.shadowHover.color : PremiumCardStyle.shadowRest.color,
-                radius: isHovered ? PremiumCardStyle.shadowHover.radius : PremiumCardStyle.shadowRest.radius,
-                y: isHovered ? PremiumCardStyle.shadowHover.y : PremiumCardStyle.shadowRest.y
-            )
-            // Subtle scale on hover
-            .scaleEffect(isHovered ? 1.01 : 1.0)
-            .animation(reduceMotion ? .none : .lawsCardHover, value: isHovered)
     }
 }
 

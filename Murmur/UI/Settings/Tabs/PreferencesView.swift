@@ -1,8 +1,8 @@
 import SwiftUI
 import AppKit
 
-/// Redesigned preferences view with organized sections
-/// Sections: Storage, Profile, Appearance, Recording, Task Integration, AI Services
+/// Minimal preferences view — SuperWhisper-inspired clean sections
+/// Sections: Profile, Appearance, Task Service, AI Services
 @available(macOS 14.0, *)
 struct PreferencesView: View {
 
@@ -16,14 +16,12 @@ struct PreferencesView: View {
     @AppStorage("geminiAPIKey") private var geminiAPIKey: String = ""
     @AppStorage("remindersListId") private var remindersListId: String = ""
 
-    // Sound is stored differently (inverted logic)
     @State private var enableSounds: Bool = true
 
     // MARK: - Verification States
 
     @State private var isVerifyingTodoist = false
     @State private var isVerifyingGemini = false
-
     @State private var todoistVerified: Bool?
     @State private var geminiVerified: Bool?
 
@@ -33,82 +31,51 @@ struct PreferencesView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                // Header
-                headerSection
-
-                // Storage Section
-                storageSection
-
-                // Profile Section
+            VStack(alignment: .leading, spacing: Spacing.xl) {
+                // Profile (includes save location)
                 profileSection
 
-                // Appearance Section
+                // Appearance
                 appearanceSection
 
-                // Task Integration Section
+                // Task Service
                 taskIntegrationSection
 
-                // AI Services Section
+                // AI Services
                 aiServicesSection
             }
             .padding(Spacing.lg)
         }
         .background(Color.panelCharcoal)
         .onAppear {
-            // Load sound preference (stored with inverted logic)
             enableSounds = UserDefaults.standard.bool(forKey: "enableUISounds") != false
         }
     }
 
-    // MARK: - Header
-
-    private var headerSection: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text("Preferences")
-                .font(.headingLarge)
-                .foregroundColor(.panelTextPrimary)
-
-            Text("Configure how Transcripted works for you")
-                .font(.bodySmall)
-                .foregroundColor(.panelTextSecondary)
-        }
-    }
-
-    // MARK: - Storage Section
-
-    private var storageSection: some View {
-        SettingsSectionCard(
-            icon: "folder.fill",
-            title: "Storage",
-            subtitle: "Where your transcripts are saved"
-        ) {
-            SettingsPathRow(
-                title: "Save Location",
-                path: saveLocation,
-                defaultPath: "~/Documents/Transcripted/",
-                onChoose: chooseSaveFolder
-            )
-        }
-    }
-
-    // MARK: - Profile Section
+    // MARK: - Profile Section (merged with Storage)
 
     private var profileSection: some View {
         SettingsSectionCard(
             icon: "person.fill",
             title: "Profile"
         ) {
-            SettingsTextField(
-                title: "Your Name",
-                placeholder: "Enter your name",
-                text: $userName
-            )
+            VStack(spacing: Spacing.md) {
+                SettingsTextField(
+                    title: "Your Name",
+                    placeholder: "Enter your name",
+                    text: $userName
+                )
 
-            Text("Used for speaker identification and action item attribution")
-                .font(.caption)
-                .foregroundColor(.panelTextMuted)
-                .padding(.top, Spacing.xs)
+                Divider()
+                    .background(Color.panelCharcoalSurface)
+
+                SettingsPathRow(
+                    title: "Save Location",
+                    path: saveLocation,
+                    defaultPath: "~/Documents/Transcripted/",
+                    onChoose: chooseSaveFolder
+                )
+            }
         }
     }
 
@@ -149,8 +116,7 @@ struct PreferencesView: View {
     private var taskIntegrationSection: some View {
         SettingsSectionCard(
             icon: "checkmark.circle.fill",
-            title: "Task Integration",
-            subtitle: "Where action items are sent"
+            title: "Task Service"
         ) {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 // Task service picker
@@ -181,11 +147,10 @@ struct PreferencesView: View {
                         verificationStatus(verified: verified, isVerifying: isVerifyingTodoist)
                     }
 
-                    Link("Get your API key from Todoist →", destination: URL(string: "https://todoist.com/app/settings/integrations")!)
+                    Link("Get your API key from Todoist", destination: URL(string: "https://todoist.com/app/settings/integrations")!)
                         .font(.caption)
                         .foregroundColor(.accentBlueLight)
                 }
-
             }
         }
     }
@@ -234,7 +199,6 @@ struct PreferencesView: View {
                 .tint(.panelTextPrimary)
             }
 
-            // Status text
             HStack(spacing: Spacing.xs) {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundColor(.attentionGreen)
@@ -334,7 +298,6 @@ struct PreferencesView: View {
                             }
                         }
 
-                        // Todoist icon (placeholder)
                         Image(systemName: "checklist")
                             .foregroundColor(.panelTextSecondary)
 
@@ -344,7 +307,6 @@ struct PreferencesView: View {
                     }
                 }
                 .buttonStyle(.plain)
-
             }
         }
     }
@@ -354,8 +316,7 @@ struct PreferencesView: View {
     private var aiServicesSection: some View {
         SettingsSectionCard(
             icon: "sparkles",
-            title: "AI Services",
-            subtitle: "Local transcription models and AI features"
+            title: "AI Services"
         ) {
             VStack(spacing: Spacing.lg) {
                 // Local Transcription Models
@@ -367,36 +328,24 @@ struct PreferencesView: View {
                     HStack(spacing: Spacing.sm) {
                         Image(systemName: "cpu.fill")
                             .foregroundColor(.attentionGreen)
-                        Text("Parakeet TDT V3 (Local)")
+                        Text("Parakeet TDT V3")
                             .font(.bodySmall)
                             .foregroundColor(.panelTextPrimary)
                         Spacer()
-                        Text("On-device")
-                            .font(.caption)
-                            .foregroundColor(.panelTextMuted)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(Color.panelCharcoalSurface)
-                            .cornerRadius(4)
+                        localBadge
                     }
 
                     HStack(spacing: Spacing.sm) {
                         Image(systemName: "person.2.fill")
                             .foregroundColor(.attentionGreen)
-                        Text("Sortformer Speaker Diarization (Local)")
+                        Text("Sortformer Diarization")
                             .font(.bodySmall)
                             .foregroundColor(.panelTextPrimary)
                         Spacer()
-                        Text("On-device")
-                            .font(.caption)
-                            .foregroundColor(.panelTextMuted)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(Color.panelCharcoalSurface)
-                            .cornerRadius(4)
+                        localBadge
                     }
 
-                    Text("Transcription runs 100% locally on your Mac. No cloud API, no internet required, no cost.")
+                    Text("100% local transcription. No cloud API, no internet, no cost.")
                         .font(.caption)
                         .foregroundColor(.panelTextMuted)
                         .padding(.top, Spacing.xs)
@@ -405,7 +354,7 @@ struct PreferencesView: View {
                 Divider()
                     .background(Color.panelCharcoalSurface)
 
-                // Gemini (still cloud-based for action items)
+                // Gemini (cloud-based for action items)
                 VStack(alignment: .leading, spacing: Spacing.sm) {
                     SettingsTextField(
                         title: "Gemini API Key",
@@ -423,12 +372,22 @@ struct PreferencesView: View {
                         .font(.caption)
                         .foregroundColor(.panelTextMuted)
 
-                    Link("Get your API key from Google AI Studio →", destination: URL(string: "https://aistudio.google.com/app/apikey")!)
+                    Link("Get your API key from Google AI Studio", destination: URL(string: "https://aistudio.google.com/app/apikey")!)
                         .font(.caption)
                         .foregroundColor(.accentBlueLight)
                 }
             }
         }
+    }
+
+    private var localBadge: some View {
+        Text("Local")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundColor(.panelTextMuted)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(Color.panelCharcoalSurface)
+            .cornerRadius(4)
     }
 
     // MARK: - Verification Status
@@ -498,7 +457,6 @@ struct PreferencesView: View {
             try? await Task.sleep(nanoseconds: 500_000_000)
 
             await MainActor.run {
-                // Basic format check
                 geminiVerified = geminiAPIKey.hasPrefix("AI") && geminiAPIKey.count > 30
                 isVerifyingGemini = false
             }

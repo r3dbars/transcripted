@@ -111,26 +111,26 @@ class SystemAudioCapture: ObservableObject {
     /// This separation prevents disk I/O from blocking the audio callback thread
     func prepare() throws {
         guard !isPrepared else {
-            print("⚠️ SystemAudioCapture: Already prepared")
+            AppLogger.audioSystem.warning("Already prepared")
             return
         }
 
-        print("🔊 Setting up system audio tap...")
+        AppLogger.audioSystem.info("Setting up system audio tap")
         try setupSystemAudioTap()
         isPrepared = true
 
         // Start proactive device change listener (critical for bulletproof device switching)
         startDeviceChangeListener()
 
-        print("🔊 System audio tap created successfully, format: \(audioFormat?.sampleRate ?? 0)Hz, \(audioFormat?.channelCount ?? 0)ch")
+        AppLogger.audioSystem.info("System audio tap created", ["sampleRate": "\(audioFormat?.sampleRate ?? 0)", "channels": "\(audioFormat?.channelCount ?? 0)"])
     }
 
     /// Starts capturing system audio and calls the callback with each buffer
     /// If prepare() wasn't called, this will call it automatically
     func start(bufferCallback: @escaping (AVAudioPCMBuffer) -> Void) throws {
-        print("🔊 SystemAudioCapture.start() called")
+        AppLogger.audioSystem.info("Start called")
         guard !isCapturing else {
-            print("⚠️ SystemAudioCapture: Already capturing, ignoring")
+            AppLogger.audioSystem.warning("Already capturing, ignoring")
             return
         }
 
@@ -140,22 +140,22 @@ class SystemAudioCapture: ObservableObject {
         do {
             // Setup tap if not already prepared
             if !isPrepared {
-                print("🔊 Preparing tap in start()...")
+                AppLogger.audioSystem.info("Preparing tap in start()")
                 try prepare()
             }
 
-            print("🔊 Starting audio device...")
+            AppLogger.audioSystem.info("Starting audio device")
             try startAudioDevice()
-            print("🔊 Audio device started successfully")
+            AppLogger.audioSystem.info("Audio device started")
 
             DispatchQueue.main.async {
                 self.isCapturing = true
                 self.startWatchdog()
             }
-            print("🔊 SystemAudioCapture: Now capturing!")
+            AppLogger.audioSystem.info("Now capturing")
         } catch {
             let errMsg = "Failed to start system audio capture: \(error.localizedDescription)"
-            print("❌ SystemAudioCapture ERROR: \(errMsg)")
+            AppLogger.audioSystem.error("Start failed", ["error": errMsg])
             errorMessage = errMsg
             throw error
         }
@@ -251,18 +251,18 @@ class SystemAudioCapture: ObservableObject {
         // Create I/O proc to receive audio buffers
         var err = AudioDeviceCreateIOProcIDWithBlock(&deviceProcID, aggregateDeviceID, queue) { [weak self] inNow, inInputData, inInputTime, outOutputData, inOutputTime in
             guard let self = self, let bufferCallback = self.bufferCallback else {
-                print("⚠️ I/O Proc: self or bufferCallback is nil")
+                AppLogger.audioSystem.warning("I/O Proc: self or bufferCallback is nil")
                 return
             }
 
             callbackCount += 1
             if callbackCount <= 3 {
-                print("🔊 I/O Proc callback #\(callbackCount)")
+                AppLogger.audioSystem.debug("I/O Proc callback", ["count": "\(callbackCount)"])
             }
 
             do {
                 guard let buffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: inInputData, deallocator: nil) else {
-                    print("❌ I/O Proc: Failed to create PCM buffer")
+                    AppLogger.audioSystem.error("I/O Proc: Failed to create PCM buffer")
                     throw "Failed to create PCM buffer"
                 }
 
@@ -276,7 +276,7 @@ class SystemAudioCapture: ObservableObject {
                 if frameLength == 0 {
                     // Log throttled: first 10, then every 100th
                     if callbackCount <= 10 || callbackCount % 100 == 0 {
-                        print("⚠️ System audio: Zero-frame buffer #\(callbackCount)")
+                        AppLogger.audioSystem.warning("Zero-frame buffer", ["callbackCount": "\(callbackCount)"])
                     }
                     self.incrementDropped()
                     // Do NOT update lastBufferTime - let watchdog detect silence
@@ -284,7 +284,7 @@ class SystemAudioCapture: ObservableObject {
                 }
 
                 if callbackCount <= 3 {
-                    print("🔊 Buffer created: \(frameLength) frames")
+                    AppLogger.audioSystem.debug("Buffer created", ["frames": "\(frameLength)"])
                 }
 
                 // Only update watchdog timestamp for buffers with actual data
@@ -294,7 +294,7 @@ class SystemAudioCapture: ObservableObject {
                 // Send buffer to callback
                 bufferCallback(buffer)
             } catch {
-                print("❌ I/O Proc error: \(error)")
+                AppLogger.audioSystem.error("I/O Proc error", ["error": "\(error)"])
             }
         }
 
@@ -310,7 +310,7 @@ class SystemAudioCapture: ObservableObject {
     }
 
     private func cleanup() {
-        print("🧹 Cleaning up system audio capture...")
+        AppLogger.audioSystem.info("Cleaning up system audio capture")
 
         // Log buffer statistics before cleanup
         logStats()
@@ -343,7 +343,7 @@ class SystemAudioCapture: ObservableObject {
         if aggregateDeviceID.isValid {
             let result = AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
             if result == noErr {
-                print("✓ Aggregate device destroyed")
+                AppLogger.audioSystem.info("Aggregate device destroyed")
             }
             // Don't log warnings for cleanup failures - they're expected race conditions
             aggregateDeviceID = .unknown
@@ -353,7 +353,7 @@ class SystemAudioCapture: ObservableObject {
         if processTapID.isValid {
             let result = AudioHardwareDestroyProcessTap(processTapID)
             if result == noErr {
-                print("✓ Process tap destroyed")
+                AppLogger.audioSystem.info("Process tap destroyed")
             }
             // Don't log warnings for cleanup failures - they're expected race conditions
             processTapID = .unknown
@@ -362,7 +362,7 @@ class SystemAudioCapture: ObservableObject {
         bufferCallback = nil
         isPrepared = false
         resetStats()
-        print("✓ System audio cleanup complete")
+        AppLogger.audioSystem.info("System audio cleanup complete")
     }
 
     private func startWatchdog() {
@@ -375,7 +375,7 @@ class SystemAudioCapture: ObservableObject {
 
             if timeSinceLastBuffer > 3.0 {
                 // System audio stopped → output device likely changed
-                print("⚠️ System audio output device disconnected or changed, attempting recovery...")
+                AppLogger.audioSystem.warning("Output device disconnected or changed, attempting recovery")
                 self.recoverFromOutputChange()
             }
         }
@@ -412,9 +412,9 @@ class SystemAudioCapture: ObservableObject {
         )
 
         if status != noErr {
-            print("⚠️ Failed to add device change listener: \(status)")
+            AppLogger.audioSystem.warning("Failed to add device change listener", ["status": "\(status)"])
         } else {
-            print("✓ Device change listener registered (proactive device switching enabled)")
+            AppLogger.audioSystem.info("Device change listener registered")
         }
     }
 
@@ -429,7 +429,7 @@ class SystemAudioCapture: ObservableObject {
         }
         lastDeviceChangeTime = now
 
-        print("🔄 Output device changed - proactively reconfiguring tap...")
+        AppLogger.audioSystem.info("Output device changed, proactively reconfiguring tap")
 
         // Trigger recovery immediately (don't wait for watchdog to detect silence)
         // This minimizes audio gap from ~3s (watchdog) to ~200ms (proactive)
@@ -454,7 +454,7 @@ class SystemAudioCapture: ObservableObject {
         )
 
         if status == noErr {
-            print("✓ Device change listener removed")
+            AppLogger.audioSystem.info("Device change listener removed")
         }
         deviceChangeListenerBlock = nil
     }
@@ -494,11 +494,11 @@ class SystemAudioCapture: ObservableObject {
         guard total > 0 else { return }
 
         let successRate = Double(withData) / Double(total) * 100
-        print("📊 System audio stats: \(total) buffers, \(withData) with data (\(String(format: "%.1f", successRate))%), \(dropped) dropped")
+        AppLogger.audioSystem.info("Buffer stats", ["total": "\(total)", "withData": "\(withData)", "successRate": String(format: "%.1f%%", successRate), "dropped": "\(dropped)"])
 
         // Warn if significant buffer loss detected
         if withData < total / 2 {
-            print("⚠️ WARNING: More than 50% of system audio buffers were empty - device issues likely occurred")
+            AppLogger.audioSystem.warning("More than 50% of system audio buffers were empty - device issues likely occurred")
         }
     }
 
@@ -516,17 +516,17 @@ class SystemAudioCapture: ObservableObject {
         // Multiple device changes can fire rapidly, and Thread.sleep blocks
         // Without this guard, concurrent recoveries cause deadlock (spinning beach ball)
         guard !isRecovering else {
-            print("⚠️ Recovery already in progress, skipping duplicate request")
+            AppLogger.audioSystem.warning("Recovery already in progress, skipping duplicate request")
             return
         }
         isRecovering = true
         defer { isRecovering = false }
 
-        print("🔄 Recovering from system audio output change...")
+        AppLogger.audioSystem.info("Recovering from system audio output change")
 
         // Store current callback - we'll need it after cleanup
         guard let callback = self.bufferCallback else {
-            print("❌ No buffer callback available for recovery")
+            AppLogger.audioSystem.error("No buffer callback available for recovery")
             return
         }
 
@@ -551,7 +551,7 @@ class SystemAudioCapture: ObservableObject {
             self.bufferCallback = callback
             lastBufferTime = Date()
 
-            print("✅ System audio device recovery complete (gap: ~250ms)")
+            AppLogger.audioSystem.info("Device recovery complete", ["estimatedGap": "~250ms"])
 
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
@@ -566,7 +566,7 @@ class SystemAudioCapture: ObservableObject {
                 }
             }
         } catch {
-            print("❌ Failed to recover from output change: \(error.localizedDescription)")
+            AppLogger.audioSystem.error("Failed to recover from output change", ["error": error.localizedDescription])
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 self.errorMessage = "System audio unavailable"

@@ -18,6 +18,7 @@
 		A1001125 /* SettingsSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001124 /* SettingsSidebarView.swift */; };
 		A1001131 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001130 /* DashboardView.swift */; };
 		A1001135 /* PreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001134 /* PreferencesView.swift */; };
+		A1001137 /* SpeakersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001136 /* SpeakersView.swift */; };
 		A1001145 /* RecentTranscriptsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001144 /* RecentTranscriptsView.swift */; };
 		A1001147 /* SettingsSectionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001146 /* SettingsSectionCard.swift */; };
 		A1000001 /* TranscriptedApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002 /* TranscriptedApp.swift */; };
@@ -75,6 +76,8 @@
 		FA000014 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000004 /* Accelerate.framework */; };
 		FA000015 /* CoreML.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000005 /* CoreML.framework */; };
 		FA000016 /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000006 /* CoreAudio.framework */; };
+		A1003001 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1003002 /* AppLogger.swift */; };
+		A1003003 /* FileLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1003004 /* FileLogger.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -88,6 +91,7 @@
 		A1001124 /* SettingsSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSidebarView.swift; sourceTree = "<group>"; };
 		A1001130 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		A1001134 /* PreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesView.swift; sourceTree = "<group>"; };
+		A1001136 /* SpeakersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakersView.swift; sourceTree = "<group>"; };
 		A1001144 /* RecentTranscriptsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentTranscriptsView.swift; sourceTree = "<group>"; };
 		A1001146 /* SettingsSectionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSectionCard.swift; sourceTree = "<group>"; };
 		A1000002 /* TranscriptedApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptedApp.swift; sourceTree = "<group>"; };
@@ -149,6 +153,8 @@
 		FA000004 /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
 		FA000005 /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
 		FA000006 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
+		A1003002 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
+		A1003004 /* FileLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileLogger.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -214,9 +220,19 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		A1003010 /* Logging */ = {
+			isa = PBXGroup;
+			children = (
+				A1003002 /* AppLogger.swift */,
+				A1003004 /* FileLogger.swift */,
+			);
+			path = Logging;
+			sourceTree = "<group>";
+		};
 		A1000024 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				A1003010 /* Logging */,
 				A1000004 /* Transcription.swift */,
 				A1000051 /* TranscriptionTaskManager.swift */,
 				A1000006 /* Audio.swift */,
@@ -277,6 +293,7 @@
 			isa = PBXGroup;
 			children = (
 				A1001130 /* DashboardView.swift */,
+				A1001136 /* SpeakersView.swift */,
 				A1001134 /* PreferencesView.swift */,
 			);
 			path = Tabs;
@@ -512,6 +529,7 @@
 				A1001125 /* SettingsSidebarView.swift in Sources */,
 				A1001131 /* DashboardView.swift in Sources */,
 				A1001135 /* PreferencesView.swift in Sources */,
+				A1001137 /* SpeakersView.swift in Sources */,
 				A1001145 /* RecentTranscriptsView.swift in Sources */,
 				A1001147 /* SettingsSectionCard.swift in Sources */,
 				A1002011 /* AudioResampler.swift in Sources */,
@@ -519,6 +537,8 @@
 				A1002013 /* SortformerService.swift in Sources */,
 				A1002014 /* SpeakerDatabase.swift in Sources */,
 				A1002015 /* TranscriptionTypes.swift in Sources */,
+				A1003001 /* AppLogger.swift in Sources */,
+				A1003003 /* FileLogger.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

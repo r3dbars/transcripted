@@ -20,7 +20,7 @@ class RemindersService {
         do {
             return try await store.requestFullAccessToReminders()
         } catch {
-            print("⚠️ Reminders access error: \(error.localizedDescription)")
+            AppLogger.services.warning("Reminders access error", ["error": error.localizedDescription])
             return false
         }
     }
@@ -104,7 +104,7 @@ class RemindersService {
                 )
 
                 successCount += 1
-                print("✓ Created reminder: \(title)")
+                AppLogger.services.info("Created reminder", ["title": title])
 
             } catch {
                 let failure = TaskCreationFailure(
@@ -114,7 +114,7 @@ class RemindersService {
                     recoveryHint: "Check Reminders permissions in System Settings"
                 )
                 failures.append(failure)
-                print("⚠️ Failed to create reminder for '\(item.task)': \(error.localizedDescription)")
+                AppLogger.services.warning("Failed to create reminder", ["task": item.task, "error": error.localizedDescription])
             }
         }
 

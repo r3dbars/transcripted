@@ -15,8 +15,8 @@ final class SettingsWindowController: NSWindowController {
 
     // MARK: - Window Dimensions
 
-    private static let windowWidth: CGFloat = 800
-    private static let windowHeight: CGFloat = 600
+    private static let windowWidth: CGFloat = 580
+    private static let windowHeight: CGFloat = 700
 
     // MARK: - Initialization
 
@@ -66,8 +66,8 @@ final class SettingsWindowController: NSWindowController {
         window.center()
 
         // Allow resize within bounds
-        window.minSize = NSSize(width: 700, height: 500)
-        window.maxSize = NSSize(width: 1200, height: 900)
+        window.minSize = NSSize(width: 500, height: 400)
+        window.maxSize = NSSize(width: 800, height: 900)
 
         // Window level and behavior
         window.level = .normal

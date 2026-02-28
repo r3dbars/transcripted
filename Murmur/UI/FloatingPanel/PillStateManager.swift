@@ -118,14 +118,14 @@ class PillStateManager: ObservableObject {
         if isTransitioning,
            let startTime = transitionStartTime,
            Date().timeIntervalSince(startTime) > transitionTimeout {
-            print("[PillState] ⚠️ Force-resetting stuck transition (was \(state) for \(String(format: "%.1f", Date().timeIntervalSince(startTime)))s)")
+            AppLogger.ui.warning("Force-resetting stuck transition", ["was": "\(state)", "stuckFor": String(format: "%.1f", Date().timeIntervalSince(startTime))])
             isTransitioning = false
             transitionStartTime = nil
         }
 
         // Don't transition if locked (e.g., during review) - UNLESS transitioning to idle (emergency escape)
         guard !isLocked || newState == .idle else {
-            print("[PillState] Blocked transition to \(newState) - pill is locked")
+            AppLogger.ui.debug("Blocked transition — pill is locked", ["target": "\(newState)"])
             return
         }
 
@@ -134,7 +134,7 @@ class PillStateManager: ObservableObject {
 
         // Don't allow transitions during cooldown (unless unlocking from review)
         guard !isTransitioning || (isLocked && newState == .idle) else {
-            print("[PillState] Blocked transition to \(newState) - cooldown active")
+            AppLogger.ui.debug("Blocked transition — cooldown active", ["target": "\(newState)"])
             return
         }
 
@@ -142,7 +142,7 @@ class PillStateManager: ObservableObject {
         isTransitioning = true
         transitionStartTime = Date()
         state = newState
-        print("[PillState] Transition: \(previousState) → \(newState)")
+        AppLogger.ui.info("Pill transition", ["from": "\(previousState)", "to": "\(newState)"])
 
         // Play state-appropriate sound feedback
         playTransitionSound(from: previousState, to: newState)
@@ -172,7 +172,7 @@ class PillStateManager: ObservableObject {
     /// Force unlock and reset all state flags - use only for emergency recovery
     /// This bypasses all guards and forces the pill back to idle state
     func forceUnlock() {
-        print("[PillState] ⚠️ Force unlock triggered - resetting all state")
+        AppLogger.ui.warning("Force unlock triggered — resetting all state")
         isLocked = false
         isTransitioning = false
         transitionStartTime = nil

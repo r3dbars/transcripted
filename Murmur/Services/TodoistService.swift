@@ -52,7 +52,7 @@ class TodoistService {
 
         guard (200...299).contains(httpResponse.statusCode) else {
             let errorBody = String(data: data, encoding: .utf8) ?? "No error body"
-            print("⚠️ Todoist API error \(httpResponse.statusCode): \(errorBody)")
+            AppLogger.services.warning("Todoist API error", ["statusCode": "\(httpResponse.statusCode)", "body": errorBody])
             throw TodoistError.requestFailed(statusCode: httpResponse.statusCode, message: errorBody)
         }
     }
@@ -79,7 +79,7 @@ class TodoistService {
                     priority: priority
                 )
                 successCount += 1
-                print("✓ Created Todoist task: \(title)")
+                AppLogger.services.info("Created Todoist task", ["title": title])
             } catch {
                 let failure = TaskCreationFailure(
                     taskTitle: item.task,
@@ -88,7 +88,7 @@ class TodoistService {
                     recoveryHint: recoveryHintFor(error)
                 )
                 failures.append(failure)
-                print("❌ Failed to create Todoist task '\(title)': \(error)")
+                AppLogger.services.error("Failed to create Todoist task", ["title": title, "error": "\(error)"])
             }
 
             // Small delay between requests to avoid rate limiting (100ms)
@@ -231,7 +231,7 @@ class TodoistService {
         }
 
         // If we can't parse it, skip the due date rather than fail
-        print("⚠️ Skipping unparseable due date: '\(input)'")
+        AppLogger.services.warning("Skipping unparseable due date", ["input": input])
         return nil
     }
 
