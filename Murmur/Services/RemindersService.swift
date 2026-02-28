@@ -84,8 +84,7 @@ class RemindersService {
 
         for item in items {
             do {
-                // Map priority string to EventKit priority
-                let priority = mapPriority(item.priority)
+                let priority = item.eventKitPriority
 
                 // Parse due date if provided
                 let dueDate = DateParser.parseNaturalDate(item.dueDate)
@@ -125,18 +124,4 @@ class RemindersService {
         )
     }
 
-    /// Map priority string to EventKit priority value
-    /// - Note: EventKit uses 1 (highest) to 9 (lowest), 0 = none
-    private func mapPriority(_ priority: String) -> Int {
-        switch priority.lowercased() {
-        case "high":
-            return 1
-        case "medium":
-            return 5
-        case "low":
-            return 9
-        default:
-            return 0  // No priority
-        }
-    }
 }

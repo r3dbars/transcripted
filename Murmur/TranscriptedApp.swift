@@ -86,32 +86,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Initialize managers
         failedTranscriptionManager = FailedTranscriptionManager()
-        taskManager = TranscriptionTaskManager(failedTranscriptionManager: failedTranscriptionManager!)
         audio = Audio()
+
+        guard let ftm = failedTranscriptionManager else {
+            AppLogger.app.error("Failed to create FailedTranscriptionManager — aborting setup")
+            return
+        }
+        taskManager = TranscriptionTaskManager(failedTranscriptionManager: ftm)
+
+        guard let tm = taskManager, let aud = audio else {
+            AppLogger.app.error("Failed to create TaskManager or Audio — aborting setup")
+            return
+        }
 
         // Initialize local transcription models (Parakeet + Sortformer) in background
         AppLogger.app.info("Creating model init task")
         Task { @MainActor in
             AppLogger.app.info("Starting model initialization")
-            if let tm = taskManager {
-                AppLogger.app.debug("TaskManager exists, calling initializeModels()")
-                await tm.transcription.initializeModels()
-                AppLogger.app.info("Model initialization complete")
-            } else {
-                AppLogger.app.error("TaskManager is nil during model init")
-            }
+            await tm.transcription.initializeModels()
+            AppLogger.app.info("Model initialization complete")
         }
 
         // Wire up recording completion callback
-        audio?.onRecordingComplete = { [weak self] micURL, systemURL in
+        aud.onRecordingComplete = { [weak self] micURL, systemURL in
             self?.handleRecordingComplete(micURL: micURL, systemURL: systemURL)
         }
 
         // Create floating panel
         floatingPanel = FloatingPanelController(
-            taskManager: taskManager!,
-            audio: audio!,
-            failedTranscriptionManager: failedTranscriptionManager!
+            taskManager: tm,
+            audio: aud,
+            failedTranscriptionManager: ftm
         )
         floatingPanel?.showWindow(nil)
     }
@@ -134,10 +139,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func openFailedTranscriptions() {
+        guard let ftm = failedTranscriptionManager, let tm = taskManager else {
+            AppLogger.app.error("Cannot open failed transcriptions — managers not initialized")
+            return
+        }
+
         if failedTranscriptionsWindow == nil {
             let view = FailedTranscriptionsView(
-                failedManager: failedTranscriptionManager!,
-                taskManager: taskManager!
+                failedManager: ftm,
+                taskManager: tm
             )
             let controller = NSHostingController(rootView: view)
 
