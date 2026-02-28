@@ -9,6 +9,7 @@ struct AuroraIdleView: View {
     let onRecord: () -> Void
     let onFiles: () -> Void
     let failedCount: Int
+    var backgroundTaskCount: Int = 0
 
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @State private var isExpanded = false
@@ -35,6 +36,11 @@ struct AuroraIdleView: View {
             // Idle background - subtle dark capsule
             idleBackground
                 .clipShape(Capsule())
+
+            // Background processing badge (top-left when collapsed)
+            if backgroundTaskCount > 0 && !isExpanded {
+                processingBadge
+            }
 
             // Failed badge (top-right when collapsed)
             if failedCount > 0 && !isExpanded {
@@ -86,6 +92,13 @@ struct AuroraIdleView: View {
                     .foregroundColor(.white)
             )
             .offset(x: 28, y: -14)
+    }
+
+    // MARK: - Processing Badge
+
+    private var processingBadge: some View {
+        ProcessingPulseDot()
+            .offset(x: -20, y: -14)
     }
 
     // MARK: - Branding View
@@ -146,8 +159,14 @@ struct AuroraIdleView: View {
 
             Spacer()
 
-            // Center: App branding (logo + name)
-            brandingView
+            // Center: App branding (logo + name) with optional processing indicator
+            ZStack {
+                brandingView
+                if backgroundTaskCount > 0 {
+                    ProcessingPulseDot()
+                        .offset(x: 16, y: -12)
+                }
+            }
 
             Spacer()
 
@@ -215,6 +234,27 @@ struct IdlePanelWaveformView: View {
         }
         let variation = sin(Double(index) * 0.5 + Double(phase) * .pi) * 2
         return baseHeights[index] + CGFloat(variation)
+    }
+}
+
+// MARK: - Processing Pulse Dot
+
+/// Subtle pulsing dot indicating background transcription is in progress
+/// Communicates "work is happening" without blocking the user from recording
+struct ProcessingPulseDot: View {
+    @State private var isPulsing = false
+
+    var body: some View {
+        Circle()
+            .fill(Color.recordingCoral.opacity(0.9))
+            .frame(width: 8, height: 8)
+            .scaleEffect(isPulsing ? 1.2 : 0.8)
+            .opacity(isPulsing ? 1.0 : 0.5)
+            .animation(
+                .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
+                value: isPulsing
+            )
+            .onAppear { isPulsing = true }
     }
 }
 

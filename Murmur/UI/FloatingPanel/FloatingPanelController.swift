@@ -131,36 +131,65 @@ class FloatingPanelController: NSWindowController, NSWindowDelegate {
             .store(in: &cancellables)
 
         // React to task manager status changes
+        // MVP: Pill returns to idle quickly so user can start a new recording
+        // while previous transcription processes in background
         taskManager.$displayStatus
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 guard let self = self else { return }
                 switch status {
-                case .gettingReady, .transcribing, .findingActionItems, .finishing:
+                case .gettingReady:
+                    // Brief processing flash, then return to idle so user can record again
                     if !self.audio.isRecording {
                         self.pillStateManager.transition(to: .processing)
+                        self.scheduleReturnToIdle(delay: 1.5)
                     }
+                case .transcribing, .findingActionItems, .finishing:
+                    // Don't re-enter processing — pill should already be idle (or heading there)
+                    // Background transcription continues silently
+                    break
                 case .pendingReview:
+                    // Don't interrupt an active recording with a review from a background task
+                    guard !self.audio.isRecording else { break }
                     // IMPORTANT: Transition BEFORE locking - lock() would block the transition
                     self.pillStateManager.transition(to: .reviewing)
                     self.pillStateManager.lock()
                 case .completed, .transcriptSaved:
-                    // Stay in processing state so success view can display
-                    // The scheduleStatusReset() timer will set .idle after ~10s
+                    // Don't interrupt an active recording with success from a background task
+                    guard !self.audio.isRecording else { break }
+                    // Show success briefly in pill, then return to idle
                     self.pillStateManager.unlock(transitionToIdle: false)
                     if self.pillStateManager.state != .processing {
                         self.pillStateManager.transition(to: .processing)
                     }
+                    // Quick return to idle after success animation
+                    self.scheduleReturnToIdle(delay: 2.5)
                 case .idle:
                     // Now transition to idle (triggered by scheduleStatusReset timer)
                     self.pillStateManager.unlock(transitionToIdle: !self.audio.isRecording)
                 case .failed:
-                    // Play error sound and stay in current state
+                    // Show error briefly in processing state, then return to idle
                     PillSounds.playError()
-                    break
+                    if !self.audio.isRecording {
+                        self.pillStateManager.transition(to: .processing)
+                        self.scheduleReturnToIdle(delay: 4.0)
+                    }
                 }
             }
             .store(in: &cancellables)
+    }
+
+    // MARK: - Background Processing Quick Return
+
+    /// Schedule a quick return to idle so user can start recording again
+    /// The pill shows processing/success briefly, then morphs back to idle
+    private func scheduleReturnToIdle(delay: TimeInterval) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self = self else { return }
+            // Only return to idle if not recording and not locked (reviewing)
+            guard !self.audio.isRecording, !self.pillStateManager.isLocked else { return }
+            self.pillStateManager.transition(to: .idle)
+        }
     }
 
     /// Reposition window if screen changes (only if no saved position)
