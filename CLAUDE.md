@@ -10,6 +10,7 @@ A macOS utility that captures rough spoken (or typed) thoughts and uses Claude H
 Sources/
 ├── DraftApp.swift           ← @main entry point only
 ├── DraftAppState.swift      ← Centralized engine ownership (lives in AppDelegate, survives window cycles)
+├── DraftPaths.swift         ← FileManager extension: draftAppSupportDir (~/Library/Application Support/Draft/)
 ├── Speech/                  ← ParakeetEngine (CoreML STT) + STTRouter
 ├── API/                     ← Anthropic API client (text + vision + streaming) + AuthCredential + Keychain
 ├── Draft/                   ← DraftEngine + PlatformFormatter — orchestrates drafting (v1 interface)
@@ -19,6 +20,7 @@ Sources/
 ├── Messages/                ← iMessage database reader (SQLite, onboarding import)
 ├── Capture/                 ← Screen capture, context extraction, hotkey registration, three-way routing
 ├── Analysis/                ← AnalysisEngine — native Swift feedback analyzer (replaces Python agent)
+├── Accessibility/           ← AccessibilityBridge — AXUIElement queries for text field position + value
 ├── Observability/           ← EventReporter — centralized error/warning/info tracking (events.jsonl)
 └── UI/                      ← Floating overlay (6 files), MenuBarPanel (single-pane), onboarding, AgentSection
 agent/                       ← ⚠️ DEPRECATED — Python orchestrator replaced by Sources/Analysis/
@@ -50,7 +52,7 @@ This compiles all Swift files from `Sources/`, signs the app bundle, and launche
 - **Menu bar dashboard** — Single-pane menubar popover (440x520) with status, usage stats (words dictated, messages drafted, time saved), shortcut pills, compact/expandable writing style, and agent section (insight cards + chat). System-adaptive colors via `MenuTokens`
 - **Native analysis engine** — Swift-native AnalysisEngine watches feedback via DispatchSource, uses Sonnet to analyze patterns, and proposes prompt improvements as InsightCards in the agent section
 - **Reliability hardened** — All force-unwraps guarded, stale Tasks cancelled before replacement, deinits on all engines (Carbon hotkeys, audio engine, file watchers), NSLock-batched audio samples, global Escape monitor, streaming state guards
-- **Observability** — `EventReporter` captures 35 structured events across all 12 engines to `events.jsonl`. See "Diagnosing Issues" below.
+- **Observability** — `EventReporter` captures 43 structured events across 11 engines to `events.jsonl`. See "Diagnosing Issues" below.
 
 ## Diagnosing Issues (When Something Weird Happens)
 
@@ -72,7 +74,7 @@ If the user describes the problem area (e.g., "voice didn't work", "draft was we
 
 | User says | Engine to check |
 |-----------|----------------|
-| "Voice/mic didn't work" | `parakeet`, `speech` |
+| "Voice/mic didn't work" | `parakeet` |
 | "Draft was bad/empty/refused" | `overlay`, `draft` |
 | "Nothing happened on hotkey" | `capture`, `overlay` |
 | "API error / auth issue" | `anthropic`, `draft` |
@@ -119,11 +121,12 @@ After identifying the error, either:
 ### Event File Location
 
 ```
-~/Library/Application Support/Draft/events.jsonl    ← Structured errors/warnings/info (JSONL)
-~/draft-debug.log                                    ← Narrative action log (text)
-~/Library/Application Support/Draft/feedback.jsonl   ← Accepted draft training pairs
-~/Library/Application Support/Draft/style.md         ← Current style profile
-~/Library/Application Support/Draft/prompts.json     ← Current prompt values
+~/Library/Application Support/Draft/events.jsonl          ← Structured errors/warnings/info (JSONL)
+~/draft-debug.log                                          ← Narrative action log (text)
+~/Library/Application Support/Draft/feedback.jsonl         ← Accepted draft training pairs
+~/Library/Application Support/Draft/style.md               ← Current style profile
+~/Library/Application Support/Draft/prompts.json           ← Current prompt values
+~/Library/Application Support/Draft/suggestion_log.jsonl   ← Applied/skipped insight card actions
 ```
 
 ## End-to-End Data Flow
@@ -162,11 +165,12 @@ After identifying the error, either:
 3. User reviews draft in overlay (editable TextEditor)
    │
    ├─→ Enter → confirmAndInject()
-   │   ├─→ Hide overlay
+   │   ├─→ Hide overlay (shrink animation)
    │   ├─→ pasteWithClipboardRestore() → save clipboard, set draft, ⌘V, restore after 500ms
-   │   ├─→ styleEngine.recordExample(aiDraft:, userFinal:, platform:)
+   │   ├─→ looksLikeRefusal() check — skip training if refusal detected
+   │   ├─→ styleEngine.recordExample(aiDraft:userFinal:platform:userInstructions:formality:)
    │   ├─→ feedbackStore.record() → append to feedback.jsonl
-   │   └─→ shouldRefineNow() → maybe trigger Sonnet refinement
+   │   └─→ shouldRefineNow() → maybe trigger Sonnet refinement via regenerateStyleSummary()
    │
    ├─→ Escape → cancelSession() → shake animation + hide overlay, discard draft
    │
@@ -187,7 +191,7 @@ If vision times out (> 8s) or fails, the fallback prompt asks Claude to "clean u
 
 1. **`Sources/Draft/PlatformFormatter.swift`** — Add `case linkedin` to the enum, add bundle ID in `detect()`, add `formattingInstructions` for the platform, add `postProcess()` rules if markdown needs fixing
 2. **`Sources/Draft/CLAUDE.md`** — Add to the bundle ID mapping table
-3. **Test** — Open the target app, capture with ⌥Space, verify platform detection in debug log
+3. **Test** — Open the target app, capture with ⌥D, verify platform detection in debug log
 
 ### To add new metadata to training pairs:
 
@@ -315,8 +319,12 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - `Speech` — Apple Speech recognition (used by ParakeetEngine for live display)
 - `Security` — Keychain access
 - `AppKit` — macOS-specific (NSPasteboard, NSWorkspace, NSRunningApplication, NSPanel)
+- `ApplicationServices` — Accessibility API (AXUIElement queries in AccessibilityBridge)
 - `Carbon` — Global hotkey registration (RegisterEventHotKey)
 - `CoreGraphics` — Window capture (CGWindowListCreateImage)
+- `CoreML` — FluidAudio Parakeet model inference
+- `CoreAudio` — Audio device queries (input device name via AudioObjectGetPropertyData)
 - `Combine` — Required by SwiftUI internally
 - `SQLite3` (via `-lsqlite3`) — iMessage database reading for style onboarding
 - `Metal` / `MetalKit` / `Accelerate` — Indirect dependencies via FluidAudio (CoreML Parakeet inference)
+- `libc++` (via `-lc++`) — Required by FluidAudio's C++ components

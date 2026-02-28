@@ -6,9 +6,9 @@ Captures a screenshot of the user's current app window, sends it to Haiku Vision
 
 ## Key Files
 
-- `ContextCaptureEngine.swift` (239 lines) — Hotkey registration (Carbon), screenshot capture, dual-mode routing with cross-mode switching to DraftSessionController, legacy `processCapture()` for compatibility
+- `ContextCaptureEngine.swift` (238 lines) — Hotkey registration (Carbon), screenshot capture, dual-mode routing with cross-mode switching to DraftSessionController, legacy `processCapture()` for compatibility
 - `CapturedContext.swift` (121 lines) — Structured data extracted from a screenshot (platform, talkingTo, formality, conversation) + parser + prompt builder
-- `ScreenCapture.swift` (47 lines) — Low-level window capture via CGWindowListCreateImage
+- `ScreenCapture.swift` (46 lines) — Low-level window capture via CGWindowListCreateImage
 
 ## How It Works (v2 — Floating Overlay)
 
