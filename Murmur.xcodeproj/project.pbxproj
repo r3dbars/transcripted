@@ -16,10 +16,6 @@
 		A1001121 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001120 /* SettingsWindowController.swift */; };
 		A1001123 /* SettingsContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001122 /* SettingsContainerView.swift */; };
 		A1001125 /* SettingsSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001124 /* SettingsSidebarView.swift */; };
-		A1001131 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001130 /* DashboardView.swift */; };
-		A1001135 /* PreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001134 /* PreferencesView.swift */; };
-		A1001137 /* SpeakersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001136 /* SpeakersView.swift */; };
-		A1001145 /* RecentTranscriptsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001144 /* RecentTranscriptsView.swift */; };
 		A1001147 /* SettingsSectionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001146 /* SettingsSectionCard.swift */; };
 		A1000001 /* TranscriptedApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002 /* TranscriptedApp.swift */; };
 		A1000003 /* Transcription.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000004 /* Transcription.swift */; };
@@ -78,7 +74,25 @@
 		FA000016 /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000006 /* CoreAudio.framework */; };
 		A1003001 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1003002 /* AppLogger.swift */; };
 		A1003003 /* FileLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1003004 /* FileLogger.swift */; };
+		T1000011 /* TestFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000001 /* TestFixtures.swift */; };
+		T1000012 /* DateFormattingHelperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000002 /* DateFormattingHelperTests.swift */; };
+		T1000013 /* DateParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000003 /* DateParserTests.swift */; };
+		T1000014 /* DisplayStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000004 /* DisplayStatusTests.swift */; };
+		T1000015 /* TranscriptionTypesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000005 /* TranscriptionTypesTests.swift */; };
+		T1000016 /* PriorityMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000006 /* PriorityMappingTests.swift */; };
+		T1000017 /* TodoistSanitizeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000007 /* TodoistSanitizeTests.swift */; };
+		T1000018 /* PillStateManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000008 /* PillStateManagerTests.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		T1000400 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A1000032 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A1000028;
+			remoteInfo = Murmur;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		957699D9D32FB594FDC17C0C /* TodoistService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TodoistService.swift; sourceTree = "<group>"; };
@@ -89,10 +103,6 @@
 		A1001120 /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
 		A1001122 /* SettingsContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsContainerView.swift; sourceTree = "<group>"; };
 		A1001124 /* SettingsSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSidebarView.swift; sourceTree = "<group>"; };
-		A1001130 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
-		A1001134 /* PreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesView.swift; sourceTree = "<group>"; };
-		A1001136 /* SpeakersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakersView.swift; sourceTree = "<group>"; };
-		A1001144 /* RecentTranscriptsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentTranscriptsView.swift; sourceTree = "<group>"; };
 		A1001146 /* SettingsSectionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSectionCard.swift; sourceTree = "<group>"; };
 		A1000002 /* TranscriptedApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptedApp.swift; sourceTree = "<group>"; };
 		A1000004 /* Transcription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcription.swift; sourceTree = "<group>"; };
@@ -155,6 +165,15 @@
 		FA000006 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
 		A1003002 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
 		A1003004 /* FileLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileLogger.swift; sourceTree = "<group>"; };
+		T1000001 /* TestFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestFixtures.swift; sourceTree = "<group>"; };
+		T1000002 /* DateFormattingHelperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateFormattingHelperTests.swift; sourceTree = "<group>"; };
+		T1000003 /* DateParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParserTests.swift; sourceTree = "<group>"; };
+		T1000004 /* DisplayStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayStatusTests.swift; sourceTree = "<group>"; };
+		T1000005 /* TranscriptionTypesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTypesTests.swift; sourceTree = "<group>"; };
+		T1000006 /* PriorityMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PriorityMappingTests.swift; sourceTree = "<group>"; };
+		T1000007 /* TodoistSanitizeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoistSanitizeTests.swift; sourceTree = "<group>"; };
+		T1000008 /* PillStateManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillStateManagerTests.swift; sourceTree = "<group>"; };
+		T1000200 /* MurmurTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MurmurTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -171,6 +190,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		T1000302 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -178,6 +204,7 @@
 			isa = PBXGroup;
 			children = (
 				A1000022 /* Murmur */,
+				T1000100 /* MurmurTests */,
 				A1000023 /* Products */,
 				FA000020 /* Frameworks */,
 			);
@@ -216,6 +243,7 @@
 			isa = PBXGroup;
 			children = (
 				A1000017 /* Murmur.app */,
+				T1000200 /* MurmurTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -292,9 +320,6 @@
 		A1001102 /* Tabs */ = {
 			isa = PBXGroup;
 			children = (
-				A1001130 /* DashboardView.swift */,
-				A1001136 /* SpeakersView.swift */,
-				A1001134 /* PreferencesView.swift */,
 			);
 			path = Tabs;
 			sourceTree = "<group>";
@@ -302,7 +327,6 @@
 		A1001103 /* Components */ = {
 			isa = PBXGroup;
 			children = (
-				A1001144 /* RecentTranscriptsView.swift */,
 				A1001146 /* SettingsSectionCard.swift */,
 			);
 			path = Components;
@@ -406,6 +430,53 @@
 			path = Services;
 			sourceTree = "<group>";
 		};
+		T1000100 /* MurmurTests */ = {
+			isa = PBXGroup;
+			children = (
+				T1000101 /* Core */,
+				T1000102 /* Services */,
+				T1000103 /* UI */,
+				T1000104 /* Helpers */,
+			);
+			path = MurmurTests;
+			sourceTree = "<group>";
+		};
+		T1000101 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				T1000002 /* DateFormattingHelperTests.swift */,
+				T1000003 /* DateParserTests.swift */,
+				T1000004 /* DisplayStatusTests.swift */,
+				T1000005 /* TranscriptionTypesTests.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		T1000102 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				T1000006 /* PriorityMappingTests.swift */,
+				T1000007 /* TodoistSanitizeTests.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		T1000103 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				T1000008 /* PillStateManagerTests.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		T1000104 /* Helpers */ = {
+			isa = PBXGroup;
+			children = (
+				T1000001 /* TestFixtures.swift */,
+			);
+			path = Helpers;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -426,6 +497,23 @@
 			productReference = A1000017 /* Murmur.app */;
 			productType = "com.apple.product-type.application";
 		};
+		T1000300 /* MurmurTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = T1000502 /* Build configuration list for PBXNativeTarget "MurmurTests" */;
+			buildPhases = (
+				T1000301 /* Sources */,
+				T1000302 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				T1000401 /* PBXTargetDependency */,
+			);
+			name = MurmurTests;
+			productName = MurmurTests;
+			productReference = T1000200 /* MurmurTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -438,6 +526,10 @@
 				TargetAttributes = {
 					A1000028 = {
 						CreatedOnToolsVersion = 15.0;
+					};
+					T1000300 = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = A1000028;
 					};
 				};
 			};
@@ -455,6 +547,7 @@
 			projectRoot = "";
 			targets = (
 				A1000028 /* Murmur */,
+				T1000300 /* MurmurTests */,
 			);
 		};
 /* End PBXProject section */
@@ -527,10 +620,6 @@
 				A1001121 /* SettingsWindowController.swift in Sources */,
 				A1001123 /* SettingsContainerView.swift in Sources */,
 				A1001125 /* SettingsSidebarView.swift in Sources */,
-				A1001131 /* DashboardView.swift in Sources */,
-				A1001135 /* PreferencesView.swift in Sources */,
-				A1001137 /* SpeakersView.swift in Sources */,
-				A1001145 /* RecentTranscriptsView.swift in Sources */,
 				A1001147 /* SettingsSectionCard.swift in Sources */,
 				A1002011 /* AudioResampler.swift in Sources */,
 				A1002012 /* ParakeetService.swift in Sources */,
@@ -542,7 +631,30 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		T1000301 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				T1000011 /* TestFixtures.swift in Sources */,
+				T1000012 /* DateFormattingHelperTests.swift in Sources */,
+				T1000013 /* DateParserTests.swift in Sources */,
+				T1000014 /* DisplayStatusTests.swift in Sources */,
+				T1000015 /* TranscriptionTypesTests.swift in Sources */,
+				T1000016 /* PriorityMappingTests.swift in Sources */,
+				T1000017 /* TodoistSanitizeTests.swift in Sources */,
+				T1000018 /* PillStateManagerTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		T1000401 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A1000028 /* Murmur */;
+			targetProxy = T1000400 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A1000034 /* Debug */ = {
@@ -756,6 +868,54 @@
 			};
 			name = Release;
 		};
+		T1000500 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = XG6WL66WUQ;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.transcripted.app.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_INCLUDE_PATHS = (
+					"$(SRCROOT)/fluidaudio-modules",
+					"$(SRCROOT)/fluidaudio-modules/FastClusterWrapper",
+					"$(SRCROOT)/fluidaudio-modules/MachTaskSelfWrapper",
+					"$(SRCROOT)/fluidaudio-modules/yyjson",
+				);
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Transcripted.app/Contents/MacOS/Transcripted";
+			};
+			name = Debug;
+		};
+		T1000501 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = XG6WL66WUQ;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.transcripted.app.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_INCLUDE_PATHS = (
+					"$(SRCROOT)/fluidaudio-modules",
+					"$(SRCROOT)/fluidaudio-modules/FastClusterWrapper",
+					"$(SRCROOT)/fluidaudio-modules/MachTaskSelfWrapper",
+					"$(SRCROOT)/fluidaudio-modules/yyjson",
+				);
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Transcripted.app/Contents/MacOS/Transcripted";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -773,6 +933,15 @@
 			buildConfigurations = (
 				A1000034 /* Debug */,
 				A1000035 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		T1000502 /* Build configuration list for PBXNativeTarget "MurmurTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				T1000500 /* Debug */,
+				T1000501 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

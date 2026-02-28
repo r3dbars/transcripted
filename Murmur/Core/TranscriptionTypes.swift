@@ -66,6 +66,30 @@ struct TranscriptionResult {
     }
 }
 
+// MARK: - Priority Mapping
+
+extension ActionItem {
+    /// EventKit priority: 1 = high, 5 = medium, 9 = low, 0 = none
+    var eventKitPriority: Int {
+        switch priority.lowercased() {
+        case "high": return 1
+        case "medium": return 5
+        case "low": return 9
+        default: return 0
+        }
+    }
+
+    /// Todoist priority: 4 = urgent/high, 3 = medium, 2 = low, 1 = normal
+    var todoistPriority: Int {
+        switch priority.lowercased() {
+        case "high": return 4
+        case "medium": return 3
+        case "low": return 2
+        default: return 1
+        }
+    }
+}
+
 /// Metadata about the transcription engines used
 struct TranscriptionMetadata {
     let transcriptionEngine: String     // "parakeet_local"

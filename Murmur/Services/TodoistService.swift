@@ -69,7 +69,7 @@ class TodoistService {
 
         for (index, item) in actionItems.enumerated() {
             let title = formatTitle(task: item.task, owner: item.owner)
-            let priority = mapPriority(item.priority)
+            let priority = item.todoistPriority
 
             do {
                 try await createTask(
@@ -150,20 +150,10 @@ class TodoistService {
         return "Follow-up: [\(owner)] \(task)"
     }
 
-    /// Map priority string to Todoist priority (1=normal, 4=urgent)
-    private func mapPriority(_ priority: String) -> Int {
-        switch priority.lowercased() {
-        case "high": return 4    // Urgent
-        case "medium": return 3
-        case "low": return 2
-        default: return 1        // Normal
-        }
-    }
-
     /// Sanitize due string to Todoist-compatible format
     /// Todoist accepts: "today", "tomorrow", "next week", "Monday", "Jan 15", "2024-01-15"
     /// Returns nil if date is too vague to convert
-    private func sanitizeDueString(_ input: String) -> String? {
+    func sanitizeDueString(_ input: String) -> String? {
         let lowercased = input.lowercased().trimmingCharacters(in: .whitespaces)
 
         // Filter out null/none/empty values
