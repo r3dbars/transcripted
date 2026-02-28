@@ -68,6 +68,9 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        #if BETA_BUILD
+        BetaTelemetry.shared.shipLogs()
+        #endif
         appState.shutdown()
     }
 

@@ -27,6 +27,8 @@ struct MenuBarPanelView: View {
                     sectionDivider
 
                     styleSection
+
+                    #if !BETA_BUILD
                     sectionDivider
 
                     AgentSection(
@@ -35,16 +37,27 @@ struct MenuBarPanelView: View {
                         auth: appState.drafter.getAuth()
                     )
                     .padding(.vertical, MenuTokens.sectionSpacing / 2)
+                    #endif
                 }
                 .padding(.horizontal, MenuTokens.innerPadding)
             }
 
             // Onboarding overlays (sequential gates)
+            #if BETA_BUILD
+            if !PermissionsOnboardingView.hasCompleted {
+                PermissionsOnboardingView(onComplete: {
+                    PermissionsOnboardingView.markCompleted()
+                })
+            } else if !appState.styleEngine.hasCompletedOnboarding {
+                StyleOnboardingView(styleEngine: appState.styleEngine, draftEngine: appState.drafter)
+            }
+            #else
             if !appState.drafter.hasCredential {
                 APIKeyEntryView(draftEngine: appState.drafter)
             } else if !appState.styleEngine.hasCompletedOnboarding {
                 StyleOnboardingView(styleEngine: appState.styleEngine, draftEngine: appState.drafter)
             }
+            #endif
         }
         .frame(width: MenuTokens.panelWidth, height: MenuTokens.panelHeight)
         .overlay(alignment: .topTrailing) {
@@ -320,6 +333,7 @@ struct MenuBarPanelView: View {
                     .foregroundColor(.secondary)
             }
 
+            #if !BETA_BUILD
             Divider()
 
             VStack(spacing: 4) {
@@ -337,6 +351,7 @@ struct MenuBarPanelView: View {
                 .buttonStyle(.bordered)
                 .foregroundColor(.red)
             }
+            #endif
 
             Divider()
 

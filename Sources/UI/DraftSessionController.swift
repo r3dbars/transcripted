@@ -358,6 +358,19 @@ class DraftSessionController: ObservableObject {
                 exampleCount: appState.styleEngine.exampleCount,
                 formality: formalityLevel
             )
+            #if BETA_BUILD
+            BetaTelemetry.shared.sendEvent(
+                type: "draft_accepted",
+                sourceApp: sessionSourceApp?.bundleIdentifier,
+                payload: [
+                    "raw_chars": voiceInstructions.count,
+                    "draft_chars": originalDraft.count,
+                    "accepted_chars": editedText.count,
+                    "platform": platform.rawValue,
+                    "was_edited": originalDraft != editedText,
+                ]
+            )
+            #endif
         } else {
             appState.logger.log("STYLE | skipping refusal example — not recording as training data")
             EventReporter.shared.capture(level: .info, engine: "overlay", event: "refusal_detected",
