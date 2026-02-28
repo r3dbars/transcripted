@@ -2,13 +2,23 @@
 
 ## What This Is
 
-`EventReporter` is the centralized event tracking system. Every meaningful error, warning, and operational event across all 11 engines flows through `EventReporter.shared.capture()` and is written to:
+`EventReporter` is the centralized event tracking system. Every meaningful error, warning, and operational event across all engines flows through `EventReporter.shared.capture()` and is written to:
 
 ```
 ~/Library/Application Support/Draft/events.jsonl
 ```
 
 Same directory as `feedback.jsonl` and `prompts.json`. Claude Code reads this file directly.
+
+## File: EventReporter.swift (~164 lines)
+
+Contains three components:
+
+1. **`ObservabilityEvent`** — A `Codable` struct for the JSONL schema (timestamp, level, engine, event, message, context, appVersion, osVersion).
+2. **`EventFileWriter`** — A private `actor` that serializes JSONL appends to `events.jsonl`. Creates the file on first write, reuses `FileHandle` for subsequent appends.
+3. **`EventReporter`** — `@MainActor` singleton (`EventReporter.shared`). Merges caller context with live engine state (via `engineStateSummary` closure set by `DraftAppState`), then dispatches to `EventFileWriter` and `SentryTransport` via `Task.detached`.
+
+Also includes `EventLevel` enum (`error`, `warning`, `info`) and a no-op `SentryTransport` stub.
 
 ## Event Schema
 
@@ -30,7 +40,7 @@ Same directory as `feedback.jsonl` and `prompts.json`. Claude Code reads this fi
 | Field | Type | Values |
 |-------|------|--------|
 | `level` | string | `"error"` \| `"warning"` \| `"info"` |
-| `engine` | string | `parakeet`, `anthropic`, `draft`, `capture`, `style`, `feedback`, `analysis`, `chat`, `overlay`, `imessage`, `app` |
+| `engine` | string | `app`, `parakeet`, `anthropic`, `draft`, `capture`, `style`, `feedback`, `analysis`, `chat`, `overlay`, `imessage` |
 | `event` | string | Machine-readable snake_case identifier (e.g., `prewarm_failed`, `api_http_error`) |
 | `message` | string | Human-readable description (often `error.localizedDescription`) |
 | `context` | dict? | Optional key-value pairs — error codes, device names, state flags |
@@ -106,7 +116,7 @@ Only `.error` level events are forwarded to Sentry. Warnings and info stay local
 
 ## Event Catalog
 
-43 unique events across 11 engines (51 total capture call sites).
+43 unique events across 11 engines (52 total capture call sites).
 
 | Engine | Event | Level | Trigger |
 |--------|-------|-------|---------|

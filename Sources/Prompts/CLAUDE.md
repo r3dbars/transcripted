@@ -8,7 +8,7 @@
 ~/Library/Application Support/Draft/prompts.json
 ```
 
-## File: PromptStore.swift (~341 lines)
+## File: PromptStore.swift (~340 lines)
 
 Contains three components:
 

@@ -6,8 +6,8 @@ Orchestrates the "rough text → polished message" workflow. Connects the speech
 
 ## Key Files
 
-- `DraftEngine.swift` — `@MainActor ObservableObject` managing auth credential state, drafting workflow, and output
-- `PlatformFormatter.swift` — Detects target platform (Slack/iMessage/email/Discord/Teams) and provides formatting rules
+- `DraftEngine.swift` (154 lines) — `@MainActor ObservableObject` managing auth credential state, drafting workflow, and output
+- `PlatformFormatter.swift` (118 lines) — Detects target platform (Slack/iMessage/email/Discord/Teams) and provides formatting rules
 
 ## How It Works
 

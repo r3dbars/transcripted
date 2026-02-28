@@ -6,24 +6,24 @@ SwiftUI views for the Draft app. The primary UI is a **floating overlay** (non-a
 
 ## Key Files
 
-- `FloatingOverlayPanel.swift` (~38 lines) — NSPanel subclass (non-activating, dynamic key status)
-- `FloatingOverlayController.swift` (~363 lines) — State machine, animations, panel lifecycle, global Escape monitor
-- `OverlayContentView.swift` (~253 lines) — SwiftUI views for all 5 overlay states (idle/listening/drafting/streaming/review)
-- `DraftSessionController.swift` (~494 lines) — Session orchestration for draft mode (⌥D) and dictation mode (⌥Space)
-- `OverlayTokens.swift` (~49 lines) — Design tokens: `OverlayTokens` for floating overlay (translucent dark), `MenuTokens` for menubar panel (system-adaptive colors, layout constants)
+- `FloatingOverlayPanel.swift` (~37 lines) — NSPanel subclass (non-activating, dynamic key status)
+- `FloatingOverlayController.swift` (~362 lines) — State machine, animations, panel lifecycle, global Escape monitor
+- `OverlayContentView.swift` (~252 lines) — SwiftUI views for all 5 overlay states (idle/listening/drafting/streaming/review)
+- `DraftSessionController.swift` (~493 lines) — Session orchestration for draft mode (⌥D) and dictation mode (⌥Space)
+- `OverlayTokens.swift` (~48 lines) — Design tokens: `OverlayTokens` for floating overlay (translucent dark), `MenuTokens` for menubar panel (system-adaptive colors, layout constants)
 - `PanelDragView.swift` (~23 lines) — AppKit drag helper (mouseDown → performDrag)
-- `MenuBarPanel.swift` (~335 lines) — Single-pane menubar popover (440x520): header (status dot), usage stats, shortcut pills, writing style (compact/expandable), agent section, onboarding gates, settings gear
-- `StyleProfileView.swift` (~51 lines) — DEPRECATED: style display is now inlined in MenuBarPanel.swift. Kept for reference only.
-- `AgentTab.swift` (~277 lines) — `AgentSection` struct: simplified insight cards (Apply/Skip) + streaming chat interface
-- `StyleOnboardingView.swift` (664 lines) — 5-step onboarding: intro → source choice → (iMessage/paste) → result
-- `APIKeyEntryView.swift` (231 lines) — Auth setup overlay: name + API key or subscription token
-- `InsightCard.swift` (71 lines) — Model for insight cards + shared `toolDefinition` and `from()` factory (used by both StreamingChatEngine and AnalysisEngine)
-- `AudioWaveformView.swift` (63 lines) — Animated waveform bars driven by `STTRouter.audioLevel`
-- `ScrollingWaveformView.swift` (147 lines) — Real-time scrolling waveform for overlay header bar, Canvas + TimelineView at 60fps, ring buffer for audio level samples
-- `AnimatedTranscriptView.swift` (81 lines) — Animated live transcript text display during recording
-- `ChatMessage.swift` (32 lines) — Model for chat messages in AgentSection
-- `AppLogger.swift` (92 lines) — Debug logger writing to `~/draft-debug.log` with timestamps
-- `PreviousAppTracker.swift` (25 lines) — Tracks last non-Draft app for paste-back fallback
+- `MenuBarPanel.swift` (~350 lines) — Single-pane menubar popover (440x520): header (status dot), usage stats, shortcut pills, writing style (compact/expandable), agent section, onboarding gates, settings gear
+- `StyleProfileView.swift` (~50 lines) — DEPRECATED: style display is now inlined in MenuBarPanel.swift. Kept for reference only.
+- `AgentTab.swift` (~287 lines) — `AgentSection` struct: simplified insight cards (Apply/Skip) + streaming chat interface with expandable tool use indicators
+- `StyleOnboardingView.swift` (~664 lines) — 5-step onboarding: intro → source choice → (iMessage/paste) → result
+- `APIKeyEntryView.swift` (~231 lines) — Auth setup overlay: name + API key or subscription token
+- `InsightCard.swift` (~71 lines) — Model for insight cards + shared `toolDefinition` and `from()` factory (used by both StreamingChatEngine and AnalysisEngine)
+- `AudioWaveformView.swift` (~63 lines) — UNUSED: animated waveform bars with compact mode (replaced by `ScrollingWaveformView` in the overlay header). Kept for potential reuse
+- `ScrollingWaveformView.swift` (~147 lines) — Real-time scrolling waveform for overlay header bar, Canvas + TimelineView at 60fps, ring buffer for audio level samples
+- `AnimatedTranscriptView.swift` (~81 lines) — Animated live transcript with word-by-word fade-in via custom `FlowLayout` (SwiftUI Layout protocol)
+- `ChatMessage.swift` (~32 lines) — Model for chat messages in AgentSection (user/assistant/tool roles)
+- `AppLogger.swift` (~92 lines) — Debug logger writing to `~/draft-debug.log` with timestamps, actor-isolated file writer, throttled logging
+- `PreviousAppTracker.swift` (~25 lines) — Tracks last non-Draft app for paste-back fallback
 
 ## Architecture Overview
 
@@ -50,7 +50,16 @@ FloatingOverlay (hotkey flow)          MenuBarPanel (configuration)
 `FloatingOverlayPanel` is an NSPanel subclass with these key properties:
 - **Non-activating** (`.nonactivatingPanel`) — the target app stays frontmost, so paste works without re-activation
 - **Dynamic key status** — `canBecomeKey` returns `allowKeyStatus`, which is `false` during listening/drafting (keyboard stays with target app) and `true` during review (TextEditor needs keyboard input)
-- **Floating level** — always above other windows, across all spaces
+- **Floating level** — `.popUpMenu` level (above `.floating`), visible over Electron apps and status bars, across all spaces
+- **Drag handle** — `PanelDragView` is added as a pure AppKit subview above the SwiftUI `NSHostingView`, not as an `NSViewRepresentable` bridge. This avoids executor isolation crashes during nested run loops
+
+### Session Modes
+
+`FloatingOverlayController.SessionMode` enum governs behavior differences:
+- **`.draft`** (⌥D) — screenshot + voice + AI rewrite + review
+- **`.dictation`** (⌥Space) — voice + batch transcribe + auto-paste
+
+The `activeMode` is set by `DraftSessionController` before showing the overlay. `OverlayContentView` uses it to render mode-specific text (e.g., "Draft" vs "Dictate" header, "⌥D to stop" vs "⌥Space to stop" hints, "Drafting..." vs "Polishing..." spinner).
 
 ### State Machine
 
@@ -64,8 +73,8 @@ idle → listening → drafting → streaming → review → idle
 |-------|---------|-----|------------|-----------------|
 | `idle` | Session end/cancel | Hidden | false | — |
 | `listening` | ⌥D/⌥Space (start) | Waveform + live transcription | false | Global monitor → cancel |
-| `drafting` | ⌥D/⌥Space (stop) | Spinner + "Drafting..." | false | Global monitor → cancel |
-| `streaming` | First API token | Green dot + tokens appearing | false | Global monitor → cancel |
+| `drafting` | ⌥D/⌥Space (stop) | Spinner + "Drafting..."/"Polishing..." (mode-dependent), or error message | false | Global monitor → cancel |
+| `streaming` | First API token | Spinner + "Drafting..." header, tokens scrolling in content area | false | Global monitor → cancel |
 | `review` | Stream complete | Editable TextEditor + hint bar | true | SwiftUI .onKeyPress → cancel |
 
 **State transition guards:** `startStreaming()` requires `.drafting` or `.listening`, `appendStreamToken()` requires `.streaming`, `finishStreaming()` requires `.streaming`. This prevents the overlay from entering `.review` when not actually streaming.
@@ -76,11 +85,11 @@ When the review view appears, `@FocusState` automatically transfers keyboard foc
 
 ### Positioning
 
-`show(near:)` uses `AccessibilityBridge.focusedTextFieldRect(for:)` to position the overlay near the user's cursor in the target app. Falls back to screen center if no text field is detected.
+`showPanel(near:)` uses `AccessibilityBridge.focusedTextFieldRect(for:)` to position the overlay above the user's focused text field in the target app. Falls back to mouse cursor position if no valid text field is detected (e.g., terminal emulators like iTerm2 that report oversized text areas). Screen-clamps the panel to the current monitor's visible frame to prevent off-screen positioning on multi-monitor setups.
 
 ### Dynamic Sizing
 
-`resizePanel(to:)` grows the panel upward (bottom edge anchored) as streaming text grows. Height range: 120px (listening) to 280px (review).
+`resizePanel(to:)` grows the panel upward (bottom edge anchored) as streaming text grows. Height range: 160px (`panelMinHeight`) to 340px (`panelMaxHeight`).
 
 ## DraftSessionController — Session Orchestration
 
@@ -111,13 +120,22 @@ stopSessionAndDraft()   — ⌥D second press: stop voice, await vision, build p
 confirmAndInject()      — Enter in review: hide overlay (shrink animation), paste to target app, record training pair
 cancelSession()         — Escape or ⌥D during any state: hide overlay (shake animation), discard draft
 startDictation()        — ⌥Space first press: show overlay, start voice recording (no screenshot)
-stopDictationAndPaste() — ⌥Space second press: stop voice, transcribe, polish, paste
+stopDictationAndPaste() — ⌥Space second press: stop voice, batch transcribe, paste directly (no API polish)
 cancelDictation()       — Escape during dictation: hide overlay (shake animation), discard
+polishDictation()       — UNUSED: light API-based polish (punctuation/grammar). Exists but not called by stopDictationAndPaste()
 ```
 
 ### Vision Race Condition Fix
 
 Vision processing (`processVision()`) runs in a parallel `Task` stored as `visionTask`. When the user stops speaking, `stopSessionAndDraft()` **awaits `visionTask?.value`** before checking `lastCapturedContext`. This ensures vision results are available even when the user speaks quickly. The vision call has an 8-second timeout via `AnthropicAPI.withTimeout(seconds: 8)`.
+
+### Error Display
+
+`FloatingOverlayController.showError()` briefly displays an error message in the overlay (reusing the `.drafting` state), then auto-hides after ~1.5 seconds with a cancel animation. Used for transient errors like "No speech detected", "Microphone unavailable", "Voice model loading...", and "Audio device changed". The dismiss task is cancelled before replacement to prevent stale timers.
+
+### Audio Device Interruption
+
+`DraftSessionController` subscribes to `STTRouter.recordingInterrupted` via Combine. When the audio device changes mid-session (e.g., headphones unplugged), it cancels all pending tasks (vision + streaming), clears session state, and calls `showError("Audio device changed")`.
 
 ### No-Context Fallback
 
@@ -165,6 +183,8 @@ The Carbon hotkey callback in `ContextCaptureEngine.swift` routes to `DraftSessi
 **Escape in non-key states:** The panel is non-key during listening/drafting/streaming (`allowKeyStatus = false`), so SwiftUI `.onKeyPress` can't receive keyboard events. A **global event monitor** (`NSEvent.addGlobalMonitorForEvents(matching: .keyDown)`) intercepts Escape (keyCode 53) and routes to `cancelSession()`/`cancelDictation()` via the `onEscapeDuringSession` closure. The monitor is installed when the overlay shows and removed when it hides. In review mode, the panel is key-capable and SwiftUI's `.onKeyPress` handles Escape directly.
 
 ## Animation System
+
+**Entrance:** Spring animation (scale 0.88 → 1.0 via `CASpringAnimation`) + 200ms fade-in on `showPanel()`.
 
 Two hide animations signal different outcomes:
 
@@ -226,6 +246,10 @@ static let toolDefinition: [String: Any]                    // Anthropic tool sc
 static func from(toolId: String, input: [String: Any]) -> InsightCard?  // Parse tool call into card
 ```
 
+## AgentSection — Chat Tool Indicators
+
+Chat messages with role `.tool` are rendered as compact, expandable tool indicators (wrench icon + label) instead of regular bubbles. Clicking expands to show the tool's detail text (file path, command, etc.) in a monospaced code block. The `expandedTools` `Set<String>` tracks which tool messages are currently expanded.
+
 ## AgentSection — Defensive Card ID Capture
 
 `AgentSection` (in `AgentTab.swift`) captures the card's `id` value type into a local `let cardId` variable before the button closures, rather than closing over the full `card` struct:
@@ -264,7 +288,7 @@ Button(action: {
 
 1. On launch, if `drafter.hasCredential` is false → `APIKeyEntryView` overlay appears
 2. Overlay shows name input + segmented picker (API Key / Claude Subscription)
-3. API Key tab: `SecureField` for `sk-ant-...` with prefix validation
+3. API Key tab: `SecureField` for `sk-ant-api...` with prefix validation (rejects `sk-ant-oat` tokens with a redirect hint)
 4. Subscription tab: step-by-step instructions for `claude setup-token` + paste field
 5. "Connect" saves to Keychain → overlay dismisses
 6. Gear icon → popover shows current auth mode + "Switch Auth Method" → clears Keychain → overlay reappears

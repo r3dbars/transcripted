@@ -6,7 +6,7 @@ Reads the user's sent iMessages from `~/Library/Messages/chat.db` for automatic 
 
 ## Key File
 
-- `iMessageReader.swift` (~165 lines) — Swift `actor` that queries chat.db via the SQLite3 C API
+- `iMessageReader.swift` (165 lines) — Swift `actor` that queries chat.db via the SQLite3 C API
 
 ## How It Works
 
