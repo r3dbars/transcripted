@@ -12,6 +12,8 @@
 		A1001011 /* StatsDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001001 /* StatsDatabase.swift */; };
 		A1001012 /* StatsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001002 /* StatsService.swift */; };
 		A1001013 /* TranscriptScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001003 /* TranscriptScanner.swift */; };
+		A1001020 /* TranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001021 /* TranscriptStore.swift */; };
+		A1001022 /* TranscriptTrayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001023 /* TranscriptTrayView.swift */; };
 		A1001111 /* SettingsNavigationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001110 /* SettingsNavigationState.swift */; };
 		A1001121 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001120 /* SettingsWindowController.swift */; };
 		A1001123 /* SettingsContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001122 /* SettingsContainerView.swift */; };
@@ -99,6 +101,8 @@
 		A1001001 /* StatsDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsDatabase.swift; sourceTree = "<group>"; };
 		A1001002 /* StatsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsService.swift; sourceTree = "<group>"; };
 		A1001003 /* TranscriptScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptScanner.swift; sourceTree = "<group>"; };
+		A1001021 /* TranscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptStore.swift; sourceTree = "<group>"; };
+		A1001023 /* TranscriptTrayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptTrayView.swift; sourceTree = "<group>"; };
 		A1001110 /* SettingsNavigationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsNavigationState.swift; sourceTree = "<group>"; };
 		A1001120 /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
 		A1001122 /* SettingsContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsContainerView.swift; sourceTree = "<group>"; };
@@ -280,6 +284,7 @@
 				A1001001 /* StatsDatabase.swift */,
 				A1001002 /* StatsService.swift */,
 				A1001003 /* TranscriptScanner.swift */,
+				A1001021 /* TranscriptStore.swift */,
 				A1002005 /* TranscriptionTypes.swift */,
 			);
 			path = Core;
@@ -353,6 +358,7 @@
 				A1000906 /* CelebrationViews.swift */,
 				A1000907 /* PillViews.swift */,
 				A1000908 /* ReviewTrayView.swift */,
+				A1001023 /* TranscriptTrayView.swift */,
 				A100090B /* AuroraRecordingView.swift */,
 				A100090C /* AuroraIdleView.swift */,
 				A100090D /* AuroraProcessingView.swift */,
@@ -616,6 +622,8 @@
 				A1001011 /* StatsDatabase.swift in Sources */,
 				A1001012 /* StatsService.swift in Sources */,
 				A1001013 /* TranscriptScanner.swift in Sources */,
+				A1001020 /* TranscriptStore.swift in Sources */,
+				A1001022 /* TranscriptTrayView.swift in Sources */,
 				A1001111 /* SettingsNavigationState.swift in Sources */,
 				A1001121 /* SettingsWindowController.swift in Sources */,
 				A1001123 /* SettingsContainerView.swift in Sources */,

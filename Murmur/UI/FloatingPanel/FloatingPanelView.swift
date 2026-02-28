@@ -24,11 +24,15 @@ struct FloatingPanelView: View {
     @State private var silencePromptDismissed = false  // Prevents re-showing after dismiss
     private let silenceThresholdSeconds: TimeInterval = 120  // 2 minutes
 
+    // Transcript tray state
+    @State private var showTranscriptTray = false
+    @StateObject private var transcriptStore = TranscriptStore()
+
     // MARK: - Computed Properties
 
     /// Dynamic frame width based on state
     private var frameWidth: CGFloat {
-        if pillStateManager.state == .reviewing {
+        if pillStateManager.state == .reviewing || showTranscriptTray {
             return PillDimensions.trayWidth + 40
         } else {
             return PillDimensions.recordingWidth + 40
@@ -40,7 +44,22 @@ struct FloatingPanelView: View {
             // MARK: - Top Spacer (pushes content to bottom)
             Spacer(minLength: 0)
 
-            // MARK: - Review Tray (expands upward when reviewing)
+            // MARK: - Transcript Tray (expands upward when browsing recent meetings)
+            if showTranscriptTray && pillStateManager.state == .idle {
+                TranscriptTrayView(
+                    store: transcriptStore,
+                    onOpenFolder: {
+                        openTranscriptsFolder()
+                        showTranscriptTray = false
+                    }
+                )
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .move(edge: .bottom)),
+                    removal: .opacity.combined(with: .scale(scale: 0.95))
+                ))
+            }
+
+            // MARK: - Review Tray (expands upward when reviewing action items)
             if pillStateManager.state == .reviewing {
                 ReviewTrayView(taskManager: taskManager)
                     .transition(.asymmetric(
@@ -52,7 +71,7 @@ struct FloatingPanelView: View {
             // MARK: - Toast Notifications (float above pill)
             ZStack {
                 Color.clear
-                    .frame(height: pillStateManager.state == .reviewing ? 0 : 60)
+                    .frame(height: (pillStateManager.state == .reviewing || showTranscriptTray) ? 0 : 60)
 
                 // Toast notification for errors (appears above pill, auto-dismisses)
                 if showErrorToast, let error = currentError {
@@ -71,6 +90,7 @@ struct FloatingPanelView: View {
         }
         .frame(width: frameWidth)
         .frame(maxHeight: .infinity, alignment: .bottom)
+        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: showTranscriptTray)
         .onChange(of: audio.silenceDuration) { _, duration in
             // UX: Don't interrupt user flow - show amber ring indicator without forcing panel expansion
             if audio.isRecording && duration >= silenceThresholdSeconds && !silencePromptDismissed && !showSilencePrompt {
@@ -82,6 +102,18 @@ struct FloatingPanelView: View {
                 showSilencePrompt = false
                 silencePromptDismissed = false
             }
+        }
+        // Dismiss transcript tray when recording starts
+        .onChange(of: pillStateManager.state) { _, newState in
+            if newState != .idle {
+                withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                    showTranscriptTray = false
+                }
+            }
+        }
+        // Refresh transcript list when tray opens
+        .onChange(of: showTranscriptTray) { _, isShowing in
+            if isShowing { transcriptStore.refresh() }
         }
         // Trigger error toasts based on displayStatus changes
         // (Success is now shown in-pill via AuroraSuccessView, not as overlay)
@@ -115,8 +147,13 @@ struct FloatingPanelView: View {
         switch pillStateManager.state {
         case .idle:
             AuroraIdleView(
-                onRecord: { audio.start() },
-                onFiles: { openTranscriptsFolder() },
+                onRecord: {
+                    withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                        showTranscriptTray = false
+                    }
+                    audio.start()
+                },
+                onTranscripts: { toggleTranscriptTray() },
                 failedCount: failedTranscriptionManager.failedTranscriptions.count,
                 backgroundTaskCount: taskManager.backgroundTaskCount
             )
@@ -142,6 +179,14 @@ struct FloatingPanelView: View {
             }
         case .reviewing:
             PillReviewingView(itemCount: taskManager.pendingReview?.totalCount ?? 0)
+        }
+    }
+
+    // MARK: - Transcript Tray
+
+    private func toggleTranscriptTray() {
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+            showTranscriptTray.toggle()
         }
     }
 
