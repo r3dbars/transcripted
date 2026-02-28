@@ -18,7 +18,7 @@ final class TranscriptScanner {
         let transcriptDir = directory ?? TranscriptSaver.defaultSaveDirectory
 
         guard FileManager.default.fileExists(atPath: transcriptDir.path) else {
-            print("⚠️ TranscriptScanner: Directory does not exist: \(transcriptDir.path)")
+            AppLogger.pipeline.warning("TranscriptScanner directory does not exist", ["path": transcriptDir.path])
             return 0
         }
 
@@ -29,7 +29,7 @@ final class TranscriptScanner {
             includingPropertiesForKeys: [.isRegularFileKey, .creationDateKey],
             options: [.skipsHiddenFiles]
         ) else {
-            print("❌ TranscriptScanner: Failed to create enumerator")
+            AppLogger.pipeline.error("TranscriptScanner failed to create enumerator")
             return 0
         }
 
@@ -41,11 +41,11 @@ final class TranscriptScanner {
         }
 
         guard !markdownFiles.isEmpty else {
-            print("ℹ️ TranscriptScanner: No markdown files found")
+            AppLogger.pipeline.debug("TranscriptScanner: No markdown files found")
             return 0
         }
 
-        print("ℹ️ TranscriptScanner: Found \(markdownFiles.count) transcript files to scan")
+        AppLogger.pipeline.info("TranscriptScanner found files to scan", ["count": "\(markdownFiles.count)"])
         progressHandler?(0.0, "Found \(markdownFiles.count) transcripts...")
 
         let database = StatsDatabase.shared
@@ -87,7 +87,7 @@ final class TranscriptScanner {
             try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
         }
 
-        print("✓ TranscriptScanner: Migrated \(migrated) transcripts")
+        AppLogger.pipeline.info("TranscriptScanner migration complete", ["migrated": "\(migrated)"])
         progressHandler?(1.0, "Complete! Migrated \(migrated) transcripts.")
 
         return migrated
@@ -97,7 +97,7 @@ final class TranscriptScanner {
     /// Returns tuple of (metadata, actionItemsCount) or nil if parsing failed
     private static func parseTranscriptFile(_ fileURL: URL) -> (RecordingMetadata, Int)? {
         guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else {
-            print("⚠️ TranscriptScanner: Could not read file: \(fileURL.lastPathComponent)")
+            AppLogger.pipeline.warning("TranscriptScanner could not read file", ["file": fileURL.lastPathComponent])
             return nil
         }
 

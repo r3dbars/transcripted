@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Simplified dashboard view - stats and recent transcripts only
-/// No gamification, no achievements, no heat maps - just what matters
+/// Clean dashboard view — stats and recent transcripts
+/// No staggered animations, simple layout
 @available(macOS 26.0, *)
 struct DashboardView: View {
 
@@ -9,7 +9,6 @@ struct DashboardView: View {
     var failedTranscriptionManager: FailedTranscriptionManager?
     var taskManager: TranscriptionTaskManager?
 
-    @State private var viewAppeared = false
     @State private var retryingIds: Set<UUID> = []
 
     var body: some View {
@@ -17,44 +16,31 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: Spacing.lg) {
                 // Header with Open Folder button
                 headerSection
-                    .staggeredAppear(delay: 0)
 
                 // Simple stats row
                 statsSection
-                    .staggeredAppear(delay: 0.1)
 
                 // Failed transcriptions (only show if there are failures)
                 if let manager = failedTranscriptionManager, manager.count > 0 {
                     failedTranscriptionsSection
-                        .staggeredAppear(delay: 0.15)
                 }
 
                 // Recent transcripts
                 RecentTranscriptsView(transcripts: statsService.recentTranscripts)
                     .frame(maxWidth: .infinity)
-                    .staggeredAppear(delay: 0.2)
             }
             .padding(Spacing.lg)
         }
         .background(Color.panelCharcoal)
-        .onAppear {
-            viewAppeared = true
-        }
     }
 
     // MARK: - Header
 
     private var headerSection: some View {
         HStack {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Dashboard")
-                    .font(.headingLarge)
-                    .foregroundColor(.panelTextPrimary)
-
-                Text("Your transcription activity")
-                    .font(.bodySmall)
-                    .foregroundColor(.panelTextSecondary)
-            }
+            Text("Dashboard")
+                .font(.headingLarge)
+                .foregroundColor(.panelTextPrimary)
 
             Spacer()
 
@@ -98,12 +84,10 @@ struct DashboardView: View {
 
     private var statsSection: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            // Period label
-            Text("Last 30 days")
-                .font(.caption)
+            Text("LAST 30 DAYS")
+                .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.panelTextMuted)
-                .textCase(.uppercase)
-                .tracking(1)
+                .tracking(0.8)
 
             // Simple inline stats
             HStack(spacing: Spacing.lg) {
@@ -112,7 +96,7 @@ struct DashboardView: View {
                     label: "meetings"
                 )
 
-                Text("•")
+                Text("|")
                     .foregroundColor(.panelTextMuted)
 
                 statItem(
@@ -120,7 +104,7 @@ struct DashboardView: View {
                     label: "recorded"
                 )
 
-                Text("•")
+                Text("|")
                     .foregroundColor(.panelTextMuted)
 
                 statItem(
@@ -133,6 +117,10 @@ struct DashboardView: View {
             .background {
                 RoundedRectangle(cornerRadius: Radius.lawsCard)
                     .fill(Color.panelCharcoalElevated)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: Radius.lawsCard)
+                    .stroke(Color.panelCharcoalSurface, lineWidth: 1)
             }
         }
     }
@@ -170,7 +158,6 @@ struct DashboardView: View {
 
                     Spacer()
 
-                    // Retry all button
                     if taskManager != nil, !manager.failedTranscriptions.isEmpty {
                         Button {
                             retryAllFailed()
@@ -188,13 +175,11 @@ struct DashboardView: View {
                     }
                 }
 
-                // Failed items list
                 VStack(spacing: Spacing.xs) {
                     ForEach(manager.failedTranscriptions.prefix(3)) { failed in
                         failedTranscriptionRow(failed)
                     }
 
-                    // Show "and X more" if there are more than 3
                     if manager.count > 3 {
                         Text("and \(manager.count - 3) more...")
                             .font(.caption)
@@ -218,7 +203,6 @@ struct DashboardView: View {
 
     private func failedTranscriptionRow(_ failed: FailedTranscription) -> some View {
         HStack(spacing: Spacing.sm) {
-            // Timestamp
             VStack(alignment: .leading, spacing: 2) {
                 Text(failed.formattedTimestamp)
                     .font(.bodySmall)
@@ -232,7 +216,6 @@ struct DashboardView: View {
 
             Spacer()
 
-            // Retry button
             if retryingIds.contains(failed.id) {
                 ProgressView()
                     .scaleEffect(0.6)
@@ -249,7 +232,6 @@ struct DashboardView: View {
                 .help("Retry this transcription")
             }
 
-            // Delete button
             Button {
                 failedTranscriptionManager?.deleteFailedTranscription(id: failed.id)
             } label: {
@@ -267,7 +249,7 @@ struct DashboardView: View {
         retryingIds.insert(id)
 
         Task {
-            let success = await taskManager?.retryFailedTranscription(failedId: id) ?? false
+            let _ = await taskManager?.retryFailedTranscription(failedId: id) ?? false
 
             await MainActor.run {
                 retryingIds.remove(id)

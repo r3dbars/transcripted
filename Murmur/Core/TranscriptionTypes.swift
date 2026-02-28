@@ -11,6 +11,7 @@ struct TranscriptionUtterance {
     let channel: Int            // 0 = mic, 1 = system
     let speakerId: Int          // from Sortformer (0 for mic unless multiple mic speakers)
     let persistentSpeakerId: UUID?  // from SpeakerDatabase (nil if not matched)
+    let matchSimilarity: Double?    // cosine similarity from SpeakerDatabase match (nil if new/unmatched)
     let transcript: String      // text from Parakeet
 }
 

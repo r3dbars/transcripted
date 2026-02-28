@@ -1,7 +1,9 @@
 import SwiftUI
+import AVFoundation
+import AppKit
 
-/// Main container view for the settings window
-/// Displays sidebar navigation on the left and content area on the right
+/// Single-page settings view — no sidebar, no tabs
+/// Top bar → Stats → Voice Fingerprints (collapsible) → Preferences
 @available(macOS 26.0, *)
 struct SettingsContainerView: View {
 
@@ -10,31 +12,76 @@ struct SettingsContainerView: View {
     var failedTranscriptionManager: FailedTranscriptionManager?
     var taskManager: TranscriptionTaskManager?
 
-    var body: some View {
-        HStack(spacing: 0) {
-            // Sidebar
-            SettingsSidebarView(
-                selectedTab: $navigationState.selectedTab,
-                statsService: statsService
-            )
-            .frame(width: 180)
+    // MARK: - Preferences State
 
-            // Divider
+    @AppStorage("transcriptSaveLocation") private var saveLocation: String = ""
+    @AppStorage("userName") private var userName: String = ""
+    @AppStorage("useAuroraRecording") private var useAuroraRecording: Bool = false
+    @AppStorage("taskService") private var taskService: String = "reminders"
+    @AppStorage("todoistAPIKey") private var todoistAPIKey: String = ""
+    @AppStorage("geminiAPIKey") private var geminiAPIKey: String = ""
+    @AppStorage("remindersListId") private var remindersListId: String = ""
+
+    @State private var enableSounds: Bool = true
+    @State private var isVerifyingTodoist = false
+    @State private var isVerifyingGemini = false
+    @State private var todoistVerified: Bool?
+    @State private var geminiVerified: Bool?
+    @State private var availableRemindersLists: [RemindersList] = []
+    @State private var isLoadingRemindersLists = false
+
+    // Speakers
+    @State private var speakersExpanded = false
+    @State private var speakers: [SpeakerProfile] = []
+    @State private var editingId: UUID?
+    @State private var editingName: String = ""
+    @State private var deleteConfirmId: UUID?
+
+    // Failed transcriptions
+    @State private var retryingIds: Set<UUID> = []
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Top bar
+            SettingsTopBar()
+
             Rectangle()
                 .fill(Color.panelCharcoalSurface)
-                .frame(width: 1)
+                .frame(height: 1)
 
-            // Content area
-            ZStack {
-                Color.panelCharcoal
-                    .ignoresSafeArea()
+            // Single scrolling page
+            ScrollView {
+                VStack(alignment: .leading, spacing: Spacing.xl) {
+                    // Stats + Open Folder
+                    statsSection
 
-                contentView
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Failed transcriptions (only if any)
+                    if let manager = failedTranscriptionManager, manager.count > 0 {
+                        failedTranscriptionsSection
+                    }
+
+                    // Voice Fingerprints (collapsible)
+                    speakersSection
+
+                    // Preferences
+                    profileSection
+
+                    appearanceSection
+
+                    taskIntegrationSection
+
+                    aiServicesSection
+                }
+                .padding(Spacing.lg)
+                .padding(.bottom, Spacing.xl)
             }
         }
-        .frame(minWidth: 700, maxWidth: 1200, minHeight: 500, maxHeight: 900)
+        .frame(minWidth: 500, maxWidth: 800, minHeight: 400, maxHeight: 900)
         .background(Color.panelCharcoal)
+        .onAppear {
+            enableSounds = UserDefaults.standard.bool(forKey: "enableUISounds") != false
+            speakers = SpeakerDatabase.shared.allSpeakers()
+        }
         // Migration overlay
         .overlay {
             if navigationState.isMigrating {
@@ -44,7 +91,6 @@ struct SettingsContainerView: View {
                 )
             }
         }
-        // Migration complete alert
         .alert("Migration Complete", isPresented: $navigationState.showMigrationComplete) {
             Button("OK") {
                 navigationState.showMigrationComplete = false
@@ -54,20 +100,764 @@ struct SettingsContainerView: View {
         }
     }
 
-    @ViewBuilder
-    private var contentView: some View {
-        switch navigationState.selectedTab {
-        case .dashboard:
-            DashboardView(
-                statsService: statsService,
-                failedTranscriptionManager: failedTranscriptionManager,
-                taskManager: taskManager
-            )
-            .transition(.opacity.combined(with: .move(edge: .trailing)))
+    // MARK: - Stats Section
 
-        case .preferences:
-            PreferencesView()
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
+    private var statsSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("ALL TIME")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.panelTextMuted)
+                .tracking(0.8)
+
+            HStack(spacing: Spacing.md) {
+                HStack(spacing: Spacing.lg) {
+                    statItem(
+                        value: "\(statsService.totalRecordings)",
+                        label: "meetings"
+                    )
+
+                    Text("|")
+                        .foregroundColor(.panelTextMuted)
+
+                    statItem(
+                        value: statsService.formattedTotalHours,
+                        label: "recorded"
+                    )
+
+                    Text("|")
+                        .foregroundColor(.panelTextMuted)
+
+                    statItem(
+                        value: "\(statsService.totalActionItems)",
+                        label: "tasks"
+                    )
+                }
+
+                Spacer()
+
+                // Open folder + Refresh
+                HStack(spacing: Spacing.sm) {
+                    Button {
+                        openTranscriptsFolder()
+                    } label: {
+                        HStack(spacing: Spacing.xs) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 12))
+                            Text("Open Folder")
+                                .font(.bodySmall)
+                        }
+                        .foregroundColor(.panelTextSecondary)
+                        .padding(.horizontal, Spacing.sm)
+                        .padding(.vertical, Spacing.xs)
+                        .background {
+                            RoundedRectangle(cornerRadius: Radius.lawsButton)
+                                .fill(Color.panelCharcoalSurface)
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        Task { await statsService.refreshStats() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 13))
+                            .foregroundColor(.panelTextMuted)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(Spacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
+                    .fill(Color.panelCharcoalElevated)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
+                    .stroke(Color.panelCharcoalSurface, lineWidth: 1)
+            }
+        }
+    }
+
+    private func statItem(value: String, label: String) -> some View {
+        HStack(spacing: Spacing.xs) {
+            Text(value)
+                .font(.headingMedium)
+                .foregroundColor(.panelTextPrimary)
+
+            Text(label)
+                .font(.bodySmall)
+                .foregroundColor(.panelTextSecondary)
+        }
+    }
+
+    // MARK: - Failed Transcriptions
+
+    @ViewBuilder
+    private var failedTranscriptionsSection: some View {
+        if let manager = failedTranscriptionManager {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.warningAmber)
+                        Text("Failed Transcriptions")
+                            .font(.bodyMedium)
+                            .foregroundColor(.panelTextPrimary)
+                        Text("(\(manager.count))")
+                            .font(.bodySmall)
+                            .foregroundColor(.panelTextMuted)
+                    }
+
+                    Spacer()
+
+                    if taskManager != nil, !manager.failedTranscriptions.isEmpty {
+                        Button {
+                            for failed in manager.failedTranscriptions {
+                                retryFailed(failed.id)
+                            }
+                        } label: {
+                            HStack(spacing: Spacing.xs) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 11))
+                                Text("Retry All")
+                                    .font(.caption)
+                            }
+                            .foregroundColor(.accentBlueLight)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!retryingIds.isEmpty)
+                    }
+                }
+
+                VStack(spacing: Spacing.xs) {
+                    ForEach(manager.failedTranscriptions.prefix(3)) { failed in
+                        HStack(spacing: Spacing.sm) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(failed.formattedTimestamp)
+                                    .font(.bodySmall)
+                                    .foregroundColor(.panelTextPrimary)
+                                Text(failed.shortErrorMessage)
+                                    .font(.caption)
+                                    .foregroundColor(.panelTextMuted)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            if retryingIds.contains(failed.id) {
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                                    .frame(width: 20, height: 20)
+                            } else if taskManager != nil {
+                                Button {
+                                    retryFailed(failed.id)
+                                } label: {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.accentBlueLight)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            Button {
+                                failedTranscriptionManager?.deleteFailedTranscription(id: failed.id)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.panelTextMuted)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.vertical, Spacing.xs)
+                    }
+
+                    if manager.count > 3 {
+                        Text("and \(manager.count - 3) more...")
+                            .font(.caption)
+                            .foregroundColor(.panelTextMuted)
+                    }
+                }
+                .padding(Spacing.md)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    RoundedRectangle(cornerRadius: Radius.lawsCard)
+                        .fill(Color.panelCharcoalElevated)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: Radius.lawsCard)
+                                .stroke(Color.warningAmber.opacity(0.3), lineWidth: 1)
+                        }
+                }
+            }
+        }
+    }
+
+    private func retryFailed(_ id: UUID) {
+        retryingIds.insert(id)
+        Task {
+            let _ = await taskManager?.retryFailedTranscription(failedId: id) ?? false
+            await MainActor.run { retryingIds.remove(id) }
+        }
+    }
+
+    // MARK: - Speakers Section (Collapsible)
+
+    private var speakersSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("VOICE FINGERPRINTS")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.panelTextMuted)
+                .tracking(0.8)
+
+            VStack(alignment: .leading, spacing: 0) {
+                // Collapsible header
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        speakersExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: Spacing.sm) {
+                        Image(systemName: speakersExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.panelTextMuted)
+                            .frame(width: 16)
+
+                        Text("\(speakers.count) speaker\(speakers.count == 1 ? "" : "s")")
+                            .font(.bodyMedium)
+                            .foregroundColor(.panelTextPrimary)
+
+                        Spacer()
+
+                        Text("Tap to manage")
+                            .font(.caption)
+                            .foregroundColor(.panelTextMuted)
+                    }
+                    .padding(Spacing.md)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                // Expanded speaker list
+                if speakersExpanded {
+                    Rectangle()
+                        .fill(Color.panelCharcoalSurface)
+                        .frame(height: 1)
+                        .padding(.horizontal, Spacing.md)
+
+                    VStack(spacing: Spacing.xs) {
+                        ForEach(speakers) { speaker in
+                            inlineSpeakerRow(speaker)
+                        }
+
+                        if speakers.isEmpty {
+                            Text("No speakers yet — record a call with system audio to start")
+                                .font(.caption)
+                                .foregroundColor(.panelTextMuted)
+                                .padding(.vertical, Spacing.md)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.bottom, Spacing.md)
+                    .padding(.top, Spacing.sm)
+                }
+            }
+            .background {
+                RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
+                    .fill(Color.panelCharcoalElevated)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: Radius.lawsCard, style: .continuous)
+                    .stroke(Color.panelCharcoalSurface, lineWidth: 1)
+            }
+        }
+    }
+
+    private func inlineSpeakerRow(_ speaker: SpeakerProfile) -> some View {
+        HStack(spacing: Spacing.sm) {
+            // Simple avatar
+            ZStack {
+                Circle()
+                    .fill(Color.panelCharcoalSurface)
+                    .frame(width: 28, height: 28)
+
+                Text(speaker.displayName?.first.map { String($0).uppercased() } ?? "?")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.panelTextSecondary)
+            }
+
+            // Name
+            if editingId == speaker.id {
+                TextField("Name", text: $editingName, onCommit: {
+                    commitNameEdit(for: speaker.id)
+                })
+                .textFieldStyle(.plain)
+                .font(.bodySmall)
+                .foregroundColor(.panelTextPrimary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.panelCharcoalSurface)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(Color.accentBlue, lineWidth: 1)
+                        }
+                }
+                .onExitCommand { editingId = nil }
+            } else {
+                Text(speaker.displayName ?? "Unknown")
+                    .font(.bodySmall)
+                    .foregroundColor(speaker.displayName != nil ? .panelTextPrimary : .panelTextMuted)
+                    .italic(speaker.displayName == nil)
+                    .onTapGesture {
+                        editingName = speaker.displayName ?? ""
+                        editingId = speaker.id
+                    }
+            }
+
+            // Meta
+            Text("\(speaker.callCount) call\(speaker.callCount == 1 ? "" : "s")")
+                .font(.caption)
+                .foregroundColor(.panelTextMuted)
+
+            Spacer()
+
+            // Actions
+            if deleteConfirmId == speaker.id {
+                HStack(spacing: Spacing.xs) {
+                    Text("Delete?")
+                        .font(.caption)
+                        .foregroundColor(.errorRed)
+                    Button("Yes") {
+                        SpeakerDatabase.shared.deleteSpeaker(id: speaker.id)
+                        deleteConfirmId = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            speakers = SpeakerDatabase.shared.allSpeakers()
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundColor(.errorRed)
+                    .buttonStyle(.plain)
+                    Button("No") { deleteConfirmId = nil }
+                        .font(.caption)
+                        .buttonStyle(.plain)
+                }
+            } else {
+                HStack(spacing: Spacing.xs) {
+                    if editingId != speaker.id {
+                        Button {
+                            editingName = speaker.displayName ?? ""
+                            editingId = speaker.id
+                        } label: {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 11))
+                                .foregroundColor(.panelTextMuted)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Button {
+                        deleteConfirmId = speaker.id
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 11))
+                            .foregroundColor(.panelTextMuted)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.vertical, Spacing.xs)
+    }
+
+    private func commitNameEdit(for id: UUID) {
+        let trimmed = editingName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            editingId = nil
+            return
+        }
+        SpeakerDatabase.shared.setDisplayName(id: id, name: trimmed, source: "user_manual")
+        editingId = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            speakers = SpeakerDatabase.shared.allSpeakers()
+        }
+    }
+
+    // MARK: - Profile Section
+
+    private var profileSection: some View {
+        SettingsSectionCard(icon: "person.fill", title: "Profile") {
+            VStack(spacing: Spacing.md) {
+                SettingsTextField(
+                    title: "Your Name",
+                    placeholder: "Enter your name",
+                    text: $userName
+                )
+
+                Divider().background(Color.panelCharcoalSurface)
+
+                SettingsPathRow(
+                    title: "Save Location",
+                    path: saveLocation,
+                    defaultPath: "~/Documents/Transcripted/",
+                    onChoose: chooseSaveFolder
+                )
+            }
+        }
+    }
+
+    // MARK: - Appearance Section
+
+    private var appearanceSection: some View {
+        SettingsSectionCard(icon: "paintbrush.fill", title: "Appearance") {
+            VStack(spacing: Spacing.md) {
+                SettingsToggleRow(
+                    title: "Aurora Recording Indicator",
+                    description: "Flowing color animation during recording",
+                    isOn: $useAuroraRecording
+                )
+
+                Divider().background(Color.panelCharcoalSurface)
+
+                SettingsToggleRow(
+                    title: "Sound Feedback",
+                    description: "Play sounds when recording starts/stops",
+                    isOn: Binding(
+                        get: { enableSounds },
+                        set: { newValue in
+                            enableSounds = newValue
+                            UserDefaults.standard.set(newValue, forKey: "enableUISounds")
+                        }
+                    )
+                )
+            }
+        }
+    }
+
+    // MARK: - Task Integration Section
+
+    private var taskIntegrationSection: some View {
+        SettingsSectionCard(icon: "checkmark.circle.fill", title: "Task Service") {
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                taskServicePicker
+
+                if taskService == "reminders" {
+                    Divider().background(Color.panelCharcoalSurface)
+                    remindersListPicker
+                }
+
+                if taskService == "todoist" {
+                    Divider().background(Color.panelCharcoalSurface)
+
+                    SettingsTextField(
+                        title: "Todoist API Key",
+                        placeholder: "Enter your Todoist API key",
+                        text: $todoistAPIKey,
+                        isSecure: true,
+                        onVerify: verifyTodoist
+                    )
+
+                    if let verified = todoistVerified {
+                        verificationBadge(verified: verified, isVerifying: isVerifyingTodoist)
+                    }
+
+                    Link("Get your API key from Todoist", destination: URL(string: "https://todoist.com/app/settings/integrations")!)
+                        .font(.caption)
+                        .foregroundColor(.accentBlueLight)
+                }
+            }
+        }
+    }
+
+    private var taskServicePicker: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Task Destination")
+                .font(.bodyMedium)
+                .foregroundColor(.panelTextPrimary)
+
+            HStack(spacing: Spacing.md) {
+                radioOption("reminders", icon: "bell.badge.fill", label: "Apple Reminders")
+                radioOption("todoist", icon: "checklist", label: "Todoist")
+            }
+        }
+    }
+
+    private func radioOption(_ value: String, icon: String, label: String) -> some View {
+        Button {
+            taskService = value
+        } label: {
+            HStack(spacing: Spacing.sm) {
+                ZStack {
+                    Circle()
+                        .stroke(taskService == value ? Color.recordingCoral : Color.panelTextMuted, lineWidth: 2)
+                        .frame(width: 18, height: 18)
+                    if taskService == value {
+                        Circle()
+                            .fill(Color.recordingCoral)
+                            .frame(width: 10, height: 10)
+                    }
+                }
+                Image(systemName: icon).foregroundColor(.panelTextSecondary)
+                Text(label).font(.bodySmall).foregroundColor(.panelTextPrimary)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Reminders List Picker
+
+    private var remindersListPicker: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Reminders List")
+                .font(.bodyMedium)
+                .foregroundColor(.panelTextPrimary)
+
+            if isLoadingRemindersLists {
+                HStack(spacing: Spacing.xs) {
+                    ProgressView().scaleEffect(0.7)
+                    Text("Loading lists...")
+                        .font(.caption)
+                        .foregroundColor(.panelTextMuted)
+                }
+            } else if availableRemindersLists.isEmpty {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundColor(.warningAmber)
+                    Text("Grant Reminders access to see your lists")
+                        .font(.caption)
+                        .foregroundColor(.panelTextMuted)
+                }
+                .onAppear { loadRemindersLists() }
+            } else {
+                Picker("", selection: $remindersListId) {
+                    Text("Default List").tag("")
+                    ForEach(availableRemindersLists) { list in
+                        HStack {
+                            Circle()
+                                .fill(list.color != nil ? Color(cgColor: list.color!) : Color.gray)
+                                .frame(width: 8, height: 8)
+                            Text(list.title + (list.isDefault ? " (System Default)" : ""))
+                        }
+                        .tag(list.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(.panelTextPrimary)
+            }
+
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.attentionGreen)
+                Text(selectedRemindersListText)
+                    .font(.caption)
+                    .foregroundColor(.panelTextSecondary)
+            }
+        }
+        .onAppear { loadRemindersLists() }
+    }
+
+    private var selectedRemindersListText: String {
+        if remindersListId.isEmpty {
+            return "Tasks go to your default Reminders list"
+        }
+        if let list = availableRemindersLists.first(where: { $0.id == remindersListId }) {
+            return "Tasks go to \"\(list.title)\""
+        }
+        return "Tasks go to Apple Reminders"
+    }
+
+    private func loadRemindersLists() {
+        guard !isLoadingRemindersLists else { return }
+        isLoadingRemindersLists = true
+        Task {
+            let service = RemindersService()
+            let hasAccess = await service.requestAccess()
+            await MainActor.run {
+                availableRemindersLists = hasAccess ? service.getRemindersLists() : []
+                isLoadingRemindersLists = false
+            }
+        }
+    }
+
+    // MARK: - AI Services Section
+
+    private var aiServicesSection: some View {
+        SettingsSectionCard(icon: "sparkles", title: "AI Services") {
+            VStack(spacing: Spacing.lg) {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    Text("Transcription Engine")
+                        .font(.bodyMedium)
+                        .foregroundColor(.panelTextPrimary)
+
+                    HStack(spacing: Spacing.sm) {
+                        Image(systemName: "cpu.fill").foregroundColor(.attentionGreen)
+                        Text("Parakeet TDT V3").font(.bodySmall).foregroundColor(.panelTextPrimary)
+                        Spacer()
+                        localBadge
+                    }
+
+                    HStack(spacing: Spacing.sm) {
+                        Image(systemName: "person.2.fill").foregroundColor(.attentionGreen)
+                        Text("Sortformer Diarization").font(.bodySmall).foregroundColor(.panelTextPrimary)
+                        Spacer()
+                        localBadge
+                    }
+
+                    Text("100% local transcription. No cloud API, no internet, no cost.")
+                        .font(.caption)
+                        .foregroundColor(.panelTextMuted)
+                        .padding(.top, Spacing.xs)
+                }
+
+                Divider().background(Color.panelCharcoalSurface)
+
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    SettingsTextField(
+                        title: "Gemini API Key",
+                        placeholder: "Enter your Gemini API key",
+                        text: $geminiAPIKey,
+                        isSecure: true,
+                        onVerify: verifyGemini
+                    )
+
+                    if let verified = geminiVerified {
+                        verificationBadge(verified: verified, isVerifying: isVerifyingGemini)
+                    }
+
+                    Text("Used for speaker identification and action item extraction")
+                        .font(.caption)
+                        .foregroundColor(.panelTextMuted)
+
+                    Link("Get your API key from Google AI Studio", destination: URL(string: "https://aistudio.google.com/app/apikey")!)
+                        .font(.caption)
+                        .foregroundColor(.accentBlueLight)
+                }
+            }
+        }
+    }
+
+    private var localBadge: some View {
+        Text("Local")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundColor(.panelTextMuted)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(Color.panelCharcoalSurface)
+            .cornerRadius(4)
+    }
+
+    @ViewBuilder
+    private func verificationBadge(verified: Bool, isVerifying: Bool) -> some View {
+        HStack(spacing: Spacing.xs) {
+            if isVerifying {
+                ProgressView().scaleEffect(0.7)
+                Text("Verifying...").font(.caption).foregroundColor(.panelTextMuted)
+            } else if verified {
+                Image(systemName: "checkmark.circle.fill").foregroundColor(.attentionGreen)
+                Text("Verified").font(.caption).foregroundColor(.attentionGreen)
+            } else {
+                Image(systemName: "xmark.circle.fill").foregroundColor(.errorCoral)
+                Text("Invalid key").font(.caption).foregroundColor(.errorCoral)
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    private func chooseSaveFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Choose"
+        panel.message = "Select where to save your transcripts"
+        if let url = URL(string: saveLocation.isEmpty ? TranscriptSaver.defaultSaveDirectory.path : saveLocation) {
+            panel.directoryURL = url
+        }
+        if panel.runModal() == .OK, let url = panel.url {
+            saveLocation = url.path
+        }
+    }
+
+    private func verifyTodoist() {
+        isVerifyingTodoist = true
+        todoistVerified = nil
+        Task {
+            let verified = await TodoistService.validateAPIKey(todoistAPIKey)
+            await MainActor.run {
+                todoistVerified = verified
+                isVerifyingTodoist = false
+            }
+        }
+    }
+
+    private func verifyGemini() {
+        isVerifyingGemini = true
+        geminiVerified = nil
+        Task {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            await MainActor.run {
+                geminiVerified = geminiAPIKey.hasPrefix("AI") && geminiAPIKey.count > 30
+                isVerifyingGemini = false
+            }
+        }
+    }
+
+    private func openTranscriptsFolder() {
+        let transcriptsFolder: URL
+        if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
+           !customPath.isEmpty {
+            transcriptsFolder = URL(fileURLWithPath: customPath)
+        } else {
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            transcriptsFolder = documentsPath.appendingPathComponent("Transcripted")
+        }
+        try? FileManager.default.createDirectory(at: transcriptsFolder, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(transcriptsFolder)
+    }
+}
+
+// MARK: - Top Bar with Branding
+
+@available(macOS 14.0, *)
+struct SettingsTopBar: View {
+
+    @State private var audioDeviceName: String = "Unknown"
+
+    var body: some View {
+        HStack(spacing: Spacing.sm) {
+            // Branding
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.recordingCoral)
+
+                Text("Transcripted")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.panelTextPrimary)
+            }
+
+            Spacer()
+
+            // Audio device
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "mic")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.panelTextMuted)
+
+                Text(audioDeviceName)
+                    .font(.system(size: 12))
+                    .foregroundColor(.panelTextSecondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, Spacing.lg)
+        .frame(height: 40)
+        .background(Color.panelCharcoal)
+        .onAppear {
+            if let device = AVCaptureDevice.default(for: .audio) {
+                audioDeviceName = device.localizedName
+            } else {
+                audioDeviceName = "No input device"
+            }
         }
     }
 }
@@ -81,49 +871,37 @@ struct MigrationOverlayView: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.7)
-                .ignoresSafeArea()
+            Color.black.opacity(0.7).ignoresSafeArea()
 
             VStack(spacing: Spacing.lg) {
-                // Icon
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.system(size: 48))
                     .foregroundColor(.recordingCoral)
-                    .rotationEffect(.degrees(progress * 360))
-                    .animation(.linear(duration: 1).repeatForever(autoreverses: false), value: progress)
 
-                // Title
                 Text("Importing Transcripts")
                     .font(.headingLarge)
                     .foregroundColor(.panelTextPrimary)
 
-                // Progress bar
                 VStack(spacing: Spacing.sm) {
                     GeometryReader { geometry in
                         ZStack(alignment: .leading) {
-                            // Background
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(Color.panelCharcoalSurface)
                                 .frame(height: 8)
-
-                            // Progress
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(Color.recordingCoral)
                                 .frame(width: geometry.size.width * progress, height: 8)
-                                .animation(.easeInOut(duration: 0.2), value: progress)
                         }
                     }
                     .frame(height: 8)
                     .frame(width: 300)
 
-                    // Status text
                     Text(status)
                         .font(.bodySmall)
                         .foregroundColor(.panelTextSecondary)
                         .lineLimit(1)
                 }
 
-                // Percentage
                 Text("\(Int(progress * 100))%")
                     .font(.headingMedium)
                     .foregroundColor(.panelTextMuted)
@@ -132,7 +910,6 @@ struct MigrationOverlayView: View {
             .background {
                 RoundedRectangle(cornerRadius: Radius.lawsCard)
                     .fill(Color.panelCharcoalElevated)
-                    .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
             }
         }
     }

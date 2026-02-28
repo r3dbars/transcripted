@@ -10,7 +10,7 @@ class Clipboard {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
-        print("✓ Copied: \"\(text.prefix(50))\(text.count > 50 ? "..." : "")\"")
+        AppLogger.pipeline.info("Copied to clipboard", ["preview": "\(text.prefix(50))\(text.count > 50 ? "..." : "")"])
         showNotification(text: text)
     }
 
@@ -27,7 +27,7 @@ class Clipboard {
 
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
-                print("⚠️ Notification failed: \(error.localizedDescription)")
+                AppLogger.pipeline.warning("Notification failed", ["error": error.localizedDescription])
             }
         }
     }

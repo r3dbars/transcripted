@@ -154,7 +154,7 @@ class Audio: ObservableObject {
         engine = AVAudioEngine()
         inputNode = engine?.inputNode
 
-        print("ℹ️ Using system default microphone")
+        AppLogger.audioMic.info("Using system default microphone")
 
         // Request microphone permission
         AVCaptureDevice.requestAccess(for: .audio) { granted in
@@ -186,7 +186,7 @@ class Audio: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             guard let self = self, self.isRecording else { return }
-            print("💤 System sleeping during recording - preparing for gap")
+            AppLogger.audio.info("System sleeping during recording - preparing for gap")
             self.sleepTimestamp = Date()
         }
 
@@ -196,7 +196,7 @@ class Audio: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             guard let self = self, self.isRecording else { return }
-            print("☀️ System waking - waiting for HAL stabilization")
+            AppLogger.audio.info("System waking - waiting for HAL stabilization")
 
             // Wait 500ms for audio subsystem to stabilize before continuing
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -210,7 +210,7 @@ class Audio: ObservableObject {
                         reason: "Sleep/wake"
                     )
                     self.recordingGaps.append(gap)
-                    print("📊 Recorded sleep/wake gap: \(gap.description)")
+                    AppLogger.audio.info("Recorded sleep/wake gap", ["gap": gap.description])
                 }
                 self.sleepTimestamp = nil
 
@@ -249,14 +249,14 @@ class Audio: ObservableObject {
 
     func start() {
         guard !isRecording else {
-            print("⚠️ Already recording, ignoring duplicate start request")
+            AppLogger.audio.warning("Already recording, ignoring duplicate start request")
             return
         }
 
         // Pre-flight validation checks
         let validationResult = RecordingValidator.validateRecordingConditions()
         guard validationResult.isValid else {
-            print("❌ Pre-flight check failed: \(validationResult.errorMessage ?? "Unknown error")")
+            AppLogger.audio.error("Pre-flight check failed", ["error": validationResult.errorMessage ?? "Unknown error"])
             error = validationResult.errorMessage
             return
         }
@@ -274,7 +274,7 @@ class Audio: ObservableObject {
         deviceSwitchCount = 0
         sleepTimestamp = nil
 
-        print("📝 Starting audio capture")
+        AppLogger.audio.info("Starting audio capture")
 
         Task {
             do {
@@ -298,7 +298,7 @@ class Audio: ObservableObject {
         // CRITICAL: Must use inputFormat(forBus: 1) to get ACTUAL hardware format
         // outputFormat(forBus: 0) returns the converter format, not hardware format
         let hardwareFormat = inputNode.inputFormat(forBus: 1)
-        print("🎤 Hardware format: \(hardwareFormat.sampleRate)Hz, \(hardwareFormat.channelCount)ch")
+        AppLogger.audioMic.info("Hardware format", ["sampleRate": "\(hardwareFormat.sampleRate)", "channels": "\(hardwareFormat.channelCount)"])
 
         guard hardwareFormat.sampleRate > 0 && hardwareFormat.channelCount > 0 else {
             throw NSError(domain: "Audio", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid input format"])
@@ -311,11 +311,11 @@ class Audio: ObservableObject {
         // CRITICAL: Create audio file BEFORE starting I/O proc to avoid CPU overload
         // Creating files in the audio callback causes HALC_ProxyIOContext::IOWorkLoop overload
         if let capture = systemAudioCapture as? SystemAudioCapture {
-            print("🎙️ System audio capture object exists, setting up...")
+            AppLogger.audioSystem.info("System audio capture object exists, setting up")
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
             let fileURL = documentsPath.appendingPathComponent("meeting_\(timestamp)_system.wav")
-            print("🎙️ System audio file URL: \(fileURL.lastPathComponent)")
+            AppLogger.audioSystem.info("System audio file URL", ["file": fileURL.lastPathComponent])
 
             DispatchQueue.main.async {
                 self.systemAudioFileURL = fileURL
@@ -323,11 +323,11 @@ class Audio: ObservableObject {
 
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let strongSelf = self else {
-                    print("❌ System audio setup: self is nil!")
+                    AppLogger.audioSystem.error("System audio setup: self is nil")
                     return
                 }
 
-                print("🎙️ Starting system audio capture on background thread...")
+                AppLogger.audioSystem.info("Starting system audio capture on background thread")
 
                 do {
                     // Step 1: Prepare the tap (creates aggregate device, gets format)
@@ -338,13 +338,13 @@ class Audio: ObservableObject {
                     guard let tapFormat = capture.audioFormat else {
                         throw NSError(domain: "Audio", code: 10, userInfo: [NSLocalizedDescriptionKey: "Failed to get tap format"])
                     }
-                    print("🔧 System audio format (reported): \(Int(tapFormat.sampleRate))Hz, \(tapFormat.channelCount)ch, interleaved=\(tapFormat.isInterleaved)")
+                    AppLogger.audioSystem.debug("System audio format (reported)", ["sampleRate": "\(Int(tapFormat.sampleRate))", "channels": "\(tapFormat.channelCount)", "interleaved": "\(tapFormat.isInterleaved)"])
 
                     // CRITICAL: CoreAudio process taps report 96kHz but actual audio data is 48kHz
                     // See MEMORY.md: "System audio: 48kHz stereo (tap claims 96kHz but actual rate is 48kHz)"
                     // Using the reported rate causes files to be half the expected duration
                     let actualSampleRate: Double = 48000.0
-                    print("🔧 System audio format (actual): \(Int(actualSampleRate))Hz (tap reports \(Int(tapFormat.sampleRate))Hz but data is 48kHz)")
+                    AppLogger.audioSystem.debug("System audio format (actual)", ["actualRate": "\(Int(actualSampleRate))", "reportedRate": "\(Int(tapFormat.sampleRate))"])
 
                     // Step 3: Create audio file BEFORE starting I/O proc (critical!)
                     let settings: [String: Any] = [
@@ -363,7 +363,7 @@ class Audio: ObservableObject {
                         commonFormat: .pcmFormatFloat32,
                         interleaved: tapFormat.isInterleaved
                     )
-                    print("✅ System audio file created BEFORE I/O proc: \(Int(actualSampleRate))Hz, \(tapFormat.channelCount)ch")
+                    AppLogger.audioSystem.info("System audio file created before I/O proc", ["sampleRate": "\(Int(actualSampleRate))", "channels": "\(tapFormat.channelCount)"])
 
                     // Step 4: Now start the I/O proc with a lightweight callback
                     // The file already exists, so callback only needs to copy+write
@@ -380,7 +380,7 @@ class Audio: ObservableObject {
                         // System audio uses bufferListNoCopy - memory is only valid during callback
                         guard let bufferCopy = self.deepCopyBuffer(systemBuffer) else {
                             if currentBufferCount <= 3 {
-                                print("⚠️ Failed to copy system audio buffer #\(currentBufferCount)")
+                                AppLogger.audioSystem.warning("Failed to copy system audio buffer", ["bufferNumber": "\(currentBufferCount)"])
                             }
                             return
                         }
@@ -388,7 +388,7 @@ class Audio: ObservableObject {
                         // Debug: Log format details on first few buffers
                         if currentBufferCount <= 3 {
                             let fmt = bufferCopy.format
-                            print("🔍 System buffer #\(currentBufferCount): \(Int(fmt.sampleRate))Hz, \(fmt.channelCount)ch, frames=\(bufferCopy.frameLength)")
+                            AppLogger.audioSystem.debug("System buffer", ["number": "\(currentBufferCount)", "sampleRate": "\(Int(fmt.sampleRate))", "channels": "\(fmt.channelCount)", "frames": "\(bufferCopy.frameLength)"])
                         }
 
                         // Dispatch file write to background queue (non-blocking)
@@ -399,15 +399,15 @@ class Audio: ObservableObject {
                                 try audioFile.write(from: bufferCopy)
                             } catch {
                                 if currentBufferCount <= 5 {
-                                    print("❌ System audio write #\(currentBufferCount) failed: \(error.localizedDescription)")
+                                    AppLogger.audioSystem.error("System audio write failed", ["bufferNumber": "\(currentBufferCount)", "error": error.localizedDescription])
                                 }
                             }
                         }
                     }
-                    print("✓ System audio capture started")
+                    AppLogger.audioSystem.info("System audio capture started")
 
                 } catch {
-                    print("⚠️ System audio failed: \(error.localizedDescription)")
+                    AppLogger.audioSystem.warning("System audio failed", ["error": error.localizedDescription])
                     DispatchQueue.main.async {
                         strongSelf.error = "System audio unavailable - recording mic only"
                     }
@@ -439,7 +439,7 @@ class Audio: ObservableObject {
             // Track channel count for manual downmix
             self.inputChannelCount = recordingFormat.channelCount
             if recordingFormat.channelCount > 1 {
-                print("🔄 Will manually downmix \(recordingFormat.channelCount)ch → mono")
+                AppLogger.audioMic.debug("Will manually downmix to mono", ["channels": "\(recordingFormat.channelCount)"])
             }
 
             // Save as mono WAV file
@@ -449,7 +449,7 @@ class Audio: ObservableObject {
                 commonFormat: monoFormat.commonFormat,
                 interleaved: monoFormat.isInterleaved
             )
-            print("✅ Mic audio: Saving as mono at \(recordingFormat.sampleRate)Hz")
+            AppLogger.audioMic.info("Saving as mono", ["sampleRate": "\(recordingFormat.sampleRate)"])
         } catch {
             throw NSError(domain: "Audio", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create mic audio file: \(error.localizedDescription)"])
         }
@@ -476,7 +476,7 @@ class Audio: ObservableObject {
                     if strongSelf.inputChannelCount > 1 {
                         // Manual downmix: average all channels to mono
                         guard let monoBuffer = strongSelf.manualDownmix(buffer: buffer, to: monoFormat) else {
-                            print("❌ Failed to downmix buffer")
+                            AppLogger.audioMic.error("Failed to downmix buffer")
                             return
                         }
                         try audioFile.write(from: monoBuffer)
@@ -485,7 +485,7 @@ class Audio: ObservableObject {
                         try audioFile.write(from: buffer)
                     }
                 } catch {
-                    print("❌ Mic audio write failed: \(error.localizedDescription)")
+                    AppLogger.audioMic.error("Write failed", ["error": error.localizedDescription])
                 }
             }
         }
@@ -509,7 +509,7 @@ class Audio: ObservableObject {
             return
         }
 
-        print("⏹️ Stopping audio capture")
+        AppLogger.audio.info("Stopping audio capture")
 
         // Stop audio engine FIRST (prevents new buffers from arriving)
         if engine.isRunning {
@@ -545,7 +545,7 @@ class Audio: ObservableObject {
         micAudioFileQueue.async { [weak self] in
             if self?.micAudioFile != nil {
                 self?.micAudioFile = nil
-                print("✓ Mic audio file closed: \(finalMicURL?.lastPathComponent ?? "unknown")")
+                AppLogger.audioMic.info("Audio file closed", ["file": finalMicURL?.lastPathComponent ?? "unknown"])
             }
             cleanupGroup.leave()
         }
@@ -554,7 +554,7 @@ class Audio: ObservableObject {
         systemAudioFileQueue.async { [weak self] in
             if self?.systemAudioFile != nil {
                 self?.systemAudioFile = nil
-                print("✓ System audio file closed: \(finalSystemURL?.lastPathComponent ?? "unknown")")
+                AppLogger.audioSystem.info("Audio file closed", ["file": finalSystemURL?.lastPathComponent ?? "unknown"])
             }
             cleanupGroup.leave()
         }
@@ -591,7 +591,7 @@ class Audio: ObservableObject {
 
             if timeSinceLastBuffer > 3.0 {
                 // Audio stopped → device likely changed
-                print("⚠️ Mic audio device disconnected or changed, switching to default...")
+                AppLogger.audioMic.warning("Audio device disconnected or changed, switching to default")
                 self.recoverFromDeviceChange()
             }
         }
@@ -606,7 +606,7 @@ class Audio: ObservableObject {
         // CRITICAL: Prevent concurrent recovery attempts
         // AVAudioEngine notifications can fire multiple times during rapid device changes
         guard !isMicRecovering else {
-            print("⚠️ Mic recovery already in progress, skipping duplicate request")
+            AppLogger.audioMic.warning("Recovery already in progress, skipping duplicate request")
             return
         }
         isMicRecovering = true
@@ -617,7 +617,7 @@ class Audio: ObservableObject {
         // Track device switch for health monitoring
         let switchStart = Date()
         deviceSwitchCount += 1
-        print("🔄 Recovering from device change (switch #\(deviceSwitchCount))...")
+        AppLogger.audioMic.debug("Recovering from device change", ["switchNumber": "\(deviceSwitchCount)"])
 
         // Stop engine (but keep recording flag true)
         inputNode.removeTap(onBus: 0)
@@ -629,7 +629,7 @@ class Audio: ObservableObject {
 
         // Get new device format
         guard let newInputNode = self.inputNode else {
-            print("❌ Failed to get input node after reset")
+            AppLogger.audioMic.error("Failed to get input node after reset")
             return
         }
 
@@ -640,13 +640,13 @@ class Audio: ObservableObject {
         // Get ACTUAL hardware format (not converter format)
         let recordingFormat = newInputNode.inputFormat(forBus: 1)
         let oldChannelCount = self.inputChannelCount
-        print("🎤 Switched to default device: \(recordingFormat.sampleRate)Hz, \(recordingFormat.channelCount)ch")
+        AppLogger.audioMic.info("Switched to default device", ["sampleRate": "\(recordingFormat.sampleRate)", "channels": "\(recordingFormat.channelCount)"])
 
         // ALWAYS update channel count for proper downmix handling
         // This was a bug: if only channel count changed (not sample rate), downmix wouldn't work
         self.inputChannelCount = recordingFormat.channelCount
         if recordingFormat.channelCount > 1 && oldChannelCount != recordingFormat.channelCount {
-            print("🔄 Recovery: Will manually downmix \(recordingFormat.channelCount)ch → mono")
+            AppLogger.audioMic.debug("Recovery: will manually downmix to mono", ["channels": "\(recordingFormat.channelCount)"])
         }
 
         // Check if we need to create a new file due to format change
@@ -656,7 +656,7 @@ class Audio: ObservableObject {
 
         if sampleRateChanged || channelCountChanged {
             let changeReason = sampleRateChanged ? "Sample rate" : "Channel count"
-            print("⚠️ \(changeReason) changed, closing old file and creating new segment")
+            AppLogger.audioMic.warning("Format changed, closing old file and creating new segment", ["reason": changeReason])
             micAudioFile = nil
 
             // Create new file segment as mono
@@ -672,7 +672,7 @@ class Audio: ObservableObject {
                     channels: 1,
                     interleaved: true
                 ) else {
-                    print("❌ Failed to create mono format for recovery")
+                    AppLogger.audioMic.error("Failed to create mono format for recovery")
                     return
                 }
                 self.monoOutputFormat = monoFormat
@@ -683,14 +683,14 @@ class Audio: ObservableObject {
                     commonFormat: monoFormat.commonFormat,
                     interleaved: monoFormat.isInterleaved
                 )
-                print("✅ Created recovery audio file: \(fileURL.lastPathComponent)")
+                AppLogger.audioMic.info("Created recovery audio file", ["file": fileURL.lastPathComponent])
 
                 // Update file URL reference
                 DispatchQueue.main.async {
                     self.micAudioFileURL = fileURL
                 }
             } catch {
-                print("❌ Failed to create recovery audio file: \(error.localizedDescription)")
+                AppLogger.audioMic.error("Failed to create recovery audio file", ["error": error.localizedDescription])
                 return
             }
         }
@@ -716,7 +716,7 @@ class Audio: ObservableObject {
                     if self.inputChannelCount > 1 {
                         // Manual downmix: average all channels to mono
                         guard let monoBuffer = self.manualDownmix(buffer: buffer, to: monoFormat) else {
-                            print("❌ Failed to downmix buffer")
+                            AppLogger.audioMic.error("Failed to downmix buffer")
                             return
                         }
                         try audioFile.write(from: monoBuffer)
@@ -725,7 +725,7 @@ class Audio: ObservableObject {
                         try audioFile.write(from: buffer)
                     }
                 } catch {
-                    print("❌ Mic audio write failed: \(error.localizedDescription)")
+                    AppLogger.audioMic.error("Write failed", ["error": error.localizedDescription])
                 }
             }
         }
@@ -755,9 +755,9 @@ class Audio: ObservableObject {
                 reason: "Device switch"
             )
             recordingGaps.append(gap)
-            print("✅ Device recovery complete (gap: \(gap.description)), recording continues")
+            AppLogger.audioMic.info("Device recovery complete, recording continues", ["gap": gap.description])
         } catch {
-            print("❌ Failed to restart engine: \(error.localizedDescription)")
+            AppLogger.audioMic.error("Failed to restart engine", ["error": error.localizedDescription])
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 self.error = "Failed to recover from device change"
@@ -944,7 +944,7 @@ class Audio: ObservableObject {
                     guard let self = self else { return }
                     if self.systemAudioStatus == .healthy {
                         self.systemAudioStatus = .silent
-                        print("⚠️ System audio: Silent for \(Int(silenceDuration))s")
+                        AppLogger.audioSystem.warning("System audio silent", ["duration": "\(Int(silenceDuration))s"])
                     }
                 }
             }

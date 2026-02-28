@@ -37,9 +37,9 @@ final class StatsDatabase {
 
     private func openDatabase() {
         if sqlite3_open(dbPath.path, &db) != SQLITE_OK {
-            print("❌ StatsDatabase: Failed to open database at \(dbPath.path)")
+            AppLogger.stats.error("Failed to open database", ["path": dbPath.path])
         } else {
-            print("✓ StatsDatabase: Opened at \(dbPath.path)")
+            AppLogger.stats.info("Opened database", ["path": dbPath.path])
         }
     }
 
@@ -98,7 +98,7 @@ final class StatsDatabase {
         var errorMessage: UnsafeMutablePointer<CChar>?
         if sqlite3_exec(db, sql, nil, nil, &errorMessage) != SQLITE_OK {
             if let error = errorMessage {
-                print("❌ StatsDatabase SQL Error: \(String(cString: error))")
+                AppLogger.stats.error("SQL error", ["message": String(cString: error)])
                 sqlite3_free(errorMessage)
             }
         }
@@ -145,7 +145,7 @@ final class StatsDatabase {
             sqlite3_bind_text(statement, 10, (createdAt as NSString).utf8String, -1, nil)
 
             if sqlite3_step(statement) != SQLITE_DONE {
-                print("❌ StatsDatabase: Failed to insert recording")
+                AppLogger.stats.error("Failed to insert recording")
             }
         }
 
@@ -292,7 +292,7 @@ final class StatsDatabase {
                 sqlite3_bind_text(statement, 8, (createdAt as NSString).utf8String, -1, nil)
 
                 if sqlite3_step(statement) != SQLITE_DONE {
-                    print("❌ StatsDatabase: Failed to insert action item")
+                    AppLogger.stats.error("Failed to insert action item")
                 }
             }
 
@@ -380,7 +380,7 @@ final class StatsDatabase {
             sqlite3_bind_int(statement, 3, Int32(durationDelta))
 
             if sqlite3_step(statement) != SQLITE_DONE {
-                print("❌ StatsDatabase: Failed to update daily activity")
+                AppLogger.stats.error("Failed to update daily activity")
             }
         }
 
@@ -408,7 +408,7 @@ final class StatsDatabase {
             sqlite3_bind_int(statement, 3, Int32(count))
 
             if sqlite3_step(statement) != SQLITE_DONE {
-                print("❌ StatsDatabase: Failed to update daily activity action items")
+                AppLogger.stats.error("Failed to update daily activity action items")
             }
         }
 
@@ -616,7 +616,7 @@ final class StatsDatabase {
         executeSQL("DELETE FROM action_items;")
         executeSQL("DELETE FROM recordings;")
         executeSQL("DELETE FROM daily_activity;")
-        print("✓ StatsDatabase: Cleared all data")
+        AppLogger.stats.info("Cleared all data")
     }
 }
 

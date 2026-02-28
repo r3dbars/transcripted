@@ -252,6 +252,9 @@ Timeline entries: `[MM:SS] [Mic/SysAudio/Speaker X] Text`
 ```
 Murmur/
 ├── Core/
+│   ├── Logging/
+│   │   ├── AppLogger.swift        # Unified logging (os.Logger + JSON Lines file)
+│   │   └── FileLogger.swift       # Rolling JSON Lines logger at ~/Library/Logs/
 │   ├── Audio.swift                # Microphone capture via AVAudioEngine
 │   ├── SystemAudioCapture.swift   # System audio via CoreAudio process taps
 │   ├── Transcription.swift        # Local transcription via Parakeet + Sortformer
@@ -327,4 +330,63 @@ Murmur/
 │   └── FailedTranscriptionsView.swift  # Retry queue management UI
 ├── TranscriptedApp.swift          # App entry point (AppDelegate pattern)
 └── Transcripted.entitlements
+```
+
+## Logging
+
+**Log file:** `~/Library/Logs/Transcripted/app.jsonl`
+**Format:** JSON Lines (one JSON object per line)
+**Max entries:** 2000 (rolling, trims oldest 500 when full)
+**Read logs:** `Read ~/Library/Logs/Transcripted/app.jsonl`
+**Filter by subsystem:** `Grep` for `"s":"audio.mic"` etc.
+
+**Subsystems:**
+
+| Subsystem | Covers |
+|-----------|--------|
+| `audio` | General audio start/stop, sleep/wake |
+| `audio.mic` | Mic capture, device switches, recovery |
+| `audio.system` | System audio tap, buffers, device changes |
+| `transcription` | Parakeet/Sortformer model loading, STT/diarization |
+| `pipeline` | Task lifecycle, saving, file management, retries |
+| `speaker-db` | Speaker matching, voice embeddings, merges |
+| `action-items` | Gemini extraction, review, task delivery |
+| `services` | Reminders/Todoist API calls |
+| `ui` | Pill state transitions, UI events |
+| `stats` | Recording statistics, database operations |
+| `app` | App lifecycle, model initialization |
+
+**For ANY runtime issue: Read the log file first.**
+
+## Agent Task Routing
+
+Read the component CLAUDE.md in the relevant folder FIRST:
+
+| Issue domain | Read first |
+|-------------|------------|
+| Audio/recording issues | `Murmur/Core/CLAUDE.md` |
+| Transcription/STT issues | `Murmur/Services/CLAUDE.md` |
+| Speaker ID issues | `Murmur/Services/CLAUDE.md` |
+| Pipeline/saving issues | `Murmur/Core/CLAUDE.md` |
+| UI/settings issues | `Murmur/UI/CLAUDE.md` |
+| Floating pill issues | `Murmur/UI/FloatingPanel/CLAUDE.md` |
+| Design system changes | `Murmur/Design/CLAUDE.md` |
+| Onboarding flow | `Murmur/Onboarding/CLAUDE.md` |
+
+## Component Dependencies
+
+```
+TranscriptedApp.swift (entry point)
+├── Core/Audio.swift + Core/SystemAudioCapture.swift
+├── Core/TranscriptionTaskManager.swift
+│   ├── Core/Transcription.swift
+│   │   ├── Services/ParakeetService.swift
+│   │   ├── Services/SortformerService.swift
+│   │   └── Services/SpeakerDatabase.swift
+│   ├── Core/TranscriptSaver.swift
+│   └── Core/ActionItemExtractor.swift
+│       ├── Services/RemindersService.swift
+│       └── Services/TodoistService.swift
+├── UI/FloatingPanel/FloatingPanelController.swift
+└── UI/Settings/SettingsWindowController.swift
 ```

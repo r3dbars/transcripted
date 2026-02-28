@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Sidebar navigation for the settings window
-/// Displays app branding at top, navigation items, and version at bottom
+/// Minimal sidebar navigation for the settings window
+/// SuperWhisper-inspired: no branding, no footer, just simple nav items
 @available(macOS 14.0, *)
 struct SettingsSidebarView: View {
 
@@ -12,99 +12,31 @@ struct SettingsSidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // App branding header
-            headerSection
-                .padding(.top, Spacing.lg)
-                .padding(.bottom, Spacing.xl)
-
-            // Navigation items
-            navigationSection
+            // Navigation items — top aligned with generous top padding
+            VStack(spacing: Spacing.xs) {
+                ForEach(SettingsTab.allCases) { tab in
+                    SidebarNavItem(
+                        tab: tab,
+                        isSelected: selectedTab == tab,
+                        isHovered: hoveredTab == tab,
+                        onSelect: {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                selectedTab = tab
+                            }
+                        },
+                        onHover: { isHovered in
+                            hoveredTab = isHovered ? tab : nil
+                        }
+                    )
+                }
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.top, Spacing.lg)
 
             Spacer()
-
-            // Version footer
-            footerSection
-                .padding(.bottom, Spacing.lg)
         }
         .frame(maxHeight: .infinity)
         .background(Color.panelCharcoalElevated)
-    }
-
-    // MARK: - Header
-
-    private var headerSection: some View {
-        VStack(spacing: Spacing.sm) {
-            // App icon placeholder (could be actual app icon)
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.recordingCoral, Color.recordingCoralDeep],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 48, height: 48)
-
-                Image(systemName: "waveform")
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundColor(.white)
-            }
-
-            // App name
-            Text("Transcripted")
-                .font(.headingMedium)
-                .foregroundColor(.panelTextPrimary)
-        }
-        .padding(.horizontal, Spacing.md)
-    }
-
-    // MARK: - Navigation
-
-    private var navigationSection: some View {
-        VStack(spacing: Spacing.xs) {
-            ForEach(SettingsTab.allCases) { tab in
-                SidebarNavItem(
-                    tab: tab,
-                    isSelected: selectedTab == tab,
-                    isHovered: hoveredTab == tab,
-                    onSelect: {
-                        withAnimation(.lawsStateChange) {
-                            selectedTab = tab
-                        }
-                    },
-                    onHover: { isHovered in
-                        hoveredTab = isHovered ? tab : nil
-                    }
-                )
-            }
-        }
-        .padding(.horizontal, Spacing.sm)
-    }
-
-    // MARK: - Footer
-
-    private var footerSection: some View {
-        VStack(spacing: Spacing.xs) {
-            // Quick stats
-            if statsService.totalRecordings > 0 {
-                HStack(spacing: Spacing.xs) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundColor(.attentionGreen)
-
-                    Text("\(statsService.totalRecordings) recordings")
-                        .font(.caption)
-                        .foregroundColor(.panelTextMuted)
-                }
-            }
-
-            // Version
-            Text("v1.0.0")
-                .font(.tiny)
-                .foregroundColor(.panelTextMuted)
-        }
-        .padding(.horizontal, Spacing.md)
     }
 }
 
@@ -124,23 +56,16 @@ struct SidebarNavItem: View {
             HStack(spacing: Spacing.ms) {
                 // Icon
                 Image(systemName: tab.icon)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundColor(iconColor)
-                    .frame(width: 24)
+                    .frame(width: 20)
 
                 // Label
                 Text(tab.rawValue)
-                    .font(.bodyMedium)
+                    .font(.system(size: 13, weight: isSelected ? .medium : .regular))
                     .foregroundColor(textColor)
 
                 Spacer()
-
-                // Selection indicator
-                if isSelected {
-                    Circle()
-                        .fill(Color.recordingCoral)
-                        .frame(width: 6, height: 6)
-                }
             }
             .padding(.horizontal, Spacing.ms)
             .padding(.vertical, Spacing.sm)
@@ -158,9 +83,10 @@ struct SidebarNavItem: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
+    // Subtle blue-tinted dark for selected, elevated for hover, clear otherwise
     private var backgroundColor: Color {
         if isSelected {
-            return Color.recordingCoral.opacity(0.15)
+            return Color(hex: "#2A3040")
         } else if isHovered {
             return Color.panelCharcoalSurface
         }
@@ -169,7 +95,7 @@ struct SidebarNavItem: View {
 
     private var iconColor: Color {
         if isSelected {
-            return .recordingCoral
+            return .accentBlueLight
         } else if isHovered {
             return .panelTextPrimary
         }
@@ -177,9 +103,7 @@ struct SidebarNavItem: View {
     }
 
     private var textColor: Color {
-        if isSelected {
-            return .panelTextPrimary
-        } else if isHovered {
+        if isSelected || isHovered {
             return .panelTextPrimary
         }
         return .panelTextSecondary

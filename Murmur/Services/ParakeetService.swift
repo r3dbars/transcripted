@@ -27,24 +27,24 @@ class ParakeetService: ObservableObject {
     /// Expected layout: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/
     func initialize() async {
         guard asrManager == nil else {
-            print("PARAKEET | already initialized")
+            AppLogger.transcription.debug("Parakeet already initialized")
             return
         }
 
         modelState = .loading
-        print("PARAKEET | initializing models...")
+        AppLogger.transcription.info("Parakeet initializing models")
 
         do {
             let models: AsrModels
             let loadSource: String
 
             if let bundlePath = bundledModelsPath() {
-                print("PARAKEET | loading from bundle: \(bundlePath.path)")
+                AppLogger.transcription.info("Parakeet loading from bundle", ["path": bundlePath.path])
                 models = try await AsrModels.load(from: bundlePath, version: .v3)
                 loadSource = "bundle"
             } else {
                 // Fallback: download from HuggingFace (~600MB on first run)
-                print("PARAKEET | models not bundled, downloading (~600MB)...")
+                AppLogger.transcription.info("Parakeet models not bundled, downloading (~600MB)")
                 models = try await AsrModels.downloadAndLoad(version: .v3)
                 loadSource = "download"
             }
@@ -54,10 +54,10 @@ class ParakeetService: ObservableObject {
 
             asrManager = manager
             modelState = .ready
-            print("PARAKEET | models loaded and ready (source: \(loadSource))")
+            AppLogger.transcription.info("Parakeet models loaded and ready", ["source": loadSource])
         } catch {
             modelState = .failed(error.localizedDescription)
-            print("PARAKEET | model initialization failed: \(error.localizedDescription)")
+            AppLogger.transcription.error("Parakeet model initialization failed", ["error": "\(error.localizedDescription)"])
         }
     }
 
@@ -84,11 +84,11 @@ class ParakeetService: ObservableObject {
         }
 
         let samples = try AudioResampler.loadAndResample(url: audioURL, targetRate: 16000)
-        print("PARAKEET | transcribing \(samples.count) samples (\(String(format: "%.1f", Double(samples.count) / 16000))s)")
+        AppLogger.transcription.info("Parakeet transcribing", ["samples": "\(samples.count)", "duration": "\(String(format: "%.1f", Double(samples.count) / 16000))s"])
 
         let result = try await manager.transcribe(samples, source: .microphone)
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        print("PARAKEET | transcribed: \"\(text.prefix(80))...\" (confidence: \(String(format: "%.2f", result.confidence)))")
+        AppLogger.transcription.info("Parakeet transcription complete", ["preview": "\(text.prefix(80))...", "confidence": "\(String(format: "%.2f", result.confidence))"])
         return text
     }
 

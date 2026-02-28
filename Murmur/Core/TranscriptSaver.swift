@@ -81,7 +81,7 @@ class TranscriptSaver {
         do {
             try FileManager.default.createDirectory(at: saveDir, withIntermediateDirectories: true)
         } catch {
-            print("❌ Failed to create save directory: \(error.localizedDescription)")
+            AppLogger.pipeline.error("Failed to create save directory", ["error": error.localizedDescription])
             return nil
         }
 
@@ -96,14 +96,14 @@ class TranscriptSaver {
         // Write to file
         do {
             try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
-            print("✓ Transcript saved to: \(fileURL.path)")
+            AppLogger.pipeline.info("Transcript saved", ["path": fileURL.path])
 
             // Show system notification
             showSaveNotification(fileURL: fileURL)
 
             return fileURL
         } catch {
-            print("❌ Failed to save transcript: \(error.localizedDescription)")
+            AppLogger.pipeline.error("Failed to save transcript", ["error": error.localizedDescription])
             return nil
         }
     }
@@ -160,6 +160,7 @@ class TranscriptSaver {
     static func saveTranscript(
         _ result: TranscriptionResult,
         speakerMappings: [String: SpeakerMapping] = [:],
+        speakerSources: [String: String] = [:],
         directory: URL? = nil,
         meetingTitle: String? = nil,
         healthInfo: RecordingHealthInfo? = nil
@@ -169,7 +170,7 @@ class TranscriptSaver {
         do {
             try FileManager.default.createDirectory(at: saveDir, withIntermediateDirectories: true)
         } catch {
-            print("Failed to create save directory: \(error.localizedDescription)")
+            AppLogger.pipeline.error("Failed to create save directory", ["error": error.localizedDescription])
             return nil
         }
 
@@ -177,11 +178,11 @@ class TranscriptSaver {
         let filename = "Call_\(timestamp).md"
         let fileURL = saveDir.appendingPathComponent(filename)
 
-        let markdown = formatTranscriptMarkdown(result: result, speakerMappings: speakerMappings, date: Date(), healthInfo: healthInfo)
+        let markdown = formatTranscriptMarkdown(result: result, speakerMappings: speakerMappings, speakerSources: speakerSources, date: Date(), healthInfo: healthInfo)
 
         do {
             try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
-            print("Transcript saved to: \(fileURL.path)")
+            AppLogger.pipeline.info("Transcript saved", ["path": fileURL.path])
             showSaveNotification(fileURL: fileURL)
 
             // Record to stats database
@@ -196,7 +197,7 @@ class TranscriptSaver {
 
             return fileURL
         } catch {
-            print("Failed to save transcript: \(error.localizedDescription)")
+            AppLogger.pipeline.error("Failed to save transcript", ["error": error.localizedDescription])
             return nil
         }
     }
@@ -206,6 +207,7 @@ class TranscriptSaver {
     private static func formatTranscriptMarkdown(
         result: TranscriptionResult,
         speakerMappings: [String: SpeakerMapping] = [:],
+        speakerSources: [String: String] = [:],
         date: Date,
         healthInfo: RecordingHealthInfo? = nil
     ) -> String {
@@ -258,6 +260,22 @@ class TranscriptSaver {
                 for gap in health.gapDescriptions {
                     yaml += "\n  - \"\(gap)\""
                 }
+            }
+        }
+
+        // Add speaker identification metadata
+        let sortedSpeakerKeys = speakerMappings.keys.sorted()
+        if !sortedSpeakerKeys.isEmpty {
+            yaml += "\nspeakers:"
+            for key in sortedSpeakerKeys {
+                guard let mapping = speakerMappings[key] else { continue }
+                let name = mapping.identifiedName ?? "Unknown"
+                let confidence = mapping.confidence ?? "unknown"
+                let source = speakerSources[mapping.speakerId] ?? "unknown"
+                yaml += "\n  - id: \"\(mapping.speakerId)\""
+                yaml += "\n    name: \"\(name)\""
+                yaml += "\n    confidence: \(confidence)"
+                yaml += "\n    source: \(source)"
             }
         }
 

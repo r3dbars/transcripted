@@ -104,9 +104,9 @@ struct FailedTranscriptionsView: View {
                 retryingIds.remove(id)
 
                 if success {
-                    print("✅ Retry successful for \(id)")
+                    AppLogger.ui.info("Retry successful", ["id": "\(id)"])
                 } else {
-                    print("❌ Retry failed for \(id)")
+                    AppLogger.ui.error("Retry failed", ["id": "\(id)"])
                 }
             }
         }

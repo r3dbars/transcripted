@@ -9,7 +9,7 @@ enum TranscriptUtils {
     ///   - summary: The meeting summary text
     static func updateWithSummary(at url: URL, summary: String) {
         guard var content = try? String(contentsOf: url, encoding: .utf8) else {
-            print("⚠️ Could not read transcript for summary update")
+            AppLogger.pipeline.warning("Could not read transcript for summary update")
             return
         }
 
@@ -31,7 +31,7 @@ enum TranscriptUtils {
             let matchCount = regex.numberOfMatches(in: content, options: [], range: range)
 
             if matchCount == 0 {
-                print("⚠️ Summary section pattern not found in transcript")
+                AppLogger.pipeline.warning("Summary section pattern not found in transcript")
                 return
             }
 
@@ -39,12 +39,12 @@ enum TranscriptUtils {
 
             do {
                 try content.write(to: url, atomically: true, encoding: .utf8)
-                print("✅ Updated transcript with meeting summary")
+                AppLogger.pipeline.info("Updated transcript with meeting summary")
             } catch {
-                print("⚠️ Failed to write summary update: \(error.localizedDescription)")
+                AppLogger.pipeline.warning("Failed to write summary update", ["error": error.localizedDescription])
             }
         } else {
-            print("⚠️ Failed to create summary regex")
+            AppLogger.pipeline.warning("Failed to create summary regex")
         }
     }
 
@@ -62,7 +62,7 @@ enum TranscriptUtils {
             .prefix(50)
 
         guard !sanitized.isEmpty else {
-            print("⚠️ Title too short or empty, keeping original filename")
+            AppLogger.pipeline.warning("Title too short or empty, keeping original filename")
             return url
         }
 
@@ -82,16 +82,16 @@ enum TranscriptUtils {
         let newURL = url.deletingLastPathComponent().appendingPathComponent(newFilename)
 
         if FileManager.default.fileExists(atPath: newURL.path) {
-            print("⚠️ File with title already exists, keeping original filename")
+            AppLogger.pipeline.warning("File with title already exists, keeping original filename")
             return url
         }
 
         do {
             try FileManager.default.moveItem(at: url, to: newURL)
-            print("✅ Renamed transcript to: \(newFilename)")
+            AppLogger.pipeline.info("Renamed transcript", ["newFilename": newFilename])
             return newURL
         } catch {
-            print("⚠️ Failed to rename transcript: \(error.localizedDescription)")
+            AppLogger.pipeline.warning("Failed to rename transcript", ["error": error.localizedDescription])
             return url
         }
     }
@@ -102,19 +102,19 @@ enum TranscriptUtils {
     ///   - count: Number of action items extracted
     static func updateActionItemsCount(at url: URL, count: Int) {
         guard var content = try? String(contentsOf: url, encoding: .utf8) else {
-            print("⚠️ Could not read transcript for action items update")
+            AppLogger.pipeline.warning("Could not read transcript for action items update")
             return
         }
 
         // Find YAML frontmatter section (between --- markers)
         guard content.hasPrefix("---") else {
-            print("⚠️ No YAML frontmatter found in transcript")
+            AppLogger.pipeline.warning("No YAML frontmatter found in transcript")
             return
         }
 
         // Find the closing --- of the YAML section
         guard let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) else {
-            print("⚠️ Could not find end of YAML frontmatter")
+            AppLogger.pipeline.warning("Could not find end of YAML frontmatter")
             return
         }
 
@@ -126,9 +126,9 @@ enum TranscriptUtils {
 
         do {
             try content.write(to: url, atomically: true, encoding: .utf8)
-            print("✅ Updated transcript with action_items: \(count)")
+            AppLogger.pipeline.info("Updated transcript with action items", ["count": "\(count)"])
         } catch {
-            print("⚠️ Failed to write action items update: \(error.localizedDescription)")
+            AppLogger.pipeline.warning("Failed to write action items update", ["error": error.localizedDescription])
         }
     }
 }

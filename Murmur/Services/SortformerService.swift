@@ -37,33 +37,33 @@ class SortformerService: ObservableObject {
     /// Load Sortformer + embedding models from the app bundle or download from HuggingFace.
     func initialize() async {
         guard diarizerManager == nil else {
-            print("SORTFORMER | already initialized")
+            AppLogger.transcription.debug("Sortformer already initialized")
             return
         }
 
         modelState = .loading
-        print("SORTFORMER | initializing models...")
+        AppLogger.transcription.info("Sortformer initializing models")
 
         do {
             let manager = DiarizerManager(config: .default)
 
             // Try loading from bundle first, fall back to download
             if let bundlePath = bundledModelsPath() {
-                print("SORTFORMER | loading from bundle: \(bundlePath)")
+                AppLogger.transcription.info("Sortformer loading from bundle", ["path": "\(bundlePath)"])
                 let models = try await DiarizerModels.load(from: bundlePath)
                 manager.initialize(models: models)
             } else {
-                print("SORTFORMER | models not bundled, downloading...")
+                AppLogger.transcription.info("Sortformer models not bundled, downloading")
                 let models = try await DiarizerModels.download()
                 manager.initialize(models: models)
             }
 
             diarizerManager = manager
             modelState = .ready
-            print("SORTFORMER | models loaded and ready")
+            AppLogger.transcription.info("Sortformer models loaded and ready")
         } catch {
             modelState = .failed(error.localizedDescription)
-            print("SORTFORMER | model initialization failed: \(error.localizedDescription)")
+            AppLogger.transcription.error("Sortformer model initialization failed", ["error": "\(error.localizedDescription)"])
         }
     }
 
@@ -92,7 +92,7 @@ class SortformerService: ObservableObject {
             ])
         }
 
-        print("SORTFORMER | diarizing \(samples.count) samples (\(String(format: "%.1f", Double(samples.count) / Double(sampleRate)))s)")
+        AppLogger.transcription.info("Sortformer diarizing", ["samples": "\(samples.count)", "duration": "\(String(format: "%.1f", Double(samples.count) / Double(sampleRate)))s"])
 
         let result = try manager.performCompleteDiarization(samples, sampleRate: sampleRate)
 
@@ -109,11 +109,11 @@ class SortformerService: ObservableObject {
 
         // Log summary
         let speakerIds = Set(segments.map { $0.speakerId })
-        print("SORTFORMER | found \(segments.count) segments from \(speakerIds.count) speakers")
+        AppLogger.transcription.info("Sortformer diarization complete", ["segments": "\(segments.count)", "speakers": "\(speakerIds.count)"])
         for id in speakerIds.sorted() {
             let speakerSegments = segments.filter { $0.speakerId == id }
             let totalDuration = speakerSegments.reduce(0.0) { $0 + $1.duration }
-            print("  Speaker \(id): \(speakerSegments.count) segments, \(String(format: "%.1f", totalDuration))s")
+            AppLogger.transcription.debug("Speaker \(id): \(speakerSegments.count) segments, \(String(format: "%.1f", totalDuration))s")
         }
 
         return segments

@@ -31,7 +31,7 @@ class FailedTranscriptionManager: ObservableObject {
     /// Loads failed transcriptions from disk
     private func loadFailedTranscriptions() {
         guard FileManager.default.fileExists(atPath: storageURL.path) else {
-            print("[FailedTranscriptionManager] No existing failed transcriptions file")
+            AppLogger.pipeline.debug("No existing failed transcriptions file")
             return
         }
 
@@ -44,13 +44,13 @@ class FailedTranscriptionManager: ObservableObject {
 
             // Save back if we filtered any out
             if failedTranscriptions.count != loaded.count {
-                print("[FailedTranscriptionManager] Removed \(loaded.count - failedTranscriptions.count) entries with missing audio files")
+                AppLogger.pipeline.info("Removed entries with missing audio files", ["count": "\(loaded.count - failedTranscriptions.count)"])
                 saveFailedTranscriptions()
             }
 
-            print("[FailedTranscriptionManager] Loaded \(failedTranscriptions.count) failed transcriptions")
+            AppLogger.pipeline.info("Loaded failed transcriptions", ["count": "\(failedTranscriptions.count)"])
         } catch {
-            print("[FailedTranscriptionManager] Error loading failed transcriptions: \(error)")
+            AppLogger.pipeline.error("Error loading failed transcriptions", ["error": "\(error)"])
         }
     }
 
@@ -59,9 +59,9 @@ class FailedTranscriptionManager: ObservableObject {
         do {
             let data = try encoder.encode(failedTranscriptions)
             try data.write(to: storageURL, options: .atomic)
-            print("[FailedTranscriptionManager] Saved \(failedTranscriptions.count) failed transcriptions")
+            AppLogger.pipeline.info("Saved failed transcriptions", ["count": "\(failedTranscriptions.count)"])
         } catch {
-            print("[FailedTranscriptionManager] Error saving failed transcriptions: \(error)")
+            AppLogger.pipeline.error("Error saving failed transcriptions", ["error": "\(error)"])
         }
     }
 
@@ -80,7 +80,7 @@ class FailedTranscriptionManager: ObservableObject {
         failedTranscriptions.append(failed)
         saveFailedTranscriptions()
 
-        print("[FailedTranscriptionManager] Added failed transcription: \(failed.id)")
+        AppLogger.pipeline.info("Added failed transcription", ["id": "\(failed.id)"])
     }
 
     /// Removes a failed transcription from the queue
@@ -92,7 +92,7 @@ class FailedTranscriptionManager: ObservableObject {
         failedTranscriptions.remove(at: index)
         saveFailedTranscriptions()
 
-        print("[FailedTranscriptionManager] Removed failed transcription: \(id)")
+        AppLogger.pipeline.info("Removed failed transcription", ["id": "\(id)"])
     }
 
     /// Removes a failed transcription and deletes its audio files
@@ -104,14 +104,14 @@ class FailedTranscriptionManager: ObservableObject {
         // Delete audio files
         do {
             try FileManager.default.removeItem(at: failed.micAudioURL)
-            print("[FailedTranscriptionManager] Deleted mic audio: \(failed.micAudioURL.lastPathComponent)")
+            AppLogger.pipeline.info("Deleted mic audio", ["file": failed.micAudioURL.lastPathComponent])
 
             if let systemURL = failed.systemAudioURL {
                 try? FileManager.default.removeItem(at: systemURL)
-                print("[FailedTranscriptionManager] Deleted system audio: \(systemURL.lastPathComponent)")
+                AppLogger.pipeline.info("Deleted system audio", ["file": systemURL.lastPathComponent])
             }
         } catch {
-            print("[FailedTranscriptionManager] Error deleting audio files: \(error)")
+            AppLogger.pipeline.error("Error deleting audio files", ["error": "\(error)"])
         }
 
         // Remove from queue
@@ -128,7 +128,7 @@ class FailedTranscriptionManager: ObservableObject {
         failedTranscriptions[index].lastRetryDate = Date()
         saveFailedTranscriptions()
 
-        print("[FailedTranscriptionManager] Incremented retry count for \(id): \(failedTranscriptions[index].retryCount)")
+        AppLogger.pipeline.info("Incremented retry count", ["id": "\(id)", "retryCount": "\(failedTranscriptions[index].retryCount)"])
     }
 
     /// Gets the total number of failed transcriptions
@@ -146,6 +146,6 @@ class FailedTranscriptionManager: ObservableObject {
             deleteFailedTranscription(id: failure.id)
         }
 
-        print("[FailedTranscriptionManager] Cleaned up \(oldFailures.count) failed transcriptions older than \(days) days")
+        AppLogger.pipeline.info("Cleaned up old failed transcriptions", ["count": "\(oldFailures.count)", "olderThanDays": "\(days)"])
     }
 }

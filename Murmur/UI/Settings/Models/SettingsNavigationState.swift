@@ -4,6 +4,7 @@ import Combine
 /// Navigation tab options for the settings window
 enum SettingsTab: String, CaseIterable, Identifiable {
     case dashboard = "Dashboard"
+    case speakers = "Speakers"
     case preferences = "Preferences"
 
     var id: String { rawValue }
@@ -12,6 +13,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .dashboard: return "chart.bar.fill"
+        case .speakers: return "person.2.fill"
         case .preferences: return "gearshape.fill"
         }
     }
@@ -20,6 +22,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var accessibilityLabel: String {
         switch self {
         case .dashboard: return "Dashboard with stats and activity"
+        case .speakers: return "Speaker voice fingerprint database"
         case .preferences: return "App preferences and settings"
         }
     }
