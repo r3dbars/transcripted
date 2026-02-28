@@ -58,31 +58,39 @@ class StyleEngine: ObservableObject {
         }
 
         return """
-            You are ghostwriting as a specific person. Your output must be indistinguishable from \
-            something they actually wrote. Study the style profile and reference messages below, \
-            then write EXACTLY as they would.
+            <primary_goal>
+            Your #1 job is to accomplish the user's communicative intent. They will tell you \
+            what they want to say — your draft must deliver that message clearly and completely. \
+            Getting the intent right matters more than sounding exactly like them.
+            </primary_goal>
 
             <style_profile>
             \(summary)
             </style_profile>
             \(samplesBlock)
-            <the_test>
-            If someone who knows this person well read your output, could they tell it wasn't written \
-            by them? If YES, you failed. Your job is to BE them, not to edit them.
-            </the_test>
+            <how_to_use_style>
+            Style is a finishing layer, not the primary directive. After you've nailed the intent:
+            - Apply their natural voice and phrasing patterns
+            - Match their typical message length for this platform
+            - Respect the NEVER list (these are things they'd never write)
+            - Use signature phrases only when they fit naturally — never force them
+            - If a signature opener ("Yeah exactly..") doesn't add value, skip it and jump \
+            straight to the content. Most messages work better without a filler opener.
+            </how_to_use_style>
 
             <instructions>
             - Output ONLY the message text. No labels, no explanations, no meta-commentary.
-            - Match their exact register for the target platform — they write differently on Slack vs. email vs. iMessage.
-            - Preserve the original meaning, intent, and all information from their input. Don't add anything they didn't say.
+            - INTENT FIRST: Deliver the user's message accurately and completely before \
+            applying any style. Don't sacrifice clarity or meaning for style matching.
+            - DON'T DEFAULT TO OPENERS: Only use agreement phrases like "Yeah exactly..", \
+            "Yeah that tracks..", or "This is interesting!" when they genuinely fit the \
+            conversational context (e.g., actively agreeing with a specific point someone made). \
+            For most messages, jump straight to the substance.
+            - Match the platform register — they write differently on Slack vs. email vs. iMessage.
             - Don't over-polish — if they write casually, keep it casual. If they use fragments, use fragments.
-            - When in doubt between two phrasings, choose the one that sounds more like THEM — even if it's \
-            less polished. Lean toward their natural voice, not what sounds "better."
-            - Incorporate their signature phrases naturally (1-2 per message, don't force all of them).
-            - Respect every rule in their NEVER list — these are the strongest signals of their voice.
-            - Match their typical message length for this platform. Don't write more than they would.
-            - Do NOT write like a helpful AI assistant. No "I hope this helps", no "Let me know if you need anything", \
-            no corporate pleasantries. Write like a real person texting or messaging their friends/colleagues.
+            - Match their typical message length. Don't elaborate beyond what they said.
+            - Do NOT write like a helpful AI assistant. No "I hope this helps", no "Let me know if \
+            you need anything", no corporate pleasantries. Write like a real person.
             </instructions>
             """
     }
@@ -283,6 +291,13 @@ class StyleEngine: ObservableObject {
                 High edit distance examples (0.3+) are the STRONGEST signals — they show where the AI \
                 got it most wrong. Low edit distance (< 0.1) means the AI was close.
 
+                OPENER ANALYSIS: Pay special attention to cases where the user removes AI-generated \
+                openers like "Yeah exactly..", "Yeah that tracks..", "This is interesting!", or similar \
+                agreement phrases from the beginning of AI_DRAFT. If the user frequently removes these \
+                openers, the profile should note that openers are CONDITIONAL — only appropriate when \
+                genuinely agreeing with a specific point someone made — rather than DEFAULT. The ALWAYS \
+                section should reflect actual opener frequency from USER_SENT, not aspirational use.
+
                 Build a profile with ALL of these sections (use these exact headings):
 
                 **Tone & Voice** — their default register, warmth, directness
@@ -381,6 +396,13 @@ class StyleEngine: ObservableObject {
             - Things the AI adds that the user consistently removes → these are NEVER rules
             - Phrases the AI uses that the user replaces with different phrasing → the user's version \
             is the signature phrase, the AI's version is a NEVER
+
+            OPENER ANALYSIS: Pay special attention to cases where the user removes AI-generated \
+            openers like "Yeah exactly..", "Yeah that tracks..", "This is interesting!", or similar \
+            agreement phrases from the beginning of AI_DRAFT. If the user frequently removes these \
+            openers, the profile should note that openers are CONDITIONAL — only appropriate when \
+            genuinely agreeing with a specific point someone made — rather than DEFAULT. The ALWAYS \
+            section should reflect actual opener frequency from USER_SENT, not aspirational use.
 
             Rewrite the COMPLETE style profile with ALL of these sections:
             **Tone & Voice**, **Sentence Patterns**, **Platform-Specific Patterns**, \
