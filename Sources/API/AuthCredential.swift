@@ -16,10 +16,15 @@ enum AuthCredential: Sendable {
     /// Uses Authorization: Bearer header. Billed against Claude Pro/Max subscription.
     case subscriptionToken(String)
 
+    /// Beta proxy token — routes through draft-proxy Worker.
+    /// Uses Authorization: Bearer header. Proxy handles Anthropic auth.
+    case betaToken(String)
+
     // MARK: - Keychain Keys
 
     static let apiKeyKeychainKey = "anthropic-api-key"
     static let subscriptionTokenKeychainKey = "anthropic-subscription-token"
+    static let betaTokenKeychainKey = "draft-beta-token"
 
     // MARK: - Apply to Request
 
@@ -33,13 +38,21 @@ enum AuthCredential: Sendable {
             // OAuth tokens require the oauth beta flag — without this,
             // the API rejects subscription tokens from non-Claude-Code apps.
             request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        case .betaToken(let token):
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            // No anthropic-beta header needed — the proxy handles Anthropic auth
         }
     }
 
     // MARK: - Keychain Load/Save/Clear
 
-    /// Load from Keychain — prefers API key, falls back to subscription token.
+    /// Load from Keychain — prefers beta token, then API key, then subscription token.
     static func load() -> AuthCredential? {
+        #if BETA_BUILD
+        if let token = KeychainHelper.load(key: betaTokenKeychainKey) {
+            return .betaToken(token)
+        }
+        #endif
         if let key = KeychainHelper.load(key: apiKeyKeychainKey) {
             return .apiKey(key)
         }
@@ -50,18 +63,27 @@ enum AuthCredential: Sendable {
     }
 
     static func saveAPIKey(_ key: String) -> Bool {
-        KeychainHelper.delete(key: subscriptionTokenKeychainKey)  // Clear the other mode
+        KeychainHelper.delete(key: subscriptionTokenKeychainKey)  // Clear other modes
+        KeychainHelper.delete(key: betaTokenKeychainKey)
         return KeychainHelper.save(key: apiKeyKeychainKey, value: key)
     }
 
     static func saveSubscriptionToken(_ token: String) -> Bool {
         KeychainHelper.delete(key: apiKeyKeychainKey)  // Clear the other mode
+        KeychainHelper.delete(key: betaTokenKeychainKey)
         return KeychainHelper.save(key: subscriptionTokenKeychainKey, value: token)
+    }
+
+    static func saveBetaToken(_ token: String) -> Bool {
+        KeychainHelper.delete(key: apiKeyKeychainKey)
+        KeychainHelper.delete(key: subscriptionTokenKeychainKey)
+        return KeychainHelper.save(key: betaTokenKeychainKey, value: token)
     }
 
     static func clear() {
         KeychainHelper.delete(key: apiKeyKeychainKey)
         KeychainHelper.delete(key: subscriptionTokenKeychainKey)
+        KeychainHelper.delete(key: betaTokenKeychainKey)
     }
 
     // MARK: - Display
@@ -70,6 +92,7 @@ enum AuthCredential: Sendable {
         switch self {
         case .apiKey: return "API Key"
         case .subscriptionToken: return "Claude Subscription"
+        case .betaToken: return "Beta"
         }
     }
 }

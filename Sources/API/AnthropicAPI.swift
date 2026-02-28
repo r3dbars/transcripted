@@ -12,7 +12,11 @@ import Foundation
 // MARK: - API Client
 
 struct AnthropicAPI {
+    #if BETA_BUILD
+    private static let endpoint = URL(string: "\(BetaConfig.proxyBaseURL)/v1/messages")!
+    #else
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+    #endif
     static let sonnetModel = "claude-sonnet-4-6-20250514"
     private static let apiVersion = "2023-06-01"
 
