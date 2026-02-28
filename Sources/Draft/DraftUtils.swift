@@ -15,7 +15,13 @@ enum DraftUtils {
             "i'd need to see",
             "please provide",
             "i can't write",
-            "i don't have enough"
+            "i don't have enough",
+            "i'm ready to help",
+            "i don't see a conversation",
+            "the screenshot shows",
+            "go ahead and share",
+            "what did the person say",
+            "not a messaging conversation"
         ]
         return refusalPhrases.contains { lower.contains($0) }
     }

@@ -8,7 +8,7 @@ Orchestrates the "rough text → polished message" workflow. Connects the speech
 
 - `DraftEngine.swift` (154 lines) — `@MainActor ObservableObject` managing auth credential state, drafting workflow, and output
 - `PlatformFormatter.swift` (118 lines) — Detects target platform (Slack/iMessage/email/Discord/Teams) and provides formatting rules
-- `DraftUtils.swift` (19 lines) — Extracted pure utility: `looksLikeRefusal()` checks if a draft is Claude refusing rather than actually drafting. Used by `DraftSessionController` to skip recording refusals as training pairs.
+- `DraftUtils.swift` (~25 lines) — Extracted pure utility: `looksLikeRefusal()` checks if a draft is Claude refusing rather than actually drafting. Used by `DraftSessionController` to skip recording refusals as training pairs. Detects 13 refusal phrases covering: missing context requests ("i need the actual", "could you provide"), readiness declarations ("i'm ready to help"), screenshot descriptions ("the screenshot shows", "i don't see a conversation"), and wrong-content indicators ("not a messaging conversation").
 
 ## How It Works
 

@@ -66,17 +66,21 @@ Both branches include:
 
 The profile gets surgically adjusted based on actual errors, not reconstructed. Sonnet is told to PRESERVE patterns from the current profile that have USER_SENT evidence, REMOVE contaminated patterns, and FIX dimensions where training pairs show clear errors.
 
-### Application — Ghostwriting System Prompt
+### Application — Ghostwriting System Prompt (Intent-First)
 
 `buildSystemPrompt()` first calls `extractStyleSummary()` to get the profile. If the summary is empty (no profile yet, or still the placeholder text `"(Will be generated after 5 examples)"`), it falls back to `promptStore?.config.draftingSystem ?? DefaultPrompts.draftingSystem` — a generic drafting prompt with no style personalization.
 
-When a style profile exists, it assembles a structured system prompt with three components:
+When a style profile exists, it assembles a structured system prompt with an **intent-first hierarchy**:
 
-1. **Style profile** — extracted from `## Style Summary`, wrapped in `<style_profile>` XML tags
-2. **Reference samples** — 2-3 diverse USER_SENT examples from training pairs, wrapped in `<reference_messages>` with platform tags. Extracted by `extractReferenceSamples(count:)` which walks backwards (most recent first) and prioritizes different platforms for diversity.
-3. **Instructions** — explicit rules in `<instructions>` tags: match platform register, use signature phrases, respect NEVER list, match message length, don't write like an AI assistant. Also includes `<the_test>` framing: "If someone who knows this person well read your output, could they tell it wasn't written by them?"
+1. **`<primary_goal>`** — Appears FIRST. Establishes that accomplishing the user's communicative intent is the top priority, above style mimicry.
+2. **`<style_profile>`** — The generated profile from `## Style Summary`, wrapped in XML tags.
+3. **`<reference_messages>`** — 2-3 diverse USER_SENT examples from training pairs, with platform tags. Extracted by `extractReferenceSamples(count:)` which walks backwards (most recent first) and prioritizes different platforms for diversity.
+4. **`<how_to_use_style>`** — Explicitly frames style as a "finishing layer" applied after intent is nailed. Includes anti-opener guidance: signature openers should only be used when they genuinely fit the conversational context.
+5. **`<instructions>`** — Rules starting with "INTENT FIRST" and "DON'T DEFAULT TO OPENERS". Covers platform register, message length, and anti-AI-assistant guardrails.
 
-The XML structure lets Haiku parse the profile sections independently (per Anthropic's prompt engineering guidance). The reference samples provide "ground truth" — descriptions tell Haiku what patterns to follow, but samples demonstrate the actual rhythm and cadence.
+**Key design decision:** The old `<the_test>` framing ("could they tell it wasn't written by them?") was removed because it pulled the AI toward style mimicry at the expense of intent delivery. Intent accomplishment is now the primary directive, with style as a finishing layer.
+
+The XML structure lets Haiku parse the prompt sections independently (per Anthropic's prompt engineering guidance). The reference samples provide "ground truth" — descriptions tell Haiku what patterns to follow, but samples demonstrate the actual rhythm and cadence.
 
 ### Profile Structure
 

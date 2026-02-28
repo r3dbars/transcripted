@@ -18,6 +18,15 @@ func testRefusalDetection() {
         assertTrue(DraftUtils.looksLikeRefusal("Could You Provide the details?"), "mixed case")
     }
 
+    runSuite("DraftUtils.looksLikeRefusal — new refusal phrases (contamination fix)") {
+        assertTrue(DraftUtils.looksLikeRefusal("I'm ready to help! Go ahead and share the message"), "ready to help")
+        assertTrue(DraftUtils.looksLikeRefusal("I don't see a conversation to respond to"), "no conversation")
+        assertTrue(DraftUtils.looksLikeRefusal("The screenshot shows terminal output"), "screenshot shows")
+        assertTrue(DraftUtils.looksLikeRefusal("Go ahead and share the message you need"), "go ahead share")
+        assertTrue(DraftUtils.looksLikeRefusal("What did the person say that you're responding to?"), "what did person say")
+        assertTrue(DraftUtils.looksLikeRefusal("Not a messaging conversation. Could you share the actual chat?"), "not messaging")
+    }
+
     runSuite("DraftUtils.looksLikeRefusal — normal messages") {
         assertFalse(DraftUtils.looksLikeRefusal("Sure, I'll be there at 3pm"), "normal response")
         assertFalse(DraftUtils.looksLikeRefusal("Hey thanks for letting me know!"), "casual message")

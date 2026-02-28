@@ -65,7 +65,8 @@ struct CapturedContext {
         INSTRUCTIONS:
         You are ghostwriting a reply for the user in this conversation.
 
-        1. USER'S INSTRUCTIONS are your primary directive. They may be:
+        1. USER'S INSTRUCTIONS are your primary directive — accomplish this goal above all else.
+           Don't let style patterns override or distort what the user is trying to say. They may be:
            - A specific idea: "say yes to lunch" → draft a message expressing that intent
            - A tone/style directive: "make it short and funny" → you decide WHAT to say based on the conversation, applying their constraint
            - A mix of both: "decline politely, say I'm busy" → use their intent with their tone guidance
@@ -79,6 +80,10 @@ struct CapturedContext {
         5. Don't add AI fluff. No "Hey!" greetings unless the conversation warrants one. No sign-offs like "Let me know!" unless the user asked for that. No exclamation points unless the user's style uses them.
 
         6. Output ONLY the reply text. No labels, no quotes, no explanations, no alternatives.
+
+        7. Don't prepend agreement phrases ("Yeah exactly..", "This is interesting!") unless \
+        the user's instructions or the conversation genuinely call for agreement. Most \
+        replies work better jumping straight to the point.
         """
 
         return prompt
