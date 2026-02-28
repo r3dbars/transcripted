@@ -6,7 +6,7 @@ Handles communication with the Anthropic Messages API (text drafting, vision con
 
 ## Key Files
 
-- `AnthropicAPI.swift` (289 lines) — URLSession-based HTTP client for Claude (text drafting, streaming drafts, vision extraction, timeout utility)
+- `AnthropicAPI.swift` (338 lines) — URLSession-based HTTP client for Claude (text drafting, streaming drafts, vision extraction, timeout utility, retry logic for transient errors)
 - `AuthCredential.swift` (75 lines) — Auth abstraction: API key or Claude subscription token, with Keychain load/save/clear
 - `KeychainHelper.swift` (54 lines) — Simple macOS Keychain wrapper (save/load/delete) using Security framework
 - `StreamingChatEngine.swift` (386 lines) — Multi-turn streaming chat engine for the Agent tab; handles conversation history, context injection (style/prompts/feedback/suggestion log), and `propose_prompt_change` tool use
@@ -122,6 +122,7 @@ Anthropic provides SDKs for Python, TypeScript, Java, etc. — but NOT Swift. We
 - `.networkError(String)` — URLSession network failure
 - `.subscriptionTokenExpired` — 401 when using subscription token (tells user to re-run `claude setup-token`)
 - `.timeout` — Request exceeded the deadline (from `withTimeout()`)
+- `.overloaded` — HTTP 529/503 — Anthropic API temporarily overloaded (retryable)
 
 HTTP status code handling in `parseResponse()`:
 - **401 + API key** → `.apiError("Invalid credentials (HTTP 401)")`
@@ -129,6 +130,16 @@ HTTP status code handling in `parseResponse()`:
 - **Other non-200** → `.apiError(message)` where message is decoded from `AnthropicErrorResponse` or falls back to "HTTP {code}"
 
 All non-200 responses and auth failures are reported via `EventReporter` (async `@MainActor` dispatch).
+
+### Retry Behavior
+
+`AnthropicAPIError.isRetryable()` returns `true` for `.overloaded` (HTTP 529/503) and URLError codes `.notConnectedToInternet`, `.networkConnectionLost`, `.timedOut`.
+
+**`draft()` retry:** Wraps `sendRequest()` in try/catch. On retryable error, logs `api_retry` event, sleeps 2 seconds, retries once. On second failure, throws as usual.
+
+**`streamDraft()` retry:** The connection phase (building request, calling `URLSession.bytes(for:)`, checking HTTP status) is retryable. The consumption phase (iterating SSE lines, yielding tokens) is NOT retryable — tokens have already been yielded to the caller. On retryable connection error, logs, sleeps 2 seconds, retries connection once.
+
+**NOT retried:** `extractStructuredContext()` — already wrapped in an 8-second timeout by the caller, and the caller handles failure gracefully (proceeds without context).
 
 ---
 

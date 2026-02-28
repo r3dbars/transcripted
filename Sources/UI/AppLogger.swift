@@ -12,7 +12,24 @@ private actor AppLogFileWriter {
     func reset(at path: String) {
         logPath = path
         closeHandle()
-        FileManager.default.createFile(atPath: path, contents: nil)
+
+        let fm = FileManager.default
+        if fm.fileExists(atPath: path) {
+            // Rotate if > 500KB: keep last 1000 lines
+            if let attrs = try? fm.attributesOfItem(atPath: path),
+               let size = attrs[.size] as? UInt64, size > 500_000 {
+                if let data = fm.contents(atPath: path),
+                   let content = String(data: data, encoding: .utf8) {
+                    let lines = content.components(separatedBy: "\n")
+                    let kept = lines.suffix(1000).joined(separator: "\n")
+                    try? kept.write(toFile: path, atomically: true, encoding: .utf8)
+                }
+            }
+            // File exists and is either small enough or just rotated — open for append
+        } else {
+            fm.createFile(atPath: path, contents: nil)
+        }
+
         openHandleIfNeeded()
     }
 
@@ -60,6 +77,7 @@ class AppLogger: ObservableObject {
         let path = logFilePath
         Task.detached(priority: .utility) { [fileWriter] in
             await fileWriter.reset(at: path)
+            await fileWriter.append("\n--- Session started \(ISO8601DateFormatter().string(from: Date())) ---\n")
         }
     }
 

@@ -6,8 +6,7 @@ import Carbon
 
 // MARK: - Carbon Hotkey Handler (C-level callback)
 
-// Global references so the C callback can reach the engines
-private weak var _sharedEngine: ContextCaptureEngine?
+// Global reference so the C callback can reach the session controller
 private weak var _sharedSessionController: DraftSessionController?
 
 private func hotkeyHandler(
@@ -74,25 +73,9 @@ private func hotkeyHandler(
 
 @MainActor
 class ContextCaptureEngine: ObservableObject {
-    @Published var isCapturing = false
-    @Published var capturedContext: CapturedContext?
-    @Published var captureError: String?
-
-    /// The app that was frontmost when the hotkey was pressed
-    @Published var sourceApp: NSRunningApplication?
-
     private var hotkeyRef: EventHotKeyRef?
     private var dictationHotkeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
-
-    /// Called when structured context is ready — set by ContentView (legacy, unused in v2)
-    var onContextCaptured: ((CapturedContext) -> Void)?
-
-    /// Fires immediately on hotkey press (legacy, unused in v2)
-    var onHotkeyFired: (() -> Void)?
-
-    /// Reference to PromptStore — set by DraftAppState after init
-    var promptStore: PromptStore?
 
     /// Set by DraftAppDelegate to wire the hotkey to the session controller
     var sessionController: DraftSessionController? {
@@ -106,7 +89,6 @@ class ContextCaptureEngine: ObservableObject {
             print("⚠️ CAPTURE | hotkey already registered")
             return
         }
-        _sharedEngine = self
 
         // Register for kEventHotKeyPressed
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
@@ -163,76 +145,6 @@ class ContextCaptureEngine: ObservableObject {
             RemoveEventHandler(ref)
             eventHandlerRef = nil
         }
-        _sharedEngine = nil
         _sharedSessionController = nil
-    }
-
-    /// Process capture from the hotkey (legacy interface, preserved for compatibility)
-    func processCapture(imageData: Data?, sourceApp: NSRunningApplication? = nil) async {
-        guard !isCapturing else { return }
-
-        isCapturing = true
-        captureError = nil
-
-        if let app = sourceApp {
-            self.sourceApp = app
-        }
-
-        // NOTE: In v2, we do NOT call NSApplication.shared.activate() here.
-        // The floating overlay is non-activating, so the target app stays frontmost.
-        onHotkeyFired?()
-
-        guard let auth = AuthCredential.load() else {
-            captureError = "No credentials — add your API key or Claude subscription token in settings"
-            EventReporter.shared.capture(level: .warning, engine: "capture", event: "capture_auth_missing",
-                message: "No auth credential configured for vision extraction")
-            isCapturing = false
-            return
-        }
-
-        guard let imageData = imageData else {
-            captureError = "Screenshot failed — grant Screen Recording permission in System Settings → Privacy & Security → Screen Recording"
-            isCapturing = false
-            return
-        }
-
-        let userName = UserDefaults.standard.string(forKey: "user-display-name")
-        let appName = sourceApp?.localizedName
-        let model = promptStore?.config.model ?? DefaultPrompts.model
-        let extractionPrompt = promptStore?.contextExtractionPrompt(userName: userName, appName: appName)
-            ?? DefaultPrompts.contextExtraction
-                .replacingOccurrences(of: "{USER_NAME}", with: userName.map { "The user's name is \($0). They are one of the participants in this conversation." } ?? "Identify the user based on which side of the conversation they appear on.")
-                .replacingOccurrences(of: "{APP_NAME}", with: appName.map { "This screenshot is from the app \"\($0)\"." } ?? "Identify which messaging app this is from the UI.")
-
-        do {
-            let context = try await AnthropicAPI.extractStructuredContext(
-                imageData: imageData,
-                auth: auth,
-                model: model,
-                systemPrompt: extractionPrompt
-            )
-            capturedContext = context
-            onContextCaptured?(context)
-        } catch AnthropicAPIError.subscriptionTokenExpired {
-            captureError = "Subscription token expired — run `claude setup-token` and update in Settings"
-            EventReporter.shared.capture(level: .error, engine: "capture", event: "vision_extraction_failed",
-                message: "Subscription token expired")
-        } catch {
-            captureError = error.localizedDescription
-            EventReporter.shared.capture(level: .error, engine: "capture", event: "vision_extraction_failed",
-                message: error.localizedDescription)
-        }
-
-        isCapturing = false
-    }
-
-    /// Manual capture from the UI button
-    func manualCapture(app: NSRunningApplication?) async {
-        guard let app = app else {
-            captureError = "No previous app detected"
-            return
-        }
-        let imageData = ScreenCapture.captureFrontmostWindow(of: app)
-        await processCapture(imageData: imageData, sourceApp: app)
     }
 }

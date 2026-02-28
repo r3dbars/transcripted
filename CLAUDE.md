@@ -23,7 +23,7 @@ Sources/
 ├── Accessibility/           ← AccessibilityBridge — AXUIElement queries for text field position + value
 ├── Observability/           ← EventReporter — centralized error/warning/info tracking (events.jsonl)
 └── UI/                      ← Floating overlay (6 files), MenuBarPanel (single-pane), onboarding, AgentSection
-agent/                       ← ⚠️ DEPRECATED — Python orchestrator replaced by Sources/Analysis/
+Tests/                       ← Pure function test suite (75 tests, no XCTest/Xcode dependency)
 ```
 
 **Each subfolder in Sources/ has its own CLAUDE.md with component-specific knowledge. Read the relevant CLAUDE.md before modifying any file in that folder.**
@@ -32,10 +32,11 @@ agent/                       ← ⚠️ DEPRECATED — Python orchestrator repla
 
 ```bash
 cd /Users/****/Draft
-bash build.sh
+bash build.sh        # Compile + sign + launch
+bash run-tests.sh    # Run 75 unit tests (pure functions only, sub-second compile)
 ```
 
-This compiles all Swift files from `Sources/`, signs the app bundle, and launches it.
+`build.sh` compiles all Swift files from `Sources/`, signs the app bundle, and launches it. `run-tests.sh` compiles only the pure source files needed by tests (no SwiftUI/Combine/FluidAudio) — fast and CI-friendly.
 
 ## Key Features
 
@@ -263,6 +264,9 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - **NSLock for audio thread ↔ MainActor** — Audio render thread has strict ~10ms deadlines; actor isolation has unpredictable scheduling latency. NSLock provides deterministic ~1μs overhead for the shared sample buffer.
 - **All engines have deinits** — `ContextCaptureEngine` (Carbon hotkeys), `AnalysisEngine` (DispatchSource + debounce task), `ParakeetEngine` (audio engine stop + AsrManager cleanup). Missing deinits leak OS-level resources.
 - **Fresh NSHostingController per popover open** — Recreating the hosting controller on each menubar popover toggle prevents stale SwiftUI observation state from accumulating across show/hide cycles. A long-lived `NSHostingController` eventually crashes in `body` evaluation after hours of use.
+- **API retry for transient errors** — `draft()` and `streamDraft()` automatically retry once after a 2-second delay for HTTP 529/503 (Anthropic overloaded) and network errors (timeout, connection lost). `streamDraft()` only retries the connection phase — once tokens have been yielded, retrying would duplicate output.
+- **Clipboard restore via changeCount polling** — `pasteWithClipboardRestore()` polls `NSPasteboard.changeCount` every 50ms with a 2-second timeout (some apps write back to clipboard on paste, which triggers early restore). Replaces the old fixed 500ms delay.
+- **Debug log rotation** — `AppLogFileWriter` preserves logs across sessions (no wipe on launch). Files over 500KB are rotated to the last 1000 lines. Session separators mark boundaries.
 
 ## Project-Wide Learnings
 
