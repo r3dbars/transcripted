@@ -64,11 +64,6 @@ class DraftSessionController: ObservableObject {
         isInSession = true
         sessionSourceApp = sourceApp
 
-        // Store source app for paste-back
-        if let app = sourceApp {
-            appState.contextCapture.sourceApp = app
-        }
-
         lastCapturedContext = nil
         appState.drafter.clear()
 
@@ -234,10 +229,6 @@ class DraftSessionController: ObservableObject {
         isDictating = true
         sessionSourceApp = sourceApp
 
-        if let app = sourceApp {
-            appState.contextCapture.sourceApp = app
-        }
-
         overlayController.activeMode = .dictation
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
@@ -296,50 +287,6 @@ class DraftSessionController: ObservableObject {
         appState.logger.log("DICTATION | cancelled")
     }
 
-    /// Apply light polish (punctuation, capitalization, grammar) to raw dictation.
-    /// Falls back to raw text if API call fails — dictation must NEVER lose text.
-    private func polishDictation(_ rawText: String) async -> String {
-        guard let appState = appState else { return rawText }
-        guard let auth = AuthCredential.load() else {
-            appState.logger.log("DICTATION | no auth, pasting raw text")
-            return rawText
-        }
-
-        let polishPrompt = """
-            Fix punctuation, capitalization, and obvious grammar errors in this dictation. \
-            Do NOT rephrase, reorganize, or change wording. Preserve the user's exact words. \
-            Do NOT add greetings, sign-offs, or extra text. Output ONLY the corrected text.
-            """
-
-        let model = appState.promptStore.config.draftModel
-
-        do {
-            let polished = try await AnthropicAPI.withTimeout(seconds: 5) {
-                try await AnthropicAPI.draft(
-                    rawText: "DICTATED:\n\(rawText)",
-                    auth: auth,
-                    model: model,
-                    systemPrompt: polishPrompt,
-                    maxTokens: 1024
-                )
-            }
-
-            // Sanity check: reject if length ratio is suspicious (hallucination or truncation)
-            let ratio = Double(polished.count) / Double(max(1, rawText.count))
-            if ratio < 0.5 || ratio > 2.0 {
-                appState.logger.log("DICTATION | polish length suspicious (ratio \(String(format: "%.2f", ratio))), using raw")
-                return rawText
-            }
-
-            return polished.trimmingCharacters(in: .whitespacesAndNewlines)
-        } catch {
-            appState.logger.log("DICTATION | polish failed: \(error.localizedDescription), pasting raw text")
-            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "polish_failed",
-                message: error.localizedDescription)
-            return rawText
-        }
-    }
-
     // MARK: - Private
 
     private func processVision(imageData: Data?, sourceApp: NSRunningApplication?) async {
@@ -374,19 +321,8 @@ class DraftSessionController: ObservableObject {
         }
     }
 
-    /// Detect if a draft is Claude refusing/asking for clarification rather than an actual message
     private func looksLikeRefusal(_ text: String) -> Bool {
-        let lower = text.lowercased()
-        let refusalPhrases = [
-            "i need the actual",
-            "i need more context",
-            "could you provide",
-            "i'd need to see",
-            "please provide",
-            "i can't write",
-            "i don't have enough"
-        ]
-        return refusalPhrases.contains { lower.contains($0) }
+        DraftUtils.looksLikeRefusal(text)
     }
 
     /// Called by Enter key in review — injects the (possibly edited) text
@@ -478,8 +414,18 @@ class DraftSessionController: ObservableObject {
         vUp?.flags = .maskCommand
         vUp?.post(tap: .cghidEventTap)
 
-        // Restore clipboard after paste completes
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        // Restore clipboard after paste completes.
+        // Poll changeCount every 50ms — some apps (rich text editors) write back to the
+        // clipboard on paste, which increments changeCount. If no change detected, fall
+        // back to a 2-second timeout (more conservative than the old 500ms for slow
+        // Electron apps like Slack/Teams).
+        let changeCountAfterSet = pasteboard.changeCount
+        Task { @MainActor in
+            let startTime = CFAbsoluteTimeGetCurrent()
+            while CFAbsoluteTimeGetCurrent() - startTime < 2.0 {
+                try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+                if pasteboard.changeCount != changeCountAfterSet { break }
+            }
             pasteboard.clearContents()
             for typeData in savedItems {
                 let item = NSPasteboardItem()

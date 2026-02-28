@@ -9,20 +9,18 @@ SwiftUI views for the Draft app. The primary UI is a **floating overlay** (non-a
 - `FloatingOverlayPanel.swift` (~37 lines) — NSPanel subclass (non-activating, dynamic key status)
 - `FloatingOverlayController.swift` (~362 lines) — State machine, animations, panel lifecycle, global Escape monitor
 - `OverlayContentView.swift` (~252 lines) — SwiftUI views for all 5 overlay states (idle/listening/drafting/streaming/review)
-- `DraftSessionController.swift` (~493 lines) — Session orchestration for draft mode (⌥D) and dictation mode (⌥Space)
+- `DraftSessionController.swift` (~439 lines) — Session orchestration for draft mode (⌥D) and dictation mode (⌥Space)
 - `OverlayTokens.swift` (~48 lines) — Design tokens: `OverlayTokens` for floating overlay (translucent dark), `MenuTokens` for menubar panel (system-adaptive colors, layout constants)
 - `PanelDragView.swift` (~23 lines) — AppKit drag helper (mouseDown → performDrag)
 - `MenuBarPanel.swift` (~350 lines) — Single-pane menubar popover (440x520): header (status dot), usage stats, shortcut pills, writing style (compact/expandable), agent section, onboarding gates, settings gear
-- `StyleProfileView.swift` (~50 lines) — DEPRECATED: style display is now inlined in MenuBarPanel.swift. Kept for reference only.
 - `AgentTab.swift` (~287 lines) — `AgentSection` struct: simplified insight cards (Apply/Skip) + streaming chat interface with expandable tool use indicators
 - `StyleOnboardingView.swift` (~664 lines) — 5-step onboarding: intro → source choice → (iMessage/paste) → result
 - `APIKeyEntryView.swift` (~231 lines) — Auth setup overlay: name + API key or subscription token
 - `InsightCard.swift` (~71 lines) — Model for insight cards + shared `toolDefinition` and `from()` factory (used by both StreamingChatEngine and AnalysisEngine)
-- `AudioWaveformView.swift` (~63 lines) — UNUSED: animated waveform bars with compact mode (replaced by `ScrollingWaveformView` in the overlay header). Kept for potential reuse
 - `ScrollingWaveformView.swift` (~147 lines) — Real-time scrolling waveform for overlay header bar, Canvas + TimelineView at 60fps, ring buffer for audio level samples
 - `AnimatedTranscriptView.swift` (~81 lines) — Animated live transcript with word-by-word fade-in via custom `FlowLayout` (SwiftUI Layout protocol)
 - `ChatMessage.swift` (~32 lines) — Model for chat messages in AgentSection (user/assistant/tool roles)
-- `AppLogger.swift` (~92 lines) — Debug logger writing to `~/draft-debug.log` with timestamps, actor-isolated file writer, throttled logging
+- `AppLogger.swift` (~110 lines) — Debug logger writing to `~/draft-debug.log` with timestamps, actor-isolated file writer, throttled logging, log rotation (>500KB → last 1000 lines), session separators
 - `PreviousAppTracker.swift` (~25 lines) — Tracks last non-Draft app for paste-back fallback
 
 ## Architecture Overview
@@ -120,9 +118,8 @@ stopSessionAndDraft()   — ⌥D second press: stop voice, await vision, build p
 confirmAndInject()      — Enter in review: hide overlay (shrink animation), paste to target app, record training pair
 cancelSession()         — Escape or ⌥D during any state: hide overlay (shake animation), discard draft
 startDictation()        — ⌥Space first press: show overlay, start voice recording (no screenshot)
-stopDictationAndPaste() — ⌥Space second press: stop voice, batch transcribe, paste directly (no API polish)
+stopDictationAndPaste() — ⌥Space second press: stop voice, batch transcribe, paste directly
 cancelDictation()       — Escape during dictation: hide overlay (shake animation), discard
-polishDictation()       — UNUSED: light API-based polish (punctuation/grammar). Exists but not called by stopDictationAndPaste()
 ```
 
 ### Vision Race Condition Fix
@@ -147,7 +144,7 @@ If vision fails or times out, the fallback prompt asks Claude to "clean up and p
 
 ### Clipboard Safety
 
-`pasteWithClipboardRestore()` saves the user's clipboard contents before setting the draft text, simulates Cmd+V, then restores the original clipboard after 500ms. The target app stays frontmost (overlay is non-activating), so no app activation polling is needed.
+`pasteWithClipboardRestore()` saves the user's clipboard contents before setting the draft text, simulates Cmd+V, then restores the original clipboard. Uses `NSPasteboard.changeCount` polling (every 50ms) with a 2-second timeout — some apps write back to the clipboard on paste, which triggers early restore. Falls back to the timeout for apps that don't modify the clipboard. The target app stays frontmost (overlay is non-activating), so no app activation polling is needed.
 
 ## Three-Way Hotkey Routing
 

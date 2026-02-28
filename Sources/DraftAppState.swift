@@ -26,7 +26,6 @@ class DraftAppState: ObservableObject {
         drafter.styleEngine = styleEngine
         drafter.promptStore = promptStore
         styleEngine.promptStore = promptStore
-        contextCapture.promptStore = promptStore
         chatEngine.promptStore = promptStore
 
         // Start native analysis engine (replaces Python agent subprocess)

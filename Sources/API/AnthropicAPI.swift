@@ -51,6 +51,7 @@ enum AnthropicAPIError: LocalizedError {
     case networkError(String)
     case subscriptionTokenExpired  // 401 when using subscription token
     case timeout  // Request exceeded the deadline
+    case overloaded  // 529/503 — Anthropic API temporarily overloaded
 
     var errorDescription: String? {
         switch self {
@@ -63,7 +64,19 @@ enum AnthropicAPIError: LocalizedError {
             return "Claude subscription token expired — run `claude setup-token` and update in settings"
         case .timeout:
             return "Request exceeded the deadline"
+        case .overloaded:
+            return "Anthropic API is temporarily overloaded — try again in a moment"
         }
+    }
+}
+
+extension AnthropicAPIError {
+    static func isRetryable(_ error: Error) -> Bool {
+        if let apiErr = error as? AnthropicAPIError, case .overloaded = apiErr { return true }
+        if let urlErr = error as? URLError {
+            return [.notConnectedToInternet, .networkConnectionLost, .timedOut].contains(urlErr.code)
+        }
+        return false
     }
 }
 
@@ -87,7 +100,16 @@ struct AnthropicAPI {
             system: systemPrompt,
             messages: [AnthropicMessage(role: "user", content: rawText)]
         )
-        return try await sendRequest(body: body, auth: auth)
+        do {
+            return try await sendRequest(body: body, auth: auth)
+        } catch where AnthropicAPIError.isRetryable(error) {
+            Task { @MainActor in
+                EventReporter.shared.capture(level: .warning, engine: "anthropic", event: "api_retry",
+                    message: "Retrying draft after transient error: \(error.localizedDescription)")
+            }
+            try await Task.sleep(nanoseconds: 2_000_000_000)
+            return try await sendRequest(body: body, auth: auth)
+        }
     }
 
     // MARK: - Streaming Draft
@@ -104,35 +126,54 @@ struct AnthropicAPI {
         AsyncThrowingStream { continuation in
             Task {
                 do {
-                    var request = URLRequest(url: endpoint)
-                    request.httpMethod = "POST"
-                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
-                    auth.apply(to: &request)
+                    // Connection phase — retryable (no tokens yielded yet)
+                    func connect() async throws -> (URLSession.AsyncBytes, URLResponse) {
+                        var request = URLRequest(url: endpoint)
+                        request.httpMethod = "POST"
+                        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                        request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
+                        auth.apply(to: &request)
 
-                    var body: [String: Any] = [
-                        "model": model,
-                        "max_tokens": maxTokens,
-                        "stream": true,
-                        "messages": [["role": "user", "content": rawText]]
-                    ]
-                    if let system = systemPrompt { body["system"] = system }
-                    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                        var body: [String: Any] = [
+                            "model": model,
+                            "max_tokens": maxTokens,
+                            "stream": true,
+                            "messages": [["role": "user", "content": rawText]]
+                        ]
+                        if let system = systemPrompt { body["system"] = system }
+                        request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
-                    if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-                        var errData = Data()
-                        for try await byte in bytes { errData.append(byte) }
-                        let msg = (try? JSONDecoder().decode(AnthropicErrorResponse.self, from: errData))?.error.message
-                            ?? "HTTP \(http.statusCode)"
-                        Task { @MainActor in
-                            EventReporter.shared.capture(level: .error, engine: "anthropic", event: "api_stream_error",
-                                message: msg, context: ["status_code": "\(http.statusCode)"])
+                        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                            var errData = Data()
+                            for try await byte in bytes { errData.append(byte) }
+                            let msg = (try? JSONDecoder().decode(AnthropicErrorResponse.self, from: errData))?.error.message
+                                ?? "HTTP \(http.statusCode)"
+                            Task { @MainActor in
+                                EventReporter.shared.capture(level: .error, engine: "anthropic", event: "api_stream_error",
+                                    message: msg, context: ["status_code": "\(http.statusCode)"])
+                            }
+                            if http.statusCode == 529 || http.statusCode == 503 {
+                                throw AnthropicAPIError.overloaded
+                            }
+                            throw AnthropicAPIError.apiError(msg)
                         }
-                        continuation.finish(throwing: AnthropicAPIError.apiError(msg))
-                        return
+                        return (bytes, response)
                     }
 
+                    var bytes: URLSession.AsyncBytes
+                    do {
+                        (bytes, _) = try await connect()
+                    } catch where AnthropicAPIError.isRetryable(error) {
+                        Task { @MainActor in
+                            EventReporter.shared.capture(level: .warning, engine: "anthropic", event: "api_retry",
+                                message: "Retrying stream after transient error: \(error.localizedDescription)")
+                        }
+                        try await Task.sleep(nanoseconds: 2_000_000_000)
+                        (bytes, _) = try await connect()
+                    }
+
+                    // Consumption phase — NOT retryable (tokens already yielded to caller)
                     for try await line in bytes.lines {
                         if line.hasPrefix("data: ") {
                             let json = String(line.dropFirst(6))
@@ -264,6 +305,14 @@ struct AnthropicAPI {
                 throw AnthropicAPIError.subscriptionTokenExpired
             }
             throw AnthropicAPIError.apiError("Invalid credentials (HTTP 401)")
+        }
+
+        if httpResponse.statusCode == 529 || httpResponse.statusCode == 503 {
+            Task { @MainActor in
+                EventReporter.shared.capture(level: .warning, engine: "anthropic", event: "api_overloaded",
+                    message: "HTTP \(httpResponse.statusCode)", context: ["status_code": "\(httpResponse.statusCode)"])
+            }
+            throw AnthropicAPIError.overloaded
         }
 
         if httpResponse.statusCode != 200 {

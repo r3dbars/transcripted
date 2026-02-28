@@ -4,9 +4,10 @@
 
 Reads the user's sent iMessages from `~/Library/Messages/chat.db` for automatic style profile generation during onboarding. Alternative to the manual "paste samples" flow.
 
-## Key File
+## Key Files
 
-- `iMessageReader.swift` (165 lines) — Swift `actor` that queries chat.db via the SQLite3 C API
+- `iMessageReader.swift` (137 lines) — Swift `actor` that queries chat.db via the SQLite3 C API
+- `MessageFilter.swift` (38 lines) — Extracted pure utility: `shouldSkip()` filters low-quality messages (single chars, emoji-only, tapbacks, URL-only). Used by `iMessageReader` to filter training data.
 
 ## How It Works
 

@@ -6,7 +6,7 @@ Captures a screenshot of the user's current app window, sends it to Haiku Vision
 
 ## Key Files
 
-- `ContextCaptureEngine.swift` (238 lines) — Hotkey registration (Carbon), screenshot capture, dual-mode routing with cross-mode switching to DraftSessionController, legacy `processCapture()` for compatibility
+- `ContextCaptureEngine.swift` (150 lines) — Hotkey registration (Carbon), screenshot capture, dual-mode routing with cross-mode switching to DraftSessionController
 - `CapturedContext.swift` (121 lines) — Structured data extracted from a screenshot (platform, talkingTo, formality, conversation) + parser + prompt builder
 - `ScreenCapture.swift` (46 lines) — Low-level window capture via CGWindowListCreateImage
 
@@ -91,11 +91,10 @@ private func hotkeyHandler(...) -> OSStatus {
 }
 ```
 
-### Global References
+### Global Reference
 
-The C callback can't capture Swift closures, so two `weak` module-level references bridge the gap:
-- `_sharedEngine` — set by `registerHotkey()`, used for legacy `processCapture()` path
-- `_sharedSessionController` — set via `ContextCaptureEngine.sessionController` didSet, used for v2 routing
+The C callback can't capture Swift closures, so a `weak` module-level reference bridges the gap:
+- `_sharedSessionController` — set via `ContextCaptureEngine.sessionController` didSet
 
 ## Vision Race Condition Fix
 
@@ -130,12 +129,6 @@ struct CapturedContext {
 
 **`parse()`** is a line-by-line parser using case-insensitive `hasPrefix` checks (each line is uppercased before comparison). An `inConversation` flag captures everything after the "CONVERSATION:" header until end of text. Other labeled headers (`PLATFORM:`, `TALKING TO:`, `FORMALITY:`) reset `inConversation` to `false`.
 
-## Legacy Interface: `processCapture()`
-
-`processCapture(imageData:sourceApp:)` is the v1 capture pipeline that runs vision extraction directly via `AnthropicAPI.extractStructuredContext()` and calls `onContextCaptured`. It is **preserved for compatibility** but unused in the v2 floating overlay flow — `DraftSessionController` handles vision processing internally. The `onContextCaptured` and `onHotkeyFired` callbacks are marked as legacy.
-
-The legacy path handles auth loading (`AuthCredential.load()`), prompt construction (via `promptStore` or `DefaultPrompts` fallback with `{USER_NAME}` and `{APP_NAME}` placeholder substitution), and error reporting via `EventReporter` for both auth-missing and vision-extraction-failed cases. It also handles `AnthropicAPIError.subscriptionTokenExpired` specifically with a user-facing message.
-
 ## Reliability Hardening
 
 ### Double Registration Guard
@@ -156,7 +149,7 @@ Carbon hotkeys are global OS-level resources. Without explicit cleanup in `deini
 
 ### unregisterHotkey() Cleanup
 
-`unregisterHotkey()` explicitly nils out all three refs (`hotkeyRef`, `dictationHotkeyRef`, `eventHandlerRef`) after unregistering, and also clears both global references (`_sharedEngine = nil`, `_sharedSessionController = nil`).
+`unregisterHotkey()` explicitly nils out all three refs (`hotkeyRef`, `dictationHotkeyRef`, `eventHandlerRef`) after unregistering, and clears the global reference (`_sharedSessionController = nil`).
 
 ### Optional Chaining for overlayController
 
@@ -185,20 +178,10 @@ Since `DraftSessionController.overlayController` is now `Optional` (not IUO), th
 
 ```swift
 // ContextCaptureEngine (@MainActor, ObservableObject)
-@Published var isCapturing: Bool
-@Published var capturedContext: CapturedContext?
-@Published var captureError: String?
-@Published var sourceApp: NSRunningApplication?  // The app that was screenshotted
-
-var onContextCaptured: ((CapturedContext) -> Void)?  // Legacy — unused in v2
-var onHotkeyFired: (() -> Void)?                     // Legacy — unused in v2
-var promptStore: PromptStore?                        // Set by DraftAppState — provides model + context extraction prompt
-var sessionController: DraftSessionController?       // Set by DraftAppDelegate — wires hotkey to v2 session (didSet updates _sharedSessionController)
+var sessionController: DraftSessionController?  // Set by DraftAppDelegate — wires hotkey routing (didSet updates _sharedSessionController)
 
 func registerHotkey()
 func unregisterHotkey()
-func processCapture(imageData: Data?, sourceApp: NSRunningApplication? = nil) async  // Legacy v1 path
-func manualCapture(app: NSRunningApplication?) async
 
 // ScreenCapture
 static func captureFrontmostWindow(of app: NSRunningApplication) -> Data?
