@@ -1,5 +1,5 @@
 // PermissionsOnboardingView.swift
-// Guided 4-step permissions flow for beta builds.
+// Guided 3-step permissions flow for beta builds.
 // Shown once before style onboarding to ensure all system permissions are granted.
 
 import SwiftUI
@@ -13,14 +13,12 @@ struct PermissionsOnboardingView: View {
     @State private var micGranted = false
     @State private var accessibilityGranted = false
     @State private var screenRecordingGranted = false
-    @State private var fullDiskGranted = false
     @State private var pollTimer: Timer?
 
     private let steps: [(title: String, icon: String, description: String, required: Bool)] = [
         ("Microphone", "mic.fill", "Draft needs microphone access to hear you speak.", true),
         ("Accessibility", "hand.raised.fill", "Required for the ⌥D global hotkey to work in any app.", true),
         ("Screen Recording", "rectangle.on.rectangle", "Reads your screen to understand conversation context for better drafts.", true),
-        ("Full Disk Access", "folder.fill", "Optional — only needed to import writing samples from iMessages.", false),
     ]
 
     var body: some View {
@@ -147,7 +145,6 @@ struct PermissionsOnboardingView: View {
         case 0: return micGranted
         case 1: return accessibilityGranted
         case 2: return screenRecordingGranted
-        case 3: return fullDiskGranted
         default: return false
         }
     }
@@ -156,7 +153,6 @@ struct PermissionsOnboardingView: View {
         micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         accessibilityGranted = AXIsProcessTrusted()
         screenRecordingGranted = checkScreenRecording()
-        fullDiskGranted = checkFullDiskAccess()
     }
 
     private func checkScreenRecording() -> Bool {
@@ -172,12 +168,6 @@ struct PermissionsOnboardingView: View {
             [.nominalResolution]
         )
         return testImage != nil
-    }
-
-    private func checkFullDiskAccess() -> Bool {
-        // Try to read the Messages database — requires Full Disk Access
-        let chatDB = NSHomeDirectory() + "/Library/Messages/chat.db"
-        return FileManager.default.isReadableFile(atPath: chatDB)
     }
 
     // MARK: - Polling
@@ -243,11 +233,6 @@ struct PermissionsOnboardingView: View {
                 CGRequestScreenCaptureAccess()
             }
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-                NSWorkspace.shared.open(url)
-            }
-        case 3:
-            // Full Disk Access
-            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
                 NSWorkspace.shared.open(url)
             }
         default:

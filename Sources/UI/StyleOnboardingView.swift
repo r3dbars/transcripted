@@ -94,7 +94,11 @@ struct StyleOnboardingView: View {
             Button(action: {
                 let trimmed = nameInput.trimmingCharacters(in: .whitespacesAndNewlines)
                 UserDefaults.standard.set(trimmed, forKey: "user-display-name")
+                #if BETA_BUILD
+                withAnimation { step = .samples }
+                #else
                 withAnimation { step = .sourceChoice }
+                #endif
             }) {
                 HStack {
                     Text("Next — Build My Writing Profile")
