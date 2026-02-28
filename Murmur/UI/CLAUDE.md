@@ -8,13 +8,9 @@ Settings window, action item review workflow, and failed transcription managemen
 | File | Responsibility |
 |------|---------------|
 | `Settings/SettingsWindowController.swift` | NSWindowController, 800x600 fixed settings window |
-| `Settings/SettingsContainerView.swift` | Sidebar + content layout composition |
+| `Settings/SettingsContainerView.swift` | Single-page scrolling layout (stats, speakers, preferences) |
 | `Settings/SettingsSidebarView.swift` | Left sidebar navigation tabs |
 | `Settings/Models/SettingsNavigationState.swift` | Tab state enum (Dashboard, Preferences, Speakers) |
-| `Settings/Tabs/DashboardView.swift` | Stats overview, recent transcripts |
-| `Settings/Tabs/PreferencesView.swift` | API keys, storage, model status, appearance |
-| `Settings/Tabs/SpeakersView.swift` | Speaker database management |
-| `Settings/Components/RecentTranscriptsView.swift` | Recent transcript list component |
 | `Settings/Components/SettingsSectionCard.swift` | Reusable card wrapper |
 | `ActionItemReviewView.swift` | Task approval/rejection workflow |
 | `FailedTranscriptionsView.swift` | Retry queue management |
@@ -23,9 +19,7 @@ Settings window, action item review workflow, and failed transcription managemen
 
 ```
 Settings:
-  SettingsWindowController → SettingsContainerView
-    → SettingsSidebarView (selects tab)
-    → DashboardView / PreferencesView / SpeakersView
+  SettingsWindowController → SettingsContainerView (single-page layout)
 
 Action Items:
   TranscriptionTaskManager publishes pendingReview state
@@ -42,8 +36,8 @@ Failed Transcriptions:
 
 | Task | Files to touch | Watch out for |
 |------|---------------|---------------|
-| Add settings tab | `SettingsNavigationState.swift`, new tab view, `SettingsSidebarView.swift` | Follow existing tab pattern |
-| Fix settings layout | `SettingsContainerView.swift`, specific tab view | 800x600 fixed window |
+| Add settings section | `SettingsContainerView.swift` | Single-page scrolling layout |
+| Fix settings layout | `SettingsContainerView.swift` | 800x600 fixed window |
 | Fix action item review | `ActionItemReviewView.swift` | Reads from TranscriptionTaskManager state |
 | Fix failed transcription UI | `FailedTranscriptionsView.swift` | Binds to FailedTranscriptionManager |
 
