@@ -190,55 +190,14 @@ class StyleEngine: ObservableObject {
 
     /// Simple word-overlap edit distance (0 = identical, 1 = completely different)
     private func wordEditDistance(_ a: String, _ b: String) -> Double {
-        let wordsA = Set(a.lowercased().split(whereSeparator: \.isWhitespace))
-        let wordsB = Set(b.lowercased().split(whereSeparator: \.isWhitespace))
-        guard !wordsA.isEmpty || !wordsB.isEmpty else { return 0 }
-        let common = wordsA.intersection(wordsB).count
-        let total = max(wordsA.count, wordsB.count)
-        return 1.0 - (Double(common) / Double(total))
+        StyleUtils.wordEditDistance(a, b)
     }
 
     // MARK: - Refinement Scheduling
 
     /// Determine whether refinement should run now based on example count and edit distance trends
     func shouldRefineNow() -> Bool {
-        guard exampleCount > 0 else { return false }
-
-        if exampleCount <= 20 {
-            // Early phase: refine every 3 examples (learning fast)
-            return exampleCount % 3 == 0
-        }
-
-        // Mature phase: check if profile has stabilized
-        let recentAvg = averageRecentEditDistance(last: 10)
-
-        if recentAvg < 0.25 {
-            // Profile is working well — refine every 10
-            return exampleCount % 10 == 0
-        } else {
-            // Still learning — refine every 5
-            return exampleCount % 5 == 0
-        }
-    }
-
-    /// Average edit distance of the N most recent examples (0 = AI nails it, 1 = completely rewritten)
-    private func averageRecentEditDistance(last n: Int) -> Double {
-        let distances = extractRecentEditDistances(last: n)
-        guard !distances.isEmpty else { return 1.0 }
-        return distances.reduce(0, +) / Double(distances.count)
-    }
-
-    /// Parse EDIT_DISTANCE values from the last N examples
-    private func extractRecentEditDistances(last n: Int) -> [Double] {
-        let blocks = styleFileContents.components(separatedBy: "### Example")
-        // First element is everything before examples — skip it
-        let exampleBlocks = Array(blocks.dropFirst().suffix(n))
-        return exampleBlocks.compactMap { block in
-            guard let range = block.range(of: "EDIT_DISTANCE: ") else { return nil }
-            let afterTag = block[range.upperBound...]
-            let line = afterTag.prefix(while: { $0 != "\n" })
-            return Double(line)
-        }
+        StyleUtils.shouldRefineNow(exampleCount: exampleCount, styleFileContents: styleFileContents)
     }
 
     // MARK: - Incremental Style Refinement
@@ -589,17 +548,8 @@ class StyleEngine: ObservableObject {
         }
     }
 
-    private func extractExamplesText() -> String {
-        guard let range = styleFileContents.range(of: "## Examples") else { return "" }
-        return String(styleFileContents[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     /// Extract only the last N examples for recency-weighted refinement
     private func extractRecentExamplesText(last n: Int) -> String {
-        let blocks = styleFileContents.components(separatedBy: "### Example")
-        // First element is everything before examples — skip it
-        let recentBlocks = blocks.dropFirst().suffix(n)
-        guard !recentBlocks.isEmpty else { return "" }
-        return recentBlocks.map { "### Example" + $0 }.joined().trimmingCharacters(in: .whitespacesAndNewlines)
+        StyleUtils.extractRecentExamplesText(last: n, styleFileContents: styleFileContents)
     }
 }

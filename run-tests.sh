@@ -13,10 +13,16 @@ swiftc \
     Tests/PlatformFormatterTests.swift \
     Tests/RefusalDetectionTests.swift \
     Tests/MessageFilterTests.swift \
+    Tests/StyleUtilsTests.swift \
+    Tests/InsightCardTests.swift \
+    Tests/IsRetryableTests.swift \
     Sources/Capture/CapturedContext.swift \
     Sources/Draft/PlatformFormatter.swift \
     Sources/Draft/DraftUtils.swift \
     Sources/Messages/MessageFilter.swift \
+    Sources/Style/StyleUtils.swift \
+    Sources/UI/InsightCard.swift \
+    Sources/API/AnthropicAPITypes.swift \
     -framework AppKit \
     -parse-as-library \
     -o build/tests \
