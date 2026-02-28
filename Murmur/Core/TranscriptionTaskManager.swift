@@ -121,6 +121,10 @@ class TranscriptionTaskManager: ObservableObject {
     // Display status for the status bar
     @Published var displayStatus: DisplayStatus = .idle
 
+    // Background processing count — tracks transcriptions running while pill is idle
+    // UI uses this to show a subtle indicator on the idle pill
+    @Published var backgroundTaskCount: Int = 0
+
     // Action item result state - for in-app notification
     @Published var actionItemsAddedCount: Int = 0
     @Published var showActionItemsAdded: Bool = false
@@ -160,6 +164,7 @@ class TranscriptionTaskManager: ObservableObject {
         // Increment active count and set initial status immediately (Goal-Gradient Effect)
         DispatchQueue.main.async {
             self.activeCount += 1
+            self.backgroundTaskCount += 1
             self.displayStatus = .gettingReady
         }
 
@@ -585,7 +590,7 @@ class TranscriptionTaskManager: ObservableObject {
             AppLogger.pipeline.error("Retry failed", ["error": "\(error.localizedDescription)"])
             await MainActor.run {
                 self.displayStatus = .failed(message: "Retry failed")
-                self.scheduleStatusReset(delay: 15)
+                self.scheduleStatusReset(delay: 8)
             }
             return false
         }
@@ -679,8 +684,9 @@ class TranscriptionTaskManager: ObservableObject {
         // Remove from active tasks
         activeTasks.removeValue(forKey: taskId)
         activeCount -= 1
+        backgroundTaskCount = max(0, backgroundTaskCount - 1)
 
-        AppLogger.pipeline.info("Task cleaned up", ["taskId": "\(taskId)", "remaining": "\(activeCount)"])
+        AppLogger.pipeline.info("Task cleaned up", ["taskId": "\(taskId)", "remaining": "\(activeCount)", "backgroundTasks": "\(backgroundTaskCount)"])
 
         // Show completion checkmark if this was the last task
         if activeCount == 0 {
@@ -701,6 +707,7 @@ class TranscriptionTaskManager: ObservableObject {
         }
         activeTasks.removeAll()
         activeCount = 0
+        backgroundTaskCount = 0
     }
 
     // MARK: - Action Item Extraction
@@ -927,7 +934,7 @@ class TranscriptionTaskManager: ObservableObject {
                     self.pendingReview = nil
                     self.lastTaskCreationResult = .failed(failures: [failure])
                     self.displayStatus = .failed(message: "Reminders access denied")
-                    self.scheduleStatusReset(delay: 15)  // Keep error visible longer
+                    self.scheduleStatusReset(delay: 8)  // Keep error visible longer
                 }
                 return
             }
@@ -961,7 +968,7 @@ class TranscriptionTaskManager: ObservableObject {
                 // All tasks failed
                 let errorMessage = result.failures.first?.errorMessage ?? "Failed to create tasks"
                 self.displayStatus = .failed(message: errorMessage)
-                self.scheduleStatusReset(delay: 15)  // Keep error visible longer
+                self.scheduleStatusReset(delay: 8)  // Keep error visible longer
             } else {
                 // Empty result (shouldn't happen but handle gracefully)
                 self.displayStatus = .transcriptSaved
@@ -981,8 +988,8 @@ class TranscriptionTaskManager: ObservableObject {
     }
 
     /// Schedule reset of displayStatus to .idle after delay
-    /// - Parameter delay: Seconds to wait before resetting (default 10s for success, 15s for errors)
-    private func scheduleStatusReset(delay: TimeInterval = 10) {
+    /// - Parameter delay: Seconds to wait before resetting (default 3s — quick return to idle so user can record again)
+    private func scheduleStatusReset(delay: TimeInterval = 3) {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self = self else { return }
             // Only reset if we're in a completion state (not if new recording started or pending review)

@@ -117,7 +117,8 @@ struct FloatingPanelView: View {
             AuroraIdleView(
                 onRecord: { audio.start() },
                 onFiles: { openTranscriptsFolder() },
-                failedCount: failedTranscriptionManager.failedTranscriptions.count
+                failedCount: failedTranscriptionManager.failedTranscriptions.count,
+                backgroundTaskCount: taskManager.backgroundTaskCount
             )
         case .recording:
             if useAuroraRecording {
