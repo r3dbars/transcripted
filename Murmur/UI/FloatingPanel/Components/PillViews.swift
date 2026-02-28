@@ -8,7 +8,7 @@ import SwiftUI
 @available(macOS 14.0, *)
 struct PillIdleView: View {
     let onRecord: () -> Void
-    let onFiles: () -> Void
+    let onTranscripts: () -> Void
     let failedCount: Int
 
     @Environment(\.accessibilityReduceMotion) var reduceMotion
@@ -20,9 +20,9 @@ struct PillIdleView: View {
         case files
     }
 
-    init(onRecord: @escaping () -> Void, onFiles: @escaping () -> Void, failedCount: Int = 0) {
+    init(onRecord: @escaping () -> Void, onTranscripts: @escaping () -> Void, failedCount: Int = 0) {
         self.onRecord = onRecord
-        self.onFiles = onFiles
+        self.onTranscripts = onTranscripts
         self.failedCount = failedCount
     }
 
@@ -57,7 +57,7 @@ struct PillIdleView: View {
                 SlideOutButton(
                     icon: "folder.fill",
                     isHovered: hoveredButton == .files,
-                    action: onFiles
+                    action: onTranscripts
                 )
                 .frame(width: buttonWidth, height: buttonHeight)
                 .offset(x: isExpanded ? 0 : -buttonWidth / 2)
