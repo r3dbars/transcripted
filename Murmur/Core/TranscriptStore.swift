@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import os
 
 // MARK: - TranscriptSummary
 
@@ -36,6 +37,9 @@ final class TranscriptStore: ObservableObject {
     func refresh() {
         let dir = saveDirectory
         guard FileManager.default.fileExists(atPath: dir.path) else {
+            if UserDefaults.standard.string(forKey: "transcriptSaveLocation") != nil {
+                AppLogger.pipeline.warning("TranscriptStore: custom save directory not found", ["path": dir.path])
+            }
             transcripts = []
             return
         }
@@ -52,6 +56,7 @@ final class TranscriptStore: ObservableObject {
 
             transcripts = files.prefix(10).compactMap { parseMetadata($0) }
         } catch {
+            AppLogger.pipeline.error("TranscriptStore.refresh failed to read directory", ["path": dir.path, "error": "\(error)"])
             transcripts = []
         }
     }
@@ -59,8 +64,11 @@ final class TranscriptStore: ObservableObject {
     /// Returns clean, AI-ready text for a transcript.
     /// Strips YAML frontmatter and the analytics sections so the result can be
     /// pasted directly into Claude, ChatGPT, etc.
-    func copyableText(for summary: TranscriptSummary) -> String {
-        guard let raw = try? String(contentsOf: summary.url, encoding: .utf8) else { return "" }
+    func copyableText(for summary: TranscriptSummary) -> String? {
+        guard let raw = try? String(contentsOf: summary.url, encoding: .utf8) else {
+            AppLogger.pipeline.error("TranscriptStore.copyableText failed to read file", ["file": summary.url.lastPathComponent])
+            return nil
+        }
 
         var content = raw
 
@@ -111,7 +119,10 @@ final class TranscriptStore: ObservableObject {
 
     /// Parse only the metadata needed for the tray row — does NOT load the full transcript.
     private func parseMetadata(_ url: URL) -> TranscriptSummary? {
-        guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        guard let raw = try? String(contentsOf: url, encoding: .utf8) else {
+            AppLogger.pipeline.warning("TranscriptStore could not read file", ["file": url.lastPathComponent])
+            return nil
+        }
 
         var title = cleanFilenameTitle(url)
         var date: Date = fileCreationDate(url)
@@ -137,7 +148,11 @@ final class TranscriptStore: ObservableObject {
                 switch key {
                 case "date":
                     let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
-                    if let d = df.date(from: val) { date = d }
+                    if let d = df.date(from: val) {
+                        date = d
+                    } else {
+                        AppLogger.pipeline.debug("TranscriptStore: malformed date in frontmatter", ["file": url.lastPathComponent, "value": val])
+                    }
                 case "duration":
                     duration = val
                 case "mic_speakers", "system_speakers":
