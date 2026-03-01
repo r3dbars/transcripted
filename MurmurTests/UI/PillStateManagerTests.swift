@@ -9,7 +9,7 @@ final class PillStateManagerTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        manager = PillStateManager()
+        manager = PillStateManager(transitionCooldown: 0)
     }
 
     // MARK: - Initial state
@@ -56,11 +56,6 @@ final class PillStateManagerTests: XCTestCase {
 
     func testLockedBlocksTransition() {
         manager.transition(to: .recording)
-        // Wait for cooldown
-        let expectation = XCTestExpectation(description: "cooldown")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { expectation.fulfill() }
-        wait(for: [expectation], timeout: 1.0)
-
         manager.lock()
         manager.transition(to: .processing)
         // Should still be recording since locked
@@ -69,11 +64,6 @@ final class PillStateManagerTests: XCTestCase {
 
     func testLockedAllowsIdleTransition() {
         manager.transition(to: .recording)
-        // Wait for cooldown
-        let expectation = XCTestExpectation(description: "cooldown")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { expectation.fulfill() }
-        wait(for: [expectation], timeout: 1.0)
-
         manager.lock()
         manager.transition(to: .idle)
         // Emergency escape to idle should work even when locked
@@ -95,11 +85,6 @@ final class PillStateManagerTests: XCTestCase {
 
     func testUnlockTransitionsToIdleByDefault() {
         manager.transition(to: .recording)
-        // Wait for cooldown
-        let expectation = XCTestExpectation(description: "cooldown")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { expectation.fulfill() }
-        wait(for: [expectation], timeout: 1.0)
-
         manager.lock()
         manager.unlock()
         XCTAssertEqual(manager.state, .idle)

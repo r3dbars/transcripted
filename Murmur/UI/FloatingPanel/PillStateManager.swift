@@ -62,8 +62,12 @@ class PillStateManager: ObservableObject {
     /// Flag to prevent rapid state changes during animations
     @Published private(set) var isTransitioning = false
 
-    /// PHASE 4 FIX: Use unified timing from DesignTokens to prevent animation/cooldown mismatch
-    private let transitionCooldown: TimeInterval = PillAnimationTiming.cooldownDuration
+    /// Transition cooldown duration — injectable for testing (pass 0 to disable cooldown)
+    private let transitionCooldown: TimeInterval
+
+    init(transitionCooldown: TimeInterval = PillAnimationTiming.cooldownDuration) {
+        self.transitionCooldown = transitionCooldown
+    }
 
     // MARK: - Timeout Recovery (Phase 1 Bug Fix)
 
@@ -148,9 +152,14 @@ class PillStateManager: ObservableObject {
         playTransitionSound(from: previousState, to: newState)
 
         // Reset transition flag after cooldown
-        DispatchQueue.main.asyncAfter(deadline: .now() + transitionCooldown) { [weak self] in
-            self?.isTransitioning = false
-            self?.transitionStartTime = nil
+        if transitionCooldown <= 0 {
+            isTransitioning = false
+            transitionStartTime = nil
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + transitionCooldown) { [weak self] in
+                self?.isTransitioning = false
+                self?.transitionStartTime = nil
+            }
         }
     }
 
