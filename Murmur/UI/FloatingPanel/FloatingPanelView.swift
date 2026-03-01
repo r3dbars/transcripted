@@ -45,7 +45,7 @@ struct FloatingPanelView: View {
             Spacer(minLength: 0)
 
             // MARK: - Transcript Tray (expands upward when browsing recent meetings)
-            if showTranscriptTray && pillStateManager.state == .idle {
+            if showTranscriptTray && (pillStateManager.state == .idle || pillStateManager.state == .recording) {
                 TranscriptTrayView(
                     store: transcriptStore,
                     onOpenFolder: {
@@ -95,8 +95,9 @@ struct FloatingPanelView: View {
             }
         }
         // Dismiss transcript tray when recording starts
+        // Dismiss transcript tray when processing starts (but keep it available during recording)
         .onChange(of: pillStateManager.state) { _, newState in
-            if newState != .idle {
+            if newState == .processing {
                 withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
                     showTranscriptTray = false
                 }
@@ -151,9 +152,11 @@ struct FloatingPanelView: View {
             )
         case .recording:
             if useAuroraRecording {
-                AuroraRecordingView(audio: audio) {
+                AuroraRecordingView(audio: audio, onStop: {
                     audio.stop()
-                }
+                }, onTranscripts: {
+                    toggleTranscriptTray()
+                })
             } else {
                 PillRecordingView(audio: audio) {
                     audio.stop()
