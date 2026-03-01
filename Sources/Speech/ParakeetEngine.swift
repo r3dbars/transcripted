@@ -415,7 +415,11 @@ class ParakeetEngine: ObservableObject {
                     let combined = self.committedLiveText.isEmpty
                         ? partialText
                         : self.committedLiveText + " " + partialText
-                    self.liveTranscript = combined
+                    // Never shrink the transcript — a new recognition task's early
+                    // partial results can be shorter than what's already committed.
+                    if combined.count >= self.liveTranscript.count {
+                        self.liveTranscript = combined
+                    }
                 }
 
                 if result.isFinal {
@@ -428,6 +432,9 @@ class ParakeetEngine: ObservableObject {
                                 ? finalText
                                 : self.committedLiveText + " " + finalText
                         }
+                        // Pin display to committed text before restarting — prevents
+                        // the gap between old task ending and new task producing text.
+                        self.liveTranscript = self.committedLiveText
                         self.startLiveSpeechTask(recognizer: recognizer)
                     }
                 }
@@ -437,6 +444,8 @@ class ParakeetEngine: ObservableObject {
                     if !self.liveTranscript.isEmpty {
                         self.committedLiveText = self.liveTranscript
                     }
+                    // Pin display to committed text before restarting
+                    self.liveTranscript = self.committedLiveText
                     self.startLiveSpeechTask(recognizer: recognizer)
                 }
             }
