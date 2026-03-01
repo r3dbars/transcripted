@@ -43,13 +43,16 @@ struct MenuBarPanelView: View {
             }
 
             // Onboarding overlays (sequential gates)
+            // New standalone onboarding window sets "onboarding-completed" — skip old overlays
             #if BETA_BUILD
-            if !PermissionsOnboardingView.hasCompleted {
-                PermissionsOnboardingView(onComplete: {
-                    PermissionsOnboardingView.markCompleted()
-                })
-            } else if !appState.styleEngine.hasCompletedOnboarding {
-                StyleOnboardingView(styleEngine: appState.styleEngine, draftEngine: appState.drafter)
+            if !UserDefaults.standard.bool(forKey: "onboarding-completed") {
+                if !PermissionsOnboardingView.hasCompleted {
+                    PermissionsOnboardingView(onComplete: {
+                        PermissionsOnboardingView.markCompleted()
+                    })
+                } else if !appState.styleEngine.hasCompletedOnboarding {
+                    StyleOnboardingView(styleEngine: appState.styleEngine, draftEngine: appState.drafter)
+                }
             }
             #else
             if !appState.drafter.hasCredential {
@@ -281,6 +284,39 @@ struct MenuBarPanelView: View {
         }
     }
 
+    #if BETA_BUILD
+    @ViewBuilder
+    private var updateStatusSection: some View {
+        switch appState.updateManager.state {
+        case .idle:
+            Text("v\(BetaConfig.appVersion)")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        case .downloading(let progress):
+            VStack(spacing: 4) {
+                ProgressView(value: progress)
+                    .frame(width: 220)
+                Text("Downloading update (\(Int(progress * 100))%)...")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+        case .installing:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Installing update...")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        case .failed(let message):
+            Text("Update failed: \(message)")
+                .font(.caption2)
+                .foregroundColor(.red)
+                .frame(width: 220, alignment: .leading)
+        }
+    }
+    #endif
+
     private var settingsPopover: some View {
         VStack(spacing: 16) {
             Text("Settings")
@@ -332,6 +368,11 @@ struct MenuBarPanelView: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
+
+            #if BETA_BUILD
+            Divider()
+            updateStatusSection
+            #endif
 
             #if !BETA_BUILD
             Divider()

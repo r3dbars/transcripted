@@ -8,6 +8,8 @@ interface Env {
   ANTHROPIC_API_KEY: string;
   ADMIN_TOKEN?: string;
   BETA_MESSAGE?: string;
+  LATEST_VERSION?: string;
+  DOWNLOAD_URL?: string;
 }
 
 interface User {
@@ -178,9 +180,13 @@ async function handleLogs(
   }
 
   await env.DB.prepare(
-    "INSERT INTO logs (user_id, log_lines) VALUES (?, ?)"
+    "INSERT INTO logs (user_id, log_lines, event_lines) VALUES (?, ?, ?)"
   )
-    .bind(user.id, (body.log_lines as string) ?? "")
+    .bind(
+      user.id,
+      (body.log_lines as string) ?? null,
+      (body.event_lines as string) ?? null
+    )
     .run();
 
   return new Response(JSON.stringify({ ok: true }), {
@@ -199,6 +205,8 @@ async function handleConfig(
       message: env.BETA_MESSAGE ?? null,
       max_drafts_per_day: user.max_drafts_per_day,
       min_version: "1.0.0",
+      latest_version: env.LATEST_VERSION ?? null,
+      download_url: env.DOWNLOAD_URL ?? null,
     }),
     { headers: { "Content-Type": "application/json" } }
   );
@@ -214,6 +222,7 @@ async function handleAdminUsage(
     return new Response("Unauthorized", { status: 401 });
   }
 
+  // Per-user API usage totals
   const usage = await env.DB.prepare(`
     SELECT u.name, u.token, u.active,
       COUNT(a.id) as total_calls,
@@ -225,16 +234,88 @@ async function handleAdminUsage(
     ORDER BY total_calls DESC
   `).all();
 
+  // Per-user event breakdown (drafts accepted, cancelled, dictations, etc.)
   const events = await env.DB.prepare(`
     SELECT u.name, e.event_type, COUNT(*) as count
     FROM events e
     JOIN users u ON u.id = e.user_id
     GROUP BY u.name, e.event_type
+    ORDER BY u.name, count DESC
+  `).all();
+
+  // Per-user usage stats (computed from event payloads)
+  const userStats = await env.DB.prepare(`
+    SELECT u.name,
+      COUNT(CASE WHEN e.event_type = 'draft_accepted' THEN 1 END) as drafts_accepted,
+      COUNT(CASE WHEN e.event_type = 'draft_cancelled' THEN 1 END) as drafts_cancelled,
+      COUNT(CASE WHEN e.event_type = 'dictation_completed' THEN 1 END) as dictations,
+      COUNT(CASE WHEN e.event_type = 'dictation_cancelled' THEN 1 END) as dictations_cancelled,
+      COUNT(CASE WHEN e.event_type = 'app_launched' THEN 1 END) as app_launches,
+      SUM(CASE WHEN e.event_type = 'draft_accepted' THEN CAST(json_extract(e.payload, '$.duration_s') AS INTEGER) ELSE 0 END) as total_draft_time_s,
+      SUM(CASE WHEN e.event_type = 'dictation_completed' THEN CAST(json_extract(e.payload, '$.duration_s') AS INTEGER) ELSE 0 END) as total_dictation_time_s,
+      SUM(CASE WHEN e.event_type = 'draft_accepted' THEN CAST(json_extract(e.payload, '$.accepted_chars') AS INTEGER) ELSE 0 END) as total_chars_drafted,
+      SUM(CASE WHEN e.event_type = 'dictation_completed' THEN CAST(json_extract(e.payload, '$.chars') AS INTEGER) ELSE 0 END) as total_chars_dictated,
+      COUNT(CASE WHEN e.event_type = 'draft_accepted' AND json_extract(e.payload, '$.was_edited') = 1 THEN 1 END) as drafts_edited
+    FROM users u
+    LEFT JOIN events e ON e.user_id = u.id
+    GROUP BY u.id
+    ORDER BY drafts_accepted DESC
+  `).all();
+
+  // Daily activity (last 7 days)
+  const dailyActivity = await env.DB.prepare(`
+    SELECT date(e.created_at) as day,
+      u.name,
+      COUNT(CASE WHEN e.event_type = 'draft_accepted' THEN 1 END) as drafts,
+      COUNT(CASE WHEN e.event_type = 'dictation_completed' THEN 1 END) as dictations
+    FROM events e
+    JOIN users u ON u.id = e.user_id
+    WHERE e.created_at >= datetime('now', '-7 days')
+    GROUP BY day, u.name
+    ORDER BY day DESC, u.name
+  `).all();
+
+  // Most used apps
+  const topApps = await env.DB.prepare(`
+    SELECT u.name, e.source_app, COUNT(*) as count
+    FROM events e
+    JOIN users u ON u.id = e.user_id
+    WHERE e.source_app IS NOT NULL
+    GROUP BY u.name, e.source_app
     ORDER BY count DESC
+    LIMIT 20
+  `).all();
+
+  // Recent logs (last 20, full content)
+  const recentLogs = await env.DB.prepare(`
+    SELECT u.name, l.created_at, l.log_lines
+    FROM logs l
+    JOIN users u ON u.id = l.user_id
+    WHERE l.log_lines IS NOT NULL
+    ORDER BY l.created_at DESC
+    LIMIT 20
+  `).all();
+
+  // Recent structured events from EventReporter (shipped via event_lines)
+  const recentEvents = await env.DB.prepare(`
+    SELECT u.name, l.created_at, l.event_lines
+    FROM logs l
+    JOIN users u ON u.id = l.user_id
+    WHERE l.event_lines IS NOT NULL
+    ORDER BY l.created_at DESC
+    LIMIT 20
   `).all();
 
   return new Response(
-    JSON.stringify({ usage: usage.results, events: events.results }),
+    JSON.stringify({
+      usage: usage.results,
+      events: events.results,
+      user_stats: userStats.results,
+      daily_activity: dailyActivity.results,
+      top_apps: topApps.results,
+      recent_logs: recentLogs.results,
+      recent_events: recentEvents.results,
+    }),
     { headers: { "Content-Type": "application/json" } }
   );
 }

@@ -13,6 +13,7 @@ class FloatingOverlayController: ObservableObject {
 
     enum OverlayState {
         case idle
+        case loading      // Voice model still loading — waiting for readiness
         case listening    // Recording (both modes)
         case drafting     // Processing (vision+draft for draft mode, polish for dictation)
         case streaming    // Tokens arriving (draft mode only)
@@ -25,6 +26,7 @@ class FloatingOverlayController: ObservableObject {
     @Published var reviewText: String = ""
     @Published var streamingText: String = ""
     @Published var errorMessage: String = ""
+    @Published var loadingElapsedSeconds: Int = 0
 
     /// Closures for Enter/Escape in review mode — set by DraftSessionController
     var onConfirm: (() -> Void)?
@@ -291,6 +293,28 @@ class FloatingOverlayController: ObservableObject {
 
     private var errorDismissTask: Task<Void, Never>?
 
+    private var loadingTimerTask: Task<Void, Never>?
+
+    /// Show a persistent loading state (stays visible until state changes or session ends).
+    func showLoadingState() {
+        errorDismissTask?.cancel()
+        errorMessage = ""
+        loadingElapsedSeconds = 0
+        state = .loading
+        if !isVisible {
+            showPanel(near: nil)
+        }
+        // Tick elapsed seconds so the user knows it's alive
+        loadingTimerTask?.cancel()
+        loadingTimerTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self = self, !Task.isCancelled, self.state == .loading else { break }
+                self.loadingElapsedSeconds += 1
+            }
+        }
+    }
+
     /// Show a brief error message in the overlay, then auto-hide after ~1.5s (plus cancel animation).
     func showError(_ message: String) {
         errorDismissTask?.cancel()
@@ -321,6 +345,8 @@ class FloatingOverlayController: ObservableObject {
         isVisible = false
         errorDismissTask?.cancel()
         errorDismissTask = nil
+        loadingTimerTask?.cancel()
+        loadingTimerTask = nil
         state = .idle
         reviewText = ""
         streamingText = ""
@@ -337,8 +363,8 @@ class FloatingOverlayController: ObservableObject {
             guard event.keyCode == 53 else { return }  // 53 = Escape
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
-                // Only handle during listening/drafting/streaming — review has its own SwiftUI handler
-                guard self.state == .listening || self.state == .drafting || self.state == .streaming else { return }
+                // Handle during loading/listening/drafting/streaming — review has its own SwiftUI handler
+                guard self.state == .loading || self.state == .listening || self.state == .drafting || self.state == .streaming else { return }
                 self.onEscapeDuringSession?()
             }
         }

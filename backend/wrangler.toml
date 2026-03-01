@@ -2,7 +2,11 @@ name = "draft-proxy"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 
+[vars]
+LATEST_VERSION = "1.1.0"
+DOWNLOAD_URL = "https://github.com/r3dbars/draft-releases/releases/download/v1.1.0/Draft.dmg"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "draft-beta-db"
-database_id = "PASTE_YOUR_D1_DATABASE_ID_HERE"
+database_id = "0fc4e34c-ddb1-4be7-af73-bc98016cce3c"

@@ -9,18 +9,10 @@ set -e
 
 USERS=(
     "draft-beta-nate:Nate"
-    "draft-beta-jack:Jack"
-    "draft-beta-abdulbaqi:Abdulbaqi"
-    "draft-beta-don:Don"
-    "draft-beta-sarah:Sarah"
-    "draft-beta-travis:Travis"
-    "draft-beta-inaje:Inaje"
-    "draft-beta-willa:Willa"
-    "draft-beta-nathan:Nathan"
-    "draft-beta-reserve:Reserve"
+    "draft-beta-josh:Josh"
 )
 
-echo "🔨 Building ${#USERS[@]} beta DMGs..."
+echo "Building ${#USERS[@]} beta DMGs..."
 echo ""
 
 BUILT=0
@@ -35,7 +27,7 @@ for entry in "${USERS[@]}"; do
     if ./build-beta.sh "$token" "$name"; then
         BUILT=$((BUILT + 1))
     else
-        echo "❌ Failed to build for $name"
+        echo "Failed to build for $name"
         FAILED=$((FAILED + 1))
     fi
     echo ""
