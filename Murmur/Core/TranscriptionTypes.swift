@@ -75,7 +75,11 @@ extension ActionItem {
         case "high": return 1
         case "medium": return 5
         case "low": return 9
-        default: return 0
+        default:
+            if !priority.isEmpty {
+                AppLogger.actionItems.warning("Unknown priority, defaulting to none", ["priority": priority])
+            }
+            return 0
         }
     }
 
@@ -85,7 +89,11 @@ extension ActionItem {
         case "high": return 4
         case "medium": return 3
         case "low": return 2
-        default: return 1
+        default:
+            if !priority.isEmpty {
+                AppLogger.actionItems.warning("Unknown priority, defaulting to normal", ["priority": priority])
+            }
+            return 1
         }
     }
 }
