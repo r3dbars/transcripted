@@ -362,7 +362,7 @@ struct TranscriptRowView: View {
 
     var body: some View {
         HStack(spacing: Spacing.sm) {
-            // Left: title + metadata (tappable for detail view)
+            // Left: title + metadata
             VStack(alignment: .leading, spacing: 2) {
                 Text(transcript.title)
                     .font(.system(size: 12, weight: .medium))
@@ -400,8 +400,6 @@ struct TranscriptRowView: View {
                     }
                 }
             }
-            .contentShape(Rectangle())
-            .onTapGesture { onSelect?() }
 
             Spacer(minLength: Spacing.xs)
 
@@ -412,6 +410,7 @@ struct TranscriptRowView: View {
         .padding(.vertical, Spacing.sm)
         .background(isHovered ? Color.panelCharcoal.opacity(0.5) : Color.clear)
         .contentShape(Rectangle())
+        .onTapGesture { onSelect?() }
         .onHover { hovering in
             withAnimation(.snappy(duration: 0.1)) { isHovered = hovering }
         }
