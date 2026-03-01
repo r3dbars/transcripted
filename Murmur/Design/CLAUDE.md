@@ -25,7 +25,7 @@ Visual design system: colors, spacing, typography, animation presets, and reusab
 - `.refined` — subtle state changes
 - `.snappy` — quick interactions
 
-**Pill dimensions**: `PillDimensions` struct with sizes per state (idle, recording, processing, reviewing)
+**Pill dimensions**: `PillDimensions` struct with sizes per state (idle, recording, processing)
 
 ## Common Tasks
 
