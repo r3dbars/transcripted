@@ -162,6 +162,9 @@ extension Color {
     /// Muted text on dark backgrounds
     static let panelTextMuted = Color(hex: "#6B6B6B")
 
+    /// Chat bubble background for "You" messages — muted navy
+    static let chatBubbleUser = Color(hue: 0.583, saturation: 0.45, brightness: 0.28)
+
     /// Vibrant recording accent - coral red
     static let recordingCoral = Color(hex: "#FF6B6B")
 

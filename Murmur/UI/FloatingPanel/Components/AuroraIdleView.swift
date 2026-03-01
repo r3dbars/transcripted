@@ -10,9 +10,13 @@ struct AuroraIdleView: View {
     let onTranscripts: () -> Void
     let failedCount: Int
     var backgroundTaskCount: Int = 0
+    var forceExpanded: Bool = false
 
     @Environment(\.accessibilityReduceMotion) var reduceMotion
-    @State private var isExpanded = false
+    @State private var isHoverExpanded = false
+
+    /// True when pill should show expanded state (hover OR forced by tray)
+    private var isExpanded: Bool { isHoverExpanded || forceExpanded }
     @State private var isRecordHovered = false
     @State private var isFilesHovered = false
 
@@ -59,7 +63,7 @@ struct AuroraIdleView: View {
         )
         .animation(.spring(response: 0.15, dampingFraction: 0.8), value: isExpanded)
         .onHover { hovering in
-            isExpanded = hovering
+            isHoverExpanded = hovering
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Ready to record")

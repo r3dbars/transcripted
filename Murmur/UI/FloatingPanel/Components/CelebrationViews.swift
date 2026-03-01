@@ -83,13 +83,11 @@ struct CelebrationOverlay: View {
     enum CelebrationType: Equatable {
         case recordingStopped           // Blue pulse ring fade
         case transcriptSaved            // Green checkmark scale-in
-        case actionItemsCreated(count: Int)  // Count badge with bounce
     }
 
     @State private var ringScale: CGFloat = 0.8
     @State private var ringOpacity: Double = 0.0
     @State private var checkScale: CGFloat = 0.5
-    @State private var badgeBounce: CGFloat = 1.0
 
     var body: some View {
         ZStack {
@@ -98,8 +96,6 @@ struct CelebrationOverlay: View {
                 recordingStoppedCelebration
             case .transcriptSaved:
                 transcriptSavedCelebration
-            case .actionItemsCreated(let count):
-                actionItemsCelebration(count: count)
             }
         }
         .opacity(isVisible ? 1.0 : 0.0)
@@ -138,32 +134,6 @@ struct CelebrationOverlay: View {
         }
     }
 
-    // MARK: - Action Items Created (Count badge with bounce)
-
-    private func actionItemsCelebration(count: Int) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "checklist")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.statusSuccessMuted)
-
-            Text("\(count) task\(count == 1 ? "" : "s") added")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.textOnCream)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(
-            Capsule()
-                .fill(Color.surfaceCard)
-                .overlay(
-                    Capsule()
-                        .stroke(Color.statusSuccessMuted.opacity(0.3), lineWidth: 1)
-                )
-        )
-        .shadow(color: Color.statusSuccessMuted.opacity(0.2), radius: 8, y: 4)
-        .scaleEffect(badgeBounce)
-    }
-
     // MARK: - Trigger Animation
 
     private func triggerCelebration() {
@@ -197,23 +167,6 @@ struct CelebrationOverlay: View {
                 }
             }
 
-        case .actionItemsCreated:
-            // Badge bounces in
-            badgeBounce = 0.7
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.5)) {
-                badgeBounce = 1.0
-            }
-            // Extra bounce
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                withAnimation(.spring(response: 0.15, dampingFraction: 0.4)) {
-                    badgeBounce = 1.1
-                }
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                withAnimation(.spring(response: 0.1, dampingFraction: 0.6)) {
-                    badgeBounce = 1.0
-                }
-            }
         }
     }
 }

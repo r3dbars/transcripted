@@ -41,20 +41,3 @@ extension TranscriptionResult {
     }
 }
 
-extension ActionItem {
-    static func mock(
-        task: String = "Follow up on proposal",
-        owner: String = "You",
-        priority: String = "Medium",
-        dueDate: String? = "next Friday",
-        context: String = "Discussed during the weekly sync"
-    ) -> ActionItem {
-        ActionItem(
-            task: task,
-            owner: owner,
-            priority: priority,
-            dueDate: dueDate,
-            context: context
-        )
-    }
-}

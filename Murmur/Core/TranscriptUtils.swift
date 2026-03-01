@@ -96,39 +96,4 @@ enum TranscriptUtils {
         }
     }
 
-    /// Update transcript YAML frontmatter with action items count
-    /// - Parameters:
-    ///   - url: The URL of the transcript markdown file
-    ///   - count: Number of action items extracted
-    static func updateActionItemsCount(at url: URL, count: Int) {
-        guard var content = try? String(contentsOf: url, encoding: .utf8) else {
-            AppLogger.pipeline.warning("Could not read transcript for action items update")
-            return
-        }
-
-        // Find YAML frontmatter section (between --- markers)
-        guard content.hasPrefix("---") else {
-            AppLogger.pipeline.warning("No YAML frontmatter found in transcript")
-            return
-        }
-
-        // Find the closing --- of the YAML section
-        guard let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) else {
-            AppLogger.pipeline.warning("Could not find end of YAML frontmatter")
-            return
-        }
-
-        // Insert action_items field before the closing ---
-        let insertPoint = endRange.lowerBound
-        let actionItemsLine = "\naction_items: \(count)"
-
-        content.insert(contentsOf: actionItemsLine, at: insertPoint)
-
-        do {
-            try content.write(to: url, atomically: true, encoding: .utf8)
-            AppLogger.pipeline.info("Updated transcript with action items", ["count": "\(count)"])
-        } catch {
-            AppLogger.pipeline.warning("Failed to write action items update", ["error": error.localizedDescription])
-        }
-    }
 }
