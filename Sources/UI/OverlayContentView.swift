@@ -1,5 +1,5 @@
 // OverlayContentView.swift
-// SwiftUI views for all 5 overlay states: idle, listening, drafting, streaming, review
+// SwiftUI views for all 6 overlay states: idle, loading, listening, drafting, streaming, review
 
 import SwiftUI
 
@@ -53,6 +53,15 @@ struct OverlayContentView: View {
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(OverlayTokens.textSecondary)
                     }
+                case (.loading, _):
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .tint(OverlayTokens.accentGreen)
+                        Text("Loading voice model...")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(OverlayTokens.textSecondary)
+                    }
                 case (.review, _):
                     Text("Draft")
                         .font(.system(size: 11, weight: .semibold))
@@ -87,6 +96,10 @@ struct OverlayContentView: View {
                     Text("\u{2325}Space to stop")
                         .font(.system(size: 10))
                         .foregroundColor(OverlayTokens.textMuted)
+                case (.loading, _):
+                    Text("Esc to cancel")
+                        .font(.system(size: 10))
+                        .foregroundColor(OverlayTokens.textMuted)
                 case (.review, _):
                     EmptyView()
                 default:
@@ -103,6 +116,8 @@ struct OverlayContentView: View {
     @ViewBuilder
     private var contentArea: some View {
         switch controller.state {
+        case .loading:
+            loadingContent
         case .listening:
             listeningContent
         case .drafting:
@@ -114,6 +129,25 @@ struct OverlayContentView: View {
         case .idle:
             idleContent
         }
+    }
+
+    @ViewBuilder
+    private var loadingContent: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.regular)
+                .tint(OverlayTokens.accentGreen)
+            Text("Preparing voice model...")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(OverlayTokens.textSecondary)
+            if controller.loadingElapsedSeconds > 0 {
+                Text("This may take a moment on first launch (\(controller.loadingElapsedSeconds)s)")
+                    .font(.system(size: 11))
+                    .foregroundColor(OverlayTokens.textMuted)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(OverlayTokens.contentPadding)
     }
 
     @ViewBuilder

@@ -2,6 +2,7 @@
 // Centralized engine ownership — lives in AppDelegate, survives window cycles
 
 import SwiftUI
+import ServiceManagement
 
 @MainActor
 class DraftAppState: ObservableObject {
@@ -15,6 +16,9 @@ class DraftAppState: ObservableObject {
     let analysisEngine = AnalysisEngine()
     let chatEngine = StreamingChatEngine()
     let sttRouter = STTRouter()
+    #if BETA_BUILD
+    let updateManager = UpdateManager()
+    #endif
 
     private var promptsObserver: NSObjectProtocol?
     private var isInitialized = false
@@ -53,16 +57,32 @@ class DraftAppState: ObservableObject {
         #endif
 
         #if BETA_BUILD
-        // Auto-inject beta token if not already in Keychain
-        if AuthCredential.load() == nil {
-            _ = AuthCredential.saveBetaToken(BetaConfig.userToken)
-            drafter.checkCredential()
-        }
+        // Always inject beta token — clears any existing API key or subscription token
+        _ = AuthCredential.saveBetaToken(BetaConfig.userToken)
+        drafter.checkCredential()
+
+        // Beta proxy may not support Sonnet — use Haiku for all API calls
+        promptStore.config.draftModel = DefaultPrompts.model
 
         // Check if beta is still active
         Task {
             await checkBetaConfig()
         }
+
+        // Register as login item so model is pre-loaded when user needs it
+        try? SMAppService.mainApp.register()
+
+        // Start periodic telemetry shipping (60s incremental uploads)
+        BetaTelemetry.shared.startPeriodicShipping()
+
+        // Report app launch to proxy
+        BetaTelemetry.shared.sendEvent(
+            type: "app_launched",
+            payload: [
+                "style_examples": styleEngine.exampleCount,
+                "app_version": BetaConfig.appVersion,
+            ]
+        )
         #endif
 
         // Initialize Parakeet STT engine in background (don't block app startup)
@@ -110,11 +130,12 @@ class DraftAppState: ObservableObject {
                 return
             }
 
-            // Check if a newer version is required
-            if let minVersion = json["min_version"] as? String,
-               compareVersions(BetaConfig.appVersion, minVersion) == .orderedAscending {
-                logger.log("BETA | update available: current=\(BetaConfig.appVersion) min=\(minVersion)")
-                showUpdateAlert(minVersion: minVersion)
+            // Auto-update if a newer version is available
+            if let latestVersion = json["latest_version"] as? String,
+               compareVersions(BetaConfig.appVersion, latestVersion) == .orderedAscending,
+               let downloadURL = json["download_url"] as? String {
+                logger.log("BETA | auto-update: current=\(BetaConfig.appVersion) latest=\(latestVersion)")
+                await updateManager.checkAndUpdate(latestVersion: latestVersion, downloadURL: downloadURL)
             }
 
             // Show optional banner message
@@ -150,23 +171,12 @@ class DraftAppState: ObservableObject {
         alert.runModal()
     }
 
-    private func showUpdateAlert(minVersion: String) {
-        let alert = NSAlert()
-        alert.messageText = "Update Available"
-        alert.informativeText = "A new version of Draft (\(minVersion)) is available. Please download the latest version to continue."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Download Update")
-        alert.addButton(withTitle: "Later")
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            if let url = URL(string: BetaConfig.updateURL) {
-                NSWorkspace.shared.open(url)
-            }
-        }
-    }
     #endif
 
     func shutdown() {
+        #if BETA_BUILD
+        BetaTelemetry.shared.stopPeriodicShipping()
+        #endif
         analysisEngine.stop()
         sttRouter.parakeetEngine.cleanup()
         contextCapture.unregisterHotkey()

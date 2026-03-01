@@ -24,6 +24,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate {
     let appState = DraftAppState()
     let overlayController = FloatingOverlayController()
     let sessionController = DraftSessionController()
+    var onboardingController: OnboardingWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Dock icon + menubar
@@ -58,6 +59,11 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             await appState.initialize()
             appState.contextCapture.registerHotkey()
+
+            // Show onboarding if first launch
+            if !UserDefaults.standard.bool(forKey: "onboarding-completed") {
+                showOnboardingWindow()
+            }
         }
     }
 
@@ -72,6 +78,15 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate {
         BetaTelemetry.shared.shipLogs()
         #endif
         appState.shutdown()
+    }
+
+    func showOnboardingWindow() {
+        let controller = OnboardingWindowController()
+        controller.sessionController = sessionController
+        controller.overlayController = overlayController
+        controller.appState = appState
+        controller.show()
+        onboardingController = controller
     }
 
     @objc func togglePopover() {

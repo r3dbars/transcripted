@@ -35,6 +35,10 @@ class DraftSessionController: ObservableObject {
     private var visionTask: Task<Void, Never>?
     private var sessionStartTime: CFAbsoluteTime = 0
 
+    /// When set, processVision() uses this context directly instead of calling the vision API.
+    /// Used by onboarding to inject a fake conversation without requiring screen recording permission.
+    var overrideContext: CapturedContext?
+
     private func setupInterruptionObserver() {
         guard let appState = appState else { return }
         interruptionSubscription = appState.sttRouter.$recordingInterrupted
@@ -389,6 +393,14 @@ class DraftSessionController: ObservableObject {
 
     private func processVision(imageData: Data?, sourceApp: NSRunningApplication?) async {
         guard let appState = appState else { return }
+
+        // Use injected context if provided (e.g., onboarding demo)
+        if let override = overrideContext {
+            lastCapturedContext = override
+            appState.logger.log("SESSION | using override context — platform=\(override.platform ?? "nil")")
+            return
+        }
+
         guard let auth = AuthCredential.load(), let imageData = imageData else {
             appState.logger.log("SESSION | no auth or screenshot, proceeding voice-only")
             return

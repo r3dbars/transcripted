@@ -1,5 +1,5 @@
 // OnboardingView.swift
-// 5-step standalone onboarding: Welcome → Permissions → Try Dictation → Try Drafting → All Set
+// 8-step standalone onboarding: Welcome → Dictation Intro → Drafting Intro → Name → Permissions → Try Dictation → Try Drafting → All Set
 
 import SwiftUI
 import AVFoundation
@@ -15,7 +15,11 @@ struct OnboardingView: View {
     var adjustWindow: ((Bool) -> Void)?
 
     enum Step: Int, CaseIterable {
-        case welcome, permissions, tryDictation, tryDrafting, allSet
+        case welcome, dictationIntro, draftingIntro, nameEntry, permissions, tryDictation, tryDrafting, allSet
+
+        var previous: Step? {
+            Step(rawValue: rawValue - 1)
+        }
     }
 
     enum TryItState {
@@ -51,6 +55,12 @@ struct OnboardingView: View {
                 switch currentStep {
                 case .welcome:
                     welcomeStep
+                case .dictationIntro:
+                    dictationIntroStep
+                case .draftingIntro:
+                    draftingIntroStep
+                case .nameEntry:
+                    nameEntryStep
                 case .permissions:
                     permissionsStep
                 case .tryDictation:
@@ -93,86 +103,161 @@ struct OnboardingView: View {
     // MARK: - Step 1: Welcome
 
     private var welcomeStep: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 24) {
             Spacer()
 
             Text("Welcome to Draft")
-                .font(.largeTitle)
-                .fontWeight(.bold)
+                .font(.system(size: 36, weight: .bold))
 
             Text("Two shortcuts. Zero typing.")
-                .font(.title3)
+                .font(.title2)
                 .foregroundColor(.secondary)
 
-            HStack(spacing: 16) {
-                featureCard(
-                    icon: "mic.fill",
-                    shortcut: "⌥Space",
-                    title: "Dictation",
-                    description: "Speak and your words appear as text. On-device, free, instant."
-                )
-                featureCard(
-                    icon: "doc.text.fill",
-                    shortcut: "⌥D",
-                    title: "AI Drafting",
-                    description: "Screenshots the conversation and writes a reply in your voice."
-                )
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 8)
+            Spacer()
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Your name")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                TextField("Your name", text: $nameInput)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 280)
-            }
-
-            Button("Get Started") {
-                let trimmed = nameInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    UserDefaults.standard.set(trimmed, forKey: "user-display-name")
-                }
-                withAnimation { currentStep = .permissions }
+            Button("Next") {
+                withAnimation { currentStep = .dictationIntro }
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(nameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-            Spacer()
+            .padding(.bottom, 24)
         }
     }
 
-    private func featureCard(icon: String, shortcut: String, title: String, description: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Image(systemName: icon)
-                    .font(.title2)
-                    .foregroundColor(.accentColor)
-                Spacer()
-                Text(shortcut)
-                    .font(.system(.caption, design: .monospaced))
-                    .fontWeight(.bold)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(MenuTokens.pillBackground)
-                    .cornerRadius(MenuTokens.pillCornerRadius)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MenuTokens.pillCornerRadius)
-                            .stroke(MenuTokens.pillBorder, lineWidth: 1)
-                    )
+    // MARK: - Step 2: Dictation Intro
+
+    private var dictationIntroStep: some View {
+        VStack(spacing: 20) {
+            Spacer()
+
+            heroFeatureCard(
+                icon: "mic.fill",
+                shortcut: "⌥Space",
+                title: "Dictation",
+                description: "Speak and your words appear as text.\nOn-device, free, instant."
+            )
+            .padding(.horizontal, 80)
+
+            Spacer()
+
+            HStack(spacing: 12) {
+                Button("Back") {
+                    withAnimation { currentStep = .welcome }
+                }
+                .buttonStyle(.bordered)
+
+                Button("Next") {
+                    withAnimation { currentStep = .draftingIntro }
+                }
+                .buttonStyle(.borderedProminent)
             }
-            Text(title)
-                .font(.headline)
-            Text(description)
+            .padding(.bottom, 24)
+        }
+    }
+
+    // MARK: - Step 3: AI Drafting Intro
+
+    private var draftingIntroStep: some View {
+        VStack(spacing: 20) {
+            Spacer()
+
+            heroFeatureCard(
+                icon: "doc.text.fill",
+                shortcut: "⌥D",
+                title: "AI Drafting",
+                description: "Reads the conversation and writes\na reply in your voice."
+            )
+            .padding(.horizontal, 80)
+
+            Spacer()
+
+            HStack(spacing: 12) {
+                Button("Back") {
+                    withAnimation { currentStep = .dictationIntro }
+                }
+                .buttonStyle(.bordered)
+
+                Button("Next") {
+                    withAnimation { currentStep = .nameEntry }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(.bottom, 24)
+        }
+    }
+
+    // MARK: - Step 4: Name Entry
+
+    private var nameEntryStep: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Text("What's your name?")
+                .font(.title)
+                .fontWeight(.bold)
+
+            Text("Draft uses this to identify you in conversations.")
                 .font(.callout)
                 .foregroundColor(.secondary)
+
+            TextField("Your name", text: $nameInput)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 280)
+                .multilineTextAlignment(.center)
+
+            Spacer()
+
+            HStack(spacing: 12) {
+                Button("Back") {
+                    withAnimation { currentStep = .draftingIntro }
+                }
+                .buttonStyle(.bordered)
+
+                Button("Get Started") {
+                    let trimmed = nameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        UserDefaults.standard.set(trimmed, forKey: "user-display-name")
+                    }
+                    withAnimation { currentStep = .permissions }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(nameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.bottom, 24)
+        }
+    }
+
+    private func heroFeatureCard(icon: String, shortcut: String, title: String, description: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: icon)
+                .font(.system(size: 40))
+                .foregroundColor(.accentColor)
+
+            Text(shortcut)
+                .font(.system(.title3, design: .monospaced))
+                .fontWeight(.bold)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(MenuTokens.pillBackground)
+                .cornerRadius(MenuTokens.pillCornerRadius)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MenuTokens.pillCornerRadius)
+                        .stroke(MenuTokens.pillBorder, lineWidth: 1)
+                )
+
+            Text(title)
+                .font(.title)
+                .fontWeight(.bold)
+
+            Text(description)
+                .font(.body)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(MenuTokens.cardPadding)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(28)
+        .frame(maxWidth: .infinity)
         .background(MenuTokens.cardBackground)
         .cornerRadius(MenuTokens.cardCornerRadius)
         .overlay(
@@ -221,8 +306,8 @@ struct OnboardingView: View {
             .padding(.horizontal, 60)
 
             HStack(spacing: 12) {
-                Button("Skip") {
-                    withAnimation { currentStep = .tryDictation }
+                Button("Back") {
+                    withAnimation { currentStep = .nameEntry }
                 }
                 .buttonStyle(.bordered)
 
@@ -407,6 +492,11 @@ struct OnboardingView: View {
             Spacer()
 
             HStack(spacing: 12) {
+                Button("Back") {
+                    withAnimation { currentStep = .permissions }
+                }
+                .buttonStyle(.bordered)
+
                 Button("Skip") {
                     withAnimation { currentStep = .tryDrafting }
                 }
@@ -435,56 +525,62 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: - Step 4: Try AI Drafting
+    // MARK: - Step 7: Try AI Drafting
 
     private var tryDraftingStep: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 14) {
             Text("Try AI Drafting")
                 .font(.title)
                 .fontWeight(.bold)
                 .padding(.top, 12)
 
-            Text("Draft reads the conversation and writes a reply in your voice.")
+            // Simplified instructions
+            Text("Draft sees the conversation, hears your reply, and writes it for you.")
                 .font(.callout)
                 .foregroundColor(.secondary)
-
-            // Fake conversation card
-            fakeConversationCard
+                .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
 
-            VStack(alignment: .leading, spacing: 10) {
-                numberedInstruction(number: 1, text: "Press", shortcut: "⌥D", suffix: "— Draft screenshots above")
-                numberedInstruction(number: 2, text: "Say your reply (e.g., \"yeah I'll be there\")", shortcut: nil)
-                numberedInstruction(number: 3, text: "Press", shortcut: "⌥D", suffix: "again — AI writes it")
-                numberedInstruction(number: 4, text: "Press", shortcut: "Enter", suffix: "to accept (Esc to cancel)")
+            VStack(alignment: .leading, spacing: 8) {
+                numberedInstruction(number: 1, text: "Press", shortcut: "⌥D", suffix: "to start")
+                numberedInstruction(number: 2, text: "Say what you want to tell Alex", shortcut: nil)
+                numberedInstruction(number: 3, text: "Press", shortcut: "⌥D", suffix: "again — AI drafts it")
+                numberedInstruction(number: 4, text: "Press", shortcut: "Enter", suffix: "to send (Esc to cancel)")
             }
-            .padding(.horizontal, 60)
+            .padding(.horizontal, 50)
 
-            // Reply result area
-            ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: MenuTokens.cardCornerRadius)
-                    .fill(MenuTokens.cardBackground)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MenuTokens.cardCornerRadius)
-                            .stroke(draftingState == .completed ? Color.green.opacity(0.4) : MenuTokens.cardBorder, lineWidth: 1)
-                    )
+            // Fake conversation + reply area paired together
+            VStack(spacing: 0) {
+                // Alex's message
+                fakeConversationCard
 
-                if draftResult.isEmpty {
-                    Text("AI-drafted reply will appear here...")
-                        .font(.body)
-                        .foregroundColor(MenuTokens.textMuted)
-                        .padding(12)
-                } else {
-                    Text(draftResult)
-                        .font(.body)
-                        .padding(12)
-                        .textSelection(.enabled)
+                // Reply result area directly below
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 0)
+                        .fill(MenuTokens.cardBackground)
+
+                    if draftResult.isEmpty {
+                        Text("Your AI-drafted reply will appear here...")
+                            .font(.body)
+                            .foregroundColor(MenuTokens.textMuted)
+                            .padding(12)
+                    } else {
+                        Text(draftResult)
+                            .font(.body)
+                            .padding(12)
+                            .textSelection(.enabled)
+                    }
                 }
+                .frame(minHeight: 60)
             }
-            .frame(height: 70)
-            .padding(.horizontal, 60)
+            .clipShape(RoundedRectangle(cornerRadius: MenuTokens.cardCornerRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: MenuTokens.cardCornerRadius)
+                    .stroke(draftingState == .completed ? Color.green.opacity(0.4) : MenuTokens.cardBorder, lineWidth: 1)
+            )
+            .padding(.horizontal, 40)
 
-            tryItStatusView(state: draftingState, inProgressText: "Draft in progress...", completedText: "Nice! That's the full AI drafting flow.")
+            tryItStatusView(state: draftingState, inProgressText: "Draft in progress...", completedText: "That's AI drafting — your thoughts, polished.")
 
             if draftingState == .completed {
                 Text("Draft learns your writing style over time — the more you use it, the better it gets.")
@@ -497,6 +593,11 @@ struct OnboardingView: View {
             Spacer()
 
             HStack(spacing: 12) {
+                Button("Back") {
+                    withAnimation { currentStep = .tryDictation }
+                }
+                .buttonStyle(.bordered)
+
                 Button("Skip") {
                     withAnimation { currentStep = .allSet }
                 }
@@ -510,6 +611,19 @@ struct OnboardingView: View {
                 }
             }
             .padding(.bottom, 16)
+        }
+        .onAppear {
+            // Inject fake conversation context so vision is bypassed — guaranteed to work
+            // without screen recording permission or vision API latency
+            sessionController.overrideContext = CapturedContext(
+                platform: "slack",
+                talkingTo: "Alex Chen",
+                formality: "casual",
+                conversation: "Alex Chen: Hey, I keep hearing about RAG for our search feature. What actually is it and would it help us? I don't want to sound clueless in the meeting tomorrow lol"
+            )
+        }
+        .onDisappear {
+            sessionController.overrideContext = nil
         }
         .onChange(of: sessionController.isInSession) { _, newValue in
             if newValue && draftingState == .waiting {
@@ -525,7 +639,7 @@ struct OnboardingView: View {
         }
     }
 
-    // Fake conversation message for step 4 — needs to look realistic enough for Haiku Vision
+    // Fake conversation message card for the onboarding demo
     private var fakeConversationCard: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "person.circle.fill")
@@ -541,7 +655,7 @@ struct OnboardingView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-                Text("Hey, are we still on for the project review tomorrow at 2pm? I wanted to go over the Q1 numbers too if we have time.")
+                Text("Hey, I keep hearing about RAG for our search feature. What actually is it and would it help us? I don't want to sound clueless in the meeting tomorrow lol")
                     .font(.body)
                     .foregroundColor(.primary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -550,11 +664,6 @@ struct OnboardingView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(MenuTokens.cardBackground)
-        .cornerRadius(MenuTokens.cardCornerRadius)
-        .overlay(
-            RoundedRectangle(cornerRadius: MenuTokens.cardCornerRadius)
-                .stroke(MenuTokens.cardBorder, lineWidth: 1)
-        )
     }
 
     // MARK: - Step 5: All Set
@@ -600,11 +709,18 @@ struct OnboardingView: View {
             }
             .buttonStyle(.plain)
 
-            Button("Start Using Draft") {
-                onComplete()
+            HStack(spacing: 12) {
+                Button("Back") {
+                    withAnimation { currentStep = .tryDrafting }
+                }
+                .buttonStyle(.bordered)
+
+                Button("Start Using Draft") {
+                    onComplete()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
 
             Spacer()
         }

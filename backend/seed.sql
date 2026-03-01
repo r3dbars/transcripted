@@ -1,13 +1,8 @@
 -- Draft Beta — Seed beta users
--- Run: wrangler d1 execute draft-beta-db --file=seed.sql
+-- Run: wrangler d1 execute draft-beta-db --remote --file=seed.sql
 
-INSERT INTO users (token, name) VALUES ('draft-beta-nate', 'Nate Bucher');
-INSERT INTO users (token, name) VALUES ('draft-beta-jack', 'Jack Trautlein');
-INSERT INTO users (token, name) VALUES ('draft-beta-abdulbaqi', 'Abdulbaqi Qureshi');
-INSERT INTO users (token, name) VALUES ('draft-beta-don', 'Don Mueller');
-INSERT INTO users (token, name) VALUES ('draft-beta-sarah', 'Sarah Graham');
-INSERT INTO users (token, name) VALUES ('draft-beta-travis', 'Travis Faust');
-INSERT INTO users (token, name) VALUES ('draft-beta-inaje', 'Inaje Petrus');
-INSERT INTO users (token, name) VALUES ('draft-beta-willa', 'Willa Murphy');
-INSERT INTO users (token, name) VALUES ('draft-beta-nathan', 'Nathan Pastor Lutzo');
-INSERT INTO users (token, name) VALUES ('draft-beta-reserve', 'Reserve');
+INSERT INTO users (token, name) VALUES ('draft-beta-nate', 'Nate');
+INSERT INTO users (token, name) VALUES ('draft-beta-josh', 'Josh');
+
+-- Migration: add event_lines column to logs table (for existing D1 instances)
+-- Run: wrangler d1 execute draft-beta-db --remote --command "ALTER TABLE logs ADD COLUMN event_lines TEXT;"
