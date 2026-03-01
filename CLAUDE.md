@@ -29,7 +29,7 @@ Avoid over-engineering. Only make changes that are directly requested or clearly
 
 ## Project Overview
 
-**Transcripted** is a native macOS application that automatically records, transcribes, and organizes voice conversations from meetings and calls. The app uses **Parakeet TDT V3** (local CoreML speech-to-text) and **Sortformer** (local CoreML speaker diarization) via the FluidAudio library — all transcription runs 100% on-device with no cloud API or internet required. It extracts action items from transcripts using Gemini AI and sends them to Apple Reminders or Todoist.
+**Transcripted** is a native macOS application that automatically records, transcribes, and organizes voice conversations from meetings and calls. The app uses **Parakeet TDT V3** (local CoreML speech-to-text) and **Sortformer** (local CoreML speaker diarization) via the FluidAudio library — all transcription runs 100% on-device with no cloud API or internet required. Transcripts are saved as Markdown and easily copied to clipboard for pasting into AI tools like Claude or ChatGPT.
 
 ## Build & Run Commands
 
@@ -98,26 +98,10 @@ TranscriptedApp.swift (AppDelegate)
 ├── Audio                    → Recording state, audio levels
 ├── TranscriptionTaskManager → Background transcription queue, progress tracking
 ├── FailedTranscriptionManager → Retry queue with persistent storage
-├── FailedActionItemManager  → Retry queue for failed action item delivery
 ├── RecordingValidator       → Pre-recording system checks
 ├── StatsService             → Recording statistics and streak tracking
 ├── StatsDatabase            → SQLite persistence for stats
 └── FloatingPanelController  → UI coordination
-```
-
-### Action Item Pipeline
-
-When enabled, transcripts are processed for action items:
-```
-Murmur/Core/ActionItemExtractor.swift → Sends transcript to Gemini 2.5 Pro API (two-pass pipeline)
-                                      → Pass 1: Speaker identification
-                                      → Pass 2: Action item extraction (tasks, owners, priorities, due dates)
-
-Murmur/Core/DateParser.swift          → Parses natural language dates ("next Friday", "EOW")
-                                      → Uses NSDataDetector + custom fallbacks
-
-Murmur/Services/RemindersService.swift → Creates EKReminders from extracted action items
-Murmur/Services/TodoistService.swift   → Alternative: sends tasks to Todoist via API
 ```
 
 ### UI Components
@@ -128,14 +112,15 @@ The floating panel UI is organized in `Murmur/UI/FloatingPanel/`:
 FloatingPanel/
 ├── FloatingPanelController.swift   # NSWindowController, window management
 ├── FloatingPanelView.swift         # Main SwiftUI view composition
-├── PillStateManager.swift          # State machine (idle/recording/processing/reviewing)
+├── PillStateManager.swift          # State machine (idle/recording/processing)
 ├── Components/
-│   ├── PillViews.swift             # Pill state views (Idle, Recording, Processing, Reviewing)
+│   ├── PillViews.swift             # Pill state views (Idle, Recording, Processing)
 │   ├── WaveformViews.swift         # Audio visualizers (EdgePeek, WaveformMini, Dormant)
-│   ├── CelebrationViews.swift      # Success animations (checkmarks, confetti)
+│   ├── CelebrationViews.swift      # Success animations (checkmarks, pulse rings)
 │   ├── ErrorViews.swift            # Error banners with recovery hints
 │   ├── AttentionPromptView.swift   # Notification prompts (silence warning)
-│   ├── ReviewTrayView.swift        # Action item review tray
+│   ├── TranscriptTrayView.swift    # Recent transcripts tray with copy-to-clipboard
+│   ├── TranscriptDetailView.swift  # Transcript detail with chat bubbles
 │   ├── AuroraIdleView.swift        # Aurora animation for idle state
 │   ├── AuroraRecordingView.swift   # Aurora animation for recording state
 │   ├── AuroraProcessingView.swift  # Aurora animation for processing state
@@ -161,7 +146,6 @@ Settings/
 ```
 
 Other UI files:
-- **ActionItemReviewView** (`Murmur/UI/ActionItemReviewView.swift`) - Task approval workflow
 - **FailedTranscriptionsView** (`Murmur/UI/FailedTranscriptionsView.swift`) - UI for retry queue management
 
 ### Onboarding Flow
@@ -169,7 +153,7 @@ Other UI files:
 Four-step onboarding managed by `Murmur/Onboarding/OnboardingState.swift`:
 1. Welcome → 2. How It Works → 3. Permissions → 4. Ready
 
-Permissions requested: Microphone (required), Screen Recording (for system audio), Reminders (optional)
+Permissions requested: Microphone (required), Screen Recording (for system audio)
 
 ## Design System
 
@@ -188,7 +172,6 @@ Defined in `Murmur/Design/DesignTokens.swift`:
 4. **Transcription queued** → `TranscriptionTaskManager.startTranscription()`
 5. **On failure** → `FailedTranscriptionManager.addFailedTranscription()` persists to `~/Documents/Transcripted/failed_transcriptions.json`
 6. **On success** → `TranscriptSaver.save()` writes markdown, audio files deleted
-7. **Action items** → Extracted via Gemini API, sent to Reminders or Todoist
 
 ## Configuration
 
@@ -197,12 +180,8 @@ User settings stored in `UserDefaults`:
 | Key | Description |
 |-----|-------------|
 | `transcriptSaveLocation` | Custom output folder path |
-| `geminiAPIKey` | Gemini API key for action item extraction |
-| `taskService` | "reminders" or "todoist" |
-| `todoistAPIKey` | Todoist API key (if using Todoist) |
-| `userName` | User's name for action item attribution |
+| `userName` | User's name for speaker attribution |
 | `hasCompletedOnboarding` | Onboarding completion flag |
-| `remindersListId` | Selected Apple Reminders list ID |
 | `enableUISounds` | Enable/disable recording sounds |
 | `useAuroraRecording` | Enable aurora animation |
 | `floatingPanelX` | Saved pill X position |
@@ -262,8 +241,8 @@ Murmur/
 │   ├── TranscriptionTaskManager.swift  # Background transcription queue
 │   ├── TranscriptSaver.swift      # Markdown output with YAML frontmatter
 │   ├── TranscriptScanner.swift    # Transcript file discovery
+│   ├── TranscriptStore.swift      # ObservableObject store for transcript tray UI
 │   ├── TranscriptUtils.swift      # Transcript helper utilities
-│   ├── ActionItemExtractor.swift  # Gemini AI two-pass action item pipeline
 │   ├── DateParser.swift           # Natural language date parsing
 │   ├── DateFormattingHelper.swift # Date formatting utilities
 │   ├── Clipboard.swift            # Clipboard operations
@@ -271,8 +250,6 @@ Murmur/
 │   ├── RecordingValidator.swift   # Pre-recording system checks
 │   ├── FailedTranscription.swift  # Failed transcription model
 │   ├── FailedTranscriptionManager.swift  # Retry queue with persistent storage
-│   ├── FailedActionItemManager.swift     # Retry queue for failed action items
-│   ├── ServiceResult.swift        # Generic service result type
 │   ├── StatsService.swift         # Recording statistics and streak tracking
 │   └── StatsDatabase.swift        # SQLite persistence for stats
 ├── Design/                        # Visual design system
@@ -293,9 +270,7 @@ Murmur/
 │   ├── ParakeetService.swift      # Local STT via FluidAudio (Parakeet TDT V3)
 │   ├── SortformerService.swift    # Local speaker diarization via FluidAudio
 │   ├── SpeakerDatabase.swift      # Persistent voice fingerprints (SQLite + 256-dim embeddings)
-│   ├── AudioResampler.swift       # Audio resampling (48kHz → 16kHz) and WAV loading
-│   ├── RemindersService.swift     # Apple Reminders integration
-│   └── TodoistService.swift       # Todoist API integration
+│   └── AudioResampler.swift       # Audio resampling (48kHz → 16kHz) and WAV loading
 ├── UI/
 │   ├── FloatingPanel/             # Floating pill UI
 │   │   ├── FloatingPanelController.swift  # NSWindowController
@@ -307,7 +282,8 @@ Murmur/
 │   │   │   ├── CelebrationViews.swift     # Success animations
 │   │   │   ├── ErrorViews.swift           # Error banners
 │   │   │   ├── AttentionPromptView.swift  # Silence warning
-│   │   │   ├── ReviewTrayView.swift       # Action item review tray
+│   │   │   ├── TranscriptTrayView.swift   # Recent transcripts tray
+│   │   │   ├── TranscriptDetailView.swift # Transcript detail view
 │   │   │   ├── AuroraIdleView.swift       # Aurora idle animation
 │   │   │   ├── AuroraRecordingView.swift  # Aurora recording animation
 │   │   │   ├── AuroraProcessingView.swift # Aurora processing animation
@@ -322,11 +298,10 @@ Murmur/
 │   │   │   └── SettingsNavigationState.swift  # Tab state
 │   │   ├── Tabs/
 │   │   │   ├── DashboardView.swift        # Stats, recent transcripts
-│   │   │   └── PreferencesView.swift      # API keys, storage, appearance
+│   │   │   └── PreferencesView.swift      # Storage, model status, appearance
 │   │   └── Components/
 │   │       ├── RecentTranscriptsView.swift # Recent transcript list
 │   │       └── SettingsSectionCard.swift   # Reusable card component
-│   ├── ActionItemReviewView.swift # Task approval workflow
 │   └── FailedTranscriptionsView.swift  # Retry queue management UI
 ├── TranscriptedApp.swift          # App entry point (AppDelegate pattern)
 └── Transcripted.entitlements
@@ -350,8 +325,6 @@ Murmur/
 | `transcription` | Parakeet/Sortformer model loading, STT/diarization |
 | `pipeline` | Task lifecycle, saving, file management, retries |
 | `speaker-db` | Speaker matching, voice embeddings, merges |
-| `action-items` | Gemini extraction, review, task delivery |
-| `services` | Reminders/Todoist API calls |
 | `ui` | Pill state transitions, UI events |
 | `stats` | Recording statistics, database operations |
 | `app` | App lifecycle, model initialization |
@@ -383,10 +356,7 @@ TranscriptedApp.swift (entry point)
 │   │   ├── Services/ParakeetService.swift
 │   │   ├── Services/SortformerService.swift
 │   │   └── Services/SpeakerDatabase.swift
-│   ├── Core/TranscriptSaver.swift
-│   └── Core/ActionItemExtractor.swift
-│       ├── Services/RemindersService.swift
-│       └── Services/TodoistService.swift
+│   └── Core/TranscriptSaver.swift
 ├── UI/FloatingPanel/FloatingPanelController.swift
 └── UI/Settings/SettingsWindowController.swift
 ```

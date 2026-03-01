@@ -1,7 +1,7 @@
 # Onboarding — CLAUDE.md
 
 ## Purpose
-Four-step first-launch onboarding flow: Welcome → How It Works → Permissions → Ready. Requests microphone, screen recording, and optionally Reminders permissions.
+Four-step first-launch onboarding flow: Welcome → How It Works → Permissions → Ready. Requests microphone and screen recording permissions.
 
 ## Key Files
 
@@ -12,7 +12,7 @@ Four-step first-launch onboarding flow: Welcome → How It Works → Permissions
 | `OnboardingContainerView.swift` | Step container with navigation and progress |
 | `Steps/WelcomeStep.swift` | Step 1: App introduction |
 | `Steps/HowItWorksStep.swift` | Step 2: Feature overview |
-| `Steps/PermissionsStep.swift` | Step 3: Request mic, screen recording, reminders |
+| `Steps/PermissionsStep.swift` | Step 3: Request mic, screen recording |
 | `Steps/ReadyStep.swift` | Step 4: Completion with celebration animation |
 | `Animations/ParticleExplosionView.swift` | Celebration particle effects for completion |
 
@@ -32,7 +32,6 @@ App launch → OnboardingState.hasCompletedOnboarding() check
 |-----------|----------|---------|
 | Microphone | Yes | Record voice audio |
 | Screen Recording | For system audio | Capture meeting/call audio via process taps |
-| Reminders | Optional | Send extracted action items to Apple Reminders |
 
 ## Common Tasks
 
