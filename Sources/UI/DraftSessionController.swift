@@ -9,6 +9,7 @@ import Combine
 class DraftSessionController: ObservableObject {
     @Published var isInSession = false
     @Published var isDictating = false
+    @Published var lastCompletedText: String?
 
     private var interruptionSubscription: AnyCancellable?
 
@@ -32,6 +33,7 @@ class DraftSessionController: ObservableObject {
     private var sessionSourceApp: NSRunningApplication?
     private var streamingTask: Task<Void, Never>?
     private var visionTask: Task<Void, Never>?
+    private var sessionStartTime: CFAbsoluteTime = 0
 
     private func setupInterruptionObserver() {
         guard let appState = appState else { return }
@@ -63,6 +65,8 @@ class DraftSessionController: ObservableObject {
         guard !isInSession, !isDictating else { return }
         isInSession = true
         sessionSourceApp = sourceApp
+        sessionStartTime = CFAbsoluteTimeGetCurrent()
+        lastCompletedText = nil
 
         lastCapturedContext = nil
         appState.drafter.clear()
@@ -72,12 +76,46 @@ class DraftSessionController: ObservableObject {
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
 
+        // If model isn't loaded yet, show loading overlay and wait (up to 120s)
         if !appState.sttRouter.isModelLoaded {
-            appState.logger.log("SESSION | model not loaded yet")
-            overlayController.showError("Voice model loading…")
-            isInSession = false
+            appState.logger.log("SESSION | waiting for model to load…")
+            overlayController.showLoadingState()
+
+            // Wait in background, then start recording once ready
+            let capturedImageData = imageData
+            let capturedSourceApp = sourceApp
+            streamingTask?.cancel()
+            streamingTask = Task { [weak self] in
+                guard let self = self else { return }
+                // Poll every 200ms for up to 120 seconds
+                for _ in 0..<600 {
+                    guard !Task.isCancelled else { return }
+                    if await self.appState?.sttRouter.isModelLoaded == true { break }
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                }
+                guard !Task.isCancelled else { return }
+                guard await self.appState?.sttRouter.isModelLoaded == true else {
+                    await self.appState?.logger.log("SESSION | model load timed out")
+                    await self.overlayController?.showError("Voice model failed to load")
+                    self.isInSession = false
+                    return
+                }
+                // Model is ready — start recording
+                await self.beginRecording(imageData: capturedImageData, sourceApp: capturedSourceApp)
+            }
             return
         }
+
+        beginRecording(imageData: imageData, sourceApp: sourceApp)
+    }
+
+    /// Actually start recording and vision — called directly or after model wait
+    private func beginRecording(imageData: Data?, sourceApp: NSRunningApplication?) {
+        guard let appState = appState, let overlayController = overlayController else { return }
+        guard isInSession else { return }
+
+        overlayController.state = .listening
+
         guard appState.sttRouter.startRecording() else {
             appState.logger.log("SESSION | recording failed to start")
             overlayController.showError("Microphone unavailable")
@@ -218,6 +256,14 @@ class DraftSessionController: ObservableObject {
         overlayController.hideWithCancelAnimation()
         isInSession = false
         appState.logger.log("SESSION | cancelled")
+        #if BETA_BUILD
+        let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
+        BetaTelemetry.shared.sendEvent(
+            type: "draft_cancelled",
+            sourceApp: sessionSourceApp?.bundleIdentifier,
+            payload: ["duration_s": Int(duration)]
+        )
+        #endif
     }
 
     // MARK: - Dictation Mode (Option+Space)
@@ -228,17 +274,49 @@ class DraftSessionController: ObservableObject {
         guard !isDictating, !isInSession else { return }
         isDictating = true
         sessionSourceApp = sourceApp
+        sessionStartTime = CFAbsoluteTimeGetCurrent()
+        lastCompletedText = nil
 
         overlayController.activeMode = .dictation
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
 
+        // If model isn't loaded yet, show loading overlay and wait (up to 120s)
         if !appState.sttRouter.isModelLoaded {
-            appState.logger.log("DICTATION | model not loaded yet")
-            overlayController.showError("Voice model loading…")
-            isDictating = false
+            appState.logger.log("DICTATION | waiting for model to load…")
+            overlayController.showLoadingState()
+
+            let capturedSourceApp = sourceApp
+            streamingTask?.cancel()
+            streamingTask = Task { [weak self] in
+                guard let self = self else { return }
+                for _ in 0..<600 {
+                    guard !Task.isCancelled else { return }
+                    if await self.appState?.sttRouter.isModelLoaded == true { break }
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                }
+                guard !Task.isCancelled else { return }
+                guard await self.appState?.sttRouter.isModelLoaded == true else {
+                    await self.appState?.logger.log("DICTATION | model load timed out")
+                    await self.overlayController?.showError("Voice model failed to load")
+                    self.isDictating = false
+                    return
+                }
+                await self.beginDictationRecording(sourceApp: capturedSourceApp)
+            }
             return
         }
+
+        beginDictationRecording(sourceApp: sourceApp)
+    }
+
+    /// Actually start dictation recording — called directly or after model wait
+    private func beginDictationRecording(sourceApp: NSRunningApplication?) {
+        guard let appState = appState, let overlayController = overlayController else { return }
+        guard isDictating else { return }
+
+        overlayController.state = .listening
+
         guard appState.sttRouter.startRecording() else {
             appState.logger.log("DICTATION | recording failed to start")
             overlayController.showError("Microphone unavailable")
@@ -268,11 +346,23 @@ class DraftSessionController: ObservableObject {
             }
 
             appState.logger.log("DICTATION | pasting \(text.count) chars")
+            lastCompletedText = text
             overlayController.hideWithConfirmAnimation { [weak self] in
                 self?.pasteWithClipboardRestore(text)
             }
             isDictating = false
             appState.logger.log("DICTATION | pasted \(text.count) chars")
+            #if BETA_BUILD
+            let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
+            BetaTelemetry.shared.sendEvent(
+                type: "dictation_completed",
+                sourceApp: sessionSourceApp?.bundleIdentifier,
+                payload: [
+                    "chars": text.count,
+                    "duration_s": Int(duration),
+                ]
+            )
+            #endif
         }
     }
 
@@ -285,6 +375,14 @@ class DraftSessionController: ObservableObject {
         overlayController.hideWithCancelAnimation()
         isDictating = false
         appState.logger.log("DICTATION | cancelled")
+        #if BETA_BUILD
+        let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
+        BetaTelemetry.shared.sendEvent(
+            type: "dictation_cancelled",
+            sourceApp: sessionSourceApp?.bundleIdentifier,
+            payload: ["duration_s": Int(duration)]
+        )
+        #endif
     }
 
     // MARK: - Private
@@ -331,6 +429,9 @@ class DraftSessionController: ObservableObject {
         let editedText = overlayController.reviewText
         let originalDraft = appState.drafter.originalDraft
 
+        // Surface completed text for observers (e.g., onboarding view)
+        lastCompletedText = editedText
+
         // Confirm animation, then paste to target app
         overlayController.hideWithConfirmAnimation { [weak self] in
             self?.pasteWithClipboardRestore(editedText)
@@ -359,6 +460,7 @@ class DraftSessionController: ObservableObject {
                 formality: formalityLevel
             )
             #if BETA_BUILD
+            let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
             BetaTelemetry.shared.sendEvent(
                 type: "draft_accepted",
                 sourceApp: sessionSourceApp?.bundleIdentifier,
@@ -368,6 +470,7 @@ class DraftSessionController: ObservableObject {
                     "accepted_chars": editedText.count,
                     "platform": platform.rawValue,
                     "was_edited": originalDraft != editedText,
+                    "duration_s": Int(duration),
                 ]
             )
             #endif
