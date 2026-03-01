@@ -27,6 +27,7 @@ class FloatingOverlayController: ObservableObject {
     @Published var streamingText: String = ""
     @Published var errorMessage: String = ""
     @Published var loadingElapsedSeconds: Int = 0
+    @Published var transcriptExpanded = false
 
     /// Closures for Enter/Escape in review mode — set by DraftSessionController
     var onConfirm: (() -> Void)?
@@ -103,7 +104,11 @@ class FloatingOverlayController: ObservableObject {
         guard let panel = panel else { return }
 
         let rawTargetRect = sourceApp.flatMap { AccessibilityBridge.focusedTextFieldRect(for: $0) }
-        let panelSize = NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight)
+        // Start compact (header-only) for listening; full height for other states
+        let initialHeight = (state == .listening || state == .idle)
+            ? OverlayTokens.panelCompactHeight
+            : OverlayTokens.panelMinHeight
+        let panelSize = NSSize(width: OverlayTokens.panelWidth, height: initialHeight)
 
         // Validate the accessibility rect — terminal emulators (iTerm2) report their entire
         // scrollback buffer as the text area rect (e.g., 4032px tall on a 982px screen).
@@ -201,15 +206,29 @@ class FloatingOverlayController: ObservableObject {
         }
     }
 
+    /// Transition from listening to drafting — expands panel to full height for spinner/content
+    func enterDraftingState() {
+        transcriptExpanded = false
+        state = .drafting
+        resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
+    }
+
+    func toggleTranscript() {
+        transcriptExpanded.toggle()
+        let height = transcriptExpanded ? OverlayTokens.panelMinHeight : OverlayTokens.panelCompactHeight
+        resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: height))
+    }
+
     func startStreaming(near sourceApp: NSRunningApplication? = nil) {
         guard state == .drafting || state == .listening else { return }
         streamingText = ""
+        transcriptExpanded = false  // Reset for next session
         state = .streaming
         // Show panel if not visible
         if !isVisible {
             showPanel(near: sourceApp)
         }
-        // Resize to initial streaming size
+        // Expand to full height for streaming content
         resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
         // Not key-capable yet (still receiving tokens)
         panel?.allowKeyStatus = false
@@ -319,7 +338,10 @@ class FloatingOverlayController: ObservableObject {
     func showError(_ message: String) {
         errorDismissTask?.cancel()
         errorMessage = message
+        transcriptExpanded = false
         state = .drafting  // Reuse drafting state for error display
+        // Ensure panel is full-height for error content (may have been compact during listening)
+        resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
         if !isVisible {
             showPanel(near: nil)
         }
@@ -351,6 +373,7 @@ class FloatingOverlayController: ObservableObject {
         reviewText = ""
         streamingText = ""
         errorMessage = ""
+        transcriptExpanded = false  // Each new session starts collapsed
     }
 
     // MARK: - Global Escape Monitor

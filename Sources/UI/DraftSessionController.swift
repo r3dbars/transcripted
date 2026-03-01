@@ -140,7 +140,7 @@ class DraftSessionController: ObservableObject {
     func stopSessionAndDraft() {
         guard let appState = appState, let overlayController = overlayController else { return }
         guard isInSession else { return }
-        overlayController.state = .drafting
+        overlayController.enterDraftingState()
 
         streamingTask?.cancel()
         streamingTask = Task {
@@ -334,7 +334,7 @@ class DraftSessionController: ObservableObject {
     func stopDictationAndPaste() {
         guard let appState = appState, let overlayController = overlayController else { return }
         guard isDictating, overlayController.state == .listening else { return }
-        overlayController.state = .drafting
+        overlayController.enterDraftingState()
 
         appState.sttRouter.stopRecording()
         Task {
