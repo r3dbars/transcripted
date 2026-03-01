@@ -23,12 +23,12 @@ APP_NAME="Draft"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 DMG_NAME="Draft-${USER_NAME}.dmg"
-SIGNING_IDENTITY="Developer ID Application: r3dbars (LZRN6W4R74)"
+SIGNING_IDENTITY="${SIGNING_IDENTITY:-Apple Development: r3dbars (LZRN6W4R74)}"
 
 echo "🔨 Building Draft Beta for $USER_NAME (token: $BETA_TOKEN)..."
 
-# Clean
-rm -rf "$BUILD_DIR"
+# Clean app bundle only (preserve previously built DMGs)
+rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
@@ -158,15 +158,19 @@ create-dmg \
 echo "Signing DMG..."
 codesign --force --sign "$SIGNING_IDENTITY" "$BUILD_DIR/$DMG_NAME"
 
-# Notarize
-echo "Submitting for notarization (this takes 1-5 minutes)..."
-xcrun notarytool submit "$BUILD_DIR/$DMG_NAME" \
-    --keychain-profile "Draft-Notarize" \
-    --wait
+# Notarize (only with Developer ID — Apple Development certs can't be notarized)
+if [[ "$SIGNING_IDENTITY" == Developer\ ID* ]]; then
+    echo "Submitting for notarization (this takes 1-5 minutes)..."
+    xcrun notarytool submit "$BUILD_DIR/$DMG_NAME" \
+        --keychain-profile "Draft-Notarize" \
+        --wait
 
-# Staple
-echo "Stapling notarization ticket..."
-xcrun stapler staple "$BUILD_DIR/$DMG_NAME"
+    # Staple
+    echo "Stapling notarization ticket..."
+    xcrun stapler staple "$BUILD_DIR/$DMG_NAME"
+else
+    echo "⚠️  Skipping notarization (using development cert — local testing only)"
+fi
 
 echo ""
 echo "✅ Done! DMG ready: $BUILD_DIR/$DMG_NAME"
