@@ -337,6 +337,98 @@ final class SpeakerDatabase {
         }
     }
 
+    // MARK: - Profile Lookup by Name
+
+    /// Find all profiles whose display name matches the query (using fuzzy name variant matching).
+    /// Returns matching profiles sorted by call count descending (strongest profile first).
+    func findProfilesByName(_ name: String) -> [SpeakerProfile] {
+        return queue.sync {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return [] }
+
+            return allSpeakersImpl()
+                .filter { profile in
+                    guard let displayName = profile.displayName else { return false }
+                    return SpeakerDatabase.areNameVariants(trimmed, displayName)
+                }
+                .sorted { $0.callCount > $1.callCount }
+        }
+    }
+
+    // MARK: - Explicit Profile Merge
+
+    /// Merge source profile into target profile.
+    /// Blends embeddings weighted by call count, sums call counts, bumps confidence.
+    /// Transfers name from source if target has none. Deletes source profile.
+    func mergeProfiles(sourceId: UUID, into targetId: UUID) {
+        queue.sync {
+            mergeProfilesImpl(sourceId: sourceId, into: targetId)
+        }
+    }
+
+    private func mergeProfilesImpl(sourceId: UUID, into targetId: UUID) {
+        guard let source = getSpeakerImpl(id: sourceId),
+              let target = getSpeakerImpl(id: targetId) else {
+            AppLogger.speakers.warning("Merge failed — profile not found", [
+                "sourceId": "\(sourceId)", "targetId": "\(targetId)"
+            ])
+            return
+        }
+
+        // Blend embeddings weighted by call count (stronger profile dominates)
+        let totalCalls = Float(source.callCount + target.callCount)
+        guard totalCalls > 0, source.embedding.count == target.embedding.count else { return }
+
+        let sourceWeight = Float(source.callCount) / totalCalls
+        let targetWeight = Float(target.callCount) / totalCalls
+        let blended = zip(source.embedding, target.embedding).map { s, t in
+            s * sourceWeight + t * targetWeight
+        }
+        let normalized = l2Normalize(blended)
+
+        // Transfer name from source if target has none
+        if target.displayName == nil, let name = source.displayName {
+            setDisplayNameImpl(id: targetId, name: name, source: source.nameSource ?? "user_manual")
+        }
+
+        // Update target: blended embedding, summed call count, bumped confidence
+        let isoFormatter = ISO8601DateFormatter()
+        let now = isoFormatter.string(from: Date())
+        let newCallCount = target.callCount + source.callCount
+        let newConfidence = min(1.0, target.confidence + 0.15)
+
+        let sql = """
+        UPDATE speakers SET embedding = ?, last_seen = ?, call_count = ?, confidence = ?
+        WHERE id = ?;
+        """
+        var statement: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
+            let embeddingData = normalized.withUnsafeBufferPointer { Data(buffer: $0) }
+            sqlite3_bind_blob(statement, 1, (embeddingData as NSData).bytes, Int32(embeddingData.count), nil)
+            sqlite3_bind_text(statement, 2, (now as NSString).utf8String, -1, nil)
+            sqlite3_bind_int(statement, 3, Int32(newCallCount))
+            sqlite3_bind_double(statement, 4, newConfidence)
+            sqlite3_bind_text(statement, 5, (targetId.uuidString as NSString).utf8String, -1, nil)
+            sqlite3_step(statement)
+        }
+        sqlite3_finalize(statement)
+
+        // Delete source profile
+        let deleteSql = "DELETE FROM speakers WHERE id = ?;"
+        var deleteStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, deleteSql, -1, &deleteStmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(deleteStmt, 1, (sourceId.uuidString as NSString).utf8String, -1, nil)
+            sqlite3_step(deleteStmt)
+        }
+        sqlite3_finalize(deleteStmt)
+
+        AppLogger.speakers.info("Merged profiles", [
+            "source": source.displayName ?? "\(sourceId)",
+            "target": target.displayName ?? "\(targetId)",
+            "newCallCount": "\(newCallCount)"
+        ])
+    }
+
     // MARK: - Duplicate Merging
 
     /// Scan all profiles for likely duplicates and merge them.

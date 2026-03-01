@@ -29,6 +29,9 @@ struct FloatingPanelView: View {
     @State private var showTranscriptTray = false
     @StateObject private var transcriptStore = TranscriptStore()
 
+    // Speaker naming tray state
+    @State private var showSpeakerNaming = false
+
     // Escape key monitors for dismissing tray (need both local + global
     // because the panel has canBecomeKey=false, so the app usually isn't frontmost)
     @State private var escapeLocalMonitor: Any?
@@ -42,8 +45,17 @@ struct FloatingPanelView: View {
             // MARK: - Top Spacer (pushes content to bottom)
             Spacer(minLength: 0)
 
+            // MARK: - Speaker Naming Tray (mutually exclusive with transcript tray)
+            if showSpeakerNaming, let request = taskManager.speakerNamingRequest {
+                SpeakerNamingView(request: request)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .move(edge: .bottom)),
+                        removal: .opacity.combined(with: .scale(scale: 0.95))
+                    ))
+            }
+
             // MARK: - Transcript Tray (expands upward when browsing recent meetings)
-            if showTranscriptTray && (pillStateManager.state == .idle || pillStateManager.state == .recording) {
+            else if showTranscriptTray && (pillStateManager.state == .idle || pillStateManager.state == .recording) {
                 TranscriptTrayView(
                     store: transcriptStore,
                     onOpenFolder: {
@@ -98,11 +110,27 @@ struct FloatingPanelView: View {
             }
         }
         // Dismiss transcript tray when processing starts (keep available during recording)
+        // Note: naming tray is NOT dismissed — it's sticky across pill state changes
         .onChange(of: pillStateManager.state) { _, newState in
             if newState == .processing {
                 withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
                     showTranscriptTray = false
                 }
+            }
+        }
+        // Auto-show naming tray when a naming request arrives; auto-hide when it clears
+        .onChange(of: taskManager.speakerNamingRequest != nil) { _, hasRequest in
+            if hasRequest {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                    showTranscriptTray = false  // close transcript tray
+                    showSpeakerNaming = true
+                }
+            } else {
+                // Request cleared by handleNamingComplete — dismiss tray
+                withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                    showSpeakerNaming = false
+                }
+                if !showTranscriptTray { removeEscapeMonitor() }
             }
         }
         // Refresh transcript list when tray opens; manage escape key monitor
@@ -111,7 +139,7 @@ struct FloatingPanelView: View {
                 transcriptStore.refresh()
                 installEscapeMonitor()
             } else {
-                removeEscapeMonitor()
+                if !showSpeakerNaming { removeEscapeMonitor() }
             }
         }
         .onDisappear { removeEscapeMonitor() }
@@ -195,8 +223,13 @@ struct FloatingPanelView: View {
         guard escapeLocalMonitor == nil else { return }
 
         // Local monitor: catches Escape when our app is frontmost
+        // Naming tray is sticky — escape only dismisses the transcript tray
         escapeLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 {
+                if showSpeakerNaming {
+                    // Naming tray is sticky — escape does nothing
+                    return nil
+                }
                 withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
                     showTranscriptTray = false
                 }
@@ -210,8 +243,11 @@ struct FloatingPanelView: View {
         escapeGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 {
                 DispatchQueue.main.async {
+                    if self.showSpeakerNaming {
+                        return  // naming tray is sticky
+                    }
                     withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
-                        showTranscriptTray = false
+                        self.showTranscriptTray = false
                     }
                 }
             }

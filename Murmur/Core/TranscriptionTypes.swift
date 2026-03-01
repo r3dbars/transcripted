@@ -90,3 +90,50 @@ struct TranscriptionMetadata {
     let systemSpeakerCount: Int
     let duration: Double
 }
+
+// MARK: - Speaker Naming Flow Types
+
+/// Request to show the speaker naming UI after transcription completes
+struct SpeakerNamingRequest {
+    let speakers: [SpeakerNamingEntry]
+    let transcriptURL: URL
+    let systemAudioURL: URL
+    let micAudioURL: URL
+    let onComplete: ([SpeakerNameUpdate]) -> Void
+}
+
+/// A single speaker needing naming or confirmation
+struct SpeakerNamingEntry: Identifiable {
+    let id: UUID                     // persistent speaker ID from SpeakerDatabase
+    let sortformerSpeakerId: String  // "0", "1" — for transcript string matching
+    let clipURL: URL                 // temporary WAV clip for playback
+    let sampleText: String           // representative quote from transcript
+    let currentName: String?         // nil if unknown speaker
+    let matchSimilarity: Double?     // cosine similarity score
+    let needsNaming: Bool            // true = unknown speaker (show text field)
+    let needsConfirmation: Bool      // true = known but low confidence (show confirm/deny)
+}
+
+/// Result of user naming/confirming a speaker
+struct SpeakerNameUpdate {
+    let persistentSpeakerId: UUID
+    let sortformerSpeakerId: String
+    let newName: String
+    let action: NamingAction
+    let mergeTargetProfileId: UUID?  // non-nil when action == .merged
+
+    init(persistentSpeakerId: UUID, sortformerSpeakerId: String, newName: String, action: NamingAction, mergeTargetProfileId: UUID? = nil) {
+        self.persistentSpeakerId = persistentSpeakerId
+        self.sortformerSpeakerId = sortformerSpeakerId
+        self.newName = newName
+        self.action = action
+        self.mergeTargetProfileId = mergeTargetProfileId
+    }
+
+    enum NamingAction {
+        case named      // user typed a name for unknown speaker
+        case confirmed  // user confirmed suggested name
+        case corrected  // user rejected suggestion and typed correct name
+        case merged     // user linked this speaker to an existing profile
+    }
+}

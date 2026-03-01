@@ -111,6 +111,9 @@ class TranscriptionTaskManager: ObservableObject {
     // UI uses this to show a subtle indicator on the idle pill
     @Published var backgroundTaskCount: Int = 0
 
+    // Speaker naming flow — published when post-meeting naming is needed
+    @Published var speakerNamingRequest: SpeakerNamingRequest? = nil
+
     private var activeTasks: [UUID: Task<Void, Never>] = [:]
     let transcription = Transcription()
 
@@ -354,7 +357,65 @@ class TranscriptionTaskManager: ObservableObject {
 
         AppLogger.pipeline.info("Phase 2 complete: Transcript saved", ["file": savedURL.lastPathComponent])
 
-        // Cleanup audio files
+        // Phase 3: Check if speaker naming is needed
+        let namingNeeded = self.checkNamingNeeded(
+            result: result,
+            dbKnowledge: dbKnowledge,
+            speakerIds: speakerIds
+        )
+
+        if namingNeeded {
+            // Extract clips for the naming UI (before cleaning up audio)
+            do {
+                let clips = try SpeakerClipExtractor.extractClips(
+                    systemAudioURL: systemURL,
+                    utterances: result.systemUtterances,
+                    speakerDB: speakerDB
+                )
+
+                if !clips.isEmpty {
+                    let entries = clips.map { clip in
+                        SpeakerNamingEntry(
+                            id: clip.persistentSpeakerId,
+                            sortformerSpeakerId: clip.sortformerSpeakerId,
+                            clipURL: clip.clipURL,
+                            sampleText: clip.sampleText,
+                            currentName: clip.currentName,
+                            matchSimilarity: clip.matchSimilarity,
+                            needsNaming: clip.currentName == nil,
+                            needsConfirmation: clip.currentName != nil
+                        )
+                    }
+
+                    // Publish naming request on main thread — UI will show naming tray
+                    // Audio cleanup is deferred until naming completes
+                    await MainActor.run {
+                        self.speakerNamingRequest = SpeakerNamingRequest(
+                            speakers: entries,
+                            transcriptURL: savedURL,
+                            systemAudioURL: systemURL,
+                            micAudioURL: micURL,
+                            onComplete: { [weak self] updates in
+                                self?.handleNamingComplete(
+                                    updates: updates,
+                                    transcriptURL: savedURL,
+                                    micURL: micURL,
+                                    systemURL: systemURL,
+                                    clips: entries
+                                )
+                            }
+                        )
+                    }
+
+                    AppLogger.pipeline.info("Speaker naming requested", ["speakers": "\(entries.count)"])
+                    return savedURL
+                }
+            } catch {
+                AppLogger.pipeline.warning("Clip extraction failed, skipping naming", ["error": error.localizedDescription])
+            }
+        }
+
+        // No naming needed (or clip extraction failed) — clean up audio files now
         try? FileManager.default.removeItem(at: micURL)
         try? FileManager.default.removeItem(at: systemURL)
 
@@ -428,6 +489,104 @@ class TranscriptionTaskManager: ObservableObject {
         }
     }
 
+
+    // MARK: - Speaker Naming Flow
+
+    /// Check if any speakers need naming or confirmation after transcription.
+    /// Auto-accepts speakers with high similarity (>0.88) and enough history (callCount > 4).
+    nonisolated private func checkNamingNeeded(
+        result: TranscriptionResult,
+        dbKnowledge: [(speakerId: String, profile: SpeakerProfile, similarity: Double)],
+        speakerIds: [String]
+    ) -> Bool {
+        guard !speakerIds.isEmpty else { return false }
+
+        // Check each system speaker
+        for sid in speakerIds {
+            if let entry = dbKnowledge.first(where: { $0.speakerId == sid }) {
+                // Known speaker — auto-accept if high confidence + enough history
+                let autoAccept = entry.profile.displayName != nil
+                    && entry.similarity > 0.88
+                    && entry.profile.callCount > 4
+                if !autoAccept {
+                    return true  // needs confirmation or naming
+                }
+            } else {
+                // Unknown speaker (no DB match at all, or matched but no entry in dbKnowledge)
+                // Check if we have a persistent ID from any utterance
+                let hasProfile = result.systemUtterances.contains {
+                    String($0.speakerId) == sid && $0.persistentSpeakerId != nil
+                }
+                if hasProfile {
+                    return true  // new speaker needs naming
+                }
+            }
+        }
+
+        return false  // all speakers auto-accepted
+    }
+
+    /// Handle completion of the speaker naming flow.
+    /// Applies names to the database, updates the transcript, and cleans up.
+    func handleNamingComplete(
+        updates: [SpeakerNameUpdate],
+        transcriptURL: URL,
+        micURL: URL,
+        systemURL: URL,
+        clips: [SpeakerNamingEntry]
+    ) {
+        let speakerDB = transcription.speakerDB
+
+        // Apply name updates to speaker database
+        for update in updates {
+            switch update.action {
+            case .merged:
+                // Merge this new profile into the existing one
+                if let targetId = update.mergeTargetProfileId {
+                    speakerDB.mergeProfiles(sourceId: update.persistentSpeakerId, into: targetId)
+                }
+
+            case .named, .corrected:
+                speakerDB.setDisplayName(
+                    id: update.persistentSpeakerId,
+                    name: update.newName,
+                    source: "user_manual"
+                )
+
+            case .confirmed:
+                speakerDB.setDisplayName(
+                    id: update.persistentSpeakerId,
+                    name: update.newName,
+                    source: "user_manual"
+                )
+                speakerDB.resetDisputeCount(id: update.persistentSpeakerId)
+            }
+
+            AppLogger.speakers.info("Speaker named", [
+                "id": "\(update.persistentSpeakerId)",
+                "name": update.newName,
+                "action": "\(update.action)"
+            ])
+        }
+
+        // Update the saved transcript file with real names
+        if !updates.isEmpty {
+            TranscriptSaver.updateSpeakerNames(transcriptURL: transcriptURL, updates: updates)
+        }
+
+        // Clean up clips and audio files
+        SpeakerClipExtractor.cleanupClips(clips)
+        try? FileManager.default.removeItem(at: micURL)
+        try? FileManager.default.removeItem(at: systemURL)
+
+        // Clear the naming request
+        self.speakerNamingRequest = nil
+
+        AppLogger.pipeline.info("Speaker naming complete", [
+            "named": "\(updates.count)",
+            "transcript": transcriptURL.lastPathComponent
+        ])
+    }
 
     private func handleTaskCompletion(taskId: UUID) {
         // Remove from active tasks
