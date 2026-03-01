@@ -49,6 +49,11 @@ struct FloatingPanelView: View {
                     onOpenFolder: {
                         openTranscriptsFolder()
                         showTranscriptTray = false
+                    },
+                    onDismiss: {
+                        withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                            showTranscriptTray = false
+                        }
                     }
                 )
                 .transition(.asymmetric(

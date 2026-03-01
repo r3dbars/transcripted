@@ -15,6 +15,7 @@ struct TranscriptTrayView: View {
 
     @ObservedObject var store: TranscriptStore
     var onOpenFolder: () -> Void
+    var onDismiss: (() -> Void)? = nil
 
     @State private var isAppearing = false
     @State private var copiedId: UUID?
@@ -127,6 +128,16 @@ struct TranscriptTrayView: View {
             }
             .buttonStyle(PlainButtonStyle())
             .help("Refresh")
+
+            if let onDismiss {
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.panelTextMuted)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help("Close")
+            }
         }
         .padding(.horizontal, Spacing.ms)
         .padding(.vertical, Spacing.xs + 2)
