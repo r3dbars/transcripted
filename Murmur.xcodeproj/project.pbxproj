@@ -62,6 +62,8 @@
 		A1002013 /* SortformerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002003 /* SortformerService.swift */; };
 		A1002014 /* SpeakerDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002004 /* SpeakerDatabase.swift */; };
 		A1002015 /* TranscriptionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002005 /* TranscriptionTypes.swift */; };
+		A1002016 /* SpeakerClipExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002006 /* SpeakerClipExtractor.swift */; };
+		A100091F /* SpeakerNamingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100090F /* SpeakerNamingView.swift */; };
 		FA000011 /* libFluidAudioAll.a in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000001 /* libFluidAudioAll.a */; };
 		FA000012 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000002 /* Metal.framework */; };
 		FA000013 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000003 /* MetalKit.framework */; };
@@ -76,6 +78,7 @@
 		T1000014 /* DisplayStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000004 /* DisplayStatusTests.swift */; };
 		T1000015 /* TranscriptionTypesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000005 /* TranscriptionTypesTests.swift */; };
 		T1000018 /* PillStateManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000008 /* PillStateManagerTests.swift */; };
+		T1000019 /* SpeakerDatabaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000009 /* SpeakerDatabaseTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -147,6 +150,8 @@
 		A1002003 /* SortformerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SortformerService.swift; sourceTree = "<group>"; };
 		A1002004 /* SpeakerDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDatabase.swift; sourceTree = "<group>"; };
 		A1002005 /* TranscriptionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTypes.swift; sourceTree = "<group>"; };
+		A1002006 /* SpeakerClipExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerClipExtractor.swift; sourceTree = "<group>"; };
+		A100090F /* SpeakerNamingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerNamingView.swift; sourceTree = "<group>"; };
 		FA000001 /* libFluidAudioAll.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libFluidAudioAll.a; path = "fluidaudio-libs/libFluidAudioAll.a"; sourceTree = "<group>"; };
 		FA000002 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		FA000003 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
@@ -161,6 +166,7 @@
 		T1000004 /* DisplayStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayStatusTests.swift; sourceTree = "<group>"; };
 		T1000005 /* TranscriptionTypesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTypesTests.swift; sourceTree = "<group>"; };
 		T1000008 /* PillStateManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillStateManagerTests.swift; sourceTree = "<group>"; };
+		T1000009 /* SpeakerDatabaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDatabaseTests.swift; sourceTree = "<group>"; };
 		T1000200 /* MurmurTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MurmurTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -343,6 +349,7 @@
 				A100090C /* AuroraIdleView.swift */,
 				A100090D /* AuroraProcessingView.swift */,
 				A100090E /* AuroraSuccessView.swift */,
+				A100090F /* SpeakerNamingView.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -410,6 +417,7 @@
 				A1002002 /* ParakeetService.swift */,
 				A1002003 /* SortformerService.swift */,
 				A1002004 /* SpeakerDatabase.swift */,
+				A1002006 /* SpeakerClipExtractor.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -439,6 +447,7 @@
 		T1000102 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				T1000009 /* SpeakerDatabaseTests.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -604,6 +613,8 @@
 				A1002013 /* SortformerService.swift in Sources */,
 				A1002014 /* SpeakerDatabase.swift in Sources */,
 				A1002015 /* TranscriptionTypes.swift in Sources */,
+				A1002016 /* SpeakerClipExtractor.swift in Sources */,
+				A100091F /* SpeakerNamingView.swift in Sources */,
 				A1003001 /* AppLogger.swift in Sources */,
 				A1003003 /* FileLogger.swift in Sources */,
 			);
@@ -619,6 +630,7 @@
 				T1000014 /* DisplayStatusTests.swift in Sources */,
 				T1000015 /* TranscriptionTypesTests.swift in Sources */,
 				T1000018 /* PillStateManagerTests.swift in Sources */,
+				T1000019 /* SpeakerDatabaseTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

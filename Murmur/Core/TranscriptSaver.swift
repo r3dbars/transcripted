@@ -366,6 +366,59 @@ class TranscriptSaver {
         return doc
     }
 
+    // MARK: - Speaker Name Updating (Post-Naming Flow)
+
+    /// Update speaker names in an already-saved transcript file.
+    /// Replaces "Speaker X" labels in both YAML frontmatter and transcript body.
+    ///
+    /// - Parameters:
+    ///   - transcriptURL: Path to the saved markdown transcript
+    ///   - updates: Speaker name updates from the naming flow
+    /// - Returns: true if the file was updated successfully
+    @discardableResult
+    static func updateSpeakerNames(transcriptURL: URL, updates: [SpeakerNameUpdate]) -> Bool {
+        guard !updates.isEmpty else { return true }
+
+        guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
+            AppLogger.pipeline.error("Failed to read transcript for name update", ["path": transcriptURL.path])
+            return false
+        }
+
+        for update in updates {
+            let speakerId = update.sortformerSpeakerId
+            let oldLabel = "Speaker \(speakerId)"
+            let newName = update.newName
+
+            // YAML frontmatter: name: "Speaker X" → name: "NewName"
+            content = content.replacingOccurrences(
+                of: "name: \"\(oldLabel)\"",
+                with: "name: \"\(newName)\""
+            )
+
+            // Transcript body: [System/Speaker X] → [System/NewName]
+            content = content.replacingOccurrences(
+                of: "[System/\(oldLabel)]",
+                with: "[System/\(newName)]"
+            )
+
+            // Speaker breakdown: **Speaker X:** → **NewName:**
+            content = content.replacingOccurrences(
+                of: "**\(oldLabel):**",
+                with: "**\(newName):**"
+            )
+        }
+
+        // Atomic write back
+        do {
+            try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            AppLogger.pipeline.info("Updated speaker names in transcript", ["path": transcriptURL.lastPathComponent, "updates": "\(updates.count)"])
+            return true
+        } catch {
+            AppLogger.pipeline.error("Failed to write updated transcript", ["error": error.localizedDescription])
+            return false
+        }
+    }
+
     /// Show macOS notification that transcript was saved
     private static func showSaveNotification(fileURL: URL) {
         let notification = NSUserNotification()

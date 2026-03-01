@@ -130,6 +130,30 @@ class FloatingPanelController: NSWindowController, NSWindowDelegate {
             }
             .store(in: &cancellables)
 
+        // React to speaker naming requests — toggle key focus for text fields
+        taskManager.$speakerNamingRequest
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] request in
+                guard let self = self, let panel = self.window as? FloatingPanel else { return }
+                let needsKeyFocus = request != nil
+                panel.allowKeyFocus = needsKeyFocus
+
+                if needsKeyFocus {
+                    // Make panel key so text fields can receive input
+                    panel.makeKey()
+                } else {
+                    // Resign key status so panel doesn't steal focus
+                    panel.resignKey()
+                }
+
+                // If naming request arrives while pill is processing, transition to idle
+                // so the naming tray can be shown
+                if request != nil && self.pillStateManager.state == .processing {
+                    self.pillStateManager.transition(to: .idle)
+                }
+            }
+            .store(in: &cancellables)
+
         // React to task manager status changes
         // MVP: Pill returns to idle quickly so user can start a new recording
         // while previous transcription processes in background
@@ -225,6 +249,9 @@ class FloatingPanelController: NSWindowController, NSWindowDelegate {
 // MARK: - Floating Panel (NSPanel subclass)
 
 class FloatingPanel: NSPanel {
-    override var canBecomeKey: Bool { false }
+    /// Toggle to allow key focus when text fields are active (e.g., speaker naming tray)
+    var allowKeyFocus: Bool = false
+
+    override var canBecomeKey: Bool { allowKeyFocus }
     override var canBecomeMain: Bool { false }
 }
