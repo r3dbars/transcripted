@@ -73,9 +73,82 @@ enum AudioResampler {
     }
 
     /// Load a WAV file and return mono Float32 samples resampled to 16kHz.
+    /// Uses AVAudioConverter for hardware-accelerated resampling with anti-aliasing.
     static func loadAndResample(url: URL, targetRate: Double = 16000) throws -> [Float] {
-        let (samples, sampleRate) = try loadWAV(url: url)
-        return resample(samples, from: sampleRate, to: targetRate)
+        return try convertToMono(url: url, targetRate: targetRate)
+    }
+
+    /// Hardware-accelerated resampling via AVAudioConverter.
+    /// Handles channel mixing (stereo→mono) and sample rate conversion in one pass
+    /// using Apple's polyphase anti-aliasing filter (vDSP under the hood).
+    private static func convertToMono(url: URL, targetRate: Double) throws -> [Float] {
+        let file = try AVAudioFile(forReading: url)
+        let srcFormat = file.processingFormat
+        let srcFrames = AVAudioFrameCount(file.length)
+
+        // Short-circuit if already at target format
+        if srcFormat.sampleRate == targetRate && srcFormat.channelCount == 1 {
+            return try loadWAV(url: url).samples
+        }
+
+        guard let dstFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: targetRate,
+            channels: 1,
+            interleaved: false
+        ) else {
+            throw NSError(domain: "AudioResampler", code: 3, userInfo: [
+                NSLocalizedDescriptionKey: "Failed to create target audio format (\(targetRate)Hz mono)"
+            ])
+        }
+
+        guard let converter = AVAudioConverter(from: srcFormat, to: dstFormat) else {
+            throw NSError(domain: "AudioResampler", code: 4, userInfo: [
+                NSLocalizedDescriptionKey: "Failed to create AVAudioConverter (\(srcFormat.sampleRate)Hz \(srcFormat.channelCount)ch → \(targetRate)Hz mono)"
+            ])
+        }
+
+        // Read entire source file into buffer
+        guard let srcBuffer = AVAudioPCMBuffer(pcmFormat: srcFormat, frameCapacity: srcFrames) else {
+            throw NSError(domain: "AudioResampler", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Failed to create source audio buffer"
+            ])
+        }
+        try file.read(into: srcBuffer)
+
+        // Calculate output frame count (add margin for filter delay)
+        let ratio = targetRate / srcFormat.sampleRate
+        let dstFrames = AVAudioFrameCount(Double(srcFrames) * ratio) + 16
+        guard let dstBuffer = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: dstFrames) else {
+            throw NSError(domain: "AudioResampler", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Failed to create destination audio buffer"
+            ])
+        }
+
+        // Convert in one pass — the input block is called once for single-buffer conversion
+        var inputConsumed = false
+        var conversionError: NSError?
+        let status = converter.convert(to: dstBuffer, error: &conversionError) { _, outStatus in
+            if inputConsumed {
+                outStatus.pointee = .endOfStream
+                return nil
+            }
+            inputConsumed = true
+            outStatus.pointee = .haveData
+            return srcBuffer
+        }
+
+        if status == .error, let conversionError {
+            throw conversionError
+        }
+
+        guard let floatData = dstBuffer.floatChannelData else {
+            throw NSError(domain: "AudioResampler", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "Failed to get float channel data from converted buffer"
+            ])
+        }
+
+        return Array(UnsafeBufferPointer(start: floatData[0], count: Int(dstBuffer.frameLength)))
     }
 
     /// Extract a time slice from samples array.

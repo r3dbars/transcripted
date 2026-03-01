@@ -89,8 +89,16 @@ class Transcription: ObservableObject {
             }
 
             AppLogger.transcription.info("Loading and resampling audio to 16kHz")
-            let systemSamples = try AudioResampler.loadAndResample(url: systemURL, targetRate: 16000)
-            let micSamples = try AudioResampler.loadAndResample(url: micURL, targetRate: 16000)
+            let resampleStart = CFAbsoluteTimeGetCurrent()
+
+            // Resample both files in parallel — they're independent I/O + compute
+            async let systemSamplesTask = Task { try AudioResampler.loadAndResample(url: systemURL, targetRate: 16000) }
+            async let micSamplesTask = Task { try AudioResampler.loadAndResample(url: micURL, targetRate: 16000) }
+            let systemSamples = try await systemSamplesTask.value
+            let micSamples = try await micSamplesTask.value
+
+            let resampleTime = CFAbsoluteTimeGetCurrent() - resampleStart
+            AppLogger.transcription.info("Resampling completed in \(String(format: "%.2f", resampleTime))s")
 
             AppLogger.transcription.debug("System: \(systemSamples.count) samples (\(String(format: "%.1f", Double(systemSamples.count) / 16000))s)")
             AppLogger.transcription.debug("Mic: \(micSamples.count) samples (\(String(format: "%.1f", Double(micSamples.count) / 16000))s)")
