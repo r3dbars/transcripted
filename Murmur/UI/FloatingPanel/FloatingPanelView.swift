@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - SwiftUI View
 
@@ -28,16 +29,11 @@ struct FloatingPanelView: View {
     @State private var showTranscriptTray = false
     @StateObject private var transcriptStore = TranscriptStore()
 
-    // MARK: - Computed Properties
+    // Escape key monitor for dismissing tray
+    @State private var escapeMonitor: Any?
 
-    /// Dynamic frame width based on state
-    private var frameWidth: CGFloat {
-        if showTranscriptTray {
-            return PillDimensions.trayWidth + 40
-        } else {
-            return PillDimensions.recordingWidth + 40
-        }
-    }
+    // Constant frame width — prevents position shift when toggling tray
+    private let frameWidth: CGFloat = PillDimensions.trayWidth + 40
 
     var body: some View {
         VStack(spacing: 0) {
@@ -94,8 +90,7 @@ struct FloatingPanelView: View {
                 silencePromptDismissed = false
             }
         }
-        // Dismiss transcript tray when recording starts
-        // Dismiss transcript tray when processing starts (but keep it available during recording)
+        // Dismiss transcript tray when processing starts (keep available during recording)
         .onChange(of: pillStateManager.state) { _, newState in
             if newState == .processing {
                 withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
@@ -103,10 +98,16 @@ struct FloatingPanelView: View {
                 }
             }
         }
-        // Refresh transcript list when tray opens
+        // Refresh transcript list when tray opens; manage escape key monitor
         .onChange(of: showTranscriptTray) { _, isShowing in
-            if isShowing { transcriptStore.refresh() }
+            if isShowing {
+                transcriptStore.refresh()
+                installEscapeMonitor()
+            } else {
+                removeEscapeMonitor()
+            }
         }
+        .onDisappear { removeEscapeMonitor() }
         // Trigger error toasts based on displayStatus changes
         // (Success is now shown in-pill via AuroraSuccessView, not as overlay)
         // Note: Use Task to debounce rapid status changes and prevent
@@ -178,6 +179,28 @@ struct FloatingPanelView: View {
     private func toggleTranscriptTray() {
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
             showTranscriptTray.toggle()
+        }
+    }
+
+    // MARK: - Escape Key Monitor
+
+    private func installEscapeMonitor() {
+        guard escapeMonitor == nil else { return }
+        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if event.keyCode == 53 { // Escape key
+                withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                    showTranscriptTray = false
+                }
+                return nil // Consume the event
+            }
+            return event
+        }
+    }
+
+    private func removeEscapeMonitor() {
+        if let monitor = escapeMonitor {
+            NSEvent.removeMonitor(monitor)
+            escapeMonitor = nil
         }
     }
 
