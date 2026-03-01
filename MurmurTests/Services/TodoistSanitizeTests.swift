@@ -87,6 +87,27 @@ final class TodoistSanitizeTests: XCTestCase {
         XCTAssertEqual(service.sanitizeDueString("next tuesday"), "next Tuesday")
     }
 
+    // MARK: - Month names
+
+    func testMonthNameExtracted() {
+        XCTAssertEqual(service.sanitizeDueString("sometime in january"), "January")
+    }
+
+    func testMayMonthExtracted() {
+        XCTAssertEqual(service.sanitizeDueString("may"), "May")
+    }
+
+    // MARK: - Substring false positives
+
+    func testMaybeDoesNotMatchMay() {
+        // "maybe" contains "may" as substring — should NOT match month name
+        XCTAssertNil(service.sanitizeDueString("maybe later"))
+    }
+
+    func testMarchingDoesNotMatchMarch() {
+        XCTAssertNil(service.sanitizeDueString("marching orders"))
+    }
+
     // MARK: - Unparseable → nil
 
     func testGibberishReturnsNil() {

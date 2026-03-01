@@ -84,20 +84,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Quit Transcripted", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem?.menu = menu
 
-        // Initialize managers
-        failedTranscriptionManager = FailedTranscriptionManager()
-        audio = Audio()
-
-        guard let ftm = failedTranscriptionManager else {
-            AppLogger.app.error("Failed to create FailedTranscriptionManager — aborting setup")
-            return
-        }
-        taskManager = TranscriptionTaskManager(failedTranscriptionManager: ftm)
-
-        guard let tm = taskManager, let aud = audio else {
-            AppLogger.app.error("Failed to create TaskManager or Audio — aborting setup")
-            return
-        }
+        // Initialize managers (all inits are non-failable — no guard needed)
+        let ftm = FailedTranscriptionManager()
+        let aud = Audio()
+        let tm = TranscriptionTaskManager(failedTranscriptionManager: ftm)
+        failedTranscriptionManager = ftm
+        audio = aud
+        taskManager = tm
 
         // Initialize local transcription models (Parakeet + Sortformer) in background
         AppLogger.app.info("Creating model init task")
@@ -141,6 +134,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func openFailedTranscriptions() {
         guard let ftm = failedTranscriptionManager, let tm = taskManager else {
             AppLogger.app.error("Cannot open failed transcriptions — managers not initialized")
+            let alert = NSAlert()
+            alert.messageText = "Unable to Open"
+            alert.informativeText = "The app has not finished initializing. Please try again in a moment."
+            alert.alertStyle = .warning
+            alert.runModal()
             return
         }
 

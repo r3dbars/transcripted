@@ -211,11 +211,12 @@ class TodoistService {
         }
 
         // Check for month names (e.g., "sometime in January" → "January")
+        // Use word boundary matching to avoid false positives ("maybe" ≠ "May")
         let monthNames = ["january", "february", "march", "april", "may", "june",
                           "july", "august", "september", "october", "november", "december"]
+        let words = Set(lowercased.components(separatedBy: .whitespacesAndNewlines))
         for month in monthNames {
-            if lowercased.contains(month) {
-                // Try to extract a date like "January 15" or just use "January 1"
+            if words.contains(month) {
                 return month.capitalized
             }
         }
