@@ -18,6 +18,7 @@ struct TranscriptTrayView: View {
 
     @State private var isAppearing = false
     @State private var copiedId: UUID?
+    @State private var copyFailedId: UUID?
 
     var body: some View {
         VStack(spacing: 4) {
@@ -105,6 +106,7 @@ struct TranscriptTrayView: View {
                         TranscriptRowView(
                             transcript: transcript,
                             isCopied: copiedId == transcript.id,
+                            copyFailed: copyFailedId == transcript.id,
                             onCopy: { copyToClipboard(transcript) }
                         )
 
@@ -160,7 +162,19 @@ struct TranscriptTrayView: View {
     // MARK: - Copy Logic
 
     private func copyToClipboard(_ transcript: TranscriptSummary) {
-        let text = store.copyableText(for: transcript)
+        guard let text = store.copyableText(for: transcript), !text.isEmpty else {
+            // Show error state — don't touch the clipboard
+            withAnimation(.snappy(duration: 0.15)) {
+                copyFailedId = transcript.id
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                withAnimation(.snappy(duration: 0.15)) {
+                    if copyFailedId == transcript.id { copyFailedId = nil }
+                }
+            }
+            return
+        }
+
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
 
@@ -185,6 +199,7 @@ struct TranscriptTrayView: View {
 struct TranscriptRowView: View {
     let transcript: TranscriptSummary
     let isCopied: Bool
+    var copyFailed: Bool = false
     let onCopy: () -> Void
 
     @State private var isHovered = false
@@ -252,14 +267,26 @@ struct TranscriptRowView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(
-                        isCopied
-                            ? Color.statusSuccessMuted.opacity(0.18)
-                            : (isHovered ? Color.panelCharcoalElevated : Color.panelCharcoalSurface)
+                        copyFailed
+                            ? Color.recordingCoral.opacity(0.18)
+                            : isCopied
+                                ? Color.statusSuccessMuted.opacity(0.18)
+                                : (isHovered ? Color.panelCharcoalElevated : Color.panelCharcoalSurface)
                     )
                     .frame(width: 56, height: 24)
                     .animation(.snappy(duration: 0.15), value: isCopied)
+                    .animation(.snappy(duration: 0.15), value: copyFailed)
 
-                if isCopied {
+                if copyFailed {
+                    HStack(spacing: 3) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .bold))
+                        Text("Error")
+                            .font(.system(size: 9, weight: .medium))
+                    }
+                    .foregroundColor(.recordingCoral)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                } else if isCopied {
                     HStack(spacing: 3) {
                         Image(systemName: "checkmark")
                             .font(.system(size: 9, weight: .bold))
@@ -280,9 +307,10 @@ struct TranscriptRowView: View {
                 }
             }
             .animation(.snappy(duration: 0.15), value: isCopied)
+            .animation(.snappy(duration: 0.15), value: copyFailed)
         }
         .buttonStyle(PlainButtonStyle())
-        .help(isCopied ? "Copied to clipboard" : "Copy transcript for AI")
+        .help(copyFailed ? "Could not read transcript" : isCopied ? "Copied to clipboard" : "Copy transcript for AI")
     }
 
     // MARK: - Relative Date
