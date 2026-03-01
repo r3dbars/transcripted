@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import UserNotifications
 
 // MARK: - Display Status for UI (Goal-Gradient Effect)
@@ -124,6 +125,21 @@ class TranscriptionTaskManager: ObservableObject {
     /// Uses local Parakeet + Sortformer pipeline: Transcribe → Save with Speaker Attribution → Extract Action Items
     /// - Parameter healthInfo: Recording health metrics for transcript metadata (Phase 3: Post-hoc transparency)
     func startTranscription(micURL: URL, systemURL: URL?, outputFolder: URL, healthInfo: RecordingHealthInfo? = nil) {
+
+        // Gate: reject recordings shorter than 2 seconds (they'll fail in Parakeet anyway)
+        let minDuration: TimeInterval = 2.0
+        if let micDuration = audioDuration(url: micURL), micDuration < minDuration {
+            AppLogger.pipeline.info("Recording too short, skipping transcription", ["duration": String(format: "%.1fs", micDuration)])
+
+            // Clean up audio files — they're useless
+            try? FileManager.default.removeItem(at: micURL)
+            if let systemURL { try? FileManager.default.removeItem(at: systemURL) }
+
+            self.displayStatus = .failed(message: "Recording too short")
+            self.scheduleStatusReset(delay: 3)
+            return
+        }
+
         let task = TranscriptionTask(micURL: micURL, systemURL: systemURL, outputFolder: outputFolder, healthInfo: healthInfo)
 
         // Increment active count and set initial status immediately (Goal-Gradient Effect)
@@ -353,6 +369,12 @@ class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
+        // Don't retry permanent failures
+        guard failed.isRetryable else {
+            AppLogger.pipeline.info("Skipping retry — failure is permanent", ["failedId": "\(failedId)", "error": failed.errorMessage])
+            return false
+        }
+
         // Verify audio files still exist
         guard failed.audioFilesExist() else {
             AppLogger.pipeline.error("Audio files no longer exist for failed transcription", ["failedId": "\(failedId)"])
@@ -462,6 +484,15 @@ class TranscriptionTaskManager: ObservableObject {
                 AppLogger.app.warning("Notification permission error", ["error": "\(error.localizedDescription)"])
             }
         }
+    }
+
+    /// Check audio file duration using AVAudioFile (quick metadata read, no decoding)
+    private func audioDuration(url: URL) -> TimeInterval? {
+        guard let file = try? AVAudioFile(forReading: url) else { return nil }
+        let frames = Double(file.length)
+        let sampleRate = file.processingFormat.sampleRate
+        guard sampleRate > 0 else { return nil }
+        return frames / sampleRate
     }
 
     /// Send a macOS notification when transcription fails

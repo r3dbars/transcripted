@@ -86,6 +86,13 @@ enum AudioResampler {
         let srcFormat = file.processingFormat
         let srcFrames = AVAudioFrameCount(file.length)
 
+        // Guard against empty audio files (e.g., mic device thrashing during recording)
+        guard srcFrames > 0 else {
+            throw NSError(domain: "AudioResampler", code: 5, userInfo: [
+                NSLocalizedDescriptionKey: "Empty audio file — no samples recorded. The microphone may have disconnected during recording."
+            ])
+        }
+
         // Short-circuit if already at target format
         if srcFormat.sampleRate == targetRate && srcFormat.channelCount == 1 {
             return try loadWAV(url: url).samples

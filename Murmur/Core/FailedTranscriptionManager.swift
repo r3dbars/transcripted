@@ -24,8 +24,9 @@ class FailedTranscriptionManager: ObservableObject {
         encoder.dateEncodingStrategy = .iso8601
         decoder.dateDecodingStrategy = .iso8601
 
-        // Load existing failed transcriptions
+        // Load existing failed transcriptions and auto-clean permanent failures
         loadFailedTranscriptions()
+        cleanupPermanentFailures()
     }
 
     /// Loads failed transcriptions from disk
@@ -134,6 +135,33 @@ class FailedTranscriptionManager: ObservableObject {
     /// Gets the total number of failed transcriptions
     var count: Int {
         return failedTranscriptions.count
+    }
+
+    /// Auto-clean permanent failures (unrecoverable errors or exhausted retries).
+    /// Deletes audio files and removes from queue on launch.
+    private func cleanupPermanentFailures() {
+        let toRemove = failedTranscriptions.filter { failed in
+            // Permanent error that will never succeed
+            !failed.isRetryable ||
+            // Exhausted retries (3+ attempts, still failing)
+            failed.retryCount >= 3
+        }
+
+        guard !toRemove.isEmpty else { return }
+
+        for failure in toRemove {
+            // Delete audio files to reclaim disk space
+            try? FileManager.default.removeItem(at: failure.micAudioURL)
+            if let systemURL = failure.systemAudioURL {
+                try? FileManager.default.removeItem(at: systemURL)
+            }
+        }
+
+        let removedIds = Set(toRemove.map { $0.id })
+        failedTranscriptions.removeAll { removedIds.contains($0.id) }
+        saveFailedTranscriptions()
+
+        AppLogger.pipeline.info("Auto-cleaned permanent failures", ["count": "\(toRemove.count)"])
     }
 
     /// Cleans up failed transcriptions older than the specified number of days
