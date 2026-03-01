@@ -45,6 +45,19 @@ struct FailedTranscription: Identifiable, Codable, Equatable {
         return errorMessage
     }
 
+    /// Whether this failure could succeed if retried.
+    /// Permanent failures (empty audio, too short) will never succeed — the data is gone.
+    var isRetryable: Bool {
+        let permanent = [
+            "Empty audio file",
+            "no samples recorded",
+            "at least 1 second",
+            "Invalid audio data",
+            "Recording too short"
+        ]
+        return !permanent.contains(where: { errorMessage.localizedCaseInsensitiveContains($0) })
+    }
+
     /// Checks if the audio files still exist on disk
     func audioFilesExist() -> Bool {
         let micExists = FileManager.default.fileExists(atPath: micAudioURL.path)
