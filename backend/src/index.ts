@@ -9,7 +9,8 @@ interface Env {
   ADMIN_TOKEN?: string;
   BETA_MESSAGE?: string;
   LATEST_VERSION?: string;
-  DOWNLOAD_URL?: string;
+  DOWNLOAD_URL?: string;       // Legacy single-URL (unused if DOWNLOAD_URL_BASE is set)
+  DOWNLOAD_URL_BASE?: string;  // Per-user: base + /Draft-{Name}.dmg
 }
 
 interface User {
@@ -199,6 +200,11 @@ async function handleConfig(
   env: Env,
   user: User
 ): Promise<Response> {
+  // Per-user download URL: base + /Draft-{Name}.dmg
+  const downloadUrl = env.DOWNLOAD_URL_BASE
+    ? `${env.DOWNLOAD_URL_BASE}/Draft-${user.name}.dmg`
+    : env.DOWNLOAD_URL ?? null;
+
   return new Response(
     JSON.stringify({
       active: user.active === 1,
@@ -206,7 +212,7 @@ async function handleConfig(
       max_drafts_per_day: user.max_drafts_per_day,
       min_version: "1.0.0",
       latest_version: env.LATEST_VERSION ?? null,
-      download_url: env.DOWNLOAD_URL ?? null,
+      download_url: downloadUrl,
     }),
     { headers: { "Content-Type": "application/json" } }
   );

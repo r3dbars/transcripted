@@ -12,14 +12,14 @@ enum BetaConfig {
     static let userToken = "BETA_TOKEN_PLACEHOLDER"
 
     /// Proxy base URL — all API calls route through here instead of api.anthropic.com
-    static let proxyBaseURL = "https://draft-proxy.YOUR-SUBDOMAIN.workers.dev"
+    static let proxyBaseURL = "https://draft-proxy.tz427gsydr.workers.dev"
 
     /// Current app version — compared against /config min_version to prompt updates.
     /// Bump this in each release. build-beta.sh can also inject it via sed.
     static let appVersion = "1.0.1"
 
     /// Where to download the latest DMG (GitHub Releases or similar)
-    static let updateURL = "https://github.com/r3dbars/draft-releases/releases/latest"
+    static let updateURL = "https://github.com/r3dbars/Draft/releases/latest"
 }
 
 #endif
