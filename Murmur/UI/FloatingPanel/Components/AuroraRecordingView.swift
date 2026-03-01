@@ -9,10 +9,12 @@ import SwiftUI
 struct AuroraRecordingView: View {
     @ObservedObject var audio: Audio
     let onStop: () -> Void
+    var onTranscripts: (() -> Void)? = nil
 
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @State private var isExpanded = true  // Start expanded, auto-collapse after 5s
     @State private var isStopHovered = false
+    @State private var isTranscriptsHovered = false
     @State private var collapseTask: Task<Void, Never>?
 
     // Smoothed audio levels (prevents jitter)
@@ -311,8 +313,33 @@ struct AuroraRecordingView: View {
                 .lineLimit(1)
                 .fixedSize()
 
-            Spacer()
+            // Transcripts button (right) - access recent transcripts while recording
+            if let onTranscripts {
+                Button(action: onTranscripts) {
+                    ZStack {
+                        Circle()
+                            .fill(isTranscriptsHovered ? Color.panelCharcoalSurface : Color.panelCharcoalElevated)
+                            .frame(width: 32, height: 32)
+
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.panelTextPrimary)
+                    }
+                    .scaleEffect(isTranscriptsHovered ? 1.1 : 1.0)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .floatingTooltip("Transcripts")
+                .onHover { hovering in
+                    withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
+                        isTranscriptsHovered = hovering
+                    }
+                }
+                .accessibilityLabel("Browse transcripts")
                 .frame(width: 44)
+            } else {
+                Spacer()
+                    .frame(width: 44)
+            }
         }
         .padding(.horizontal, 8)
     }
