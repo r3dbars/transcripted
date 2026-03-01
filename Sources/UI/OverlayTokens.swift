@@ -12,9 +12,10 @@ enum OverlayTokens {
     static let textMuted     = Color(white: 0.35)                          // placeholder
 
     // Layout
-    static let panelWidth: CGFloat     = 480
-    static let panelMinHeight: CGFloat = 160
-    static let panelMaxHeight: CGFloat = 340
+    static let panelWidth: CGFloat         = 480
+    static let panelCompactHeight: CGFloat = 52   // header bar only, no content area
+    static let panelMinHeight: CGFloat     = 160
+    static let panelMaxHeight: CGFloat     = 340
     static let cornerRadius: CGFloat   = 16
     static let contentPadding: CGFloat = 16
 }

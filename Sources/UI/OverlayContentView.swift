@@ -7,13 +7,22 @@ struct OverlayContentView: View {
     @ObservedObject var sttRouter: STTRouter
     @ObservedObject var controller: FloatingOverlayController
     @FocusState private var isReviewFocused: Bool
+    /// Content area and dividers are hidden when listening + collapsed (compact header-only bar)
+    private var showContentArea: Bool {
+        if controller.state == .idle { return false }
+        if controller.state == .listening && !controller.transcriptExpanded { return false }
+        return true
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             headerBar
-            Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
-            contentArea
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+            if showContentArea {
+                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+                contentArea
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+            }
             bottomToolbar
         }
         .background(OverlayTokens.panelBg)
@@ -81,6 +90,15 @@ struct OverlayContentView: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: 20)
                 .padding(.horizontal, 8)
+
+                // Chevron to expand/collapse transcript
+                Button(action: { controller.toggleTranscript() }) {
+                    Image(systemName: controller.transcriptExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(OverlayTokens.textMuted)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 4)
             } else {
                 Spacer()
             }
