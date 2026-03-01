@@ -144,29 +144,23 @@ class FloatingPanelController: NSWindowController, NSWindowDelegate {
                         self.pillStateManager.transition(to: .processing)
                         self.scheduleReturnToIdle(delay: 1.5)
                     }
-                case .transcribing, .findingActionItems, .finishing:
+                case .transcribing, .finishing:
                     // Don't re-enter processing — pill should already be idle (or heading there)
                     // Background transcription continues silently
                     break
-                case .pendingReview:
-                    // Don't interrupt an active recording with a review from a background task
-                    guard !self.audio.isRecording else { break }
-                    // IMPORTANT: Transition BEFORE locking - lock() would block the transition
-                    self.pillStateManager.transition(to: .reviewing)
-                    self.pillStateManager.lock()
-                case .completed, .transcriptSaved:
+                case .transcriptSaved:
                     // Don't interrupt an active recording with success from a background task
                     guard !self.audio.isRecording else { break }
                     // Show success briefly in pill, then return to idle
-                    self.pillStateManager.unlock(transitionToIdle: false)
                     if self.pillStateManager.state != .processing {
                         self.pillStateManager.transition(to: .processing)
                     }
                     // Quick return to idle after success animation
                     self.scheduleReturnToIdle(delay: 2.5)
                 case .idle:
-                    // Now transition to idle (triggered by scheduleStatusReset timer)
-                    self.pillStateManager.unlock(transitionToIdle: !self.audio.isRecording)
+                    if !self.audio.isRecording {
+                        self.pillStateManager.transition(to: .idle)
+                    }
                 case .failed:
                     // Show error briefly in processing state, then return to idle
                     PillSounds.playError()

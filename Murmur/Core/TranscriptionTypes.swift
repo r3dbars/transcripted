@@ -39,7 +39,7 @@ struct TranscriptionResult {
         systemUtterances.reduce(0) { $0 + $1.transcript.split(separator: " ").count }
     }
 
-    /// Unique speaker IDs in system audio (for Gemini speaker identification)
+    /// Unique speaker IDs in system audio
     var systemSpeakerIds: Set<String> {
         Set(systemUtterances.map { String($0.speakerId) })
     }
@@ -66,36 +66,18 @@ struct TranscriptionResult {
     }
 }
 
-// MARK: - Priority Mapping
+/// Result of speaker identification from voice fingerprint matching
+struct SpeakerIdentificationResult: Codable {
+    let speakers: [IdentifiedSpeaker]
+    let userSpeakerId: String?
+}
 
-extension ActionItem {
-    /// EventKit priority: 1 = high, 5 = medium, 9 = low, 0 = none
-    var eventKitPriority: Int {
-        switch priority.lowercased() {
-        case "high": return 1
-        case "medium": return 5
-        case "low": return 9
-        default:
-            if !priority.isEmpty {
-                AppLogger.actionItems.warning("Unknown priority, defaulting to none", ["priority": priority])
-            }
-            return 0
-        }
-    }
-
-    /// Todoist priority: 4 = urgent/high, 3 = medium, 2 = low, 1 = normal
-    var todoistPriority: Int {
-        switch priority.lowercased() {
-        case "high": return 4
-        case "medium": return 3
-        case "low": return 2
-        default:
-            if !priority.isEmpty {
-                AppLogger.actionItems.warning("Unknown priority, defaulting to normal", ["priority": priority])
-            }
-            return 1
-        }
-    }
+/// Individual speaker identified in the call
+struct IdentifiedSpeaker: Codable {
+    let name: String
+    let speakerId: String?
+    let confidence: String   // "high" or "medium"
+    let evidence: String
 }
 
 /// Metadata about the transcription engines used

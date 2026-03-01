@@ -446,97 +446,14 @@ struct PillProcessingView: View {
 
     private var statusColor: Color {
         switch status {
-        case .gettingReady, .transcribing:
+        case .gettingReady, .transcribing, .finishing:
             return .statusProcessingMuted
-        case .findingActionItems:
-            return .processingPurple
-        case .finishing:
-            return .statusProcessingMuted
-        case .completed, .transcriptSaved:
+        case .transcriptSaved:
             return .statusSuccessMuted
         case .failed:
             return .statusErrorMuted
         default:
             return .panelTextSecondary
         }
-    }
-}
-
-// MARK: - Pill Reviewing View (Bottom pill during review tray)
-
-/// Shown at bottom of review tray
-/// Green success tint with task count - anchors the expanded tray above
-@available(macOS 14.0, *)
-struct PillReviewingView: View {
-    let itemCount: Int
-    var onTap: (() -> Void)? = nil  // Optional tap handler for future expand/collapse
-
-    @State private var isHovered = false
-    @State private var pulseOpacity: Double = 0.4
-
-    var body: some View {
-        Button(action: { onTap?() }) {
-            ZStack {
-                // Subtle pulsing glow behind pill (draws attention)
-                Capsule()
-                    .fill(Color.statusSuccessMuted.opacity(pulseOpacity * 0.3))
-                    .frame(width: PillDimensions.recordingWidth + 8, height: PillDimensions.recordingHeight + 4)
-                    .blur(radius: 8)
-
-                // Solid dark background with green success tint
-                Capsule()
-                    .fill(Color.panelCharcoal)
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(Color.statusSuccessMuted.opacity(0.6), lineWidth: 1.5)
-                    )
-
-                HStack(spacing: 8) {
-                    // Checklist icon with badge indicator
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: "checklist")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.statusSuccessMuted)
-
-                        // Small count badge
-                        Circle()
-                            .fill(Color.statusSuccessMuted)
-                            .frame(width: 14, height: 14)
-                            .overlay(
-                                Text("\(min(itemCount, 9))")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundColor(.white)
-                            )
-                            .offset(x: 8, y: -6)
-                    }
-
-                    Text("\(itemCount) task\(itemCount == 1 ? "" : "s") to review")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.panelTextPrimary)
-
-                    // Up arrow indicator showing tray is above
-                    Image(systemName: "chevron.up")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.panelTextMuted)
-                }
-            }
-            .frame(width: PillDimensions.recordingWidth, height: PillDimensions.recordingHeight)
-            .scaleEffect(isHovered ? 1.02 : 1.0)
-            .shadow(color: Color.statusSuccessMuted.opacity(0.2), radius: 8, y: 2)
-        }
-        .buttonStyle(PlainButtonStyle())
-        .onHover { hovering in
-            withAnimation(.pillMorph) {
-                isHovered = hovering
-            }
-        }
-        .onAppear {
-            // Subtle pulse animation to draw attention
-            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
-                pulseOpacity = 0.8
-            }
-        }
-        .accessibilityLabel("\(itemCount) tasks ready to review")
-        .accessibilityHint("Review tray is open above")
     }
 }

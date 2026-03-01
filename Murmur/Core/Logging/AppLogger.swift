@@ -21,7 +21,6 @@ final class AppLogger: @unchecked Sendable {
     static let transcription = SubsystemLogger("transcription")
     static let pipeline = SubsystemLogger("pipeline")
     static let speakers = SubsystemLogger("speaker-db")
-    static let actionItems = SubsystemLogger("action-items")
     static let services = SubsystemLogger("services")
     static let ui = SubsystemLogger("ui")
     static let stats = SubsystemLogger("stats")

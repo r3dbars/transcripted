@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import EventKit
 
 @available(macOS 26.0, *)
 @main

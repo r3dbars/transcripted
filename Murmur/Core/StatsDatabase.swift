@@ -59,20 +59,6 @@ final class StatsDatabase {
         );
         """
 
-        let createActionItemsTable = """
-        CREATE TABLE IF NOT EXISTS action_items (
-            id TEXT PRIMARY KEY,
-            recording_id TEXT,
-            task TEXT NOT NULL,
-            owner TEXT,
-            priority TEXT,
-            due_date TEXT,
-            destination TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE
-        );
-        """
-
         let createDailyActivityTable = """
         CREATE TABLE IF NOT EXISTS daily_activity (
             date TEXT PRIMARY KEY,
@@ -85,13 +71,9 @@ final class StatsDatabase {
 
         // Create indexes for common queries
         let createDateIndex = "CREATE INDEX IF NOT EXISTS idx_recordings_date ON recordings(date);"
-        let createActionItemRecordingIndex = "CREATE INDEX IF NOT EXISTS idx_action_items_recording ON action_items(recording_id);"
-
         executeSQL(createRecordingsTable)
-        executeSQL(createActionItemsTable)
         executeSQL(createDailyActivityTable)
         executeSQL(createDateIndex)
-        executeSQL(createActionItemRecordingIndex)
     }
 
     private func executeSQL(_ sql: String) {
@@ -260,101 +242,6 @@ final class StatsDatabase {
         return recordings
     }
 
-    // MARK: - Action Item Operations
-
-    /// Record action items for a session (thread-safe, async)
-    func recordActionItems(_ items: [ActionItemRecord], for recordingId: String) {
-        queue.async { [weak self] in
-            self?.recordActionItemsImpl(items, for: recordingId)
-        }
-    }
-
-    private func recordActionItemsImpl(_ items: [ActionItemRecord], for recordingId: String) {
-        let sql = """
-        INSERT INTO action_items (id, recording_id, task, owner, priority, due_date, destination, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-        """
-
-        let isoFormatter = ISO8601DateFormatter()
-        let createdAt = isoFormatter.string(from: Date())
-
-        for item in items {
-            var statement: OpaquePointer?
-
-            if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-                sqlite3_bind_text(statement, 1, (item.id as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(statement, 2, (recordingId as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(statement, 3, (item.task as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(statement, 4, ((item.owner ?? "") as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(statement, 5, ((item.priority ?? "") as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(statement, 6, ((item.dueDate ?? "") as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(statement, 7, (item.destination as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(statement, 8, (createdAt as NSString).utf8String, -1, nil)
-
-                if sqlite3_step(statement) != SQLITE_DONE {
-                    AppLogger.stats.error("Failed to insert action item")
-                }
-            }
-
-            sqlite3_finalize(statement)
-        }
-
-        // Update daily activity
-        updateDailyActivityActionItemsImpl(count: items.count)
-    }
-
-    /// Get total action items count (thread-safe, sync)
-    func getTotalActionItemsCount() -> Int {
-        return queue.sync {
-            getTotalActionItemsCountImpl()
-        }
-    }
-
-    private func getTotalActionItemsCountImpl() -> Int {
-        let sql = "SELECT COUNT(*) FROM action_items;"
-        var statement: OpaquePointer?
-        var count = 0
-
-        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            if sqlite3_step(statement) == SQLITE_ROW {
-                count = Int(sqlite3_column_int(statement, 0))
-            }
-        }
-
-        sqlite3_finalize(statement)
-        return count
-    }
-
-    /// Get action items count for a date range (thread-safe, sync)
-    func getActionItemsCount(from startDate: Date, to endDate: Date) -> Int {
-        return queue.sync {
-            getActionItemsCountImpl(from: startDate, to: endDate)
-        }
-    }
-
-    private func getActionItemsCountImpl(from startDate: Date, to endDate: Date) -> Int {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        let startStr = dateFormatter.string(from: startDate)
-        let endStr = dateFormatter.string(from: endDate)
-
-        let sql = "SELECT COUNT(*) FROM action_items WHERE date(created_at) >= ? AND date(created_at) <= ?;"
-        var statement: OpaquePointer?
-        var count = 0
-
-        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (startStr as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(statement, 2, (endStr as NSString).utf8String, -1, nil)
-
-            if sqlite3_step(statement) == SQLITE_ROW {
-                count = Int(sqlite3_column_int(statement, 0))
-            }
-        }
-
-        sqlite3_finalize(statement)
-        return count
-    }
-
     // MARK: - Daily Activity Operations
 
     private func updateDailyActivityImpl(for date: Date, durationDelta: Int) {
@@ -381,34 +268,6 @@ final class StatsDatabase {
 
             if sqlite3_step(statement) != SQLITE_DONE {
                 AppLogger.stats.error("Failed to update daily activity")
-            }
-        }
-
-        sqlite3_finalize(statement)
-    }
-
-    private func updateDailyActivityActionItemsImpl(count: Int) {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        let dateStr = dateFormatter.string(from: Date())
-
-        let updateSQL = """
-        INSERT INTO daily_activity (date, recording_count, total_duration_seconds, action_items_count, updated_at)
-        VALUES (?, 0, 0, ?, datetime('now'))
-        ON CONFLICT(date) DO UPDATE SET
-            action_items_count = action_items_count + ?,
-            updated_at = datetime('now');
-        """
-
-        var statement: OpaquePointer?
-
-        if sqlite3_prepare_v2(db, updateSQL, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (dateStr as NSString).utf8String, -1, nil)
-            sqlite3_bind_int(statement, 2, Int32(count))
-            sqlite3_bind_int(statement, 3, Int32(count))
-
-            if sqlite3_step(statement) != SQLITE_DONE {
-                AppLogger.stats.error("Failed to update daily activity action items")
             }
         }
 
@@ -534,13 +393,13 @@ final class StatsDatabase {
     }
 
     /// Get stats for the last N days (thread-safe, sync)
-    func getStatsForLastDays(_ days: Int) -> (recordings: Int, durationSeconds: Int, actionItems: Int) {
+    func getStatsForLastDays(_ days: Int) -> (recordings: Int, durationSeconds: Int) {
         return queue.sync {
             getStatsForLastDaysImpl(days)
         }
     }
 
-    private func getStatsForLastDaysImpl(_ days: Int) -> (recordings: Int, durationSeconds: Int, actionItems: Int) {
+    private func getStatsForLastDaysImpl(_ days: Int) -> (recordings: Int, durationSeconds: Int) {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let startDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
@@ -548,9 +407,7 @@ final class StatsDatabase {
 
         var recordings = 0
         var duration = 0
-        var actionItems = 0
 
-        // Get recordings stats
         let recordingSQL = "SELECT COUNT(*), COALESCE(SUM(duration_seconds), 0) FROM recordings WHERE date >= ?;"
         var statement: OpaquePointer?
 
@@ -564,19 +421,7 @@ final class StatsDatabase {
         }
         sqlite3_finalize(statement)
 
-        // Get action items count
-        let actionSQL = "SELECT COALESCE(SUM(action_items_count), 0) FROM daily_activity WHERE date >= ?;"
-
-        if sqlite3_prepare_v2(db, actionSQL, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (startStr as NSString).utf8String, -1, nil)
-
-            if sqlite3_step(statement) == SQLITE_ROW {
-                actionItems = Int(sqlite3_column_int(statement, 0))
-            }
-        }
-        sqlite3_finalize(statement)
-
-        return (recordings, duration, actionItems)
+        return (recordings, duration)
     }
 
     // MARK: - Migration Support
@@ -613,7 +458,6 @@ final class StatsDatabase {
     }
 
     private func clearAllDataImpl() {
-        executeSQL("DELETE FROM action_items;")
         executeSQL("DELETE FROM recordings;")
         executeSQL("DELETE FROM daily_activity;")
         AppLogger.stats.info("Cleared all data")
@@ -674,32 +518,6 @@ struct RecordingMetadata: Identifiable {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return "Recording - \(formatter.string(from: date))"
-    }
-}
-
-/// Record of an action item (for stats tracking)
-struct ActionItemRecord: Identifiable {
-    let id: String
-    let task: String
-    let owner: String?
-    let priority: String?
-    let dueDate: String?
-    let destination: String // "reminders" or "todoist"
-
-    init(
-        id: String = UUID().uuidString,
-        task: String,
-        owner: String? = nil,
-        priority: String? = nil,
-        dueDate: String? = nil,
-        destination: String
-    ) {
-        self.id = id
-        self.task = task
-        self.owner = owner
-        self.priority = priority
-        self.dueDate = dueDate
-        self.destination = destination
     }
 }
 

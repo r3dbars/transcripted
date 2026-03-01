@@ -32,7 +32,7 @@ struct FloatingPanelView: View {
 
     /// Dynamic frame width based on state
     private var frameWidth: CGFloat {
-        if pillStateManager.state == .reviewing || showTranscriptTray {
+        if showTranscriptTray {
             return PillDimensions.trayWidth + 40
         } else {
             return PillDimensions.recordingWidth + 40
@@ -59,19 +59,10 @@ struct FloatingPanelView: View {
                 ))
             }
 
-            // MARK: - Review Tray (expands upward when reviewing action items)
-            if pillStateManager.state == .reviewing {
-                ReviewTrayView(taskManager: taskManager)
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .move(edge: .bottom)),
-                        removal: .opacity.combined(with: .scale(scale: 0.95))
-                    ))
-            }
-
             // MARK: - Toast Notifications (float above pill)
             ZStack {
                 Color.clear
-                    .frame(height: (pillStateManager.state == .reviewing || showTranscriptTray) ? 0 : 60)
+                    .frame(height: showTranscriptTray ? 0 : 60)
 
                 // Toast notification for errors (appears above pill, auto-dismisses)
                 if showErrorToast, let error = currentError {
@@ -155,7 +146,8 @@ struct FloatingPanelView: View {
                 },
                 onTranscripts: { toggleTranscriptTray() },
                 failedCount: failedTranscriptionManager.failedTranscriptions.count,
-                backgroundTaskCount: taskManager.backgroundTaskCount
+                backgroundTaskCount: taskManager.backgroundTaskCount,
+                forceExpanded: showTranscriptTray
             )
         case .recording:
             if useAuroraRecording {
@@ -168,17 +160,13 @@ struct FloatingPanelView: View {
                 }
             }
         case .processing:
-            // Show success view for success states, processing aurora otherwise
+            // Show success view for transcript saved, processing aurora otherwise
             switch taskManager.displayStatus {
             case .transcriptSaved:
                 AuroraSuccessView(successType: .transcriptSaved)
-            case .completed(let count):
-                AuroraSuccessView(successType: .tasksAdded(count: count))
             default:
                 AuroraProcessingView(status: taskManager.displayStatus)
             }
-        case .reviewing:
-            PillReviewingView(itemCount: taskManager.pendingReview?.totalCount ?? 0)
         }
     }
 

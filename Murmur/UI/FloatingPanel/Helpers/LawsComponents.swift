@@ -114,12 +114,10 @@ struct LawsStatusTextView: View {
         switch status {
         case .idle:
             return .accentBlue
-        case .gettingReady, .transcribing, .findingActionItems, .finishing:
+        case .gettingReady, .transcribing, .finishing:
             return .statusProcessingMuted
-        case .transcriptSaved, .completed:
+        case .transcriptSaved:
             return .statusSuccessMuted
-        case .pendingReview:
-            return .statusWarningMuted
         case .failed:
             return .statusErrorMuted
         }
@@ -206,5 +204,18 @@ extension View {
     ///   - delay: Delay in seconds before showing (default: 1.0)
     func floatingTooltip(_ text: String, delay: TimeInterval = 1.0) -> some View {
         modifier(FloatingTooltipModifier(text: text, delay: delay))
+    }
+}
+
+// MARK: - Triangle Shape
+
+struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
