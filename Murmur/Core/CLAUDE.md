@@ -1,7 +1,7 @@
 # Core — CLAUDE.md
 
 ## Purpose
-Audio capture, transcription pipeline orchestration, task management, transcript saving, action item extraction, and recording statistics. This is the engine room of Transcripted.
+Audio capture, transcription pipeline orchestration, task management, transcript saving, and recording statistics. This is the engine room of Transcripted. Everything runs 100% locally — no cloud APIs.
 
 ## Key Files
 
@@ -10,18 +10,18 @@ Audio capture, transcription pipeline orchestration, task management, transcript
 | `Audio.swift` | Microphone capture via AVAudioEngine, writes WAV in real-time, monitors levels/silence |
 | `SystemAudioCapture.swift` | System-wide audio via CoreAudio process taps, aggregate device management |
 | `Transcription.swift` | Orchestrates Parakeet STT + Sortformer diarization + speaker matching |
-| `TranscriptionTaskManager.swift` | Background transcription queue, progress tracking, action item pipeline |
+| `TranscriptionTaskManager.swift` | Background transcription queue, progress tracking, status management |
+| `TranscriptionTypes.swift` | Engine-agnostic result types (TranscriptionResult, SpeakerIdentificationResult, etc.) |
 | `TranscriptSaver.swift` | Writes markdown with YAML frontmatter to ~/Documents/Transcripted/ |
-| `TranscriptUtils.swift` | Transcript file management, renaming, cleanup |
+| `TranscriptStore.swift` | ObservableObject store for transcript tray UI (recent transcripts, copy-to-clipboard) |
 | `TranscriptScanner.swift` | Discovers and indexes existing transcript files |
-| `ActionItemExtractor.swift` | Two-pass Gemini API pipeline: speaker ID → action item extraction |
+| `TranscriptUtils.swift` | Transcript file management, renaming, cleanup |
 | `DateParser.swift` | Natural language date parsing ("next Friday", "EOW") |
+| `DateFormattingHelper.swift` | Date formatting utilities |
 | `FailedTranscriptionManager.swift` | Persistent retry queue for failed transcriptions (JSON file) |
-| `FailedActionItemManager.swift` | Persistent retry queue for failed action item delivery |
 | `RecordingValidator.swift` | Pre-recording checks: disk space, permissions, devices |
 | `StatsService.swift` | Recording statistics and streak tracking |
 | `StatsDatabase.swift` | SQLite persistence for stats |
-| `TranscriptionTypes.swift` | Engine-agnostic result types (TranscriptionResult, etc.) |
 | `Logging/AppLogger.swift` | Unified logging interface with subsystem loggers |
 | `Logging/FileLogger.swift` | JSON Lines file logger at ~/Library/Logs/Transcripted/app.jsonl |
 
@@ -40,8 +40,7 @@ Recording stops
   → Transcription.swift runs pipeline:
       Sortformer diarizes → Parakeet transcribes per-segment → Speaker matching
   → TranscriptSaver writes markdown
-  → ActionItemExtractor (if API key set) extracts tasks via Gemini
-  → Tasks sent to Reminders/Todoist
+  → Status transitions to .transcriptSaved → auto-resets to .idle
 
 On failure → FailedTranscriptionManager persists for retry
 ```
@@ -52,9 +51,9 @@ On failure → FailedTranscriptionManager persists for retry
 |------|---------------|---------------|
 | Fix audio capture bug | `Audio.swift`, `SystemAudioCapture.swift` | NEVER do I/O or locks in audio callbacks (real-time threads) |
 | Fix transcription output | `Transcription.swift`, `TranscriptSaver.swift` | Check model loading state first |
-| Fix action items | `ActionItemExtractor.swift`, `DateParser.swift` | Two-pass pipeline: speaker ID then extraction |
 | Fix retry/queue behavior | `TranscriptionTaskManager.swift`, `FailedTranscriptionManager.swift` | Retry state persisted to JSON file |
 | Fix stats/counts | `StatsService.swift`, `StatsDatabase.swift` | SQLite database, check schema |
+| Fix transcript tray | `TranscriptStore.swift` | Reads from TranscriptScanner, provides copy-to-clipboard |
 | Add new log subsystem | `Logging/AppLogger.swift` | Add static let, follow existing pattern |
 
 ## Failure Modes
@@ -82,5 +81,4 @@ On failure → FailedTranscriptionManager persists for retry
 | `audio.system` | System tap setup, buffers, device changes, recovery |
 | `transcription` | Model loading, STT/diarization results |
 | `pipeline` | Task lifecycle, saving, file management, retries |
-| `action-items` | Gemini extraction, review, delivery |
 | `stats` | Database operations, recording stats |

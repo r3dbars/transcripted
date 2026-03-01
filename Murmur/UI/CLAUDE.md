@@ -1,7 +1,7 @@
 # UI — CLAUDE.md
 
 ## Purpose
-Settings window, action item review workflow, and failed transcription management UI. The main floating pill UI lives in `FloatingPanel/` (see its own CLAUDE.md).
+Settings window and failed transcription management UI. The main floating pill UI lives in `FloatingPanel/` (see its own CLAUDE.md).
 
 ## Key Files
 
@@ -12,7 +12,6 @@ Settings window, action item review workflow, and failed transcription managemen
 | `Settings/SettingsSidebarView.swift` | Left sidebar navigation tabs |
 | `Settings/Models/SettingsNavigationState.swift` | Tab state enum (Dashboard, Preferences, Speakers) |
 | `Settings/Components/SettingsSectionCard.swift` | Reusable card wrapper |
-| `ActionItemReviewView.swift` | Task approval/rejection workflow |
 | `FailedTranscriptionsView.swift` | Retry queue management |
 
 ## Data Flow
@@ -20,12 +19,6 @@ Settings window, action item review workflow, and failed transcription managemen
 ```
 Settings:
   SettingsWindowController → SettingsContainerView (single-page layout)
-
-Action Items:
-  TranscriptionTaskManager publishes pendingReview state
-    → FloatingPanel shows ReviewTrayView
-    → ActionItemReviewView for full approval workflow
-    → Approved items sent to Reminders/Todoist
 
 Failed Transcriptions:
   FailedTranscriptionManager (Core) → FailedTranscriptionsView
@@ -38,7 +31,6 @@ Failed Transcriptions:
 |------|---------------|---------------|
 | Add settings section | `SettingsContainerView.swift` | Single-page scrolling layout |
 | Fix settings layout | `SettingsContainerView.swift` | 800x600 fixed window |
-| Fix action item review | `ActionItemReviewView.swift` | Reads from TranscriptionTaskManager state |
 | Fix failed transcription UI | `FailedTranscriptionsView.swift` | Binds to FailedTranscriptionManager |
 
 ## Dependencies
@@ -48,4 +40,4 @@ Failed Transcriptions:
 
 ## Logging
 
-Subsystem: `ui` — covers pill transitions, retry actions, review events.
+Subsystem: `ui` — covers pill transitions, retry actions.
