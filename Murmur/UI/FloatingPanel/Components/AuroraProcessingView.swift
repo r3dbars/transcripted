@@ -297,7 +297,6 @@ struct AuroraProcessingView_Previews: PreviewProvider {
             VStack(spacing: 20) {
                 AuroraProcessingView(status: .gettingReady)
                 AuroraProcessingView(status: .transcribing(progress: 0.45))
-                AuroraProcessingView(status: .findingActionItems)
                 AuroraProcessingView(status: .finishing)
             }
         }

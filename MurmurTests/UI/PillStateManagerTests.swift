@@ -39,12 +39,6 @@ final class PillStateManagerTests: XCTestCase {
         XCTAssertEqual(manager.pillHeight, PillDimensions.recordingHeight)
     }
 
-    func testReviewingDimensions() {
-        manager.transition(to: .reviewing)
-        XCTAssertEqual(manager.pillWidth, PillDimensions.trayWidth)
-        XCTAssertEqual(manager.pillHeight, PillDimensions.recordingHeight)
-    }
-
     // MARK: - Transition guards
 
     func testSameStateTransitionIsNoOp() {
@@ -102,11 +96,4 @@ final class PillStateManagerTests: XCTestCase {
         XCTAssertFalse(manager.isTransitioning)
     }
 
-    // MARK: - Window height
-
-    func testReviewingWindowHeightIncludesTray() {
-        manager.transition(to: .reviewing)
-        let expectedHeight = PillDimensions.recordingHeight + PillDimensions.trayMaxHeight
-        XCTAssertEqual(manager.windowHeight, expectedHeight)
-    }
 }

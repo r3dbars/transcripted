@@ -46,7 +46,6 @@ enum PillState: Equatable {
     case idle           // 40x20px - Dormant waveform, capsule shape
     case recording      // 180x40px - Live visualizer + timer + stop
     case processing     // 180x40px - Status text + progress
-    case reviewing      // 280px wide - Tray expands upward for action items
 }
 
 // MARK: - Pill State Manager
@@ -86,8 +85,6 @@ class PillStateManager: ObservableObject {
             return PillDimensions.idleWidth
         case .recording, .processing:
             return PillDimensions.recordingWidth
-        case .reviewing:
-            return PillDimensions.trayWidth
         }
     }
 
@@ -97,20 +94,16 @@ class PillStateManager: ObservableObject {
             return PillDimensions.idleHeight
         case .recording, .processing:
             return PillDimensions.recordingHeight
-        case .reviewing:
-            return PillDimensions.recordingHeight  // Base pill stays same, tray expands above
         }
     }
 
-    /// Total window height including tray when reviewing
+    /// Total window height
     var windowHeight: CGFloat {
         switch state {
         case .idle:
             return PillDimensions.idleHeight + 20  // Small padding
         case .recording, .processing:
             return PillDimensions.recordingHeight + 20
-        case .reviewing:
-            return PillDimensions.recordingHeight + PillDimensions.trayMaxHeight
         }
     }
 
@@ -199,11 +192,8 @@ class PillStateManager: ObservableObject {
         case (.recording, .processing):
             // Stopped recording, starting transcription - subtle tink
             PillSounds.playRecordingStop()
-        case (.processing, .reviewing):
-            // Transcription complete, showing action items - glass chime
-            PillSounds.playComplete()
-        case (_, .idle) where previousState == .reviewing:
-            // Finished reviewing - subtle completion
+        case (.processing, .idle):
+            // Transcription complete — glass chime
             PillSounds.playComplete()
         default:
             // No sound for other transitions (keeps it unobtrusive)

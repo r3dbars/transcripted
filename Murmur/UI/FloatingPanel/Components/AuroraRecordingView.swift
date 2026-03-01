@@ -13,9 +13,7 @@ struct AuroraRecordingView: View {
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @State private var isExpanded = true  // Start expanded, auto-collapse after 5s
     @State private var isStopHovered = false
-    @State private var isTasksHovered = false
     @State private var collapseTask: Task<Void, Never>?
-    @AppStorage("taskService") private var taskService: String = "reminders"
 
     // Smoothed audio levels (prevents jitter)
     @State private var smoothedMicLevel: CGFloat = 0
@@ -314,51 +312,9 @@ struct AuroraRecordingView: View {
                 .fixedSize()
 
             Spacer()
-
-            // Tasks button (right) - SECONDARY ACTION
-            Button(action: openTaskApp) {
-                ZStack {
-                    Circle()
-                        .fill(isTasksHovered ? Color.panelCharcoalSurface : Color.panelCharcoalElevated)
-                        .frame(width: 32, height: 32)
-
-                    Image(systemName: "checklist")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.panelTextPrimary)
-                }
-                .scaleEffect(isTasksHovered ? 1.1 : 1.0)
-            }
-            .buttonStyle(PlainButtonStyle())
-            .floatingTooltip("Tasks")
-            .onHover { hovering in
-                withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
-                    isTasksHovered = hovering
-                }
-            }
-            .accessibilityLabel("Open tasks")
-            .frame(width: 44)
+                .frame(width: 44)
         }
         .padding(.horizontal, 8)
-    }
-
-    // MARK: - Actions
-
-    private func openTaskApp() {
-        if taskService == "todoist" {
-            // Try native Todoist app first, fallback to web
-            if let appURL = URL(string: "todoist://"),
-               NSWorkspace.shared.open(appURL) {
-                return
-            }
-            if let webURL = URL(string: "https://todoist.com/app") {
-                NSWorkspace.shared.open(webURL)
-            }
-        } else {
-            // Open Apple Reminders
-            if let url = URL(string: "x-apple-reminders://") {
-                NSWorkspace.shared.open(url)
-            }
-        }
     }
 
     // MARK: - Helpers

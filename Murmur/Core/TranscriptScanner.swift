@@ -58,23 +58,8 @@ final class TranscriptScanner {
             }
 
             // Parse the transcript
-            if let (metadata, actionItemsCount) = parseTranscriptFile(fileURL) {
+            if let (metadata, _) = parseTranscriptFile(fileURL) {
                 database.recordSession(metadata)
-
-                // Record action items if present in YAML
-                if actionItemsCount > 0 {
-                    let records = (0..<actionItemsCount).map { _ in
-                        ActionItemRecord(
-                            task: "Migrated action item",
-                            owner: nil,
-                            priority: nil,
-                            dueDate: nil,
-                            destination: "migrated"
-                        )
-                    }
-                    database.recordActionItems(records, for: fileURL.path)
-                }
-
                 migrated += 1
             }
 

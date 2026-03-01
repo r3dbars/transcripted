@@ -9,7 +9,7 @@ import AppKit
 /// no YAML frontmatter, no analytics sections, just the conversation formatted for
 /// pasting into Claude, ChatGPT, or any AI tool.
 ///
-/// Visual style mirrors ReviewTrayView (frosted glass, triangle connector).
+/// Frosted glass tray with triangle connector to pill below.
 @available(macOS 14.0, *)
 struct TranscriptTrayView: View {
 
@@ -19,6 +19,11 @@ struct TranscriptTrayView: View {
     @State private var isAppearing = false
     @State private var copiedId: UUID?
     @State private var copyFailedId: UUID?
+
+    // Navigation: nil = list mode, non-nil = detail mode
+    @State private var selectedTranscript: TranscriptSummary?
+    @State private var detailLines: [TranscriptLine]?
+    @State private var navigatingForward = true
 
     var body: some View {
         VStack(spacing: 4) {
@@ -43,15 +48,23 @@ struct TranscriptTrayView: View {
                     )
                     .shadow(color: Color.black.opacity(0.25), radius: 16, y: 6)
 
-                VStack(spacing: 0) {
-                    trayHeader
-                    Divider().background(Color.panelCharcoalElevated)
-                    trayBody
-                    Divider().background(Color.panelCharcoalElevated)
-                    trayFooter
+                // Switch between list and detail modes
+                if let selected = selectedTranscript {
+                    detailContent(for: selected)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .move(edge: .trailing).combined(with: .opacity)
+                        ))
+                } else {
+                    listContent
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .leading).combined(with: .opacity),
+                            removal: .move(edge: .leading).combined(with: .opacity)
+                        ))
                 }
             }
             .frame(width: PillDimensions.trayWidth)
+            .clipped()
 
             // Triangle connector pointing down toward the pill
             Triangle()
@@ -66,31 +79,57 @@ struct TranscriptTrayView: View {
         }
         .onDisappear {
             isAppearing = false
+            selectedTranscript = nil
+            detailLines = nil
+        }
+    }
+
+    // MARK: - List Content
+
+    private var listContent: some View {
+        VStack(spacing: 0) {
+            trayHeader
+            Divider().background(Color.panelCharcoalElevated)
+            trayBody
+            Divider().background(Color.panelCharcoalElevated)
+            trayFooter
+        }
+    }
+
+    // MARK: - Detail Content
+
+    private func detailContent(for transcript: TranscriptSummary) -> some View {
+        VStack(spacing: 0) {
+            detailHeader(for: transcript)
+            Divider().background(Color.panelCharcoalElevated)
+            detailBody
+            Divider().background(Color.panelCharcoalElevated)
+            detailFooter(for: transcript)
         }
     }
 
     // MARK: - Header
 
     private var trayHeader: some View {
-        HStack {
-            Text("Recent Meetings")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.panelTextSecondary)
-                .tracking(0.5)
+        HStack(spacing: Spacing.xs) {
+            Text("Recent")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.panelTextMuted)
+                .textCase(.uppercase)
+                .tracking(0.8)
 
             Spacer()
 
             Button(action: { store.refresh() }) {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 9, weight: .medium))
                     .foregroundColor(.panelTextMuted)
             }
             .buttonStyle(PlainButtonStyle())
             .help("Refresh")
         }
-        .padding(.horizontal, Spacing.md)
-        .padding(.top, Spacing.md)
-        .padding(.bottom, Spacing.sm)
+        .padding(.horizontal, Spacing.ms)
+        .padding(.vertical, Spacing.xs + 2)
     }
 
     // MARK: - Body
@@ -107,7 +146,8 @@ struct TranscriptTrayView: View {
                             transcript: transcript,
                             isCopied: copiedId == transcript.id,
                             copyFailed: copyFailedId == transcript.id,
-                            onCopy: { copyToClipboard(transcript) }
+                            onCopy: { copyToClipboard(transcript) },
+                            onSelect: { selectTranscript(transcript) }
                         )
 
                         if transcript.id != store.transcripts.last?.id {
@@ -118,7 +158,7 @@ struct TranscriptTrayView: View {
                     }
                 }
             }
-            .frame(maxHeight: 240)
+            .frame(maxHeight: 280)
         }
     }
 
@@ -128,14 +168,129 @@ struct TranscriptTrayView: View {
         Button(action: onOpenFolder) {
             HStack(spacing: 4) {
                 Image(systemName: "folder")
+                    .font(.system(size: 9))
+                Text("Open folder")
                     .font(.system(size: 10))
-                Text("Open transcripts folder")
-                    .font(.system(size: 11))
+                Spacer()
+                Image(systemName: "arrow.forward")
+                    .font(.system(size: 8, weight: .medium))
             }
             .foregroundColor(.panelTextMuted)
+            .padding(.horizontal, Spacing.ms)
+            .padding(.vertical, Spacing.xs + 2)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
-        .padding(.vertical, Spacing.sm)
+    }
+
+    // MARK: - Detail Header
+
+    private func detailHeader(for transcript: TranscriptSummary) -> some View {
+        HStack(spacing: Spacing.xs) {
+            Button(action: navigateBack) {
+                HStack(spacing: 2) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("Back")
+                        .font(.system(size: 10, weight: .medium))
+                }
+                .foregroundColor(.accentBlue)
+            }
+            .buttonStyle(PlainButtonStyle())
+
+            Spacer()
+
+            Text(transcript.title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.panelTextMuted)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .padding(.horizontal, Spacing.ms)
+        .padding(.vertical, Spacing.xs + 2)
+        .background(Color.panelCharcoal.opacity(0.3))
+    }
+
+    // MARK: - Detail Body
+
+    @ViewBuilder
+    private var detailBody: some View {
+        if let lines = detailLines, !lines.isEmpty {
+            TranscriptDetailView(lines: lines)
+        } else {
+            VStack(spacing: Spacing.sm) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 20, weight: .light))
+                    .foregroundColor(.panelTextMuted)
+
+                Text("Could not load transcript")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.panelTextSecondary)
+            }
+            .padding(.vertical, Spacing.xl)
+            .padding(.horizontal, Spacing.md)
+        }
+    }
+
+    // MARK: - Detail Footer
+
+    private func detailFooter(for transcript: TranscriptSummary) -> some View {
+        Button(action: { copyToClipboard(transcript) }) {
+            HStack(spacing: 4) {
+                if copyFailedId == transcript.id {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.recordingCoral)
+                    Text("Copy failed")
+                        .font(.system(size: 10))
+                        .foregroundColor(.recordingCoral)
+                } else if copiedId == transcript.id {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.statusSuccessMuted)
+                    Text("Copied!")
+                        .font(.system(size: 10))
+                        .foregroundColor(.statusSuccessMuted)
+                } else {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 9))
+                    Text("Copy transcript")
+                        .font(.system(size: 10))
+                }
+                Spacer()
+                if copiedId != transcript.id && copyFailedId != transcript.id {
+                    Image(systemName: "arrow.forward")
+                        .font(.system(size: 8, weight: .medium))
+                }
+            }
+            .foregroundColor(.panelTextMuted)
+            .padding(.horizontal, Spacing.ms)
+            .padding(.vertical, Spacing.xs + 2)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+        .background(Color.panelCharcoal.opacity(0.3))
+        .animation(.snappy(duration: 0.15), value: copiedId)
+        .animation(.snappy(duration: 0.15), value: copyFailedId)
+    }
+
+    // MARK: - Navigation
+
+    private func selectTranscript(_ transcript: TranscriptSummary) {
+        let lines = store.displayLines(for: transcript)
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+            detailLines = lines
+            selectedTranscript = transcript
+        }
+    }
+
+    private func navigateBack() {
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+            selectedTranscript = nil
+            detailLines = nil
+        }
     }
 
     // MARK: - Empty State
@@ -201,28 +356,29 @@ struct TranscriptRowView: View {
     let isCopied: Bool
     var copyFailed: Bool = false
     let onCopy: () -> Void
+    var onSelect: (() -> Void)?
 
     @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: Spacing.sm) {
-            // Left: title + metadata
+            // Left: title + metadata (tappable for detail view)
             VStack(alignment: .leading, spacing: 2) {
                 Text(transcript.title)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.panelTextPrimary)
-                    .lineLimit(1)
+                    .lineLimit(2)
                     .truncationMode(.tail)
 
-                HStack(spacing: 5) {
+                HStack(spacing: 4) {
                     Text(relativeDate)
                         .font(.system(size: 10))
                         .foregroundColor(.panelTextMuted)
 
                     if !transcript.duration.isEmpty {
                         Text("·")
-                            .font(.system(size: 10))
-                            .foregroundColor(.panelTextMuted)
+                            .font(.system(size: 8))
+                            .foregroundColor(.panelTextMuted.opacity(0.6))
 
                         Text(transcript.duration)
                             .font(.system(size: 10, design: .monospaced))
@@ -231,12 +387,12 @@ struct TranscriptRowView: View {
 
                     if transcript.speakerCount > 0 {
                         Text("·")
-                            .font(.system(size: 10))
-                            .foregroundColor(.panelTextMuted)
+                            .font(.system(size: 8))
+                            .foregroundColor(.panelTextMuted.opacity(0.6))
 
                         HStack(spacing: 2) {
                             Image(systemName: "person.2")
-                                .font(.system(size: 8))
+                                .font(.system(size: 7))
                             Text("\(transcript.speakerCount)")
                                 .font(.system(size: 10))
                         }
@@ -244,14 +400,16 @@ struct TranscriptRowView: View {
                     }
                 }
             }
+            .contentShape(Rectangle())
+            .onTapGesture { onSelect?() }
 
-            Spacer(minLength: Spacing.sm)
+            Spacer(minLength: Spacing.xs)
 
-            // Right: Copy button
+            // Right: Copy button (icon-only, minimal)
             copyButton
         }
-        .padding(.horizontal, Spacing.md)
-        .padding(.vertical, 10)
+        .padding(.horizontal, Spacing.ms)
+        .padding(.vertical, Spacing.sm)
         .background(isHovered ? Color.panelCharcoal.opacity(0.5) : Color.clear)
         .contentShape(Rectangle())
         .onHover { hovering in
@@ -262,54 +420,44 @@ struct TranscriptRowView: View {
 
     // MARK: - Copy Button
 
+    @State private var isCopyHovered = false
+
     private var copyButton: some View {
         Button(action: onCopy) {
             ZStack {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                Circle()
                     .fill(
                         copyFailed
-                            ? Color.recordingCoral.opacity(0.18)
+                            ? Color.recordingCoral.opacity(0.15)
                             : isCopied
-                                ? Color.statusSuccessMuted.opacity(0.18)
-                                : (isHovered ? Color.panelCharcoalElevated : Color.panelCharcoalSurface)
+                                ? Color.statusSuccessMuted.opacity(0.15)
+                                : (isCopyHovered ? Color.panelCharcoalSurface : Color.clear)
                     )
-                    .frame(width: 56, height: 24)
-                    .animation(.snappy(duration: 0.15), value: isCopied)
-                    .animation(.snappy(duration: 0.15), value: copyFailed)
+                    .frame(width: 28, height: 28)
 
                 if copyFailed {
-                    HStack(spacing: 3) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9, weight: .bold))
-                        Text("Error")
-                            .font(.system(size: 9, weight: .medium))
-                    }
-                    .foregroundColor(.recordingCoral)
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.recordingCoral)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 } else if isCopied {
-                    HStack(spacing: 3) {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .bold))
-                        Text("Copied")
-                            .font(.system(size: 9, weight: .medium))
-                    }
-                    .foregroundColor(.statusSuccessMuted)
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.statusSuccessMuted)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 } else {
-                    HStack(spacing: 3) {
-                        Image(systemName: "doc.on.clipboard")
-                            .font(.system(size: 9))
-                        Text("Copy")
-                            .font(.system(size: 9, weight: .medium))
-                    }
-                    .foregroundColor(.panelTextSecondary)
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 11))
+                        .foregroundColor(isCopyHovered ? .panelTextPrimary : .panelTextMuted)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 }
             }
             .animation(.snappy(duration: 0.15), value: isCopied)
             .animation(.snappy(duration: 0.15), value: copyFailed)
+            .animation(.snappy(duration: 0.1), value: isCopyHovered)
         }
         .buttonStyle(PlainButtonStyle())
+        .onHover { hovering in isCopyHovered = hovering }
         .help(copyFailed ? "Could not read transcript" : isCopied ? "Copied to clipboard" : "Copy transcript for AI")
     }
 

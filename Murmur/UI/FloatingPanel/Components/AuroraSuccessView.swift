@@ -10,7 +10,6 @@ struct AuroraSuccessView: View {
     /// Type of success to display
     enum SuccessType: Equatable {
         case transcriptSaved
-        case tasksAdded(count: Int)
     }
 
     let successType: SuccessType
@@ -72,21 +71,11 @@ struct AuroraSuccessView: View {
     // MARK: - Text Content
 
     private var primaryText: String {
-        switch successType {
-        case .transcriptSaved:
-            return "Saved"
-        case .tasksAdded(let count):
-            return "\(count) task\(count == 1 ? "" : "s") added"
-        }
+        return "Saved"
     }
 
     private var secondaryText: String? {
-        switch successType {
-        case .transcriptSaved:
-            return "No tasks found"
-        case .tasksAdded:
-            return nil
-        }
+        return nil
     }
 
     // MARK: - Success Background
@@ -148,12 +137,7 @@ struct AuroraSuccessView: View {
     // MARK: - Accessibility
 
     private var accessibilityText: String {
-        switch successType {
-        case .transcriptSaved:
-            return "Transcript saved. No tasks found."
-        case .tasksAdded(let count):
-            return "\(count) task\(count == 1 ? "" : "s") added"
-        }
+        return "Transcript saved."
     }
 }
 
@@ -167,9 +151,6 @@ struct AuroraSuccessView_Previews: PreviewProvider {
             Color.black
             VStack(spacing: 20) {
                 AuroraSuccessView(successType: .transcriptSaved)
-                AuroraSuccessView(successType: .tasksAdded(count: 1))
-                AuroraSuccessView(successType: .tasksAdded(count: 3))
-                AuroraSuccessView(successType: .tasksAdded(count: 12))
             }
         }
         .frame(width: 300, height: 300)

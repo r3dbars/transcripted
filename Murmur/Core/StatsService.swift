@@ -17,9 +17,6 @@ final class StatsService: ObservableObject {
     /// Total number of recordings
     @Published private(set) var totalRecordings: Int = 0
 
-    /// Total action items created
-    @Published private(set) var totalActionItems: Int = 0
-
     /// Current recording streak (consecutive days)
     @Published private(set) var currentStreak: Int = 0
 
@@ -38,8 +35,6 @@ final class StatsService: ObservableObject {
     /// Stats for last 30 days
     @Published private(set) var last30DaysRecordings: Int = 0
     @Published private(set) var last30DaysDuration: Int = 0
-    @Published private(set) var last30DaysActionItems: Int = 0
-
     /// Active days in current month
     @Published private(set) var activeDaysThisMonth: Int = 0
 
@@ -63,7 +58,6 @@ final class StatsService: ObservableObject {
     func refreshStats() async {
         // Get all-time stats
         totalRecordings = database.getTotalRecordingsCount()
-        totalActionItems = database.getTotalActionItemsCount()
 
         let totalSeconds = database.getTotalDurationSeconds()
         totalHoursTranscribed = Double(totalSeconds) / 3600.0
@@ -77,8 +71,6 @@ final class StatsService: ObservableObject {
         let thirtyDayStats = database.getStatsForLastDays(30)
         last30DaysRecordings = thirtyDayStats.recordings
         last30DaysDuration = thirtyDayStats.durationSeconds
-        last30DaysActionItems = thirtyDayStats.actionItems
-
         // Get monthly activity for heat map
         monthlyActivity = database.getDailyActivity(for: Date())
         activeDaysThisMonth = monthlyActivity.values.filter { $0.recordingCount > 0 }.count
@@ -97,12 +89,6 @@ final class StatsService: ObservableObject {
     /// Record a new session (called after transcription completes)
     func recordSession(_ metadata: RecordingMetadata) async {
         database.recordSession(metadata)
-        await refreshStats()
-    }
-
-    /// Record action items (called after action item extraction)
-    func recordActionItems(_ items: [ActionItemRecord], for recordingId: String) async {
-        database.recordActionItems(items, for: recordingId)
         await refreshStats()
     }
 
@@ -273,19 +259,4 @@ extension StatsService {
         )
     }
 
-    /// Create ActionItemRecords from extracted action items
-    static func createActionItemRecords(
-        from items: [ActionItem],
-        destination: String
-    ) -> [ActionItemRecord] {
-        return items.map { item in
-            ActionItemRecord(
-                task: item.task,
-                owner: item.owner,
-                priority: item.priority,
-                dueDate: item.dueDate,
-                destination: destination
-            )
-        }
-    }
 }
