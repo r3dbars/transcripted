@@ -280,65 +280,68 @@ struct AuroraRecordingView: View {
     // MARK: - Expanded Content
 
     private var expandedContent: some View {
-        HStack(spacing: 0) {
-            // Stop button (left) - PRIMARY ACTION
-            Button(action: onStop) {
-                ZStack {
-                    Circle()
-                        .fill(isStopHovered ? Color.panelCharcoalSurface : Color.panelCharcoalElevated)
-                        .frame(width: 32, height: 32)
-
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.panelTextPrimary)
-                        .frame(width: 12, height: 12)
-                }
-                .scaleEffect(isStopHovered ? 1.1 : 1.0)
-            }
-            .buttonStyle(PlainButtonStyle())
-            .floatingTooltip("Stop")
-            .onHover { hovering in
-                withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
-                    isStopHovered = hovering
-                }
-            }
-            .accessibilityLabel("Stop recording")
-            .frame(width: 44)
-
-            Spacer()
-
-            // Timer (center)
+        ZStack {
+            // Timer (absolutely centered, independent of button layout)
             Text(formatDuration(audio.recordingDuration))
                 .font(.system(size: 15, weight: .semibold, design: .monospaced))
                 .foregroundColor(.panelTextPrimary)
                 .lineLimit(1)
                 .fixedSize()
 
-            // Transcripts button (right) - access recent transcripts while recording
-            if let onTranscripts {
-                Button(action: onTranscripts) {
+            // Buttons pinned to edges
+            HStack(spacing: 0) {
+                // Stop button (left)
+                Button(action: onStop) {
                     ZStack {
                         Circle()
-                            .fill(isTranscriptsHovered ? Color.panelCharcoalSurface : Color.panelCharcoalElevated)
+                            .fill(isStopHovered ? Color.panelCharcoalSurface : Color.panelCharcoalElevated)
                             .frame(width: 32, height: 32)
 
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.panelTextPrimary)
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.panelTextPrimary)
+                            .frame(width: 12, height: 12)
                     }
-                    .scaleEffect(isTranscriptsHovered ? 1.1 : 1.0)
+                    .scaleEffect(isStopHovered ? 1.1 : 1.0)
                 }
                 .buttonStyle(PlainButtonStyle())
-                .floatingTooltip("Transcripts")
+                .floatingTooltip("Stop")
                 .onHover { hovering in
                     withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
-                        isTranscriptsHovered = hovering
+                        isStopHovered = hovering
                     }
                 }
-                .accessibilityLabel("Browse transcripts")
+                .accessibilityLabel("Stop recording")
                 .frame(width: 44)
-            } else {
+
                 Spacer()
+
+                // Transcripts button (right)
+                if let onTranscripts {
+                    Button(action: onTranscripts) {
+                        ZStack {
+                            Circle()
+                                .fill(isTranscriptsHovered ? Color.panelCharcoalSurface : Color.panelCharcoalElevated)
+                                .frame(width: 32, height: 32)
+
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.panelTextPrimary)
+                        }
+                        .scaleEffect(isTranscriptsHovered ? 1.1 : 1.0)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .floatingTooltip("Transcripts")
+                    .onHover { hovering in
+                        withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
+                            isTranscriptsHovered = hovering
+                        }
+                    }
+                    .accessibilityLabel("Browse transcripts")
                     .frame(width: 44)
+                } else {
+                    Spacer()
+                        .frame(width: 44)
+                }
             }
         }
         .padding(.horizontal, 8)
