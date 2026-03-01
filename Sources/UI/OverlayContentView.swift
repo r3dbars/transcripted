@@ -26,6 +26,7 @@ struct OverlayContentView: View {
             bottomToolbar
         }
         .background(OverlayTokens.panelBg)
+        .clipShape(RoundedRectangle(cornerRadius: OverlayTokens.cornerRadius, style: .continuous))
     }
 
     // MARK: - Header Bar
@@ -96,9 +97,10 @@ struct OverlayContentView: View {
                     Image(systemName: controller.transcriptExpanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundColor(OverlayTokens.textMuted)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .padding(.trailing, 4)
             } else {
                 Spacer()
             }

@@ -119,6 +119,8 @@ class DraftSessionController: ObservableObject {
         guard isInSession else { return }
 
         overlayController.state = .listening
+        // After loading state, panel may be at full height — shrink to compact for listening
+        resizePanelToCompact()
 
         guard appState.sttRouter.startRecording() else {
             appState.logger.log("SESSION | recording failed to start")
@@ -320,6 +322,8 @@ class DraftSessionController: ObservableObject {
         guard isDictating else { return }
 
         overlayController.state = .listening
+        // After loading state, panel may be at full height — shrink to compact for listening
+        resizePanelToCompact()
 
         guard appState.sttRouter.startRecording() else {
             appState.logger.log("DICTATION | recording failed to start")
@@ -334,7 +338,10 @@ class DraftSessionController: ObservableObject {
     func stopDictationAndPaste() {
         guard let appState = appState, let overlayController = overlayController else { return }
         guard isDictating, overlayController.state == .listening else { return }
-        overlayController.enterDraftingState()
+        // Stay compact during transcription — don't expand to full drafting height.
+        // Just update the state for the spinner, keeping the compact panel size.
+        overlayController.transcriptExpanded = false
+        overlayController.state = .drafting
 
         appState.sttRouter.stopRecording()
         Task {
@@ -390,6 +397,12 @@ class DraftSessionController: ObservableObject {
     }
 
     // MARK: - Private
+
+    /// Shrink the panel to compact (header-only) height without animation.
+    /// Called after loading → listening transition to undo showLoadingState()'s expansion.
+    private func resizePanelToCompact() {
+        overlayController?.resizePanelToCompact()
+    }
 
     private func processVision(imageData: Data?, sourceApp: NSRunningApplication?) async {
         guard let appState = appState else { return }

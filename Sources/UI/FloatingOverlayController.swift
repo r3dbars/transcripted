@@ -58,7 +58,8 @@ class FloatingOverlayController: ObservableObject {
 
         // Glassmorphism: NSVisualEffectView behind SwiftUI content
         let blurView = NSVisualEffectView()
-        blurView.material = .hudWindow
+        blurView.appearance = NSAppearance(named: .darkAqua)
+        blurView.material = .underWindowBackground
         blurView.blendingMode = .behindWindow
         blurView.state = .active
         blurView.wantsLayer = true
@@ -213,10 +214,15 @@ class FloatingOverlayController: ObservableObject {
         resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
     }
 
+    /// Snap the panel to compact (header-only) height without animation.
+    func resizePanelToCompact() {
+        resizePanelInstant(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelCompactHeight))
+    }
+
     func toggleTranscript() {
         transcriptExpanded.toggle()
         let height = transcriptExpanded ? OverlayTokens.panelMinHeight : OverlayTokens.panelCompactHeight
-        resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: height))
+        resizePanelInstant(to: NSSize(width: OverlayTokens.panelWidth, height: height))
     }
 
     func startStreaming(near sourceApp: NSRunningApplication? = nil) {
@@ -323,6 +329,9 @@ class FloatingOverlayController: ObservableObject {
         if !isVisible {
             showPanel(near: nil)
         }
+        // Ensure full height for loading content (spinner + text) — the panel may have
+        // been shown at compact height if it started in .listening before model was ready.
+        resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
         // Tick elapsed seconds so the user knows it's alive
         loadingTimerTask?.cancel()
         loadingTimerTask = Task { @MainActor [weak self] in
@@ -398,6 +407,15 @@ class FloatingOverlayController: ObservableObject {
             NSEvent.removeMonitor(monitor)
             escapeMonitor = nil
         }
+    }
+
+    private func resizePanelInstant(to size: NSSize) {
+        guard let panel = panel else { return }
+        var frame = panel.frame
+        let heightDelta = size.height - frame.size.height
+        frame.size = size
+        frame.origin.y -= heightDelta  // Keep top edge fixed
+        panel.setFrame(frame, display: true, animate: false)
     }
 
     private func resizePanel(to size: NSSize) {
