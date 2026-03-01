@@ -7,7 +7,7 @@ import SwiftUI
 @available(macOS 26.0, *)
 struct AuroraIdleView: View {
     let onRecord: () -> Void
-    let onFiles: () -> Void
+    let onTranscripts: () -> Void
     let failedCount: Int
     var backgroundTaskCount: Int = 0
 
@@ -170,27 +170,27 @@ struct AuroraIdleView: View {
 
             Spacer()
 
-            // Files button (right) - SECONDARY ACTION
-            Button(action: onFiles) {
+            // Transcripts button (right) - SECONDARY ACTION
+            Button(action: onTranscripts) {
                 ZStack {
                     Circle()
                         .fill(isFilesHovered ? Color.panelCharcoalSurface : Color.panelCharcoalElevated)
                         .frame(width: 32, height: 32)
 
-                    Image(systemName: "folder.fill")
-                        .font(.system(size: 14, weight: .medium))
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.panelTextPrimary)
                 }
                 .scaleEffect(isFilesHovered ? 1.1 : 1.0)
             }
             .buttonStyle(PlainButtonStyle())
-            .floatingTooltip("Transcripts")
+            .floatingTooltip("Recent Meetings")
             .onHover { hovering in
                 withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
                     isFilesHovered = hovering
                 }
             }
-            .accessibilityLabel("Open transcripts folder")
+            .accessibilityLabel("Browse recent transcripts")
             .frame(width: 44)
         }
         .padding(.horizontal, 8)
@@ -268,10 +268,10 @@ struct AuroraIdleView_Previews: PreviewProvider {
             Color.black
             VStack(spacing: 40) {
                 // Collapsed state
-                AuroraIdleView(onRecord: {}, onFiles: {}, failedCount: 0)
+                AuroraIdleView(onRecord: {}, onTranscripts: {}, failedCount: 0)
 
                 // With failed badge
-                AuroraIdleView(onRecord: {}, onFiles: {}, failedCount: 3)
+                AuroraIdleView(onRecord: {}, onTranscripts: {}, failedCount: 3)
             }
         }
         .frame(width: 300, height: 200)
