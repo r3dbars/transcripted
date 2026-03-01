@@ -29,8 +29,10 @@ struct FloatingPanelView: View {
     @State private var showTranscriptTray = false
     @StateObject private var transcriptStore = TranscriptStore()
 
-    // Escape key monitor for dismissing tray
-    @State private var escapeMonitor: Any?
+    // Escape key monitors for dismissing tray (need both local + global
+    // because the panel has canBecomeKey=false, so the app usually isn't frontmost)
+    @State private var escapeLocalMonitor: Any?
+    @State private var escapeGlobalMonitor: Any?
 
     // Constant frame width — prevents position shift when toggling tray
     private let frameWidth: CGFloat = PillDimensions.trayWidth + 40
@@ -185,22 +187,40 @@ struct FloatingPanelView: View {
     // MARK: - Escape Key Monitor
 
     private func installEscapeMonitor() {
-        guard escapeMonitor == nil else { return }
-        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if event.keyCode == 53 { // Escape key
+        guard escapeLocalMonitor == nil else { return }
+
+        // Local monitor: catches Escape when our app is frontmost
+        escapeLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if event.keyCode == 53 {
                 withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
                     showTranscriptTray = false
                 }
-                return nil // Consume the event
+                return nil
             }
             return event
+        }
+
+        // Global monitor: catches Escape when another app is frontmost
+        // (normal case — our panel has canBecomeKey=false)
+        escapeGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
+            if event.keyCode == 53 {
+                DispatchQueue.main.async {
+                    withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                        showTranscriptTray = false
+                    }
+                }
+            }
         }
     }
 
     private func removeEscapeMonitor() {
-        if let monitor = escapeMonitor {
+        if let monitor = escapeLocalMonitor {
             NSEvent.removeMonitor(monitor)
-            escapeMonitor = nil
+            escapeLocalMonitor = nil
+        }
+        if let monitor = escapeGlobalMonitor {
+            NSEvent.removeMonitor(monitor)
+            escapeGlobalMonitor = nil
         }
     }
 
