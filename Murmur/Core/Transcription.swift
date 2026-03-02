@@ -113,32 +113,22 @@ class Transcription: ObservableObject {
             AppLogger.transcription.info("Running Sortformer diarization on system audio")
             let rawSegments = try await sortformer.diarize(samples: systemSamples, sampleRate: 16000)
 
-            // Re-cluster speaker assignments using AHC on WeSpeaker embeddings.
-            // Sortformer's streaming clustering is mediocre at grouping similar voices;
-            // AHC with cosine similarity produces more accurate speaker counts.
-            // Safety: if AHC produces MORE speakers than Sortformer, it made things worse —
-            // fall back to Sortformer's original assignments.
-            let sortformerSpeakerCount = Set(rawSegments.map { $0.speakerId }).count
-            let ahcResult = EmbeddingClusterer.recluster(segments: rawSegments)
-            let ahcSpeakerCount = Set(ahcResult.map { $0.speakerId }).count
+            // Post-process Sortformer segments:
+            // 1. Pairwise merge fixes fragmentation (same speaker split across IDs)
+            // 2. DB-informed split fixes merging (different speakers collapsed into one ID)
+            let existingProfiles = speakerDB.allSpeakers()
+            let speakerSegments = EmbeddingClusterer.postProcess(
+                segments: rawSegments,
+                existingProfiles: existingProfiles
+            )
 
-            let speakerSegments: [SpeakerSegment]
-            if ahcSpeakerCount > sortformerSpeakerCount {
-                // AHC over-split — keep Sortformer's grouping
-                speakerSegments = rawSegments
-                AppLogger.transcription.info("AHC over-split, falling back to Sortformer", [
-                    "sortformer": "\(sortformerSpeakerCount)",
-                    "ahc": "\(ahcSpeakerCount)",
-                    "segments": "\(rawSegments.count)"
-                ])
-            } else {
-                speakerSegments = ahcResult
-                AppLogger.transcription.info("Re-clustered speakers", [
-                    "before": "\(sortformerSpeakerCount)",
-                    "after": "\(ahcSpeakerCount)",
-                    "segments": "\(speakerSegments.count)"
-                ])
-            }
+            let sortformerSpeakerCount = Set(rawSegments.map { $0.speakerId }).count
+            let postProcessedSpeakerCount = Set(speakerSegments.map { $0.speakerId }).count
+            AppLogger.transcription.info("Post-processed speaker segments", [
+                "sortformer": "\(sortformerSpeakerCount)",
+                "after": "\(postProcessedSpeakerCount)",
+                "segments": "\(speakerSegments.count)"
+            ])
 
             onProgress?(0.30)
 
@@ -176,13 +166,8 @@ class Transcription: ObservableObject {
                 AppLogger.transcription.info("Filtered low-quality segments from embedding aggregation", ["filtered": "\(filteredSegmentCount)", "total": "\(speakerSegments.count)"])
             }
 
-            // Snapshot existing DB profiles BEFORE the matching loop.
-            // This prevents profiles created during this recording from being matched
-            // by later speakers in the same loop (e.g., Speaker 6 matching Speaker 2's
-            // brand-new profile from the same recording).
-            let existingProfiles = speakerDB.allSpeakers()
-
             // Match each speaker's mean embedding against the DB once
+            // (existingProfiles was already snapshotted above for post-processing)
             var speakerMatchResults: [Int: (persistentId: UUID, similarity: Double)] = [:]
             var speakerNewProfiles: [Int: UUID] = [:]
 
@@ -338,7 +323,7 @@ class Transcription: ObservableObject {
 
     /// Compute the L2-normalized mean of multiple embeddings.
     /// Averaging reduces per-segment noise, producing a more stable speaker fingerprint.
-    private nonisolated static func computeMeanEmbedding(_ embeddings: [[Float]]) -> [Float] {
+    nonisolated static func computeMeanEmbedding(_ embeddings: [[Float]]) -> [Float] {
         guard let first = embeddings.first else { return [] }
         let dim = first.count
         guard dim > 0 else { return [] }
@@ -402,7 +387,7 @@ class Transcription: ObservableObject {
     }
 
     /// Static cosine similarity (no instance needed — used in nonisolated static context)
-    private nonisolated static func cosineSimilarityStatic(_ a: [Float], _ b: [Float]) -> Double {
+    nonisolated static func cosineSimilarityStatic(_ a: [Float], _ b: [Float]) -> Double {
         guard a.count == b.count, !a.isEmpty else { return 0 }
 
         var dotProduct: Float = 0
