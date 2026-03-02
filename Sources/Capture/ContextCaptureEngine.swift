@@ -76,6 +76,11 @@ class ContextCaptureEngine: ObservableObject {
     private var hotkeyRef: EventHotKeyRef?
     private var dictationHotkeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
+    private var hotkeyChangeObserver: NSObjectProtocol?
+
+    /// Human-readable display strings for current shortcuts (drives MenuBarPanel pills + overlay hints)
+    @Published var draftShortcutDisplay: String = HotkeyPreferences.displayString(for: HotkeyPreferences.draftBinding())
+    @Published var dictationShortcutDisplay: String = HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
 
     /// Set by DraftAppDelegate to wire the hotkey to the session controller
     var sessionController: DraftSessionController? {
@@ -101,35 +106,73 @@ class ContextCaptureEngine: ObservableObject {
             &eventHandlerRef
         )
 
-        // Option+D — Draft mode (screenshot + voice → AI draft)
-        let draftHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 1)  // 'DRFT'
-        let modifiers: UInt32 = UInt32(optionKey)
+        // Register hotkeys from saved preferences (or defaults)
+        registerHotkeysFromPreferences()
 
+        // Listen for preference changes (from HotkeyRecorderView)
+        hotkeyChangeObserver = NotificationCenter.default.addObserver(
+            forName: .hotkeysDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.reRegisterHotkeys()
+            }
+        }
+    }
+
+    /// Unregisters current hotkeys and re-registers with latest preferences.
+    /// Preserves the event handler — only the key+modifier bindings change.
+    private func reRegisterHotkeys() {
+        if let ref = hotkeyRef {
+            UnregisterEventHotKey(ref)
+            hotkeyRef = nil
+        }
+        if let ref = dictationHotkeyRef {
+            UnregisterEventHotKey(ref)
+            dictationHotkeyRef = nil
+        }
+        registerHotkeysFromPreferences()
+    }
+
+    private func registerHotkeysFromPreferences() {
+        let draftBinding = HotkeyPreferences.draftBinding()
+        let dictationBinding = HotkeyPreferences.dictationBinding()
+
+        // Draft mode — hotkey ID 1
+        let draftHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 1)  // 'DRFT'
         RegisterEventHotKey(
-            UInt32(kVK_ANSI_D),
-            modifiers,
+            draftBinding.keyCode,
+            draftBinding.modifiers,
             draftHotkeyID,
             GetApplicationEventTarget(),
             0,
             &hotkeyRef
         )
 
-        // Option+Space — Dictation mode (voice → text → paste)
+        // Dictation mode — hotkey ID 2
         let dictationHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 2)  // 'DRFT'
         RegisterEventHotKey(
-            UInt32(kVK_Space),
-            modifiers,
+            dictationBinding.keyCode,
+            dictationBinding.modifiers,
             dictationHotkeyID,
             GetApplicationEventTarget(),
             0,
             &dictationHotkeyRef
         )
+
+        // Update display strings
+        draftShortcutDisplay = HotkeyPreferences.displayString(for: draftBinding)
+        dictationShortcutDisplay = HotkeyPreferences.displayString(for: dictationBinding)
     }
 
     deinit {
         if let ref = hotkeyRef { UnregisterEventHotKey(ref) }
         if let ref = dictationHotkeyRef { UnregisterEventHotKey(ref) }
         if let ref = eventHandlerRef { RemoveEventHandler(ref) }
+        if let observer = hotkeyChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     func unregisterHotkey() {
@@ -144,6 +187,10 @@ class ContextCaptureEngine: ObservableObject {
         if let ref = eventHandlerRef {
             RemoveEventHandler(ref)
             eventHandlerRef = nil
+        }
+        if let observer = hotkeyChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            hotkeyChangeObserver = nil
         }
         _sharedSessionController = nil
     }

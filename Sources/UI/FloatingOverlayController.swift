@@ -20,6 +20,10 @@ class FloatingOverlayController: ObservableObject {
         case review       // Editable draft (draft mode only)
     }
 
+    /// Human-readable shortcut hints for OverlayContentView (reads live from UserDefaults)
+    var draftShortcutHint: String { HotkeyPreferences.displayString(for: HotkeyPreferences.draftBinding()) }
+    var dictationShortcutHint: String { HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding()) }
+
     @Published var state: OverlayState = .idle
     @Published var activeMode: SessionMode = .draft
     @Published var isVisible = false

@@ -109,11 +109,11 @@ struct OverlayContentView: View {
             Group {
                 switch (controller.state, controller.activeMode) {
                 case (.listening, .draft):
-                    Text("\u{2325}D to stop")
+                    Text("\(controller.draftShortcutHint) to stop")
                         .font(.system(size: 10))
                         .foregroundColor(OverlayTokens.textMuted)
                 case (.listening, .dictation):
-                    Text("\u{2325}Space to stop")
+                    Text("\(controller.dictationShortcutHint) to stop")
                         .font(.system(size: 10))
                         .foregroundColor(OverlayTokens.textMuted)
                 case (.loading, _):
@@ -188,8 +188,8 @@ struct OverlayContentView: View {
                 }
             } else {
                 Text(controller.activeMode == .dictation
-                     ? "Recording... press \u{2325}Space to stop"
-                     : "Recording... press \u{2325}D to stop")
+                     ? "Recording... press \(controller.dictationShortcutHint) to stop"
+                     : "Recording... press \(controller.draftShortcutHint) to stop")
                     .font(.system(size: 12))
                     .foregroundColor(OverlayTokens.textMuted)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -283,7 +283,7 @@ struct OverlayContentView: View {
 
     @ViewBuilder
     private var idleContent: some View {
-        Text("Press \u{2325}Space or \u{2325}D to start")
+        Text("Press \(controller.dictationShortcutHint) or \(controller.draftShortcutHint) to start")
             .font(.system(size: 12))
             .foregroundColor(OverlayTokens.textMuted)
             .frame(maxWidth: .infinity, maxHeight: .infinity)

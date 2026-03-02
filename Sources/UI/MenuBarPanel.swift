@@ -152,8 +152,8 @@ struct MenuBarPanelView: View {
 
     private var shortcutsSection: some View {
         HStack(spacing: 12) {
-            shortcutPill(key: "⌥D", label: "Draft")
-            shortcutPill(key: "⌥Space", label: "Dictation")
+            shortcutPill(key: appState.contextCapture.draftShortcutDisplay, label: "Draft")
+            shortcutPill(key: appState.contextCapture.dictationShortcutDisplay, label: "Dictation")
             Spacer()
         }
         .padding(.vertical, MenuTokens.sectionSpacing / 2)
@@ -367,6 +367,15 @@ struct MenuBarPanelView: View {
                 Text("CoreML Parakeet — local, ~0.2s latency")
                     .font(.caption2)
                     .foregroundColor(.secondary)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Keyboard Shortcuts")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                HotkeyRecorderView(captureEngine: appState.contextCapture)
             }
 
             #if BETA_BUILD
