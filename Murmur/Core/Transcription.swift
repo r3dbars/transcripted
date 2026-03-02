@@ -138,11 +138,27 @@ class Transcription: ObservableObject {
             // Aggregate embeddings per Sortformer speaker ID for stable matching.
             // Instead of matching each segment independently (noisy), we compute
             // a mean embedding per speaker and match that once against the DB.
+            // Quality gate: skip low-quality segments to prevent noisy embeddings
+            // from polluting the speaker database.
             var embeddingsPerSpeaker: [Int: [[Float]]] = [:]
+            var filteredSegmentCount = 0
             for segment in speakerSegments {
                 if let embedding = segment.embedding, !embedding.isEmpty {
+                    // Skip segments with very low quality scores — they produce noisy embeddings
+                    if segment.qualityScore < 0.3 {
+                        filteredSegmentCount += 1
+                        continue
+                    }
+                    // Skip very short segments (< 1.0s) — insufficient audio for reliable voiceprint
+                    if segment.duration < 1.0 {
+                        filteredSegmentCount += 1
+                        continue
+                    }
                     embeddingsPerSpeaker[segment.speakerId, default: []].append(embedding)
                 }
+            }
+            if filteredSegmentCount > 0 {
+                AppLogger.transcription.info("Filtered low-quality segments from embedding aggregation", ["filtered": "\(filteredSegmentCount)", "total": "\(speakerSegments.count)"])
             }
 
             // Match each speaker's mean embedding against the DB once

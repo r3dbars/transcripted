@@ -335,8 +335,9 @@ class TranscriptionTaskManager: ObservableObject {
             }
         }
 
-        // Clean up duplicate speaker profiles that accumulated from noisy embeddings
+        // Clean up speaker profiles: first merge obvious duplicates, then prune orphans
         speakerDB.mergeDuplicates()
+        speakerDB.pruneWeakProfiles()
 
         // Phase 2: Save transcript with speaker names
         await MainActor.run {
