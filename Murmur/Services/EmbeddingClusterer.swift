@@ -1,301 +1,241 @@
 // EmbeddingClusterer.swift
-// Agglomerative Hierarchical Clustering (AHC) for speaker embeddings.
+// Post-processes Sortformer speaker segments to fix two failure modes:
 //
-// Sortformer is good at detecting WHEN someone speaks (segment boundaries)
-// but mediocre at deciding WHO is speaking (speaker grouping), especially
-// for similar-sounding voices. This module re-clusters the per-segment
-// WeSpeaker embeddings using AHC with cosine similarity + average linkage,
-// producing more accurate speaker assignments.
+// 1. Fragmentation: Same speaker split across multiple Sortformer IDs.
+//    Fixed by pairwise merge — compare mean embeddings of every speaker pair
+//    and merge those above a high cosine similarity threshold.
 //
-// The hybrid pattern (neural segmentation + classical clustering) is the
-// approach that wins diarization competitions (CHiME-7, CHiME-8).
+// 2. Merging: Different speakers collapsed into one Sortformer ID.
+//    Fixed by DB-informed split — compare per-segment embeddings against
+//    known speaker profiles and split clusters that contain 2+ distinct voices.
 
 import Foundation
 import Accelerate
 
+@available(macOS 26.0, *)
 enum EmbeddingClusterer {
 
-    /// Re-cluster speaker segments based on their WeSpeaker embeddings.
-    ///
-    /// Ignores Sortformer's original speaker IDs and assigns new ones
-    /// based on AHC with cosine similarity and average linkage.
-    ///
-    /// - Parameters:
-    ///   - segments: Speaker segments from Sortformer (with embeddings)
-    ///   - threshold: Cosine similarity threshold for merging clusters.
-    ///     Higher = more aggressive merging (fewer speakers).
-    ///     Lower = less merging (more speakers).
-    ///     Typical range: 0.55-0.75. Default 0.55.
-    /// - Returns: Segments with reassigned speaker IDs
-    static func recluster(
+    /// Post-process Sortformer segments: merge fragmented speakers,
+    /// then split clusters that contain multiple known DB voices.
+    static func postProcess(
         segments: [SpeakerSegment],
-        threshold: Float = 0.55
+        existingProfiles: [SpeakerProfile]
     ) -> [SpeakerSegment] {
-        // Filter to segments that have embeddings
-        let withEmbeddings = segments.filter { $0.embedding != nil && !($0.embedding?.isEmpty ?? true) }
-        let withoutEmbeddings = segments.filter { $0.embedding == nil || ($0.embedding?.isEmpty ?? true) }
+        guard segments.count >= 2 else { return segments }
+        var result = pairwiseMerge(segments: segments)
+        result = dbInformedSplit(segments: result, profiles: existingProfiles)
+        return result
+    }
 
-        guard withEmbeddings.count >= 2 else {
-            // Nothing to re-cluster — return as-is
-            return segments
+    // MARK: - Pairwise Merge
+
+    /// Merge speaker clusters whose mean embeddings are highly similar (>= threshold).
+    /// Fixes Sortformer fragmentation where one person gets 2+ speaker IDs.
+    ///
+    /// Uses union-find for transitive merges: if A≈B and B≈C, all three merge.
+    static func pairwiseMerge(
+        segments: [SpeakerSegment],
+        threshold: Float = 0.85
+    ) -> [SpeakerSegment] {
+        // Compute quality-filtered mean embedding per speaker
+        let meanEmbeddings = computeMeanEmbeddingsPerSpeaker(segments: segments)
+        let speakerIds = Array(meanEmbeddings.keys).sorted()
+        guard speakerIds.count >= 2 else { return segments }
+
+        // Union-find: parent[id] = id initially
+        var parent = Dictionary(uniqueKeysWithValues: speakerIds.map { ($0, $0) })
+
+        func find(_ x: Int) -> Int {
+            var root = x
+            while parent[root] != root { root = parent[root]! }
+            // Path compression
+            var node = x
+            while node != root {
+                let next = parent[node]!
+                parent[node] = root
+                node = next
+            }
+            return root
         }
 
-        let embeddings = withEmbeddings.map { $0.embedding! }
-        let n = embeddings.count
+        func union(_ a: Int, _ b: Int) {
+            let ra = find(a), rb = find(b)
+            if ra != rb { parent[rb] = ra }
+        }
 
-        // Step 1: Compute pairwise cosine similarity matrix (upper triangle)
-        let similarities = computeSimilarityMatrix(embeddings: embeddings)
+        // Compare every pair of speakers
+        for i in 0..<speakerIds.count {
+            for j in (i + 1)..<speakerIds.count {
+                let idA = speakerIds[i], idB = speakerIds[j]
+                guard let embA = meanEmbeddings[idA], let embB = meanEmbeddings[idB] else { continue }
+                let sim = Transcription.cosineSimilarityStatic(embA, embB)
+                if Float(sim) >= threshold {
+                    union(idA, idB)
+                }
+            }
+        }
 
-        // Log similarity distribution so we can find the right threshold empirically
-        logSimilarityDistribution(similarities: similarities, segments: withEmbeddings)
+        // Build merge map: old speaker ID → canonical speaker ID
+        var mergeMap: [Int: Int] = [:]
+        for id in speakerIds {
+            mergeMap[id] = find(id)
+        }
 
-        // Step 2: AHC with average linkage
-        let clusterAssignments = agglomerativeClustering(
-            similarities: similarities,
-            count: n,
-            threshold: threshold
-        )
+        // Check if any merges happened
+        let mergedGroups = Dictionary(grouping: speakerIds, by: { find($0) }).filter { $0.value.count > 1 }
+        guard !mergedGroups.isEmpty else { return segments }
 
-        // Step 3: Reassign speaker IDs (sequential from 0)
-        let uniqueClusters = Array(Set(clusterAssignments)).sorted()
-        let clusterToSpeakerId = Dictionary(uniqueKeysWithValues: uniqueClusters.enumerated().map { ($1, $0) })
+        // Log merges
+        for (canonical, members) in mergedGroups {
+            let memberStr = members.map { "spk\($0)" }.joined(separator: "+")
+            AppLogger.transcription.info("Pairwise merged speakers", [
+                "merged": memberStr,
+                "canonical": "spk\(canonical)"
+            ])
+        }
 
-        var result: [SpeakerSegment] = []
-
-        for (i, segment) in withEmbeddings.enumerated() {
-            let newSpeakerId = clusterToSpeakerId[clusterAssignments[i]] ?? 0
-            result.append(SpeakerSegment(
-                speakerId: newSpeakerId,
+        // Reassign speaker IDs
+        return segments.map { segment in
+            let newId = mergeMap[segment.speakerId] ?? segment.speakerId
+            guard newId != segment.speakerId else { return segment }
+            return SpeakerSegment(
+                speakerId: newId,
                 startTime: segment.startTime,
                 endTime: segment.endTime,
                 embedding: segment.embedding,
                 qualityScore: segment.qualityScore
-            ))
+            )
+        }
+    }
+
+    // MARK: - DB-Informed Split
+
+    /// Split clusters that contain 2+ known DB voices.
+    ///
+    /// When Sortformer merges different speakers into one cluster,
+    /// the per-segment embeddings still differ. We match each segment
+    /// against known DB profiles to detect and separate mixed clusters.
+    static func dbInformedSplit(
+        segments: [SpeakerSegment],
+        profiles: [SpeakerProfile],
+        perSegmentThreshold: Float = 0.62,
+        minSegmentsPerProfile: Int = 8
+    ) -> [SpeakerSegment] {
+        guard !profiles.isEmpty else { return segments }
+
+        // Group segments by speaker ID
+        var segmentsBySpkId: [Int: [(index: Int, segment: SpeakerSegment)]] = [:]
+        for (i, seg) in segments.enumerated() {
+            segmentsBySpkId[seg.speakerId, default: []].append((i, seg))
         }
 
-        // Segments without embeddings get assigned to speaker 0 (fallback)
-        for segment in withoutEmbeddings {
-            result.append(SpeakerSegment(
-                speakerId: 0,
-                startTime: segment.startTime,
-                endTime: segment.endTime,
-                embedding: segment.embedding,
-                qualityScore: segment.qualityScore
-            ))
-        }
+        // We'll need new speaker IDs for split-off groups.
+        // Start above the max existing speaker ID.
+        var nextSpeakerId = (segments.map { $0.speakerId }.max() ?? 0) + 1
+        var result = segments
 
-        // Sort by start time to maintain chronological order
-        result.sort { $0.startTime < $1.startTime }
+        for (speakerId, indexedSegments) in segmentsBySpkId {
+            // Only attempt split on clusters with enough segments
+            guard indexedSegments.count >= minSegmentsPerProfile * 2 else { continue }
+
+            // Score each segment against each profile
+            // profileId → list of segment indices that match
+            var matchesByProfile: [UUID: [Int]] = [:]
+
+            for (idx, seg) in indexedSegments {
+                guard let embedding = seg.embedding, !embedding.isEmpty else { continue }
+                // Skip very short/low-quality segments — too noisy for per-segment matching
+                guard seg.duration >= 0.5, seg.qualityScore >= 0.2 else { continue }
+
+                var bestProfileId: UUID?
+                var bestSim: Float = 0
+
+                for profile in profiles {
+                    guard profile.embedding.count == embedding.count else { continue }
+                    let sim = Float(Transcription.cosineSimilarityStatic(embedding, profile.embedding))
+                    if sim >= perSegmentThreshold && sim > bestSim {
+                        bestSim = sim
+                        bestProfileId = profile.id
+                    }
+                }
+
+                if let profileId = bestProfileId {
+                    matchesByProfile[profileId, default: []].append(idx)
+                }
+            }
+
+            // Check if 2+ profiles each have enough matching segments
+            let significantProfiles = matchesByProfile.filter { $0.value.count >= minSegmentsPerProfile }
+            guard significantProfiles.count >= 2 else { continue }
+
+            // Split! Assign each significant profile's segments to a new speaker ID.
+            // The first profile keeps the original speaker ID; others get new IDs.
+            let sortedProfiles = significantProfiles.sorted { $0.value.count > $1.value.count }
+
+            for (profileIdx, (profileId, segmentIndices)) in sortedProfiles.enumerated() {
+                let assignedSpkId: Int
+                if profileIdx == 0 {
+                    // Largest group keeps original speaker ID
+                    assignedSpkId = speakerId
+                } else {
+                    assignedSpkId = nextSpeakerId
+                    nextSpeakerId += 1
+                }
+
+                for idx in segmentIndices {
+                    let seg = result[idx]
+                    if seg.speakerId != assignedSpkId {
+                        result[idx] = SpeakerSegment(
+                            speakerId: assignedSpkId,
+                            startTime: seg.startTime,
+                            endTime: seg.endTime,
+                            embedding: seg.embedding,
+                            qualityScore: seg.qualityScore
+                        )
+                    }
+                }
+
+                let profileName = profiles.first(where: { $0.id == profileId })?.displayName ?? profileId.uuidString.prefix(8).description
+                AppLogger.transcription.info("DB-informed split", [
+                    "originalSpkId": "spk\(speakerId)",
+                    "profile": profileName,
+                    "assignedSpkId": "spk\(assignedSpkId)",
+                    "segments": "\(segmentIndices.count)"
+                ])
+            }
+
+            // Unmatched segments stay on the original speaker ID (no change needed)
+            let allMatchedIndices = Set(significantProfiles.values.flatMap { $0 })
+            let unmatchedCount = indexedSegments.count - allMatchedIndices.count
+            if unmatchedCount > 0 {
+                AppLogger.transcription.info("DB-informed split unmatched segments remain on spk\(speakerId)", [
+                    "count": "\(unmatchedCount)"
+                ])
+            }
+        }
 
         return result
     }
 
-    // MARK: - Similarity Matrix
+    // MARK: - Helpers
 
-    /// Compute NxN cosine similarity matrix.
-    /// L2-normalizes each embedding first, then dot product = cosine similarity.
-    private static func computeSimilarityMatrix(embeddings: [[Float]]) -> [[Float]] {
-        let n = embeddings.count
-        let dim = embeddings[0].count
+    /// Compute quality-filtered mean embedding per speaker ID.
+    /// Filters out low-quality (< 0.3) and short (< 1.0s) segments.
+    private static func computeMeanEmbeddingsPerSpeaker(
+        segments: [SpeakerSegment]
+    ) -> [Int: [Float]] {
+        var embeddingsPerSpeaker: [Int: [[Float]]] = [:]
 
-        // L2-normalize all embeddings (don't assume they're pre-normalized)
-        let normalized = embeddings.map { emb -> [Float] in
-            var norm: Float = 0
-            vDSP_dotpr(emb, 1, emb, 1, &norm, vDSP_Length(dim))
-            norm = sqrt(norm)
-            guard norm > 0 else { return emb }
-            var result = emb
-            vDSP_vsdiv(result, 1, &norm, &result, 1, vDSP_Length(dim))
-            return result
+        for segment in segments {
+            guard let embedding = segment.embedding, !embedding.isEmpty else { continue }
+            guard segment.qualityScore >= 0.3, segment.duration >= 1.0 else { continue }
+            embeddingsPerSpeaker[segment.speakerId, default: []].append(embedding)
         }
 
-        var matrix = [[Float]](repeating: [Float](repeating: 0, count: n), count: n)
-
-        for i in 0..<n {
-            matrix[i][i] = 1.0  // self-similarity
-            for j in (i + 1)..<n {
-                var similarity: Float = 0
-                vDSP_dotpr(normalized[i], 1, normalized[j], 1, &similarity, vDSP_Length(dim))
-                matrix[i][j] = similarity
-                matrix[j][i] = similarity
-            }
+        var result: [Int: [Float]] = [:]
+        for (speakerId, embeddings) in embeddingsPerSpeaker {
+            result[speakerId] = Transcription.computeMeanEmbedding(embeddings)
         }
-
-        return matrix
-    }
-
-    // MARK: - Agglomerative Hierarchical Clustering
-
-    /// AHC with average linkage. Merges clusters until max inter-cluster
-    /// similarity falls below threshold.
-    ///
-    /// Returns an array of cluster IDs (one per input embedding).
-    private static func agglomerativeClustering(
-        similarities: [[Float]],
-        count n: Int,
-        threshold: Float
-    ) -> [Int] {
-        // Each element starts in its own cluster
-        var clusterOf = Array(0..<n)  // clusterOf[i] = cluster ID for element i
-        var nextClusterId = n
-
-        // Track which elements belong to each cluster
-        var clusterMembers: [Int: [Int]] = [:]
-        for i in 0..<n {
-            clusterMembers[i] = [i]
-        }
-
-        // Track active clusters
-        var activeClusters = Set(0..<n)
-
-        // Average linkage similarity cache between active cluster pairs
-        // Key: (min(a,b), max(a,b)), Value: average similarity
-        var linkageCache: [Int64: Float] = [:]
-
-        func cacheKey(_ a: Int, _ b: Int) -> Int64 {
-            let lo = min(a, b)
-            let hi = max(a, b)
-            return Int64(lo) << 32 | Int64(hi)
-        }
-
-        // Initialize linkage cache from raw similarities
-        for i in 0..<n {
-            for j in (i + 1)..<n {
-                linkageCache[cacheKey(i, j)] = similarities[i][j]
-            }
-        }
-
-        // Iteratively merge the most similar pair of clusters
-        while activeClusters.count > 1 {
-            // Find the most similar pair of active clusters
-            var bestSim: Float = -Float.infinity
-            var bestA = -1
-            var bestB = -1
-
-            let sorted = activeClusters.sorted()
-            for (idx, a) in sorted.enumerated() {
-                for b in sorted[(idx + 1)...] {
-                    let key = cacheKey(a, b)
-                    if let sim = linkageCache[key], sim > bestSim {
-                        bestSim = sim
-                        bestA = a
-                        bestB = b
-                    }
-                }
-            }
-
-            // Stop if best similarity is below threshold
-            guard bestSim >= threshold, bestA >= 0, bestB >= 0 else { break }
-
-            // Merge bestB into bestA
-            let mergedId = nextClusterId
-            nextClusterId += 1
-
-            let membersA = clusterMembers[bestA]!
-            let membersB = clusterMembers[bestB]!
-            let mergedMembers = membersA + membersB
-
-            clusterMembers[mergedId] = mergedMembers
-            clusterMembers.removeValue(forKey: bestA)
-            clusterMembers.removeValue(forKey: bestB)
-
-            // Update cluster assignments
-            for i in mergedMembers {
-                clusterOf[i] = mergedId
-            }
-
-            // Remove old clusters from active set, add new one
-            activeClusters.remove(bestA)
-            activeClusters.remove(bestB)
-
-            // Compute average linkage between new merged cluster and all remaining active clusters
-            for other in activeClusters {
-                let otherMembers = clusterMembers[other]!
-                var totalSim: Float = 0
-                var count = 0
-                for mi in mergedMembers {
-                    for mj in otherMembers {
-                        totalSim += similarities[mi][mj]
-                        count += 1
-                    }
-                }
-                let avgSim = count > 0 ? totalSim / Float(count) : 0
-                linkageCache[cacheKey(mergedId, other)] = avgSim
-            }
-
-            activeClusters.insert(mergedId)
-        }
-
-        return clusterOf
-    }
-
-    // MARK: - Diagnostic Logging
-
-    /// Log pairwise similarity distribution to help tune the threshold.
-    /// Shows min/max/mean, histogram buckets, and the 5 lowest pairs (most likely different speakers).
-    private static func logSimilarityDistribution(similarities: [[Float]], segments: [SpeakerSegment]) {
-        let n = similarities.count
-        guard n >= 2 else { return }
-
-        // Collect upper triangle values
-        var allSims: [Float] = []
-        for i in 0..<n {
-            for j in (i + 1)..<n {
-                allSims.append(similarities[i][j])
-            }
-        }
-
-        guard !allSims.isEmpty else { return }
-        let sorted = allSims.sorted()
-
-        let minSim = sorted.first!
-        let maxSim = sorted.last!
-        let meanSim = sorted.reduce(0, +) / Float(sorted.count)
-
-        AppLogger.transcription.info("AHC similarity matrix", [
-            "pairs": "\(sorted.count)",
-            "min": String(format: "%.3f", minSim),
-            "max": String(format: "%.3f", maxSim),
-            "mean": String(format: "%.3f", meanSim)
-        ])
-
-        // Histogram: 0.5-0.6, 0.6-0.7, 0.7-0.8, 0.8-0.9, 0.9-1.0
-        let buckets: [(String, ClosedRange<Float>)] = [
-            ("<0.5", -1.0...0.499),
-            ("0.5-0.6", 0.5...0.599),
-            ("0.6-0.7", 0.6...0.699),
-            ("0.7-0.8", 0.7...0.799),
-            ("0.8-0.9", 0.8...0.899),
-            ("0.9-1.0", 0.9...1.0)
-        ]
-        var histData: [String: String] = [:]
-        for (label, range) in buckets {
-            let count = sorted.filter { range.contains($0) }.count
-            if count > 0 { histData[label] = "\(count)" }
-        }
-        AppLogger.transcription.info("AHC similarity histogram", histData)
-
-        // Log the 5 lowest-similarity pairs with timestamps
-        struct SimPair: Comparable {
-            let i: Int, j: Int, sim: Float
-            static func < (lhs: SimPair, rhs: SimPair) -> Bool { lhs.sim < rhs.sim }
-        }
-        var pairs: [SimPair] = []
-        for i in 0..<n {
-            for j in (i + 1)..<n {
-                pairs.append(SimPair(i: i, j: j, sim: similarities[i][j]))
-            }
-        }
-        pairs.sort()
-        let lowestPairs = pairs.prefix(5)
-        for (idx, pair) in lowestPairs.enumerated() {
-            let si = segments[pair.i]
-            let sj = segments[pair.j]
-            AppLogger.transcription.info("AHC lowest pair \(idx + 1)", [
-                "sim": String(format: "%.3f", pair.sim),
-                "segA": String(format: "%.1fs-%.1fs (spk%d)", si.startTime, si.endTime, si.speakerId),
-                "segB": String(format: "%.1fs-%.1fs (spk%d)", sj.startTime, sj.endTime, sj.speakerId)
-            ])
-        }
+        return result
     }
 }
