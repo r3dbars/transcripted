@@ -25,11 +25,11 @@ enum EmbeddingClusterer {
     ///   - threshold: Cosine similarity threshold for merging clusters.
     ///     Higher = more aggressive merging (fewer speakers).
     ///     Lower = less merging (more speakers).
-    ///     Typical range: 0.55-0.75. Default 0.65.
+    ///     Typical range: 0.55-0.75. Default 0.55.
     /// - Returns: Segments with reassigned speaker IDs
     static func recluster(
         segments: [SpeakerSegment],
-        threshold: Float = 0.65
+        threshold: Float = 0.55
     ) -> [SpeakerSegment] {
         // Filter to segments that have embeddings
         let withEmbeddings = segments.filter { $0.embedding != nil && !($0.embedding?.isEmpty ?? true) }
