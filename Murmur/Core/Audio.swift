@@ -114,6 +114,14 @@ class Audio: ObservableObject {
 
     // Mic recovery guard (prevents concurrent recovery attempts)
     private var isMicRecovering: Bool = false
+    private var lastRecoveryTime: Date?
+    private let maxRecoveryAttempts = 5
+    private let recoveryCooldown: TimeInterval = 5.0  // Min seconds between recovery attempts
+
+    // Write error tracking — stop writing after repeated failures
+    private var consecutiveMicWriteErrors: Int = 0
+    private var consecutiveSystemWriteErrors: Int = 0
+    private let maxConsecutiveWriteErrors = 10
 
     // System audio capture
     private var systemAudioCapture: Any? // SystemAudioCapture (macOS 14.2+)
@@ -273,6 +281,9 @@ class Audio: ObservableObject {
         recordingGaps = []
         deviceSwitchCount = 0
         sleepTimestamp = nil
+        lastRecoveryTime = nil
+        consecutiveMicWriteErrors = 0
+        consecutiveSystemWriteErrors = 0
 
         AppLogger.audio.info("Starting audio capture")
 
@@ -394,12 +405,19 @@ class Audio: ObservableObject {
                         // Dispatch file write to background queue (non-blocking)
                         // File already exists, so this is just a write operation
                         self.systemAudioFileQueue.async { [weak self] in
-                            guard let self = self, let audioFile = self.systemAudioFile else { return }
+                            guard let self = self,
+                                  self.consecutiveSystemWriteErrors < self.maxConsecutiveWriteErrors,
+                                  let audioFile = self.systemAudioFile else { return }
                             do {
                                 try audioFile.write(from: bufferCopy)
+                                self.consecutiveSystemWriteErrors = 0
                             } catch {
-                                if currentBufferCount <= 5 {
-                                    AppLogger.audioSystem.error("System audio write failed", ["bufferNumber": "\(currentBufferCount)", "error": error.localizedDescription])
+                                self.consecutiveSystemWriteErrors += 1
+                                if self.consecutiveSystemWriteErrors <= 3 || self.consecutiveSystemWriteErrors == self.maxConsecutiveWriteErrors {
+                                    AppLogger.audioSystem.error("System audio write failed", ["bufferNumber": "\(currentBufferCount)", "error": error.localizedDescription, "consecutive": "\(self.consecutiveSystemWriteErrors)"])
+                                }
+                                if self.consecutiveSystemWriteErrors >= self.maxConsecutiveWriteErrors {
+                                    AppLogger.audioSystem.error("Too many consecutive system write errors, stopping system writes")
                                 }
                             }
                         }
@@ -469,7 +487,8 @@ class Audio: ObservableObject {
 
             // Convert to mono if needed, then write to file
             strongSelf.micAudioFileQueue.async {
-                guard let audioFile = strongSelf.micAudioFile,
+                guard strongSelf.consecutiveMicWriteErrors < strongSelf.maxConsecutiveWriteErrors,
+                      let audioFile = strongSelf.micAudioFile,
                       let monoFormat = strongSelf.monoOutputFormat else { return }
 
                 do {
@@ -484,8 +503,15 @@ class Audio: ObservableObject {
                         // Already mono, write directly
                         try audioFile.write(from: buffer)
                     }
+                    strongSelf.consecutiveMicWriteErrors = 0
                 } catch {
-                    AppLogger.audioMic.error("Write failed", ["error": error.localizedDescription])
+                    strongSelf.consecutiveMicWriteErrors += 1
+                    if strongSelf.consecutiveMicWriteErrors <= 3 || strongSelf.consecutiveMicWriteErrors == strongSelf.maxConsecutiveWriteErrors {
+                        AppLogger.audioMic.error("Write failed", ["error": error.localizedDescription, "consecutive": "\(strongSelf.consecutiveMicWriteErrors)"])
+                    }
+                    if strongSelf.consecutiveMicWriteErrors >= strongSelf.maxConsecutiveWriteErrors {
+                        AppLogger.audioMic.error("Too many consecutive write errors, stopping mic writes")
+                    }
                 }
             }
         }
@@ -590,6 +616,24 @@ class Audio: ObservableObject {
             let timeSinceLastBuffer = Date().timeIntervalSince(self.lastBufferTime)
 
             if timeSinceLastBuffer > 3.0 {
+                // Enforce cooldown — don't attempt recovery more often than every 5s
+                if let lastRecovery = self.lastRecoveryTime,
+                   Date().timeIntervalSince(lastRecovery) < self.recoveryCooldown {
+                    return  // Too soon, skip this tick
+                }
+
+                // Give up after too many failed recoveries
+                if self.deviceSwitchCount >= self.maxRecoveryAttempts {
+                    AppLogger.audioMic.error("Max recovery attempts reached, stopping recording", [
+                        "attempts": "\(self.deviceSwitchCount)"
+                    ])
+                    DispatchQueue.main.async {
+                        self.error = "Audio device unavailable — recording stopped"
+                        self.stop()
+                    }
+                    return
+                }
+
                 // Audio stopped → device likely changed
                 AppLogger.audioMic.warning("Audio device disconnected or changed, switching to default")
                 self.recoverFromDeviceChange()
@@ -611,13 +655,14 @@ class Audio: ObservableObject {
         }
         isMicRecovering = true
         defer { isMicRecovering = false }
+        lastRecoveryTime = Date()
 
         guard let engine = engine, let inputNode = inputNode else { return }
 
         // Track device switch for health monitoring
         let switchStart = Date()
         deviceSwitchCount += 1
-        AppLogger.audioMic.debug("Recovering from device change", ["switchNumber": "\(deviceSwitchCount)"])
+        AppLogger.audioMic.debug("Recovering from device change", ["switchNumber": "\(deviceSwitchCount)", "maxAttempts": "\(maxRecoveryAttempts)"])
 
         // Stop engine (but keep recording flag true)
         inputNode.removeTap(onBus: 0)
@@ -709,6 +754,7 @@ class Audio: ObservableObject {
             // Note: Use weak self in nested async to prevent retain cycle
             self.micAudioFileQueue.async { [weak self] in
                 guard let self = self,
+                      self.consecutiveMicWriteErrors < self.maxConsecutiveWriteErrors,
                       let audioFile = self.micAudioFile,
                       let monoFormat = self.monoOutputFormat else { return }
 
@@ -724,8 +770,15 @@ class Audio: ObservableObject {
                         // Already mono, write directly
                         try audioFile.write(from: buffer)
                     }
+                    self.consecutiveMicWriteErrors = 0
                 } catch {
-                    AppLogger.audioMic.error("Write failed", ["error": error.localizedDescription])
+                    self.consecutiveMicWriteErrors += 1
+                    if self.consecutiveMicWriteErrors <= 3 || self.consecutiveMicWriteErrors == self.maxConsecutiveWriteErrors {
+                        AppLogger.audioMic.error("Write failed", ["error": error.localizedDescription, "consecutive": "\(self.consecutiveMicWriteErrors)"])
+                    }
+                    if self.consecutiveMicWriteErrors >= self.maxConsecutiveWriteErrors {
+                        AppLogger.audioMic.error("Too many consecutive write errors, stopping mic writes")
+                    }
                 }
             }
         }
