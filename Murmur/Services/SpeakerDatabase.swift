@@ -492,6 +492,54 @@ final class SpeakerDatabase {
         }
     }
 
+    // MARK: - Same-Name Profile Merging
+
+    /// Merge all profiles that share the same display name.
+    /// After user naming, multiple profiles may end up with the same name (e.g., 4 profiles
+    /// all named "Jenny Wen"). This merges them into a single profile — the one with the
+    /// highest call count — using the existing weighted embedding blend from mergeProfilesImpl().
+    func mergeProfilesByName() {
+        queue.sync {
+            mergeProfilesByNameImpl()
+        }
+    }
+
+    private func mergeProfilesByNameImpl() {
+        let speakers = allSpeakersImpl()
+
+        // Group named profiles by lowercased display name
+        var byName: [String: [SpeakerProfile]] = [:]
+        for speaker in speakers {
+            guard let name = speaker.displayName?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines),
+                  !name.isEmpty else { continue }
+            byName[name, default: []].append(speaker)
+        }
+
+        var mergeCount = 0
+        for (name, profiles) in byName {
+            guard profiles.count > 1 else { continue }
+
+            // Keep the profile with the highest call count (best embedding data)
+            let sorted = profiles.sorted { $0.callCount > $1.callCount }
+            let keeper = sorted[0]
+
+            for source in sorted.dropFirst() {
+                mergeProfilesImpl(sourceId: source.id, into: keeper.id)
+                mergeCount += 1
+            }
+
+            AppLogger.speakers.info("Merged same-name profiles", [
+                "name": name,
+                "merged": "\(sorted.count - 1)",
+                "keeperId": "\(keeper.id)"
+            ])
+        }
+
+        if mergeCount > 0 {
+            AppLogger.speakers.info("Same-name merge complete", ["merged": "\(mergeCount)"])
+        }
+    }
+
     // MARK: - Weak Profile Pruning
 
     /// Remove unnamed, low-confidence, single-call profiles older than 1 hour.

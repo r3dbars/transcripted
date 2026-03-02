@@ -116,14 +116,29 @@ class Transcription: ObservableObject {
             // Re-cluster speaker assignments using AHC on WeSpeaker embeddings.
             // Sortformer's streaming clustering is mediocre at grouping similar voices;
             // AHC with cosine similarity produces more accurate speaker counts.
+            // Safety: if AHC produces MORE speakers than Sortformer, it made things worse —
+            // fall back to Sortformer's original assignments.
             let sortformerSpeakerCount = Set(rawSegments.map { $0.speakerId }).count
-            let speakerSegments = EmbeddingClusterer.recluster(segments: rawSegments)
-            let ahcSpeakerCount = Set(speakerSegments.map { $0.speakerId }).count
-            AppLogger.transcription.info("Re-clustered speakers", [
-                "before": "\(sortformerSpeakerCount)",
-                "after": "\(ahcSpeakerCount)",
-                "segments": "\(speakerSegments.count)"
-            ])
+            let ahcResult = EmbeddingClusterer.recluster(segments: rawSegments)
+            let ahcSpeakerCount = Set(ahcResult.map { $0.speakerId }).count
+
+            let speakerSegments: [SpeakerSegment]
+            if ahcSpeakerCount > sortformerSpeakerCount {
+                // AHC over-split — keep Sortformer's grouping
+                speakerSegments = rawSegments
+                AppLogger.transcription.info("AHC over-split, falling back to Sortformer", [
+                    "sortformer": "\(sortformerSpeakerCount)",
+                    "ahc": "\(ahcSpeakerCount)",
+                    "segments": "\(rawSegments.count)"
+                ])
+            } else {
+                speakerSegments = ahcResult
+                AppLogger.transcription.info("Re-clustered speakers", [
+                    "before": "\(sortformerSpeakerCount)",
+                    "after": "\(ahcSpeakerCount)",
+                    "segments": "\(speakerSegments.count)"
+                ])
+            }
 
             onProgress?(0.30)
 
@@ -161,20 +176,45 @@ class Transcription: ObservableObject {
                 AppLogger.transcription.info("Filtered low-quality segments from embedding aggregation", ["filtered": "\(filteredSegmentCount)", "total": "\(speakerSegments.count)"])
             }
 
+            // Snapshot existing DB profiles BEFORE the matching loop.
+            // This prevents profiles created during this recording from being matched
+            // by later speakers in the same loop (e.g., Speaker 6 matching Speaker 2's
+            // brand-new profile from the same recording).
+            let existingProfiles = speakerDB.allSpeakers()
+
             // Match each speaker's mean embedding against the DB once
             var speakerMatchResults: [Int: (persistentId: UUID, similarity: Double)] = [:]
             var speakerNewProfiles: [Int: UUID] = [:]
 
             for (speakerId, embeddings) in embeddingsPerSpeaker {
                 let meanEmbedding = Self.computeMeanEmbedding(embeddings)
-                if let matchResult = speakerDB.matchSpeaker(embedding: meanEmbedding) {
-                    speakerMatchResults[speakerId] = (matchResult.profile.id, matchResult.similarity)
-                    _ = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: matchResult.profile.id)
-                    AppLogger.transcription.info("Speaker matched DB profile", ["speakerId": "\(speakerId)", "similarity": String(format: "%.3f", matchResult.similarity), "segmentsAveraged": "\(embeddings.count)"])
+
+                // Adaptive threshold: require higher similarity when we have fewer segments.
+                // A single 2s segment can false-match at 0.79; 4+ segments give a reliable mean.
+                let adaptiveThreshold: Double = switch embeddings.count {
+                    case 1: 0.85       // single segment — need near-certainty
+                    case 2...3: 0.78   // few segments — still cautious
+                    default: 0.70      // 4+ segments — reliable mean embedding
+                }
+
+                // Match only against profiles that existed BEFORE this recording
+                if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold) {
+                    speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity)
+                    _ = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: matchResult.profileId)
+                    AppLogger.transcription.info("Speaker matched DB profile", [
+                        "speakerId": "\(speakerId)",
+                        "similarity": String(format: "%.3f", matchResult.similarity),
+                        "threshold": String(format: "%.2f", adaptiveThreshold),
+                        "segmentsAveraged": "\(embeddings.count)"
+                    ])
                 } else {
                     let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding)
                     speakerNewProfiles[speakerId] = newProfile.id
-                    AppLogger.transcription.info("Speaker new profile created", ["speakerId": "\(speakerId)", "segmentsAveraged": "\(embeddings.count)"])
+                    AppLogger.transcription.info("Speaker new profile created", [
+                        "speakerId": "\(speakerId)",
+                        "threshold": String(format: "%.2f", adaptiveThreshold),
+                        "segmentsAveraged": "\(embeddings.count)"
+                    ])
                 }
             }
 
@@ -323,6 +363,60 @@ class Transcription: ObservableObject {
             vDSP_vsdiv(mean, 1, &norm, &mean, 1, vDSP_Length(mean.count))
         }
         return mean
+    }
+
+    // MARK: - In-Memory Speaker Matching
+
+    /// Result of matching against an in-memory snapshot of profiles
+    private struct SnapshotMatchResult {
+        let profileId: UUID
+        let similarity: Double
+    }
+
+    /// Match an embedding against a frozen snapshot of speaker profiles.
+    /// Same logic as SpeakerDatabase.matchSpeaker but operates on an in-memory array,
+    /// preventing the matching loop from seeing profiles created during the same recording.
+    private nonisolated static func matchAgainstProfiles(
+        _ embedding: [Float],
+        profiles: [SpeakerProfile],
+        threshold: Double
+    ) -> SnapshotMatchResult? {
+        guard !profiles.isEmpty, !embedding.isEmpty else { return nil }
+
+        var bestId: UUID?
+        var bestSimilarity: Double = -1
+
+        for profile in profiles {
+            guard profile.embedding.count == embedding.count else { continue }
+            let similarity = cosineSimilarityStatic(embedding, profile.embedding)
+            if similarity > bestSimilarity && similarity >= threshold {
+                bestSimilarity = similarity
+                bestId = profile.id
+            }
+        }
+
+        if let id = bestId {
+            return SnapshotMatchResult(profileId: id, similarity: bestSimilarity)
+        }
+        return nil
+    }
+
+    /// Static cosine similarity (no instance needed — used in nonisolated static context)
+    private nonisolated static func cosineSimilarityStatic(_ a: [Float], _ b: [Float]) -> Double {
+        guard a.count == b.count, !a.isEmpty else { return 0 }
+
+        var dotProduct: Float = 0
+        var normA: Float = 0
+        var normB: Float = 0
+
+        vDSP_dotpr(a, 1, b, 1, &dotProduct, vDSP_Length(a.count))
+        vDSP_dotpr(a, 1, a, 1, &normA, vDSP_Length(a.count))
+        vDSP_dotpr(b, 1, b, 1, &normB, vDSP_Length(b.count))
+
+        let denom = sqrt(normA) * sqrt(normB)
+        guard denom > 0 else { return 0 }
+
+        return Double(dotProduct / denom)
     }
 
     // MARK: - Text Splitting

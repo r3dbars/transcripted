@@ -570,6 +570,11 @@ class TranscriptionTaskManager: ObservableObject {
             ])
         }
 
+        // Merge profiles that ended up with the same name (e.g., user named 4 profiles "Jenny Wen")
+        speakerDB.mergeProfilesByName()
+        // Also re-run duplicate detection now that profiles have been updated
+        speakerDB.mergeDuplicates()
+
         // Update the saved transcript file with real names
         if !updates.isEmpty {
             TranscriptSaver.updateSpeakerNames(transcriptURL: transcriptURL, updates: updates)
