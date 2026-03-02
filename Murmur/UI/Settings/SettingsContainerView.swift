@@ -26,6 +26,7 @@ struct SettingsContainerView: View {
     @State private var editingId: UUID?
     @State private var editingName: String = ""
     @State private var deleteConfirmId: UUID?
+    @StateObject private var clipPlayer = ClipAudioPlayer()
 
     // Failed transcriptions
     @State private var retryingIds: Set<UUID> = []
@@ -352,6 +353,18 @@ struct SettingsContainerView: View {
 
     private func inlineSpeakerRow(_ speaker: SpeakerProfile) -> some View {
         HStack(spacing: Spacing.sm) {
+            // Play button (only if persistent clip exists)
+            if SpeakerClipExtractor.persistentClipURL(for: speaker.id) != nil {
+                Button(action: { toggleClipPlayback(for: speaker.id) }) {
+                    Image(systemName: isClipPlaying(speaker.id) ? "stop.fill" : "play.fill")
+                        .font(.system(size: 10))
+                        .foregroundColor(isClipPlaying(speaker.id) ? .accentBlue : .panelTextMuted)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 20)
+                .help(isClipPlaying(speaker.id) ? "Stop" : "Play voice clip")
+            }
+
             // Simple avatar
             ZStack {
                 Circle()
@@ -407,6 +420,7 @@ struct SettingsContainerView: View {
                         .font(.caption)
                         .foregroundColor(.errorRed)
                     Button("Yes") {
+                        SpeakerClipExtractor.deletePersistedClip(for: speaker.id)
                         SpeakerDatabase.shared.deleteSpeaker(id: speaker.id)
                         deleteConfirmId = nil
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -456,8 +470,28 @@ struct SettingsContainerView: View {
         }
         SpeakerDatabase.shared.setDisplayName(id: id, name: trimmed, source: "user_manual")
         editingId = nil
+        // Retroactively update all transcripts referencing this speaker
+        Task.detached {
+            TranscriptSaver.retroactivelyUpdateSpeaker(dbId: id, newName: trimmed)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             speakers = SpeakerDatabase.shared.allSpeakers()
+        }
+    }
+
+    // MARK: - Clip Playback Helpers
+
+    private func isClipPlaying(_ speakerId: UUID) -> Bool {
+        guard let clipURL = SpeakerClipExtractor.persistentClipURL(for: speakerId) else { return false }
+        return clipPlayer.isPlaying && clipPlayer.currentClipURL == clipURL
+    }
+
+    private func toggleClipPlayback(for speakerId: UUID) {
+        guard let clipURL = SpeakerClipExtractor.persistentClipURL(for: speakerId) else { return }
+        if isClipPlaying(speakerId) {
+            clipPlayer.stop()
+        } else {
+            clipPlayer.play(url: clipURL)
         }
     }
 

@@ -339,6 +339,15 @@ class TranscriptionTaskManager: ObservableObject {
         speakerDB.mergeDuplicates()
         speakerDB.pruneWeakProfiles()
 
+        // Build sortformer-ID → persistent DB UUID mapping for YAML
+        var speakerDbIds: [String: UUID] = [:]
+        for utterance in result.systemUtterances {
+            let sid = String(utterance.speakerId)
+            if let pid = utterance.persistentSpeakerId, speakerDbIds[sid] == nil {
+                speakerDbIds[sid] = pid
+            }
+        }
+
         // Phase 2: Save transcript with speaker names
         await MainActor.run {
             self.displayStatus = .finishing
@@ -348,6 +357,7 @@ class TranscriptionTaskManager: ObservableObject {
             result,
             speakerMappings: speakerMappings,
             speakerSources: speakerSources,
+            speakerDbIds: speakerDbIds,
             directory: outputFolder,
             healthInfo: healthInfo
         ) else {
@@ -373,6 +383,11 @@ class TranscriptionTaskManager: ObservableObject {
                     utterances: result.systemUtterances,
                     speakerDB: speakerDB
                 )
+
+                // Persist clips so they survive naming tray dismissal
+                for clip in clips {
+                    SpeakerClipExtractor.persistClip(from: clip.clipURL, speakerId: clip.persistentSpeakerId)
+                }
 
                 if !clips.isEmpty {
                     let entries = clips.map { clip in

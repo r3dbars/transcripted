@@ -93,6 +93,37 @@ enum SpeakerClipExtractor {
         return results
     }
 
+    // MARK: - Persistent Clips
+
+    /// Persistent clips directory alongside transcripts
+    static var clipsDirectory: URL {
+        TranscriptSaver.defaultSaveDirectory.appendingPathComponent("speaker_clips")
+    }
+
+    /// Copy a temporary clip to persistent storage, keyed by speaker UUID.
+    /// Overwrites any existing clip for this speaker (keeps the latest).
+    static func persistClip(from tempClipURL: URL, speakerId: UUID) {
+        let dir = clipsDirectory
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dest = dir.appendingPathComponent("\(speakerId.uuidString).wav")
+        try? FileManager.default.removeItem(at: dest)
+        try? FileManager.default.copyItem(at: tempClipURL, to: dest)
+    }
+
+    /// Look up persistent clip URL for a speaker. Returns nil if no clip exists.
+    static func persistentClipURL(for speakerId: UUID) -> URL? {
+        let url = clipsDirectory.appendingPathComponent("\(speakerId.uuidString).wav")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// Delete persistent clip when a speaker profile is removed.
+    static func deletePersistedClip(for speakerId: UUID) {
+        let url = clipsDirectory.appendingPathComponent("\(speakerId.uuidString).wav")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    // MARK: - Temporary Clip Cleanup
+
     /// Clean up temporary clip files
     static func cleanupClips(_ clips: [ClipResult]) {
         for clip in clips {

@@ -18,6 +18,7 @@ struct SpeakerNamingView: View {
 
     @State private var isAppearing = false
     @State private var updates: [UUID: SpeakerNameUpdate] = [:]
+    @State private var canDismiss = false
     @StateObject private var clipPlayer = ClipAudioPlayer()
 
     var body: some View {
@@ -64,6 +65,10 @@ struct SpeakerNamingView: View {
         .opacity(isAppearing ? 1.0 : 0.0)
         .onAppear {
             withAnimation(.trayExpand) { isAppearing = true }
+            // Prevent accidental dismissal — button enables after 3s
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                withAnimation(.easeInOut(duration: 0.2)) { canDismiss = true }
+            }
         }
         .onDisappear {
             isAppearing = false
@@ -86,14 +91,6 @@ struct SpeakerNamingView: View {
                 .tracking(0.8)
 
             Spacer()
-
-            Button(action: skipNaming) {
-                Text("Skip")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.panelTextMuted)
-            }
-            .buttonStyle(PlainButtonStyle())
-            .help("Skip naming — keep default labels")
         }
         .padding(.horizontal, Spacing.ms)
         .padding(.vertical, Spacing.xs + 2)
@@ -129,14 +126,16 @@ struct SpeakerNamingView: View {
     private var footer: some View {
         Button(action: submitNaming) {
             HStack(spacing: 4) {
-                Image(systemName: "checkmark.circle")
+                let namedCount = updates.count
+                let totalCount = request.speakers.count
+
+                Image(systemName: namedCount > 0 ? "checkmark.circle.fill" : "checkmark.circle")
                     .font(.system(size: 10, weight: .medium))
-                Text("Done")
+                    .foregroundColor(namedCount > 0 ? .statusSuccessMuted : .panelTextSecondary)
+                Text(namedCount > 0 ? "Done" : "Skip")
                     .font(.system(size: 11, weight: .medium))
                 Spacer()
 
-                let namedCount = updates.count
-                let totalCount = request.speakers.count
                 if namedCount > 0 {
                     Text("\(namedCount)/\(totalCount)")
                         .font(.system(size: 10, design: .monospaced))
@@ -150,6 +149,8 @@ struct SpeakerNamingView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
+        .disabled(!canDismiss)
+        .opacity(canDismiss ? 1.0 : 0.5)
         .background(Color.panelCharcoal.opacity(0.3))
     }
 
@@ -158,12 +159,8 @@ struct SpeakerNamingView: View {
     private func submitNaming() {
         clipPlayer.stop()
         let allUpdates = Array(updates.values)
+        AppLogger.pipeline.info("Speaker naming submitted by user", ["updates": "\(allUpdates.count)"])
         request.onComplete(allUpdates)
-    }
-
-    private func skipNaming() {
-        clipPlayer.stop()
-        request.onComplete([])
     }
 }
 
