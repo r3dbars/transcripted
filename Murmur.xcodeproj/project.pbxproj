@@ -63,6 +63,7 @@
 		A1002014 /* SpeakerDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002004 /* SpeakerDatabase.swift */; };
 		A1002015 /* TranscriptionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002005 /* TranscriptionTypes.swift */; };
 		A1002016 /* SpeakerClipExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002006 /* SpeakerClipExtractor.swift */; };
+		A1002018 /* EmbeddingClusterer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002007 /* EmbeddingClusterer.swift */; };
 		A100091F /* SpeakerNamingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100090F /* SpeakerNamingView.swift */; };
 		FA000011 /* libFluidAudioAll.a in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000001 /* libFluidAudioAll.a */; };
 		FA000012 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000002 /* Metal.framework */; };
@@ -151,6 +152,7 @@
 		A1002004 /* SpeakerDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDatabase.swift; sourceTree = "<group>"; };
 		A1002005 /* TranscriptionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTypes.swift; sourceTree = "<group>"; };
 		A1002006 /* SpeakerClipExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerClipExtractor.swift; sourceTree = "<group>"; };
+		A1002007 /* EmbeddingClusterer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingClusterer.swift; sourceTree = "<group>"; };
 		A100090F /* SpeakerNamingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerNamingView.swift; sourceTree = "<group>"; };
 		FA000001 /* libFluidAudioAll.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libFluidAudioAll.a; path = "fluidaudio-libs/libFluidAudioAll.a"; sourceTree = "<group>"; };
 		FA000002 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
@@ -418,6 +420,7 @@
 				A1002003 /* SortformerService.swift */,
 				A1002004 /* SpeakerDatabase.swift */,
 				A1002006 /* SpeakerClipExtractor.swift */,
+				A1002007 /* EmbeddingClusterer.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -614,6 +617,7 @@
 				A1002014 /* SpeakerDatabase.swift in Sources */,
 				A1002015 /* TranscriptionTypes.swift in Sources */,
 				A1002016 /* SpeakerClipExtractor.swift in Sources */,
+				A1002018 /* EmbeddingClusterer.swift in Sources */,
 				A100091F /* SpeakerNamingView.swift in Sources */,
 				A1003001 /* AppLogger.swift in Sources */,
 				A1003003 /* FileLogger.swift in Sources */,
