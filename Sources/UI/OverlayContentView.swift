@@ -27,6 +27,7 @@ struct OverlayContentView: View {
             }
             bottomToolbar
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(OverlayTokens.panelBg)
         .clipShape(RoundedRectangle(cornerRadius: OverlayTokens.cornerRadius, style: .continuous))
     }
@@ -56,6 +57,7 @@ struct OverlayContentView: View {
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(OverlayTokens.textPrimary)
                     }
+                    .frame(maxWidth: .infinity)
                 case (.drafting, _), (.streaming, _):
                     HStack(spacing: 6) {
                         ProgressView()
@@ -85,8 +87,10 @@ struct OverlayContentView: View {
                 }
             }
 
-            // Scrolling waveform during listening; spacer otherwise
-            if controller.state == .listening {
+            // Scrolling waveform during listening; spacer otherwise (skip for dictation drafting — centered above)
+            if controller.state == .drafting && controller.activeMode == .dictation {
+                // No spacer — Polishing content is centered via .frame(maxWidth: .infinity)
+            } else if controller.state == .listening {
                 ScrollingWaveformView(
                     level: sttRouter.audioLevel,
                     isActive: true
