@@ -32,6 +32,7 @@ class FloatingOverlayController: ObservableObject {
     @Published var errorMessage: String = ""
     @Published var loadingElapsedSeconds: Int = 0
     @Published var transcriptExpanded = false
+    @Published var hasContext: Bool = true
 
     /// Closures for Enter/Escape in review mode — set by DraftSessionController
     var onConfirm: (() -> Void)?

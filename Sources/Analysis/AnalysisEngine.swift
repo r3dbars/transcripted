@@ -178,11 +178,19 @@ class AnalysisEngine: ObservableObject {
         if let feedback = loadRecentLines(from: feedbackURL, limit: 50) {
             parts.append("\n<feedback_jsonl>\n\(feedback)\n</feedback_jsonl>")
         }
-        if let prompts = try? String(contentsOf: promptsURL, encoding: .utf8) {
+        do {
+            let prompts = try String(contentsOf: promptsURL, encoding: .utf8)
             parts.append("\n<prompts_json>\n\(prompts)\n</prompts_json>")
+        } catch {
+            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "analysis_file_read_failed",
+                message: error.localizedDescription, context: ["path": promptsURL.path])
         }
-        if let style = try? String(contentsOf: styleURL, encoding: .utf8) {
+        do {
+            let style = try String(contentsOf: styleURL, encoding: .utf8)
             parts.append("\n<style_profile>\n\(style)\n</style_profile>")
+        } catch {
+            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "analysis_file_read_failed",
+                message: error.localizedDescription, context: ["path": styleURL.path])
         }
         if let log = loadRecentLines(from: suggestionLogURL, limit: 20) {
             parts.append("\n<suggestion_log_jsonl>\n\(log)\n</suggestion_log_jsonl>")
@@ -269,12 +277,25 @@ class AnalysisEngine: ObservableObject {
     // MARK: - File I/O
 
     private func countLines(at url: URL) -> Int {
-        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return 0 }
-        return content.split(separator: "\n", omittingEmptySubsequences: true).count
+        do {
+            let content = try String(contentsOf: url, encoding: .utf8)
+            return content.split(separator: "\n", omittingEmptySubsequences: true).count
+        } catch {
+            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "analysis_file_read_failed",
+                message: error.localizedDescription, context: ["path": url.path, "operation": "countLines"])
+            return 0
+        }
     }
 
     private func loadRecentLines(from url: URL, limit: Int) -> String? {
-        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let content: String
+        do {
+            content = try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "analysis_file_read_failed",
+                message: error.localizedDescription, context: ["path": url.path, "operation": "loadRecentLines"])
+            return nil
+        }
         let lines = content.split(separator: "\n", omittingEmptySubsequences: true)
         let recent = lines.suffix(limit)
         return recent.isEmpty ? nil : recent.joined(separator: "\n")
@@ -308,11 +329,18 @@ class AnalysisEngine: ObservableObject {
             "saw": card.saw,
             "why": card.why
         ]
-        guard let data = try? JSONSerialization.data(withJSONObject: entry),
-              let line = String(data: data, encoding: .utf8)
-        else {
+        let data: Data
+        do {
+            data = try JSONSerialization.data(withJSONObject: entry)
+        } catch {
             EventReporter.shared.capture(level: .warning, engine: "analysis", event: "suggestion_write_failed",
-                message: "Failed to encode suggestion log entry", context: ["action": action, "suggestion_id": card.suggestionId])
+                message: "Failed to serialize suggestion log entry: \(error.localizedDescription)",
+                context: ["action": action, "suggestion_id": card.suggestionId])
+            return
+        }
+        guard let line = String(data: data, encoding: .utf8) else {
+            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "suggestion_write_failed",
+                message: "Failed to convert suggestion data to UTF-8", context: ["action": action, "suggestion_id": card.suggestionId])
             return
         }
         let lineWithNewline = (line + "\n").data(using: .utf8) ?? Data()

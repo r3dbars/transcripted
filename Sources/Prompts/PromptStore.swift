@@ -279,10 +279,18 @@ class PromptStore: ObservableObject {
             print("⚠️ PROMPTS | failed to create directory \(storageDir.path): \(error.localizedDescription)")
         }
 
-        if FileManager.default.fileExists(atPath: storeURL.path),
-           let data = try? Data(contentsOf: storeURL),
-           let loaded = try? JSONDecoder().decode(PromptConfig.self, from: data) {
-            config = loaded
+        if FileManager.default.fileExists(atPath: storeURL.path) {
+            do {
+                let data = try Data(contentsOf: storeURL)
+                let loaded = try JSONDecoder().decode(PromptConfig.self, from: data)
+                config = loaded
+            } catch {
+                print("⚠️ PROMPTS | failed to load prompts.json: \(error.localizedDescription)")
+                // Can't use EventReporter here — it may not be initialized yet during app launch.
+                // Fall back to defaults so the app still works.
+                config = .defaults
+                Self.write(config: .defaults, to: storeURL)
+            }
         } else {
             config = .defaults
             Self.write(config: .defaults, to: storeURL)
@@ -297,6 +305,8 @@ class PromptStore: ObservableObject {
             config = loaded
         } catch {
             print("⚠️ PROMPTS | failed to reload prompts.json: \(error.localizedDescription)")
+            EventReporter.shared.capture(level: .warning, engine: "app", event: "prompts_load_failed",
+                message: error.localizedDescription, context: ["path": storeURL.path])
         }
     }
 

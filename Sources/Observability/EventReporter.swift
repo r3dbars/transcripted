@@ -53,9 +53,15 @@ private actor EventFileWriter {
     }
 
     func append(_ event: ObservabilityEvent) {
-        guard let data = try? encoder.encode(event),
-              let line = String(data: data, encoding: .utf8) else {
-            print("⚠️ EVENT | failed to encode event: \(event.event)")
+        let data: Data
+        do {
+            data = try encoder.encode(event)
+        } catch {
+            fputs("⚠️ EVENT | failed to encode event '\(event.event)': \(error.localizedDescription)\n", stderr)
+            return
+        }
+        guard let line = String(data: data, encoding: .utf8) else {
+            fputs("⚠️ EVENT | failed to convert encoded data to UTF-8 for event: \(event.event)\n", stderr)
             return
         }
 
@@ -63,10 +69,11 @@ private actor EventFileWriter {
 
         if FileManager.default.fileExists(atPath: fileURL.path) {
             if handle == nil {
-                handle = try? FileHandle(forWritingTo: fileURL)
-            }
-            if handle == nil {
-                print("⚠️ EVENT | failed to open FileHandle for \(fileURL.path)")
+                do {
+                    handle = try FileHandle(forWritingTo: fileURL)
+                } catch {
+                    fputs("⚠️ EVENT | failed to open FileHandle for \(fileURL.path): \(error.localizedDescription)\n", stderr)
+                }
             }
             handle?.seekToEndOfFile()
             handle?.write(lineData)
@@ -75,9 +82,13 @@ private actor EventFileWriter {
                 try lineData.write(to: fileURL)
                 print("📊 EVENT | created events.jsonl at \(fileURL.path)")
             } catch {
-                print("⚠️ EVENT | failed to create events.jsonl: \(error.localizedDescription)")
+                fputs("⚠️ EVENT | failed to create events.jsonl: \(error.localizedDescription)\n", stderr)
             }
-            handle = try? FileHandle(forWritingTo: fileURL)
+            do {
+                handle = try FileHandle(forWritingTo: fileURL)
+            } catch {
+                fputs("⚠️ EVENT | failed to open FileHandle after creation: \(error.localizedDescription)\n", stderr)
+            }
         }
     }
 

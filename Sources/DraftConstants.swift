@@ -55,8 +55,19 @@ enum DraftConstants {
     /// Live speech restart rate-limit window in seconds
     static let liveSpeechRestartWindowSeconds: TimeInterval = 10.0
 
+    /// Delay for audio engine re-warm after device change (nanoseconds)
+    static let audioRecoveryDelay: UInt64 = 300_000_000  // 300ms
+
     /// Delay for audio engine re-warm after system wake (nanoseconds)
     static let audioRewarmDelay: UInt64 = 500_000_000  // 500ms
+
+    // MARK: - Model Loading
+
+    /// Polling interval while waiting for voice model to load (nanoseconds)
+    static let modelLoadPollInterval: UInt64 = 200_000_000  // 200ms
+
+    /// Max polling iterations for model load (600 * 200ms = 120s timeout)
+    static let modelLoadMaxIterations = 600
 
     // MARK: - Clipboard
 
@@ -122,5 +133,5 @@ enum DraftConstants {
     // MARK: - Error Display
 
     /// Duration to show error messages in overlay before auto-dismiss (nanoseconds)
-    static let errorDismissDelay: UInt64 = 1_500_000_000  // 1.5 seconds
+    static let errorDismissDelay: UInt64 = 2_500_000_000  // 2.5 seconds
 }

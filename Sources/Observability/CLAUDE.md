@@ -10,6 +10,12 @@
 
 Same directory as `feedback.jsonl` and `prompts.json`. Claude Code reads this file directly.
 
+## Key Files
+
+- `EventReporter.swift` (~164 lines) — Centralized JSONL event writer + Sentry stub (details below)
+- `BetaTelemetry.swift` (~159 lines) — `#if BETA_BUILD` gated: batched event shipping to proxy Worker, incremental log/events.jsonl upload (60s timer), synchronous quit-time flush, crash-safe offset tracking
+- `UpdateManager.swift` (~225 lines) — DMG download, mount, staged app replacement with backup/rollback, version comparison via Info.plist, user-facing update prompts
+
 ## File: EventReporter.swift (~164 lines)
 
 Contains three components:
