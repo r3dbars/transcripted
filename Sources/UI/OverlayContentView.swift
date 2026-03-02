@@ -11,6 +11,8 @@ struct OverlayContentView: View {
     private var showContentArea: Bool {
         if controller.state == .idle { return false }
         if controller.state == .listening && !controller.transcriptExpanded { return false }
+        // Dictation stays compact during transcription — header spinner is enough
+        if controller.state == .drafting && controller.activeMode == .dictation { return false }
         return true
     }
 
@@ -51,8 +53,8 @@ struct OverlayContentView: View {
                             .controlSize(.mini)
                             .tint(OverlayTokens.accentGreen)
                         Text("Polishing...")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(OverlayTokens.textSecondary)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(OverlayTokens.textPrimary)
                     }
                 case (.drafting, _), (.streaming, _):
                     HStack(spacing: 6) {
