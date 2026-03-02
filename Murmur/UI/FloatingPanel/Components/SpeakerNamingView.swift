@@ -288,28 +288,37 @@ struct SpeakerNamingCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             }
 
-            // Merge-aware suggestions: show matching profiles with call count
+            // Autocomplete suggestions from speaker database
             if !nameText.isEmpty {
                 let profiles = matchingProfiles
-                if let topMatch = profiles.first {
-                    Button(action: {
-                        withAnimation(.snappy(duration: 0.15)) {
-                            mergeCandidate = topMatch
+                if !profiles.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(profiles.prefix(4), id: \.id) { profile in
+                            Button(action: {
+                                withAnimation(.snappy(duration: 0.15)) {
+                                    mergeCandidate = profile
+                                    nameText = profile.displayName ?? nameText
+                                }
+                            }) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "person.circle")
+                                        .font(.system(size: 9))
+                                    Text(profile.displayName ?? "")
+                                        .font(.system(size: 10, weight: .medium))
+                                    Text("(\(profile.callCount) calls)")
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.accentBlue.opacity(0.7))
+                                }
+                                .foregroundColor(.accentBlue)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.accentBlue.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                            }
+                            .buttonStyle(PlainButtonStyle())
                         }
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "link")
-                                .font(.system(size: 9))
-                            Text("\(topMatch.displayName ?? "") (\(topMatch.callCount) calls)")
-                                .font(.system(size: 10, weight: .medium))
-                        }
-                        .foregroundColor(.accentBlue)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.accentBlue.opacity(0.1))
-                        .clipShape(Capsule())
                     }
-                    .buttonStyle(PlainButtonStyle())
                     .padding(.leading, 24)  // align with text field
                 }
             }
@@ -397,6 +406,7 @@ struct SpeakerNamingCard: View {
     }
 
     private func confirmMerge() {
+        clipPlayer.stop()
         guard let candidate = mergeCandidate else { return }
         let name = candidate.displayName ?? nameText.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -474,6 +484,7 @@ struct SpeakerNamingCard: View {
     }
 
     private func confirmSpeaker() {
+        clipPlayer.stop()
         isConfirmed = true
         guard let name = entry.currentName else { return }
         onUpdate(SpeakerNameUpdate(
