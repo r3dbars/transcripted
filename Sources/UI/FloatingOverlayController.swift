@@ -314,7 +314,7 @@ class FloatingOverlayController: ObservableObject {
                 ctx.duration = 0.14
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
                 panel.animator().alphaValue = 0
-            }, completionHandler: {
+            }, completionHandler: { [weak self] in
                 self?._performHide()
             })
         }

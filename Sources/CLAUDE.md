@@ -29,7 +29,7 @@ The boot sequence in `DraftAppDelegate.applicationDidFinishLaunching()` has stri
    └→ overlayController.setup(sttRouter: appState.sttRouter)  // Creates NSPanel + hosting view
 
 4. Menubar setup
-   └→ NSStatusBar item + NSPopover with MenuBarPanelView
+   └→ NSStatusBar item + empty NSPopover (NO contentViewController — created on-demand in togglePopover())
 
 5. Async initialization (in Task { @MainActor })
    ├→ appState.initialize()     // Engine cross-wiring, analysis start, Parakeet model load
