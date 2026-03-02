@@ -175,6 +175,9 @@ class FloatingPanelController: NSWindowController, NSWindowDelegate {
                 case .transcriptSaved:
                     // Don't interrupt an active recording with success from a background task
                     guard !self.audio.isRecording else { break }
+                    // Don't show success animation if speaker naming is pending —
+                    // the naming tray IS the post-transcription UI
+                    guard self.taskManager.speakerNamingRequest == nil else { break }
                     // Show success briefly in pill, then return to idle
                     if self.pillStateManager.state != .processing {
                         self.pillStateManager.transition(to: .processing)
@@ -204,8 +207,9 @@ class FloatingPanelController: NSWindowController, NSWindowDelegate {
     private func scheduleReturnToIdle(delay: TimeInterval) {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self = self else { return }
-            // Only return to idle if not recording and not locked (reviewing)
+            // Only return to idle if not recording, not locked, and not naming speakers
             guard !self.audio.isRecording, !self.pillStateManager.isLocked else { return }
+            guard self.taskManager.speakerNamingRequest == nil else { return }
             self.pillStateManager.transition(to: .idle)
         }
     }
