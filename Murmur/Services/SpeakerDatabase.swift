@@ -492,6 +492,41 @@ final class SpeakerDatabase {
         }
     }
 
+    // MARK: - Weak Profile Pruning
+
+    /// Remove unnamed, low-confidence, single-call profiles older than 1 hour.
+    /// These are typically noise from AHC over-splitting one speaker into multiple clusters.
+    /// Safe to call after each transcription — only prunes stale orphans, never recent profiles.
+    func pruneWeakProfiles() {
+        queue.sync {
+            pruneWeakProfilesImpl()
+        }
+    }
+
+    private func pruneWeakProfilesImpl() {
+        // Only prune profiles created more than 1 hour ago — don't prune profiles from
+        // the current recording that are about to be named in the speaker naming flow.
+        let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+
+        let sql = """
+        DELETE FROM speakers
+        WHERE display_name IS NULL
+          AND call_count <= 1
+          AND confidence <= 0.5
+          AND first_seen < ?;
+        """
+        var statement: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
+            sqlite3_bind_text(statement, 1, (cutoff as NSString).utf8String, -1, nil)
+            sqlite3_step(statement)
+            let pruned = Int(sqlite3_changes(db))
+            if pruned > 0 {
+                AppLogger.speakers.info("Pruned weak profiles", ["count": "\(pruned)"])
+            }
+        }
+        sqlite3_finalize(statement)
+    }
+
     // MARK: - Name Variant Detection
 
     /// Common English name variants (informal → formal and vice versa)
