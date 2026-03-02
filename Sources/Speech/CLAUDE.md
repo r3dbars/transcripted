@@ -6,7 +6,7 @@ Audio recording and transcription via **ParakeetEngine** — a CoreML-based STT 
 
 ## Key Files
 
-- `ParakeetEngine.swift` (561 lines) — `@MainActor ObservableObject`: AVAudioEngine tap, NSLock-batched sample collection, live Apple Speech display with restart rate limiting, CoreML batch inference via FluidAudio AsrManager, audio level metering, device change handling, `ParakeetModelState` enum for download/load progress
+- `ParakeetEngine.swift` (578 lines) — `@MainActor ObservableObject`: AVAudioEngine tap, NSLock-batched sample collection, live Apple Speech display with restart rate limiting, CoreML batch inference via FluidAudio AsrManager, audio level metering, device change handling, `ParakeetModelState` enum for download/load progress
 - `STTRouter.swift` (54 lines) — Wrapper forwarding 5 `@Published` properties (`isRecording`, `isTranscribing`, `audioLevel`, `liveTranscript`, `recordingInterrupted`) from ParakeetEngine via Combine `assign(to:)`. Gates `startRecording()` on `isModelLoaded` and logs a warning via `EventReporter` if the model is not ready. Passes through `isModelLoaded` and `inputDeviceName` as computed properties. Also exposes `stopRecording()`, `transcribe()`, and `cancel()` as direct pass-throughs to ParakeetEngine.
 - `AudioResampler.swift` (28 lines) — Pure Swift linear-interpolation sample rate conversion (native → 16kHz for Parakeet). No dependencies. Stateless `enum` with a single `resample(_:from:to:)` static method.
 

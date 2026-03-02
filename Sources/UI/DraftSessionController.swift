@@ -76,6 +76,7 @@ class DraftSessionController: ObservableObject {
         appState.drafter.clear()
 
         // Show overlay and start recording
+        overlayController.hasContext = true
         overlayController.activeMode = .draft
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
@@ -91,11 +92,11 @@ class DraftSessionController: ObservableObject {
             streamingTask?.cancel()
             streamingTask = Task { [weak self] in
                 guard let self = self else { return }
-                // Poll every 200ms for up to 120 seconds
-                for _ in 0..<600 {
+                // Poll for model readiness (200ms intervals, up to 120s)
+                for _ in 0..<DraftConstants.modelLoadMaxIterations {
                     guard !Task.isCancelled else { return }
                     if await self.appState?.sttRouter.isModelLoaded == true { break }
-                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    try? await Task.sleep(nanoseconds: DraftConstants.modelLoadPollInterval)
                 }
                 guard !Task.isCancelled else { return }
                 guard await self.appState?.sttRouter.isModelLoaded == true else {
@@ -296,10 +297,10 @@ class DraftSessionController: ObservableObject {
             streamingTask?.cancel()
             streamingTask = Task { [weak self] in
                 guard let self = self else { return }
-                for _ in 0..<600 {
+                for _ in 0..<DraftConstants.modelLoadMaxIterations {
                     guard !Task.isCancelled else { return }
                     if await self.appState?.sttRouter.isModelLoaded == true { break }
-                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    try? await Task.sleep(nanoseconds: DraftConstants.modelLoadPollInterval)
                 }
                 guard !Task.isCancelled else { return }
                 guard await self.appState?.sttRouter.isModelLoaded == true else {
@@ -416,6 +417,7 @@ class DraftSessionController: ObservableObject {
 
         guard let auth = AuthCredential.load(), let imageData = imageData else {
             appState.logger.log("SESSION | no auth or screenshot, proceeding voice-only")
+            overlayController?.hasContext = false
             return
         }
 
@@ -439,6 +441,7 @@ class DraftSessionController: ObservableObject {
             appState.logger.log("SESSION | vision timeout/error: \(error.localizedDescription), proceeding voice-only")
             EventReporter.shared.capture(level: .warning, engine: "overlay", event: "vision_timeout",
                 message: error.localizedDescription)
+            overlayController?.hasContext = false
             // Proceed without context — voiceText alone is enough to draft
         }
     }

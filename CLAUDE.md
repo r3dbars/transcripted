@@ -12,6 +12,7 @@ Sources/
 ├── DraftAppState.swift      ← Centralized engine ownership (lives in AppDelegate, survives window cycles)
 ├── DraftPaths.swift         ← FileManager extension: draftAppSupportDir (~/Library/Application Support/Draft/)
 ├── DraftConstants.swift     ← Centralized configuration constants (timeouts, thresholds, limits)
+├── HotkeyPreferences.swift  ← Stores/loads custom hotkey bindings (UserDefaults), Carbon modifier conversion, display strings
 ├── CLAUDE.md                ← Initialization order and boot sequence documentation
 ├── Speech/                  ← ParakeetEngine (CoreML STT) + STTRouter
 ├── API/                     ← Anthropic API client (text + vision + streaming) + AuthCredential + Keychain
@@ -24,10 +25,9 @@ Sources/
 ├── Analysis/                ← AnalysisEngine — native Swift feedback analyzer (replaces Python agent)
 ├── Accessibility/           ← AccessibilityBridge — AXUIElement queries for text field position + value
 ├── Observability/           ← EventReporter — centralized error/warning/info tracking (events.jsonl)
-└── UI/                      ← Floating overlay (6 files), MenuBarPanel (single-pane), onboarding, AgentSection
-Tests/                       ← Pure-function test suite (153 tests, no XCTest, 2s compile+run)
+└── UI/                      ← UI layer (20 files): floating overlay, MenuBarPanel, onboarding, AgentSection
+Tests/                       ← Pure-function test suite (159 tests, no XCTest, 2s compile+run)
 run-tests.sh                 ← Compiles and runs the test suite
-Tests/                       ← Pure function test suite (75 tests, no XCTest/Xcode dependency)
 ```
 
 **Each subfolder in Sources/ has its own CLAUDE.md with component-specific knowledge. Read the relevant CLAUDE.md before modifying any file in that folder.**
@@ -37,7 +37,7 @@ Tests/                       ← Pure function test suite (75 tests, no XCTest/X
 ```bash
 cd /Users/****/Draft
 bash build.sh        # Compile + sign + launch (~5s)
-bash run-tests.sh    # Run 153 unit tests (pure functions only, ~2s)
+bash run-tests.sh    # Run 159 unit tests (pure functions only, ~2s)
 ```
 
 **After modifying any Swift file, always run both commands.** `build.sh` compiles all Swift files from `Sources/`, signs the app bundle, and launches it. `run-tests.sh` compiles only the pure source files needed by tests (no SwiftUI/Combine/FluidAudio) — fast and CI-friendly.
@@ -273,7 +273,7 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - **Clipboard restore via changeCount polling** — `pasteWithClipboardRestore()` polls `NSPasteboard.changeCount` every 50ms with a 2-second timeout (some apps write back to clipboard on paste, which triggers early restore). Replaces the old fixed 500ms delay.
 - **Debug log rotation** — `AppLogFileWriter` preserves logs across sessions (no wipe on launch). Files over 500KB are rotated to the last 1000 lines. Session separators mark boundaries.
 - **Centralized constants** — `DraftConstants` enum in `Sources/DraftConstants.swift` holds timeouts, thresholds, retry delays, buffer sizes, and data limits. Use these instead of inline magic numbers when modifying configuration-like values.
-- **Pure-function test suite** — 153 tests in `Tests/` covering CapturedContext, PlatformFormatter, DraftUtils, MessageFilter, StyleUtils, InsightCard, and AnthropicAPIError. Compiled with `swiftc` (no Xcode/XCTest dependency), runs in ~2 seconds. **Always run `bash build.sh && bash run-tests.sh` after modifying any Swift file.**
+- **Pure-function test suite** — 159 tests in `Tests/` covering CapturedContext, PlatformFormatter, DraftUtils, MessageFilter, StyleUtils, InsightCard, and AnthropicAPIError. Compiled with `swiftc` (no Xcode/XCTest dependency), runs in ~2 seconds. **Always run `bash build.sh && bash run-tests.sh` after modifying any Swift file.**
 - **Extracted pure utilities for testability** — `StyleUtils`, `DraftUtils`, `MessageFilter` are stateless enums with static methods, extracted from `@MainActor ObservableObject` classes so they can be tested without SwiftUI. `AnthropicAPITypes.swift` holds the error enum and Codable types separate from the API client.
 
 ## Project-Wide Learnings

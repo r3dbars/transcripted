@@ -7,12 +7,16 @@ SwiftUI views for the Draft app. The primary UI is a **floating overlay** (non-a
 ## Key Files
 
 - `FloatingOverlayPanel.swift` (~37 lines) — NSPanel subclass (non-activating, dynamic key status)
-- `FloatingOverlayController.swift` (~362 lines) — State machine, animations, panel lifecycle, global Escape monitor
-- `OverlayContentView.swift` (~252 lines) — SwiftUI views for all 5 overlay states (idle/listening/drafting/streaming/review)
-- `DraftSessionController.swift` (~439 lines) — Session orchestration for draft mode (⌥D) and dictation mode (⌥Space)
+- `FloatingOverlayController.swift` (~433 lines) — State machine, animations, panel lifecycle, global Escape monitor
+- `OverlayContentView.swift` (~312 lines) — SwiftUI views for all 6 overlay states (idle/loading/listening/drafting/streaming/review)
+- `DraftSessionController.swift` (~579 lines) — Session orchestration for draft mode (⌥D) and dictation mode (⌥Space)
 - `OverlayTokens.swift` (~48 lines) — Design tokens: `OverlayTokens` for floating overlay (translucent dark), `MenuTokens` for menubar panel (system-adaptive colors, layout constants)
-- `PanelDragView.swift` (~23 lines) — AppKit drag helper (mouseDown → performDrag)
-- `MenuBarPanel.swift` (~350 lines) — Single-pane menubar popover (440x520): header (status dot), usage stats, shortcut pills, writing style (compact/expandable), agent section, onboarding gates, settings gear
+- `PanelDragView.swift` (~37 lines) — AppKit drag helper (mouseDown → performDrag)
+- `MenuBarPanel.swift` (~415 lines) — Single-pane menubar popover (440x520): header (status dot), usage stats, shortcut pills, writing style (compact/expandable), agent section, onboarding gates, settings gear
+- `OnboardingView.swift` (~876 lines) — 8-step interactive onboarding: welcome → permissions → try dictation → try drafting → fake conversation → try context draft → style setup → complete. The largest UI file.
+- `OnboardingWindowController.swift` (~88 lines) — NSWindowController that hosts the onboarding SwiftUI view in a standalone window
+- `PermissionsOnboardingView.swift` (~252 lines) — Permission checker for mic, speech, screen capture with live polling and System Settings deep links
+- `HotkeyRecorderView.swift` (~142 lines) — Compact keyboard shortcut recorder for settings popover, uses NSEvent local monitor for key capture
 - `AgentTab.swift` (~287 lines) — `AgentSection` struct: simplified insight cards (Apply/Skip) + streaming chat interface with expandable tool use indicators
 - `StyleOnboardingView.swift` (~664 lines) — 5-step onboarding: intro → source choice → (iMessage/paste) → result
 - `APIKeyEntryView.swift` (~231 lines) — Auth setup overlay: name + API key or subscription token

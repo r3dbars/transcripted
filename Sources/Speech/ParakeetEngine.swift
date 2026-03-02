@@ -215,7 +215,7 @@ class ParakeetEngine: ObservableObject {
         // accessing inputNode immediately can throw an ObjC exception that
         // kills the process without a crash report.
         Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 300_000_000)  // 300ms
+            try? await Task.sleep(nanoseconds: DraftConstants.audioRecoveryDelay)
             guard let self = self else { return }
             do {
                 let newFormat = self.audioEngine.inputNode.outputFormat(forBus: 0)
@@ -258,7 +258,7 @@ class ParakeetEngine: ObservableObject {
 
         // Re-warm after a brief delay to let audio hardware reinitialize
         Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 500_000_000)  // 500ms
+            try? await Task.sleep(nanoseconds: DraftConstants.audioRewarmDelay)
             self?.prewarm()
         }
     }

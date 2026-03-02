@@ -46,7 +46,12 @@ final class BetaTelemetry {
             if let app = sourceApp { body["source_app"] = app }
             if !payload.isEmpty { body["payload"] = payload }
 
-            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            do {
+                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            } catch {
+                fputs("⚠️ TELEMETRY | failed to serialize event body: \(error.localizedDescription)\n", stderr)
+                return
+            }
             _ = try? await URLSession.shared.data(for: request)
         }
     }
@@ -88,7 +93,12 @@ final class BetaTelemetry {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         auth.apply(to: &request)
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            fputs("⚠️ TELEMETRY | failed to serialize quit-time log body: \(error.localizedDescription)\n", stderr)
+            return
+        }
 
         // Synchronous wait — applicationWillTerminate can't use async
         let semaphore = DispatchSemaphore(value: 0)
@@ -117,7 +127,12 @@ final class BetaTelemetry {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         auth.apply(to: &request)
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            fputs("⚠️ TELEMETRY | failed to serialize incremental log body: \(error.localizedDescription)\n", stderr)
+            return
+        }
 
         do {
             let (_, response) = try await URLSession.shared.data(for: request)

@@ -15,14 +15,22 @@ private actor AppLogFileWriter {
 
         let fm = FileManager.default
         if fm.fileExists(atPath: path) {
-            if let attrs = try? fm.attributesOfItem(atPath: path),
-               let size = attrs[.size] as? UInt64, size > DraftConstants.logRotationThreshold {
-                if let data = fm.contents(atPath: path),
-                   let content = String(data: data, encoding: .utf8) {
-                    let lines = content.components(separatedBy: "\n")
-                    let kept = lines.suffix(DraftConstants.logRotationKeepLines).joined(separator: "\n")
-                    try? kept.write(toFile: path, atomically: true, encoding: .utf8)
+            do {
+                let attrs = try fm.attributesOfItem(atPath: path)
+                if let size = attrs[.size] as? UInt64, size > DraftConstants.logRotationThreshold {
+                    if let data = fm.contents(atPath: path),
+                       let content = String(data: data, encoding: .utf8) {
+                        let lines = content.components(separatedBy: "\n")
+                        let kept = lines.suffix(DraftConstants.logRotationKeepLines).joined(separator: "\n")
+                        do {
+                            try kept.write(toFile: path, atomically: true, encoding: .utf8)
+                        } catch {
+                            fputs("⚠️ LOGGER | log rotation write failed: \(error.localizedDescription)\n", stderr)
+                        }
+                    }
                 }
+            } catch {
+                fputs("⚠️ LOGGER | failed to read log file attributes: \(error.localizedDescription)\n", stderr)
             }
             // File exists and is either small enough or just rotated — open for append
         } else {
