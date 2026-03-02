@@ -111,7 +111,19 @@ class Transcription: ObservableObject {
             }
 
             AppLogger.transcription.info("Running Sortformer diarization on system audio")
-            let speakerSegments = try await sortformer.diarize(samples: systemSamples, sampleRate: 16000)
+            let rawSegments = try await sortformer.diarize(samples: systemSamples, sampleRate: 16000)
+
+            // Re-cluster speaker assignments using AHC on WeSpeaker embeddings.
+            // Sortformer's streaming clustering is mediocre at grouping similar voices;
+            // AHC with cosine similarity produces more accurate speaker counts.
+            let sortformerSpeakerCount = Set(rawSegments.map { $0.speakerId }).count
+            let speakerSegments = EmbeddingClusterer.recluster(segments: rawSegments)
+            let ahcSpeakerCount = Set(speakerSegments.map { $0.speakerId }).count
+            AppLogger.transcription.info("Re-clustered speakers", [
+                "before": "\(sortformerSpeakerCount)",
+                "after": "\(ahcSpeakerCount)",
+                "segments": "\(speakerSegments.count)"
+            ])
 
             onProgress?(0.30)
 
