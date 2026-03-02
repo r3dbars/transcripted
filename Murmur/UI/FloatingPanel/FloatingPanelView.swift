@@ -121,9 +121,23 @@ struct FloatingPanelView: View {
         // Auto-show naming tray when a naming request arrives; auto-hide when it clears
         .onChange(of: taskManager.speakerNamingRequest != nil) { _, hasRequest in
             if hasRequest {
-                withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                    showTranscriptTray = false  // close transcript tray
-                    showSpeakerNaming = true
+                if pillStateManager.state == .idle {
+                    // Background processing just finished — pill has been idle.
+                    // Play completion sound as heads-up, then show naming tray
+                    // after a brief delay so it doesn't appear mid-drag.
+                    PillSounds.playComplete()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                            showTranscriptTray = false
+                            showSpeakerNaming = true
+                        }
+                    }
+                } else {
+                    // Pill is still in processing — show tray immediately
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                        showTranscriptTray = false
+                        showSpeakerNaming = true
+                    }
                 }
             } else {
                 // Request cleared by handleNamingComplete — dismiss tray
