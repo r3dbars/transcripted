@@ -203,6 +203,26 @@ class Transcription: ObservableObject {
                 }
             }
 
+            // Merge speaker IDs that matched the same DB profile.
+            // Fixes cross-cluster fragmentation: if Sortformer split one person
+            // into spk1 and spk3, and DB matching identified both as the same
+            // profile, unify them under the speaker ID with the most segments.
+            var speakerIdRemap: [Int: Int] = [:]
+            let profileToSpeakers = Dictionary(grouping: speakerMatchResults.keys) { speakerMatchResults[$0]!.persistentId }
+            for (_, matchedSpeakerIds) in profileToSpeakers where matchedSpeakerIds.count >= 2 {
+                let sorted = matchedSpeakerIds.sorted { a, b in
+                    embeddingsPerSpeaker[a]?.count ?? 0 > embeddingsPerSpeaker[b]?.count ?? 0
+                }
+                let canonical = sorted[0]
+                for other in sorted.dropFirst() {
+                    speakerIdRemap[other] = canonical
+                }
+                AppLogger.transcription.info("Merged speaker IDs with same DB profile", [
+                    "merged": sorted.dropFirst().map { "spk\($0)" }.joined(separator: "+"),
+                    "canonical": "spk\(canonical)"
+                ])
+            }
+
             for (index, segment) in speakerSegments.enumerated() {
                 // Extract audio slice for this segment
                 let segmentSamples = AudioResampler.extractSlice(
@@ -220,14 +240,17 @@ class Transcription: ObservableObject {
                 // Skip empty transcriptions
                 guard !text.isEmpty else { continue }
 
+                // Apply remap (unifies speakers that matched the same DB profile)
+                let effectiveSpeakerId = speakerIdRemap[segment.speakerId] ?? segment.speakerId
+
                 // Use the pre-computed per-speaker match result
                 let persistentId: UUID?
                 let similarity: Double?
-                if let match = speakerMatchResults[segment.speakerId] {
+                if let match = speakerMatchResults[effectiveSpeakerId] {
                     persistentId = match.persistentId
                     similarity = match.similarity
                 } else {
-                    persistentId = speakerNewProfiles[segment.speakerId]
+                    persistentId = speakerNewProfiles[effectiveSpeakerId]
                     similarity = nil
                 }
 
@@ -235,7 +258,7 @@ class Transcription: ObservableObject {
                     start: segment.startTime,
                     end: segment.endTime,
                     channel: 1,
-                    speakerId: segment.speakerId,
+                    speakerId: effectiveSpeakerId,
                     persistentSpeakerId: persistentId,
                     matchSimilarity: similarity,
                     transcript: text
