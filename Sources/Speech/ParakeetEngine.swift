@@ -50,6 +50,7 @@ class ParakeetEngine: ObservableObject {
     // FluidAudio ASR
     private var asrManager: AsrManager?
     private var initTask: Task<Void, Never>?
+    private var audioWatchdogTask: Task<Void, Never>?
 
     var isModelLoaded: Bool { asrManager?.isAvailable ?? false }
 
@@ -145,6 +146,17 @@ class ParakeetEngine: ObservableObject {
         do {
             let inputNode = audioEngine.inputNode
             let nativeFormat = inputNode.outputFormat(forBus: 0)
+
+            // Validate audio format — after sleep, the input node may return a zero-rate
+            // format if CoreAudio hardware hasn't fully reinitialized.
+            guard nativeFormat.sampleRate > 0, nativeFormat.channelCount > 0 else {
+                print("⚠️ PARAKEET | prewarm skipped — audio format invalid (sr: \(nativeFormat.sampleRate), ch: \(nativeFormat.channelCount))")
+                EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "prewarm_invalid_format",
+                    message: "Audio format invalid during prewarm",
+                    context: ["sample_rate": "\(nativeFormat.sampleRate)", "channels": "\(nativeFormat.channelCount)"])
+                return
+            }
+
             nativeSampleRate = nativeFormat.sampleRate
 
             audioEngine.prepare()
@@ -256,16 +268,24 @@ class ParakeetEngine: ObservableObject {
                 message: "Recording interrupted by system sleep/wake")
         }
 
-        // Re-warm after a brief delay to let audio hardware reinitialize
+        // Re-warm after a delay to let audio hardware reinitialize.
+        // Retry once if the first attempt fails (CoreAudio may need more time).
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: DraftConstants.audioRewarmDelay)
-            self?.prewarm()
+            guard let self = self else { return }
+            self.prewarm()
+
+            if !self.isEnginePrewarmed {
+                print("⚠️ PARAKEET | first prewarm after wake failed, retrying in 1s")
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                self.prewarm()
+            }
         }
     }
 
     // MARK: - Recording
 
-    func startRecording() -> Bool {
+    func startRecording(isRecoveryAttempt: Bool = false) -> Bool {
         guard !isRecording else { return true }
         guard isModelLoaded else {
             print("⚠️ PARAKEET | cannot start recording — model not loaded")
@@ -357,11 +377,67 @@ class ParakeetEngine: ObservableObject {
         committedLiveText = ""
         startLiveSpeech()
         print("🎤 PARAKEET | recording started (\(inputDeviceName), \(nativeSampleRate)Hz)")
+
+        // Watchdog: detect zombie audio engine (running but no samples flowing after sleep/wake).
+        // Only on first attempt — recovery attempt doesn't re-watchdog to prevent infinite loops.
+        if !isRecoveryAttempt {
+            startAudioWatchdog()
+        }
+
         return true
+    }
+
+    /// Watchdog that detects zombie audio engines — running but producing no samples.
+    /// After sleep/wake, CoreAudio may report the engine as running but the hardware graph
+    /// is disconnected. If no samples arrive within 2 seconds, tear down and retry once.
+    private func startAudioWatchdog() {
+        audioWatchdogTask?.cancel()
+        audioWatchdogTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: DraftConstants.audioWatchdogTimeout)
+            guard let self = self, self.isRecording, !Task.isCancelled else { return }
+
+            self.pendingSamplesLock.lock()
+            let sampleCount = self.pendingSamples.count + self.sampleBuffer.count
+            self.pendingSamplesLock.unlock()
+
+            guard sampleCount == 0 else { return }  // Audio is flowing — all good
+
+            print("⚠️ PARAKEET | no audio samples after 2s — zombie engine detected, attempting recovery")
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "zombie_engine_detected",
+                message: "No audio samples received after recording start — resetting engine",
+                context: ["audio_device": self.inputDeviceName])
+
+            // Full teardown
+            self.stopLiveSpeech()
+            self.audioEngine.inputNode.removeTap(onBus: 0)
+            self.audioEngine.stop()
+            self.isEnginePrewarmed = false
+            self.isRecording = false
+            self.audioLevel = 0
+
+            // Brief delay for hardware to reinitialize
+            try? await Task.sleep(nanoseconds: DraftConstants.audioRecoveryDelay)
+            guard !Task.isCancelled else { return }
+
+            // Retry once — isRecoveryAttempt prevents another watchdog
+            if self.startRecording(isRecoveryAttempt: true) {
+                print("✅ PARAKEET | zombie engine recovered — recording restarted")
+                EventReporter.shared.capture(level: .info, engine: "parakeet", event: "zombie_engine_recovered",
+                    message: "Audio engine recovered after reset")
+            } else {
+                print("❌ PARAKEET | zombie engine recovery failed")
+                EventReporter.shared.capture(level: .error, engine: "parakeet", event: "zombie_engine_recovery_failed",
+                    message: "Audio engine could not recover after reset",
+                    context: ["audio_device": self.inputDeviceName])
+                self.recordingInterrupted = true
+            }
+        }
     }
 
     func stopRecording() {
         guard isRecording else { return }
+        audioWatchdogTask?.cancel()
+        audioWatchdogTask = nil
         stopLiveSpeech()
         audioEngine.inputNode.removeTap(onBus: 0)
         pendingSamplesLock.lock()
@@ -544,6 +620,8 @@ class ParakeetEngine: ObservableObject {
     // MARK: - Cleanup
 
     func cancel() {
+        audioWatchdogTask?.cancel()
+        audioWatchdogTask = nil
         if isRecording {
             stopLiveSpeech()
             audioEngine.inputNode.removeTap(onBus: 0)
