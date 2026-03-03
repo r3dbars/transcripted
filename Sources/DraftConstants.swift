@@ -59,7 +59,12 @@ enum DraftConstants {
     static let audioRecoveryDelay: UInt64 = 300_000_000  // 300ms
 
     /// Delay for audio engine re-warm after system wake (nanoseconds)
-    static let audioRewarmDelay: UInt64 = 500_000_000  // 500ms
+    /// Increased from 500ms to 1s — CoreAudio needs time to fully reinitialize after sleep
+    static let audioRewarmDelay: UInt64 = 1_000_000_000  // 1 second
+
+    /// Watchdog timeout — if no audio samples arrive within this window after starting
+    /// recording, the engine is likely a zombie (running but disconnected from hardware)
+    static let audioWatchdogTimeout: UInt64 = 2_000_000_000  // 2 seconds
 
     // MARK: - Model Loading
 
