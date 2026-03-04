@@ -23,7 +23,7 @@ APP_NAME="Draft"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 DMG_NAME="Draft-${USER_NAME}.dmg"
-SIGNING_IDENTITY="${SIGNING_IDENTITY:-Apple Development: Justin Betker (LZRN6W4R74)}"
+SIGNING_IDENTITY="${SIGNING_IDENTITY:-Developer ID Application: Justin Betker (XG6WL66WUQ)}"
 
 echo "🔨 Building Draft Beta for $USER_NAME (token: $BETA_TOKEN)..."
 
@@ -121,6 +121,7 @@ echo "Signing with Developer ID..."
 codesign --force --deep \
     --sign "$SIGNING_IDENTITY" \
     --options runtime \
+    --timestamp \
     --entitlements "$BUILD_DIR/Draft.entitlements" \
     "$APP_BUNDLE" 2>&1
 
@@ -156,13 +157,13 @@ create-dmg \
 
 # Sign the DMG
 echo "Signing DMG..."
-codesign --force --sign "$SIGNING_IDENTITY" "$BUILD_DIR/$DMG_NAME"
+codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$BUILD_DIR/$DMG_NAME"
 
 # Notarize (only with Developer ID — Apple Development certs can't be notarized)
 if [[ "$SIGNING_IDENTITY" == Developer\ ID* ]]; then
     echo "Submitting for notarization (this takes 1-5 minutes)..."
     xcrun notarytool submit "$BUILD_DIR/$DMG_NAME" \
-        --keychain-profile "Draft-Notarize" \
+        --keychain-profile "draft-notary" \
         --wait
 
     # Staple
