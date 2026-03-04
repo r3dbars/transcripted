@@ -10,6 +10,7 @@ set -e
 USERS=(
     "draft-beta-nate:Nate"
     "draft-beta-josh:Josh"
+    "draft-beta-taylor:Taylor"
 )
 
 echo "Building ${#USERS[@]} beta DMGs..."
