@@ -276,7 +276,11 @@ class FloatingOverlayController: ObservableObject {
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             completion?()
-            self?._performHide()
+            // completionHandler runs on an arbitrary thread — dispatch to MainActor
+            // to avoid calling @MainActor-isolated _performHide() from a non-isolated context
+            Task { @MainActor [weak self] in
+                self?._performHide()
+            }
         })
 
         if let contentLayer = panel.contentView?.layer {
@@ -310,13 +314,19 @@ class FloatingOverlayController: ObservableObject {
 
         // Fade out after shake completes
         DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(offsets.count)) { [weak self, weak panel] in
-            guard let panel = panel else { self?._performHide(); return }
+            guard let panel = panel else {
+                Task { @MainActor [weak self] in self?._performHide() }
+                return
+            }
             NSAnimationContext.runAnimationGroup({ ctx in
                 ctx.duration = 0.14
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
                 panel.animator().alphaValue = 0
             }, completionHandler: { [weak self] in
-                self?._performHide()
+                // completionHandler runs on an arbitrary thread — dispatch to MainActor
+                Task { @MainActor [weak self] in
+                    self?._performHide()
+                }
             })
         }
     }
@@ -374,6 +384,7 @@ class FloatingOverlayController: ObservableObject {
     private func _performHide() {
         guard isVisible else { return }  // Prevent double-hide during animation overlap
         removeEscapeMonitor()
+        panel?.ignoresMouseEvents = true  // Block gesture dispatch immediately
         panel?.allowKeyStatus = false
         panel?.orderOut(nil)
         panel?.alphaValue = 1.0  // Reset for next show
