@@ -117,11 +117,63 @@ class TranscriptionTaskManager: ObservableObject {
     private var activeTasks: [UUID: Task<Void, Never>] = [:]
     let transcription = Transcription()
 
+    /// Pre-loaded Qwen service — loaded when recording starts, consumed by pipeline
+    private var qwenService: QwenService?
+    private var qwenPreloadTask: Task<Void, Never>?
+    private var qwenTimeoutTask: Task<Void, Never>?
+
     // Reference to failed transcription manager
     private let failedTranscriptionManager: FailedTranscriptionManager
 
     init(failedTranscriptionManager: FailedTranscriptionManager) {
         self.failedTranscriptionManager = failedTranscriptionManager
+    }
+
+    // MARK: - Qwen Pre-loading
+
+    /// Pre-load Qwen model when recording starts so it's ready by the time the pipeline needs it.
+    /// Only pre-loads if enabled AND model already cached (don't trigger a download during recording).
+    func prepareForRecording() {
+        guard QwenService.isEnabled, QwenService.isModelCached else { return }
+
+        // Don't create a second instance if already loading/ready
+        if let existing = qwenService {
+            if case .ready = existing.modelState { return }
+            if case .loading = existing.modelState { return }
+        }
+
+        AppLogger.pipeline.info("Pre-loading Qwen model for recording")
+
+        qwenTimeoutTask?.cancel()
+        let qwen = QwenService()
+        self.qwenService = qwen
+
+        qwenPreloadTask = Task { @MainActor [weak self] in
+            await qwen.loadModel()
+            if case .ready = qwen.modelState {
+                AppLogger.pipeline.info("Qwen model pre-loaded and ready")
+            } else {
+                self?.qwenService = nil
+            }
+        }
+
+        // Safety: free memory if pipeline never uses it (cancelled recording, all speakers known)
+        qwenTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(300))
+            guard !Task.isCancelled else { return }
+            if let self, self.qwenService != nil {
+                AppLogger.pipeline.info("Qwen timeout — unloading unused model")
+                self.cleanupQwen()
+            }
+        }
+    }
+
+    private func cleanupQwen() {
+        qwenTimeoutTask?.cancel()
+        qwenTimeoutTask = nil
+        qwenPreloadTask = nil
+        qwenService?.unload()
+        qwenService = nil
     }
 
     /// Start a new transcription task in the background
@@ -137,6 +189,8 @@ class TranscriptionTaskManager: ObservableObject {
             // Clean up audio files — they're useless
             try? FileManager.default.removeItem(at: micURL)
             if let systemURL { try? FileManager.default.removeItem(at: systemURL) }
+
+            cleanupQwen()
 
             self.displayStatus = .failed(message: "Recording too short")
             self.scheduleStatusReset(delay: 3)
@@ -402,18 +456,33 @@ class TranscriptionTaskManager: ObservableObject {
 
                         if !fiveMinText.isEmpty {
                             do {
-                                let qwenService = await QwenService()
-                                await qwenService.loadModel()
-                                if case .ready = await qwenService.modelState {
-                                    qwenSuggestions = try await qwenService.inferSpeakerNames(transcript: fiveMinText)
+                                // Wait for pre-loaded model (started when recording began)
+                                if let preloadTask = await MainActor.run(body: { self.qwenPreloadTask }) {
+                                    await preloadTask.value
                                 }
-                                await qwenService.unload()
+
+                                // Use pre-loaded instance, or fall back to fresh load (retry path)
+                                let qwen: QwenService
+                                if let preloaded = await MainActor.run(body: { self.qwenService }),
+                                   case .ready = await preloaded.modelState {
+                                    qwen = preloaded
+                                } else {
+                                    let fresh = await QwenService()
+                                    await fresh.loadModel()
+                                    qwen = fresh
+                                }
+
+                                if case .ready = await qwen.modelState {
+                                    qwenSuggestions = try await qwen.inferSpeakerNames(transcript: fiveMinText)
+                                }
+                                await MainActor.run { self.cleanupQwen() }
 
                                 AppLogger.pipeline.info("Qwen speaker inference complete", [
                                     "suggestions": "\(qwenSuggestions.filter { $0.value != "Unknown" }.count)",
                                     "total": "\(qwenSuggestions.count)"
                                 ])
                             } catch {
+                                await MainActor.run { self.cleanupQwen() }
                                 AppLogger.pipeline.warning("Qwen inference failed, falling back to manual naming", [
                                     "error": error.localizedDescription
                                 ])
@@ -467,7 +536,8 @@ class TranscriptionTaskManager: ObservableObject {
             }
         }
 
-        // No naming needed (or clip extraction failed) — clean up audio files now
+        // No naming needed (or clip extraction failed) — clean up Qwen and audio files
+        await MainActor.run { self.cleanupQwen() }
         try? FileManager.default.removeItem(at: micURL)
         try? FileManager.default.removeItem(at: systemURL)
 

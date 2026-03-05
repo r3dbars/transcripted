@@ -101,7 +101,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             AppLogger.app.info("Model initialization complete")
         }
 
-        // Wire up recording completion callback
+        // Wire up recording callbacks
+        aud.onRecordingStart = { [weak self] in
+            Task { @MainActor in
+                self?.taskManager?.prepareForRecording()
+            }
+        }
         aud.onRecordingComplete = { [weak self] micURL, systemURL in
             self?.handleRecordingComplete(micURL: micURL, systemURL: systemURL)
         }
