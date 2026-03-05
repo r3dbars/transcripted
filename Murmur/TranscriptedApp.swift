@@ -160,7 +160,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 currentName: nil,
                 matchSimilarity: nil,
                 needsNaming: true,
-                needsConfirmation: false
+                needsConfirmation: false,
+                suggestedName: nil,
+                suggestionSource: nil
             ),
             SpeakerNamingEntry(
                 id: knownProfile.id,
@@ -170,7 +172,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 currentName: "Travis",
                 matchSimilarity: 0.72,
                 needsNaming: false,
-                needsConfirmation: true
+                needsConfirmation: true,
+                suggestedName: nil,
+                suggestionSource: nil
             )
         ]
 
