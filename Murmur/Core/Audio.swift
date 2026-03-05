@@ -59,6 +59,11 @@ class Audio: ObservableObject {
     @Published var micAudioFileURL: URL?
     @Published var systemAudioFileURL: URL?
 
+    // Original mic URL set at recording start — never overwritten by device recovery.
+    // Device recovery creates a new WAV segment and updates micAudioFileURL (the write target),
+    // but the original file contains the bulk of the recording and is what the pipeline should use.
+    private var originalMicAudioFileURL: URL?
+
     // MARK: - Recording Health Tracking (Phase 1: Sleep/Wake + Gap Logging)
 
     /// Simple struct to track audio gaps (sleep/wake, device switches)
@@ -153,6 +158,9 @@ class Audio: ObservableObject {
 
     // Callback for when recording completes
     var onRecordingComplete: ((URL?, URL?) -> Void)?
+
+    // Callback for when recording starts (used for pre-loading models)
+    var onRecordingStart: (() -> Void)?
 
     init() {
         setup()
@@ -286,6 +294,8 @@ class Audio: ObservableObject {
         consecutiveSystemWriteErrors = 0
 
         AppLogger.audio.info("Starting audio capture")
+
+        onRecordingStart?()
 
         Task {
             do {
@@ -439,6 +449,7 @@ class Audio: ObservableObject {
             let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
             let fileURL = documentsPath.appendingPathComponent("meeting_\(timestamp)_mic.wav")
 
+            self.originalMicAudioFileURL = fileURL
             DispatchQueue.main.async {
                 self.micAudioFileURL = fileURL
             }
@@ -548,8 +559,10 @@ class Audio: ObservableObject {
             capture.stop()
         }
 
-        // Capture file URLs before async cleanup
-        let finalMicURL = micAudioFileURL
+        // Use the original mic URL (set at recording start), not the potentially-overwritten
+        // recovery URL. Device recovery creates a new WAV segment but the original file
+        // contains the bulk of the recording.
+        let finalMicURL = originalMicAudioFileURL ?? micAudioFileURL
         let finalSystemURL = systemAudioFileURL
 
         // Update UI immediately - don't wait for file cleanup
@@ -587,6 +600,7 @@ class Audio: ObservableObject {
 
         // Notify completion AFTER files are closed (but don't block main thread waiting)
         cleanupGroup.notify(queue: .main) { [weak self] in
+            self?.originalMicAudioFileURL = nil
             self?.onRecordingComplete?(finalMicURL, finalSystemURL)
         }
     }

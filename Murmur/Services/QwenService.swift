@@ -36,10 +36,11 @@ class QwenService: ObservableObject {
     }
 
     /// Check if the model is already cached locally (downloaded previously)
+    /// mlx-swift-lm caches at ~/Library/Caches/models/ (not HuggingFace's path)
     nonisolated static var isModelCached: Bool {
         let cacheDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Caches/huggingface")
-        let modelDir = cacheDir.appendingPathComponent("models--mlx-community--Qwen3.5-4B-4bit")
+            .appendingPathComponent("Library/Caches/models/mlx-community")
+        let modelDir = cacheDir.appendingPathComponent("Qwen3.5-4B-4bit")
         return FileManager.default.fileExists(atPath: modelDir.path)
     }
 
@@ -84,10 +85,11 @@ class QwenService: ObservableObject {
             ])
         }
 
-        let prompt = Self.buildPrompt(transcript: transcript)
-        AppLogger.transcription.info("Qwen inferring speaker names", ["promptLength": "\(prompt.count)"])
+        let chatMessages = Self.buildChatMessages(transcript: transcript)
+        AppLogger.transcription.info("Qwen inferring speaker names", ["promptLength": "\(transcript.count)"])
 
-        let userInput = UserInput(prompt: prompt)
+        var userInput = UserInput(chat: chatMessages)
+        userInput.additionalContext = ["enable_thinking": false]
         let lmInput = try await container.prepare(input: userInput)
 
         let parameters = GenerateParameters(
@@ -118,27 +120,26 @@ class QwenService: ObservableObject {
 
     // MARK: - Prompt Construction
 
-    nonisolated private static func buildPrompt(transcript: String) -> String {
+    nonisolated private static func buildChatMessages(transcript: String) -> [Chat.Message] {
+        let systemPrompt = """
+        You are a speaker name extractor. Given a meeting transcript with labels like "Speaker 1", "Speaker 2", etc., identify each speaker's real name.
+
+        Look for: greetings ("Hey Jack"), introductions ("I'm Sarah from..."), third-person references ("Jack was saying..."), sign-offs.
+
+        Return ONLY a JSON object mapping speaker IDs to names. Use "Unknown" if a name cannot be determined. No explanation, no markdown.
+        Example: {"1": "Boris", "2": "Unknown"}
         """
-        You are analyzing a meeting transcript to identify speaker names.
-        The transcript uses labels like "Speaker 0", "Speaker 1", etc.
 
-        Identify the real name of each speaker based on:
-        - Direct greetings ("Hey Jack", "Hi Sarah")
-        - Self-introductions ("I'm Nate from...")
-        - Third-person references ("Jack was saying...")
-        - Sign-offs ("Thanks everyone, this is Don signing off")
-
-        Return ONLY a JSON object mapping speaker IDs to names.
-        Use "Unknown" for speakers whose names cannot be determined.
-        Do not include any other text, explanation, or markdown formatting.
-
-        Example output: {"0": "Justin", "1": "Nate", "2": "Unknown"}
-
+        let userMessage = """
         TRANSCRIPT (first 5 minutes):
         ---
         \(transcript)
         """
+
+        return [
+            .system(systemPrompt),
+            .user(userMessage)
+        ]
     }
 
     // MARK: - Response Parsing
