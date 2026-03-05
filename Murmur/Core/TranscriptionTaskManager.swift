@@ -390,16 +390,52 @@ class TranscriptionTaskManager: ObservableObject {
                 }
 
                 if !clips.isEmpty {
+                    // Run Qwen inference for unidentified speakers (if enabled)
+                    var qwenSuggestions: [String: String] = [:]
+                    let unidentifiedClips = clips.filter { $0.currentName == nil }
+
+                    if !unidentifiedClips.isEmpty && QwenService.isEnabled && QwenService.isModelCached {
+                        let fiveMinText = self.buildFirst5MinutesText(
+                            utterances: result.systemUtterances,
+                            speakerMappings: speakerMappings
+                        )
+
+                        if !fiveMinText.isEmpty {
+                            do {
+                                let qwenService = await QwenService()
+                                await qwenService.loadModel()
+                                if case .ready = await qwenService.modelState {
+                                    qwenSuggestions = try await qwenService.inferSpeakerNames(transcript: fiveMinText)
+                                }
+                                await qwenService.unload()
+
+                                AppLogger.pipeline.info("Qwen speaker inference complete", [
+                                    "suggestions": "\(qwenSuggestions.filter { $0.value != "Unknown" }.count)",
+                                    "total": "\(qwenSuggestions.count)"
+                                ])
+                            } catch {
+                                AppLogger.pipeline.warning("Qwen inference failed, falling back to manual naming", [
+                                    "error": error.localizedDescription
+                                ])
+                            }
+                        }
+                    }
+
                     let entries = clips.map { clip in
-                        SpeakerNamingEntry(
+                        let qwenName = qwenSuggestions[clip.sortformerSpeakerId]
+                        let hasQwenSuggestion = qwenName != nil && qwenName != "Unknown"
+
+                        return SpeakerNamingEntry(
                             id: clip.persistentSpeakerId,
                             sortformerSpeakerId: clip.sortformerSpeakerId,
                             clipURL: clip.clipURL,
                             sampleText: clip.sampleText,
                             currentName: clip.currentName,
                             matchSimilarity: clip.matchSimilarity,
-                            needsNaming: clip.currentName == nil,
-                            needsConfirmation: clip.currentName != nil
+                            needsNaming: clip.currentName == nil && !hasQwenSuggestion,
+                            needsConfirmation: clip.currentName != nil || hasQwenSuggestion,
+                            suggestedName: hasQwenSuggestion ? qwenName : nil,
+                            suggestionSource: hasQwenSuggestion ? "qwen_inferred" : nil
                         )
                     }
 
@@ -651,6 +687,30 @@ class TranscriptionTaskManager: ObservableObject {
                 break
             }
         }
+    }
+
+    // MARK: - Qwen Transcript Builder
+
+    /// Build a text representation of the first 5 minutes of system audio transcript
+    /// for Qwen speaker name inference.
+    nonisolated private func buildFirst5MinutesText(
+        utterances: [TranscriptionUtterance],
+        speakerMappings: [String: SpeakerMapping]
+    ) -> String {
+        let maxSeconds: Double = 300  // 5 minutes
+        let filtered = utterances
+            .filter { $0.start < maxSeconds }
+            .sorted { $0.start < $1.start }
+
+        guard !filtered.isEmpty else { return "" }
+
+        return filtered.map { utterance in
+            let mins = Int(utterance.start) / 60
+            let secs = Int(utterance.start) % 60
+            let key = "system_\(utterance.speakerId)"
+            let label = speakerMappings[key]?.displayName ?? "Speaker \(utterance.speakerId)"
+            return "[\(String(format: "%02d:%02d", mins, secs))] [\(label)] \(utterance.transcript)"
+        }.joined(separator: "\n")
     }
 
     // MARK: - Failure Notifications (UX: Doherty Threshold - users need immediate feedback)
