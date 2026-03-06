@@ -57,6 +57,7 @@ class FeedbackStore: ObservableObject {
     private let feedbackURL: URL
     private let encoder: JSONEncoder
     private let isoFormatter: ISO8601DateFormatter
+    private var lastStatsModDate: Date?
 
     init() {
         let storageDir = FileManager.default.draftAppSupportDir
@@ -125,14 +126,22 @@ class FeedbackStore: ObservableObject {
     }
 
     /// Parse feedback.jsonl and compute aggregate usage stats.
+    /// Skips reparsing if the file hasn't been modified since the last call.
     /// File I/O runs on a background thread to avoid blocking the main actor.
     func refreshStats() {
         let url = feedbackURL
+        // Check modification date — skip expensive reparse if file hasn't changed
+        let currentModDate = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+        if let currentModDate, let lastModDate = lastStatsModDate, currentModDate == lastModDate {
+            return  // File unchanged since last parse
+        }
+        let captured = currentModDate
         Task {
             let computed = await Task.detached {
                 FeedbackStore.parseStats(url: url)
             }.value
             self.stats = computed
+            self.lastStatsModDate = captured
         }
     }
 

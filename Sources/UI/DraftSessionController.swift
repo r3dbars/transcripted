@@ -65,7 +65,11 @@ class DraftSessionController: ObservableObject {
 
     /// Start a new recording session — called on first hotkey press
     func startSession(imageData: Data?, sourceApp: NSRunningApplication?) {
-        guard let appState = appState, let overlayController = overlayController else { return }
+        guard let appState = appState, let overlayController = overlayController else {
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "session_not_wired",
+                message: "startSession called before appState/overlayController wired")
+            return
+        }
         guard !isInSession, !isDictating else { return }
         isInSession = true
         sessionSourceApp = sourceApp
@@ -141,7 +145,11 @@ class DraftSessionController: ObservableObject {
 
     /// Stop recording and trigger drafting — called on second hotkey press
     func stopSessionAndDraft() {
-        guard let appState = appState, let overlayController = overlayController else { return }
+        guard let appState = appState, let overlayController = overlayController else {
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "session_not_wired",
+                message: "stopSessionAndDraft called before appState/overlayController wired")
+            return
+        }
         guard isInSession else { return }
         overlayController.enterDraftingState()
 
@@ -252,7 +260,11 @@ class DraftSessionController: ObservableObject {
     }
 
     func cancelSession() {
-        guard let appState = appState, let overlayController = overlayController else { return }
+        guard let appState = appState, let overlayController = overlayController else {
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "session_not_wired",
+                message: "cancelSession called before appState/overlayController wired")
+            return
+        }
         visionTask?.cancel()
         visionTask = nil
         streamingTask?.cancel()
@@ -277,7 +289,11 @@ class DraftSessionController: ObservableObject {
 
     /// Start dictation — show overlay and begin voice recording (no screenshot/vision)
     func startDictation(sourceApp: NSRunningApplication?) {
-        guard let appState = appState, let overlayController = overlayController else { return }
+        guard let appState = appState, let overlayController = overlayController else {
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "session_not_wired",
+                message: "startDictation called before appState/overlayController wired")
+            return
+        }
         guard !isDictating, !isInSession else { return }
         isDictating = true
         sessionSourceApp = sourceApp
@@ -337,7 +353,11 @@ class DraftSessionController: ObservableObject {
 
     /// Stop dictation and paste — Parakeet batch transcription
     func stopDictationAndPaste() {
-        guard let appState = appState, let overlayController = overlayController else { return }
+        guard let appState = appState, let overlayController = overlayController else {
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "session_not_wired",
+                message: "stopDictationAndPaste called before appState/overlayController wired")
+            return
+        }
         guard isDictating, overlayController.state == .listening else { return }
         // Stay compact during transcription — don't expand to full drafting height.
         // Just update the state for the spinner, keeping the compact panel size.
@@ -345,8 +365,10 @@ class DraftSessionController: ObservableObject {
         overlayController.state = .drafting
 
         appState.sttRouter.stopRecording()
-        Task {
+        streamingTask?.cancel()
+        streamingTask = Task {
             let voiceText = await appState.sttRouter.transcribe()
+            guard !Task.isCancelled else { return }
 
             guard let text = voiceText, !text.isEmpty else {
                 appState.logger.log("DICTATION | no transcription, cancelling")
@@ -357,6 +379,7 @@ class DraftSessionController: ObservableObject {
                 return
             }
 
+            guard !Task.isCancelled else { return }
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
             overlayController.hideWithConfirmAnimation { [weak self] in
@@ -380,7 +403,13 @@ class DraftSessionController: ObservableObject {
 
     /// Cancel dictation without pasting
     func cancelDictation() {
-        guard let appState = appState, let overlayController = overlayController else { return }
+        guard let appState = appState, let overlayController = overlayController else {
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "session_not_wired",
+                message: "cancelDictation called before appState/overlayController wired")
+            return
+        }
+        streamingTask?.cancel()
+        streamingTask = nil
         if appState.sttRouter.isRecording {
             appState.sttRouter.cancel()
         }
