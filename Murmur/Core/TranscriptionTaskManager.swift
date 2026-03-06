@@ -117,6 +117,11 @@ class TranscriptionTaskManager: ObservableObject {
     private var activeTasks: [UUID: Task<Void, Never>] = [:]
     let transcription = Transcription()
 
+    /// Pre-loaded Qwen service — loaded when recording starts, consumed by pipeline
+    private var qwenService: QwenService?
+    private var qwenPreloadTask: Task<Void, Never>?
+    private var qwenTimeoutTask: Task<Void, Never>?
+
     // Reference to failed transcription manager
     private let failedTranscriptionManager: FailedTranscriptionManager
 
@@ -124,10 +129,61 @@ class TranscriptionTaskManager: ObservableObject {
         self.failedTranscriptionManager = failedTranscriptionManager
     }
 
+    // MARK: - Qwen Pre-loading
+
+    /// Pre-load Qwen model when recording starts so it's ready by the time the pipeline needs it.
+    /// Only pre-loads if enabled AND model already cached (don't trigger a download during recording).
+    func prepareForRecording() {
+        guard QwenService.isEnabled, QwenService.isModelCached else { return }
+
+        // Don't create a second instance if already loading/ready
+        if let existing = qwenService {
+            if case .ready = existing.modelState { return }
+            if case .loading = existing.modelState { return }
+        }
+
+        AppLogger.pipeline.info("Pre-loading Qwen model for recording")
+
+        qwenTimeoutTask?.cancel()
+        let qwen = QwenService()
+        self.qwenService = qwen
+
+        qwenPreloadTask = Task { @MainActor [weak self] in
+            await qwen.loadModel()
+            if case .ready = qwen.modelState {
+                AppLogger.pipeline.info("Qwen model pre-loaded and ready")
+            } else {
+                self?.qwenService = nil
+            }
+        }
+
+        // Safety: free memory if pipeline never uses it (cancelled recording, all speakers known)
+        qwenTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(300))
+            guard !Task.isCancelled else { return }
+            if let self, self.qwenService != nil {
+                AppLogger.pipeline.info("Qwen timeout — unloading unused model")
+                self.cleanupQwen()
+            }
+        }
+    }
+
+    private func cleanupQwen() {
+        qwenTimeoutTask?.cancel()
+        qwenTimeoutTask = nil
+        qwenPreloadTask = nil
+        qwenService?.unload()
+        qwenService = nil
+    }
+
     /// Start a new transcription task in the background
     /// Uses local Parakeet + Sortformer pipeline: Transcribe → Save with Speaker Attribution → Extract Action Items
     /// - Parameter healthInfo: Recording health metrics for transcript metadata (Phase 3: Post-hoc transparency)
     func startTranscription(micURL: URL, systemURL: URL?, outputFolder: URL, healthInfo: RecordingHealthInfo? = nil) {
+
+        // Cancel the pre-load timeout — the pipeline will handle Qwen cleanup itself
+        qwenTimeoutTask?.cancel()
+        qwenTimeoutTask = nil
 
         // Gate: reject recordings shorter than 2 seconds (they'll fail in Parakeet anyway)
         let minDuration: TimeInterval = 2.0
@@ -137,6 +193,8 @@ class TranscriptionTaskManager: ObservableObject {
             // Clean up audio files — they're useless
             try? FileManager.default.removeItem(at: micURL)
             if let systemURL { try? FileManager.default.removeItem(at: systemURL) }
+
+            cleanupQwen()
 
             self.displayStatus = .failed(message: "Recording too short")
             self.scheduleStatusReset(delay: 3)
@@ -390,16 +448,67 @@ class TranscriptionTaskManager: ObservableObject {
                 }
 
                 if !clips.isEmpty {
+                    // Run Qwen inference for unidentified speakers (if enabled)
+                    var qwenSuggestions: [String: String] = [:]
+                    let unidentifiedClips = clips.filter { $0.currentName == nil }
+
+                    if !unidentifiedClips.isEmpty && QwenService.isEnabled && QwenService.isModelCached {
+                        let fiveMinText = self.buildFirst5MinutesText(
+                            utterances: result.systemUtterances,
+                            speakerMappings: speakerMappings
+                        )
+
+                        if !fiveMinText.isEmpty {
+                            do {
+                                // Wait for pre-loaded model (started when recording began)
+                                if let preloadTask = await MainActor.run(body: { self.qwenPreloadTask }) {
+                                    await preloadTask.value
+                                }
+
+                                // Use pre-loaded instance, or fall back to fresh load (retry path)
+                                let qwen: QwenService
+                                if let preloaded = await MainActor.run(body: { self.qwenService }),
+                                   case .ready = await preloaded.modelState {
+                                    qwen = preloaded
+                                } else {
+                                    let fresh = await QwenService()
+                                    await fresh.loadModel()
+                                    qwen = fresh
+                                }
+
+                                if case .ready = await qwen.modelState {
+                                    qwenSuggestions = try await qwen.inferSpeakerNames(transcript: fiveMinText)
+                                }
+                                await MainActor.run { self.cleanupQwen() }
+
+                                AppLogger.pipeline.info("Qwen speaker inference complete", [
+                                    "suggestions": "\(qwenSuggestions.filter { $0.value != "Unknown" }.count)",
+                                    "total": "\(qwenSuggestions.count)"
+                                ])
+                            } catch {
+                                await MainActor.run { self.cleanupQwen() }
+                                AppLogger.pipeline.warning("Qwen inference failed, falling back to manual naming", [
+                                    "error": error.localizedDescription
+                                ])
+                            }
+                        }
+                    }
+
                     let entries = clips.map { clip in
-                        SpeakerNamingEntry(
+                        let qwenName = qwenSuggestions[clip.sortformerSpeakerId]
+                        let hasQwenSuggestion = qwenName != nil && qwenName != "Unknown"
+
+                        return SpeakerNamingEntry(
                             id: clip.persistentSpeakerId,
                             sortformerSpeakerId: clip.sortformerSpeakerId,
                             clipURL: clip.clipURL,
                             sampleText: clip.sampleText,
                             currentName: clip.currentName,
                             matchSimilarity: clip.matchSimilarity,
-                            needsNaming: clip.currentName == nil,
-                            needsConfirmation: clip.currentName != nil
+                            needsNaming: clip.currentName == nil && !hasQwenSuggestion,
+                            needsConfirmation: clip.currentName != nil || hasQwenSuggestion,
+                            suggestedName: hasQwenSuggestion ? qwenName : nil,
+                            suggestionSource: hasQwenSuggestion ? "qwen_inferred" : nil
                         )
                     }
 
@@ -431,7 +540,8 @@ class TranscriptionTaskManager: ObservableObject {
             }
         }
 
-        // No naming needed (or clip extraction failed) — clean up audio files now
+        // No naming needed (or clip extraction failed) — clean up Qwen and audio files
+        await MainActor.run { self.cleanupQwen() }
         try? FileManager.default.removeItem(at: micURL)
         try? FileManager.default.removeItem(at: systemURL)
 
@@ -651,6 +761,30 @@ class TranscriptionTaskManager: ObservableObject {
                 break
             }
         }
+    }
+
+    // MARK: - Qwen Transcript Builder
+
+    /// Build a text representation of the first 5 minutes of system audio transcript
+    /// for Qwen speaker name inference.
+    nonisolated private func buildFirst5MinutesText(
+        utterances: [TranscriptionUtterance],
+        speakerMappings: [String: SpeakerMapping]
+    ) -> String {
+        let maxSeconds: Double = 300  // 5 minutes
+        let filtered = utterances
+            .filter { $0.start < maxSeconds }
+            .sorted { $0.start < $1.start }
+
+        guard !filtered.isEmpty else { return "" }
+
+        return filtered.map { utterance in
+            let mins = Int(utterance.start) / 60
+            let secs = Int(utterance.start) % 60
+            let key = "system_\(utterance.speakerId)"
+            let label = speakerMappings[key]?.displayName ?? "Speaker \(utterance.speakerId)"
+            return "[\(String(format: "%02d:%02d", mins, secs))] [\(label)] \(utterance.transcript)"
+        }.joined(separator: "\n")
     }
 
     // MARK: - Failure Notifications (UX: Doherty Threshold - users need immediate feedback)

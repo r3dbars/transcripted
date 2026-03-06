@@ -208,6 +208,9 @@ struct SpeakerNamingCard: View {
         .onAppear {
             if let name = entry.currentName, entry.needsConfirmation {
                 nameText = name
+            } else if let suggested = entry.suggestedName {
+                // Pre-fill from Qwen inference
+                nameText = suggested
             }
         }
     }
@@ -440,7 +443,19 @@ struct SpeakerNamingCard: View {
         }
     }
 
-    // MARK: - Confirmation Row (known speaker)
+    // MARK: - Confirmation Row (known speaker or Qwen suggestion)
+
+    /// Whether this entry has a Qwen-inferred name suggestion
+    private var isQwenSuggestion: Bool {
+        entry.suggestionSource == "qwen_inferred"
+    }
+
+    /// Display name for this entry — DB match or Qwen suggestion
+    private var displayName: String {
+        if let name = entry.currentName { return name }
+        if let suggested = entry.suggestedName { return suggested }
+        return ""
+    }
 
     private var confirmationRow: some View {
         HStack(spacing: Spacing.sm) {
@@ -448,11 +463,18 @@ struct SpeakerNamingCard: View {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 14))
                     .foregroundColor(.statusSuccessMuted)
-                Text(entry.currentName ?? "")
+                Text(displayName)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.panelTextPrimary)
             } else {
-                Text(entry.currentName ?? "")
+                // Qwen suggestions get an amber sparkle badge
+                if isQwenSuggestion {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 10))
+                        .foregroundColor(.orange.opacity(0.8))
+                }
+
+                Text(displayName)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.panelTextPrimary)
 
@@ -464,7 +486,7 @@ struct SpeakerNamingCard: View {
                         .foregroundColor(.statusSuccessMuted)
                 }
                 .buttonStyle(PlainButtonStyle())
-                .help("Yes, that's \(entry.currentName ?? "them")")
+                .help("Yes, that's \(displayName)")
 
                 Button(action: rejectSpeaker) {
                     Image(systemName: "xmark.circle.fill")
@@ -483,7 +505,8 @@ struct SpeakerNamingCard: View {
     private func confirmSpeaker() {
         clipPlayer.stop()
         isConfirmed = true
-        guard let name = entry.currentName else { return }
+        let name = displayName
+        guard !name.isEmpty else { return }
         onUpdate(SpeakerNameUpdate(
             persistentSpeakerId: entry.id,
             sortformerSpeakerId: entry.sortformerSpeakerId,

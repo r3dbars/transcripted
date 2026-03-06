@@ -80,6 +80,9 @@
 		T1000015 /* TranscriptionTypesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000005 /* TranscriptionTypesTests.swift */; };
 		T1000018 /* PillStateManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000008 /* PillStateManagerTests.swift */; };
 		T1000019 /* SpeakerDatabaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000009 /* SpeakerDatabaseTests.swift */; };
+		Q1000001 /* QwenService.swift in Sources */ = {isa = PBXBuildFile; fileRef = Q1000002 /* QwenService.swift */; };
+		Q1000011 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = Q1000012 /* MLXLLM */; };
+		Q1000021 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = Q1000022 /* MLXLMCommon */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -170,6 +173,7 @@
 		T1000008 /* PillStateManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillStateManagerTests.swift; sourceTree = "<group>"; };
 		T1000009 /* SpeakerDatabaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDatabaseTests.swift; sourceTree = "<group>"; };
 		T1000200 /* MurmurTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MurmurTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		Q1000002 /* QwenService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QwenService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -183,6 +187,8 @@
 				FA000014 /* Accelerate.framework in Frameworks */,
 				FA000015 /* CoreML.framework in Frameworks */,
 				FA000016 /* CoreAudio.framework in Frameworks */,
+				Q1000011 /* MLXLLM in Frameworks */,
+				Q1000021 /* MLXLMCommon in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -417,6 +423,7 @@
 			children = (
 				A1002001 /* AudioResampler.swift */,
 				A1002002 /* ParakeetService.swift */,
+				Q1000002 /* QwenService.swift */,
 				A1002003 /* SortformerService.swift */,
 				A1002004 /* SpeakerDatabase.swift */,
 				A1002006 /* SpeakerClipExtractor.swift */,
@@ -487,6 +494,10 @@
 			dependencies = (
 			);
 			name = Murmur;
+			packageProductDependencies = (
+				Q1000012 /* MLXLLM */,
+				Q1000022 /* MLXLMCommon */,
+			);
 			productName = Murmur;
 			productReference = A1000017 /* Murmur.app */;
 			productType = "com.apple.product-type.application";
@@ -536,6 +547,9 @@
 				Base,
 			);
 			mainGroup = A1000021;
+			packageReferences = (
+				Q1000030 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
+			);
 			productRefGroup = A1000023 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -621,6 +635,7 @@
 				A100091F /* SpeakerNamingView.swift in Sources */,
 				A1003001 /* AppLogger.swift in Sources */,
 				A1003003 /* FileLogger.swift in Sources */,
+				Q1000001 /* QwenService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -939,6 +954,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		Q1000030 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ml-explore/mlx-swift-lm";
+			requirement = {
+				kind = branch;
+				branch = main;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		Q1000012 /* MLXLLM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = Q1000030 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
+			productName = MLXLLM;
+		};
+		Q1000022 /* MLXLMCommon */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = Q1000030 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
+			productName = MLXLMCommon;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A1000032 /* Project object */;
 }
