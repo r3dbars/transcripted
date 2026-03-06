@@ -181,6 +181,10 @@ class TranscriptionTaskManager: ObservableObject {
     /// - Parameter healthInfo: Recording health metrics for transcript metadata (Phase 3: Post-hoc transparency)
     func startTranscription(micURL: URL, systemURL: URL?, outputFolder: URL, healthInfo: RecordingHealthInfo? = nil) {
 
+        // Cancel the pre-load timeout — the pipeline will handle Qwen cleanup itself
+        qwenTimeoutTask?.cancel()
+        qwenTimeoutTask = nil
+
         // Gate: reject recordings shorter than 2 seconds (they'll fail in Parakeet anyway)
         let minDuration: TimeInterval = 2.0
         if let micDuration = audioDuration(url: micURL), micDuration < minDuration {
