@@ -112,6 +112,8 @@ struct SpeakerNamingEntry: Identifiable {
     let matchSimilarity: Double?     // cosine similarity score
     let needsNaming: Bool            // true = unknown speaker (show text field)
     let needsConfirmation: Bool      // true = known but low confidence (show confirm/deny)
+    let suggestedName: String?       // Qwen-inferred name (nil if no suggestion)
+    let suggestionSource: String?    // "qwen_inferred" or nil
 }
 
 /// Result of user naming/confirming a speaker
