@@ -11,12 +11,6 @@ A native macOS app that automatically records, transcribes, and organizes voice 
 - Persistent speaker matching - Learns voices over time via 256-dim embeddings
 - Real-time status - Visual feedback during recording and processing
 
-**AI-Powered Action Items**
-- Automatic extraction - Uses Gemini AI to identify tasks from transcripts
-- Smart parsing - Understands "next Friday", "EOW", relative dates
-- Task integration - Sends to Apple Reminders or Todoist
-- Review workflow - Approve/edit items before adding
-
 **Output & Organization**
 - Markdown transcripts - With YAML frontmatter (date, duration, word count)
 - Speaker identification - Labels by audio source (Mic/System Audio)
@@ -50,7 +44,7 @@ On first launch, Transcripted requests:
 |------------|---------|----------|
 | Microphone | Capture your voice | Yes |
 | Screen Recording | Capture system audio from meetings | For system audio |
-| Reminders | Create tasks from action items | Optional |
+| Reminders | Optional integration | Optional |
 
 ## Architecture
 
@@ -61,7 +55,6 @@ Murmur/
 │   ├── SystemAudioCapture.swift           # System audio via CoreAudio process taps
 │   ├── Transcription.swift                # Local transcription (Parakeet + Sortformer)
 │   ├── TranscriptionTaskManager.swift     # Background transcription queue
-│   ├── ActionItemExtractor.swift          # Gemini AI integration
 │   ├── DateParser.swift                   # Natural language date parsing
 │   ├── TranscriptSaver.swift              # Markdown output
 │   ├── TranscriptScanner.swift            # Transcript file discovery & parsing
@@ -74,8 +67,9 @@ Murmur/
 │   ├── SortformerService.swift            # Local speaker diarization
 │   ├── SpeakerDatabase.swift              # Persistent voice fingerprints (SQLite)
 │   ├── AudioResampler.swift               # Audio resampling + WAV loading
-│   ├── RemindersService.swift             # Apple Reminders
-│   └── TodoistService.swift               # Todoist API
+│   ├── QwenService.swift                  # Local Qwen model for speaker inference
+│   ├── EmbeddingClusterer.swift           # Voice embedding clustering
+│   └── SpeakerClipExtractor.swift         # Speaker audio clip extraction
 │
 ├── UI/
 │   ├── FloatingPanel/                     # Floating pill UI
@@ -88,18 +82,14 @@ Murmur/
 │   │       ├── CelebrationViews.swift     # Success animations
 │   │       ├── ErrorViews.swift           # Error handling UI
 │   │       ├── AttentionPromptView.swift  # Notifications
-│   │       ├── ReviewTrayView.swift       # Action item review
+│   │       ├── SpeakerNamingView.swift    # Speaker identification
 │   │       └── ...                        # Additional components
 │   │
-│   └── Settings/                          # Preferences (sidebar navigation)
+│   └── Settings/                          # Settings window
 │       ├── SettingsWindowController.swift  # Window management
-│       ├── SettingsContainerView.swift     # Main container
+│       ├── SettingsContainerView.swift     # Single-page scrolling layout
 │       ├── SettingsSidebarView.swift       # Sidebar navigation
-│       ├── Tabs/
-│       │   ├── DashboardView.swift        # Stats, recent transcripts
-│       │   └── PreferencesView.swift      # API keys, storage, appearance
 │       ├── Components/
-│       │   ├── RecentTranscriptsView.swift # Recent transcript list
 │       │   └── SettingsSectionCard.swift   # Reusable card component
 │       └── Models/
 │           └── SettingsNavigationState.swift  # Tab state
@@ -141,13 +131,10 @@ Settings are stored in UserDefaults:
 | Key | Description |
 |-----|-------------|
 | `transcriptSaveLocation` | Custom output folder |
-| `geminiAPIKey` | Gemini API key for action item extraction |
-| `taskService` | "reminders" or "todoist" |
-| `todoistAPIKey` | Todoist API key (if using Todoist) |
-| `userName` | Your name for task attribution |
-| `remindersListId` | Apple Reminders list for action items |
+| `userName` | Your name for speaker attribution |
 | `enableUISounds` | Enable/disable UI sound effects |
 | `useAuroraRecording` | Use Aurora recording mode |
+| `enableQwenSpeakerInference` | Enable Qwen-based speaker name inference |
 
 ## Privacy & Security
 

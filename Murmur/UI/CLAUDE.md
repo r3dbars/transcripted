@@ -10,7 +10,7 @@ Settings window and failed transcription management UI. The main floating pill U
 | `Settings/SettingsWindowController.swift` | NSWindowController, 800x600 fixed settings window |
 | `Settings/SettingsContainerView.swift` | Single-page scrolling layout (stats, speakers, preferences) |
 | `Settings/SettingsSidebarView.swift` | Left sidebar navigation tabs |
-| `Settings/Models/SettingsNavigationState.swift` | Tab state enum (Dashboard, Preferences, Speakers) |
+| `Settings/Models/SettingsNavigationState.swift` | Tab state enum (Dashboard, Speakers, Preferences) |
 | `Settings/Components/SettingsSectionCard.swift` | Reusable card wrapper |
 | `FailedTranscriptionsView.swift` | Retry queue management |
 

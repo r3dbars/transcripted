@@ -95,13 +95,12 @@ The app uses **FluidAudio** for 100% local transcription — no cloud API, no in
 
 ```
 TranscriptedApp.swift (AppDelegate)
-├── Audio                    → Recording state, audio levels
-├── TranscriptionTaskManager → Background transcription queue, progress tracking
+├── Audio                      → Recording state, audio levels
+├── TranscriptionTaskManager   → Background transcription queue, progress tracking
 ├── FailedTranscriptionManager → Retry queue with persistent storage
-├── RecordingValidator       → Pre-recording system checks
-├── StatsService             → Recording statistics and streak tracking
-├── StatsDatabase            → SQLite persistence for stats
-└── FloatingPanelController  → UI coordination
+├── FloatingPanelController    → UI coordination
+├── SettingsWindowController   → Settings window
+└── OnboardingWindowController → Onboarding flow
 ```
 
 ### UI Components
@@ -121,6 +120,7 @@ FloatingPanel/
 │   ├── AttentionPromptView.swift   # Notification prompts (silence warning)
 │   ├── TranscriptTrayView.swift    # Recent transcripts tray with copy-to-clipboard
 │   ├── TranscriptDetailView.swift  # Transcript detail with chat bubbles
+│   ├── SpeakerNamingView.swift     # Speaker identification and naming UI
 │   ├── AuroraIdleView.swift        # Aurora animation for idle state
 │   ├── AuroraRecordingView.swift   # Aurora animation for recording state
 │   ├── AuroraProcessingView.swift  # Aurora animation for processing state
@@ -133,15 +133,11 @@ Settings window (`Murmur/UI/Settings/`):
 ```
 Settings/
 ├── SettingsWindowController.swift          # NSWindowController, 800x600 fixed window
-├── SettingsContainerView.swift             # Sidebar + content layout
+├── SettingsContainerView.swift             # Single-page scrolling layout (stats, speakers, preferences)
 ├── SettingsSidebarView.swift               # Left sidebar navigation
 ├── Models/
-│   └── SettingsNavigationState.swift       # Tab state (Dashboard, Preferences)
-├── Tabs/
-│   ├── DashboardView.swift                 # Stats, recent transcripts
-│   └── PreferencesView.swift               # Storage, model status, task service, appearance
+│   └── SettingsNavigationState.swift       # Tab state (Dashboard, Speakers, Preferences)
 └── Components/
-    ├── RecentTranscriptsView.swift          # Recent transcript list
     └── SettingsSectionCard.swift            # Reusable card component
 ```
 
@@ -184,6 +180,7 @@ User settings stored in `UserDefaults`:
 | `hasCompletedOnboarding` | Onboarding completion flag |
 | `enableUISounds` | Enable/disable recording sounds |
 | `useAuroraRecording` | Enable aurora animation |
+| `enableQwenSpeakerInference` | Enable Qwen-based speaker name inference |
 | `floatingPanelX` | Saved pill X position |
 | `floatingPanelY` | Saved pill Y position |
 
@@ -270,7 +267,10 @@ Murmur/
 │   ├── ParakeetService.swift      # Local STT via FluidAudio (Parakeet TDT V3)
 │   ├── SortformerService.swift    # Local speaker diarization via FluidAudio
 │   ├── SpeakerDatabase.swift      # Persistent voice fingerprints (SQLite + 256-dim embeddings)
-│   └── AudioResampler.swift       # Audio resampling (48kHz → 16kHz) and WAV loading
+│   ├── AudioResampler.swift       # Audio resampling (48kHz → 16kHz) and WAV loading
+│   ├── QwenService.swift          # Local Qwen model for speaker name inference
+│   ├── EmbeddingClusterer.swift   # Clustering utility for voice embeddings
+│   └── SpeakerClipExtractor.swift # Extracts audio clips for speaker samples
 ├── UI/
 │   ├── FloatingPanel/             # Floating pill UI
 │   │   ├── FloatingPanelController.swift  # NSWindowController
@@ -284,23 +284,20 @@ Murmur/
 │   │   │   ├── AttentionPromptView.swift  # Silence warning
 │   │   │   ├── TranscriptTrayView.swift   # Recent transcripts tray
 │   │   │   ├── TranscriptDetailView.swift # Transcript detail view
+│   │   │   ├── SpeakerNamingView.swift    # Speaker identification and naming
 │   │   │   ├── AuroraIdleView.swift       # Aurora idle animation
 │   │   │   ├── AuroraRecordingView.swift  # Aurora recording animation
 │   │   │   ├── AuroraProcessingView.swift # Aurora processing animation
 │   │   │   └── AuroraSuccessView.swift    # Aurora success animation
 │   │   └── Helpers/
 │   │       └── LawsComponents.swift       # Reusable UI primitives
-│   ├── Settings/                  # Settings sidebar+tabs system
+│   ├── Settings/                  # Settings window
 │   │   ├── SettingsWindowController.swift  # NSWindowController, 800x600
-│   │   ├── SettingsContainerView.swift     # Sidebar + content layout
+│   │   ├── SettingsContainerView.swift     # Single-page scrolling layout
 │   │   ├── SettingsSidebarView.swift       # Left sidebar navigation
 │   │   ├── Models/
-│   │   │   └── SettingsNavigationState.swift  # Tab state
-│   │   ├── Tabs/
-│   │   │   ├── DashboardView.swift        # Stats, recent transcripts
-│   │   │   └── PreferencesView.swift      # Storage, model status, appearance
+│   │   │   └── SettingsNavigationState.swift  # Tab state (Dashboard, Speakers, Preferences)
 │   │   └── Components/
-│   │       ├── RecentTranscriptsView.swift # Recent transcript list
 │   │       └── SettingsSectionCard.swift   # Reusable card component
 │   └── FailedTranscriptionsView.swift  # Retry queue management UI
 ├── TranscriptedApp.swift          # App entry point (AppDelegate pattern)
@@ -325,6 +322,7 @@ Murmur/
 | `transcription` | Parakeet/Sortformer model loading, STT/diarization |
 | `pipeline` | Task lifecycle, saving, file management, retries |
 | `speaker-db` | Speaker matching, voice embeddings, merges |
+| `services` | Service-level operations (Qwen, etc.) |
 | `ui` | Pill state transitions, UI events |
 | `stats` | Recording statistics, database operations |
 | `app` | App lifecycle, model initialization |
