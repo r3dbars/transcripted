@@ -15,17 +15,17 @@ Sources/
 ├── HotkeyPreferences.swift  ← Stores/loads custom hotkey bindings (UserDefaults), Carbon modifier conversion, display strings
 ├── CLAUDE.md                ← Initialization order and boot sequence documentation
 ├── Speech/                  ← ParakeetEngine (CoreML STT) + STTRouter
-├── API/                     ← Anthropic API client (text + vision + streaming) + AuthCredential + Keychain
+├── API/                     ← Anthropic API client (text + vision + streaming) + AuthCredential + Keychain + ChatMessage
 ├── Draft/                   ← DraftEngine + PlatformFormatter + DraftUtils — orchestrates drafting
 ├── Style/                   ← StyleEngine + StyleUtils — learns user's writing voice + onboarding
 ├── Prompts/                 ← PromptStore — externalized prompts (prompts.json)
 ├── Feedback/                ← FeedbackStore — accept/edit signal logging (feedback.jsonl) + UsageStats
 ├── Messages/                ← iMessage database reader (SQLite, onboarding import) + MessageFilter
-├── Capture/                 ← Screen capture, context extraction, hotkey registration, three-way routing
-├── Analysis/                ← AnalysisEngine — native Swift feedback analyzer (replaces Python agent)
+├── Capture/                 ← Screen capture, context extraction, hotkey registration, three-way routing, PreviousAppTracker
+├── Analysis/                ← AnalysisEngine + InsightCard — native Swift feedback analyzer (replaces Python agent)
 ├── Accessibility/           ← AccessibilityBridge — AXUIElement queries for text field position + value
-├── Observability/           ← EventReporter — centralized error/warning/info tracking (events.jsonl)
-└── UI/                      ← UI layer (20 files): floating overlay, MenuBarPanel, onboarding, AgentSection
+├── Observability/           ← EventReporter + AppLogger + JSONLWriter — centralized error/warning/info tracking (events.jsonl)
+└── UI/                      ← UI layer (16 files): floating overlay, MenuBarPanel, onboarding, AgentSection
 Tests/                       ← Pure-function test suite (159 tests, no XCTest, 2s compile+run)
 run-tests.sh                 ← Compiles and runs the test suite
 ```

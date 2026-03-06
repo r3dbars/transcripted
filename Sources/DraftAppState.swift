@@ -50,6 +50,7 @@ class DraftAppState: ObservableObject {
             ) { [weak self] _ in
                 Task { @MainActor [weak self] in
                     self?.promptStore.reload()
+                    self?.chatEngine.invalidatePromptCache()
                     self?.logger.log("🤖 AGENT | prompts.json reloaded after analysis change")
                 }
             }
@@ -70,7 +71,12 @@ class DraftAppState: ObservableObject {
         }
 
         // Register as login item so model is pre-loaded when user needs it
-        try? SMAppService.mainApp.register()
+        do {
+            try SMAppService.mainApp.register()
+        } catch {
+            EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_failed",
+                message: error.localizedDescription)
+        }
 
         // Start periodic telemetry shipping (60s incremental uploads)
         BetaTelemetry.shared.startPeriodicShipping()

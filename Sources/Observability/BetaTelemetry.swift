@@ -86,8 +86,8 @@ final class BetaTelemetry {
         guard logChunk != nil || eventChunk != nil else { return }
 
         var body: [String: Any] = [:]
-        if let log = logChunk { body["log_lines"] = log }
-        if let events = eventChunk { body["event_lines"] = events }
+        if let log = logChunk { body["log_lines"] = redactChunk(log) }
+        if let events = eventChunk { body["event_lines"] = redactChunk(events) }
 
         var request = URLRequest(url: URL(string: "\(BetaConfig.proxyBaseURL)/logs")!)
         request.httpMethod = "POST"
@@ -120,8 +120,8 @@ final class BetaTelemetry {
         guard logChunk != nil || eventChunk != nil else { return }
 
         var body: [String: Any] = [:]
-        if let log = logChunk { body["log_lines"] = log }
-        if let events = eventChunk { body["event_lines"] = events }
+        if let log = logChunk { body["log_lines"] = redactChunk(log) }
+        if let events = eventChunk { body["event_lines"] = redactChunk(events) }
 
         var request = URLRequest(url: URL(string: "\(BetaConfig.proxyBaseURL)/logs")!)
         request.httpMethod = "POST"
@@ -144,6 +144,37 @@ final class BetaTelemetry {
         } catch {
             // Leave offsets unchanged — will retry next cycle
         }
+    }
+
+    // MARK: - Log Redaction
+
+    /// Strip sensitive data from log lines before shipping to proxy.
+    private func redactLogLine(_ line: String) -> String {
+        var result = line
+        // Redact file paths containing usernames: /Users/<name>/ → /Users/****/
+        if let range = result.range(of: #"/Users/[^/]+/"#, options: .regularExpression) {
+            result = result.replacingCharacters(in: range, with: "/Users/****/")
+        }
+        // Redact API key patterns
+        result = result.replacingOccurrences(
+            of: #"sk-ant-[A-Za-z0-9_-]+"#,
+            with: "sk-ant-****",
+            options: .regularExpression
+        )
+        // Redact Bearer tokens
+        result = result.replacingOccurrences(
+            of: #"Bearer [A-Za-z0-9._-]+"#,
+            with: "Bearer ****",
+            options: .regularExpression
+        )
+        return result
+    }
+
+    /// Redact all lines in a multi-line log chunk.
+    private func redactChunk(_ chunk: String) -> String {
+        chunk.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { redactLogLine(String($0)) }
+            .joined(separator: "\n")
     }
 
     // MARK: - File chunk reading

@@ -25,6 +25,8 @@ class DraftEngine: ObservableObject {
     /// The raw text from the user's last draft request — exposed for FeedbackStore logging.
     var lastRawText = ""
 
+    private var draftTask: Task<Void, Never>?
+
     func checkCredential() {
         hasCredential = AuthCredential.load() != nil
     }
@@ -70,16 +72,20 @@ class DraftEngine: ObservableObject {
         let customPrompt = styleEngine?.buildSystemPrompt()
         let model = promptStore?.config.draftModel ?? DefaultPrompts.sonnetModel
 
-        Task {
+        draftTask?.cancel()
+        draftTask = Task {
             do {
                 let result = try await AnthropicAPI.draft(rawText: rawText, auth: auth, model: model, systemPrompt: customPrompt)
+                guard !Task.isCancelled else { return }
                 self.draftedText = result
                 self.originalDraft = result
             } catch AnthropicAPIError.subscriptionTokenExpired {
+                guard !Task.isCancelled else { return }
                 self.error = "Subscription token expired — run `claude setup-token` and update in Settings"
                 EventReporter.shared.capture(level: .error, engine: "draft", event: "subscription_expired",
                     message: "Subscription token expired during plain draft")
             } catch {
+                guard !Task.isCancelled else { return }
                 self.error = error.localizedDescription
                 EventReporter.shared.capture(level: .error, engine: "draft", event: "draft_failed",
                     message: error.localizedDescription)
@@ -114,7 +120,8 @@ class DraftEngine: ObservableObject {
             userMessage = "The user said: \"\(voiceText.trimmingCharacters(in: .whitespacesAndNewlines))\"\n\nWrite the reply. Output ONLY the reply text, nothing else."
         }
 
-        Task {
+        draftTask?.cancel()
+        draftTask = Task {
             do {
                 let draftModel = self.promptStore?.config.draftModel ?? DefaultPrompts.sonnetModel
                 let result = try await AnthropicAPI.draft(
@@ -123,15 +130,18 @@ class DraftEngine: ObservableObject {
                     model: draftModel,
                     systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt
                 )
+                guard !Task.isCancelled else { return }
                 // Apply platform post-processing as safety net
                 let processed = platform.postProcess(result)
                 self.draftedText = processed
                 self.originalDraft = processed
             } catch AnthropicAPIError.subscriptionTokenExpired {
+                guard !Task.isCancelled else { return }
                 self.error = "Subscription token expired — run `claude setup-token` and update in Settings"
                 EventReporter.shared.capture(level: .error, engine: "draft", event: "subscription_expired",
                     message: "Subscription token expired during context-aware draft")
             } catch {
+                guard !Task.isCancelled else { return }
                 self.error = error.localizedDescription
                 EventReporter.shared.capture(level: .error, engine: "draft", event: "draft_failed",
                     message: error.localizedDescription)

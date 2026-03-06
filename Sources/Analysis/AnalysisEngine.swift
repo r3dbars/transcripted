@@ -34,14 +34,21 @@ class AnalysisEngine: ObservableObject {
 
     private let minEntries = 5
     private let debounceSeconds: Double = 30
+    private let isoFormatter = ISO8601DateFormatter()
+    private let suggestionWriter: JSONLWriter
 
     init() {
         dataDir = FileManager.default.draftAppSupportDir
+        suggestionWriter = JSONLWriter(fileURL: dataDir.appendingPathComponent("suggestion_log.jsonl"))
     }
 
     deinit {
-        fileSource?.cancel()
-        debounceTask?.cancel()
+        let source = fileSource
+        let task = debounceTask
+        let fd = fileDescriptor
+        source?.cancel()
+        task?.cancel()
+        if fd >= 0 { Darwin.close(fd) }
     }
 
     func start() {
@@ -172,7 +179,6 @@ class AnalysisEngine: ObservableObject {
                 insights.append(card)
             }
         } catch {
-            print("⚠️ ANALYSIS | analysis failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "analysis", event: "analysis_failed",
                 message: error.localizedDescription)
         }
@@ -294,14 +300,16 @@ class AnalysisEngine: ObservableObject {
     // MARK: - File I/O
 
     private func countLines(at url: URL) -> Int {
-        do {
-            let content = try String(contentsOf: url, encoding: .utf8)
-            return content.split(separator: "\n", omittingEmptySubsequences: true).count
-        } catch {
-            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "analysis_file_read_failed",
-                message: error.localizedDescription, context: ["path": url.path, "operation": "countLines"])
-            return 0
-        }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return 0 }
+        defer { try? handle.close() }
+        var count = 0
+        while autoreleasepool(invoking: {
+            let chunk = handle.readData(ofLength: 8192)
+            guard !chunk.isEmpty else { return false }
+            for byte in chunk where byte == 0x0A { count += 1 }
+            return true
+        }) {}
+        return count
     }
 
     private func loadRecentLines(from url: URL, limit: Int) -> String? {
@@ -322,7 +330,6 @@ class AnalysisEngine: ObservableObject {
         do {
             let data = try Data(contentsOf: promptsURL)
             guard var dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                print("⚠️ ANALYSIS | prompts.json is not a dictionary")
                 EventReporter.shared.capture(level: .error, engine: "analysis", event: "prompt_write_failed",
                     message: "prompts.json root is not a dictionary", context: ["key": key])
                 return
@@ -331,7 +338,6 @@ class AnalysisEngine: ObservableObject {
             let newData = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys])
             try newData.write(to: promptsURL)
         } catch {
-            print("⚠️ ANALYSIS | failed to write prompt change for key '\(key)': \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "analysis", event: "prompt_write_failed",
                 message: error.localizedDescription, context: ["key": key])
         }
@@ -339,7 +345,7 @@ class AnalysisEngine: ObservableObject {
 
     private func logSuggestion(card: InsightCard, action: String) {
         let entry: [String: Any] = [
-            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "timestamp": isoFormatter.string(from: Date()),
             "suggestion_id": card.suggestionId,
             "prompt_key": card.promptKey,
             "action": action,
@@ -355,26 +361,8 @@ class AnalysisEngine: ObservableObject {
                 context: ["action": action, "suggestion_id": card.suggestionId])
             return
         }
-        guard let line = String(data: data, encoding: .utf8) else {
-            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "suggestion_write_failed",
-                message: "Failed to convert suggestion data to UTF-8", context: ["action": action, "suggestion_id": card.suggestionId])
-            return
-        }
-        let lineWithNewline = (line + "\n").data(using: .utf8) ?? Data()
-        do {
-            if FileManager.default.fileExists(atPath: suggestionLogURL.path) {
-                let handle = try FileHandle(forWritingTo: suggestionLogURL)
-                defer { try? handle.close() }
-                handle.seekToEndOfFile()
-                handle.write(lineWithNewline)
-            } else {
-                try lineWithNewline.write(to: suggestionLogURL)
-            }
-        } catch {
-            print("⚠️ ANALYSIS | failed to write suggestion log: \(error.localizedDescription)")
-            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "suggestion_write_failed",
-                message: error.localizedDescription, context: ["action": action, "suggestion_id": card.suggestionId])
-        }
+        let w = suggestionWriter
+        Task { await w.append(data) }
     }
 }
 
@@ -416,7 +404,8 @@ private extension URL {
         do {
             try FileManager.default.createDirectory(at: self, withIntermediateDirectories: true)
         } catch {
-            print("⚠️ ANALYSIS | failed to create directory \(self.path): \(error.localizedDescription)")
+            // Can't call EventReporter.shared.capture() from nonisolated URL extension
+            fputs("⚠️ ANALYSIS | failed to create directory \(self.path): \(error.localizedDescription)\n", stderr)
         }
     }
 }

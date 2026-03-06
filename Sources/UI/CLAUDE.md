@@ -20,12 +20,8 @@ SwiftUI views for the Draft app. The primary UI is a **floating overlay** (non-a
 - `AgentTab.swift` (~287 lines) — `AgentSection` struct: simplified insight cards (Apply/Skip) + streaming chat interface with expandable tool use indicators
 - `StyleOnboardingView.swift` (~664 lines) — 5-step onboarding: intro → source choice → (iMessage/paste) → result
 - `APIKeyEntryView.swift` (~231 lines) — Auth setup overlay: name + API key or subscription token
-- `InsightCard.swift` (~71 lines) — Model for insight cards + shared `toolDefinition` and `from()` factory (used by both StreamingChatEngine and AnalysisEngine)
 - `ScrollingWaveformView.swift` (~147 lines) — Real-time scrolling waveform for overlay header bar, Canvas + TimelineView at 60fps, ring buffer for audio level samples
 - `AnimatedTranscriptView.swift` (~81 lines) — Animated live transcript with word-by-word fade-in via custom `FlowLayout` (SwiftUI Layout protocol)
-- `ChatMessage.swift` (~32 lines) — Model for chat messages in AgentSection (user/assistant/tool roles)
-- `AppLogger.swift` (~110 lines) — Debug logger writing to `~/draft-debug.log` with timestamps, actor-isolated file writer, throttled logging, log rotation (>500KB → last 1000 lines), session separators
-- `PreviousAppTracker.swift` (~25 lines) — Tracks last non-Draft app for paste-back fallback
 
 ## Architecture Overview
 
@@ -236,17 +232,6 @@ The `NSHostingController` is **recreated on every popover open** inside `DraftAp
 
 This guarantees a fresh SwiftUI view tree on each open. A long-lived `NSHostingController` accumulates stale observation state across show/hide cycles and can crash in body evaluation. Do NOT cache the hosting controller or use `.id()` tricks (e.g., a `popoverGeneration` counter) — a `.id()` change on the root view triggers an infinite `.onAppear` → re-layout → `.onAppear` loop. Just recreate the controller.
 
-## InsightCard
-
-Model struct for agent-proposed prompt changes. The card UI in `AgentSection` is simplified: shows only the `promptKeyLabel`, `changeDescription`, and Apply/Skip buttons (no SAW/WHY/CHANGE labels). The full data (saw, why, currentValue, proposedValue) is still stored for programmatic use by `AnalysisEngine.apply()`.
-
-Key addition: **shared `toolDefinition` and `from()` factory** used by both `StreamingChatEngine` and `AnalysisEngine` — eliminates tool definition duplication.
-
-```swift
-static let toolDefinition: [String: Any]                    // Anthropic tool schema for propose_prompt_change
-static func from(toolId: String, input: [String: Any]) -> InsightCard?  // Parse tool call into card
-```
-
 ## AgentSection — Chat Tool Indicators
 
 Chat messages with role `.tool` are rendered as compact, expandable tool indicators (wrench icon + label) instead of regular bubbles. Clicking expands to show the tool's detail text (file path, command, etc.) in a monospaced code block. The `expandedTools` `Set<String>` tracks which tool messages are currently expanded.
@@ -293,10 +278,6 @@ Button(action: {
 4. Subscription tab: step-by-step instructions for `claude setup-token` + paste field
 5. "Connect" saves to Keychain → overlay dismisses
 6. Gear icon → popover shows current auth mode + "Switch Auth Method" → clears Keychain → overlay reappears
-
-## PreviousAppTracker
-
-Observes `NSWorkspace.didDeactivateApplicationNotification` to remember the last non-Draft app. Used as fallback for source app in paste-back. Hardcoded bundle ID fallback (`com.justinbetker.draft`) since `Bundle.main.bundleIdentifier` can be nil for swiftc-built apps.
 
 ## Verification
 

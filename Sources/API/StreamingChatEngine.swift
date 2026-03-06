@@ -64,8 +64,22 @@ class StreamingChatEngine: ObservableObject {
     private let dataDir: URL
     private static let apiVersion = "2023-06-01"
 
+    // Cached file contents for system prompt — invalidated on demand
+    private var cachedStyleContent: String?
+    private var cachedPromptsContent: String?
+    private var cachedFeedbackLines: String?
+    private var cachedSuggestionLines: String?
+
     init() {
         dataDir = FileManager.default.draftAppSupportDir
+    }
+
+    /// Invalidate cached prompt context — call after prompt changes or style refinement.
+    func invalidatePromptCache() {
+        cachedStyleContent = nil
+        cachedPromptsContent = nil
+        cachedFeedbackLines = nil
+        cachedSuggestionLines = nil
     }
 
     // MARK: - Public Interface
@@ -95,19 +109,24 @@ class StreamingChatEngine: ObservableObject {
     private func buildSystemPromptWithContext() -> String {
         var parts = [chatSystemPromptBase]
 
-        if let style = loadFile("style.md"), !style.isEmpty {
+        // Use cached values when available; re-read on cache miss
+        if cachedStyleContent == nil { cachedStyleContent = loadFile("style.md") }
+        if let style = cachedStyleContent, !style.isEmpty {
             parts.append("\n<style_profile>\n\(style)\n</style_profile>")
         }
 
-        if let prompts = loadFile("prompts.json"), !prompts.isEmpty {
+        if cachedPromptsContent == nil { cachedPromptsContent = loadFile("prompts.json") }
+        if let prompts = cachedPromptsContent, !prompts.isEmpty {
             parts.append("\n<prompts_json>\n\(prompts)\n</prompts_json>")
         }
 
-        if let feedback = loadRecentFeedback(limit: 25) {
+        if cachedFeedbackLines == nil { cachedFeedbackLines = loadRecentFeedback(limit: 25) }
+        if let feedback = cachedFeedbackLines {
             parts.append("\n<recent_feedback_jsonl>\n\(feedback)\n</recent_feedback_jsonl>")
         }
 
-        if let suggestionLog = loadRecentSuggestionLog(limit: 10) {
+        if cachedSuggestionLines == nil { cachedSuggestionLines = loadRecentSuggestionLog(limit: 10) }
+        if let suggestionLog = cachedSuggestionLines {
             parts.append("\n<recent_suggestion_log_jsonl>\n\(suggestionLog)\n</recent_suggestion_log_jsonl>")
         }
 
@@ -254,6 +273,8 @@ class StreamingChatEngine: ObservableObject {
             }
         } catch {
             updateLastMessage(id: msgId, text: "Error: \(error.localizedDescription)", streaming: false)
+            EventReporter.shared.capture(level: .error, engine: "chat", event: "chat_followup_failed",
+                message: error.localizedDescription)
             return
         }
 
@@ -265,7 +286,11 @@ class StreamingChatEngine: ObservableObject {
 
     private func streamRequest(systemPrompt: String, auth: AuthCredential) -> AsyncThrowingStream<StreamEvent, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            Task { [weak self] in
+                guard let self = self else {
+                    continuation.finish()
+                    return
+                }
                 do {
                     var request = URLRequest(url: AnthropicAPI.endpoint)
                     request.httpMethod = "POST"

@@ -10,8 +10,9 @@ Handles communication with the Anthropic Messages API (text drafting, vision con
 - `AnthropicAPI.swift` (~260 lines) — URLSession-based HTTP client for Claude (text drafting, streaming drafts, vision extraction, timeout utility, retry logic for transient errors)
 - `AuthCredential.swift` (75 lines) — Auth abstraction: API key or Claude subscription token, with Keychain load/save/clear
 - `KeychainHelper.swift` (54 lines) — Simple macOS Keychain wrapper (save/load/delete) using Security framework
-- `StreamingChatEngine.swift` (386 lines) — Multi-turn streaming chat engine for the Agent tab; handles conversation history, context injection (style/prompts/feedback/suggestion log), and `propose_prompt_change` tool use
-- `BetaConfig.swift` (25 lines) — `#if BETA_BUILD` gated config: per-user token (placeholder replaced by build-beta.sh), proxy URL, app version, update URL
+- `StreamingChatEngine.swift` (~386 lines) — Multi-turn streaming chat engine for the Agent tab; handles conversation history, context injection (style/prompts/feedback/suggestion log), prompt caching, and `propose_prompt_change` tool use
+- `ChatMessage.swift` (~32 lines) — Model for chat messages in AgentSection (user/assistant/tool roles)
+- `BetaConfig.swift` (~25 lines) — `#if BETA_BUILD` gated config: per-user token (placeholder replaced by build-beta.sh), proxy URL, app version, update URL
 
 ---
 
@@ -234,7 +235,7 @@ Powers the Agent tab's conversational interface. Goes directly to the Anthropic 
 
 **Model selection:** Reads from `promptStore?.config.draftModel`, falling back to `DefaultPrompts.sonnetModel` (`claude-sonnet-4-6-20250514`).
 
-**Tool use:** Declares a single tool (`InsightCard.toolDefinition` from `UI/InsightCard.swift`) for `propose_prompt_change`. When Claude calls it, the engine parses the tool input JSON, creates an `InsightCard` via `InsightCard.from(toolId:input:)`, and fires `onInsightProposed`. A tool result (`"Card emitted successfully."`) is sent back in a follow-up turn so Claude can respond naturally after the tool call.
+**Tool use:** Declares a single tool (`InsightCard.toolDefinition` from `Analysis/InsightCard.swift`) for `propose_prompt_change`. When Claude calls it, the engine parses the tool input JSON, creates an `InsightCard` via `InsightCard.from(toolId:input:)`, and fires `onInsightProposed`. A tool result (`"Card emitted successfully."`) is sent back in a follow-up turn so Claude can respond naturally after the tool call.
 
 **Conversation turn flow:** `runConversationTurn()` streams the response, collecting text deltas and tool use events. If a tool was called, it appends the assistant message (with tool_use block) and tool_result to history, then calls `runFollowUpTurn()` for Claude's verbal follow-up. Pure text responses are appended directly to history.
 

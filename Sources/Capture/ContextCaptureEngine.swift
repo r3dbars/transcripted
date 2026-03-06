@@ -91,7 +91,8 @@ class ContextCaptureEngine: ObservableObject {
 
     func registerHotkey() {
         guard eventHandlerRef == nil else {
-            print("⚠️ CAPTURE | hotkey already registered")
+            EventReporter.shared.capture(level: .warning, engine: "capture", event: "hotkey_already_registered",
+                message: "registerHotkey() called but hotkey already registered — ignoring")
             return
         }
 
@@ -141,7 +142,7 @@ class ContextCaptureEngine: ObservableObject {
 
         // Draft mode — hotkey ID 1
         let draftHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 1)  // 'DRFT'
-        RegisterEventHotKey(
+        let draftStatus = RegisterEventHotKey(
             draftBinding.keyCode,
             draftBinding.modifiers,
             draftHotkeyID,
@@ -149,10 +150,14 @@ class ContextCaptureEngine: ObservableObject {
             0,
             &hotkeyRef
         )
+        if draftStatus != noErr {
+            EventReporter.shared.capture(level: .error, engine: "capture", event: "hotkey_register_failed",
+                message: "Draft hotkey registration failed", context: ["os_status": "\(draftStatus)"])
+        }
 
         // Dictation mode — hotkey ID 2
         let dictationHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 2)  // 'DRFT'
-        RegisterEventHotKey(
+        let dictationStatus = RegisterEventHotKey(
             dictationBinding.keyCode,
             dictationBinding.modifiers,
             dictationHotkeyID,
@@ -160,6 +165,10 @@ class ContextCaptureEngine: ObservableObject {
             0,
             &dictationHotkeyRef
         )
+        if dictationStatus != noErr {
+            EventReporter.shared.capture(level: .error, engine: "capture", event: "hotkey_register_failed",
+                message: "Dictation hotkey registration failed", context: ["os_status": "\(dictationStatus)"])
+        }
 
         // Update display strings
         draftShortcutDisplay = HotkeyPreferences.displayString(for: draftBinding)

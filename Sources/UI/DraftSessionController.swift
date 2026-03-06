@@ -542,6 +542,7 @@ class DraftSessionController: ObservableObject {
         if appState.styleEngine.shouldRefineNow(), let auth = appState.drafter.getAuth() {
             Task {
                 await appState.styleEngine.regenerateStyleSummary(auth: auth)
+                appState.chatEngine.invalidatePromptCache()
                 appState.logger.log("STYLE | summary updated")
             }
         }
@@ -578,13 +579,17 @@ class DraftSessionController: ObservableObject {
         }
 
         // Simulate Cmd+V — target app is already frontmost (overlay is non-activating)
-        let vDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true)
-        vDown?.flags = .maskCommand
-        vDown?.post(tap: .cghidEventTap)
+        guard let vDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true),
+              let vUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false) else {
+            EventReporter.shared.capture(level: .error, engine: "overlay", event: "cgevent_create_failed",
+                message: "CGEvent creation returned nil — paste will not work")
+            return
+        }
+        vDown.flags = .maskCommand
+        vDown.post(tap: .cghidEventTap)
 
-        let vUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false)
-        vUp?.flags = .maskCommand
-        vUp?.post(tap: .cghidEventTap)
+        vUp.flags = .maskCommand
+        vUp.post(tap: .cghidEventTap)
 
         // Restore clipboard after paste completes.
         // Poll changeCount every 50ms — some apps (rich text editors) write back to the

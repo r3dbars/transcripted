@@ -4,9 +4,10 @@
 
 Native Swift replacement for the Python orchestrator agent. Watches `~/Library/Application Support/Draft/feedback.jsonl` for new accepted drafts, uses Claude Sonnet to analyze editing patterns, and proposes prompt improvements as InsightCards displayed in AgentSection (menubar panel). Runs entirely in-process — no subprocess, no SSE relay, no port conflicts.
 
-## Key File
+## Key Files
 
-- `AnalysisEngine.swift` (377 lines) — `@MainActor ObservableObject` with DispatchSource file watching, debounced Sonnet analysis, InsightCard management, EventReporter observability, and proper deinit cleanup
+- `AnalysisEngine.swift` (~365 lines) — `@MainActor ObservableObject` with DispatchSource file watching, debounced Sonnet analysis, InsightCard management, EventReporter observability, and proper deinit cleanup
+- `InsightCard.swift` (~71 lines) — Model struct for insight cards + shared `toolDefinition` and `from()` factory (used by both StreamingChatEngine and AnalysisEngine)
 
 ## How It Works
 

@@ -48,7 +48,7 @@ private actor EventFileWriter {
         do {
             try FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
         } catch {
-            print("⚠️ EVENT | failed to create directory \(storageDir.path): \(error.localizedDescription)")
+            fputs("⚠️ EVENT | failed to create directory \(storageDir.path): \(error.localizedDescription)\n", stderr)
         }
     }
 

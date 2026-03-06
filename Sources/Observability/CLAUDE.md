@@ -13,8 +13,10 @@ Same directory as `feedback.jsonl` and `prompts.json`. Claude Code reads this fi
 ## Key Files
 
 - `EventReporter.swift` (~164 lines) — Centralized JSONL event writer + Sentry stub (details below)
-- `BetaTelemetry.swift` (~159 lines) — `#if BETA_BUILD` gated: batched event shipping to proxy Worker, incremental log/events.jsonl upload (60s timer), synchronous quit-time flush, crash-safe offset tracking
-- `UpdateManager.swift` (~225 lines) — DMG download, mount, staged app replacement with backup/rollback, version comparison via Info.plist, user-facing update prompts
+- `BetaTelemetry.swift` (~159 lines) — `#if BETA_BUILD` gated: batched event shipping to proxy Worker, incremental log/events.jsonl upload (60s timer), synchronous quit-time flush, crash-safe offset tracking, log redaction (paths, API keys, bearer tokens)
+- `UpdateManager.swift` (~225 lines) — DMG download, mount, staged app replacement with backup/rollback, version comparison via Info.plist, user-facing update prompts, team ID verification (XG6WL66WUQ)
+- `AppLogger.swift` (~110 lines) — Debug logger writing to `~/draft-debug.log` with timestamps, actor-isolated file writer, throttled logging, log rotation (>500KB → last 1000 lines), session separators
+- `JSONLWriter.swift` (~38 lines) — Shared actor for append-only JSONL file writes. Reuses FileHandle across appends to avoid open/seek/close overhead per write. Used by FeedbackStore and AnalysisEngine.
 
 ## File: EventReporter.swift (~164 lines)
 
@@ -122,7 +124,7 @@ Only `.error` level events are forwarded to Sentry. Warnings and info stay local
 
 ## Event Catalog
 
-43 unique events across 11 engines (52 total capture call sites).
+50 unique events across 11 engines (59 total capture call sites).
 
 | Engine | Event | Level | Trigger |
 |--------|-------|-------|---------|
@@ -167,5 +169,10 @@ Only `.error` level events are forwarded to Sentry. Warnings and info stay local
 | `overlay` | `refusal_detected` | info | Draft contained refusal pattern |
 | `overlay` | `no_voice_input` | warning | Empty transcription after recording |
 | `overlay` | `auth_missing` | error | No API credential when drafting |
+| `app` | `login_item_failed` | warning | SMAppService.register() failed for launch-at-login |
+| `capture` | `hotkey_register_failed` | error | RegisterEventHotKey returned non-zero OSStatus |
+| `capture` | `hotkey_already_registered` | warning | registerHotkey() called when hotkeys already registered |
+| `overlay` | `cgevent_create_failed` | error | CGEvent creation returned nil during paste simulation |
+| `chat` | `chat_followup_failed` | error | Follow-up turn after tool use threw an error |
 | `imessage` | `imessage_db_open_failed` | error | Can't open chat.db |
 | `imessage` | `imessage_query_failed` | error | SQLite query fails |
