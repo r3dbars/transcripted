@@ -172,16 +172,17 @@ final class SpeakerDatabaseTests: XCTestCase {
             persistentSpeakerId: UUID(),
             sortformerSpeakerId: "0",
             newName: "MKBHD",
-            action: .merged,
-            mergeTargetProfileId: targetId
+            action: .merged(targetProfileId: targetId)
         )
 
-        XCTAssertEqual(update.action, .merged)
-        XCTAssertEqual(update.mergeTargetProfileId, targetId)
+        if case .merged(let id) = update.action {
+            XCTAssertEqual(id, targetId)
+        } else {
+            XCTFail("Expected .merged action")
+        }
     }
 
-    func testSpeakerNameUpdateBackwardCompatibility() {
-        // Old-style init without mergeTargetProfileId should default to nil
+    func testSpeakerNameUpdateNamedAction() {
         let update = SpeakerNameUpdate(
             persistentSpeakerId: UUID(),
             sortformerSpeakerId: "0",
@@ -189,7 +190,11 @@ final class SpeakerDatabaseTests: XCTestCase {
             action: .named
         )
 
-        XCTAssertNil(update.mergeTargetProfileId, "Default mergeTargetProfileId should be nil")
+        if case .named = update.action {
+            // expected
+        } else {
+            XCTFail("Expected .named action")
+        }
     }
 
     // MARK: - areNameVariants (static, no DB needed)

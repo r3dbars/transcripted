@@ -93,28 +93,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         audio = aud
         taskManager = tm
 
-        // Initialize local transcription models (Parakeet + Sortformer) in background
+        // Initialize local models in background (Parakeet + Sortformer + Qwen pre-cache in parallel)
         AppLogger.app.info("Creating model init task")
         Task { @MainActor in
             AppLogger.app.info("Starting model initialization")
-            await tm.transcription.initializeModels()
+            async let modelsReady: Void = tm.transcription.initializeModels()
+            async let qwenCached: Void = Self.preCacheQwenIfNeeded()
+            await modelsReady
+            await qwenCached
             AppLogger.app.info("Model initialization complete")
-
-            // Pre-cache Qwen model in background so it's ready for first recording
-            if QwenService.isEnabled && !QwenService.isModelCached {
-                AppLogger.app.info("Pre-caching Qwen model in background")
-                let qwen = QwenService()
-                await qwen.loadModel()
-                switch qwen.modelState {
-                case .ready:
-                    qwen.unload()  // Free memory — just wanted to cache the files
-                    AppLogger.app.info("Qwen model pre-cached successfully")
-                case .failed(let error):
-                    AppLogger.app.error("Qwen model pre-cache failed", ["error": error])
-                default:
-                    AppLogger.app.warning("Qwen model pre-cache ended in unexpected state", ["state": "\(qwen.modelState)"])
-                }
-            }
         }
 
         // Wire up recording callbacks
@@ -134,6 +121,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             failedTranscriptionManager: ftm
         )
         floatingPanel?.showWindow(nil)
+    }
+
+    /// Pre-cache Qwen model so it's ready for first recording.
+    /// Downloads model files if enabled but not yet cached, then frees memory.
+    private static func preCacheQwenIfNeeded() async {
+        guard QwenService.isEnabled, !QwenService.isModelCached else { return }
+        AppLogger.app.info("Pre-caching Qwen model in background")
+        let qwen = QwenService()
+        await qwen.loadModel()
+        switch qwen.modelState {
+        case .ready:
+            qwen.unload()  // Free memory — just wanted to cache the files
+            AppLogger.app.info("Qwen model pre-cached successfully")
+        case .failed(let error):
+            AppLogger.app.error("Qwen model pre-cache failed", ["error": error])
+        default:
+            AppLogger.app.warning("Qwen model pre-cache ended in unexpected state")
+        }
     }
 
     #if DEBUG
@@ -182,9 +187,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 matchSimilarity: nil,
                 needsNaming: true,
                 needsConfirmation: false,
-                suggestedName: nil,
-                suggestionSource: nil,
-                qwenAttempted: false
+                qwenResult: .notAttempted
             ),
             SpeakerNamingEntry(
                 id: knownProfile.id,
@@ -195,9 +198,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 matchSimilarity: 0.72,
                 needsNaming: false,
                 needsConfirmation: true,
-                suggestedName: nil,
-                suggestionSource: nil,
-                qwenAttempted: false
+                qwenResult: .notAttempted
             )
         ]
 

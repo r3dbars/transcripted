@@ -11,13 +11,13 @@ import Accelerate
 struct SpeakerProfile: Identifiable {
     let id: UUID
     var displayName: String?        // "Nate", "Travis", or nil if unnamed
-    var nameSource: String?         // "user_manual", "gemini_inferred", "gemini_override", nil
+    var nameSource: String?         // "user_manual", "qwen_inferred", nil
     var embedding: [Float]          // 256-dim average voice vector
     var firstSeen: Date
     var lastSeen: Date
     var callCount: Int
     var confidence: Double          // Improves with more data points
-    var disputeCount: Int           // Times Gemini disagreed with DB name
+    var disputeCount: Int           // Times inference disagreed with DB name
 }
 
 /// Result of matching an embedding against the speaker database
@@ -217,8 +217,8 @@ final class SpeakerDatabase {
     /// - Parameters:
     ///   - id: Speaker profile UUID
     ///   - name: Display name to set
-    ///   - source: Where the name came from ("user_manual", "gemini_inferred", "gemini_override")
-    func setDisplayName(id: UUID, name: String, source: String = "gemini_inferred") {
+    ///   - source: Where the name came from ("user_manual", "qwen_inferred")
+    func setDisplayName(id: UUID, name: String, source: String = "qwen_inferred") {
         queue.async { [weak self] in
             self?.setDisplayNameImpl(id: id, name: name, source: source)
         }
@@ -236,7 +236,7 @@ final class SpeakerDatabase {
         sqlite3_finalize(statement)
     }
 
-    /// Increment the dispute count for a speaker (Gemini disagreed with DB name)
+    /// Increment the dispute count for a speaker (inference disagreed with DB name)
     func incrementDisputeCount(id: UUID) {
         queue.async { [weak self] in
             let sql = "UPDATE speakers SET dispute_count = dispute_count + 1 WHERE id = ?;"
@@ -469,7 +469,7 @@ final class SpeakerDatabase {
 
                 // Transfer display name if keeper doesn't have one
                 if keeper.displayName == nil, let name = absorbed.displayName {
-                    setDisplayNameImpl(id: keeper.id, name: name, source: absorbed.nameSource ?? "gemini_inferred")
+                    setDisplayNameImpl(id: keeper.id, name: name, source: absorbed.nameSource ?? "qwen_inferred")
                 }
 
                 // Delete the absorbed profile
