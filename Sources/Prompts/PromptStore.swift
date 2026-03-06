@@ -276,7 +276,8 @@ class PromptStore: ObservableObject {
         do {
             try FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
         } catch {
-            print("⚠️ PROMPTS | failed to create directory \(storageDir.path): \(error.localizedDescription)")
+            EventReporter.shared.capture(level: .warning, engine: "prompts", event: "directory_create_failed",
+                message: "Failed to create directory \(storageDir.path): \(error.localizedDescription)")
         }
 
         if FileManager.default.fileExists(atPath: storeURL.path) {
@@ -285,9 +286,8 @@ class PromptStore: ObservableObject {
                 let loaded = try JSONDecoder().decode(PromptConfig.self, from: data)
                 config = loaded
             } catch {
-                print("⚠️ PROMPTS | failed to load prompts.json: \(error.localizedDescription)")
-                // Can't use EventReporter here — it may not be initialized yet during app launch.
-                // Fall back to defaults so the app still works.
+                EventReporter.shared.capture(level: .warning, engine: "prompts", event: "prompts_load_failed",
+                    message: "Failed to load prompts.json: \(error.localizedDescription)")
                 config = .defaults
                 Self.write(config: .defaults, to: storeURL)
             }
@@ -304,8 +304,7 @@ class PromptStore: ObservableObject {
             let loaded = try JSONDecoder().decode(PromptConfig.self, from: data)
             config = loaded
         } catch {
-            print("⚠️ PROMPTS | failed to reload prompts.json: \(error.localizedDescription)")
-            EventReporter.shared.capture(level: .warning, engine: "app", event: "prompts_load_failed",
+            EventReporter.shared.capture(level: .warning, engine: "prompts", event: "prompts_reload_failed",
                 message: error.localizedDescription, context: ["path": storeURL.path])
         }
     }
@@ -352,7 +351,8 @@ class PromptStore: ObservableObject {
             let data = try encoder.encode(config)
             try data.write(to: url)
         } catch {
-            print("⚠️ PROMPTS | failed to write prompts.json: \(error.localizedDescription)")
+            EventReporter.shared.capture(level: .warning, engine: "prompts", event: "prompts_write_failed",
+                message: "Failed to write prompts.json: \(error.localizedDescription)")
         }
     }
 }

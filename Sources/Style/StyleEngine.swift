@@ -26,7 +26,8 @@ class StyleEngine: ObservableObject {
         do {
             try FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
         } catch {
-            print("⚠️ STYLE | failed to create directory \(storageDir.path): \(error.localizedDescription)")
+            EventReporter.shared.capture(level: .warning, engine: "style", event: "directory_create_failed",
+                message: "Failed to create directory \(storageDir.path): \(error.localizedDescription)")
         }
 
         // Load existing file
@@ -237,7 +238,6 @@ class StyleEngine: ObservableObject {
                 }
             }
         } catch {
-            print("⚠️ Style summary regeneration failed: \(error)")
             EventReporter.shared.capture(level: .error, engine: "style", event: "style_refinement_failed",
                 message: error.localizedDescription)
         }
@@ -564,7 +564,6 @@ class StyleEngine: ObservableObject {
         do {
             try styleFileContents.write(to: styleFileURL, atomically: true, encoding: .utf8)
         } catch {
-            print("⚠️ STYLE | failed to save style.md: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "style", event: "style_file_write_failed",
                 message: error.localizedDescription)
         }

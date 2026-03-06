@@ -151,6 +151,12 @@ async function handleEvents(
     return new Response("Invalid JSON", { status: 400 });
   }
 
+  // Limit payload size to prevent abuse
+  const payloadStr = body.payload ? JSON.stringify(body.payload) : null;
+  if (payloadStr && payloadStr.length > 4096) {
+    return new Response("Payload too large", { status: 413 });
+  }
+
   await env.DB.prepare(
     "INSERT INTO events (user_id, event_type, source_app, payload) VALUES (?, ?, ?, ?)"
   )
@@ -158,7 +164,7 @@ async function handleEvents(
       user.id,
       (body.event_type as string) ?? "unknown",
       (body.source_app as string) ?? null,
-      body.payload ? JSON.stringify(body.payload) : null
+      payloadStr
     )
     .run();
 
@@ -333,15 +339,9 @@ export default {
     const path = url.pathname;
     const method = request.method;
 
-    // CORS preflight
+    // CORS preflight — reject browser requests (native URLSession clients don't send preflight)
     if (method === "OPTIONS") {
-      return new Response(null, {
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization, anthropic-version, anthropic-beta",
-        },
-      });
+      return new Response(null, { status: 204 });
     }
 
     // Admin endpoint (separate auth)

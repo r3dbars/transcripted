@@ -33,7 +33,6 @@ class STTRouter: ObservableObject {
         if parakeetEngine.isModelLoaded {
             return parakeetEngine.startRecording()
         } else {
-            print("⚠️ ROUTER | Parakeet not ready — model still loading")
             EventReporter.shared.capture(level: .warning, engine: "parakeet",
                 event: "model_not_ready", message: "Parakeet model not loaded when startRecording called")
             return false

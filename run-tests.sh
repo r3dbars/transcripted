@@ -21,7 +21,7 @@ swiftc \
     Sources/Draft/DraftUtils.swift \
     Sources/Messages/MessageFilter.swift \
     Sources/Style/StyleUtils.swift \
-    Sources/UI/InsightCard.swift \
+    Sources/Analysis/InsightCard.swift \
     Sources/API/AnthropicAPITypes.swift \
     -framework AppKit \
     -parse-as-library \

@@ -85,7 +85,8 @@ class ParakeetEngine: ObservableObject {
     /// Bundle path: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/
     func initialize() async {
         guard asrManager == nil else {
-            print("⚠️ PARAKEET | already initialized")
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "already_initialized",
+                message: "initialize() called but ASR manager already exists — ignoring")
             return
         }
 
@@ -150,7 +151,6 @@ class ParakeetEngine: ObservableObject {
             // Validate audio format — after sleep, the input node may return a zero-rate
             // format if CoreAudio hardware hasn't fully reinitialized.
             guard nativeFormat.sampleRate > 0, nativeFormat.channelCount > 0 else {
-                print("⚠️ PARAKEET | prewarm skipped — audio format invalid (sr: \(nativeFormat.sampleRate), ch: \(nativeFormat.channelCount))")
                 EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "prewarm_invalid_format",
                     message: "Audio format invalid during prewarm",
                     context: ["sample_rate": "\(nativeFormat.sampleRate)", "channels": "\(nativeFormat.channelCount)"])
@@ -188,7 +188,6 @@ class ParakeetEngine: ObservableObject {
                 }
             }
         } catch {
-            print("⚠️ PARAKEET | prewarm failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "prewarm_failed",
                 message: error.localizedDescription, context: ["audio_device": inputDeviceName])
         }
@@ -238,7 +237,6 @@ class ParakeetEngine: ObservableObject {
                 self.isEnginePrewarmed = true
                 print("🔥 PARAKEET | engine re-warmed after device change")
             } catch {
-                print("⚠️ PARAKEET | re-warm failed: \(error.localizedDescription)")
                 EventReporter.shared.capture(level: .error, engine: "parakeet", event: "device_change_rewarm_failed",
                     message: error.localizedDescription, context: ["audio_device": self.inputDeviceName])
             }
@@ -276,7 +274,8 @@ class ParakeetEngine: ObservableObject {
             self.prewarm()
 
             if !self.isEnginePrewarmed {
-                print("⚠️ PARAKEET | first prewarm after wake failed, retrying in 1s")
+                EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "wake_prewarm_retry",
+                    message: "First prewarm after wake failed, retrying in 1s")
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 self.prewarm()
             }
@@ -288,14 +287,12 @@ class ParakeetEngine: ObservableObject {
     func startRecording(isRecoveryAttempt: Bool = false) -> Bool {
         guard !isRecording else { return true }
         guard isModelLoaded else {
-            print("⚠️ PARAKEET | cannot start recording — model not loaded")
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "model_not_loaded",
                 message: "Recording attempted without model loaded")
             return false
         }
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         guard micStatus == .authorized else {
-            print("⚠️ PARAKEET | microphone permission not granted (status: \(micStatus.rawValue))")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "mic_not_authorized",
                 message: "Microphone permission status: \(micStatus.rawValue)")
             return false
@@ -402,7 +399,6 @@ class ParakeetEngine: ObservableObject {
 
             guard sampleCount == 0 else { return }  // Audio is flowing — all good
 
-            print("⚠️ PARAKEET | no audio samples after 2s — zombie engine detected, attempting recovery")
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "zombie_engine_detected",
                 message: "No audio samples received after recording start — resetting engine",
                 context: ["audio_device": self.inputDeviceName])
@@ -456,7 +452,8 @@ class ParakeetEngine: ObservableObject {
             liveSpeechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
         }
         guard let recognizer = liveSpeechRecognizer, recognizer.isAvailable else {
-            print("⚠️ PARAKEET | Apple Speech unavailable, skipping live transcript")
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "live_speech_unavailable",
+                message: "Apple Speech recognizer unavailable, skipping live transcript")
             return
         }
 
@@ -475,7 +472,8 @@ class ParakeetEngine: ObservableObject {
         }
         liveRestartCount += 1
         if liveRestartCount > 5 {
-            print("⚠️ PARAKEET | live speech restarted too many times, stopping")
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "live_speech_restart_limit",
+                message: "Live speech restarted too many times (>5 in 10s), stopping")
             isLiveSpeechActive = false
             return
         }
@@ -548,7 +546,8 @@ class ParakeetEngine: ObservableObject {
 
     func transcribe() async -> String? {
         guard !isTranscribing else {
-            print("⚠️ PARAKEET | transcription already in progress")
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "transcription_already_active",
+                message: "transcribe() called while transcription already in progress")
             return nil
         }
         pendingSamplesLock.lock()
@@ -556,7 +555,8 @@ class ParakeetEngine: ObservableObject {
         pendingSamples.removeAll(keepingCapacity: true)
         pendingSamplesLock.unlock()
         guard !sampleBuffer.isEmpty else {
-            print("⚠️ PARAKEET | no audio to transcribe")
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "no_audio_samples",
+                message: "No audio samples in buffer when transcribe() called")
             return nil
         }
         guard let manager = asrManager, manager.isAvailable else {

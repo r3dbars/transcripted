@@ -34,6 +34,8 @@ class FloatingOverlayController: ObservableObject {
     @Published var transcriptExpanded = false
     @Published var hasContext: Bool = true
 
+    private var streamingNewlineCount = 0
+
     /// Closures for Enter/Escape in review mode — set by DraftSessionController
     var onConfirm: (() -> Void)?
     var onCancel: (() -> Void)?
@@ -50,7 +52,8 @@ class FloatingOverlayController: ObservableObject {
 
     func setup(sttRouter: STTRouter) {
         guard panel == nil else {
-            print("⚠️ OVERLAY | setup() called twice — ignoring")
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "setup_called_twice",
+                message: "setup() called but panel already exists — ignoring")
             return
         }
         self.sttRouter = sttRouter
@@ -233,6 +236,7 @@ class FloatingOverlayController: ObservableObject {
     func startStreaming(near sourceApp: NSRunningApplication? = nil) {
         guard state == .drafting || state == .listening else { return }
         streamingText = ""
+        streamingNewlineCount = 0
         transcriptExpanded = false  // Reset for next session
         state = .streaming
         // Show panel if not visible
@@ -248,8 +252,10 @@ class FloatingOverlayController: ObservableObject {
     func appendStreamToken(_ token: String) {
         guard state == .streaming else { return }
         streamingText += token
+        // Count newlines in incoming token only (O(token_length) instead of O(total_length))
+        for c in token where c == "\n" { streamingNewlineCount += 1 }
         // Dynamically resize as text grows
-        let lineCount = max(1, streamingText.components(separatedBy: "\n").count)
+        let lineCount = max(1, streamingNewlineCount + 1)
         let charEstimate = CGFloat(streamingText.count) / 50.0
         let lines = max(CGFloat(lineCount), charEstimate)
         let estimatedHeight = max(OverlayTokens.panelMinHeight, min(OverlayTokens.panelMaxHeight, lines * 20 + 120))
