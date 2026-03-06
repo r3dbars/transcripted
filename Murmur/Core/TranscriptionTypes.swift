@@ -114,6 +114,7 @@ struct SpeakerNamingEntry: Identifiable {
     let needsConfirmation: Bool      // true = known but low confidence (show confirm/deny)
     let suggestedName: String?       // Qwen-inferred name (nil if no suggestion)
     let suggestionSource: String?    // "qwen_inferred" or nil
+    let qwenAttempted: Bool          // true if Qwen ran (even if result was "Unknown")
 }
 
 /// Result of user naming/confirming a speaker
