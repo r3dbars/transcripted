@@ -99,6 +99,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             AppLogger.app.info("Starting model initialization")
             await tm.transcription.initializeModels()
             AppLogger.app.info("Model initialization complete")
+
+            // Pre-cache Qwen model in background so it's ready for first recording
+            if QwenService.isEnabled && !QwenService.isModelCached {
+                AppLogger.app.info("Pre-caching Qwen model in background")
+                let qwen = QwenService()
+                await qwen.loadModel()
+                if case .ready = qwen.modelState {
+                    qwen.unload()  // Free memory — just wanted to cache the files
+                    AppLogger.app.info("Qwen model pre-cached successfully")
+                }
+            }
         }
 
         // Wire up recording callbacks
@@ -167,7 +178,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 needsNaming: true,
                 needsConfirmation: false,
                 suggestedName: nil,
-                suggestionSource: nil
+                suggestionSource: nil,
+                qwenAttempted: false
             ),
             SpeakerNamingEntry(
                 id: knownProfile.id,
@@ -179,7 +191,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 needsNaming: false,
                 needsConfirmation: true,
                 suggestedName: nil,
-                suggestionSource: nil
+                suggestionSource: nil,
+                qwenAttempted: false
             )
         ]
 
