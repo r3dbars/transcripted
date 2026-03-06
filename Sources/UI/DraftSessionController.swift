@@ -570,12 +570,15 @@ class DraftSessionController: ObservableObject {
                 if pasteboard.changeCount != changeCountAfterSet { break }
             }
             pasteboard.clearContents()
-            for typeData in savedItems {
+            let items = savedItems.map { typeData -> NSPasteboardItem in
                 let item = NSPasteboardItem()
                 for (type, data) in typeData {
                     item.setData(data, forType: type)
                 }
-                pasteboard.writeObjects([item])
+                return item
+            }
+            if !items.isEmpty {
+                pasteboard.writeObjects(items)
             }
         }
     }

@@ -62,7 +62,6 @@ class StreamingChatEngine: ObservableObject {
     var promptStore: PromptStore?
 
     private let dataDir: URL
-    private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
     private static let apiVersion = "2023-06-01"
 
     init() {
@@ -268,7 +267,7 @@ class StreamingChatEngine: ObservableObject {
         AsyncThrowingStream { continuation in
             Task {
                 do {
-                    var request = URLRequest(url: Self.endpoint)
+                    var request = URLRequest(url: AnthropicAPI.endpoint)
                     request.httpMethod = "POST"
                     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     request.setValue(Self.apiVersion, forHTTPHeaderField: "anthropic-version")
