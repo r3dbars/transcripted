@@ -137,26 +137,9 @@ class TranscriptionTaskManager: ObservableObject {
         guard QwenService.isEnabled, QwenService.isModelCached else { return }
 
         // Check available memory — Qwen needs ~2.5GB, require 4GB headroom
-        let hostPort = mach_host_self()
-        defer { mach_port_deallocate(mach_task_self_, hostPort) }
-        var stats = vm_statistics64()
-        var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size)
-        let result = withUnsafeMutablePointer(to: &stats) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                host_statistics64(hostPort, HOST_VM_INFO64, $0, &count)
-            }
-        }
-        if result == KERN_SUCCESS {
-            let pageSize = UInt64(vm_kernel_page_size)
-            let freeBytes = (UInt64(stats.free_count) + UInt64(stats.inactive_count)) * pageSize
-            let requiredBytes: UInt64 = 4 * 1024 * 1024 * 1024
-            if freeBytes < requiredBytes {
-                AppLogger.pipeline.info("Skipping Qwen pre-load — low memory", [
-                    "availableMB": "\(freeBytes / (1024 * 1024))",
-                    "requiredMB": "\(requiredBytes / (1024 * 1024))"
-                ])
-                return
-            }
+        guard hasMemoryForQwen() else {
+            AppLogger.pipeline.info("Skipping Qwen pre-load — low memory")
+            return
         }
 
         // Don't create a second instance if already loading/ready
@@ -189,6 +172,25 @@ class TranscriptionTaskManager: ObservableObject {
                 self.cleanupQwen()
             }
         }
+    }
+
+    /// Check if enough memory is available for Qwen (~2.5GB model, require 4GB headroom).
+    /// Returns true if memory is sufficient or the check is unavailable.
+    nonisolated private func hasMemoryForQwen() -> Bool {
+        let hostPort = mach_host_self()
+        defer { mach_port_deallocate(mach_task_self_, hostPort) }
+        var stats = vm_statistics64()
+        var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &stats) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics64(hostPort, HOST_VM_INFO64, $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return true }  // if check fails, allow the attempt
+        let pageSize = UInt64(vm_kernel_page_size)
+        let freeBytes = (UInt64(stats.free_count) + UInt64(stats.inactive_count)) * pageSize
+        let requiredBytes: UInt64 = 4 * 1024 * 1024 * 1024
+        return freeBytes >= requiredBytes
     }
 
     private func cleanupQwen() {
@@ -489,17 +491,20 @@ class TranscriptionTaskManager: ObservableObject {
                                 }
 
                                 // Use pre-loaded instance, or fall back to fresh load (retry path)
-                                let qwen: QwenService
+                                let qwen: QwenService?
                                 if let preloaded = await MainActor.run(body: { self.qwenService }),
                                    case .ready = await preloaded.modelState {
                                     qwen = preloaded
-                                } else {
+                                } else if self.hasMemoryForQwen() {
                                     let fresh = await QwenService()
                                     await fresh.loadModel()
                                     qwen = fresh
+                                } else {
+                                    AppLogger.pipeline.info("Skipping Qwen fresh load — low memory")
+                                    qwen = nil
                                 }
 
-                                if case .ready = await qwen.modelState {
+                                if let qwen, case .ready = await qwen.modelState {
                                     qwenSuggestions = try await qwen.inferSpeakerNames(transcript: fiveMinText)
                                 }
                                 await MainActor.run { self.cleanupQwen() }
