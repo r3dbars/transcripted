@@ -259,6 +259,34 @@ struct SpeakerNamingCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    // MARK: - Source Label
+
+    /// Hint text showing how the name was detected (or that detection was attempted)
+    private var sourceLabel: some View {
+        Group {
+            if isQwenSuggestion {
+                Label("Detected from conversation", systemImage: "sparkles")
+                    .font(.system(size: 9))
+                    .foregroundColor(.orange.opacity(0.7))
+            } else if entry.currentName != nil, let sim = entry.matchSimilarity {
+                Label("Voice match · \(Int(sim * 100))%", systemImage: "waveform")
+                    .font(.system(size: 9))
+                    .foregroundColor(.panelTextMuted)
+            }
+        }
+    }
+
+    /// Hint for unknown speakers when Qwen tried but found no name
+    private var noNameDetectedHint: some View {
+        Group {
+            if entry.qwenAttempted && entry.suggestedName == nil && entry.currentName == nil {
+                Label("No name detected in conversation", systemImage: "sparkles")
+                    .font(.system(size: 9))
+                    .foregroundColor(.panelTextMuted.opacity(0.7))
+            }
+        }
+    }
+
     // MARK: - Naming Field (unknown speaker or rejected suggestion)
 
     private var namingField: some View {
@@ -287,6 +315,9 @@ struct SpeakerNamingCard: View {
                 .background(Color.panelCharcoalSurface.opacity(0.6))
                 .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             }
+
+            noNameDetectedHint
+                .padding(.leading, 24)
 
             // Autocomplete suggestions from speaker database
             if !nameText.isEmpty {
@@ -467,16 +498,13 @@ struct SpeakerNamingCard: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.panelTextPrimary)
             } else {
-                // Qwen suggestions get an amber sparkle badge
-                if isQwenSuggestion {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 10))
-                        .foregroundColor(.orange.opacity(0.8))
-                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(displayName)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.panelTextPrimary)
 
-                Text(displayName)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.panelTextPrimary)
+                    sourceLabel
+                }
 
                 Spacer()
 

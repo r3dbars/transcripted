@@ -136,6 +136,27 @@ class TranscriptionTaskManager: ObservableObject {
     func prepareForRecording() {
         guard QwenService.isEnabled, QwenService.isModelCached else { return }
 
+        // Check available memory — Qwen needs ~2.5GB, require 4GB headroom
+        var stats = vm_statistics64()
+        var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &stats) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+            }
+        }
+        if result == KERN_SUCCESS {
+            let pageSize = UInt64(vm_kernel_page_size)
+            let freeBytes = (UInt64(stats.free_count) + UInt64(stats.inactive_count)) * pageSize
+            let requiredBytes: UInt64 = 4 * 1024 * 1024 * 1024
+            if freeBytes < requiredBytes {
+                AppLogger.pipeline.info("Skipping Qwen pre-load — low memory", [
+                    "availableMB": "\(freeBytes / (1024 * 1024))",
+                    "requiredMB": "\(requiredBytes / (1024 * 1024))"
+                ])
+                return
+            }
+        }
+
         // Don't create a second instance if already loading/ready
         if let existing = qwenService {
             if case .ready = existing.modelState { return }
@@ -494,6 +515,8 @@ class TranscriptionTaskManager: ObservableObject {
                         }
                     }
 
+                    let qwenRan = !qwenSuggestions.isEmpty
+
                     let entries = clips.map { clip in
                         let qwenName = qwenSuggestions[clip.sortformerSpeakerId]
                         let hasQwenSuggestion = qwenName != nil && qwenName != "Unknown"
@@ -508,7 +531,8 @@ class TranscriptionTaskManager: ObservableObject {
                             needsNaming: clip.currentName == nil && !hasQwenSuggestion,
                             needsConfirmation: clip.currentName != nil || hasQwenSuggestion,
                             suggestedName: hasQwenSuggestion ? qwenName : nil,
-                            suggestionSource: hasQwenSuggestion ? "qwen_inferred" : nil
+                            suggestionSource: hasQwenSuggestion ? "qwen_inferred" : nil,
+                            qwenAttempted: qwenRan
                         )
                     }
 
