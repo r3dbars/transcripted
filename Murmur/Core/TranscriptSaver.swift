@@ -272,7 +272,7 @@ class TranscriptSaver {
             for key in sortedSpeakerKeys {
                 guard let mapping = speakerMappings[key] else { continue }
                 let name = mapping.identifiedName ?? "Unknown"
-                let confidence = mapping.confidence ?? "unknown"
+                let confidence = mapping.confidence?.rawValue ?? "unknown"
                 let source = speakerSources[mapping.speakerId] ?? "unknown"
                 yaml += "\n  - id: \"\(mapping.speakerId)\""
                 if let dbId = speakerDbIds[mapping.speakerId] {
@@ -294,7 +294,7 @@ class TranscriptSaver {
 
         // SECTION 1: Summary placeholder
         doc += "## Summary\n\n"
-        doc += "*Summary generation available with Gemini integration*\n\n"
+        doc += "*Paste into your favorite AI tool for summary generation*\n\n"
 
         // SECTION 2: Channel & Speaker Analytics
         doc += "---\n\n"

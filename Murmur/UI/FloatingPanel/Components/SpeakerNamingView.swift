@@ -208,7 +208,7 @@ struct SpeakerNamingCard: View {
         .onAppear {
             if let name = entry.currentName, entry.needsConfirmation {
                 nameText = name
-            } else if let suggested = entry.suggestedName {
+            } else if let suggested = qwenSuggestedName {
                 // Pre-fill from Qwen inference
                 nameText = suggested
             }
@@ -267,11 +267,11 @@ struct SpeakerNamingCard: View {
             if entry.currentName != nil, let sim = entry.matchSimilarity {
                 // Voice match from DB takes priority — biometric > LLM inference
                 Label("Voice match · \(Int(sim * 100))%", systemImage: "waveform")
-                    .font(.system(size: 9))
+                    .font(.system(size: 10))
                     .foregroundColor(.panelTextMuted)
             } else if isQwenSuggestion {
                 Label("Detected from conversation", systemImage: "sparkles")
-                    .font(.system(size: 9))
+                    .font(.system(size: 10))
                     .foregroundColor(.orange.opacity(0.7))
             }
         }
@@ -280,9 +280,9 @@ struct SpeakerNamingCard: View {
     /// Hint for unknown speakers when Qwen tried but found no name
     private var noNameDetectedHint: some View {
         Group {
-            if entry.qwenAttempted && entry.suggestedName == nil && entry.currentName == nil {
+            if case .noNameFound = entry.qwenResult, entry.currentName == nil {
                 Label("No name detected in conversation", systemImage: "sparkles")
-                    .font(.system(size: 9))
+                    .font(.system(size: 10))
                     .foregroundColor(.panelTextMuted.opacity(0.7))
             }
         }
@@ -450,8 +450,7 @@ struct SpeakerNamingCard: View {
             persistentSpeakerId: entry.id,
             sortformerSpeakerId: entry.sortformerSpeakerId,
             newName: name,
-            action: .merged,
-            mergeTargetProfileId: candidate.id
+            action: .merged(targetProfileId: candidate.id)
         ))
     }
 
@@ -479,13 +478,20 @@ struct SpeakerNamingCard: View {
 
     /// Whether this entry has a Qwen-inferred name suggestion
     private var isQwenSuggestion: Bool {
-        entry.suggestionSource == "qwen_inferred"
+        if case .suggested = entry.qwenResult { return true }
+        return false
+    }
+
+    /// Extract Qwen suggested name, if any
+    private var qwenSuggestedName: String? {
+        if case .suggested(let name) = entry.qwenResult { return name }
+        return nil
     }
 
     /// Display name for this entry — DB match or Qwen suggestion
     private var displayName: String {
         if let name = entry.currentName { return name }
-        if let suggested = entry.suggestedName { return suggested }
+        if let suggested = qwenSuggestedName { return suggested }
         return ""
     }
 
@@ -525,8 +531,6 @@ struct SpeakerNamingCard: View {
                 .buttonStyle(PlainButtonStyle())
                 .help("Wrong person")
             }
-
-            Spacer()
         }
         .animation(.snappy(duration: 0.15), value: isConfirmed)
     }

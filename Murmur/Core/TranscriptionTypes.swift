@@ -66,6 +66,19 @@ struct TranscriptionResult {
     }
 }
 
+/// Speaker confidence level from voice fingerprint matching
+enum SpeakerConfidence: String, Codable {
+    case high
+    case medium
+}
+
+/// Result of Qwen speaker name inference on transcript text
+enum QwenInferenceResult {
+    case notAttempted
+    case noNameFound
+    case suggested(name: String)
+}
+
 /// Result of speaker identification from voice fingerprint matching
 struct SpeakerIdentificationResult: Codable {
     let speakers: [IdentifiedSpeaker]
@@ -76,7 +89,7 @@ struct SpeakerIdentificationResult: Codable {
 struct IdentifiedSpeaker: Codable {
     let name: String
     let speakerId: String?
-    let confidence: String   // "high" or "medium"
+    let confidence: SpeakerConfidence
     let evidence: String
 }
 
@@ -112,9 +125,7 @@ struct SpeakerNamingEntry: Identifiable {
     let matchSimilarity: Double?     // cosine similarity score
     let needsNaming: Bool            // true = unknown speaker (show text field)
     let needsConfirmation: Bool      // true = known but low confidence (show confirm/deny)
-    let suggestedName: String?       // Qwen-inferred name (nil if no suggestion)
-    let suggestionSource: String?    // "qwen_inferred" or nil
-    let qwenAttempted: Bool          // true if Qwen ran (even if result was "Unknown")
+    let qwenResult: QwenInferenceResult  // result of Qwen name inference
 }
 
 /// Result of user naming/confirming a speaker
@@ -123,20 +134,11 @@ struct SpeakerNameUpdate {
     let sortformerSpeakerId: String
     let newName: String
     let action: NamingAction
-    let mergeTargetProfileId: UUID?  // non-nil when action == .merged
-
-    init(persistentSpeakerId: UUID, sortformerSpeakerId: String, newName: String, action: NamingAction, mergeTargetProfileId: UUID? = nil) {
-        self.persistentSpeakerId = persistentSpeakerId
-        self.sortformerSpeakerId = sortformerSpeakerId
-        self.newName = newName
-        self.action = action
-        self.mergeTargetProfileId = mergeTargetProfileId
-    }
 
     enum NamingAction {
         case named      // user typed a name for unknown speaker
         case confirmed  // user confirmed suggested name
         case corrected  // user rejected suggestion and typed correct name
-        case merged     // user linked this speaker to an existing profile
+        case merged(targetProfileId: UUID)  // user linked this speaker to an existing profile
     }
 }

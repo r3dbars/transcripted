@@ -229,11 +229,9 @@ class TranscriptionTaskManager: ObservableObject {
         let task = TranscriptionTask(micURL: micURL, systemURL: systemURL, outputFolder: outputFolder, healthInfo: healthInfo)
 
         // Increment active count and set initial status immediately (Goal-Gradient Effect)
-        DispatchQueue.main.async {
-            self.activeCount += 1
-            self.backgroundTaskCount += 1
-            self.displayStatus = .gettingReady
-        }
+        activeCount += 1
+        backgroundTaskCount += 1
+        displayStatus = .gettingReady
 
         AppLogger.pipeline.info("Starting transcription task", ["taskId": "\(task.id)", "activeCount": "\(activeCount)"])
 
@@ -346,9 +344,9 @@ class TranscriptionTaskManager: ObservableObject {
 
         AppLogger.pipeline.info("Phase 1 complete: Local transcription done", ["micUtterances": "\(result.micUtteranceCount)", "systemUtterances": "\(result.systemUtteranceCount)"])
 
-        // Phase 1.5: Identify speakers — DB knowledge first, then Gemini if needed
+        // Phase 1.5: Identify speakers — DB knowledge first, then Qwen if needed
         var speakerMappings: [String: SpeakerMapping] = [:]
-        var speakerSources: [String: String] = [:]  // "db" or "gemini" per speaker ID
+        var speakerSources: [String: String] = [:]  // "db" per speaker ID
         var speakerResult: SpeakerIdentificationResult? = nil
 
         // Build DB knowledge snapshot: what do we already know about these speakers?
@@ -374,14 +372,14 @@ class TranscriptionTaskManager: ObservableObject {
             }
 
         if allSpeakersKnown {
-            // Skip Gemini entirely — build mappings + synthetic SpeakerIdentificationResult from DB
-            AppLogger.speakers.info("All speakers known from DB, skipping Gemini", ["speakerCount": "\(speakerIds.count)"])
+            // Skip name inference — build mappings + synthetic SpeakerIdentificationResult from DB
+            AppLogger.speakers.info("All speakers known from DB, skipping name inference", ["speakerCount": "\(speakerIds.count)"])
 
             var identifiedSpeakers: [IdentifiedSpeaker] = []
             for entry in dbKnowledge {
                 guard let name = entry.profile.displayName else { continue }
                 let key = "system_\(entry.speakerId)"
-                let confidence = entry.similarity > 0.85 && entry.profile.callCount > 3 ? "high" : "medium"
+                let confidence: SpeakerConfidence = entry.similarity > 0.85 && entry.profile.callCount > 3 ? .high : .medium
                 speakerMappings[key] = SpeakerMapping(
                     speakerId: entry.speakerId,
                     identifiedName: name,
@@ -398,14 +396,14 @@ class TranscriptionTaskManager: ObservableObject {
 
             speakerResult = SpeakerIdentificationResult(speakers: identifiedSpeakers, userSpeakerId: nil)
         } else {
-            AppLogger.speakers.info("Using DB-only speaker identification (no Gemini)")
+            AppLogger.speakers.info("Using DB-only speaker identification")
         }
 
         // Fill gaps: use DB display names for any speaker IDs not yet in speakerMappings
         for entry in dbKnowledge {
             let key = "system_\(entry.speakerId)"
             if speakerMappings[key] == nil, let name = entry.profile.displayName {
-                let confidence = entry.similarity > 0.85 && entry.profile.callCount > 3 ? "high" : "medium"
+                let confidence: SpeakerConfidence = entry.similarity > 0.85 && entry.profile.callCount > 3 ? .high : .medium
                 speakerMappings[key] = SpeakerMapping(
                     speakerId: entry.speakerId,
                     identifiedName: name,
@@ -414,7 +412,7 @@ class TranscriptionTaskManager: ObservableObject {
                 if speakerSources[entry.speakerId] == nil {
                     speakerSources[entry.speakerId] = "db"
                 }
-                AppLogger.speakers.info("DB fallback for speaker", ["speakerId": entry.speakerId, "name": name, "confidence": confidence, "similarity": String(format: "%.0f", entry.similarity * 100)])
+                AppLogger.speakers.info("DB fallback for speaker", ["speakerId": entry.speakerId, "name": name, "confidence": confidence.rawValue, "similarity": String(format: "%.0f", entry.similarity * 100)])
             }
         }
 
@@ -490,18 +488,21 @@ class TranscriptionTaskManager: ObservableObject {
                                     await preloadTask.value
                                 }
 
-                                // Use pre-loaded instance, or fall back to fresh load (retry path)
-                                let qwen: QwenService?
-                                if let preloaded = await MainActor.run(body: { self.qwenService }),
-                                   case .ready = await preloaded.modelState {
-                                    qwen = preloaded
-                                } else if self.hasMemoryForQwen() {
-                                    let fresh = await QwenService()
-                                    await fresh.loadModel()
-                                    qwen = fresh
-                                } else {
-                                    AppLogger.pipeline.info("Skipping Qwen fresh load — low memory")
-                                    qwen = nil
+                                // Atomically check pre-loaded instance (single MainActor hop prevents TOCTOU)
+                                var qwen: QwenService? = await MainActor.run {
+                                    if let svc = self.qwenService, case .ready = svc.modelState { return svc }
+                                    return nil
+                                }
+
+                                // Fall back to fresh load (retry path)
+                                if qwen == nil {
+                                    if self.hasMemoryForQwen() {
+                                        let fresh = await QwenService()
+                                        await fresh.loadModel()
+                                        qwen = fresh
+                                    } else {
+                                        AppLogger.pipeline.info("Skipping Qwen fresh load — low memory")
+                                    }
                                 }
 
                                 if let qwen, case .ready = await qwen.modelState {
@@ -522,13 +523,21 @@ class TranscriptionTaskManager: ObservableObject {
                         }
                     }
 
-                    // Track whether Qwen actually ran (not just whether it found names).
-                    // This drives the "No name detected" hint in the naming UI.
+                    // Determine whether Qwen ran at all (drives "No name detected" hint)
                     let qwenRan = QwenService.isEnabled && QwenService.isModelCached && !unidentifiedClips.isEmpty
 
                     let entries = clips.map { clip in
                         let qwenName = qwenSuggestions[clip.sortformerSpeakerId]
                         let hasQwenSuggestion = qwenName != nil && qwenName != "Unknown"
+
+                        let qwenResult: QwenInferenceResult
+                        if hasQwenSuggestion {
+                            qwenResult = .suggested(name: qwenName!)
+                        } else if qwenRan {
+                            qwenResult = .noNameFound
+                        } else {
+                            qwenResult = .notAttempted
+                        }
 
                         return SpeakerNamingEntry(
                             id: clip.persistentSpeakerId,
@@ -539,9 +548,7 @@ class TranscriptionTaskManager: ObservableObject {
                             matchSimilarity: clip.matchSimilarity,
                             needsNaming: clip.currentName == nil && !hasQwenSuggestion,
                             needsConfirmation: clip.currentName != nil || hasQwenSuggestion,
-                            suggestedName: hasQwenSuggestion ? qwenName : nil,
-                            suggestionSource: hasQwenSuggestion ? "qwen_inferred" : nil,
-                            qwenAttempted: qwenRan
+                            qwenResult: qwenResult
                         )
                     }
 
@@ -699,11 +706,8 @@ class TranscriptionTaskManager: ObservableObject {
         // Apply name updates to speaker database
         for update in updates {
             switch update.action {
-            case .merged:
-                // Merge this new profile into the existing one
-                if let targetId = update.mergeTargetProfileId {
-                    speakerDB.mergeProfiles(sourceId: update.persistentSpeakerId, into: targetId)
-                }
+            case .merged(let targetId):
+                speakerDB.mergeProfiles(sourceId: update.persistentSpeakerId, into: targetId)
 
             case .named, .corrected:
                 speakerDB.setDisplayName(
@@ -764,8 +768,9 @@ class TranscriptionTaskManager: ObservableObject {
         if activeCount == 0 {
             justCompleted = true
 
-            // Reset flag after animation (use weak self to prevent retain cycle)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            // Reset flag after animation
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(1.5))
                 self?.justCompleted = false
             }
         }
@@ -785,8 +790,9 @@ class TranscriptionTaskManager: ObservableObject {
     /// Schedule reset of displayStatus to .idle after delay
     /// - Parameter delay: Seconds to wait before resetting (default 3s — quick return to idle so user can record again)
     func scheduleStatusReset(delay: TimeInterval = 3) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self = self else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self else { return }
             switch self.displayStatus {
             case .transcriptSaved, .failed:
                 self.displayStatus = .idle
