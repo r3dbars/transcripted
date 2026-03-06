@@ -2,21 +2,21 @@ import Foundation
 @preconcurrency import AVFoundation
 import Accelerate
 
-/// Maps speaker labels to identified names from Gemini
+/// Maps speaker labels to identified names from voice fingerprint matching
 struct SpeakerMapping {
     let speakerId: String           // "0", "1", "2" for speaker IDs
     var identifiedName: String?     // "John Smith" or nil if unidentified
-    var confidence: String?         // "high" or "medium"
+    var confidence: SpeakerConfidence?
 
     /// Display name: uses identified name if available, otherwise "Speaker X"
     var displayName: String {
         if let name = identifiedName {
-            return confidence == "medium" ? "\(name)?" : name
+            return confidence == .medium ? "\(name)?" : name
         }
         return "Speaker \(speakerId)"
     }
 
-    init(speakerId: String, identifiedName: String? = nil, confidence: String? = nil) {
+    init(speakerId: String, identifiedName: String? = nil, confidence: SpeakerConfidence? = nil) {
         self.speakerId = speakerId
         self.identifiedName = identifiedName
         self.confidence = confidence
