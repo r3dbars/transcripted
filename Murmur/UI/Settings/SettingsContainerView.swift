@@ -631,7 +631,7 @@ struct SettingsContainerView: View {
                     }
                 }
 
-                Text("Reads the first 5 minutes of transcript to extract names from greetings and introductions. Runs 100% on-device.")
+                Text("Reads the first 15 minutes of transcript to extract names from greetings and introductions. Runs 100% on-device.")
                     .font(.caption)
                     .foregroundColor(.panelTextMuted)
             }

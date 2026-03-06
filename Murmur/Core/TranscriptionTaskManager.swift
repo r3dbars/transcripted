@@ -476,12 +476,12 @@ class TranscriptionTaskManager: ObservableObject {
                     let unidentifiedClips = clips.filter { $0.currentName == nil }
 
                     if !unidentifiedClips.isEmpty && QwenService.isEnabled && QwenService.isModelCached {
-                        let fiveMinText = self.buildFirst5MinutesText(
+                        let inferenceText = self.buildTranscriptTextForInference(
                             utterances: result.systemUtterances,
                             speakerMappings: speakerMappings
                         )
 
-                        if !fiveMinText.isEmpty {
+                        if !inferenceText.isEmpty {
                             do {
                                 // Wait for pre-loaded model (started when recording began)
                                 if let preloadTask = await MainActor.run(body: { self.qwenPreloadTask }) {
@@ -506,7 +506,7 @@ class TranscriptionTaskManager: ObservableObject {
                                 }
 
                                 if let qwen, case .ready = await qwen.modelState {
-                                    qwenSuggestions = try await qwen.inferSpeakerNames(transcript: fiveMinText)
+                                    qwenSuggestions = try await qwen.inferSpeakerNames(transcript: inferenceText)
                                 }
                                 await MainActor.run { self.cleanupQwen() }
 
@@ -804,13 +804,13 @@ class TranscriptionTaskManager: ObservableObject {
 
     // MARK: - Qwen Transcript Builder
 
-    /// Build a text representation of the first 5 minutes of system audio transcript
-    /// for Qwen speaker name inference.
-    nonisolated private func buildFirst5MinutesText(
+    /// Build a text representation of system audio transcript for Qwen speaker name inference.
+    /// Uses the first 15 minutes — enough to capture late introductions without excessive tokens.
+    nonisolated private func buildTranscriptTextForInference(
         utterances: [TranscriptionUtterance],
         speakerMappings: [String: SpeakerMapping]
     ) -> String {
-        let maxSeconds: Double = 300  // 5 minutes
+        let maxSeconds: Double = 900  // 15 minutes
         let filtered = utterances
             .filter { $0.start < maxSeconds }
             .sorted { $0.start < $1.start }
