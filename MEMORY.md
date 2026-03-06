@@ -7,11 +7,11 @@ This file documents important lessons learned during development. Reference this
 ## Architecture Quick Reference
 
 ### What This App Does
-Transcripted captures mic + system audio, transcribes locally via Parakeet TDT V3 (STT) + Sortformer (speaker diarization) using the FluidAudio library, identifies speakers and extracts action items via Gemini, then sends tasks to Reminders/Todoist.
+Transcripted captures mic + system audio, transcribes locally via Parakeet TDT V3 (STT) + Sortformer (speaker diarization) using the FluidAudio library, identifies speakers via persistent voice fingerprints, and saves transcripts as Markdown.
 
 ### Core Data Flow
 ```
-Record → WAV files → Transcription → Speaker ID → Save → Action Items → Review → Tasks
+Record → WAV files → Transcription → Speaker ID → Save Markdown
 ```
 
 ### Key Components
@@ -20,19 +20,17 @@ Record → WAV files → Transcription → Speaker ID → Save → Action Items 
 | Audio capture | `Core/Audio.swift` | Mic via AVAudioEngine, coordinates system audio |
 | System audio | `Core/SystemAudioCapture.swift` | CoreAudio process taps (macOS 26+) |
 | Orchestration | `Core/TranscriptionTaskManager.swift` | Background transcription queue, progress |
-| UI State | `UI/FloatingPanel/PillStateManager.swift` | State machine: idle→recording→processing→reviewing |
-| Action Items | `Core/ActionItemExtractor.swift` | Two-pass Gemini: speaker ID, then extraction |
+| UI State | `UI/FloatingPanel/PillStateManager.swift` | State machine: idle→recording→processing |
 | Transcription | `Core/Transcription.swift` | Local Parakeet + Sortformer pipeline |
 | Speaker DB | `Services/SpeakerDatabase.swift` | Persistent voice fingerprints (SQLite, 256-dim embeddings) |
 | Transcript Output | `Core/TranscriptSaver.swift` | Markdown with YAML frontmatter |
 | StatsDatabase | `Core/StatsDatabase.swift` | SQLite persistence for recording sessions and activity |
 | StatsService | `Core/StatsService.swift` | Calculates hours, streaks, heat map data |
 | TranscriptScanner | `Core/TranscriptScanner.swift` | Scans folder for transcript metadata |
-| FailedActionItemManager | `Core/FailedActionItemManager.swift` | Retry queue for action item delivery failures |
 
 ### State Machine (PillStateManager)
 ```
-idle (40×20) → recording (180×40) → processing (180×40) → reviewing (280px tray) → idle
+idle (40×20) → recording (180×40) → processing (180×40) → idle
 ```
 
 ---
@@ -71,7 +69,7 @@ This is why the app uses `@available(macOS 26.0, *)` throughout.
 
 ### DisplayStatus (Goal-Gradient Effect)
 ```
-idle → gettingReady (0-15%) → transcribing (15-75%) → findingActionItems (75-95%) → finishing (95-100%)
+idle → gettingReady (0-15%) → transcribing (15-75%) → finishing (95-100%) → transcriptSaved
 ```
 
 ---
@@ -84,7 +82,6 @@ idle → gettingReady (0-15%) → transcribing (15-75%) → findingActionItems (
 | idle | 40×20 | Dormant waveform |
 | recording | 180×40 | Aurora + timer + stop button |
 | processing | 180×40 | Aurora + progress + status text |
-| reviewing | 280px tray | Action item list |
 
 ### Aurora Color Palette (Synthwave)
 - **Mic audio**: Hot pink coral `#EC4899` / light `#F472B6`
