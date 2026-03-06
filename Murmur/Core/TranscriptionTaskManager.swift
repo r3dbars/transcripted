@@ -137,11 +137,13 @@ class TranscriptionTaskManager: ObservableObject {
         guard QwenService.isEnabled, QwenService.isModelCached else { return }
 
         // Check available memory — Qwen needs ~2.5GB, require 4GB headroom
+        let hostPort = mach_host_self()
+        defer { mach_port_deallocate(mach_task_self_, hostPort) }
         var stats = vm_statistics64()
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size)
         let result = withUnsafeMutablePointer(to: &stats) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+                host_statistics64(hostPort, HOST_VM_INFO64, $0, &count)
             }
         }
         if result == KERN_SUCCESS {
@@ -515,7 +517,9 @@ class TranscriptionTaskManager: ObservableObject {
                         }
                     }
 
-                    let qwenRan = !qwenSuggestions.isEmpty
+                    // Track whether Qwen actually ran (not just whether it found names).
+                    // This drives the "No name detected" hint in the naming UI.
+                    let qwenRan = QwenService.isEnabled && QwenService.isModelCached && !unidentifiedClips.isEmpty
 
                     let entries = clips.map { clip in
                         let qwenName = qwenSuggestions[clip.sortformerSpeakerId]
