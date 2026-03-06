@@ -112,8 +112,12 @@ final class UpdateManager: ObservableObject {
         do {
             try fm.moveItem(at: stagedApp, to: currentURL)
         } catch {
-            // Rollback: move .old back
-            try? fm.moveItem(at: backupURL, to: currentURL)
+            // Rollback: move .old back — if this fails too, the user needs to know
+            do {
+                try fm.moveItem(at: backupURL, to: currentURL)
+            } catch let rollbackError {
+                throw UpdateError.replaceFailed("Move failed AND rollback failed: \(rollbackError.localizedDescription). Restore from: \(backupURL.path)")
+            }
             throw UpdateError.replaceFailed("Move failed: \(error.localizedDescription)")
         }
 
@@ -122,8 +126,14 @@ final class UpdateManager: ObservableObject {
         try? fm.removeItem(at: dmgPath)
 
         // Spawn detached relaunch and terminate
-        spawnRelaunch(appPath: currentURL.path)
-        NSApp.terminate(nil)
+        do {
+            try spawnRelaunch(appPath: currentURL.path)
+            NSApp.terminate(nil)
+        } catch {
+            // App was replaced successfully but relaunch failed — don't terminate
+            // or user loses the app entirely. They can restart manually.
+            state = .failed("Update installed but relaunch failed — please restart Draft manually")
+        }
     }
 
     // MARK: - DMG operations
@@ -188,14 +198,14 @@ final class UpdateManager: ObservableObject {
 
     // MARK: - Relaunch
 
-    private func spawnRelaunch(appPath: String) {
+    private func spawnRelaunch(appPath: String) throws {
         let script = "sleep 2 && open -a \"\(appPath)\""
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = ["-c", script]
         process.standardOutput = Pipe()
         process.standardError = Pipe()
-        try? process.run()
+        try process.run()
         // Do NOT waitUntilExit — this is a detached fire-and-forget
     }
 
