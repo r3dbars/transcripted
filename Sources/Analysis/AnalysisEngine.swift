@@ -139,7 +139,13 @@ class AnalysisEngine: ObservableObject {
     // MARK: - Analysis
 
     private func runAnalysis(newEntryCount: Int) async {
-        guard let auth = AuthCredential.load() else { return }
+        guard let auth = AuthCredential.load() else {
+            // No auth configured — re-accumulate entries so they're analyzed once auth is set up
+            pendingNewCount += newEntryCount
+            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "analysis_skipped_no_auth",
+                message: "Skipped analysis of \(newEntryCount) entries — no auth credential configured")
+            return
+        }
         isAnalyzing = true
         defer { isAnalyzing = false }
 
@@ -211,7 +217,7 @@ class AnalysisEngine: ObservableObject {
         var cards: [InsightCard] = []
         var messages: [[String: Any]] = [["role": "user", "content": userMessage]]
 
-        let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+        let endpoint = AnthropicAPI.endpoint
         let apiVersion = "2023-06-01"
 
         for _ in 0..<maxTurns {
@@ -232,8 +238,19 @@ class AnalysisEngine: ObservableObject {
             request.timeoutInterval = 60
 
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                break
+            guard let http = response as? HTTPURLResponse else {
+                throw AnthropicAPIError.invalidResponse
+            }
+            guard http.statusCode == 200 else {
+                let errorMessage: String
+                if let errorResponse = try? JSONDecoder().decode(AnthropicErrorResponse.self, from: data) {
+                    errorMessage = errorResponse.error.message
+                } else {
+                    errorMessage = "HTTP \(http.statusCode)"
+                }
+                EventReporter.shared.capture(level: .error, engine: "analysis", event: "analysis_api_error",
+                    message: errorMessage, context: ["status_code": "\(http.statusCode)"])
+                throw AnthropicAPIError.apiError(errorMessage)
             }
 
             guard let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
