@@ -11,6 +11,9 @@ Local ML inference engines (Parakeet STT, Sortformer diarization), persistent sp
 | `SortformerService.swift` | Local speaker diarization via FluidAudio's Sortformer (identifies who speaks when) |
 | `SpeakerDatabase.swift` | SQLite database with 256-dim voice embeddings, cosine similarity matching |
 | `AudioResampler.swift` | Resamples audio (48kHz → 16kHz mono) for model input, WAV file loading |
+| `QwenService.swift` | Local Qwen model for speaker name inference from transcript context |
+| `EmbeddingClusterer.swift` | Clustering utility for grouping similar voice embeddings |
+| `SpeakerClipExtractor.swift` | Extracts audio clips for speaker voice samples |
 
 ## Data Flow
 

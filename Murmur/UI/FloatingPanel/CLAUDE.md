@@ -21,6 +21,7 @@ The main user-facing UI: a draggable floating pill that shows recording state, a
 | `Components/CelebrationViews.swift` | Success checkmark and pulse ring animations |
 | `Components/ErrorViews.swift` | Error banners with recovery hints |
 | `Components/AttentionPromptView.swift` | "Still recording?" silence warning |
+| `Components/SpeakerNamingView.swift` | Speaker identification and naming UI with audio clip playback |
 | `Helpers/LawsComponents.swift` | Reusable UI primitives (buttons, status text, Triangle shape) |
 
 ## State Machine
