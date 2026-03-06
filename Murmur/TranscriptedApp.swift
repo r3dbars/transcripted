@@ -101,7 +101,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             AppLogger.app.info("Model initialization complete")
         }
 
-        // Wire up recording completion callback
+        // Wire up recording callbacks
+        aud.onRecordingStart = { [weak self] in
+            Task { @MainActor in
+                self?.taskManager?.prepareForRecording()
+            }
+        }
         aud.onRecordingComplete = { [weak self] micURL, systemURL in
             self?.handleRecordingComplete(micURL: micURL, systemURL: systemURL)
         }
@@ -160,7 +165,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 currentName: nil,
                 matchSimilarity: nil,
                 needsNaming: true,
-                needsConfirmation: false
+                needsConfirmation: false,
+                suggestedName: nil,
+                suggestionSource: nil
             ),
             SpeakerNamingEntry(
                 id: knownProfile.id,
@@ -170,7 +177,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 currentName: "Travis",
                 matchSimilarity: 0.72,
                 needsNaming: false,
-                needsConfirmation: true
+                needsConfirmation: true,
+                suggestedName: nil,
+                suggestionSource: nil
             )
         ]
 
