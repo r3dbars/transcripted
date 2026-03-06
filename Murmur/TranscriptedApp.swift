@@ -105,9 +105,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 AppLogger.app.info("Pre-caching Qwen model in background")
                 let qwen = QwenService()
                 await qwen.loadModel()
-                if case .ready = qwen.modelState {
+                switch qwen.modelState {
+                case .ready:
                     qwen.unload()  // Free memory — just wanted to cache the files
                     AppLogger.app.info("Qwen model pre-cached successfully")
+                case .failed(let error):
+                    AppLogger.app.error("Qwen model pre-cache failed", ["error": error])
+                default:
+                    AppLogger.app.warning("Qwen model pre-cache ended in unexpected state", ["state": "\(qwen.modelState)"])
                 }
             }
         }

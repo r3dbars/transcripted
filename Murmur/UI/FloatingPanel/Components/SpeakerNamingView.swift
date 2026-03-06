@@ -264,14 +264,15 @@ struct SpeakerNamingCard: View {
     /// Hint text showing how the name was detected (or that detection was attempted)
     private var sourceLabel: some View {
         Group {
-            if isQwenSuggestion {
-                Label("Detected from conversation", systemImage: "sparkles")
-                    .font(.system(size: 9))
-                    .foregroundColor(.orange.opacity(0.7))
-            } else if entry.currentName != nil, let sim = entry.matchSimilarity {
+            if entry.currentName != nil, let sim = entry.matchSimilarity {
+                // Voice match from DB takes priority — biometric > LLM inference
                 Label("Voice match · \(Int(sim * 100))%", systemImage: "waveform")
                     .font(.system(size: 9))
                     .foregroundColor(.panelTextMuted)
+            } else if isQwenSuggestion {
+                Label("Detected from conversation", systemImage: "sparkles")
+                    .font(.system(size: 9))
+                    .foregroundColor(.orange.opacity(0.7))
             }
         }
     }
