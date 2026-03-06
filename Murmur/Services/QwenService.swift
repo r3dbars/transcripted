@@ -169,12 +169,20 @@ class QwenService: ObservableObject {
 
         let jsonSubstring = String(jsonString[openBrace...closeBrace])
 
-        guard let data = jsonSubstring.data(using: .utf8),
-              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
-            AppLogger.transcription.warning("Qwen response JSON parse failed", ["json": jsonSubstring])
+        guard let data = jsonSubstring.data(using: .utf8) else {
+            AppLogger.transcription.warning("Qwen response not valid UTF-8", ["json": jsonSubstring])
             return [:]
         }
 
-        return parsed
+        do {
+            guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: String] else {
+                AppLogger.transcription.warning("Qwen response JSON is not [String: String]", ["json": jsonSubstring])
+                return [:]
+            }
+            return parsed
+        } catch {
+            AppLogger.transcription.warning("Qwen response JSON parse failed", ["json": jsonSubstring, "error": error.localizedDescription])
+            return [:]
+        }
     }
 }
