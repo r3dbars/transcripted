@@ -75,7 +75,7 @@ class QwenService: ObservableObject {
         }
     }
 
-    /// Extract speaker names from the first 5 minutes of transcript text.
+    /// Extract speaker names from transcript text (up to first 15 minutes).
     /// Returns a mapping of sortformer speaker IDs to inferred names.
     /// Example: ["0": "Jack", "1": "Sarah", "2": "Unknown"]
     nonisolated func inferSpeakerNames(transcript: String) async throws -> [String: String] {
@@ -122,16 +122,53 @@ class QwenService: ObservableObject {
 
     nonisolated private static func buildChatMessages(transcript: String) -> [Chat.Message] {
         let systemPrompt = """
-        You are a speaker name extractor. Given a meeting transcript with labels like "Speaker 1", "Speaker 2", etc., identify each speaker's real name.
+        You extract speaker names from meeting transcripts.
 
-        Look for: greetings ("Hey Jack"), introductions ("I'm Sarah from..."), third-person references ("Jack was saying..."), sign-offs.
+        RULES:
+        - Lines with [Speaker 0], [Speaker 1] etc. are UNKNOWN speakers. Find their names.
+        - Lines with a real name like [Jenny] or [Jenny?] are ALREADY IDENTIFIED. Ignore them.
+        - Return a JSON object mapping speaker numbers to names.
+        - Use "Unknown" if you cannot find a name.
 
-        Return ONLY a JSON object mapping speaker IDs to names. Use "Unknown" if a name cannot be determined. No explanation, no markdown.
-        Example: {"1": "Boris", "2": "Unknown"}
+        CRITICAL RULE — "Hey Jack" DOES NOT MEAN THE SPEAKER IS JACK:
+        When someone SAYS a name, they are talking TO that person, not introducing themselves.
+        The name belongs to the LISTENER, not the speaker.
+
+        EXAMPLE 1:
+        [00:00] [Speaker 0] Hey Jack, how are you?
+        [00:05] [Speaker 1] I'm doing great, thanks!
+
+        Speaker 0 said "Hey Jack" → Speaker 0 is talking TO Jack → Speaker 1 is Jack.
+        Answer: {"0": "Unknown", "1": "Jack"}
+
+        EXAMPLE 2:
+        [00:00] [Speaker 0] Welcome everyone. I'm Sarah from marketing.
+        [00:10] [Speaker 1] Thanks Sarah. This is Mike.
+        [00:20] [Speaker 0] Great, Mike. Let's get started.
+
+        Speaker 0 said "I'm Sarah" → Speaker 0 is Sarah.
+        Speaker 1 said "This is Mike" → Speaker 1 is Mike.
+        Answer: {"0": "Sarah", "1": "Mike"}
+
+        EXAMPLE 3:
+        [00:00] [Speaker 0] Let me hand it over to David.
+        [00:05] [Speaker 1] Thanks! So as I was saying...
+        [00:15] [Speaker 0] Good point. Alex, what do you think?
+        [00:20] [Speaker 2] I agree with what David said earlier.
+
+        Speaker 0 said "hand it over to David" → Speaker 1 is David.
+        Speaker 0 said "Alex, what do you think?" → Speaker 2 is Alex.
+        Speaker 2 said "what David said" confirms Speaker 1 is David.
+        Answer: {"0": "Unknown", "1": "David", "2": "Alex"}
+
+        OUTPUT FORMAT:
+        Return ONLY a JSON object like {"0": "Sarah", "1": "Unknown"}
+        Keys are speaker numbers only: "0", "1", "2" — not "Speaker 0".
+        No explanation. No markdown. Just the JSON object.
         """
 
         let userMessage = """
-        TRANSCRIPT (first 5 minutes):
+        TRANSCRIPT:
         ---
         \(transcript)
         """
