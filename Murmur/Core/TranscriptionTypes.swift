@@ -53,16 +53,10 @@ struct TranscriptionResult {
         Set(systemUtterances.map { $0.speakerId }).count
     }
 
-    /// Matched speaker profiles from the speaker database
-    var speakerProfiles: [UUID: SpeakerProfile] {
-        var profiles: [UUID: SpeakerProfile] = [:]
-        for utterance in systemUtterances {
-            if let id = utterance.persistentSpeakerId {
-                // Profile will be looked up separately — this just tracks which IDs appeared
-                profiles[id] = profiles[id] // placeholder
-            }
-        }
-        return profiles
+    /// Persistent speaker IDs that appeared in system audio utterances.
+    /// Profiles are looked up separately via SpeakerDatabase.
+    var persistentSpeakerIds: Set<UUID> {
+        Set(systemUtterances.compactMap { $0.persistentSpeakerId })
     }
 }
 
