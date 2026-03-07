@@ -285,7 +285,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         failedTranscriptionsWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
     }
 
     @objc func openSettings() {
@@ -325,7 +325,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Create output folder if it doesn't exist
-        try? FileManager.default.createDirectory(at: outputFolder, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: outputFolder, withIntermediateDirectories: true)
+        } catch {
+            AppLogger.pipeline.error("Failed to create output folder", ["error": error.localizedDescription, "path": outputFolder.path])
+        }
 
         // Start transcription in background using task manager
         taskManager?.startTranscription(
@@ -337,6 +341,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Stop active recording so audio files are properly finalized
+        if audio?.isRecording == true {
+            audio?.stop()
+        }
+        taskManager?.cancelAll()
         AppLogger.shared.flush()
     }
 }

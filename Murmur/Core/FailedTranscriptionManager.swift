@@ -51,7 +51,10 @@ class FailedTranscriptionManager: ObservableObject {
 
             AppLogger.pipeline.info("Loaded failed transcriptions", ["count": "\(failedTranscriptions.count)"])
         } catch {
-            AppLogger.pipeline.error("Error loading failed transcriptions", ["error": "\(error)"])
+            // Backup corrupt file before it gets overwritten on next save
+            let backupURL = storageURL.deletingLastPathComponent().appendingPathComponent("failed_transcriptions_backup.json")
+            try? FileManager.default.copyItem(at: storageURL, to: backupURL)
+            AppLogger.pipeline.error("Corrupt failed transcriptions file, backed up", ["error": "\(error)"])
         }
     }
 

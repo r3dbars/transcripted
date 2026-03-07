@@ -42,6 +42,7 @@ enum SystemAudioStatus: Equatable {
 @available(macOS 26.0, *)
 class Audio: ObservableObject {
     @Published var isRecording: Bool = false
+    private var isStarting: Bool = false  // Prevents double-start during async setup
     @Published var audioLevel: Float = 0.0
     @Published var recordingDuration: TimeInterval = 0.0
     @Published var audioLevelHistory: [Float] = Array(repeating: 0.0, count: 15)
@@ -230,7 +231,11 @@ class Audio: ObservableObject {
                 }
                 self.sleepTimestamp = nil
 
-                // Existing device recovery will handle reconnection via watchdog
+                // Proactively trigger mic recovery instead of waiting for the 3-5s watchdog delay
+                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                    guard let self = self, self.isRecording else { return }
+                    self.recoverFromDeviceChange()
+                }
             }
         }
     }
@@ -264,8 +269,8 @@ class Audio: ObservableObject {
     }
 
     func start() {
-        guard !isRecording else {
-            AppLogger.audio.warning("Already recording, ignoring duplicate start request")
+        guard !isRecording, !isStarting else {
+            AppLogger.audio.warning("Already recording or starting, ignoring duplicate start request")
             return
         }
 
@@ -277,8 +282,8 @@ class Audio: ObservableObject {
             return
         }
 
-        // Set flag immediately to prevent concurrent starts
-        isRecording = true
+        // Set isStarting to prevent double-start during async setup
+        isStarting = true
         error = nil
         systemBufferCount = 0  // Reset debug counter
         resetSilenceTracking()  // Start fresh silence tracking
@@ -300,10 +305,15 @@ class Audio: ObservableObject {
         Task {
             do {
                 try await startAudioCapture()
+                await MainActor.run {
+                    self.isRecording = true
+                    self.isStarting = false
+                }
             } catch {
                 await MainActor.run {
                     self.error = "Failed to start recording: \(error.localizedDescription)"
-                    self.isRecording = false  // Reset on failure
+                    self.isRecording = false
+                    self.isStarting = false
                     self.stop()
                 }
             }
@@ -650,7 +660,10 @@ class Audio: ObservableObject {
 
                 // Audio stopped → device likely changed
                 AppLogger.audioMic.warning("Audio device disconnected or changed, switching to default")
-                self.recoverFromDeviceChange()
+                // Dispatch to background — recovery uses Thread.sleep for HAL settle time
+                DispatchQueue.global(qos: .userInitiated).async {
+                    self.recoverFromDeviceChange()
+                }
             }
         }
     }
