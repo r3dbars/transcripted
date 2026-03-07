@@ -17,7 +17,6 @@
 		A1001111 /* SettingsNavigationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001110 /* SettingsNavigationState.swift */; };
 		A1001121 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001120 /* SettingsWindowController.swift */; };
 		A1001123 /* SettingsContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001122 /* SettingsContainerView.swift */; };
-		A1001125 /* SettingsSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001124 /* SettingsSidebarView.swift */; };
 		A1001147 /* SettingsSectionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001146 /* SettingsSectionCard.swift */; };
 		A1000001 /* TranscriptedApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002 /* TranscriptedApp.swift */; };
 		A1000003 /* Transcription.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000004 /* Transcription.swift */; };
@@ -105,7 +104,6 @@
 		A1001110 /* SettingsNavigationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsNavigationState.swift; sourceTree = "<group>"; };
 		A1001120 /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
 		A1001122 /* SettingsContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsContainerView.swift; sourceTree = "<group>"; };
-		A1001124 /* SettingsSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSidebarView.swift; sourceTree = "<group>"; };
 		A1001146 /* SettingsSectionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSectionCard.swift; sourceTree = "<group>"; };
 		A1000002 /* TranscriptedApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptedApp.swift; sourceTree = "<group>"; };
 		A1000004 /* Transcription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcription.swift; sourceTree = "<group>"; };
@@ -300,7 +298,6 @@
 			children = (
 				A1001120 /* SettingsWindowController.swift */,
 				A1001122 /* SettingsContainerView.swift */,
-				A1001124 /* SettingsSidebarView.swift */,
 				A1001101 /* Models */,
 				A1001102 /* Tabs */,
 				A1001103 /* Components */,
@@ -623,7 +620,6 @@
 				A1001111 /* SettingsNavigationState.swift in Sources */,
 				A1001121 /* SettingsWindowController.swift in Sources */,
 				A1001123 /* SettingsContainerView.swift in Sources */,
-				A1001125 /* SettingsSidebarView.swift in Sources */,
 				A1001147 /* SettingsSectionCard.swift in Sources */,
 				A1002011 /* AudioResampler.swift in Sources */,
 				A1002012 /* ParakeetService.swift in Sources */,
