@@ -98,7 +98,7 @@ class OnboardingWindowController: NSWindowController {
         guard let window = self.window else { return }
 
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
 
         // Fade in animation
         NSAnimationContext.runAnimationGroup { context in

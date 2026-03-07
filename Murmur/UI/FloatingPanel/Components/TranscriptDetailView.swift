@@ -5,7 +5,8 @@ import SwiftUI
 /// Groups consecutive transcript lines from the same speaker for iMessage-style rendering.
 /// Presentation-only model — stays in this file, not in TranscriptStore.
 struct MessageGroup: Identifiable {
-    let id = UUID()
+    /// Deterministic ID derived from content so SwiftUI doesn't re-render unchanged groups
+    let id: String
     let speaker: String?    // Raw: "Mic/You" or "System/Speaker 1"
     let isUser: Bool        // true if speaker starts with "Mic"
     let lines: [TranscriptLine]
@@ -25,6 +26,7 @@ struct MessageGroup: Identifiable {
         var groups: [MessageGroup] = []
         var currentSpeaker: String?
         var currentLines: [TranscriptLine] = []
+        var groupIndex = 0
 
         for line in lines {
             if line.speaker == currentSpeaker {
@@ -32,7 +34,9 @@ struct MessageGroup: Identifiable {
             } else {
                 if !currentLines.isEmpty {
                     let isUser = currentSpeaker?.lowercased().hasPrefix("mic") ?? false
-                    groups.append(MessageGroup(speaker: currentSpeaker, isUser: isUser, lines: currentLines))
+                    let stableId = "\(groupIndex)_\(currentSpeaker ?? "nil")_\(currentLines.first?.timestamp ?? "")"
+                    groups.append(MessageGroup(id: stableId, speaker: currentSpeaker, isUser: isUser, lines: currentLines))
+                    groupIndex += 1
                 }
                 currentSpeaker = line.speaker
                 currentLines = [line]
@@ -41,7 +45,8 @@ struct MessageGroup: Identifiable {
         // Flush last group
         if !currentLines.isEmpty {
             let isUser = currentSpeaker?.lowercased().hasPrefix("mic") ?? false
-            groups.append(MessageGroup(speaker: currentSpeaker, isUser: isUser, lines: currentLines))
+            let stableId = "\(groupIndex)_\(currentSpeaker ?? "nil")_\(currentLines.first?.timestamp ?? "")"
+            groups.append(MessageGroup(id: stableId, speaker: currentSpeaker, isUser: isUser, lines: currentLines))
         }
 
         return groups

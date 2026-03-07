@@ -11,6 +11,7 @@ class FloatingPanelController: NSWindowController, NSWindowDelegate {
     private var failedTranscriptionManager: FailedTranscriptionManager
     let pillStateManager = PillStateManager()
     private var cancellables = Set<AnyCancellable>()
+    private var returnToIdleWorkItem: DispatchWorkItem?
 
     // Position persistence keys
     private static let savedPositionXKey = "floatingPanelX"
@@ -205,24 +206,31 @@ class FloatingPanelController: NSWindowController, NSWindowDelegate {
     /// Schedule a quick return to idle so user can start recording again
     /// The pill shows processing/success briefly, then morphs back to idle
     private func scheduleReturnToIdle(delay: TimeInterval) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        // Cancel any pending return-to-idle so we don't stack multiple timers
+        returnToIdleWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
             // Only return to idle if not recording, not locked, and not naming speakers
             guard !self.audio.isRecording, !self.pillStateManager.isLocked else { return }
             guard self.taskManager.speakerNamingRequest == nil else { return }
             self.pillStateManager.transition(to: .idle)
         }
+        returnToIdleWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
-    /// Reposition window if screen changes (only if no saved position)
+    /// Reposition window if saved position is off-screen or no position saved
     func repositionIfNeeded() {
         guard let window = self.window, let screen = NSScreen.main else { return }
 
-        // Only reposition if no saved position exists
-        if UserDefaults.standard.object(forKey: Self.savedPositionXKey) != nil {
-            return
+        // Validate saved position — if it's on-screen, keep it
+        if let savedX = UserDefaults.standard.object(forKey: Self.savedPositionXKey) as? CGFloat,
+           let savedY = UserDefaults.standard.object(forKey: Self.savedPositionYKey) as? CGFloat,
+           Self.isOnScreen(x: savedX, y: savedY) {
+            return  // Saved position is still valid
         }
 
+        // No valid saved position — reposition to default center-bottom
         let dockHeight = Self.detectDockHeight(for: screen)
         let x = (screen.frame.width - maxWindowWidth) / 2
         let y = dockHeight + PillDimensions.dockPadding
@@ -235,10 +243,10 @@ class FloatingPanelController: NSWindowController, NSWindowDelegate {
 
     // MARK: - Position Persistence
 
-    /// Check if a position is visible on any connected screen
-    private static func isOnScreen(x: CGFloat, y: CGFloat) -> Bool {
-        let point = NSPoint(x: x, y: y)
-        return NSScreen.screens.contains { $0.frame.contains(point) }
+    /// Check if a position is visible on any connected screen (checks a rect, not just a point)
+    private static func isOnScreen(x: CGFloat, y: CGFloat, width: CGFloat = 280, height: CGFloat = 60) -> Bool {
+        let rect = NSRect(x: x, y: y, width: width, height: height)
+        return NSScreen.screens.contains { $0.visibleFrame.intersects(rect) }
     }
 
     // MARK: - NSWindowDelegate

@@ -43,14 +43,21 @@ class RecordingValidator {
         return .success
     }
 
-    /// Checks if sufficient disk space is available
+    /// Checks if sufficient disk space is available on the configured save volume
     private static func checkDiskSpace() -> ValidationResult? {
-        guard let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            return .failure("Cannot access Documents folder")
+        // Check the actual save location, not just Documents — user may save to an external drive
+        let checkPath: URL
+        if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
+           !customPath.isEmpty {
+            checkPath = URL(fileURLWithPath: customPath)
+        } else if let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            checkPath = documentsPath
+        } else {
+            return .failure("Cannot access save folder")
         }
 
         do {
-            let values = try documentsPath.resourceValues(forKeys: [.volumeAvailableCapacityKey])
+            let values = try checkPath.resourceValues(forKeys: [.volumeAvailableCapacityKey])
             guard let availableCapacity = values.volumeAvailableCapacity else {
                 return .failure("Cannot determine available disk space")
             }
