@@ -45,30 +45,34 @@ final class TranscriptStore: ObservableObject {
     // MARK: - Public API
 
     /// Reload transcript list from disk (call after recording completes or on tray open).
+    /// File I/O runs off the main thread to avoid blocking the UI.
     func refresh() {
         let dir = saveDirectory
-        guard FileManager.default.fileExists(atPath: dir.path) else {
-            if UserDefaults.standard.string(forKey: "transcriptSaveLocation") != nil {
-                AppLogger.pipeline.warning("TranscriptStore: custom save directory not found", ["path": dir.path])
-            }
-            transcripts = []
-            return
-        }
-
-        do {
-            let files = try FileManager.default
-                .contentsOfDirectory(at: dir, includingPropertiesForKeys: [.creationDateKey], options: [.skipsHiddenFiles])
-                .filter { $0.pathExtension == "md" }
-                .sorted { a, b in
-                    let da = (try? a.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
-                    let db = (try? b.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
-                    return da > db
+        Task.detached(priority: .userInitiated) {
+            guard FileManager.default.fileExists(atPath: dir.path) else {
+                if UserDefaults.standard.string(forKey: "transcriptSaveLocation") != nil {
+                    AppLogger.pipeline.warning("TranscriptStore: custom save directory not found", ["path": dir.path])
                 }
+                await MainActor.run { self.transcripts = [] }
+                return
+            }
 
-            transcripts = files.prefix(10).compactMap { parseMetadata($0) }
-        } catch {
-            AppLogger.pipeline.error("TranscriptStore.refresh failed to read directory", ["path": dir.path, "error": "\(error)"])
-            transcripts = []
+            do {
+                let files = try FileManager.default
+                    .contentsOfDirectory(at: dir, includingPropertiesForKeys: [.creationDateKey], options: [.skipsHiddenFiles])
+                    .filter { $0.pathExtension == "md" }
+                    .sorted { a, b in
+                        let da = (try? a.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+                        let db = (try? b.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+                        return da > db
+                    }
+
+                let parsed = files.compactMap { self.parseMetadata($0) }
+                await MainActor.run { self.transcripts = parsed }
+            } catch {
+                AppLogger.pipeline.error("TranscriptStore.refresh failed to read directory", ["path": dir.path, "error": "\(error)"])
+                await MainActor.run { self.transcripts = [] }
+            }
         }
     }
 
@@ -177,7 +181,8 @@ final class TranscriptStore: ObservableObject {
     // MARK: - Metadata Parsing
 
     /// Parse only the metadata needed for the tray row — does NOT load the full transcript.
-    private func parseMetadata(_ url: URL) -> TranscriptSummary? {
+    /// nonisolated so it can run off the main thread in refresh().
+    nonisolated private func parseMetadata(_ url: URL) -> TranscriptSummary? {
         guard let raw = try? String(contentsOf: url, encoding: .utf8) else {
             AppLogger.pipeline.warning("TranscriptStore could not read file", ["file": url.lastPathComponent])
             return nil
@@ -243,7 +248,7 @@ final class TranscriptStore: ObservableObject {
         )
     }
 
-    private func cleanFilenameTitle(_ url: URL) -> String {
+    nonisolated private func cleanFilenameTitle(_ url: URL) -> String {
         let name = url.deletingPathExtension().lastPathComponent
         if name.hasPrefix("Call_") { return "Meeting" }
         return name
@@ -251,7 +256,7 @@ final class TranscriptStore: ObservableObject {
             .replacingOccurrences(of: "-", with: " ")
     }
 
-    private func fileCreationDate(_ url: URL) -> Date {
+    nonisolated private func fileCreationDate(_ url: URL) -> Date {
         (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
     }
 }

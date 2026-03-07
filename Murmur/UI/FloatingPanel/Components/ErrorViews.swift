@@ -11,6 +11,8 @@ struct ToastNotificationView: View {
 
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @State private var isShown = false
+    @State private var isHovered = false
+    @State private var dismissTask: Task<Void, Never>?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -68,6 +70,16 @@ struct ToastNotificationView: View {
         .onAppear {
             performAnimateIn()
         }
+        .onHover { hovering in
+            isHovered = hovering
+            if hovering {
+                // Pause auto-dismiss while user is reading
+                dismissTask?.cancel()
+            } else {
+                // Resume auto-dismiss when mouse leaves
+                scheduleDismiss()
+            }
+        }
         .accessibilityLabel("Error: \(error.title)")
         .accessibilityHint(error.recoveryHint)
     }
@@ -78,13 +90,23 @@ struct ToastNotificationView: View {
             isShown = true
         }
 
-        // Auto-dismiss after toast duration
-        DispatchQueue.main.asyncAfter(deadline: .now() + PillAnimationTiming.toastDuration) {
-            dismissToast()
+        // Schedule auto-dismiss
+        scheduleDismiss()
+    }
+
+    private func scheduleDismiss() {
+        dismissTask?.cancel()
+        dismissTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(PillAnimationTiming.toastDuration * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                dismissToast()
+            }
         }
     }
 
     private func dismissToast() {
+        dismissTask?.cancel()
         withAnimation(reduceMotion ? .none : .easeOut(duration: 0.2)) {
             isShown = false
         }

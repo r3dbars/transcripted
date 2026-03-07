@@ -159,8 +159,8 @@ extension Color {
     /// Secondary text on dark backgrounds
     static let panelTextSecondary = Color(hex: "#B0B0B0")
 
-    /// Muted text on dark backgrounds
-    static let panelTextMuted = Color(hex: "#6B6B6B")
+    /// Muted text on dark backgrounds (WCAG AA: 4.5:1 contrast on #1A1A1A)
+    static let panelTextMuted = Color(hex: "#8A8A8A")
 
     /// Chat bubble background for "You" messages — muted navy
     static let chatBubbleUser = Color(hue: 0.583, saturation: 0.45, brightness: 0.28)
@@ -215,6 +215,11 @@ extension Color {
 
     /// Aurora system secondary - lighter blue for gradients
     static let auroraTealLight = Color(hex: "#60A5FA")
+
+    // MARK: - Waveform System Audio Colors (replaces hardcoded Color.purple)
+
+    /// System audio waveform bar - muted indigo
+    static let systemAudioIndicator = Color(hex: "#7B68A8")
 }
 
 // MARK: - Gradients
@@ -285,6 +290,10 @@ struct Spacing {
 // MARK: - Corner Radius Scale
 
 struct Radius {
+    /// 1pt - Micro rounding (waveform bars)
+    static let micro: CGFloat = 1
+    /// 2pt - Tiny rounding (small indicators)
+    static let tiny: CGFloat = 2
     /// 4pt - Subtle rounding
     static let xs: CGFloat = 4
     /// 8pt - Small components
@@ -916,8 +925,8 @@ struct PillAnimationTiming {
     /// Tray expand/collapse duration
     static let trayDuration: Double = 0.2
 
-    /// Toast notification display duration
-    static let toastDuration: Double = 5.0
+    /// Toast notification display duration (8s — enough to read error + recovery hint)
+    static let toastDuration: Double = 8.0
 
     /// State transition duration - slightly longer for smooth cross-fade between pill states
     static let stateTransitionDuration: Double = 0.2

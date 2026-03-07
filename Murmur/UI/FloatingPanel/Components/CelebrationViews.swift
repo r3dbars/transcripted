@@ -1,88 +1,21 @@
 import SwiftUI
 
-// MARK: - Pill Success Celebration (Phase 6 Polish)
+// MARK: - Unified Celebration Overlay
 
-/// Expanding green glow ring with checkmark
-/// Shows briefly when tasks are added successfully
-@available(macOS 14.0, *)
-struct PillSuccessCelebration: View {
-    let taskCount: Int
-    let isVisible: Bool
-
-    @State private var ringScale: CGFloat = 0.8
-    @State private var ringOpacity: Double = 0
-    @State private var contentOpacity: Double = 0
-
-    var body: some View {
-        ZStack {
-            // Expanding glow ring
-            Circle()
-                .stroke(Color.statusSuccessMuted.opacity(0.4), lineWidth: 3)
-                .frame(width: 80, height: 80)
-                .scaleEffect(ringScale)
-                .opacity(ringOpacity)
-
-            // Inner content
-            VStack(spacing: 4) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundColor(.statusSuccessMuted)
-
-                Text("\(taskCount) added")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.panelTextPrimary)
-            }
-            .opacity(contentOpacity)
-        }
-        .onChange(of: isVisible) { _, visible in
-            if visible {
-                animate()
-            } else {
-                reset()
-            }
-        }
-        .onAppear {
-            if isVisible {
-                animate()
-            }
-        }
-    }
-
-    private func animate() {
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
-            ringScale = 1.5
-            ringOpacity = 1
-            contentOpacity = 1
-        }
-
-        // Fade out ring
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            withAnimation(.easeOut(duration: 0.5)) {
-                ringOpacity = 0
-            }
-        }
-    }
-
-    private func reset() {
-        ringScale = 0.8
-        ringOpacity = 0
-        contentOpacity = 0
-    }
-}
-
-// MARK: - Success Celebration Overlay (Peak-End Rule: positive endings are remembered)
-
-/// Overlay that shows celebration animations for success states
-/// Uses Laws of UX aesthetic with warm, subtle animations
+/// Single reusable celebration animation for success states.
+/// Replaces the three previous redundant views (PillSuccessCelebration, CelebrationOverlay, RecordingStoppedCelebration).
+/// Supports two styles: expanding ring and checkmark scale-in.
 @available(macOS 14.0, *)
 struct CelebrationOverlay: View {
     @Environment(\.accessibilityReduceMotion) var reduceMotion
-    let celebrationType: CelebrationType
+    let style: CelebrationStyle
     let isVisible: Bool
 
-    enum CelebrationType: Equatable {
-        case recordingStopped           // Blue pulse ring fade
-        case transcriptSaved            // Green checkmark scale-in
+    enum CelebrationStyle: Equatable {
+        /// Blue ring that expands and fades (recording stopped)
+        case ring(color: Color = .accentBlue)
+        /// Green checkmark that scales in (transcript saved)
+        case checkmark
     }
 
     @State private var ringScale: CGFloat = 0.8
@@ -91,11 +24,25 @@ struct CelebrationOverlay: View {
 
     var body: some View {
         ZStack {
-            switch celebrationType {
-            case .recordingStopped:
-                recordingStoppedCelebration
-            case .transcriptSaved:
-                transcriptSavedCelebration
+            switch style {
+            case .ring(let color):
+                Circle()
+                    .stroke(color.opacity(ringOpacity), lineWidth: 3)
+                    .frame(width: 60, height: 60)
+                    .scaleEffect(ringScale)
+
+            case .checkmark:
+                ZStack {
+                    Circle()
+                        .fill(Color.statusSuccessMuted.opacity(0.15))
+                        .frame(width: 48, height: 48)
+                        .scaleEffect(checkScale)
+
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 32, weight: .medium))
+                        .foregroundColor(.statusSuccessMuted)
+                        .scaleEffect(checkScale)
+                }
             }
         }
         .opacity(isVisible ? 1.0 : 0.0)
@@ -107,41 +54,11 @@ struct CelebrationOverlay: View {
         }
     }
 
-    // MARK: - Recording Stopped (Blue pulse ring)
-
-    private var recordingStoppedCelebration: some View {
-        Circle()
-            .stroke(Color.accentBlue.opacity(ringOpacity), lineWidth: 3)
-            .frame(width: 60, height: 60)
-            .scaleEffect(ringScale)
-    }
-
-    // MARK: - Transcript Saved (Green checkmark)
-
-    private var transcriptSavedCelebration: some View {
-        ZStack {
-            // Background circle
-            Circle()
-                .fill(Color.statusSuccessMuted.opacity(0.15))
-                .frame(width: 48, height: 48)
-                .scaleEffect(checkScale)
-
-            // Checkmark icon
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 32, weight: .medium))
-                .foregroundColor(.statusSuccessMuted)
-                .scaleEffect(checkScale)
-        }
-    }
-
-    // MARK: - Trigger Animation
-
     private func triggerCelebration() {
         guard !reduceMotion else { return }
 
-        switch celebrationType {
-        case .recordingStopped:
-            // Blue ring expands and fades out
+        switch style {
+        case .ring:
             ringScale = 0.8
             ringOpacity = 0.8
             withAnimation(.easeOut(duration: 0.6)) {
@@ -149,13 +66,11 @@ struct CelebrationOverlay: View {
                 ringOpacity = 0.0
             }
 
-        case .transcriptSaved:
-            // Green checkmark scales in with bounce
+        case .checkmark:
             checkScale = 0.5
-            withAnimation(.lawsSuccess) {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.5)) {
                 checkScale = 1.0
             }
-            // Subtle bounce
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 withAnimation(.spring(response: 0.2, dampingFraction: 0.5)) {
                     checkScale = 1.1
@@ -166,36 +81,6 @@ struct CelebrationOverlay: View {
                     checkScale = 1.0
                 }
             }
-
         }
-    }
-}
-
-// MARK: - Recording Stopped Celebration View
-
-/// Simple celebration when recording stops (before transcription starts)
-@available(macOS 14.0, *)
-struct RecordingStoppedCelebration: View {
-    @Environment(\.accessibilityReduceMotion) var reduceMotion
-    let isVisible: Bool
-
-    @State private var ringScale: CGFloat = 0.6
-    @State private var ringOpacity: Double = 0.0
-
-    var body: some View {
-        Circle()
-            .stroke(Color.accentBlue.opacity(ringOpacity), lineWidth: 2)
-            .frame(width: 50, height: 50)
-            .scaleEffect(ringScale)
-            .onChange(of: isVisible) { _, newValue in
-                if newValue && !reduceMotion {
-                    ringScale = 0.6
-                    ringOpacity = 0.7
-                    withAnimation(.easeOut(duration: 0.5)) {
-                        ringScale = 1.3
-                        ringOpacity = 0.0
-                    }
-                }
-            }
     }
 }
