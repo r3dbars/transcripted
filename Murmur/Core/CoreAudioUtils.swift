@@ -90,6 +90,12 @@ extension AudioObjectID {
         try read(kAudioTapPropertyFormat, defaultValue: AudioStreamBasicDescription())
     }
 
+    /// Reads the nominal sample rate of an audio device via `kAudioDevicePropertyNominalSampleRate`.
+    /// Returns the rate the device is configured to operate at (e.g. 24000, 44100, 48000, 96000).
+    func readNominalSampleRate() throws -> Float64 {
+        try read(kAudioDevicePropertyNominalSampleRate, defaultValue: Float64(0))
+    }
+
     private func requireSystemObject() throws {
         if self != .system { throw "Only supported for the system object." }
     }

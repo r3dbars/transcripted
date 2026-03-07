@@ -18,6 +18,7 @@ struct SettingsContainerView: View {
     @AppStorage("userName") private var userName: String = ""
     @AppStorage("useAuroraRecording") private var useAuroraRecording: Bool = false
     @AppStorage("enableQwenSpeakerInference") private var enableQwenInference: Bool = true
+    @AppStorage("enableObsidianFormat") private var enableObsidianFormat: Bool = false
 
     @State private var enableSounds: Bool = true
     @State private var qwenModelCached: Bool = false
@@ -547,6 +548,14 @@ struct SettingsContainerView: View {
                             UserDefaults.standard.set(newValue, forKey: "enableUISounds")
                         }
                     )
+                )
+
+                Divider().background(Color.panelCharcoalSurface)
+
+                SettingsToggleRow(
+                    title: "Obsidian-Friendly Format",
+                    description: "Adds tags, [[wiki links]], and aliases to transcripts",
+                    isOn: $enableObsidianFormat
                 )
             }
         }

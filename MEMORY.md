@@ -13,6 +13,7 @@ Read this file FIRST when debugging runtime issues. Indexed by symptom for fast 
 | System audio cuts out mid-recording | [Dual Tap Conflict](#dual-tap-conflict) |
 | "0Hz 0ch" in logs | [Audio Format Rules](#audio-format-rules) |
 | 96kHz mismatch / half-duration files | [Audio Format Rules](#audio-format-rules) |
+| System audio half duration / sped-up playback | [NEVER Hardcode Sample Rates](#never-hardcode-sample-rates) |
 | Model stuck in `.loading` | [Model Loading Issues](#model-loading-issues) |
 | Wrong speaker names / poor matching | [Speaker Matching Debugging](#speaker-matching-debugging) |
 | HALC_ShellObject warnings | [Expected Console Warnings](#expected-console-warnings) |
@@ -23,10 +24,27 @@ Read this file FIRST when debugging runtime issues. Indexed by symptom for fast 
 
 ---
 
+## NEVER Hardcode Sample Rates
+
+**THIS IS THE #1 AUDIO BUG IN THIS CODEBASE. It has been fixed twice. Do not introduce it again.**
+
+**What went wrong (March 2026)**: `Audio.swift` hardcoded `actualSampleRate = 48000.0` for system audio WAV files. The aggregate device actually ran at 24kHz (matching the Mac's built-in mic hardware), not 48kHz. Result: WAV header said 48kHz but data was 24kHz → audio played back at 2x speed, system audio duration showed as exactly half of mic duration.
+
+**The rule**: ALWAYS read the actual sample rate from the device. NEVER hardcode 48000, 44100, 24000, or any other rate.
+
+**How it's solved now**:
+1. `SystemAudioCapture.setupSystemAudioTap()` reads `aggregateDeviceID.readNominalSampleRate()` after creating the aggregate device
+2. If the tap format rate differs from the device nominal rate, it corrects the format
+3. `Audio.swift` uses `tapFormat.sampleRate` (the corrected value) for WAV file settings
+
+**How to detect**: Compare system audio duration vs mic duration in logs. They should be within ~1s. If system is exactly half of mic, the sample rate is wrong.
+
+---
+
 ## Audio Format Rules
 
 - **Mic format**: Use `inputFormat(forBus: 1)` (hardware format). NEVER `outputFormat(forBus: 0)` — returns 0Hz 0ch.
-- **System audio**: Actual rate is 48kHz. Tap reports 96kHz — always hardcode `48000.0` when creating files. Using 96kHz causes files to appear half expected duration.
+- **System audio**: Use aggregate device's nominal sample rate (via `readNominalSampleRate()`). Do NOT hardcode any rate — the tap format rate can differ from the actual device rate.
 - **Mic saving**: Mono (manually downmixed if multi-channel hardware)
 - **System audio buffers**: Use `bufferListNoCopy` — memory only valid during callback. Deep-copy before async dispatch.
 
@@ -92,11 +110,11 @@ These CoreAudio framework warnings are **expected and harmless** — they cannot
 | Symptom | Cause | Fix |
 |---|---|---|
 | Tiny system audio file | Callbacks dropped (I/O overload) | Move heavy work out of callback. See [CoreAudio I/O Overload](#coreaudio-io-overload) |
-| Wrong sample rate | Format mismatch | System = 48kHz (NOT 96kHz). Mic = use buffer's actual format |
+| Wrong sample rate | Format mismatch | System = use device nominal rate. Mic = use buffer's actual format |
 | Mono instead of stereo | Channel count mismatch | Check `format.channelCount` |
 | Garbled audio | Interleaved/non-interleaved mismatch | Match `isInterleaved` setting |
 | Silent audio | Wrong bus or format | Use `inputFormat(forBus: 1)` for hardware format |
-| Half-expected duration | Using tap's 96kHz instead of actual 48kHz | Hardcode `48000.0` for system audio |
+| Half-expected duration | Tap format rate differs from device rate | Use `readNominalSampleRate()` on aggregate device |
 
 ---
 

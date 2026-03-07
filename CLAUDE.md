@@ -46,7 +46,7 @@ Read the component CLAUDE.md in the relevant directory FIRST:
 - **@MainActor classes:** Audio, Transcription, TranscriptionTaskManager, PillStateManager, ParakeetService, SortformerService, QwenService, StatsService, FailedTranscriptionManager
 - **NOT @MainActor:** SystemAudioCapture (DispatchQueue + NSLock), SpeakerDatabase (DispatchQueue + SQLite), StatsDatabase (DispatchQueue)
 - **CoreAudio I/O callbacks run on real-time threads** — NEVER do I/O, locks, allocations, or Objective-C calls inside them. Deep-copy buffers before async dispatch.
-- System audio is 48kHz (tap reports 96kHz — always hardcode 48000.0)
+- System audio sample rate: read from aggregate device's nominal rate (not from tap format, which may differ)
 - Mic format: use `inputFormat(forBus: 1)` (hardware), NEVER `outputFormat(forBus: 0)`
 - Model states: `.notLoaded` → `.loading` → `.ready` | `.failed`
 - App runs as LSUIElement (no dock icon), NSPanel floating UI

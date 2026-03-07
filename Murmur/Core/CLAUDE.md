@@ -81,7 +81,7 @@ Sections: Meeting Recording title → Channel & Speaker Analytics → Full Trans
 | Change recording validation | `RecordingValidator.swift` |
 
 ## Gotchas
-- System audio: always 48kHz. Tap reports 96kHz — hardcode `48000.0`
+- System audio: use aggregate device's nominal sample rate (read via `readNominalSampleRate()`), NOT tap format rate
 - Mic format: `inputFormat(forBus: 1)`, NOT `outputFormat(forBus: 0)` (the latter returns 0Hz 0ch)
 - File creation MUST happen BEFORE I/O callback starts — never create AVAudioFile inside callback
 - `SystemAudioCapture.prepare()` must be called before `start()` (separates setup from I/O)

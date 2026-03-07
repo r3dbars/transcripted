@@ -51,6 +51,17 @@ struct OnboardingContainerView: View {
                     .transition(reduceMotion ? .opacity : pageTransition)
                     .id(state.currentStep)
                     .animation(reduceMotion ? .none : .smooth, value: state.currentStep)
+                    .onChange(of: state.modelsReady) { _, ready in
+                        if ready && state.currentStep == .modelSetup {
+                            // Brief delay so user sees the success checkmarks
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                direction = .forward
+                                withAnimation(reduceMotion ? .none : .smooth) {
+                                    state.advance()
+                                }
+                            }
+                        }
+                    }
 
                 // Navigation buttons
                 navigationButtons
@@ -94,6 +105,8 @@ struct OnboardingContainerView: View {
             HowItWorksStep()
         case .permissions:
             PermissionsStep(state: state)
+        case .modelSetup:
+            ModelSetupStep(state: state)
         case .ready:
             ReadyStep()
         }
@@ -166,6 +179,8 @@ struct OnboardingContainerView: View {
             return "Continue"
         case .permissions:
             return state.canProceed ? "Continue" : "Grant Permissions"
+        case .modelSetup:
+            return state.modelsReady ? "Continue" : "Setting Up..."
         case .ready:
             return "Start Using Transcripted"
         }
@@ -177,6 +192,8 @@ struct OnboardingContainerView: View {
             return "arrow.right"
         case .permissions:
             return state.canProceed ? "arrow.right" : "lock.open"
+        case .modelSetup:
+            return state.modelsReady ? "arrow.right" : "arrow.down.circle"
         default:
             return "arrow.right"
         }
