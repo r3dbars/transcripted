@@ -365,22 +365,17 @@ class Audio: ObservableObject {
                     // This does NOT start the I/O proc yet
                     try capture.prepare()
 
-                    // Step 2: Get the actual format from the tap
+                    // Step 2: Get the format from the tap (now corrected to match device nominal rate)
                     guard let tapFormat = capture.audioFormat else {
                         throw NSError(domain: "Audio", code: 10, userInfo: [NSLocalizedDescriptionKey: "Failed to get tap format"])
                     }
-                    AppLogger.audioSystem.debug("System audio format (reported)", ["sampleRate": "\(Int(tapFormat.sampleRate))", "channels": "\(tapFormat.channelCount)", "interleaved": "\(tapFormat.isInterleaved)"])
-
-                    // CRITICAL: CoreAudio process taps report 96kHz but actual audio data is 48kHz
-                    // See MEMORY.md: "System audio: 48kHz stereo (tap claims 96kHz but actual rate is 48kHz)"
-                    // Using the reported rate causes files to be half the expected duration
-                    let actualSampleRate: Double = 48000.0
-                    AppLogger.audioSystem.debug("System audio format (actual)", ["actualRate": "\(Int(actualSampleRate))", "reportedRate": "\(Int(tapFormat.sampleRate))"])
+                    let sampleRate = tapFormat.sampleRate
+                    AppLogger.audioSystem.info("System audio format", ["sampleRate": "\(Int(sampleRate))", "channels": "\(tapFormat.channelCount)", "interleaved": "\(tapFormat.isInterleaved)"])
 
                     // Step 3: Create audio file BEFORE starting I/O proc (critical!)
                     let settings: [String: Any] = [
                         AVFormatIDKey: kAudioFormatLinearPCM,
-                        AVSampleRateKey: actualSampleRate,  // Use actual 48kHz, not reported 96kHz
+                        AVSampleRateKey: sampleRate,
                         AVNumberOfChannelsKey: Int(tapFormat.channelCount),
                         AVLinearPCMBitDepthKey: 32,
                         AVLinearPCMIsFloatKey: true,
@@ -394,7 +389,7 @@ class Audio: ObservableObject {
                         commonFormat: .pcmFormatFloat32,
                         interleaved: tapFormat.isInterleaved
                     )
-                    AppLogger.audioSystem.info("System audio file created before I/O proc", ["sampleRate": "\(Int(actualSampleRate))", "channels": "\(tapFormat.channelCount)"])
+                    AppLogger.audioSystem.info("System audio file created before I/O proc", ["sampleRate": "\(Int(sampleRate))", "channels": "\(tapFormat.channelCount)"])
 
                     // Step 4: Now start the I/O proc with a lightweight callback
                     // The file already exists, so callback only needs to copy+write

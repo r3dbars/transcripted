@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import AVFoundation
+import Combine
 
 @available(macOS 26.0, *)
 @main
@@ -16,7 +17,7 @@ struct TranscriptedApp: App {
 
 @available(macOS 26.0, *)
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var statusItem: NSStatusItem?
     var floatingPanel: FloatingPanelController?
     var failedTranscriptionManager: FailedTranscriptionManager?
@@ -29,6 +30,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Onboarding
     var onboardingWindowController: OnboardingWindowController?
+
+    // Global hotkey monitors
+    private var globalHotkeyMonitor: Any?
+    private var localHotkeyMonitor: Any?
+
+    // Enhanced menu bar
+    private var recordingToggleMenuItem: NSMenuItem?
+    private var durationMenuItem: NSMenuItem?
+    private var durationTimer: Timer?
+    private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Initialize logger (creates log directory, opens file handle)
@@ -70,13 +81,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let menu = NSMenu()
+        menu.delegate = self
+
+        // Start/Stop Recording with hotkey hint
+        let toggleItem = NSMenuItem(title: "Start Recording", action: #selector(toggleRecording), keyEquivalent: "R")
+        toggleItem.keyEquivalentModifierMask = [.command, .shift]
+        recordingToggleMenuItem = toggleItem
+        menu.addItem(toggleItem)
+
+        // Duration display (hidden when not recording)
+        let durationItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        durationItem.isHidden = true
+        durationItem.isEnabled = false
+        durationMenuItem = durationItem
+        menu.addItem(durationItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        // Recent Transcripts section
+        let recentHeader = NSMenuItem(title: "Recent Transcripts", action: nil, keyEquivalent: "")
+        recentHeader.isEnabled = false
+        menu.addItem(recentHeader)
+        for _ in 0..<5 {
+            let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            item.isHidden = true
+            item.tag = 100
+            menu.addItem(item)
+        }
+
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Show/Hide Window", action: #selector(toggleWindow), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Failed Transcriptions...", action: #selector(openFailedTranscriptions), keyEquivalent: "f"))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
-        // Add "Reset Onboarding" for testing (can be removed in production)
         #if DEBUG
         menu.addItem(NSMenuItem(title: "Reset Onboarding (Debug)", action: #selector(resetOnboarding), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Test Naming Tray (Debug)", action: #selector(testNamingTray), keyEquivalent: ""))
@@ -121,6 +160,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             failedTranscriptionManager: ftm
         )
         floatingPanel?.showWindow(nil)
+
+        // Dynamic menu bar icon: changes when recording starts/stops
+        aud.$isRecording
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isRecording in
+                guard let button = self?.statusItem?.button else { return }
+                if isRecording {
+                    button.image = NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: "Recording")
+                    button.contentTintColor = .systemRed
+                    self?.recordingToggleMenuItem?.title = "Stop Recording"
+                    self?.startDurationTimer()
+                } else {
+                    button.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Transcripted")
+                    button.contentTintColor = nil
+                    self?.recordingToggleMenuItem?.title = "Start Recording"
+                    self?.stopDurationTimer()
+                }
+            }
+            .store(in: &cancellables)
+
+        // Register global hotkey: ⌘⇧R to toggle recording
+        registerGlobalHotkey()
     }
 
     /// Pre-cache Qwen model so it's ready for first recording.
@@ -241,6 +302,112 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     #endif
 
+    // MARK: - Recording Toggle (shared by hotkey + menu)
+
+    @objc func toggleRecording() {
+        guard let audio = audio else { return }
+        if audio.isRecording {
+            audio.stop()
+        } else {
+            audio.start()
+        }
+    }
+
+    // MARK: - Global Hotkey (⌘⇧R)
+
+    private func registerGlobalHotkey() {
+        // Global monitor: catches ⌘⇧R when OTHER apps are frontmost
+        globalHotkeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains([.command, .shift]),
+               event.charactersIgnoringModifiers?.lowercased() == "r" {
+                DispatchQueue.main.async {
+                    self?.toggleRecording()
+                }
+            }
+        }
+        // Local monitor: catches ⌘⇧R when THIS app is frontmost
+        localHotkeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains([.command, .shift]),
+               event.charactersIgnoringModifiers?.lowercased() == "r" {
+                DispatchQueue.main.async {
+                    self?.toggleRecording()
+                }
+                return nil  // consume the event
+            }
+            return event
+        }
+    }
+
+    // MARK: - NSMenuDelegate
+
+    func menuWillOpen(_ menu: NSMenu) {
+        // Update duration display
+        if let audio = audio, audio.isRecording {
+            let totalSeconds = Int(audio.recordingDuration)
+            let minutes = totalSeconds / 60
+            let seconds = totalSeconds % 60
+            durationMenuItem?.title = String(format: "  ● Recording: %d:%02d", minutes, seconds)
+            durationMenuItem?.isHidden = false
+        } else {
+            durationMenuItem?.isHidden = true
+        }
+
+        // Populate recent transcripts
+        let recentItems = menu.items.filter { $0.tag == 100 }
+        let saveDir = TranscriptSaver.defaultSaveDirectory
+
+        var recentFiles: [(name: String, url: URL)] = []
+        if let files = try? FileManager.default.contentsOfDirectory(at: saveDir, includingPropertiesForKeys: [.contentModificationDateKey])
+            .filter({ $0.pathExtension == "md" }) {
+            let sorted = files.sorted { a, b in
+                let aDate = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let bDate = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return aDate > bDate
+            }
+            recentFiles = sorted.prefix(5).map { (name: $0.deletingPathExtension().lastPathComponent, url: $0) }
+        }
+
+        for (index, item) in recentItems.enumerated() {
+            if index < recentFiles.count {
+                let file = recentFiles[index]
+                item.title = "  \(file.name)"
+                item.representedObject = file.url
+                item.action = #selector(openRecentTranscript(_:))
+                item.target = self
+                item.isHidden = false
+                item.isEnabled = true
+            } else {
+                item.isHidden = true
+            }
+        }
+    }
+
+    @objc func openRecentTranscript(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    // MARK: - Duration Timer
+
+    private func startDurationTimer() {
+        stopDurationTimer()
+        durationTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self, let audio = self.audio, audio.isRecording else { return }
+                let totalSeconds = Int(audio.recordingDuration)
+                let minutes = totalSeconds / 60
+                let seconds = totalSeconds % 60
+                self.durationMenuItem?.title = String(format: "  ● Recording: %d:%02d", minutes, seconds)
+            }
+        }
+    }
+
+    private func stopDurationTimer() {
+        durationTimer?.invalidate()
+        durationTimer = nil
+        durationMenuItem?.isHidden = true
+    }
+
     @objc func statusBarClicked() {
         // Menu shows automatically
     }
@@ -346,6 +513,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             audio?.stop()
         }
         taskManager?.cancelAll()
+
+        // Clean up hotkey monitors
+        if let monitor = globalHotkeyMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = localHotkeyMonitor { NSEvent.removeMonitor(monitor) }
+        stopDurationTimer()
+
         AppLogger.shared.flush()
     }
 }

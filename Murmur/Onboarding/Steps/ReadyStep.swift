@@ -17,7 +17,7 @@ struct ReadyStep: View {
     private let quickTips: [(icon: String, text: String, color: Color)] = [
         ("capsule.portrait", "Look for the floating pill above your dock", .terracotta),
         ("hand.tap", "Tap the pill to start recording", .recordingRed),
-        ("keyboard", "Pro tip: Use ⌃⇧R for instant recording", .processingPurple),
+        ("keyboard", "Pro tip: Use ⌘⇧R for instant recording", .processingPurple),
         ("sparkles", "AI extracts insights when you stop", .successGreen)
     ]
 

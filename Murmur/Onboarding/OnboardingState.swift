@@ -15,13 +15,15 @@ class OnboardingState {
         case welcome = 0
         case howItWorks = 1
         case permissions = 2
-        case ready = 3
+        case modelSetup = 3
+        case ready = 4
 
         var title: String {
             switch self {
             case .welcome: return "Welcome"
             case .howItWorks: return "How It Works"
             case .permissions: return "Permissions"
+            case .modelSetup: return "Model Setup"
             case .ready: return "Ready"
             }
         }
@@ -51,12 +53,25 @@ class OnboardingState {
 
     var isMicrophoneRequestInProgress = false
 
+    // MARK: - Model Setup State
+
+    var parakeetReady = false
+    var sortformerReady = false
+    var modelError: String?
+    var isLoadingModels = false
+
+    var modelsReady: Bool {
+        parakeetReady && sortformerReady
+    }
+
     // MARK: - Computed Properties
 
     var canProceed: Bool {
         switch currentStep {
         case .permissions:
             return allPermissionsGranted
+        case .modelSetup:
+            return modelsReady
         default:
             return true
         }
@@ -160,6 +175,42 @@ class OnboardingState {
         // Screen recording doesn't have a programmatic request API —
         // opening System Settings is the only way to guide the user
         openScreenRecordingSettings()
+    }
+
+    // MARK: - Model Loading
+
+    /// Download and initialize Parakeet + Sortformer models.
+    /// These temporary instances trigger the download/cache so models are on disk
+    /// for the real Transcription object created in setupApp().
+    @MainActor
+    func loadModels() async {
+        guard !isLoadingModels else { return }
+        isLoadingModels = true
+        modelError = nil
+
+        let parakeet = ParakeetService()
+        let sortformer = SortformerService()
+
+        // Initialize both in parallel
+        async let p: Void = parakeet.initialize()
+        async let s: Void = sortformer.initialize()
+        await p
+        await s
+
+        // Check results
+        if case .ready = parakeet.modelState {
+            parakeetReady = true
+        } else if case .failed(let e) = parakeet.modelState {
+            modelError = "Speech recognition: \(e)"
+        }
+
+        if case .ready = sortformer.modelState {
+            sortformerReady = true
+        } else if case .failed(let e) = sortformer.modelState {
+            modelError = (modelError != nil ? modelError! + "\n" : "") + "Speaker diarization: \(e)"
+        }
+
+        isLoadingModels = false
     }
 
     // MARK: - Completion
