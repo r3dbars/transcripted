@@ -1,329 +1,174 @@
-# Memory: Lessons Learned & Debugging Reference
+# MEMORY.md — Debugging Reference
 
-This file documents important lessons learned during development. Reference this when debugging similar issues.
-
----
-
-## Architecture Quick Reference
-
-### What This App Does
-Transcripted captures mic + system audio, transcribes locally via Parakeet TDT V3 (STT) + Sortformer (speaker diarization) using the FluidAudio library, identifies speakers via persistent voice fingerprints, and saves transcripts as Markdown.
-
-### Core Data Flow
-```
-Record → WAV files → Transcription → Speaker ID → Save Markdown
-```
-
-### Key Components
-| Component | File | Purpose |
-|-----------|------|---------|
-| Audio capture | `Core/Audio.swift` | Mic via AVAudioEngine, coordinates system audio |
-| System audio | `Core/SystemAudioCapture.swift` | CoreAudio process taps (macOS 26+) |
-| Orchestration | `Core/TranscriptionTaskManager.swift` | Background transcription queue, progress |
-| UI State | `UI/FloatingPanel/PillStateManager.swift` | State machine: idle→recording→processing |
-| Transcription | `Core/Transcription.swift` | Local Parakeet + Sortformer pipeline |
-| Speaker DB | `Services/SpeakerDatabase.swift` | Persistent voice fingerprints (SQLite, 256-dim embeddings) |
-| Transcript Output | `Core/TranscriptSaver.swift` | Markdown with YAML frontmatter |
-| StatsDatabase | `Core/StatsDatabase.swift` | SQLite persistence for recording sessions and activity |
-| StatsService | `Core/StatsService.swift` | Calculates hours, streaks, heat map data |
-| TranscriptScanner | `Core/TranscriptScanner.swift` | Scans folder for transcript metadata |
-
-### State Machine (PillStateManager)
-```
-idle (40×20) → recording (180×40) → processing (180×40) → idle
-```
+Read this file FIRST when debugging runtime issues. Indexed by symptom for fast lookup.
 
 ---
 
-## macOS 26 System Audio Permissions
+## Symptom Index
 
-**Important**: System audio capture via `AudioHardwareCreateProcessTap` does NOT require Screen Recording permission on macOS 26. The OS provides an audio-only permission flow, which is more privacy-preserving.
-
-This is why the app uses `@available(macOS 26.0, *)` throughout.
-
----
-
-## Transcription Pipeline
-
-### Engine: Parakeet + Sortformer (Local, via FluidAudio)
-| Component | Model | Purpose |
-|-----------|-------|---------|
-| Speech-to-text | Parakeet TDT V3 | CoreML, ~600MB, runs on Neural Engine |
-| Speaker diarization | Sortformer | CoreML, identifies speaker segments |
-| Voice fingerprints | WeSpeaker | 256-dim embeddings, persistent matching |
-
-### Pipeline (batch, after recording stops)
-1. Load & resample audio to 16kHz mono (AudioResampler)
-2. Sortformer diarizes system audio → speaker segments with timestamps + embeddings
-3. Parakeet transcribes each speaker segment individually
-4. Parakeet transcribes full mic track (split into sentences for timestamps)
-5. Match speaker embeddings against SpeakerDatabase (cosine similarity)
-6. Merge mic + system utterances chronologically
-
-### Historical Providers (Removed)
-| Provider | Status | Notes |
-|----------|--------|-------|
-| Deepgram | **Removed (Feb 2026)** | Replaced by local Parakeet + Sortformer |
-| Apple | **Legacy/Unused** | Was used pre-Deepgram migration |
-| AssemblyAI | **Legacy/Unused** | Was evaluated, not integrated |
-
-### DisplayStatus (Goal-Gradient Effect)
-```
-idle → gettingReady (0-15%) → transcribing (15-75%) → finishing (95-100%) → transcriptSaved
-```
+| Symptom | Section |
+|---|---|
+| Tiny system audio file (~50KB) | [CoreAudio I/O Overload](#coreaudio-io-overload) |
+| "skipping cycle due to overload" in console | [CoreAudio I/O Overload](#coreaudio-io-overload) |
+| System audio cuts out mid-recording | [Dual Tap Conflict](#dual-tap-conflict) |
+| "0Hz 0ch" in logs | [Audio Format Rules](#audio-format-rules) |
+| 96kHz mismatch / half-duration files | [Audio Format Rules](#audio-format-rules) |
+| Model stuck in `.loading` | [Model Loading Issues](#model-loading-issues) |
+| Wrong speaker names / poor matching | [Speaker Matching Debugging](#speaker-matching-debugging) |
+| HALC_ShellObject warnings | [Expected Console Warnings](#expected-console-warnings) |
+| "throwing -10877" at startup | [Expected Console Warnings](#expected-console-warnings) |
+| onChange tried to update multiple times | [Expected Console Warnings](#expected-console-warnings) |
+| Garbled/silent audio | [Common Audio Issues](#common-audio-issues) |
+| Pill stuck in state | Check `ui` logs for "Blocked transition" |
 
 ---
 
-## UI & Design System
+## Audio Format Rules
 
-### Floating Panel States
-| State | Dimensions | Content |
-|-------|------------|---------|
-| idle | 40×20 | Dormant waveform |
-| recording | 180×40 | Aurora + timer + stop button |
-| processing | 180×40 | Aurora + progress + status text |
-
-### Aurora Color Palette (Synthwave)
-- **Mic audio**: Hot pink coral `#EC4899` / light `#F472B6`
-- **System audio**: Electric blue `#3B82F6` / light `#60A5FA`
-- **Background**: Dark charcoal `#1A1A1A`
-- **Text primary**: White `#FFFFFF`
-
-### Animation Timing
-- Pill morph: 175ms spring (response: 0.175, damping: 0.8)
-- Content fade: 100ms
-- Toast duration: 5s
-- Success celebration: 2s
-
-### Key UI Files
-- `Design/DesignTokens.swift` - All colors, spacing, animations
-- `UI/FloatingPanel/Components/Aurora*.swift` - Recording/Processing/Success views
-- `UI/FloatingPanel/PillStateManager.swift` - State machine with sound feedback
+- **Mic format**: Use `inputFormat(forBus: 1)` (hardware format). NEVER `outputFormat(forBus: 0)` — returns 0Hz 0ch.
+- **System audio**: Actual rate is 48kHz. Tap reports 96kHz — always hardcode `48000.0` when creating files. Using 96kHz causes files to appear half expected duration.
+- **Mic saving**: Mono (manually downmixed if multi-channel hardware)
+- **System audio buffers**: Use `bufferListNoCopy` — memory only valid during callback. Deep-copy before async dispatch.
 
 ---
 
-## CoreAudio I/O Callback CPU Overload (Jan 2, 2026)
+## CoreAudio I/O Overload
 
-### Symptom
-- System audio files were tiny (~50KB instead of ~2MB for a 40-second recording)
-- Console showed: `HALC_ProxyIOContext::IOWorkLoop: skipping cycle due to overload` (hundreds of times)
-- Only 3 I/O callbacks completed, then all subsequent audio frames were dropped
-- System audio duration reported as 0.0 seconds
-- Transcripts showed `system_utterances: 0` despite visualizer showing audio levels
+**Symptom**: System audio files tiny (~50KB instead of ~2MB). Console: `HALC_ProxyIOContext::IOWorkLoop: skipping cycle due to overload`. Only 3 I/O callbacks complete, then all frames dropped. `system_utterances: 0` despite visualizer showing levels.
 
-### Root Cause
-**Creating `AVAudioFile` inside the CoreAudio I/O callback caused CPU overload.**
+**Root cause**: Creating `AVAudioFile` inside CoreAudio I/O callback. For 512-sample buffer at 48kHz, callback must return within ~10.7ms. File creation takes 10-100ms.
 
-The I/O callback (created via `AudioDeviceCreateIOProcIDWithBlock`) runs on a real-time audio thread with strict timing requirements. For a 512-sample buffer at 48kHz, the callback must return within ~10.7ms (realistically <1ms to be safe).
-
-Creating an `AVAudioFile` involves:
-1. File system metadata operations
-2. Disk space allocation
-3. WAV header writing
-4. Potential disk I/O blocking
-
-This can take 10-100ms, causing CoreAudio to skip subsequent cycles.
-
-### The Broken Pattern
+**Fix pattern**: Create audio file BEFORE starting I/O proc.
 ```swift
-// BAD: File creation inside I/O callback
-try capture.start { systemBuffer in
-    // First callback creates the file - BLOCKS AUDIO THREAD!
-    if self.systemAudioFile == nil {
-        self.systemAudioFile = try AVAudioFile(forWriting: fileURL, ...)  // 10-100ms!
-    }
-    try self.systemAudioFile?.write(from: systemBuffer)
-}
-```
-
-### The Fix
-**Create the audio file BEFORE starting the I/O proc.**
-
-1. Added `prepare()` method to `SystemAudioCapture` that creates the tap without starting I/O
-2. Exposed `audioFormat` property to get the tap's format after preparation
-3. Created audio file synchronously before calling `start()`
-4. Callback now only does lightweight operations
-
-```swift
-// GOOD: File creation before I/O callback starts
+// GOOD: File creation before callbacks
 try capture.prepare()  // Creates tap, gets format
-let format = capture.audioFormat!
-self.systemAudioFile = try AVAudioFile(forWriting: fileURL, settings: ...)  // Done BEFORE callbacks
-
-try capture.start { systemBuffer in
-    // Callback is now lightweight - no file creation!
-    let copy = self.deepCopyBuffer(systemBuffer)
-    self.fileQueue.async {
-        try self.systemAudioFile?.write(from: copy)
-    }
+systemAudioFile = try AVAudioFile(forWriting: url, settings: ...)  // Before I/O
+try capture.start { buffer in
+    let copy = deepCopyBuffer(buffer)  // Deep copy required
+    fileQueue.async { try systemAudioFile?.write(from: copy) }
 }
 ```
 
-### Key Rules for CoreAudio Callbacks
-
-1. **NEVER do disk I/O** - No file creation, no file reads, no logging to files
-2. **NEVER allocate large memory blocks** - Pre-allocate buffers before starting
-3. **NEVER block on locks** - Use lock-free queues or try-locks
-4. **NEVER call Objective-C/Swift methods that might allocate** - Be careful with string interpolation
-5. **Dispatch heavy work to background queues** - Use async dispatch for file writes
-6. **Deep copy buffers before async dispatch** - System audio uses `bufferListNoCopy`, memory is only valid during callback
-
-### How to Debug Similar Issues
-
-1. **Check console for overload messages:**
-   ```
-   HALC_ProxyIOContext::IOWorkLoop: skipping cycle due to overload
-   ```
-
-2. **Add callback counters:**
-   ```swift
-   var callbackCount = 0
-   // In callback:
-   callbackCount += 1
-   if callbackCount <= 3 { print("Callback #\(callbackCount)") }
-   ```
-
-3. **Check file sizes after recording:**
-   ```bash
-   ls -la ~/Documents/Transcripted/meeting_*_system.wav
-   ```
-   If system files are tiny (~50KB) but mic files are normal (~2MB), system audio callbacks are being dropped.
-
-4. **Compare working vs broken commits:**
-   ```bash
-   git log --oneline -- Murmur/Core/Audio.swift
-   git show <commit>:Murmur/Core/Audio.swift | grep -A 50 "system audio"
-   ```
-
-### Files Involved
-- `Murmur/Core/Audio.swift` - Main recording class, manages mic + system audio files
-- `Murmur/Core/SystemAudioCapture.swift` - CoreAudio process tap for system-wide audio
-- `Murmur/Services/AudioResampler.swift` - Resamples audio to 16kHz for Parakeet/Sortformer
+**CoreAudio callback rules**:
+1. NEVER do disk I/O — no file creation, reads, or logging
+2. NEVER allocate large memory — pre-allocate buffers
+3. NEVER block on locks — use lock-free queues or try-locks
+4. NEVER call ObjC/Swift methods that might allocate
+5. Dispatch heavy work to background queues
+6. Deep-copy buffers before async dispatch
 
 ---
 
-## General Audio Debugging Tips
+## Dual Tap Conflict
 
-### Audio Format Critical Details
-- **Hardware format**: Use `inputFormat(forBus: 1)`, NOT `outputFormat(forBus: 0)`
-- **Mic audio**: Saved as mono (manually downmixed if multi-channel)
-- **System audio**: 48kHz stereo (tap claims 96kHz but actual is 48kHz)
-  - **CRITICAL**: Always use 48kHz when creating system audio files, NOT the tap's reported rate
-  - If you use the reported 96kHz, files will appear half the expected duration (Jan 6, 2026 fix)
-- **Deep copy required**: System audio buffers use `bufferListNoCopy` - memory only valid during callback
+**Symptom**: System audio captured for ~60s then goes silent. Mic works for full duration. `system_utterances: 1` vs `mic_utterances: 18`.
 
-### Verify Audio Pipeline Health
-```swift
-// Add to callback for debugging
-print("Buffer: \(buffer.frameLength) frames, \(buffer.format.sampleRate)Hz")
-```
+**Root cause**: Two concurrent `SystemAudioCapture` instances (recording + passive monitor) conflict. When passive monitor calls `cleanup()`, it destroys the shared process tap and breaks the recording's capture.
 
-### Check Audio File Contents
-```bash
-# Get duration of WAV file
-afinfo ~/Documents/Transcripted/meeting_*_system.wav | grep duration
+**Key lesson**: CoreAudio process taps are system resources. Multiple concurrent taps for same processes cause conflicts. Ensure only one tap active at a time. Stop passive monitors BEFORE starting recording capture.
 
-# Play audio file to verify content
-afplay ~/Documents/Transcripted/meeting_*_system.wav
-```
+**Note**: The MeetingDetector component that caused this was removed (Feb 2026), but the lesson applies to any future use of multiple SystemAudioCapture instances.
 
-### Common Audio Issues
+---
 
-| Symptom | Likely Cause | Fix |
-|---------|--------------|-----|
-| Tiny file size | Callbacks being dropped | Move heavy work out of callback |
-| Wrong sample rate | Format mismatch | Use buffer's actual format, not hardcoded |
+## Expected Console Warnings
+
+These CoreAudio framework warnings are **expected and harmless** — they cannot be suppressed from user code:
+
+| Warning | When | Why |
+|---|---|---|
+| `HALC_ShellObject::SetPropertyData: call to the proxy failed` | Startup | Internal format negotiation during aggregate device creation |
+| `throwing -10877` | Startup | `kAudioUnitErr_InvalidElement` during tap initialization |
+| `AudioObjectRemovePropertyListener: no object with given ID` | Cleanup | Race condition destroying audio objects |
+
+**SwiftUI warning**: `onChange action tried to update multiple times per frame` — caused by rapid DisplayStatus changes. Fixed by wrapping state updates in `Task { @MainActor in }`.
+
+**Verifying audio works despite warnings**: Check callback count (should see callbacks #1, #2, #3 at startup), check file sizes (system audio ~384KB/sec), no "skipping cycle due to overload".
+
+---
+
+## Common Audio Issues
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Tiny system audio file | Callbacks dropped (I/O overload) | Move heavy work out of callback. See [CoreAudio I/O Overload](#coreaudio-io-overload) |
+| Wrong sample rate | Format mismatch | System = 48kHz (NOT 96kHz). Mic = use buffer's actual format |
 | Mono instead of stereo | Channel count mismatch | Check `format.channelCount` |
 | Garbled audio | Interleaved/non-interleaved mismatch | Match `isInterleaved` setting |
 | Silent audio | Wrong bus or format | Use `inputFormat(forBus: 1)` for hardware format |
+| Half-expected duration | Using tap's 96kHz instead of actual 48kHz | Hardcode `48000.0` for system audio |
 
 ---
 
-## Expected Console Warnings (Jan 4, 2026)
+## Audio Debugging Commands
 
-### CoreAudio Internal Warnings
+```bash
+# Check file duration
+afinfo ~/Documents/Transcripted/meeting_*_system.wav | grep duration
 
-During system audio setup and teardown, the macOS CoreAudio framework emits internal log messages that **cannot be suppressed from user code**. These are **expected and harmless**:
+# Play audio to verify content
+afplay ~/Documents/Transcripted/meeting_*_system.wav
 
-| Warning | When | Why |
-|---------|------|-----|
-| `HALC_ShellObject::SetPropertyData: call to the proxy failed` | Startup | Internal format negotiation during aggregate device creation |
-| `throwing -10877` | Startup | `kAudioUnitErr_InvalidElement` during tap initialization |
-| `AudioObjectRemovePropertyListener: no object with given ID` | Cleanup | Race condition when destroying audio objects |
+# Check file sizes (system should be ~384KB/sec)
+ls -la ~/Documents/Transcripted/meeting_*_system.wav
 
-### Why These Can't Be Suppressed
-
-These messages are logged directly by the CoreAudio framework (HALC = Hardware Abstraction Layer Core), not by our code. They appear even when all our error handling is correct. The messages indicate internal operations that the framework handles gracefully.
-
-### Verifying Audio Is Working Despite Warnings
-
-If you see these warnings but want to confirm audio capture is working:
-
-1. **Check callback count** - Should see "I/O Proc callback #1", #2, #3 at startup
-2. **Check file sizes** - System audio should grow continuously (~384KB/sec)
-3. **No "skipping cycle due to overload"** - This is the critical error (see CPU Overload section above)
-
-### SwiftUI Warning
-
-`onChange(of: DisplayStatus) action tried to update multiple times per frame` - Fixed by wrapping state updates in `Task { @MainActor in ... }` to debounce rapid status changes during transcription progress updates.
+# Read app logs
+# Use Read tool on: ~/Library/Logs/Transcripted/app.jsonl
+# Filter with Grep for subsystem: "s":"audio.system"
+```
 
 ---
 
-> **HISTORICAL NOTE (Feb 2026):** The `MeetingDetector` component described below was removed from the codebase as part of a settings redesign. The architectural lesson about concurrent CoreAudio taps remains valid.
+## Model Loading Issues
 
-## Dual SystemAudioCapture Conflict Bug (Jan 6, 2026)
+**Symptom**: Model stuck in `.loading`, transcription never starts.
 
-### Symptom
-- System audio captured for only ~60 seconds, then went silent for remainder of recording
-- Mic audio worked perfectly for entire duration
-- Console showed: `✅ System audio capture started` but later `⚠️ System audio: Silent for 10s`
-- Transcript showed `system_utterances: 1` vs `mic_utterances: 18`
-- System audio file had audio at start, then silence
+**Check**: Grep logs for subsystem `transcription`. Common causes:
+- HuggingFace download failed (network or disk space)
+- Bundle path wrong — models expected at `Contents/Resources/parakeet-models/` and `sortformer-models/`
+- Qwen: needs 4GB free memory — check `hasMemoryForQwen()` in TranscriptionTaskManager
 
-### Root Cause
-**Two concurrent `SystemAudioCapture` instances conflicted.**
-
-1. `MeetingDetector` creates a passive `SystemAudioCapture` for meeting detection (monitoring audio levels without recording)
-2. `Audio.swift` creates another `SystemAudioCapture` for actual recording
-3. When recording starts, both taps run simultaneously
-4. After 3 seconds, `MeetingDetector.checkForMeetingApps()` sees `isRecording == true`
-5. It calls `stopPassiveAudioMonitor()` → `SystemAudioCapture.stop()` → `cleanup()`
-6. Cleanup destroys the process tap and aggregate device
-7. **This breaks the recording's tap** - CoreAudio doesn't handle concurrent taps well
-
-### Evidence
-- System audio captured "Hello" (first word) at 60% confidence before passive monitor stopped
-- System audio duration: 66.0s (until passive monitor cleanup)
-- Mic audio duration: 131.9s (full recording)
-- Log sequence: passive starts → recording starts → passive destroyed → silence begins
-
-### The Fix
-**Stop the passive monitor BEFORE starting the recording's capture.**
-
-1. Added `stopPassiveMonitorForRecording()` method to `MeetingDetector`
-2. Added `meetingDetector` weak reference to `Audio`
-3. Call `meetingDetector?.stopPassiveMonitorForRecording()` at start of `startAudioCapture()`
-4. Wired up dependency in `TranscriptedApp.setupMeetingDetection()`
-
-### Files Modified
-- `Murmur/Core/MeetingDetector.swift` **[DELETED]** - Added `stopPassiveMonitorForRecording()` method
-- `Murmur/Core/Audio.swift` - Added `meetingDetector` reference and call before capture
-- `Murmur/TranscriptedApp.swift` **[SIMPLIFIED]** - Wire up `audio.setMeetingDetector(meetingDetector!)`
-
-### Key Lesson
-**CoreAudio process taps and aggregate devices are system resources.** Having multiple concurrent taps for the same processes can cause resource conflicts. When one tap is destroyed during cleanup, it can affect others. Always ensure only one tap is active at a time.
-
-### How to Debug Similar Issues
-1. **Check for multiple SystemAudioCapture instances** - Search for `SystemAudioCapture()` constructor calls
-2. **Check cleanup timing** - Look at "Cleaning up system audio capture" logs vs recording duration
-3. **Compare audio durations** - If system audio is shorter than mic, something killed the tap mid-recording
-4. **Look for the first captured system audio** - If present, proves tap WAS working initially
+**Qwen-specific**: Model cached at `~/Library/Caches/models/mlx-community/Qwen3.5-4B-4bit/`. `QwenService.isModelCached` checks this path. Model is loaded on-demand (NOT at startup).
 
 ---
 
-## Related Documentation
+## Speaker Matching Debugging
 
-- [Apple Audio Unit Hosting Guide](https://developer.apple.com/documentation/audiotoolbox/audio_unit_hosting_guide)
+**Symptom**: Wrong speaker names, speakers merged incorrectly, or speakers not recognized.
+
+**Check**: Grep logs for subsystem `speaker-db`.
+
+**Key parameters** (in SpeakerDatabase.swift):
+- Match threshold: adaptive 0.85 (1 segment) → 0.70 (4+ segments)
+- EMA alpha: 0.15 for embedding blending
+- Post-processing: pairwise merge 0.85, DB-informed split 0.62
+
+**Common issues**:
+- Threshold too low → different speakers merged
+- Threshold too high → same speaker gets multiple profiles
+- Stale profiles → run `pruneWeakProfiles()`
+- Name variants not recognized → check `areNameVariants()` in SpeakerDatabase
+
+---
+
+## Transcription Pipeline Reference
+
+**Pipeline** (batch, after recording stops):
+1. Resample audio to 16kHz mono (AudioResampler)
+2. Sortformer diarizes system audio → speaker segments with embeddings
+3. EmbeddingClusterer post-processes segments (merge + split)
+4. Parakeet transcribes each speaker segment individually
+5. Parakeet transcribes full mic track (split into sentences)
+6. Match speaker embeddings against SpeakerDatabase
+7. Merge mic + system utterances chronologically
+
+**DisplayStatus progression**: idle → gettingReady (0-15%) → transcribing (15-75%) → finishing (95-100%) → transcriptSaved | failed
+
+**Historical providers (removed)**: Deepgram (removed Feb 2026), Apple Speech (legacy), AssemblyAI (never integrated).
+
+---
+
+## Reference Links
 - [Core Audio Overview](https://developer.apple.com/library/archive/documentation/MusicAudio/Conceptual/CoreAudioOverview/)
-- Process taps via `AudioHardwareCreateProcessTap` - macOS 26 provides audio-only permission (no Screen Recording needed)
-- [OSStatus Lookup](https://www.osstatus.com/) - For decoding CoreAudio error codes
+- [OSStatus Lookup](https://www.osstatus.com/) — decode CoreAudio error codes
+- Process taps via `AudioHardwareCreateProcessTap` — macOS 26 provides audio-only permission (no Screen Recording needed)
