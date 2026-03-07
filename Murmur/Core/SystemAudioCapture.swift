@@ -376,7 +376,10 @@ class SystemAudioCapture: ObservableObject {
             if timeSinceLastBuffer > 3.0 {
                 // System audio stopped → output device likely changed
                 AppLogger.audioSystem.warning("Output device disconnected or changed, attempting recovery")
-                self.recoverFromOutputChange()
+                // Dispatch to self.queue — recovery uses Thread.sleep for HAL settle time
+                self.queue.async {
+                    self.recoverFromOutputChange()
+                }
             }
         }
     }

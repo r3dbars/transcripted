@@ -115,47 +115,60 @@ enum AudioResampler {
             ])
         }
 
-        // Read entire source file into buffer
-        guard let srcBuffer = AVAudioPCMBuffer(pcmFormat: srcFormat, frameCapacity: srcFrames) else {
-            throw NSError(domain: "AudioResampler", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "Failed to create source audio buffer"
-            ])
-        }
-        try file.read(into: srcBuffer)
-
-        // Calculate output frame count (add margin for filter delay)
         let ratio = targetRate / srcFormat.sampleRate
-        let dstFrames = AVAudioFrameCount(Double(srcFrames) * ratio) + 16
-        guard let dstBuffer = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: dstFrames) else {
-            throw NSError(domain: "AudioResampler", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "Failed to create destination audio buffer"
-            ])
-        }
 
-        // Convert in one pass — the input block is called once for single-buffer conversion
-        var inputConsumed = false
-        var conversionError: NSError?
-        let status = converter.convert(to: dstBuffer, error: &conversionError) { _, outStatus in
-            if inputConsumed {
-                outStatus.pointee = .endOfStream
-                return nil
+        // Process in chunks to avoid multi-GB allocations for long recordings
+        // 30 seconds at 48kHz stereo float32 ≈ 11MB per chunk (vs 2.6GB for a 2-hour file)
+        let chunkDuration: Double = 30.0  // seconds
+        let chunkFrames = AVAudioFrameCount(srcFormat.sampleRate * chunkDuration)
+        var allSamples: [Float] = []
+        allSamples.reserveCapacity(Int(Double(srcFrames) * ratio) + 16)
+
+        while file.framePosition < file.length {
+            let framesToRead = min(chunkFrames, AVAudioFrameCount(file.length - file.framePosition))
+
+            guard let srcBuffer = AVAudioPCMBuffer(pcmFormat: srcFormat, frameCapacity: framesToRead) else {
+                throw NSError(domain: "AudioResampler", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "Failed to create source audio buffer"
+                ])
             }
-            inputConsumed = true
-            outStatus.pointee = .haveData
-            return srcBuffer
+            try file.read(into: srcBuffer, frameCount: framesToRead)
+
+            let dstFrames = AVAudioFrameCount(Double(framesToRead) * ratio) + 16
+            guard let dstBuffer = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: dstFrames) else {
+                throw NSError(domain: "AudioResampler", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "Failed to create destination audio buffer"
+                ])
+            }
+
+            var inputConsumed = false
+            var conversionError: NSError?
+            let status = converter.convert(to: dstBuffer, error: &conversionError) { _, outStatus in
+                if inputConsumed {
+                    outStatus.pointee = .endOfStream
+                    return nil
+                }
+                inputConsumed = true
+                outStatus.pointee = .haveData
+                return srcBuffer
+            }
+
+            if status == .error, let conversionError {
+                throw conversionError
+            }
+
+            guard let floatData = dstBuffer.floatChannelData else {
+                throw NSError(domain: "AudioResampler", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "Failed to get float channel data from converted buffer"
+                ])
+            }
+
+            allSamples.append(contentsOf: UnsafeBufferPointer(start: floatData[0], count: Int(dstBuffer.frameLength)))
+            // Reset converter state between chunks for clean boundaries
+            converter.reset()
         }
 
-        if status == .error, let conversionError {
-            throw conversionError
-        }
-
-        guard let floatData = dstBuffer.floatChannelData else {
-            throw NSError(domain: "AudioResampler", code: 2, userInfo: [
-                NSLocalizedDescriptionKey: "Failed to get float channel data from converted buffer"
-            ])
-        }
-
-        return Array(UnsafeBufferPointer(start: floatData[0], count: Int(dstBuffer.frameLength)))
+        return allSamples
     }
 
     /// Extract a time slice from samples array.
