@@ -104,10 +104,19 @@ enum SpeakerClipExtractor {
     /// Overwrites any existing clip for this speaker (keeps the latest).
     static func persistClip(from tempClipURL: URL, speakerId: UUID) {
         let dir = clipsDirectory
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            AppLogger.pipeline.error("Failed to create clips directory", ["error": error.localizedDescription])
+            return
+        }
         let dest = dir.appendingPathComponent("\(speakerId.uuidString).wav")
-        try? FileManager.default.removeItem(at: dest)
-        try? FileManager.default.copyItem(at: tempClipURL, to: dest)
+        try? FileManager.default.removeItem(at: dest) // OK if doesn't exist
+        do {
+            try FileManager.default.copyItem(at: tempClipURL, to: dest)
+        } catch {
+            AppLogger.pipeline.error("Failed to persist speaker clip", ["speakerId": speakerId.uuidString, "error": error.localizedDescription])
+        }
     }
 
     /// Look up persistent clip URL for a speaker. Returns nil if no clip exists.
