@@ -130,22 +130,6 @@ struct OnboardingContainerView: View {
 
             Spacer()
 
-            // Skip button (on certain steps)
-            if canSkip {
-                Button(action: {
-                    direction = .forward
-                    withAnimation(reduceMotion ? .none : .smooth) {
-                        state.advance()
-                    }
-                }) {
-                    Text("Skip")
-                        .font(.bodyMedium)
-                        .foregroundColor(.softCharcoal)
-                }
-                .buttonStyle(.plain)
-                .padding(.trailing, Spacing.md)
-            }
-
             // Continue/Finish button
             if state.isLastStep {
                 PremiumButton(
@@ -196,11 +180,6 @@ struct OnboardingContainerView: View {
         default:
             return "arrow.right"
         }
-    }
-
-    private var canSkip: Bool {
-        // No skippable steps in simplified onboarding
-        false
     }
 
     // MARK: - Skip For Now Link

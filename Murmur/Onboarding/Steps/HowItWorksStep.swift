@@ -5,11 +5,12 @@ import SwiftUI
 /// mic → transcript → AI analysis (explosion) → organized insights
 @available(macOS 26.0, *)
 struct HowItWorksStep: View {
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
     @State private var phase: Int = 0
     @State private var titleOpacity: Double = 0
-    @State private var autoAdvance: Bool = true
+    @State private var autoAdvance: Bool = false  // Manual by default — user taps phase dots
 
-    // Timer for auto-advancing phases
+    // Timer for auto-advancing phases (only active when autoAdvance is true)
     private let timer = Timer.publish(every: 3.0, on: .main, in: .common).autoconnect()
 
     private let phases: [(caption: String, icon: String, color: Color)] = [
@@ -42,7 +43,7 @@ struct HowItWorksStep: View {
 
                 // Phase content
                 animationContent
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.95)))
                     .id(phase)
             }
             .frame(height: 280)
@@ -83,12 +84,12 @@ struct HowItWorksStep: View {
             Spacer()
         }
         .onAppear {
-            withAnimation(.easeOut(duration: 0.3)) {
+            withAnimation(reduceMotion ? .none : .easeOut(duration: 0.3)) {
                 titleOpacity = 1.0
             }
         }
         .onReceive(timer) { _ in
-            guard autoAdvance else { return }
+            guard autoAdvance, !reduceMotion else { return }
             withAnimation(.smooth) {
                 phase = (phase + 1) % 4
             }

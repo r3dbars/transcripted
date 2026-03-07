@@ -15,6 +15,8 @@ struct EdgePeekView: View {
     var silenceWarning: Bool = false  // Amber ring when silence detected
     var onStop: () -> Void = {}
 
+    @State private var isPulsing = false
+
     var body: some View {
         ZStack {
             // Warm cream background with vibrancy
@@ -43,15 +45,17 @@ struct EdgePeekView: View {
                             Circle()
                                 .stroke(Color.statusWarningMuted, lineWidth: 2)
                                 .frame(width: 18, height: 18)
-                                .opacity(Double(Int(Date().timeIntervalSince1970 * 1.5) % 2 == 0 ? 1.0 : 0.4))
+                                .opacity(isPulsing ? 1.0 : 0.4)
                         }
 
                         Circle()
                             .fill(silenceWarning ? Color.statusWarningMuted : Color.recordingCoral)
                             .frame(width: 10, height: 10)
                             .shadow(color: (silenceWarning ? Color.statusWarningMuted : Color.recordingCoral).opacity(0.6), radius: 4)
-                            .opacity(Double(Int(Date().timeIntervalSince1970 * 2) % 2 == 0 ? 1.0 : 0.5))
+                            .opacity(isPulsing ? 1.0 : 0.5)
                     }
+                    .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: isPulsing)
+                    .onAppear { isPulsing = true }
 
                     // Dual Waveform showing both mic and system audio
                     WaveformMiniView(levels: audioLevels, systemLevels: systemAudioLevels)
@@ -121,14 +125,14 @@ struct WaveformMiniView: View {
         }
     }
 
-    /// Color for system audio (what you're hearing) - cool tones to differentiate
+    /// Color for system audio (what you're hearing) - uses design token instead of hardcoded purple
     private func colorForSystemLevel(_ level: CGFloat) -> Color {
         if level > 0.75 {
-            return Color.purple.opacity(0.8)
+            return Color.systemAudioIndicator.opacity(0.8)
         } else if level > 0.5 {
-            return Color.purple.opacity(0.6)
+            return Color.systemAudioIndicator.opacity(0.6)
         } else {
-            return Color.purple.opacity(0.4)
+            return Color.systemAudioIndicator.opacity(0.4)
         }
     }
 }

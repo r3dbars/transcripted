@@ -9,17 +9,18 @@ struct PermissionsStep: View {
     @State private var titleOpacity: Double = 0
     @State private var titleOffset: CGFloat = 10
     @State private var cardAppeared: Bool = false
+    @State private var card2Appeared: Bool = false
     @State private var successPulse: Bool = false
 
     var body: some View {
         VStack(spacing: Spacing.lg) {
             // Header
             VStack(spacing: Spacing.sm) {
-                Text("One Quick Permission")
+                Text("Quick Permissions")
                     .font(.displayMedium)
                     .foregroundColor(.charcoal)
 
-                Text("We just need microphone access to get started")
+                Text("We need a couple of permissions to get started")
                     .font(.bodyLarge)
                     .foregroundColor(.softCharcoal)
             }
@@ -27,9 +28,9 @@ struct PermissionsStep: View {
             .offset(y: titleOffset)
             .padding(.top, Spacing.lg)
 
-            // Permission card
+            // Permission cards
             VStack(spacing: Spacing.md) {
-                // Microphone Permission
+                // Microphone Permission (required)
                 OnboardingPermissionCard(
                     icon: "mic.fill",
                     title: "Microphone Access",
@@ -38,6 +39,7 @@ struct PermissionsStep: View {
                         avStatus: state.microphoneStatus,
                         isLoading: state.isMicrophoneRequestInProgress
                     ),
+                    isRequired: true,
                     onGrant: {
                         Task {
                             await state.requestMicrophonePermission()
@@ -49,6 +51,23 @@ struct PermissionsStep: View {
                 )
                 .offset(x: cardAppeared ? 0 : 40)
                 .opacity(cardAppeared ? 1 : 0)
+
+                // Screen Recording Permission (recommended for system audio)
+                OnboardingPermissionCard(
+                    icon: "rectangle.inset.filled.and.person.filled",
+                    title: "Screen Recording",
+                    description: "To capture meeting audio from Zoom, Teams, and other apps",
+                    status: state.screenRecordingGranted ? .granted : .notRequested,
+                    isRequired: false,
+                    onGrant: {
+                        state.requestScreenRecordingPermission()
+                    },
+                    onOpenSettings: {
+                        state.openScreenRecordingSettings()
+                    }
+                )
+                .offset(x: card2Appeared ? 0 : 40)
+                .opacity(card2Appeared ? 1 : 0)
             }
             .padding(.horizontal, Spacing.lg)
 
@@ -85,9 +104,12 @@ struct PermissionsStep: View {
             titleOffset = 0
         }
 
-        // Card animation
+        // Card animations (staggered)
         withAnimation(.smooth.delay(0.2)) {
             cardAppeared = true
+        }
+        withAnimation(.smooth.delay(0.35)) {
+            card2Appeared = true
         }
     }
 
@@ -124,6 +146,7 @@ private struct OnboardingPermissionCard: View {
     let title: String
     let description: String
     let status: OnboardingPermissionStatus
+    var isRequired: Bool = true
     let onGrant: () -> Void
     let onOpenSettings: () -> Void
 
@@ -155,9 +178,21 @@ private struct OnboardingPermissionCard: View {
 
             // Text
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text(title)
-                    .font(.headingMedium)
-                    .foregroundColor(.charcoal)
+                HStack(spacing: Spacing.sm) {
+                    Text(title)
+                        .font(.headingMedium)
+                        .foregroundColor(.charcoal)
+
+                    Text(isRequired ? "Required" : "Recommended")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(isRequired ? .terracotta : .softCharcoal)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(isRequired ? Color.terracotta.opacity(0.12) : Color.softCharcoal.opacity(0.1))
+                        )
+                }
 
                 Text(description)
                     .font(.bodyMedium)
