@@ -75,6 +75,9 @@ final class SettingsWindowController: NSWindowController {
 
         // Set window appearance to dark
         window.appearance = NSAppearance(named: .darkAqua)
+
+        // Set delegate so NSWindowDelegate methods work
+        window.delegate = self
     }
 
     private func setupContentView() {
@@ -98,7 +101,7 @@ final class SettingsWindowController: NSWindowController {
     /// Show the settings window
     func showWindow() {
         window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
 
         // Refresh stats when window is shown
         Task { @MainActor in

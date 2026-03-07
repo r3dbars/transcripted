@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import UserNotifications
 
 /// Recording health information for transcript metadata (Phase 3)
 /// Captures quality metrics to be embedded in transcript YAML frontmatter
@@ -85,10 +86,14 @@ class TranscriptSaver {
             return nil
         }
 
-        // Generate filename with timestamp
+        // Generate filename with timestamp, avoiding collisions
         let timestamp = DateFormattingHelper.formatFilename(Date())
-        let filename = "Call_\(timestamp).md"
-        let fileURL = saveDir.appendingPathComponent(filename)
+        var fileURL = saveDir.appendingPathComponent("Call_\(timestamp).md")
+        var counter = 1
+        while FileManager.default.fileExists(atPath: fileURL.path) {
+            fileURL = saveDir.appendingPathComponent("Call_\(timestamp)_\(counter).md")
+            counter += 1
+        }
 
         // Create markdown content with metadata
         let markdown = formatMarkdown(text: text, duration: duration, date: Date())
@@ -110,6 +115,12 @@ class TranscriptSaver {
 
 
     /// Format source label for timeline display
+    /// Escape special characters for safe YAML string interpolation
+    private static func escapeYAML(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+         .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
     private static func formatSourceLabel(_ source: String) -> String {
         // Map "System Audio" to shorter "SysAudio"
         return source == "System Audio" ? "SysAudio" : source
@@ -176,8 +187,12 @@ class TranscriptSaver {
         }
 
         let timestamp = DateFormattingHelper.formatFilename(Date())
-        let filename = "Call_\(timestamp).md"
-        let fileURL = saveDir.appendingPathComponent(filename)
+        var fileURL = saveDir.appendingPathComponent("Call_\(timestamp).md")
+        var counter = 1
+        while FileManager.default.fileExists(atPath: fileURL.path) {
+            fileURL = saveDir.appendingPathComponent("Call_\(timestamp)_\(counter).md")
+            counter += 1
+        }
 
         let markdown = formatTranscriptMarkdown(result: result, speakerMappings: speakerMappings, speakerSources: speakerSources, speakerDbIds: speakerDbIds, date: Date(), healthInfo: healthInfo)
 
@@ -274,11 +289,11 @@ class TranscriptSaver {
                 let name = mapping.identifiedName ?? "Unknown"
                 let confidence = mapping.confidence?.rawValue ?? "unknown"
                 let source = speakerSources[mapping.speakerId] ?? "unknown"
-                yaml += "\n  - id: \"\(mapping.speakerId)\""
+                yaml += "\n  - id: \"\(Self.escapeYAML(mapping.speakerId))\""
                 if let dbId = speakerDbIds[mapping.speakerId] {
                     yaml += "\n    db_id: \"\(dbId.uuidString)\""
                 }
-                yaml += "\n    name: \"\(name)\""
+                yaml += "\n    name: \"\(Self.escapeYAML(name))\""
                 yaml += "\n    confidence: \(confidence)"
                 yaml += "\n    source: \(source)"
             }
@@ -497,49 +512,86 @@ class TranscriptSaver {
         }
     }
 
+    /// Notification category identifier for "Show in Finder" action
+    fileprivate static let notificationCategoryId = "TRANSCRIPT_SAVED"
+    fileprivate static let showInFinderActionId = "SHOW_IN_FINDER"
+
+    /// Set up notification categories (call once at app startup)
+    static func registerNotificationCategories() {
+        let showAction = UNNotificationAction(
+            identifier: showInFinderActionId,
+            title: "Show in Finder",
+            options: .foreground
+        )
+        let category = UNNotificationCategory(
+            identifier: notificationCategoryId,
+            actions: [showAction],
+            intentIdentifiers: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category])
+    }
+
     /// Show macOS notification that transcript was saved
     private static func showSaveNotification(fileURL: URL) {
-        let notification = NSUserNotification()
-        notification.title = "Transcript Saved"
-        notification.informativeText = fileURL.lastPathComponent
-        notification.soundName = nil // Silent notification
+        let center = UNUserNotificationCenter.current()
 
-        // Add action to open in Finder
-        notification.hasActionButton = true
-        notification.actionButtonTitle = "Show in Finder"
+        // Set delegate so we receive action callbacks
+        if notificationDelegate == nil {
+            let delegate = SaveNotificationDelegate()
+            notificationDelegate = delegate
+            center.delegate = delegate
+        }
 
-        // Deliver notification
-        NSUserNotificationCenter.default.deliver(notification)
+        // Store the file URL for the "Show in Finder" action
+        notificationDelegate?.latestFileURL = fileURL
 
-        // Set up delegate to handle "Show in Finder" action
-        let delegate = NotificationDelegate(fileURL: fileURL)
-        NSUserNotificationCenter.default.delegate = delegate
+        center.requestAuthorization(options: [.alert]) { granted, _ in
+            guard granted else { return }
 
-        // Keep delegate alive (store in static property)
-        notificationDelegates.append(delegate)
-    }
+            let content = UNMutableNotificationContent()
+            content.title = "Transcript Saved"
+            content.body = fileURL.lastPathComponent
+            content.categoryIdentifier = notificationCategoryId
 
-    // Keep notification delegates alive
-    private static var notificationDelegates: [NotificationDelegate] = []
-}
+            let request = UNNotificationRequest(
+                identifier: UUID().uuidString,
+                content: content,
+                trigger: nil // deliver immediately
+            )
 
-/// Delegate to handle notification actions (e.g., "Show in Finder")
-private class NotificationDelegate: NSObject, NSUserNotificationCenterDelegate {
-    let fileURL: URL
-
-    init(fileURL: URL) {
-        self.fileURL = fileURL
-    }
-
-    func userNotificationCenter(_ center: NSUserNotificationCenter, didActivate notification: NSUserNotification) {
-        if notification.activationType == .actionButtonClicked {
-            // Open in Finder and select the file
-            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+            center.add(request) { error in
+                if let error = error {
+                    AppLogger.pipeline.error("Failed to deliver notification", ["error": error.localizedDescription])
+                }
+            }
         }
     }
 
-    // Always show notifications even if app is in foreground
-    func userNotificationCenter(_ center: NSUserNotificationCenter, shouldPresent notification: NSUserNotification) -> Bool {
-        return true
+    private static var notificationDelegate: SaveNotificationDelegate?
+}
+
+/// Delegate to handle UNUserNotification actions (e.g., "Show in Finder")
+private class SaveNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    var latestFileURL: URL?
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        if response.actionIdentifier == TranscriptSaver.showInFinderActionId,
+           let url = latestFileURL {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+        completionHandler()
+    }
+
+    // Show notifications even when app is in foreground
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner])
     }
 }

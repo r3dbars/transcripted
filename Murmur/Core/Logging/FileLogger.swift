@@ -97,6 +97,11 @@ final class FileLogger: @unchecked Sendable {
         try? newContent.write(to: logFileURL, atomically: true, encoding: .utf8)
 
         fileHandle = try? FileHandle(forWritingTo: logFileURL)
+        if fileHandle == nil {
+            // File may have been deleted during atomic write — recreate and retry
+            FileManager.default.createFile(atPath: logFileURL.path, contents: nil)
+            fileHandle = try? FileHandle(forWritingTo: logFileURL)
+        }
         fileHandle?.seekToEndOfFile()
     }
 

@@ -729,9 +729,8 @@ struct SettingsContainerView: View {
         panel.canCreateDirectories = true
         panel.prompt = "Choose"
         panel.message = "Select where to save your transcripts"
-        if let url = URL(string: saveLocation.isEmpty ? TranscriptSaver.defaultSaveDirectory.path : saveLocation) {
-            panel.directoryURL = url
-        }
+        let directoryPath = saveLocation.isEmpty ? TranscriptSaver.defaultSaveDirectory.path : saveLocation
+        panel.directoryURL = URL(fileURLWithPath: directoryPath)
         if panel.runModal() == .OK, let url = panel.url {
             saveLocation = url.path
         }

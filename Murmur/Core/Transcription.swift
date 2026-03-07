@@ -92,10 +92,11 @@ class Transcription: ObservableObject {
             let resampleStart = CFAbsoluteTimeGetCurrent()
 
             // Resample both files in parallel — they're independent I/O + compute
-            async let systemSamplesTask = Task { try AudioResampler.loadAndResample(url: systemURL, targetRate: 16000) }
-            async let micSamplesTask = Task { try AudioResampler.loadAndResample(url: micURL, targetRate: 16000) }
-            let systemSamples = try await systemSamplesTask.value
-            let micSamples = try await micSamplesTask.value
+            // Using async let (not Task {}) so cancellation propagates correctly
+            async let systemSamplesAsync = AudioResampler.loadAndResample(url: systemURL, targetRate: 16000)
+            async let micSamplesAsync = AudioResampler.loadAndResample(url: micURL, targetRate: 16000)
+            let systemSamples = try await systemSamplesAsync
+            let micSamples = try await micSamplesAsync
 
             let resampleTime = CFAbsoluteTimeGetCurrent() - resampleStart
             AppLogger.transcription.info("Resampling completed in \(String(format: "%.2f", resampleTime))s")
@@ -224,6 +225,9 @@ class Transcription: ObservableObject {
             }
 
             for (index, segment) in speakerSegments.enumerated() {
+                // Allow cancellation between segments (user hit stop or app is terminating)
+                try Task.checkCancellation()
+
                 // Extract audio slice for this segment
                 let segmentSamples = AudioResampler.extractSlice(
                     from: systemSamples,
