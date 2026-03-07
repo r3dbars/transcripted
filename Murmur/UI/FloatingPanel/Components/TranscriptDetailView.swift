@@ -66,16 +66,24 @@ struct TranscriptDetailView: View {
     }
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            LazyVStack(spacing: 10) {
-                ForEach(groups) { group in
-                    MessageGroupView(group: group)
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                LazyVStack(spacing: 10) {
+                    ForEach(groups) { group in
+                        MessageGroupView(group: group)
+                    }
+                    // Invisible anchor at the bottom
+                    Color.clear.frame(height: 1).id("bottom")
                 }
+                .padding(.horizontal, Spacing.ms)
+                .padding(.vertical, Spacing.sm)
             }
-            .padding(.horizontal, Spacing.ms)
-            .padding(.vertical, Spacing.sm)
+            .frame(maxHeight: 280)
+            .onAppear {
+                // Scroll to bottom so user sees most recent messages first
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
         }
-        .frame(maxHeight: 280)
     }
 }
 
@@ -110,7 +118,7 @@ private struct MessageGroupView: View {
 
                 // Bubbles
                 ForEach(group.lines) { line in
-                    ChatBubbleView(text: line.text, isUser: group.isUser)
+                    ChatBubbleView(text: line.text, isUser: group.isUser, speakerName: group.displayName)
                 }
             }
 
@@ -122,20 +130,39 @@ private struct MessageGroupView: View {
 // MARK: - ChatBubbleView
 
 /// A single chat bubble with rounded corners and tinted background.
+/// Non-user speakers get distinct colors based on their name for visual differentiation.
 @available(macOS 14.0, *)
 private struct ChatBubbleView: View {
     let text: String
     let isUser: Bool
+    var speakerName: String? = nil
+
+    /// Stable color per speaker name using hash — produces a muted, readable tint
+    private var bubbleColor: Color {
+        guard !isUser, let name = speakerName else {
+            return isUser ? Color.chatBubbleUser : Color.panelCharcoalSurface
+        }
+        let speakerColors: [Color] = [
+            Color(hue: 0.55, saturation: 0.35, brightness: 0.28),  // muted blue
+            Color(hue: 0.75, saturation: 0.30, brightness: 0.28),  // muted purple
+            Color(hue: 0.45, saturation: 0.35, brightness: 0.25),  // muted teal
+            Color(hue: 0.10, saturation: 0.35, brightness: 0.28),  // muted amber
+            Color(hue: 0.90, saturation: 0.30, brightness: 0.28),  // muted rose
+        ]
+        let index = abs(name.hashValue) % speakerColors.count
+        return speakerColors[index]
+    }
 
     var body: some View {
         Text(text)
             .font(.system(size: 11))
             .foregroundColor(.panelTextPrimary)
+            .textSelection(.enabled)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(isUser ? Color.chatBubbleUser : Color.panelCharcoalSurface)
+                    .fill(bubbleColor)
             )
     }
 }
