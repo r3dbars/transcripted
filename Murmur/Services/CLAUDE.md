@@ -68,14 +68,14 @@ Local ML inference engines (Parakeet STT, Sortformer diarization), persistent sp
 | Change diarization model | `SortformerService.swift` — update `DiarizerModels` loading path |
 | Add speaker DB field | `SpeakerDatabase.swift` — createTables + migrateSchema + SpeakerProfile struct |
 | Fix Qwen inference | `QwenService.swift` — check model cache path, prompt in `buildChatMessages()` |
-| Fix audio resampling | `AudioResampler.swift` — system audio input is 48kHz, NOT 96kHz |
+| Fix audio resampling | `AudioResampler.swift` — system audio rate from device nominal rate, not tap format |
 | Add name variant | `SpeakerDatabase.swift` — `areNameVariants()` dictionary |
 | Fix embedding clustering | `EmbeddingClusterer.swift` — pairwiseMerge threshold or dbInformedSplit params |
 
 ## Gotchas
 - SpeakerDatabase is singleton — always use `.shared`
 - Qwen needs 4GB free memory — `hasMemoryForQwen()` check in TranscriptionTaskManager
-- AudioResampler: system audio is 48kHz input, NOT the tap's reported 96kHz
+- AudioResampler: system audio rate comes from the WAV file header (set by device nominal rate)
 - Qwen prompt has critical rule: "Hey Jack" = talking TO Jack, not introducing self
 - Sortformer max 4 speakers per diarization run
 - SpeakerClipExtractor writes temp clips — call `cleanupClips()` after use

@@ -234,6 +234,16 @@ class SystemAudioCapture: ObservableObject {
         guard err == noErr else {
             throw "Failed to create aggregate device: \(err)"
         }
+
+        // CRITICAL: The tap format may report a different sample rate than the aggregate
+        // device actually operates at. Read the device's nominal rate and correct the format.
+        // Without this, the WAV file header has the wrong rate and audio plays back at the wrong speed.
+        let deviceNominalRate = try aggregateDeviceID.readNominalSampleRate()
+        if deviceNominalRate > 0 && deviceNominalRate != tapStreamDescription!.mSampleRate {
+            AppLogger.audioSystem.warning("Tap format rate (\(Int(tapStreamDescription!.mSampleRate))Hz) differs from device nominal rate (\(Int(deviceNominalRate))Hz) — correcting")
+            tapStreamDescription!.mSampleRate = deviceNominalRate
+        }
+        AppLogger.audioSystem.info("Aggregate device nominal sample rate", ["rate": "\(Int(deviceNominalRate))"])
     }
 
     private func startAudioDevice() throws {
