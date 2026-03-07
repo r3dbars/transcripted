@@ -1,360 +1,79 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Important References
-
-- **MEMORY.md** - Contains lessons learned and debugging references from past issues. **Check this file first when debugging audio, transcription, or performance issues.**
-
 ## Behavioral Guidelines
+- **Implement, don't suggest.** If intent is unclear, infer the most useful action and proceed.
+- **Read before answering.** Never speculate about code you haven't opened. This is critical given CoreAudio/Speech framework nuances.
+- **Parallel tool calls.** When independent, make all calls in parallel.
+- **No overengineering.** Only changes that are directly requested. Don't refactor surrounding code, add features, or clean up unless asked.
+- **Work summaries.** After completing tool-based work, summarize what was done.
+- **Check MEMORY.md first** when debugging any runtime issue.
 
-### Proactive Implementation
-By default, implement changes rather than only suggesting them. If intent is unclear, infer the most useful likely action and proceed, using tools to discover missing details instead of guessing.
+## Project Summary
+**Transcripted** — macOS app that records, transcribes, and organizes voice conversations. Uses Parakeet TDT V3 (STT) + Sortformer (diarization) via FluidAudio — 100% local, no cloud APIs. Outputs Markdown transcripts to `~/Documents/Transcripted/`.
 
-### Read Before Answering
-Never speculate about code you have not opened. If a specific file is referenced, read it before answering. Investigate and read relevant files BEFORE answering questions about the codebase. This is especially critical for this codebase given the nuanced CoreAudio and Speech framework APIs.
-
-### Work Summaries
-After completing a task that involves tool use (file edits, builds, searches), provide a quick summary of the work done.
-
-### Parallel Tool Execution
-When calling multiple tools with no dependencies between them, make all independent calls in parallel to maximize speed and efficiency.
-
-### No Overengineering
-Avoid over-engineering. Only make changes that are directly requested or clearly necessary:
-- Don't add features beyond what was asked
-- Don't refactor surrounding code unless explicitly requested
-- A bug fix doesn't need surrounding code cleaned up
-- A simple feature doesn't need extra configurability
-
-## Project Overview
-
-**Transcripted** is a native macOS application that automatically records, transcribes, and organizes voice conversations from meetings and calls. The app uses **Parakeet TDT V3** (local CoreML speech-to-text) and **Sortformer** (local CoreML speaker diarization) via the FluidAudio library — all transcription runs 100% on-device with no cloud API or internet required. Transcripts are saved as Markdown and easily copied to clipboard for pasting into AI tools like Claude or ChatGPT.
-
-## Build & Run Commands
-
+## Build Commands
 ```bash
-# Open in Xcode (primary development method)
-open Murmur.xcodeproj
-
-# Build from command line
 xcodebuild -project Murmur.xcodeproj -scheme Murmur -configuration Debug build
-
-# Build for release
 xcodebuild -project Murmur.xcodeproj -scheme Murmur -configuration Release build
-
-# Clean build
 xcodebuild -project Murmur.xcodeproj -scheme Murmur clean
 ```
+Requires: macOS 14.2+, Xcode 15+, Swift 5.9+
 
-**Requirements:**
-- macOS 14.2+ (Sonoma) - required for system audio capture APIs
-- Xcode 15+
-- Swift 5.9+
+## Agent Routing Table
+Read the component CLAUDE.md in the relevant directory FIRST:
 
-## Architecture
+| Task / Issue | Read first |
+|---|---|
+| Audio capture, mic, recording | `Murmur/Core/CLAUDE.md` |
+| System audio, process taps | `Murmur/Core/CLAUDE.md` |
+| Transcription pipeline, saving | `Murmur/Core/CLAUDE.md` |
+| Task queue, retries, progress | `Murmur/Core/CLAUDE.md` |
+| STT model (Parakeet) | `Murmur/Services/CLAUDE.md` |
+| Speaker diarization (Sortformer) | `Murmur/Services/CLAUDE.md` |
+| Speaker matching, voice DB | `Murmur/Services/CLAUDE.md` |
+| Speaker name inference (Qwen) | `Murmur/Services/CLAUDE.md` |
+| Audio resampling | `Murmur/Services/CLAUDE.md` |
+| Floating pill UI, state machine | `Murmur/UI/FloatingPanel/CLAUDE.md` |
+| Transcript tray, speaker naming | `Murmur/UI/FloatingPanel/CLAUDE.md` |
+| Settings window | `Murmur/UI/Settings/CLAUDE.md` |
+| Design tokens, colors, animations | `Murmur/Design/CLAUDE.md` |
+| Onboarding flow | `Murmur/Onboarding/CLAUDE.md` |
+| App entry point, bootstrap | `Murmur/TranscriptedApp.swift` |
+| Runtime debugging | `MEMORY.md` |
 
-### Core Audio Pipeline
+## Critical Invariants (All Changes)
+- All classes use `@available(macOS 26.0, *)` — required for `AudioHardwareCreateProcessTap`
+- **@MainActor classes:** Audio, Transcription, TranscriptionTaskManager, PillStateManager, ParakeetService, SortformerService, QwenService, StatsService, FailedTranscriptionManager
+- **NOT @MainActor:** SystemAudioCapture (DispatchQueue + NSLock), SpeakerDatabase (DispatchQueue + SQLite), StatsDatabase (DispatchQueue)
+- **CoreAudio I/O callbacks run on real-time threads** — NEVER do I/O, locks, allocations, or Objective-C calls inside them. Deep-copy buffers before async dispatch.
+- System audio is 48kHz (tap reports 96kHz — always hardcode 48000.0)
+- Mic format: use `inputFormat(forBus: 1)` (hardware), NEVER `outputFormat(forBus: 0)`
+- Model states: `.notLoaded` → `.loading` → `.ready` | `.failed`
+- App runs as LSUIElement (no dock icon), NSPanel floating UI
 
-```
-Murmur/Core/Audio.swift              → Microphone capture via AVAudioEngine
-                                     → Writes to WAV file in real-time
-                                     → Monitors audio levels for silence detection
-
-Murmur/Core/SystemAudioCapture.swift → System-wide audio via CoreAudio process taps
-                                     → Creates aggregate device with tap
-                                     → Captures all system audio including meeting apps
-
-Murmur/Core/Transcription.swift      → Local transcription via Parakeet + Sortformer
-                                     → Diarizes system audio, transcribes per-segment
-                                     → Speaker matching via persistent voice database
-
-Murmur/Core/TranscriptSaver.swift    → Outputs markdown with YAML frontmatter
-                                     → Saves to ~/Documents/Transcripted/
-```
-
-### Transcription Engine (Local)
-
-The app uses **FluidAudio** for 100% local transcription — no cloud API, no internet, no cost:
-
-| Component | Model | Purpose |
-|-----------|-------|---------|
-| Speech-to-text | Parakeet TDT V3 (~600MB CoreML) | Transcribes audio to text on Neural Engine |
-| Speaker diarization | Sortformer (~CoreML) | Identifies who speaks when in system audio |
-| Voice fingerprints | WeSpeaker (256-dim embeddings) | Persistent speaker matching across sessions |
-
-**Services:** `Murmur/Services/ParakeetService.swift`, `Murmur/Services/SortformerService.swift`
-**Database:** `Murmur/Services/SpeakerDatabase.swift` (SQLite, voice embeddings)
-**Resampler:** `Murmur/Services/AudioResampler.swift` (48kHz → 16kHz for model input)
-
-**Pipeline:** Record → Sortformer diarizes system audio → Parakeet transcribes each speaker segment → Parakeet transcribes mic → Match speakers to database → Merge utterances chronologically
-
-**Note:** Models are downloaded from HuggingFace on first launch if not bundled. System audio capture requires appropriate permissions.
-
-### State Management
-
-```
-TranscriptedApp.swift (AppDelegate)
-├── Audio                      → Recording state, audio levels
-├── TranscriptionTaskManager   → Background transcription queue, progress tracking
-├── FailedTranscriptionManager → Retry queue with persistent storage
-├── FloatingPanelController    → UI coordination
-├── SettingsWindowController   → Settings window
-└── OnboardingWindowController → Onboarding flow
-```
-
-### UI Components
-
-The floating panel UI is organized in `Murmur/UI/FloatingPanel/`:
-
-```
-FloatingPanel/
-├── FloatingPanelController.swift   # NSWindowController, window management
-├── FloatingPanelView.swift         # Main SwiftUI view composition
-├── PillStateManager.swift          # State machine (idle/recording/processing)
-├── Components/
-│   ├── PillViews.swift             # Pill state views (Idle, Recording, Processing)
-│   ├── WaveformViews.swift         # Audio visualizers (EdgePeek, WaveformMini, Dormant)
-│   ├── CelebrationViews.swift      # Success animations (checkmarks, pulse rings)
-│   ├── ErrorViews.swift            # Error banners with recovery hints
-│   ├── AttentionPromptView.swift   # Notification prompts (silence warning)
-│   ├── TranscriptTrayView.swift    # Recent transcripts tray with copy-to-clipboard
-│   ├── TranscriptDetailView.swift  # Transcript detail with chat bubbles
-│   ├── SpeakerNamingView.swift     # Speaker identification and naming UI
-│   ├── AuroraIdleView.swift        # Aurora animation for idle state
-│   ├── AuroraRecordingView.swift   # Aurora animation for recording state
-│   ├── AuroraProcessingView.swift  # Aurora animation for processing state
-│   └── AuroraSuccessView.swift     # Aurora animation for success state
-└── Helpers/
-    └── LawsComponents.swift        # Reusable UI primitives (buttons, status text)
-```
-
-Settings window (`Murmur/UI/Settings/`):
-```
-Settings/
-├── SettingsWindowController.swift          # NSWindowController, 800x600 fixed window
-├── SettingsContainerView.swift             # Single-page scrolling layout (stats, speakers, preferences)
-├── SettingsSidebarView.swift               # Left sidebar navigation
-├── Models/
-│   └── SettingsNavigationState.swift       # Tab state (Dashboard, Speakers, Preferences)
-└── Components/
-    └── SettingsSectionCard.swift            # Reusable card component
-```
-
-Other UI files:
-- **FailedTranscriptionsView** (`Murmur/UI/FailedTranscriptionsView.swift`) - UI for retry queue management
-
-### Onboarding Flow
-
-Four-step onboarding managed by `Murmur/Onboarding/OnboardingState.swift`:
-1. Welcome → 2. How It Works → 3. Permissions → 4. Ready
-
-Permissions requested: Microphone (required), Screen Recording (for system audio)
-
-## Design System
-
-Defined in `Murmur/Design/DesignTokens.swift`:
-- **Panel theme**: Dark charcoal (`panelCharcoal`, `panelCharcoalElevated`)
-- **Recording accent**: Coral red (`recordingCoral` #FF6B6B)
-- **Text**: `panelTextPrimary`, `panelTextSecondary`, `panelTextMuted`
-- **Onboarding theme**: Warm cream with terracotta accents
-- **Animation presets**: `.elegant` (0.5s), `.refined`, `.snappy`
-
-## Data Flow
-
-1. **Recording starts** → `RecordingValidator.validateRecordingConditions()` checks disk space, permissions, devices
-2. **Audio capture** → `Audio.start()` + `SystemAudioCapture.start()` write WAV files
-3. **Recording stops** → `onRecordingComplete` callback triggers
-4. **Transcription queued** → `TranscriptionTaskManager.startTranscription()`
-5. **On failure** → `FailedTranscriptionManager.addFailedTranscription()` persists to `~/Documents/Transcripted/failed_transcriptions.json`
-6. **On success** → `TranscriptSaver.save()` writes markdown, audio files deleted
-
-## Configuration
-
-User settings stored in `UserDefaults`:
-
-| Key | Description |
-|-----|-------------|
-| `transcriptSaveLocation` | Custom output folder path |
-| `userName` | User's name for speaker attribution |
-| `hasCompletedOnboarding` | Onboarding completion flag |
-| `enableUISounds` | Enable/disable recording sounds |
-| `useAuroraRecording` | Enable aurora animation |
-| `enableQwenSpeakerInference` | Enable Qwen-based speaker name inference |
-| `floatingPanelX` | Saved pill X position |
-| `floatingPanelY` | Saved pill Y position |
-
-## Debug Features
-
-In DEBUG builds, the menu bar includes "Reset Onboarding (Debug)" to test the onboarding flow.
-
-To test failed transcription retry:
-```swift
-// In TranscriptionTaskManager.startTranscription(), uncomment:
-// throw NSError(domain: "TestError", code: 999, ...)
-```
-
-## Important Implementation Notes
-
-### macOS Version Annotations
-The app uses `@available(macOS 26.0, *)` annotations throughout, targeting macOS 14.2+ due to:
-- `AudioHardwareCreateProcessTap` API for system audio capture
-
-### Audio Format Handling
-- Mic audio: Uses hardware format from `inputNode.inputFormat(forBus: 1)` (NOT `outputFormat`)
-- System audio: Native 48kHz (tap claims 96kHz but actual rate is 48kHz)
-- Transcription: Resampled to 16kHz mono for Parakeet/Sortformer input
-
-### Transcript Format
-Output is markdown with YAML frontmatter:
-```yaml
----
-date: YYYY-MM-DD
-time: HH:mm:ss
-duration: "MM:SS"
-processing_time: "X.Xs"
-word_count: N
----
-```
-Timeline entries: `[MM:SS] [Mic/SysAudio/Speaker X] Text`
-
-### Local Model Loading
-- **Parakeet + Sortformer**: Models loaded from app bundle on launch, or downloaded from HuggingFace on first run
-- Model states: `.notLoaded` → `.loading` → `.ready` (or `.failed`)
-- Initialization triggered in `setupApp()` via `taskManager?.transcription.initializeModels()`
-
-## File Organization
-
-```
-Murmur/
-├── Core/
-│   ├── Logging/
-│   │   ├── AppLogger.swift        # Unified logging (os.Logger + JSON Lines file)
-│   │   └── FileLogger.swift       # Rolling JSON Lines logger at ~/Library/Logs/
-│   ├── Audio.swift                # Microphone capture via AVAudioEngine
-│   ├── SystemAudioCapture.swift   # System audio via CoreAudio process taps
-│   ├── Transcription.swift        # Local transcription via Parakeet + Sortformer
-│   ├── TranscriptionTypes.swift   # Engine-agnostic result types (TranscriptionResult, etc.)
-│   ├── TranscriptionTaskManager.swift  # Background transcription queue
-│   ├── TranscriptSaver.swift      # Markdown output with YAML frontmatter
-│   ├── TranscriptScanner.swift    # Transcript file discovery
-│   ├── TranscriptStore.swift      # ObservableObject store for transcript tray UI
-│   ├── TranscriptUtils.swift      # Transcript helper utilities
-│   ├── DateParser.swift           # Natural language date parsing
-│   ├── DateFormattingHelper.swift # Date formatting utilities
-│   ├── Clipboard.swift            # Clipboard operations
-│   ├── CoreAudioUtils.swift       # CoreAudio helper utilities
-│   ├── RecordingValidator.swift   # Pre-recording system checks
-│   ├── FailedTranscription.swift  # Failed transcription model
-│   ├── FailedTranscriptionManager.swift  # Retry queue with persistent storage
-│   ├── StatsService.swift         # Recording statistics and streak tracking
-│   └── StatsDatabase.swift        # SQLite persistence for stats
-├── Design/                        # Visual design system
-│   ├── DesignTokens.swift         # Colors, spacing, animation presets
-│   └── PremiumComponents.swift    # Reusable premium UI components
-├── Onboarding/                    # Four-step onboarding flow
-│   ├── OnboardingState.swift      # State management for onboarding
-│   ├── OnboardingContainerView.swift  # Container view for steps
-│   ├── OnboardingWindow.swift     # Onboarding window controller
-│   ├── Steps/
-│   │   ├── WelcomeStep.swift      # Step 1: Welcome
-│   │   ├── HowItWorksStep.swift   # Step 2: How It Works
-│   │   ├── PermissionsStep.swift  # Step 3: Permissions
-│   │   └── ReadyStep.swift        # Step 4: Ready
-│   └── Animations/
-│       └── ParticleExplosionView.swift  # Celebration particle effects
-├── Services/                      # Local engines + external integrations
-│   ├── ParakeetService.swift      # Local STT via FluidAudio (Parakeet TDT V3)
-│   ├── SortformerService.swift    # Local speaker diarization via FluidAudio
-│   ├── SpeakerDatabase.swift      # Persistent voice fingerprints (SQLite + 256-dim embeddings)
-│   ├── AudioResampler.swift       # Audio resampling (48kHz → 16kHz) and WAV loading
-│   ├── QwenService.swift          # Local Qwen model for speaker name inference
-│   ├── EmbeddingClusterer.swift   # Clustering utility for voice embeddings
-│   └── SpeakerClipExtractor.swift # Extracts audio clips for speaker samples
-├── UI/
-│   ├── FloatingPanel/             # Floating pill UI
-│   │   ├── FloatingPanelController.swift  # NSWindowController
-│   │   ├── FloatingPanelView.swift        # Main SwiftUI composition
-│   │   ├── PillStateManager.swift         # State machine
-│   │   ├── Components/
-│   │   │   ├── PillViews.swift            # Pill state views
-│   │   │   ├── WaveformViews.swift        # Audio visualizers
-│   │   │   ├── CelebrationViews.swift     # Success animations
-│   │   │   ├── ErrorViews.swift           # Error banners
-│   │   │   ├── AttentionPromptView.swift  # Silence warning
-│   │   │   ├── TranscriptTrayView.swift   # Recent transcripts tray
-│   │   │   ├── TranscriptDetailView.swift # Transcript detail view
-│   │   │   ├── SpeakerNamingView.swift    # Speaker identification and naming
-│   │   │   ├── AuroraIdleView.swift       # Aurora idle animation
-│   │   │   ├── AuroraRecordingView.swift  # Aurora recording animation
-│   │   │   ├── AuroraProcessingView.swift # Aurora processing animation
-│   │   │   └── AuroraSuccessView.swift    # Aurora success animation
-│   │   └── Helpers/
-│   │       └── LawsComponents.swift       # Reusable UI primitives
-│   ├── Settings/                  # Settings window
-│   │   ├── SettingsWindowController.swift  # NSWindowController, 800x600
-│   │   ├── SettingsContainerView.swift     # Single-page scrolling layout
-│   │   ├── SettingsSidebarView.swift       # Left sidebar navigation
-│   │   ├── Models/
-│   │   │   └── SettingsNavigationState.swift  # Tab state (Dashboard, Speakers, Preferences)
-│   │   └── Components/
-│   │       └── SettingsSectionCard.swift   # Reusable card component
-│   └── FailedTranscriptionsView.swift  # Retry queue management UI
-├── TranscriptedApp.swift          # App entry point (AppDelegate pattern)
-└── Transcripted.entitlements
-```
+## Data Locations
+| Data | Path |
+|---|---|
+| Transcripts | `~/Documents/Transcripted/` (customizable via UserDefaults `transcriptSaveLocation`) |
+| Stats DB | `~/Documents/Transcripted/stats.sqlite` |
+| Speaker DB | `~/Documents/Transcripted/speakers.sqlite` |
+| Failed queue | `~/Documents/Transcripted/failed_transcriptions.json` |
+| Speaker clips | `~/Documents/Transcripted/speaker_clips/` |
+| Logs | `~/Library/Logs/Transcripted/app.jsonl` |
+| Qwen cache | `~/Library/Caches/models/mlx-community/` |
 
 ## Logging
-
-**Log file:** `~/Library/Logs/Transcripted/app.jsonl`
-**Format:** JSON Lines (one JSON object per line)
-**Max entries:** 2000 (rolling, trims oldest 500 when full)
-**Read logs:** `Read ~/Library/Logs/Transcripted/app.jsonl`
-**Filter by subsystem:** `Grep` for `"s":"audio.mic"` etc.
-
-**Subsystems:**
+**File:** `~/Library/Logs/Transcripted/app.jsonl` — JSON Lines, rolling 2000 entries.
 
 | Subsystem | Covers |
-|-----------|--------|
-| `audio` | General audio start/stop, sleep/wake |
-| `audio.mic` | Mic capture, device switches, recovery |
-| `audio.system` | System audio tap, buffers, device changes |
-| `transcription` | Parakeet/Sortformer model loading, STT/diarization |
-| `pipeline` | Task lifecycle, saving, file management, retries |
-| `speaker-db` | Speaker matching, voice embeddings, merges |
-| `services` | Service-level operations (Qwen, etc.) |
+|---|---|
+| `audio`, `audio.mic`, `audio.system` | Recording, mic, system audio |
+| `transcription` | Model loading, STT, diarization |
+| `pipeline` | Task lifecycle, saving, retries |
+| `speaker-db` | Speaker matching, embeddings, merges |
+| `services` | Qwen, service-level ops |
 | `ui` | Pill state transitions, UI events |
-| `stats` | Recording statistics, database operations |
-| `app` | App lifecycle, model initialization |
+| `stats` | Recording statistics, DB ops |
+| `app` | App lifecycle, initialization |
 
-**For ANY runtime issue: Read the log file first.**
-
-## Agent Task Routing
-
-Read the component CLAUDE.md in the relevant folder FIRST:
-
-| Issue domain | Read first |
-|-------------|------------|
-| Audio/recording issues | `Murmur/Core/CLAUDE.md` |
-| Transcription/STT issues | `Murmur/Services/CLAUDE.md` |
-| Speaker ID issues | `Murmur/Services/CLAUDE.md` |
-| Pipeline/saving issues | `Murmur/Core/CLAUDE.md` |
-| UI/settings issues | `Murmur/UI/CLAUDE.md` |
-| Floating pill issues | `Murmur/UI/FloatingPanel/CLAUDE.md` |
-| Design system changes | `Murmur/Design/CLAUDE.md` |
-| Onboarding flow | `Murmur/Onboarding/CLAUDE.md` |
-
-## Component Dependencies
-
-```
-TranscriptedApp.swift (entry point)
-├── Core/Audio.swift + Core/SystemAudioCapture.swift
-├── Core/TranscriptionTaskManager.swift
-│   ├── Core/Transcription.swift
-│   │   ├── Services/ParakeetService.swift
-│   │   ├── Services/SortformerService.swift
-│   │   └── Services/SpeakerDatabase.swift
-│   └── Core/TranscriptSaver.swift
-├── UI/FloatingPanel/FloatingPanelController.swift
-└── UI/Settings/SettingsWindowController.swift
-```
+**For ANY runtime issue:** Read the log file first.
