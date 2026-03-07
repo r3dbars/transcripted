@@ -90,7 +90,7 @@ struct AuroraRecordingView: View {
             fogLayer(
                 color: Color.auroraCoral,
                 secondaryColor: Color.auroraCoralLight,
-                blurRadius: 12,
+                blurRadius: 8,
                 opacity: 0.75,
                 orbCount: 2,
                 phaseOffset: 0,
@@ -103,7 +103,7 @@ struct AuroraRecordingView: View {
             fogLayer(
                 color: Color.auroraTeal,
                 secondaryColor: Color.auroraTealLight,
-                blurRadius: 10,
+                blurRadius: 8,
                 opacity: 0.7,
                 orbCount: 2,
                 phaseOffset: .pi / 3,
@@ -127,9 +127,8 @@ struct AuroraRecordingView: View {
                     lineWidth: 1
                 )
         )
-        // Outer glow shadows (coral left, teal right)
-        .shadow(color: Color.auroraCoral.opacity(0.3), radius: 20, x: -5, y: 0)
-        .shadow(color: Color.auroraTeal.opacity(0.25), radius: 20, x: 5, y: 0)
+        // Single combined glow shadow (reduced from two radius-20 shadows)
+        .shadow(color: Color.auroraCoral.opacity(0.25), radius: 12, x: -3, y: 0)
     }
 
     // MARK: - Fog Layer
@@ -145,23 +144,18 @@ struct AuroraRecordingView: View {
         positionBias: CGFloat = 0  // -1 = left, 0 = center, 1 = right
     ) -> some View {
         TimelineView(.animation(minimumInterval: 1/30)) { timeline in
+            let time = timeline.date.timeIntervalSinceReferenceDate
+
+            // Compute smoothed levels OUTSIDE Canvas (in View body, safe for @State reads)
+            let targetMic = CGFloat(audio.audioLevelHistory.last ?? 0)
+            let targetSystem = CGFloat(audio.systemAudioLevelHistory.last ?? 0)
+            let effectiveSmoothing = reduceMotion ? 0.02 : smoothingFactor
+            let currentMic = smoothedMicLevel + (targetMic - smoothedMicLevel) * effectiveSmoothing
+            let currentSystem = smoothedSystemLevel + (targetSystem - smoothedSystemLevel) * effectiveSmoothing
+            let audioLevel = isMicLevel ? currentMic : currentSystem
+
             Canvas { context, size in
-                let time = timeline.date.timeIntervalSinceReferenceDate
-
-                // Update smoothed levels
-                let targetMic = CGFloat(audio.audioLevelHistory.last ?? 0)
-                let targetSystem = CGFloat(audio.systemAudioLevelHistory.last ?? 0)
-
-                // Use main actor dispatch for state updates (can't mutate @State in Canvas)
-                // Instead, compute smoothed values locally each frame
-                let effectiveSmoothing = reduceMotion ? 0.02 : smoothingFactor
-                let localSmoothedMic = smoothedMicLevel + (targetMic - smoothedMicLevel) * effectiveSmoothing
-                let localSmoothedSystem = smoothedSystemLevel + (targetSystem - smoothedSystemLevel) * effectiveSmoothing
-
-                // Select audio level based on layer type
-                let audioLevel = isMicLevel ? localSmoothedMic : localSmoothedSystem
-
-                // Draw fog orbs
+                // Draw fog orbs (Canvas closure is pure rendering, no state mutation)
                 drawFogOrbs(
                     context: &context,
                     size: size,
@@ -174,15 +168,15 @@ struct AuroraRecordingView: View {
                     opacity: opacity,
                     positionBias: positionBias
                 )
-
-                // Update state for next frame (approximate - computed in body)
-                DispatchQueue.main.async {
-                    smoothedMicLevel = localSmoothedMic
-                    smoothedSystemLevel = localSmoothedSystem
-                }
+            }
+            .onChange(of: time) { _, _ in
+                // Update smoothed state on the main run loop, outside Canvas render
+                smoothedMicLevel = currentMic
+                smoothedSystemLevel = currentSystem
             }
         }
         .blur(radius: blurRadius)
+        .drawingGroup()  // Flatten to Metal texture for GPU performance
     }
 
     // MARK: - Pseudo-noise Function
