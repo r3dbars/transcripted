@@ -1,43 +1,40 @@
 # UI — CLAUDE.md
 
 ## Purpose
-Settings window and failed transcription management UI. The main floating pill UI lives in `FloatingPanel/` (see its own CLAUDE.md).
+Top-level UI directory. Contains Settings window and failed transcription management. The main floating pill UI lives in `FloatingPanel/` — see its own CLAUDE.md.
 
-## Key Files
+## Sub-component Routing
+
+| Area | Read |
+|---|---|
+| Floating pill, transcript tray, speaker naming | `FloatingPanel/CLAUDE.md` |
+| Settings window, stats, speaker management | `Settings/CLAUDE.md` |
+
+## Files (this directory only)
 
 | File | Responsibility |
-|------|---------------|
-| `Settings/SettingsWindowController.swift` | NSWindowController, 800x600 fixed settings window |
-| `Settings/SettingsContainerView.swift` | Single-page scrolling layout (stats, speakers, preferences) |
-| `Settings/SettingsSidebarView.swift` | Left sidebar navigation tabs |
-| `Settings/Models/SettingsNavigationState.swift` | Tab state enum (Dashboard, Speakers, Preferences) |
-| `Settings/Components/SettingsSectionCard.swift` | Reusable card wrapper |
-| `FailedTranscriptionsView.swift` | Retry queue management |
+|---|---|
+| `FailedTranscriptionsView.swift` | Retry queue management: list of failed transcriptions with retry/delete per item, retry all button |
 
-## Data Flow
+## Key Types
 
-```
-Settings:
-  SettingsWindowController → SettingsContainerView (single-page layout)
+**FailedTranscriptionsView** (SwiftUI View):
+- `@State retryingIds: Set<UUID>` — tracks which items are being retried
+- Retry: calls `taskManager.retryFailedTranscription(failedId:)`
+- Delete: confirmation alert, then `failedManager.deleteFailedTranscription(id:)`
+- Opened from menu bar (Cmd+F) in a standalone 650×500 NSWindow
 
-Failed Transcriptions:
-  FailedTranscriptionManager (Core) → FailedTranscriptionsView
-    → User triggers retry → TranscriptionTaskManager.retryFailedTranscription()
-```
+## Modification Recipes
 
-## Common Tasks
-
-| Task | Files to touch | Watch out for |
-|------|---------------|---------------|
-| Add settings section | `SettingsContainerView.swift` | Single-page scrolling layout |
-| Fix settings layout | `SettingsContainerView.swift` | 800x600 fixed window |
-| Fix failed transcription UI | `FailedTranscriptionsView.swift` | Binds to FailedTranscriptionManager |
+| Task | Files to touch |
+|---|---|
+| Fix retry UI | `FailedTranscriptionsView.swift` — binds to FailedTranscriptionManager from Core/ |
+| Fix retry logic | `Core/TranscriptionTaskManager.swift` — `retryFailedTranscription()` |
+| Add new UI area | Create subdirectory with its own CLAUDE.md, import DesignTokens |
 
 ## Dependencies
-
-**Imports from Core/**: TranscriptionTaskManager, FailedTranscriptionManager, StatsService
-**Imports from Design/**: DesignTokens (colors, spacing, animations)
+**From Core/**: TranscriptionTaskManager, FailedTranscriptionManager
+**From Design/**: DesignTokens (colors, spacing, animations)
 
 ## Logging
-
-Subsystem: `ui` — covers pill transitions, retry actions.
+Subsystem: `ui`
