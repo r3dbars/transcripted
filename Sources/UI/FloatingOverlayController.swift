@@ -192,6 +192,7 @@ class FloatingOverlayController: ObservableObject {
     func showReview(text: String) {
         reviewText = text
         state = .review
+        EventTracker.track("draft.shown", with: ["word_count": "\(text.split(whereSeparator: \.isWhitespace).count)"])
 
         // Resize: grow upward from bottom edge to fit text
         let lineCount = max(1, text.components(separatedBy: "\n").count)
