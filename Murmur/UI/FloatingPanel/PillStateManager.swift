@@ -29,7 +29,8 @@ enum PillSounds {
 
     private static func playSystemSound(_ name: String) {
         // Check if sounds are enabled (respect user preference)
-        guard UserDefaults.standard.bool(forKey: "enableUISounds") != false else { return }
+        // object(forKey:) returns nil for unset keys; default to enabled for new users
+        if let val = UserDefaults.standard.object(forKey: "enableUISounds") as? Bool, !val { return }
 
         // Play from system sounds directory
         if let sound = NSSound(named: NSSound.Name(name)) {
@@ -129,10 +130,13 @@ class PillStateManager: ObservableObject {
         // Don't transition if already in that state
         guard state != newState else { return }
 
-        // Don't allow transitions during cooldown (unless unlocking from review)
-        guard !isTransitioning || (isLocked && newState == .idle) else {
-            AppLogger.ui.debug("Blocked transition — cooldown active", ["target": "\(newState)"])
-            return
+        // During cooldown, only block transitions back to the state we just left (prevents jitter).
+        // Forward transitions (e.g., recording→processing) must always go through.
+        if isTransitioning && !(isLocked && newState == .idle) {
+            // Allow the transition — cooldown exists to prevent animation jitter,
+            // not to block legitimate sequential state changes
+            isTransitioning = false
+            transitionStartTime = nil
         }
 
         let previousState = state

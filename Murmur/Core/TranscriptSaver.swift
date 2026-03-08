@@ -275,7 +275,7 @@ class TranscriptSaver {
             if !health.gapDescriptions.isEmpty {
                 yaml += "\ngap_events:"
                 for gap in health.gapDescriptions {
-                    yaml += "\n  - \"\(gap)\""
+                    yaml += "\n  - \"\(Self.escapeYAML(gap))\""
                 }
             }
         }
@@ -429,10 +429,20 @@ class TranscriptSaver {
 
     // MARK: - Retroactive Speaker Updates
 
+    /// Serial queue for file updates — prevents concurrent reads/writes from corrupting transcripts
+    private static let fileUpdateQueue = DispatchQueue(label: "com.transcripted.fileupdate", qos: .utility)
+
     /// When a speaker is renamed in Settings, update ALL transcripts that reference them.
     /// Finds transcripts by searching YAML for the speaker's db_id, extracts the old name,
     /// and replaces it in both YAML frontmatter and transcript body.
+    /// Thread-safe: serialized via fileUpdateQueue to prevent concurrent file corruption.
     static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String) {
+        fileUpdateQueue.sync {
+            _retroactivelyUpdateSpeakerImpl(dbId: dbId, newName: newName)
+        }
+    }
+
+    private static func _retroactivelyUpdateSpeakerImpl(dbId: UUID, newName: String) {
         let dir = defaultSaveDirectory
         guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
             .filter({ $0.pathExtension == "md" }) else { return }

@@ -16,6 +16,10 @@ final class StatsDatabase {
     /// All database operations are serialized through this queue
     private let queue = DispatchQueue(label: "com.transcripted.statsdb", qos: .utility)
 
+    /// SQLITE_TRANSIENT tells SQLite to copy text immediately, preventing dangling pointer issues
+    /// from temporary (NSString).utf8String pointers
+    private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
     private init() {
         // Store database in the Transcripted folder
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -49,10 +53,15 @@ final class StatsDatabase {
     }
 
     /// Execute multiple writes atomically — if the app crashes mid-block, all changes are rolled back.
-    private func transaction(_ block: () -> Void) {
+    private func transaction(_ block: () throws -> Void) rethrows {
         sqlite3_exec(db, "BEGIN EXCLUSIVE", nil, nil, nil)
-        block()
-        sqlite3_exec(db, "COMMIT", nil, nil, nil)
+        do {
+            try block()
+            sqlite3_exec(db, "COMMIT", nil, nil, nil)
+        } catch {
+            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            throw error
+        }
     }
 
     /// Log and return the sqlite3_errmsg for the current database connection
@@ -132,26 +141,28 @@ final class StatsDatabase {
 
             if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
                 let dateFormatter = DateFormatter()
+                dateFormatter.locale = Locale(identifier: "en_US_POSIX")
                 dateFormatter.dateFormat = "yyyy-MM-dd"
                 let dateString = dateFormatter.string(from: metadata.date)
 
                 let timeFormatter = DateFormatter()
+                timeFormatter.locale = Locale(identifier: "en_US_POSIX")
                 timeFormatter.dateFormat = "HH:mm:ss"
                 let timeString = timeFormatter.string(from: metadata.date)
 
                 let isoFormatter = ISO8601DateFormatter()
                 let createdAt = isoFormatter.string(from: metadata.date)
 
-                sqlite3_bind_text(statement, 1, (metadata.id as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(statement, 2, (dateString as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(statement, 3, (timeString as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(statement, 1, (metadata.id as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(statement, 2, (dateString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(statement, 3, (timeString as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_int(statement, 4, Int32(metadata.durationSeconds))
                 sqlite3_bind_int(statement, 5, Int32(metadata.wordCount))
                 sqlite3_bind_int(statement, 6, Int32(metadata.speakerCount))
                 sqlite3_bind_int(statement, 7, Int32(metadata.processingTimeMs))
-                sqlite3_bind_text(statement, 8, ((metadata.transcriptPath ?? "") as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(statement, 9, ((metadata.title ?? "") as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(statement, 10, (createdAt as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(statement, 8, ((metadata.transcriptPath ?? "") as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(statement, 9, ((metadata.title ?? "") as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(statement, 10, (createdAt as NSString).utf8String, -1, SQLITE_TRANSIENT)
 
                 if sqlite3_step(statement) != SQLITE_DONE {
                     AppLogger.stats.error("Failed to insert recording", ["sqlite_error": dbErrorMessage()])
@@ -237,8 +248,8 @@ final class StatsDatabase {
         var statement: OpaquePointer?
 
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (startStr as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(statement, 2, (endStr as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 1, (startStr as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 2, (endStr as NSString).utf8String, -1, SQLITE_TRANSIENT)
 
             while sqlite3_step(statement) == SQLITE_ROW {
                 let id = String(cString: sqlite3_column_text(statement, 0))
@@ -296,7 +307,7 @@ final class StatsDatabase {
         var statement: OpaquePointer?
 
         if sqlite3_prepare_v2(db, updateSQL, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (dateStr as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 1, (dateStr as NSString).utf8String, -1, SQLITE_TRANSIENT)
             sqlite3_bind_int(statement, 2, Int32(durationDelta))
             sqlite3_bind_int(statement, 3, Int32(durationDelta))
 
@@ -336,8 +347,8 @@ final class StatsDatabase {
         var statement: OpaquePointer?
 
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (startStr as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(statement, 2, (endStr as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 1, (startStr as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 2, (endStr as NSString).utf8String, -1, SQLITE_TRANSIENT)
 
             while sqlite3_step(statement) == SQLITE_ROW {
                 let dateStr = String(cString: sqlite3_column_text(statement, 0))
@@ -456,7 +467,7 @@ final class StatsDatabase {
         var statement: OpaquePointer?
 
         if sqlite3_prepare_v2(db, recordingSQL, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (startStr as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 1, (startStr as NSString).utf8String, -1, SQLITE_TRANSIENT)
 
             if sqlite3_step(statement) == SQLITE_ROW {
                 recordings = Int(sqlite3_column_int(statement, 0))
@@ -485,7 +496,7 @@ final class StatsDatabase {
         var exists = false
 
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (transcriptPath as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 1, (transcriptPath as NSString).utf8String, -1, SQLITE_TRANSIENT)
 
             if sqlite3_step(statement) == SQLITE_ROW {
                 exists = sqlite3_column_int(statement, 0) > 0

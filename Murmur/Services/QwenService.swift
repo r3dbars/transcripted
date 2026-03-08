@@ -47,11 +47,21 @@ class QwenService: ObservableObject {
     // MARK: - Model Lifecycle
 
     /// Load model on demand. Downloads from HuggingFace on first use (~2.5GB).
+    /// Guards against double-load: if already loading or ready, returns immediately.
     func loadModel() async {
         guard modelContainer == nil else {
             modelState = .ready
             return
         }
+
+        // Prevent double-load race: if another caller started loading during an await suspension,
+        // this guard catches the second entry. Without this, two 2.5GB model instances could be
+        // allocated simultaneously — potential OOM on 8GB Macs.
+        guard modelState != .loading else {
+            AppLogger.transcription.debug("Qwen loadModel already in progress, skipping")
+            return
+        }
+        if case .downloading = modelState { return }
 
         modelState = .loading
         AppLogger.transcription.info("Qwen loading model", ["modelId": Self.modelId])
@@ -59,9 +69,9 @@ class QwenService: ObservableObject {
         do {
             let container = try await loadModelContainer(
                 id: Self.modelId,
-                progressHandler: { progress in
+                progressHandler: { [weak self] progress in
                     Task { @MainActor in
-                        self.modelState = .downloading(progress: progress.fractionCompleted)
+                        self?.modelState = .downloading(progress: progress.fractionCompleted)
                     }
                 }
             )

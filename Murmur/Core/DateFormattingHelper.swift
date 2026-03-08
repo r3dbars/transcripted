@@ -9,6 +9,7 @@ enum DateFormattingHelper {
     /// Filename format with milliseconds: "2024-01-15_14-30-45-123"
     private static let filenamePreciseFormatter: DateFormatter = {
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss-SSS"
         return formatter
     }()
@@ -16,6 +17,7 @@ enum DateFormattingHelper {
     /// Filename format without milliseconds: "2024-01-15_14-30-45"
     private static let filenameFormatter: DateFormatter = {
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
         return formatter
     }()
@@ -31,6 +33,7 @@ enum DateFormattingHelper {
     /// Time only: "14:30:45"
     private static let timeOnlyFormatter: DateFormatter = {
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "HH:mm:ss"
         return formatter
     }()
@@ -38,6 +41,7 @@ enum DateFormattingHelper {
     /// ISO date only: "2024-01-15"
     private static let isoDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()

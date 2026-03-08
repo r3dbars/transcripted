@@ -81,6 +81,9 @@ final class FileLogger: @unchecked Sendable {
     }
 
     private func trimIfNeeded() {
+        // Flush buffered writes before reading — otherwise Data(contentsOf:) may miss recent entries
+        fileHandle?.synchronizeFile()
+
         guard let data = try? Data(contentsOf: logFileURL),
               let content = String(data: data, encoding: .utf8) else { return }
 
