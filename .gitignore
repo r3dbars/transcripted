@@ -94,3 +94,17 @@ iOSInjectionProject/
 
 # IDE
 .vscode/
+
+# Claude Code
+.claude/
+
+# Internal dev docs
+MEMORY.md
+
+# Xcode backups
+*.backup
+
+# Environment / secrets
+.env
+*.key
+*.pem

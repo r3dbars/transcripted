@@ -138,9 +138,9 @@ Settings are stored in UserDefaults:
 
 ## Privacy & Security
 
+- **100% local processing** — no API keys, no cloud services, no data leaves your Mac
 - Audio files deleted after successful transcription
 - No analytics or tracking
-- All API keys stored locally in UserDefaults
 - Transcripts saved locally to `~/Documents/Transcripted/`
 
 ## Troubleshooting
@@ -163,9 +163,14 @@ Settings are stored in UserDefaults:
 - Check `~/Documents/Transcripted/failed_transcriptions.json` for queued retries
 - Ensure appropriate audio capture permissions are granted
 
-## License
+## Contributing
 
-MIT License
+1. Fork the repo and create your branch from `main`
+2. Open `Murmur.xcodeproj` in Xcode
+3. Set your own **Development Team** in the Signing & Capabilities tab (the project has a placeholder team ID)
+4. Build and run
+
+The FluidAudio static library (`fluidaudio-libs/libFluidAudioAll.a`) is pre-built and included in the repo. If you need to rebuild it, run `./build-fluidaudio.sh`.
 
 ---
 
