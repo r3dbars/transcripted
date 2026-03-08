@@ -4,7 +4,7 @@ import SwiftUI
 /// Window controller for the onboarding experience
 /// Creates a centered, borderless window with the onboarding flow
 @available(macOS 26.0, *)
-class OnboardingWindowController: NSWindowController {
+class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     private var onboardingState: OnboardingState
     private var onComplete: (() -> Void)?
@@ -24,8 +24,18 @@ class OnboardingWindowController: NSWindowController {
 
         super.init(window: window)
 
+        window.delegate = self
         configureWindow(window)
         setupContentView()
+    }
+
+    // MARK: - NSWindowDelegate
+
+    /// Handle close button: treat as "skip onboarding" so the app doesn't end up in a dead state.
+    /// Without this, closing the window leaves no menu bar, no floating panel — just an invisible process.
+    func windowWillClose(_ notification: Notification) {
+        onComplete?()
+        onComplete = nil  // Prevent double-fire from handleOnboardingComplete
     }
 
     required init?(coder: NSCoder) {
@@ -110,6 +120,7 @@ class OnboardingWindowController: NSWindowController {
 
     private func handleOnboardingComplete() {
         guard let window = self.window else { return }
+        guard onComplete != nil else { return }  // Already handled (e.g., via windowWillClose)
 
         // Fade out animation
         NSAnimationContext.runAnimationGroup({ context in
@@ -119,6 +130,7 @@ class OnboardingWindowController: NSWindowController {
         }, completionHandler: { [weak self] in
             window.orderOut(nil)
             self?.onComplete?()
+            self?.onComplete = nil
         })
     }
 }
