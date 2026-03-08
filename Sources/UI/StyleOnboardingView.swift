@@ -633,6 +633,7 @@ struct StyleOnboardingView: View {
             )
             generatedProfile = profile
             withAnimation { step = .result }
+            EventTracker.track("onboarding.completed", with: ["example_count": "\(styleEngine.exampleCount)"])
         } catch {
             analysisError = "Analysis failed: \(error.localizedDescription)"
         }
