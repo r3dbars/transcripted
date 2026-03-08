@@ -262,6 +262,7 @@ class DraftSessionController: ObservableObject {
         overlayController.hideWithCancelAnimation()
         isInSession = false
         appState.logger.log("SESSION | cancelled")
+        EventTracker.track("draft.rejected")
         #if BETA_BUILD
         let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
         BetaTelemetry.shared.sendEvent(
@@ -363,6 +364,7 @@ class DraftSessionController: ObservableObject {
             }
             isDictating = false
             appState.logger.log("DICTATION | pasted \(text.count) chars")
+            EventTracker.track("dictation.completed", with: ["word_count": "\(text.split(whereSeparator: \.isWhitespace).count)"])
             #if BETA_BUILD
             let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
             BetaTelemetry.shared.sendEvent(
@@ -461,6 +463,10 @@ class DraftSessionController: ObservableObject {
         overlayController.hideWithConfirmAnimation { [weak self] in
             self?.pasteWithClipboardRestore(editedText)
         }
+        EventTracker.track("draft.accepted", with: [
+            "word_count": "\(editedText.split(whereSeparator: \.isWhitespace).count)",
+            "was_edited": "\(editedText != originalDraft)"
+        ])
 
         // Record with REAL edit data — but skip refusals to avoid poisoning style training
         if !looksLikeRefusal(originalDraft) {

@@ -92,6 +92,10 @@ class DraftAppState: ObservableObject {
         }
 
         logger.log("🚀 APP LAUNCHED | auth: \(drafter.authModeName), style: \(styleEngine.exampleCount) examples, model: \(promptStore.config.model), hotkey registered, analysis engine started")
+        EventTracker.track("app.launched", with: [
+            "style_examples": "\(styleEngine.exampleCount)",
+            "has_credential": "\(drafter.hasCredential)"
+        ])
 
         // Wire EventReporter with live engine state for context enrichment
         EventReporter.shared.setEngineStateSummary { [weak self] in
