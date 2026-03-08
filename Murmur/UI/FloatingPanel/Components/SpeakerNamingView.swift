@@ -179,6 +179,8 @@ struct SpeakerNamingCard: View {
     @State private var isMerged = false     // merge confirmed — show linked state
     @State private var mergeCandidate: SpeakerProfile? = nil  // profile to merge into
     @State private var isHovered = false
+    @State private var cachedMatchingProfiles: [SpeakerProfile] = []
+    @State private var profileSearchTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -356,6 +358,7 @@ struct SpeakerNamingCard: View {
             }
         }
         .onChange(of: nameText) { _, newValue in
+            refreshMatchingProfiles()
             if !newValue.isEmpty && mergeCandidate == nil {
                 let action: SpeakerNameUpdate.NamingAction = isRejected ? .corrected : .named
                 onUpdate(SpeakerNameUpdate(
@@ -368,14 +371,28 @@ struct SpeakerNamingCard: View {
         }
     }
 
-    /// Profiles whose display name matches the current text input
-    private var matchingProfiles: [SpeakerProfile] {
-        guard nameText.count >= 2 else { return [] }
-        if #available(macOS 14.0, *) {
-            return SpeakerDatabase.shared.findProfilesByName(nameText)
-                .filter { $0.id != entry.id }  // don't suggest merging with self
+    /// Profiles whose display name matches the current text input (debounced, async)
+    private var matchingProfiles: [SpeakerProfile] { cachedMatchingProfiles }
+
+    private func refreshMatchingProfiles() {
+        profileSearchTask?.cancel()
+        let query = nameText
+        guard query.count >= 2 else {
+            cachedMatchingProfiles = []
+            return
         }
-        return []
+        let entryId = entry.id
+        profileSearchTask = Task {
+            // Debounce: wait 150ms to avoid blocking on every keystroke
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            if #available(macOS 14.0, *) {
+                let results = SpeakerDatabase.shared.findProfilesByName(query)
+                    .filter { $0.id != entryId }
+                guard !Task.isCancelled else { return }
+                cachedMatchingProfiles = results
+            }
+        }
     }
 
     private func commitName() {
