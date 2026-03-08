@@ -613,15 +613,23 @@ class TranscriptionTaskManager: ObservableObject {
 
         AppLogger.pipeline.info("Retrying failed transcription", ["failedId": "\(failedId)"])
 
-        // Increment retry count
+        // Increment retry count and track as active task
         await MainActor.run {
             failedTranscriptionManager.incrementRetryCount(id: failedId)
+            self.activeCount += 1
+            self.backgroundTaskCount += 1
             self.displayStatus = .gettingReady
         }
 
-        // Get output folder (same as original)
-        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let transcriptedFolder = documentsURL.appendingPathComponent("Transcripted")
+        // Get output folder — respect custom save location from Settings
+        let transcriptedFolder: URL
+        if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
+           !customPath.isEmpty {
+            transcriptedFolder = URL(fileURLWithPath: customPath)
+        } else {
+            let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            transcriptedFolder = documentsURL.appendingPathComponent("Transcripted")
+        }
 
         do {
             // Use multichannel pipeline when both sources available (consistent with main flow)
@@ -639,6 +647,8 @@ class TranscriptionTaskManager: ObservableObject {
             // Remove from failed queue (audio files already cleaned up by pipeline)
             await MainActor.run {
                 failedTranscriptionManager.removeFailedTranscription(id: failedId)
+                self.activeCount = max(0, self.activeCount - 1)
+                self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
                 self.displayStatus = .transcriptSaved
                 self.scheduleStatusReset()
             }
@@ -648,6 +658,8 @@ class TranscriptionTaskManager: ObservableObject {
         } catch {
             AppLogger.pipeline.error("Retry failed", ["error": "\(error.localizedDescription)"])
             await MainActor.run {
+                self.activeCount = max(0, self.activeCount - 1)
+                self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
                 self.displayStatus = .failed(message: "Retry failed")
                 self.scheduleStatusReset(delay: 8)
             }
@@ -785,6 +797,7 @@ class TranscriptionTaskManager: ObservableObject {
         activeTasks.removeAll()
         activeCount = 0
         backgroundTaskCount = 0
+        displayStatus = .idle
     }
 
     /// Schedule reset of displayStatus to .idle after delay

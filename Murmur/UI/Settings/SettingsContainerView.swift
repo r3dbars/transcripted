@@ -73,7 +73,12 @@ struct SettingsContainerView: View {
         .frame(minWidth: 500, maxWidth: 800, minHeight: 400, maxHeight: 900)
         .background(Color.panelCharcoal)
         .onAppear {
-            enableSounds = UserDefaults.standard.bool(forKey: "enableUISounds") != false
+            // object(forKey:) returns nil for unset keys; default to enabled for new users
+            if let val = UserDefaults.standard.object(forKey: "enableUISounds") as? Bool {
+                enableSounds = val
+            } else {
+                enableSounds = true
+            }
             speakers = SpeakerDatabase.shared.allSpeakers()
             qwenModelCached = QwenService.isModelCached
         }

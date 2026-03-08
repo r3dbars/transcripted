@@ -84,11 +84,32 @@ final class SpeakerDatabase {
         migrateSchema()
     }
 
-    /// Add columns that may be missing from older databases
+    /// Add columns that may be missing from older databases.
+    /// Uses column existence check to avoid false error logs from repeated ALTER TABLE.
     private func migrateSchema() {
-        // These are safe to run repeatedly — SQLite silently fails if column already exists
-        executeSQL("ALTER TABLE speakers ADD COLUMN name_source TEXT DEFAULT NULL;")
-        executeSQL("ALTER TABLE speakers ADD COLUMN dispute_count INTEGER NOT NULL DEFAULT 0;")
+        let existingColumns = getColumnNames(table: "speakers")
+        if !existingColumns.contains("name_source") {
+            executeSQL("ALTER TABLE speakers ADD COLUMN name_source TEXT DEFAULT NULL;")
+        }
+        if !existingColumns.contains("dispute_count") {
+            executeSQL("ALTER TABLE speakers ADD COLUMN dispute_count INTEGER NOT NULL DEFAULT 0;")
+        }
+    }
+
+    /// Query SQLite for existing column names in a table
+    private func getColumnNames(table: String) -> Set<String> {
+        var columns: Set<String> = []
+        var statement: OpaquePointer?
+        let sql = "PRAGMA table_info(\(table));"
+        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
+            while sqlite3_step(statement) == SQLITE_ROW {
+                if let namePtr = sqlite3_column_text(statement, 1) {
+                    columns.insert(String(cString: namePtr))
+                }
+            }
+        }
+        sqlite3_finalize(statement)
+        return columns
     }
 
     private func executeSQL(_ sql: String) {
@@ -102,10 +123,15 @@ final class SpeakerDatabase {
     }
 
     /// Execute multiple writes atomically — if the app crashes mid-block, all changes are rolled back.
-    private func transaction(_ block: () -> Void) {
+    private func transaction(_ block: () throws -> Void) rethrows {
         sqlite3_exec(db, "BEGIN EXCLUSIVE", nil, nil, nil)
-        block()
-        sqlite3_exec(db, "COMMIT", nil, nil, nil)
+        do {
+            try block()
+            sqlite3_exec(db, "COMMIT", nil, nil, nil)
+        } catch {
+            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            throw error
+        }
     }
 
     /// Log and return the sqlite3_errmsg for the current database connection
@@ -188,9 +214,9 @@ final class SpeakerDatabase {
             if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
                 let embeddingData = normalized.withUnsafeBufferPointer { Data(buffer: $0) }
                 sqlite3_bind_blob(statement, 1, (embeddingData as NSData).bytes, Int32(embeddingData.count), SQLITE_TRANSIENT)
-                sqlite3_bind_text(statement, 2, (now as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(statement, 2, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_double(statement, 3, newConfidence)
-                sqlite3_bind_text(statement, 4, (existingId.uuidString as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(statement, 4, (existingId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 if sqlite3_step(statement) != SQLITE_DONE {
                     AppLogger.speakers.error("Failed to update speaker embedding", ["sqlite_error": dbErrorMessage(), "id": existingId.uuidString])
                 }
@@ -222,10 +248,10 @@ final class SpeakerDatabase {
             """
             var statement: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-                sqlite3_bind_text(statement, 1, (newId.uuidString as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(statement, 1, (newId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_blob(statement, 2, (embeddingData as NSData).bytes, Int32(embeddingData.count), SQLITE_TRANSIENT)
-                sqlite3_bind_text(statement, 3, (now as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(statement, 4, (now as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(statement, 3, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(statement, 4, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 if sqlite3_step(statement) != SQLITE_DONE {
                     AppLogger.speakers.error("Failed to insert new speaker", ["sqlite_error": dbErrorMessage(), "id": newId.uuidString])
                 }
@@ -265,9 +291,9 @@ final class SpeakerDatabase {
         let sql = "UPDATE speakers SET display_name = ?, name_source = ? WHERE id = ?;"
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (name as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(statement, 2, (source as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(statement, 3, (id.uuidString as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 1, (name as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 2, (source as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 3, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
             if sqlite3_step(statement) != SQLITE_DONE {
                 AppLogger.speakers.error("Failed to set display name", ["sqlite_error": dbErrorMessage(), "id": id.uuidString])
             }
@@ -284,7 +310,7 @@ final class SpeakerDatabase {
             let sql = "UPDATE speakers SET dispute_count = dispute_count + 1 WHERE id = ?;"
             var statement: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-                sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 if sqlite3_step(statement) != SQLITE_DONE {
                     AppLogger.speakers.error("Failed to increment dispute count", ["sqlite_error": dbErrorMessage()])
                 }
@@ -302,7 +328,7 @@ final class SpeakerDatabase {
             let sql = "UPDATE speakers SET dispute_count = 0 WHERE id = ?;"
             var statement: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-                sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 if sqlite3_step(statement) != SQLITE_DONE {
                     AppLogger.speakers.error("Failed to reset dispute count", ["sqlite_error": dbErrorMessage()])
                 }
@@ -374,7 +400,53 @@ final class SpeakerDatabase {
     }
 
     private func getSpeakerImpl(id: UUID) -> SpeakerProfile? {
-        return allSpeakersImpl().first { $0.id == id }
+        guard isDatabaseOpen else { return nil }
+
+        let sql = "SELECT id, display_name, name_source, embedding, first_seen, last_seen, call_count, confidence, dispute_count FROM speakers WHERE id = ?;"
+        var statement: OpaquePointer?
+        var profile: SpeakerProfile?
+
+        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
+            sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+
+            if sqlite3_step(statement) == SQLITE_ROW {
+                let isoFormatter = ISO8601DateFormatter()
+                let idStr = String(cString: sqlite3_column_text(statement, 0))
+                let displayName: String? = sqlite3_column_text(statement, 1).map { String(cString: $0) }
+                let nameSource: String? = sqlite3_column_text(statement, 2).map { String(cString: $0) }
+
+                let blobPtr = sqlite3_column_blob(statement, 3)
+                let blobSize = sqlite3_column_bytes(statement, 3)
+                var embedding: [Float] = []
+                if let ptr = blobPtr, blobSize > 0 {
+                    let floatCount = Int(blobSize) / MemoryLayout<Float>.size
+                    embedding = Array(UnsafeBufferPointer(
+                        start: ptr.assumingMemoryBound(to: Float.self),
+                        count: floatCount
+                    ))
+                }
+
+                let firstSeenStr = String(cString: sqlite3_column_text(statement, 4))
+                let lastSeenStr = String(cString: sqlite3_column_text(statement, 5))
+                let callCount = Int(sqlite3_column_int(statement, 6))
+                let confidence = sqlite3_column_double(statement, 7)
+                let disputeCount = Int(sqlite3_column_int(statement, 8))
+
+                profile = SpeakerProfile(
+                    id: UUID(uuidString: idStr) ?? id,
+                    displayName: displayName,
+                    nameSource: nameSource,
+                    embedding: embedding,
+                    firstSeen: isoFormatter.date(from: firstSeenStr) ?? Date(),
+                    lastSeen: isoFormatter.date(from: lastSeenStr) ?? Date(),
+                    callCount: callCount,
+                    confidence: confidence,
+                    disputeCount: disputeCount
+                )
+            }
+        }
+        sqlite3_finalize(statement)
+        return profile
     }
 
     /// Delete a speaker profile
@@ -384,7 +456,7 @@ final class SpeakerDatabase {
             let sql = "DELETE FROM speakers WHERE id = ?;"
             var statement: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-                sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 if sqlite3_step(statement) != SQLITE_DONE {
                     AppLogger.speakers.error("Failed to delete speaker", ["sqlite_error": dbErrorMessage(), "id": id.uuidString])
                 }
@@ -465,10 +537,10 @@ final class SpeakerDatabase {
             if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
                 let embeddingData = normalized.withUnsafeBufferPointer { Data(buffer: $0) }
                 sqlite3_bind_blob(statement, 1, (embeddingData as NSData).bytes, Int32(embeddingData.count), SQLITE_TRANSIENT)
-                sqlite3_bind_text(statement, 2, (now as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(statement, 2, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_int(statement, 3, Int32(newCallCount))
                 sqlite3_bind_double(statement, 4, newConfidence)
-                sqlite3_bind_text(statement, 5, (targetId.uuidString as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(statement, 5, (targetId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 if sqlite3_step(statement) != SQLITE_DONE {
                     AppLogger.speakers.error("Failed to update target in merge", ["sqlite_error": dbErrorMessage(), "targetId": targetId.uuidString])
                 }
@@ -481,7 +553,7 @@ final class SpeakerDatabase {
             let deleteSql = "DELETE FROM speakers WHERE id = ?;"
             var deleteStmt: OpaquePointer?
             if sqlite3_prepare_v2(db, deleteSql, -1, &deleteStmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(deleteStmt, 1, (sourceId.uuidString as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(deleteStmt, 1, (sourceId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 if sqlite3_step(deleteStmt) != SQLITE_DONE {
                     AppLogger.speakers.error("Failed to delete source in merge", ["sqlite_error": dbErrorMessage(), "sourceId": sourceId.uuidString])
                 }
@@ -516,50 +588,34 @@ final class SpeakerDatabase {
         var mergedIds: Set<UUID> = []
         var mergeCount = 0
 
-        // Wrap all deletes in a single transaction so the merge is atomic
-        transaction {
-            for i in 0..<speakers.count {
-                guard !mergedIds.contains(speakers[i].id) else { continue }
+        // Each mergeProfilesImpl call is individually transactional (UPDATE + DELETE).
+        // No outer transaction — SQLite doesn't support nested BEGIN EXCLUSIVE.
+        for i in 0..<speakers.count {
+            guard !mergedIds.contains(speakers[i].id) else { continue }
 
-                for j in (i + 1)..<speakers.count {
-                    guard !mergedIds.contains(speakers[j].id) else { continue }
+            for j in (i + 1)..<speakers.count {
+                guard !mergedIds.contains(speakers[j].id) else { continue }
 
-                    let similarity = cosineSimilarity(speakers[i].embedding, speakers[j].embedding)
-                    guard similarity >= threshold else { continue }
+                let similarity = cosineSimilarity(speakers[i].embedding, speakers[j].embedding)
+                guard similarity >= threshold else { continue }
 
-                    // Determine which profile to keep (more calls = better data)
-                    let keeper: SpeakerProfile
-                    let absorbed: SpeakerProfile
-                    if speakers[i].callCount >= speakers[j].callCount {
-                        keeper = speakers[i]
-                        absorbed = speakers[j]
-                    } else {
-                        keeper = speakers[j]
-                        absorbed = speakers[i]
-                    }
-
-                    // Transfer display name if keeper doesn't have one
-                    if keeper.displayName == nil, let name = absorbed.displayName {
-                        setDisplayNameImpl(id: keeper.id, name: name, source: absorbed.nameSource ?? "qwen_inferred")
-                    }
-
-                    // Delete the absorbed profile
-                    let sql = "DELETE FROM speakers WHERE id = ?;"
-                    var statement: OpaquePointer?
-                    if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-                        sqlite3_bind_text(statement, 1, (absorbed.id.uuidString as NSString).utf8String, -1, nil)
-                        if sqlite3_step(statement) != SQLITE_DONE {
-                            AppLogger.speakers.error("Failed to delete absorbed speaker", ["sqlite_error": dbErrorMessage(), "id": absorbed.id.uuidString])
-                        }
-                    } else {
-                        AppLogger.speakers.error("Failed to prepare duplicate delete", ["sqlite_error": dbErrorMessage()])
-                    }
-                    sqlite3_finalize(statement)
-
-                    mergedIds.insert(absorbed.id)
-                    mergeCount += 1
-                    AppLogger.speakers.info("Merged duplicate speaker", ["absorbed": absorbed.displayName ?? "unnamed", "keeper": keeper.displayName ?? "unnamed", "similarity": String(format: "%.3f", similarity)])
+                // Determine which profile to keep (more calls = better data)
+                let keeper: SpeakerProfile
+                let absorbed: SpeakerProfile
+                if speakers[i].callCount >= speakers[j].callCount {
+                    keeper = speakers[i]
+                    absorbed = speakers[j]
+                } else {
+                    keeper = speakers[j]
+                    absorbed = speakers[i]
                 }
+
+                // Merge via mergeProfilesImpl (blends embeddings, transfers name, deletes source)
+                mergeProfilesImpl(sourceId: absorbed.id, into: keeper.id)
+
+                mergedIds.insert(absorbed.id)
+                mergeCount += 1
+                AppLogger.speakers.info("Merged duplicate speaker", ["absorbed": absorbed.displayName ?? "unnamed", "keeper": keeper.displayName ?? "unnamed", "similarity": String(format: "%.3f", similarity)])
             }
         }
 
@@ -642,7 +698,7 @@ final class SpeakerDatabase {
         """
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (cutoff as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 1, (cutoff as NSString).utf8String, -1, SQLITE_TRANSIENT)
             if sqlite3_step(statement) != SQLITE_DONE {
                 AppLogger.speakers.error("Failed to prune weak profiles", ["sqlite_error": dbErrorMessage()])
             } else {

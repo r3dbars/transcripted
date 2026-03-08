@@ -119,7 +119,21 @@ class Audio: ObservableObject {
     private var watchdogTimer: Timer?
 
     // Mic recovery guard (prevents concurrent recovery attempts)
-    private var isMicRecovering: Bool = false
+    // Thread-safe: accessed from watchdog (main) and recovery (background) threads
+    private var _isMicRecovering: Bool = false
+    private let micRecoveryLock = NSLock()
+    private var isMicRecovering: Bool {
+        get {
+            micRecoveryLock.lock()
+            defer { micRecoveryLock.unlock() }
+            return _isMicRecovering
+        }
+        set {
+            micRecoveryLock.lock()
+            defer { micRecoveryLock.unlock() }
+            _isMicRecovering = newValue
+        }
+    }
     private var lastRecoveryTime: Date?
     private let maxRecoveryAttempts = 5
     private let recoveryCooldown: TimeInterval = 5.0  // Min seconds between recovery attempts

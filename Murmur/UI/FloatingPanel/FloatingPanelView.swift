@@ -241,9 +241,10 @@ struct FloatingPanelView: View {
         escapeLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 {
                 if showSpeakerNaming {
-                    // Naming tray is sticky — escape does nothing
-                    return nil
+                    // Naming tray is sticky — escape does nothing but don't swallow the event
+                    return event
                 }
+                guard showTranscriptTray else { return event }  // Don't swallow escape app-wide
                 withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
                     showTranscriptTray = false
                 }
@@ -257,9 +258,7 @@ struct FloatingPanelView: View {
         escapeGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 {
                 DispatchQueue.main.async {
-                    if self.showSpeakerNaming {
-                        return  // naming tray is sticky
-                    }
+                    guard self.showTranscriptTray, !self.showSpeakerNaming else { return }
                     withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
                         self.showTranscriptTray = false
                     }
