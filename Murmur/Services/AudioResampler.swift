@@ -164,8 +164,8 @@ enum AudioResampler {
             }
 
             allSamples.append(contentsOf: UnsafeBufferPointer(start: floatData[0], count: Int(dstBuffer.frameLength)))
-            // Reset converter state between chunks for clean boundaries
-            converter.reset()
+            // Do NOT reset converter between chunks — resetting discards the polyphase
+            // filter's internal state, causing tiny clicks at chunk boundaries.
         }
 
         return allSamples
