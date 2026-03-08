@@ -6,7 +6,6 @@
 - **Parallel tool calls.** When independent, make all calls in parallel.
 - **No overengineering.** Only changes that are directly requested. Don't refactor surrounding code, add features, or clean up unless asked.
 - **Work summaries.** After completing tool-based work, summarize what was done.
-- **Check MEMORY.md first** when debugging any runtime issue.
 
 ## Project Summary
 **Transcripted** — macOS app that records, transcribes, and organizes voice conversations. Uses Parakeet TDT V3 (STT) + Sortformer (diarization) via FluidAudio — 100% local, no cloud APIs. Outputs Markdown transcripts to `~/Documents/Transcripted/`.
@@ -39,7 +38,6 @@ Read the component CLAUDE.md in the relevant directory FIRST:
 | Design tokens, colors, animations | `Murmur/Design/CLAUDE.md` |
 | Onboarding flow | `Murmur/Onboarding/CLAUDE.md` |
 | App entry point, bootstrap | `Murmur/TranscriptedApp.swift` |
-| Runtime debugging | `MEMORY.md` |
 
 ## Critical Invariants (All Changes)
 - All classes use `@available(macOS 26.0, *)` — required for `AudioHardwareCreateProcessTap`
