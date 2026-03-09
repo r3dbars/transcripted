@@ -31,14 +31,15 @@ final class BetaTelemetry {
     // MARK: - Discrete events (fire-and-forget, unchanged)
 
     func sendEvent(type: String, sourceApp: String? = nil, payload: [String: Any] = [:]) {
-        guard let auth = AuthCredential.load() else { return }
+        let token = BetaConfig.userToken
+        guard token != "BETA_TOKEN_PLACEHOLDER" else { return }
         let url = URL(string: "\(BetaConfig.proxyBaseURL)/events")!
 
         Task.detached(priority: .utility) {
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            auth.apply(to: &request)
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
             var body: [String: Any] = [
                 "event_type": type,
@@ -77,7 +78,8 @@ final class BetaTelemetry {
     // MARK: - Quit shipping (synchronous, 3s timeout — called from applicationWillTerminate)
 
     func shipLogs() {
-        guard let auth = AuthCredential.load() else { return }
+        let token = BetaConfig.userToken
+        guard token != "BETA_TOKEN_PLACEHOLDER" else { return }
 
         // Ship any remaining debug log content
         let logChunk = readChunk(from: debugLogURL, offset: &debugLogOffset)
@@ -92,7 +94,7 @@ final class BetaTelemetry {
         var request = URLRequest(url: URL(string: "\(BetaConfig.proxyBaseURL)/logs")!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        auth.apply(to: &request)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         } catch {
@@ -109,7 +111,8 @@ final class BetaTelemetry {
     // MARK: - Incremental shipping
 
     private func shipIncremental() async {
-        guard let auth = AuthCredential.load() else { return }
+        let token = BetaConfig.userToken
+        guard token != "BETA_TOKEN_PLACEHOLDER" else { return }
 
         // Read new chunks from both files
         var tempDebugOffset = debugLogOffset
@@ -126,7 +129,7 @@ final class BetaTelemetry {
         var request = URLRequest(url: URL(string: "\(BetaConfig.proxyBaseURL)/logs")!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        auth.apply(to: &request)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         } catch {

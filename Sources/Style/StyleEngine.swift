@@ -211,8 +211,8 @@ class StyleEngine: ObservableObject {
 
     // MARK: - Incremental Style Refinement
 
-    /// Regenerate the Style Summary using Sonnet — incremental refinement based on recent training pairs
-    func regenerateStyleSummary(auth: AuthCredential) async {
+    /// Regenerate the Style Summary using local LLM — incremental refinement based on recent training pairs
+    func regenerateStyleSummary(draftEngine: LlamaEngine) async {
         let currentProfile = extractStyleSummary()
         let examples = extractRecentExamplesText(last: 20)
         guard !examples.isEmpty else { return }
@@ -220,12 +220,11 @@ class StyleEngine: ObservableObject {
         let refinementPrompt = Self.buildRefinementPrompt(currentProfile: currentProfile)
 
         do {
-            let analysis = try await AnthropicAPI.draft(
-                rawText: examples,
-                auth: auth,
-                model: AnthropicAPI.sonnetModel,
+            let analysis = try await draftEngine.complete(
+                prompt: examples,
                 systemPrompt: refinementPrompt,
-                maxTokens: 4096
+                maxTokens: DraftConstants.localRefinementMaxTokens,
+                temperature: 0.7
             )
 
             // Replace the Style Summary section
@@ -518,16 +517,15 @@ class StyleEngine: ObservableObject {
 
     /// Import bulk writing samples from onboarding and generate initial style profile.
     /// Raw samples are used for analysis only — NOT persisted in style.md.
-    func importBulkSamples(rawText: String, auth: AuthCredential) async throws -> String {
+    func importBulkSamples(rawText: String, draftEngine: LlamaEngine) async throws -> String {
         let userName = UserDefaults.standard.string(forKey: "user-display-name")
 
-        // Send to Sonnet for deep analysis
-        let analysis = try await AnthropicAPI.draft(
-            rawText: rawText,
-            auth: auth,
-            model: AnthropicAPI.sonnetModel,
+        // Send to local LLM for analysis
+        let analysis = try await draftEngine.complete(
+            prompt: rawText,
             systemPrompt: Self.bulkAnalysisPrompt(userName: userName),
-            maxTokens: 4096
+            maxTokens: DraftConstants.localBulkAnalysisMaxTokens,
+            temperature: 0.7
         )
 
         // Build style.md with ONLY the generated summary — raw samples are discarded

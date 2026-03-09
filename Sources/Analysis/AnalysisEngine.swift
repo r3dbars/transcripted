@@ -143,14 +143,17 @@ class AnalysisEngine: ObservableObject {
         }
     }
 
+    /// Reference to local inference — set by DraftAppState after init.
+    var localInference: LocalInferenceManager?
+
     // MARK: - Analysis
 
     private func runAnalysis(newEntryCount: Int) async {
-        guard let auth = AuthCredential.load() else {
-            // No auth configured — re-accumulate entries so they're analyzed once auth is set up
+        guard let localInference = localInference, localInference.isReady else {
+            // Model not ready — re-accumulate entries
             pendingNewCount += newEntryCount
-            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "analysis_skipped_no_auth",
-                message: "Skipped analysis of \(newEntryCount) entries — no auth credential configured")
+            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "analysis_skipped_no_model",
+                message: "Skipped analysis of \(newEntryCount) entries — local model not loaded")
             return
         }
         isAnalyzing = true
@@ -161,26 +164,48 @@ class AnalysisEngine: ObservableObject {
             \(newEntryCount) new feedback entries have arrived since the last analysis.
             Read the data provided in the system prompt, find the highest-impact pattern
             (the recurring edit that shows the biggest gap between drafted and accepted text),
-            and propose 1–3 focused prompt changes using the propose_prompt_change tool.
+            and propose 1–3 focused prompt changes.
+
+            Output your response as a JSON array of objects, each with these fields:
+            - "prompt_key": key in prompts.json to change
+            - "saw": evidence from the feedback data
+            - "why": reasoning about what's wrong
+            - "current_value": the current prompt value (relevant section)
+            - "proposed_value": the full new value for the key
+
+            Example format:
+            [{"prompt_key": "drafting_system", "saw": "...", "why": "...", "current_value": "...", "proposed_value": "..."}]
             """
 
-        let tools: [[String: Any]] = [InsightCard.toolDefinition]
-
         do {
-            let result = try await callAPIWithToolUse(
+            let response = try await localInference.draftEngine.complete(
+                prompt: userMessage,
                 systemPrompt: systemPrompt,
-                userMessage: userMessage,
-                tools: tools,
-                auth: auth,
-                maxTurns: 3
+                maxTokens: DraftConstants.analysisMaxTokens,
+                temperature: 0.3
             )
-            // Parse tool calls from result and create InsightCards
-            for card in result {
+
+            // Parse JSON array from response
+            let cards = parseInsightCards(from: response)
+            for card in cards {
                 insights.append(card)
             }
         } catch {
             EventReporter.shared.capture(level: .error, engine: "analysis", event: "analysis_failed",
                 message: error.localizedDescription)
+        }
+    }
+
+    private func parseInsightCards(from response: String) -> [InsightCard] {
+        // Find JSON array in response (model may include text before/after)
+        guard let start = response.firstIndex(of: "["),
+              let end = response.lastIndex(of: "]") else { return [] }
+        let jsonStr = String(response[start...end])
+        guard let data = jsonStr.data(using: .utf8),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+
+        return arr.compactMap { dict in
+            InsightCard.from(toolId: UUID().uuidString, input: dict)
         }
     }
 
@@ -209,92 +234,6 @@ class AnalysisEngine: ObservableObject {
         }
 
         return parts.joined(separator: "\n")
-    }
-
-    // MARK: - API with Tool Use
-
-    private func callAPIWithToolUse(
-        systemPrompt: String,
-        userMessage: String,
-        tools: [[String: Any]],
-        auth: AuthCredential,
-        maxTurns: Int
-    ) async throws -> [InsightCard] {
-        var cards: [InsightCard] = []
-        var messages: [[String: Any]] = [["role": "user", "content": userMessage]]
-
-        let endpoint = AnthropicAPI.endpoint
-        let apiVersion = "2023-06-01"
-
-        for _ in 0..<maxTurns {
-            var request = URLRequest(url: endpoint)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
-            auth.apply(to: &request)
-
-            let body: [String: Any] = [
-                "model": AnthropicAPI.sonnetModel,
-                "max_tokens": 4096,
-                "system": systemPrompt,
-                "messages": messages,
-                "tools": tools
-            ]
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            request.timeoutInterval = 60
-
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                throw AnthropicAPIError.invalidResponse
-            }
-            guard http.statusCode == 200 else {
-                let errorMessage: String
-                if let errorResponse = try? JSONDecoder().decode(AnthropicErrorResponse.self, from: data) {
-                    errorMessage = errorResponse.error.message
-                } else {
-                    errorMessage = "HTTP \(http.statusCode)"
-                }
-                EventReporter.shared.capture(level: .error, engine: "analysis", event: "analysis_api_error",
-                    message: errorMessage, context: ["status_code": "\(http.statusCode)"])
-                throw AnthropicAPIError.apiError(errorMessage)
-            }
-
-            guard let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let content = dict["content"] as? [[String: Any]]
-            else { break }
-
-            let stopReason = dict["stop_reason"] as? String
-
-            // Collect assistant turn
-            messages.append(["role": "assistant", "content": content])
-
-            // Process tool calls
-            var toolResults: [[String: Any]] = []
-            for block in content {
-                guard block["type"] as? String == "tool_use",
-                      let toolId = block["id"] as? String,
-                      let name = block["name"] as? String,
-                      name == "propose_prompt_change",
-                      let input = block["input"] as? [String: Any],
-                      let card = InsightCard.from(toolId: toolId, input: input)
-                else { continue }
-
-                cards.append(card)
-
-                toolResults.append([
-                    "type": "tool_result",
-                    "tool_use_id": toolId,
-                    "content": "Card emitted with suggestion_id: \(toolId)"
-                ])
-            }
-
-            if toolResults.isEmpty || stopReason == "end_turn" { break }
-
-            // Feed tool results back for next turn
-            messages.append(["role": "user", "content": toolResults])
-        }
-
-        return cards
     }
 
     // MARK: - File I/O

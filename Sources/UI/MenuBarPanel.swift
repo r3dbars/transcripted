@@ -31,11 +31,7 @@ struct MenuBarPanelView: View {
                     #if !BETA_BUILD
                     sectionDivider
 
-                    AgentSection(
-                        orchestrator: appState.analysisEngine,
-                        chatEngine: appState.chatEngine,
-                        auth: appState.drafter.getAuth()
-                    )
+                    AgentSection(orchestrator: appState.analysisEngine)
                     .padding(.vertical, MenuTokens.sectionSpacing / 2)
                     #endif
                 }
@@ -55,10 +51,8 @@ struct MenuBarPanelView: View {
                 }
             }
             #else
-            if !appState.drafter.hasCredential {
-                APIKeyEntryView(draftEngine: appState.drafter)
-            } else if !appState.styleEngine.hasCompletedOnboarding {
-                StyleOnboardingView(styleEngine: appState.styleEngine, draftEngine: appState.drafter)
+            if !appState.styleEngine.hasCompletedOnboarding {
+                StyleOnboardingView(styleEngine: appState.styleEngine, localInference: appState.localInference)
             }
             #endif
         }
@@ -75,6 +69,17 @@ struct MenuBarPanelView: View {
         }
     }
 
+    private var statusText: String {
+        if !appState.sttRouter.isModelLoaded && !appState.localInference.isReady {
+            return "Loading models..."
+        } else if !appState.sttRouter.isModelLoaded {
+            return "Loading voice model..."
+        } else if !appState.localInference.isReady {
+            return appState.localInference.statusLabel
+        }
+        return "Ready"
+    }
+
     // MARK: - Header
 
     private var headerSection: some View {
@@ -85,9 +90,10 @@ struct MenuBarPanelView: View {
 
             HStack(spacing: 6) {
                 Circle()
-                    .fill(appState.sttRouter.isModelLoaded ? MenuTokens.statusGreen : MenuTokens.statusOrange)
+                    .fill(appState.sttRouter.isModelLoaded && appState.localInference.isReady
+                          ? MenuTokens.statusGreen : MenuTokens.statusOrange)
                     .frame(width: MenuTokens.statusDotSize, height: MenuTokens.statusDotSize)
-                Text(appState.sttRouter.isModelLoaded ? "Ready" : "Loading model...")
+                Text(statusText)
                     .font(.caption)
                     .foregroundColor(MenuTokens.textSecondary)
             }
@@ -387,19 +393,12 @@ struct MenuBarPanelView: View {
             Divider()
 
             VStack(spacing: 4) {
-                Text("Credentials stored in macOS Keychain")
+                Text("LLM: \(appState.localInference.statusLabel)")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                Text("Auth: \(appState.drafter.authModeName)")
-                    .font(.caption)
+                Text("Fully local — no cloud, no API keys")
+                    .font(.caption2)
                     .foregroundColor(.secondary)
-                Button("Switch Auth Method") {
-                    appState.logger.log("🔑 AUTH reset")
-                    appState.drafter.clearCredential()
-                    showSettings = false
-                }
-                .buttonStyle(.bordered)
-                .foregroundColor(.red)
             }
             #endif
 

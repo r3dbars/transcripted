@@ -1,7 +1,6 @@
 // DraftEngine.swift
-// Manages the "rough text → polished message" workflow via Claude.
-//
-// Supports both API key auth and Claude subscription token auth via AuthCredential.
+// Manages draft state for the confirm/inject flow.
+// Auth and direct API drafting removed — local inference handles generation.
 
 import SwiftUI
 
@@ -14,7 +13,6 @@ class DraftEngine: ObservableObject {
     /// Used by StyleEngine to compare AI output vs. what the user actually sent.
     @Published var originalDraft = ""
     @Published var error: String?
-    @Published var hasCredential = false
 
     /// Reference to style engine — set by ContentView after init.
     var styleEngine: StyleEngine?
@@ -24,136 +22,6 @@ class DraftEngine: ObservableObject {
 
     /// The raw text from the user's last draft request — exposed for FeedbackStore logging.
     var lastRawText = ""
-
-    private var draftTask: Task<Void, Never>?
-
-    func checkCredential() {
-        hasCredential = AuthCredential.load() != nil
-    }
-
-    func saveAPIKey(_ key: String) -> Bool {
-        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-        let saved = AuthCredential.saveAPIKey(trimmed)
-        if saved { hasCredential = true }
-        return saved
-    }
-
-    func saveSubscriptionToken(_ token: String) -> Bool {
-        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-        let saved = AuthCredential.saveSubscriptionToken(trimmed)
-        if saved { hasCredential = true }
-        return saved
-    }
-
-    func clearCredential() {
-        AuthCredential.clear()
-        hasCredential = false
-    }
-
-    /// Returns the current auth mode name for display ("API Key" or "Claude Subscription").
-    var authModeName: String {
-        AuthCredential.load()?.modeName ?? "None"
-    }
-
-    /// Original drafting method — used when no screen context is available
-    func draftMessage(from rawText: String) {
-        guard let auth = AuthCredential.load() else {
-            error = "No credentials — add your API key or Claude subscription token in settings"
-            return
-        }
-
-        isDrafting = true
-        error = nil
-        draftedText = ""
-        lastRawText = rawText
-
-        let customPrompt = styleEngine?.buildSystemPrompt()
-        let model = promptStore?.config.draftModel ?? DefaultPrompts.sonnetModel
-
-        draftTask?.cancel()
-        draftTask = Task {
-            do {
-                let result = try await AnthropicAPI.draft(rawText: rawText, auth: auth, model: model, systemPrompt: customPrompt)
-                guard !Task.isCancelled else { return }
-                self.draftedText = result
-                self.originalDraft = result
-            } catch AnthropicAPIError.subscriptionTokenExpired {
-                guard !Task.isCancelled else { return }
-                self.error = "Subscription token expired — run `claude setup-token` and update in Settings"
-                EventReporter.shared.capture(level: .error, engine: "draft", event: "subscription_expired",
-                    message: "Subscription token expired during plain draft")
-            } catch {
-                guard !Task.isCancelled else { return }
-                self.error = error.localizedDescription
-                EventReporter.shared.capture(level: .error, engine: "draft", event: "draft_failed",
-                    message: error.localizedDescription)
-            }
-            self.isDrafting = false
-        }
-    }
-
-    /// Context-aware drafting — uses full conversation context + user's voice instructions
-    func draftWithContext(voiceText: String, context: CapturedContext?, platform: PlatformFormatter) {
-        guard let auth = AuthCredential.load() else {
-            error = "No credentials — add your API key or Claude subscription token in settings"
-            return
-        }
-
-        isDrafting = true
-        error = nil
-        draftedText = ""
-        lastRawText = voiceText
-
-        // Build system prompt with style + platform formatting
-        var systemPrompt = styleEngine?.buildSystemPrompt() ?? ""
-        if !platform.formattingInstructions.isEmpty {
-            systemPrompt += "\n\n" + platform.formattingInstructions
-        }
-
-        // Build the user message — context struct assembles everything
-        let userMessage: String
-        if let context = context {
-            userMessage = context.draftingPrompt(userInstructions: voiceText)
-        } else {
-            userMessage = "The user said: \"\(voiceText.trimmingCharacters(in: .whitespacesAndNewlines))\"\n\nWrite the reply. Output ONLY the reply text, nothing else."
-        }
-
-        draftTask?.cancel()
-        draftTask = Task {
-            do {
-                let draftModel = self.promptStore?.config.draftModel ?? DefaultPrompts.sonnetModel
-                let result = try await AnthropicAPI.draft(
-                    rawText: userMessage,
-                    auth: auth,
-                    model: draftModel,
-                    systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt
-                )
-                guard !Task.isCancelled else { return }
-                // Apply platform post-processing as safety net
-                let processed = platform.postProcess(result)
-                self.draftedText = processed
-                self.originalDraft = processed
-            } catch AnthropicAPIError.subscriptionTokenExpired {
-                guard !Task.isCancelled else { return }
-                self.error = "Subscription token expired — run `claude setup-token` and update in Settings"
-                EventReporter.shared.capture(level: .error, engine: "draft", event: "subscription_expired",
-                    message: "Subscription token expired during context-aware draft")
-            } catch {
-                guard !Task.isCancelled else { return }
-                self.error = error.localizedDescription
-                EventReporter.shared.capture(level: .error, engine: "draft", event: "draft_failed",
-                    message: error.localizedDescription)
-            }
-            self.isDrafting = false
-        }
-    }
-
-    /// Get current auth credential for style summary regeneration
-    func getAuth() -> AuthCredential? {
-        AuthCredential.load()
-    }
 
     func clear() {
         draftedText = ""
