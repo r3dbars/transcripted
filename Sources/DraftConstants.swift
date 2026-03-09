@@ -6,10 +6,7 @@ import Foundation
 
 enum DraftConstants {
 
-    // MARK: - API & Network
-
-    /// Delay between retry attempts for transient API errors (nanoseconds)
-    static let apiRetryDelay: UInt64 = 2_000_000_000  // 2 seconds
+    // MARK: - Generation
 
     /// Default max tokens for draft responses
     static let draftMaxTokens = 1024
@@ -17,17 +14,8 @@ enum DraftConstants {
     /// Max tokens for vision context extraction
     static let visionMaxTokens = 2048
 
-    /// Max tokens for streaming chat responses
-    static let chatMaxTokens = 2048
-
-    /// Max tokens for Sonnet analysis/refinement calls
-    static let analysisMaxTokens = 4096
-
-    /// Vision extraction timeout (typical calls take 2-6s; 4s was too tight)
-    static let visionTimeoutSeconds: Double = 8.0
-
-    /// HTTP request timeout for Sonnet analysis calls
-    static let analysisHTTPTimeoutSeconds: Double = 60.0
+    /// Max tokens for analysis calls
+    static let analysisMaxTokens = 2048
 
     // MARK: - Audio & Speech
 
@@ -139,4 +127,34 @@ enum DraftConstants {
 
     /// Duration to show error messages in overlay before auto-dismiss (nanoseconds)
     static let errorDismissDelay: UInt64 = 2_500_000_000  // 2.5 seconds
+
+    // MARK: - Local Inference
+
+    /// Vision extraction timeout for local OCR + LLM pipeline
+    static let localVisionTimeoutSeconds: Double = 15.0
+
+    /// Max tokens for local style refinement (smaller than cloud Sonnet)
+    static let localRefinementMaxTokens = 2048
+
+    /// Max tokens for local bulk analysis during onboarding
+    static let localBulkAnalysisMaxTokens = 2048
+
+    // MARK: - Async Utilities
+
+    /// Run an async operation with a deadline. Throws CancellationError on timeout.
+    static func withTimeout<T: Sendable>(seconds: Double, operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw CancellationError()
+            }
+            guard let result = try await group.next() else {
+                group.cancelAll()
+                throw CancellationError()
+            }
+            group.cancelAll()
+            return result
+        }
+    }
 }

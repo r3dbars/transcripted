@@ -50,8 +50,8 @@ struct PromptConfig: Codable {
 // MARK: - Default Prompt Text (source of truth on first run)
 
 enum DefaultPrompts {
-    static let model = "claude-haiku-4-5-20251001"
-    static let sonnetModel = "claude-sonnet-4-6-20250514"
+    static let model = "local"          // Legacy — models are now embedded GGUF files
+    static let sonnetModel = "local"    // Legacy — models are now embedded GGUF files
 
     static let draftingSystem = """
         You are a writing assistant. Take the user's rough spoken text and rewrite it as a clear, \

@@ -173,18 +173,18 @@ class DraftSessionController: ObservableObject {
 
             let platform = PlatformFormatter.detect(from: sessionSourceApp)
 
-            guard let auth = AuthCredential.load() else {
-                appState.logger.log("SESSION | no auth credential, cancelling")
-                EventReporter.shared.capture(level: .error, engine: "overlay", event: "auth_missing",
-                    message: "No API credential configured")
+            guard appState.localInference.isReady else {
+                appState.logger.log("SESSION | local model not loaded, cancelling")
+                EventReporter.shared.capture(level: .error, engine: "overlay", event: "model_not_ready",
+                    message: "Local LLM not loaded")
                 visionTask?.cancel()
                 visionTask = nil
-                overlayController.showError("No API key configured")
+                overlayController.showError("Model not loaded")
                 isInSession = false
                 return
             }
 
-            // Wait for vision to complete (or its 8-second timeout) before checking context
+            // Wait for vision to complete (or timeout) before checking context
             await visionTask?.value
             visionTask = nil
 
@@ -202,12 +202,11 @@ class DraftSessionController: ObservableObject {
                 userMessage = "The user dictated the following message. Clean it up, fix grammar, and make it sound natural while preserving their intent and tone. Do NOT add greetings, sign-offs, or change the meaning. Output ONLY the cleaned-up message.\n\nDICTATED:\n\(voiceText.trimmingCharacters(in: .whitespacesAndNewlines))"
             }
 
-            let model = appState.promptStore.config.draftModel
-            let stream = AnthropicAPI.streamDraft(
-                rawText: userMessage,
-                auth: auth,
-                model: model,
-                systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt
+            let stream = await appState.localInference.draftEngine.generate(
+                prompt: userMessage,
+                systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt,
+                maxTokens: DraftConstants.draftMaxTokens,
+                temperature: 0.7
             )
 
             var fullText = ""
@@ -444,23 +443,21 @@ class DraftSessionController: ObservableObject {
             return
         }
 
-        guard let auth = AuthCredential.load(), let imageData = imageData else {
-            appState.logger.log("SESSION | no auth or screenshot, proceeding voice-only")
+        guard appState.localInference.isReady, let imageData = imageData else {
+            appState.logger.log("SESSION | model not ready or no screenshot, proceeding voice-only")
             overlayController?.hasContext = false
             return
         }
 
         let userName = UserDefaults.standard.string(forKey: "user-display-name")
         let appName = sourceApp?.localizedName
-        let model = appState.promptStore.config.model
         let extractionPrompt = appState.promptStore.contextExtractionPrompt(userName: userName, appName: appName)
 
         do {
-            let context = try await AnthropicAPI.withTimeout(seconds: DraftConstants.visionTimeoutSeconds) {
-                try await AnthropicAPI.extractStructuredContext(
+            let context = try await DraftConstants.withTimeout(seconds: DraftConstants.localVisionTimeoutSeconds) {
+                try await LocalVisionExtractor.extractContext(
                     imageData: imageData,
-                    auth: auth,
-                    model: model,
+                    engine: appState.localInference.visionEngine,
                     systemPrompt: extractionPrompt
                 )
             }
@@ -471,7 +468,6 @@ class DraftSessionController: ObservableObject {
             EventReporter.shared.capture(level: .warning, engine: "overlay", event: "vision_timeout",
                 message: error.localizedDescription)
             overlayController?.hasContext = false
-            // Proceed without context — voiceText alone is enough to draft
         }
     }
 
@@ -539,10 +535,9 @@ class DraftSessionController: ObservableObject {
         }
 
         // Check if style refinement is needed
-        if appState.styleEngine.shouldRefineNow(), let auth = appState.drafter.getAuth() {
+        if appState.styleEngine.shouldRefineNow(), appState.localInference.isReady {
             Task {
-                await appState.styleEngine.regenerateStyleSummary(auth: auth)
-                appState.chatEngine.invalidatePromptCache()
+                await appState.styleEngine.regenerateStyleSummary(draftEngine: appState.localInference.draftEngine)
                 appState.logger.log("STYLE | summary updated")
             }
         }

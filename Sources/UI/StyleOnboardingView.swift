@@ -6,7 +6,7 @@ import AppKit
 
 struct StyleOnboardingView: View {
     @ObservedObject var styleEngine: StyleEngine
-    @ObservedObject var draftEngine: DraftEngine
+    @ObservedObject var localInference: LocalInferenceManager
 
     enum Step { case intro, sourceChoice, samples, imessagePreview, result }
 
@@ -616,8 +616,8 @@ struct StyleOnboardingView: View {
     // MARK: - Analysis
 
     private func buildProfile(from text: String? = nil) async {
-        guard let auth = draftEngine.getAuth() else {
-            analysisError = "No credentials configured"
+        guard localInference.isReady else {
+            analysisError = "Model not loaded yet — please wait"
             return
         }
 
@@ -629,7 +629,7 @@ struct StyleOnboardingView: View {
         do {
             let profile = try await styleEngine.importBulkSamples(
                 rawText: sourceText,
-                auth: auth
+                draftEngine: localInference.draftEngine
             )
             generatedProfile = profile
             withAnimation { step = .result }
