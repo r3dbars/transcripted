@@ -32,8 +32,10 @@ final class SpeakerDatabaseTests: XCTestCase {
 
         if let name = name {
             db.setDisplayName(id: profile.id, name: name, source: "test")
-            // setDisplayName uses queue.async — wait for it to flush
-            Thread.sleep(forTimeInterval: 0.3)
+            // Re-fetch the profile so the returned struct reflects the updated display name
+            if let updated = db.getSpeaker(id: profile.id) {
+                profile = updated
+            }
         }
 
         return profile
