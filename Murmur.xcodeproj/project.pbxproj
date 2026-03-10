@@ -83,6 +83,7 @@
 		T1000015 /* TranscriptionTypesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000005 /* TranscriptionTypesTests.swift */; };
 		T1000018 /* PillStateManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000008 /* PillStateManagerTests.swift */; };
 		T1000019 /* SpeakerDatabaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000009 /* SpeakerDatabaseTests.swift */; };
+		T1000020 /* TranscriptSaverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000010 /* TranscriptSaverTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -171,6 +172,7 @@
 		T1000003 /* DateParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParserTests.swift; sourceTree = "<group>"; };
 		T1000004 /* DisplayStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayStatusTests.swift; sourceTree = "<group>"; };
 		T1000005 /* TranscriptionTypesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTypesTests.swift; sourceTree = "<group>"; };
+		T1000010 /* TranscriptSaverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSaverTests.swift; sourceTree = "<group>"; };
 		T1000008 /* PillStateManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillStateManagerTests.swift; sourceTree = "<group>"; };
 		T1000009 /* SpeakerDatabaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDatabaseTests.swift; sourceTree = "<group>"; };
 		T1000200 /* MurmurTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MurmurTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -450,6 +452,7 @@
 				T1000003 /* DateParserTests.swift */,
 				T1000004 /* DisplayStatusTests.swift */,
 				T1000005 /* TranscriptionTypesTests.swift */,
+				T1000010 /* TranscriptSaverTests.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -650,6 +653,7 @@
 				T1000015 /* TranscriptionTypesTests.swift in Sources */,
 				T1000018 /* PillStateManagerTests.swift in Sources */,
 				T1000019 /* SpeakerDatabaseTests.swift in Sources */,
+				T1000020 /* TranscriptSaverTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

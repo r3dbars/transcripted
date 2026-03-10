@@ -78,9 +78,7 @@ class ParakeetService: ObservableObject {
     nonisolated func transcribe(audioURL: URL) async throws -> String {
         guard let manager = await MainActor.run(body: { self.asrManager }),
               manager.isAvailable else {
-            throw NSError(domain: "ParakeetService", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "Parakeet model not loaded"
-            ])
+            throw PipelineError.modelNotLoaded(model: "Parakeet")
         }
 
         let samples = try AudioResampler.loadAndResample(url: audioURL, targetRate: 16000)
@@ -97,9 +95,7 @@ class ParakeetService: ObservableObject {
     nonisolated func transcribeSegment(samples: [Float], source: AudioSource = .system) async throws -> String {
         guard let manager = await MainActor.run(body: { self.asrManager }),
               manager.isAvailable else {
-            throw NSError(domain: "ParakeetService", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "Parakeet model not loaded"
-            ])
+            throw PipelineError.modelNotLoaded(model: "Parakeet")
         }
 
         let result = try await manager.transcribe(samples, source: source)
