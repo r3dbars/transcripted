@@ -1,6 +1,6 @@
 // LocalInferenceManager.swift
 // Owns two LlamaEngine instances: a small one for vision parsing, a larger one for drafting.
-// Both load from the app bundle on launch and stay resident.
+// Draft model is required; vision model is optional (degrades to voice-only if missing).
 
 import Foundation
 import SwiftUI
@@ -15,6 +15,7 @@ enum ModelState {
 @MainActor
 class LocalInferenceManager: ObservableObject {
     @Published var modelState: ModelState = .notLoaded
+    @Published var visionAvailable = false
 
     let visionEngine = LlamaEngine()
     let draftEngine = LlamaEngine()
@@ -32,7 +33,8 @@ class LocalInferenceManager: ObservableObject {
         switch modelState {
         case .notLoaded: return "Models not loaded"
         case .loading: return "Loading models..."
-        case .ready: return "Ready"
+        case .ready:
+            return visionAvailable ? "Ready" : "Ready (no vision)"
         case .failed(let reason): return "Failed: \(reason)"
         }
     }
@@ -52,14 +54,8 @@ class LocalInferenceManager: ObservableObject {
         let visionPath = modelsDir + "/" + Self.visionModelName
         let draftPath = modelsDir + "/" + Self.draftModelName
 
-        // Check files exist
+        // Draft model is required
         let fm = FileManager.default
-        guard fm.fileExists(atPath: visionPath) else {
-            modelState = .failed("Vision model not found in bundle")
-            EventReporter.shared.capture(level: .error, engine: "local", event: "model_not_found",
-                message: "Vision model not found at \(visionPath)")
-            return
-        }
         guard fm.fileExists(atPath: draftPath) else {
             modelState = .failed("Draft model not found in bundle")
             EventReporter.shared.capture(level: .error, engine: "local", event: "model_not_found",
@@ -67,16 +63,7 @@ class LocalInferenceManager: ObservableObject {
             return
         }
 
-        // Load both models (vision first — smaller, loads faster)
-        do {
-            try await visionEngine.load(path: visionPath, contextSize: 4096)
-        } catch {
-            modelState = .failed("Vision model: \(error.localizedDescription)")
-            EventReporter.shared.capture(level: .error, engine: "local", event: "model_load_failed",
-                message: "Vision model load failed: \(error.localizedDescription)")
-            return
-        }
-
+        // Load draft model (required)
         do {
             try await draftEngine.load(path: draftPath, contextSize: 8192)
         } catch {
@@ -86,9 +73,24 @@ class LocalInferenceManager: ObservableObject {
             return
         }
 
+        // Load vision model (optional — degrades to voice-only if missing)
+        if fm.fileExists(atPath: visionPath) {
+            do {
+                try await visionEngine.load(path: visionPath, contextSize: 4096)
+                visionAvailable = true
+            } catch {
+                EventReporter.shared.capture(level: .warning, engine: "local", event: "vision_model_load_failed",
+                    message: "Vision model load failed: \(error.localizedDescription)")
+            }
+        } else {
+            EventReporter.shared.capture(level: .info, engine: "local", event: "vision_model_missing",
+                message: "Vision model not found — context extraction disabled")
+        }
+
         modelState = .ready
+        let visionStatus = visionAvailable ? "vision + draft" : "draft only"
         EventReporter.shared.capture(level: .info, engine: "local", event: "models_loaded",
-            message: "Both LLM models loaded successfully")
+            message: "LLM models loaded (\(visionStatus))")
     }
 
     func cleanup() {
@@ -96,6 +98,7 @@ class LocalInferenceManager: ObservableObject {
             await visionEngine.unload()
             await draftEngine.unload()
         }
+        visionAvailable = false
         modelState = .notLoaded
     }
 }

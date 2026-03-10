@@ -52,7 +52,7 @@ struct CapturedContext {
         }
 
         if let conversation = conversation {
-            prompt += "\nCONVERSATION:\n\(conversation)\n"
+            prompt += "\nSCREEN TEXT (OCR from the user's current conversation window):\n\(conversation)\n"
         }
 
         let trimmedInstructions = userInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -71,7 +71,7 @@ struct CapturedContext {
            - A tone/style directive: "make it short and funny" → you decide WHAT to say based on the conversation, applying their constraint
            - A mix of both: "decline politely, say I'm busy" → use their intent with their tone guidance
 
-        2. CONVERSATION is background context so you understand what's being discussed and who said what. You are replying to the most recent message directed at the user.
+        2. SCREEN TEXT is OCR-captured text from the user's messaging window. It may contain UI chrome, timestamps, and formatting artifacts — focus on the actual messages. You are replying to the most recent message directed at the user.
 
         3. Match the conversational energy. If messages in the thread are 5-10 words, don't write a paragraph. If they're detailed, match that depth. Read the room.
 

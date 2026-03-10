@@ -11,7 +11,7 @@ LC_LIBS="$DRAFT_DIR/llamacpp-libs"
 LC_MODULES="$DRAFT_DIR/llamacpp-modules"
 
 # Pinned tag — update this to upgrade llama.cpp
-LLAMA_CPP_TAG="b5270"
+LLAMA_CPP_TAG="b8245"
 
 # Skip if already built (use --force to rebuild)
 if [ -f "$LC_LIBS/libLlamaCppAll.a" ] && [ -d "$LC_MODULES/include" ] && [ "$1" != "--force" ]; then
@@ -71,18 +71,11 @@ else
     echo "  No precompiled Metal shaders found (will use runtime compilation)"
 fi
 
-# Copy C headers
+# Copy C headers — grab all public headers from both llama and ggml
 echo "Copying headers..."
 cp "$LC_BUILD/source/include/llama.h" "$LC_MODULES/include/"
-# ggml headers — location varies by version
-for header in ggml.h ggml-backend.h ggml-alloc.h ggml-metal.h ggml-cpu.h; do
-    found=$(find "$LC_BUILD/source" -name "$header" -path "*/include/*" | head -1)
-    if [ -z "$found" ]; then
-        found=$(find "$LC_BUILD/source" -name "$header" -not -path "*/build/*" | head -1)
-    fi
-    if [ -n "$found" ]; then
-        cp "$found" "$LC_MODULES/include/"
-    fi
+for header in "$LC_BUILD/source/ggml/include/"*.h; do
+    cp "$header" "$LC_MODULES/include/"
 done
 
 # Create module map for Swift interop

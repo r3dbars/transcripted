@@ -11,8 +11,8 @@ enum DraftConstants {
     /// Default max tokens for draft responses
     static let draftMaxTokens = 1024
 
-    /// Max tokens for vision context extraction
-    static let visionMaxTokens = 2048
+    /// Max tokens for vision context extraction (structured fields only — kept small)
+    static let visionMaxTokens = 512
 
     /// Max tokens for analysis calls
     static let analysisMaxTokens = 2048
