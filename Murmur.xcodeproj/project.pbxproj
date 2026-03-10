@@ -90,6 +90,11 @@
 		T1000034 /* FailedTranscriptionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000024 /* FailedTranscriptionTests.swift */; };
 		T1000035 /* EmbeddingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000025 /* EmbeddingTests.swift */; };
 		T1000036 /* SpeechSegmentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000026 /* SpeechSegmentationTests.swift */; };
+		T1000037 /* EmbeddingClustererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000027 /* EmbeddingClustererTests.swift */; };
+		T1000038 /* FailedTranscriptionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000028 /* FailedTranscriptionManagerTests.swift */; };
+		T1000039 /* RecordingValidatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000029 /* RecordingValidatorTests.swift */; };
+		T1000040 /* TranscriptStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000030 /* TranscriptStoreTests.swift */; };
+		T1000051 /* StatsDatabaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000050 /* StatsDatabaseTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -185,6 +190,11 @@
 		T1000024 /* FailedTranscriptionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailedTranscriptionTests.swift; sourceTree = "<group>"; };
 		T1000025 /* EmbeddingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingTests.swift; sourceTree = "<group>"; };
 		T1000026 /* SpeechSegmentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechSegmentationTests.swift; sourceTree = "<group>"; };
+		T1000027 /* EmbeddingClustererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingClustererTests.swift; sourceTree = "<group>"; };
+		T1000028 /* FailedTranscriptionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailedTranscriptionManagerTests.swift; sourceTree = "<group>"; };
+		T1000029 /* RecordingValidatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingValidatorTests.swift; sourceTree = "<group>"; };
+		T1000030 /* TranscriptStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptStoreTests.swift; sourceTree = "<group>"; };
+		T1000050 /* StatsDatabaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsDatabaseTests.swift; sourceTree = "<group>"; };
 		T1000008 /* PillStateManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillStateManagerTests.swift; sourceTree = "<group>"; };
 		T1000009 /* SpeakerDatabaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDatabaseTests.swift; sourceTree = "<group>"; };
 		T1000200 /* MurmurTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MurmurTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -469,6 +479,10 @@
 				T1000024 /* FailedTranscriptionTests.swift */,
 				T1000025 /* EmbeddingTests.swift */,
 				T1000026 /* SpeechSegmentationTests.swift */,
+				T1000028 /* FailedTranscriptionManagerTests.swift */,
+				T1000029 /* RecordingValidatorTests.swift */,
+				T1000030 /* TranscriptStoreTests.swift */,
+				T1000050 /* StatsDatabaseTests.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -479,6 +493,7 @@
 				T1000009 /* SpeakerDatabaseTests.swift */,
 				T1000021 /* QwenServiceTests.swift */,
 				T1000022 /* AudioResamplerTests.swift */,
+				T1000027 /* EmbeddingClustererTests.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -678,6 +693,11 @@
 				T1000034 /* FailedTranscriptionTests.swift in Sources */,
 				T1000035 /* EmbeddingTests.swift in Sources */,
 				T1000036 /* SpeechSegmentationTests.swift in Sources */,
+				T1000037 /* EmbeddingClustererTests.swift in Sources */,
+				T1000038 /* FailedTranscriptionManagerTests.swift in Sources */,
+				T1000039 /* RecordingValidatorTests.swift in Sources */,
+				T1000040 /* TranscriptStoreTests.swift in Sources */,
+				T1000051 /* StatsDatabaseTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
