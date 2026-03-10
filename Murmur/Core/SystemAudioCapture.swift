@@ -1,6 +1,7 @@
 import Foundation
 import AudioToolbox
 import AVFoundation
+import QuartzCore  // CACurrentMediaTime — real-time-safe monotonic clock
 
 /// Captures system-wide audio output using CoreAudio process taps (macOS 14.2+)
 ///
@@ -36,9 +37,24 @@ class SystemAudioCapture: ObservableObject {
     private var bufferCallback: ((AVAudioPCMBuffer) -> Void)?
 
     // Device change watchdog - thread-safe access via lock
-    private var _lastBufferTime: Date = Date()
+    // Uses CACurrentMediaTime() (monotonic, allocation-free) instead of Date()
+    // to avoid memory allocation on CoreAudio real-time threads.
+    private var _lastBufferTime: CFTimeInterval = CACurrentMediaTime()
+    private var _hasReceivedFirstBuffer: Bool = false
     private let lastBufferTimeLock = NSLock()
-    private var lastBufferTime: Date {
+    private var hasReceivedFirstBuffer: Bool {
+        get {
+            lastBufferTimeLock.lock()
+            defer { lastBufferTimeLock.unlock() }
+            return _hasReceivedFirstBuffer
+        }
+        set {
+            lastBufferTimeLock.lock()
+            defer { lastBufferTimeLock.unlock() }
+            _hasReceivedFirstBuffer = newValue
+        }
+    }
+    private var lastBufferTime: CFTimeInterval {
         get {
             lastBufferTimeLock.lock()
             defer { lastBufferTimeLock.unlock() }
@@ -56,7 +72,7 @@ class SystemAudioCapture: ObservableObject {
     // Detects output device changes IMMEDIATELY (not reactively via watchdog)
     // This is how OBS Studio, Mozilla Firefox, and professional audio apps handle device switching
     private var deviceChangeListenerBlock: AudioObjectPropertyListenerBlock?
-    private var lastDeviceChangeTime: Date?
+    private var lastDeviceChangeTime: CFTimeInterval?
     private let deviceChangeDebounce: TimeInterval = 0.3  // 300ms debounce - device changes fire multiple times
 
     // MARK: - Recovery Guard (prevents concurrent recovery attempts)
@@ -298,7 +314,11 @@ class SystemAudioCapture: ObservableObject {
                 }
 
                 // Only update watchdog timestamp for buffers with actual data
-                self.lastBufferTime = Date()
+                // CACurrentMediaTime() is allocation-free and safe for real-time threads
+                self.lastBufferTime = CACurrentMediaTime()
+                if !self.hasReceivedFirstBuffer {
+                    self.hasReceivedFirstBuffer = true
+                }
                 self.markBufferHasData()
 
                 // Send buffer to callback
@@ -376,12 +396,17 @@ class SystemAudioCapture: ObservableObject {
     }
 
     private func startWatchdog() {
-        lastBufferTime = Date()
+        lastBufferTime = CACurrentMediaTime()
+        hasReceivedFirstBuffer = false
         watchdogTimer?.invalidate()
         watchdogTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             guard let self = self, self.isCapturing else { return }
 
-            let timeSinceLastBuffer = Date().timeIntervalSince(self.lastBufferTime)
+            // Don't trigger recovery before we've received any buffers —
+            // CoreAudio tap startup can take 100-200ms on some devices
+            guard self.hasReceivedFirstBuffer else { return }
+
+            let timeSinceLastBuffer = CACurrentMediaTime() - self.lastBufferTime
 
             if timeSinceLastBuffer > 3.0 {
                 // System audio stopped → output device likely changed
@@ -435,9 +460,9 @@ class SystemAudioCapture: ObservableObject {
     /// Uses 300ms debounce because macOS fires MULTIPLE notifications for a single device change
     private func handleDeviceChangeNotification() {
         // Debounce: device changes fire multiple times rapidly
-        let now = Date()
+        let now = CACurrentMediaTime()
         if let lastChange = lastDeviceChangeTime,
-           now.timeIntervalSince(lastChange) < deviceChangeDebounce {
+           (now - lastChange) < deviceChangeDebounce {
             return  // Ignore rapid-fire duplicate notifications
         }
         lastDeviceChangeTime = now
@@ -522,6 +547,7 @@ class SystemAudioCapture: ObservableObject {
         _buffersWithData = 0
         _buffersDropped = 0
         statsLock.unlock()
+        hasReceivedFirstBuffer = false
     }
 
     private func recoverFromOutputChange() {
@@ -562,7 +588,7 @@ class SystemAudioCapture: ObservableObject {
 
             // Restore callback and reset watchdog
             self.bufferCallback = callback
-            lastBufferTime = Date()
+            lastBufferTime = CACurrentMediaTime()
 
             AppLogger.audioSystem.info("Device recovery complete", ["estimatedGap": "~250ms"])
 

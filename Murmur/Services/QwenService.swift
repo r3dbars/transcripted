@@ -90,9 +90,7 @@ class QwenService: ObservableObject {
     /// Example: ["0": "Jack", "1": "Sarah", "2": "Unknown"]
     nonisolated func inferSpeakerNames(transcript: String) async throws -> [String: String] {
         guard let container = await MainActor.run(body: { self.modelContainer }) else {
-            throw NSError(domain: "QwenService", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "Qwen model not loaded"
-            ])
+            throw PipelineError.modelNotLoaded(model: "Qwen")
         }
 
         let chatMessages = Self.buildChatMessages(transcript: transcript)

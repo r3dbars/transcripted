@@ -304,9 +304,7 @@ class TranscriptionTaskManager: ObservableObject {
 
         // Require system audio for multichannel transcription
         guard let systemURL = systemURL else {
-            throw NSError(domain: "Transcription", code: 100, userInfo: [
-                NSLocalizedDescriptionKey: "System audio is required. Please grant Screen Recording permission in System Settings."
-            ])
+            throw PipelineError.missingSystemAudio
         }
 
         return try await transcribeMultichannelPipeline(
@@ -365,27 +363,46 @@ class TranscriptionTaskManager: ObservableObject {
             }
         }
 
-        // Check if ALL system speakers are already known with high confidence
-        let allSpeakersKnown = !speakerIds.isEmpty &&
-            speakerIds.allSatisfy { sid in
-                dbKnowledge.contains { $0.speakerId == sid && $0.profile.displayName != nil && $0.similarity > 0.85 && $0.profile.callCount > 3 }
+        // Per-speaker classification: auto-accept high-confidence known speakers,
+        // track which ones need naming or confirmation
+        var autoAcceptedIds: Set<String> = []
+        var needsActionIds: Set<String> = []
+
+        for sid in speakerIds {
+            if let entry = dbKnowledge.first(where: { $0.speakerId == sid }) {
+                let canAutoAccept = entry.profile.displayName != nil
+                    && entry.similarity > 0.88
+                    && entry.profile.callCount > 4
+                if canAutoAccept {
+                    autoAcceptedIds.insert(sid)
+                } else {
+                    needsActionIds.insert(sid)
+                }
+            } else {
+                // Unknown speaker — check if they at least have a persistent profile
+                let hasProfile = result.systemUtterances.contains {
+                    String($0.speakerId) == sid && $0.persistentSpeakerId != nil
+                }
+                if hasProfile {
+                    needsActionIds.insert(sid)
+                }
             }
+        }
 
-        if allSpeakersKnown {
-            // Skip name inference — build mappings + synthetic SpeakerIdentificationResult from DB
-            AppLogger.speakers.info("All speakers known from DB, skipping name inference", ["speakerCount": "\(speakerIds.count)"])
+        // Auto-accept known speakers: populate mappings from DB without showing naming UI
+        var identifiedSpeakers: [IdentifiedSpeaker] = []
+        for entry in dbKnowledge {
+            guard let name = entry.profile.displayName else { continue }
+            let key = "system_\(entry.speakerId)"
+            let confidence: SpeakerConfidence = entry.similarity > 0.85 && entry.profile.callCount > 3 ? .high : .medium
+            speakerMappings[key] = SpeakerMapping(
+                speakerId: entry.speakerId,
+                identifiedName: name,
+                confidence: confidence
+            )
+            speakerSources[entry.speakerId] = "db"
 
-            var identifiedSpeakers: [IdentifiedSpeaker] = []
-            for entry in dbKnowledge {
-                guard let name = entry.profile.displayName else { continue }
-                let key = "system_\(entry.speakerId)"
-                let confidence: SpeakerConfidence = entry.similarity > 0.85 && entry.profile.callCount > 3 ? .high : .medium
-                speakerMappings[key] = SpeakerMapping(
-                    speakerId: entry.speakerId,
-                    identifiedName: name,
-                    confidence: confidence
-                )
-                speakerSources[entry.speakerId] = "db"
+            if autoAcceptedIds.contains(entry.speakerId) {
                 identifiedSpeakers.append(IdentifiedSpeaker(
                     name: name,
                     speakerId: entry.speakerId,
@@ -393,28 +410,17 @@ class TranscriptionTaskManager: ObservableObject {
                     evidence: "Voice fingerprint match (\(String(format: "%.0f", entry.similarity * 100))%, \(entry.profile.callCount) calls)"
                 ))
             }
+        }
 
+        if !autoAcceptedIds.isEmpty {
             speakerResult = SpeakerIdentificationResult(speakers: identifiedSpeakers, userSpeakerId: nil)
-        } else {
-            AppLogger.speakers.info("Using DB-only speaker identification")
         }
 
-        // Fill gaps: use DB display names for any speaker IDs not yet in speakerMappings
-        for entry in dbKnowledge {
-            let key = "system_\(entry.speakerId)"
-            if speakerMappings[key] == nil, let name = entry.profile.displayName {
-                let confidence: SpeakerConfidence = entry.similarity > 0.85 && entry.profile.callCount > 3 ? .high : .medium
-                speakerMappings[key] = SpeakerMapping(
-                    speakerId: entry.speakerId,
-                    identifiedName: name,
-                    confidence: confidence
-                )
-                if speakerSources[entry.speakerId] == nil {
-                    speakerSources[entry.speakerId] = "db"
-                }
-                AppLogger.speakers.info("DB fallback for speaker", ["speakerId": entry.speakerId, "name": name, "confidence": confidence.rawValue, "similarity": String(format: "%.0f", entry.similarity * 100)])
-            }
-        }
+        AppLogger.speakers.info("Per-speaker classification", [
+            "autoAccepted": "\(autoAcceptedIds.count)",
+            "needsAction": "\(needsActionIds.count)",
+            "total": "\(speakerIds.count)"
+        ])
 
         // Clean up speaker profiles: first merge obvious duplicates, then prune orphans
         speakerDB.mergeDuplicates()
@@ -442,26 +448,21 @@ class TranscriptionTaskManager: ObservableObject {
             directory: outputFolder,
             healthInfo: healthInfo
         ) else {
-            throw NSError(domain: "Transcription", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "Failed to save transcript"
-            ])
+            throw PipelineError.saveFailed(detail: "Could not write transcript to \(outputFolder.lastPathComponent)")
         }
 
         AppLogger.pipeline.info("Phase 2 complete: Transcript saved", ["file": savedURL.lastPathComponent])
 
-        // Phase 3: Check if speaker naming is needed
-        let namingNeeded = self.checkNamingNeeded(
-            result: result,
-            dbKnowledge: dbKnowledge,
-            speakerIds: speakerIds
-        )
-
-        if namingNeeded {
-            // Extract clips for the naming UI (before cleaning up audio)
+        // Phase 3: Speaker naming — only for speakers that need action
+        if !needsActionIds.isEmpty {
+            // Extract clips only for speakers that need naming/confirmation
             do {
+                let actionUtterances = result.systemUtterances.filter {
+                    needsActionIds.contains(String($0.speakerId))
+                }
                 let clips = try SpeakerClipExtractor.extractClips(
                     systemAudioURL: systemURL,
-                    utterances: result.systemUtterances,
+                    utterances: actionUtterances,
                     speakerDB: speakerDB
                 )
 
@@ -669,40 +670,6 @@ class TranscriptionTaskManager: ObservableObject {
 
 
     // MARK: - Speaker Naming Flow
-
-    /// Check if any speakers need naming or confirmation after transcription.
-    /// Auto-accepts speakers with high similarity (>0.88) and enough history (callCount > 4).
-    nonisolated private func checkNamingNeeded(
-        result: TranscriptionResult,
-        dbKnowledge: [(speakerId: String, profile: SpeakerProfile, similarity: Double)],
-        speakerIds: [String]
-    ) -> Bool {
-        guard !speakerIds.isEmpty else { return false }
-
-        // Check each system speaker
-        for sid in speakerIds {
-            if let entry = dbKnowledge.first(where: { $0.speakerId == sid }) {
-                // Known speaker — auto-accept if high confidence + enough history
-                let autoAccept = entry.profile.displayName != nil
-                    && entry.similarity > 0.88
-                    && entry.profile.callCount > 4
-                if !autoAccept {
-                    return true  // needs confirmation or naming
-                }
-            } else {
-                // Unknown speaker (no DB match at all, or matched but no entry in dbKnowledge)
-                // Check if we have a persistent ID from any utterance
-                let hasProfile = result.systemUtterances.contains {
-                    String($0.speakerId) == sid && $0.persistentSpeakerId != nil
-                }
-                if hasProfile {
-                    return true  // new speaker needs naming
-                }
-            }
-        }
-
-        return false  // all speakers auto-accepted
-    }
 
     /// Handle completion of the speaker naming flow.
     /// Applies names to the database, updates the transcript, and cleans up.

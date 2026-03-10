@@ -60,6 +60,62 @@ struct TranscriptionResult {
     }
 }
 
+// MARK: - Pipeline Errors
+
+/// Typed errors for the transcription pipeline.
+/// Replaces stringly-typed NSError so retry logic can make structured decisions.
+enum PipelineError: LocalizedError {
+    // Audio errors (permanent — bad data won't improve on retry)
+    case emptyAudioFile
+    case recordingTooShort(duration: TimeInterval)
+    case invalidAudioFormat(detail: String)
+
+    // Permission errors (permanent until user acts)
+    case missingSystemAudio
+
+    // Model errors (transient — reload may fix)
+    case modelNotLoaded(model: String)
+    case modelInferenceFailed(model: String, underlying: String)
+
+    // Storage errors (transient — disk space may free up)
+    case saveFailed(detail: String)
+
+    // Wrapped unknown error (transient by default)
+    case unknown(underlying: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .emptyAudioFile:
+            return "Empty audio file — no samples recorded."
+        case .recordingTooShort(let duration):
+            return "Recording too short (\(String(format: "%.1f", duration))s). At least 2 seconds required."
+        case .invalidAudioFormat(let detail):
+            return "Invalid audio format: \(detail)"
+        case .missingSystemAudio:
+            return "System audio is required. Please grant Screen Recording permission in System Settings."
+        case .modelNotLoaded(let model):
+            return "\(model) model not loaded"
+        case .modelInferenceFailed(let model, let underlying):
+            return "\(model) inference failed: \(underlying)"
+        case .saveFailed(let detail):
+            return "Failed to save transcript: \(detail)"
+        case .unknown(let underlying):
+            return underlying
+        }
+    }
+
+    /// Whether this error could succeed on retry.
+    /// Audio data errors are permanent. Model/storage errors may be transient.
+    var isRetryable: Bool {
+        switch self {
+        case .emptyAudioFile, .recordingTooShort, .invalidAudioFormat, .missingSystemAudio:
+            return false
+        case .modelNotLoaded, .modelInferenceFailed, .saveFailed, .unknown:
+            return true
+        }
+    }
+}
+
 /// Speaker confidence level from voice fingerprint matching
 enum SpeakerConfidence: String, Codable {
     case high

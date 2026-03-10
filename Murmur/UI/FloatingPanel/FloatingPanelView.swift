@@ -1,6 +1,16 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Tray State (single source of truth for mutually exclusive overlays)
+
+/// Which tray overlay is currently visible above the pill.
+/// Transcript tray and speaker naming are mutually exclusive — only one can be shown.
+enum TrayState: Equatable {
+    case none
+    case transcripts
+    case speakerNaming
+}
+
 // MARK: - SwiftUI View
 
 @available(macOS 26.0, *)
@@ -25,12 +35,9 @@ struct FloatingPanelView: View {
     @State private var silencePromptDismissed = false  // Prevents re-showing after dismiss
     private let silenceThresholdSeconds: TimeInterval = 120  // 2 minutes
 
-    // Transcript tray state
-    @State private var showTranscriptTray = false
+    // Unified tray state — replaces separate showTranscriptTray / showSpeakerNaming booleans
+    @State private var trayState: TrayState = .none
     @StateObject private var transcriptStore = TranscriptStore()
-
-    // Speaker naming tray state
-    @State private var showSpeakerNaming = false
 
     // Escape key monitors for dismissing tray (need both local + global
     // because the panel has canBecomeKey=false, so the app usually isn't frontmost)
@@ -46,7 +53,7 @@ struct FloatingPanelView: View {
             Spacer(minLength: 0)
 
             // MARK: - Speaker Naming Tray (mutually exclusive with transcript tray)
-            if showSpeakerNaming, let request = taskManager.speakerNamingRequest {
+            if trayState == .speakerNaming, let request = taskManager.speakerNamingRequest {
                 SpeakerNamingView(request: request)
                     .transition(.asymmetric(
                         insertion: .opacity.combined(with: .move(edge: .bottom)),
@@ -55,16 +62,16 @@ struct FloatingPanelView: View {
             }
 
             // MARK: - Transcript Tray (expands upward when browsing recent meetings)
-            else if showTranscriptTray && (pillStateManager.state == .idle || pillStateManager.state == .recording) {
+            else if trayState == .transcripts && (pillStateManager.state == .idle || pillStateManager.state == .recording) {
                 TranscriptTrayView(
                     store: transcriptStore,
                     onOpenFolder: {
                         openTranscriptsFolder()
-                        showTranscriptTray = false
+                        trayState = .none
                     },
                     onDismiss: {
                         withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
-                            showTranscriptTray = false
+                            trayState = .none
                         }
                     }
                 )
@@ -77,7 +84,7 @@ struct FloatingPanelView: View {
             // MARK: - Toast Notifications (float above pill)
             ZStack {
                 Color.clear
-                    .frame(height: showTranscriptTray ? 0 : 60)
+                    .frame(height: trayState == .transcripts ? 0 : 60)
 
                 // Toast notification for errors (appears above pill, auto-dismisses)
                 if showErrorToast, let error = currentError {
@@ -96,7 +103,7 @@ struct FloatingPanelView: View {
         }
         .frame(width: frameWidth)
         .frame(maxHeight: .infinity, alignment: .bottom)
-        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: showTranscriptTray)
+        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: trayState)
         .onChange(of: audio.silenceDuration) { _, duration in
             // UX: Don't interrupt user flow - show amber ring indicator without forcing panel expansion
             if audio.isRecording && duration >= silenceThresholdSeconds && !silencePromptDismissed && !showSilencePrompt {
@@ -112,9 +119,9 @@ struct FloatingPanelView: View {
         // Dismiss transcript tray when processing starts (keep available during recording)
         // Note: naming tray is NOT dismissed — it's sticky across pill state changes
         .onChange(of: pillStateManager.state) { _, newState in
-            if newState == .processing {
+            if newState == .processing && trayState == .transcripts {
                 withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
-                    showTranscriptTray = false
+                    trayState = .none
                 }
             }
         }
@@ -128,32 +135,33 @@ struct FloatingPanelView: View {
                     PillSounds.playComplete()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                            showTranscriptTray = false
-                            showSpeakerNaming = true
+                            trayState = .speakerNaming
                         }
                     }
                 } else {
                     // Pill is still in processing — show tray immediately
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                        showTranscriptTray = false
-                        showSpeakerNaming = true
+                        trayState = .speakerNaming
                     }
                 }
             } else {
                 // Request cleared by handleNamingComplete — dismiss tray
                 withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
-                    showSpeakerNaming = false
+                    trayState = .none
                 }
-                if !showTranscriptTray { removeEscapeMonitor() }
+                removeEscapeMonitor()
             }
         }
         // Refresh transcript list when tray opens; manage escape key monitor
-        .onChange(of: showTranscriptTray) { _, isShowing in
-            if isShowing {
+        .onChange(of: trayState) { _, newState in
+            switch newState {
+            case .transcripts:
                 transcriptStore.refresh()
                 installEscapeMonitor()
-            } else {
-                if !showSpeakerNaming { removeEscapeMonitor() }
+            case .speakerNaming:
+                installEscapeMonitor()
+            case .none:
+                removeEscapeMonitor()
             }
         }
         .onDisappear { removeEscapeMonitor() }
@@ -191,14 +199,14 @@ struct FloatingPanelView: View {
             AuroraIdleView(
                 onRecord: {
                     withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
-                        showTranscriptTray = false
+                        trayState = .none
                     }
                     audio.start()
                 },
                 onTranscripts: { toggleTranscriptTray() },
                 failedCount: failedTranscriptionManager.failedTranscriptions.count,
                 backgroundTaskCount: taskManager.backgroundTaskCount,
-                forceExpanded: showTranscriptTray
+                forceExpanded: trayState == .transcripts
             )
         case .recording:
             if useAuroraRecording {
@@ -227,7 +235,7 @@ struct FloatingPanelView: View {
 
     private func toggleTranscriptTray() {
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-            showTranscriptTray.toggle()
+            trayState = trayState == .transcripts ? .none : .transcripts
         }
     }
 
@@ -240,13 +248,13 @@ struct FloatingPanelView: View {
         // Naming tray is sticky — escape only dismisses the transcript tray
         escapeLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 {
-                if showSpeakerNaming {
+                if trayState == .speakerNaming {
                     // Naming tray is sticky — escape does nothing but don't swallow the event
                     return event
                 }
-                guard showTranscriptTray else { return event }  // Don't swallow escape app-wide
+                guard trayState == .transcripts else { return event }  // Don't swallow escape app-wide
                 withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
-                    showTranscriptTray = false
+                    trayState = .none
                 }
                 return nil
             }
@@ -258,9 +266,9 @@ struct FloatingPanelView: View {
         escapeGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 {
                 DispatchQueue.main.async {
-                    guard self.showTranscriptTray, !self.showSpeakerNaming else { return }
+                    guard self.trayState == .transcripts else { return }
                     withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
-                        self.showTranscriptTray = false
+                        self.trayState = .none
                     }
                 }
             }
