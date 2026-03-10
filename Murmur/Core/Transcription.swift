@@ -442,7 +442,7 @@ class Transcription: ObservableObject {
     // MARK: - Silence-Based Speech Segmentation
 
     /// A time range representing a speech segment in the audio.
-    private struct SpeechSegment {
+    struct SpeechSegment {
         let start: Double   // seconds
         let end: Double     // seconds
     }
@@ -455,7 +455,7 @@ class Transcription: ObservableObject {
     ///   - samples: 16kHz mono Float32 audio samples
     ///   - sampleRate: Sample rate (16000)
     /// - Returns: Array of speech segments with start/end times
-    nonisolated private static func detectSpeechSegments(
+    nonisolated static func detectSpeechSegments(
         samples: [Float],
         sampleRate: Double
     ) -> [SpeechSegment] {
