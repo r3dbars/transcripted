@@ -25,6 +25,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     let overlayController = FloatingOverlayController()
     let sessionController = DraftSessionController()
     var onboardingController: OnboardingWindowController?
+    private var wakeObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Dock icon + menubar
@@ -58,6 +59,20 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         pop.delegate = self
         popover = pop
 
+        // Dismiss popover on system wake — SwiftUI gesture handlers hold stale
+        // AttributeGraph state after sleep, causing EXC_BAD_ACCESS on interaction
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, let popover = self.popover, popover.isShown else { return }
+                popover.performClose(nil)
+                popover.contentViewController = nil
+            }
+        }
+
         // Initialize engines
         Task { @MainActor in
             await appState.initialize()
@@ -77,6 +92,9 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if let observer = wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
         #if BETA_BUILD
         BetaTelemetry.shared.shipLogs()
         #endif
