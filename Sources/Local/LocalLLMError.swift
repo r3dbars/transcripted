@@ -9,6 +9,7 @@ enum LocalLLMError: LocalizedError {
     case generationFailed(String)
     case contextOverflow
     case cancelled
+    case downloadFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -17,6 +18,7 @@ enum LocalLLMError: LocalizedError {
         case .generationFailed(let reason): return "Generation failed: \(reason)"
         case .contextOverflow: return "Input exceeds model context window"
         case .cancelled: return "Generation was cancelled"
+        case .downloadFailed(let reason): return "Model download failed: \(reason)"
         }
     }
 }

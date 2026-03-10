@@ -1,12 +1,14 @@
 // LocalInferenceManager.swift
-// Owns two LlamaEngine instances: a small one for vision parsing, a larger one for drafting.
-// Draft model is required; vision model is optional (degrades to voice-only if missing).
+// Owns a single MLXEngine for drafting, style refinement, and analysis.
+// Downloads the Qwen3.5-4B-4bit model from HuggingFace on first use (~2.5GB),
+// then loads from cache on subsequent launches.
 
 import Foundation
 import SwiftUI
 
-enum ModelState {
+enum ModelState: Equatable {
     case notLoaded
+    case downloading(progress: Double)
     case loading
     case ready
     case failed(String)
@@ -15,14 +17,8 @@ enum ModelState {
 @MainActor
 class LocalInferenceManager: ObservableObject {
     @Published var modelState: ModelState = .notLoaded
-    @Published var visionAvailable = false
 
-    let visionEngine = LlamaEngine()
-    let draftEngine = LlamaEngine()
-
-    /// Model file names in the app bundle's Resources/llm-models/
-    private static let visionModelName = "vision-parser.gguf"
-    private static let draftModelName = "draft-model.gguf"
+    let draftEngine = MLXEngine()
 
     var isReady: Bool {
         if case .ready = modelState { return true }
@@ -31,74 +27,48 @@ class LocalInferenceManager: ObservableObject {
 
     var statusLabel: String {
         switch modelState {
-        case .notLoaded: return "Models not loaded"
-        case .loading: return "Loading models..."
-        case .ready:
-            return visionAvailable ? "Ready" : "Ready (no vision)"
+        case .notLoaded: return "Model not loaded"
+        case .downloading(let progress):
+            let pct = Int(progress * 100)
+            return "Downloading model (\(pct)%)..."
+        case .loading: return "Loading model..."
+        case .ready: return "Ready"
         case .failed(let reason): return "Failed: \(reason)"
         }
     }
 
     func initialize() async {
-        modelState = .loading
-
-        // Find models in bundle
-        let modelsDir: String
-        if let bundlePath = Bundle.main.resourcePath {
-            modelsDir = bundlePath + "/llm-models"
+        // If already cached, show "loading" — otherwise show download progress
+        if MLXEngine.isModelCached {
+            modelState = .loading
         } else {
-            modelState = .failed("No bundle resource path")
-            return
+            modelState = .downloading(progress: 0)
         }
 
-        let visionPath = modelsDir + "/" + Self.visionModelName
-        let draftPath = modelsDir + "/" + Self.draftModelName
-
-        // Draft model is required
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: draftPath) else {
-            modelState = .failed("Draft model not found in bundle")
-            EventReporter.shared.capture(level: .error, engine: "local", event: "model_not_found",
-                message: "Draft model not found at \(draftPath)")
-            return
-        }
-
-        // Load draft model (required)
         do {
-            try await draftEngine.load(path: draftPath, contextSize: 8192)
+            try await draftEngine.load(progressHandler: { [weak self] progress in
+                Task { @MainActor [weak self] in
+                    guard let self = self else { return }
+                    // Only update download progress if we're in downloading state
+                    if case .downloading = self.modelState {
+                        self.modelState = .downloading(progress: progress)
+                    }
+                }
+            })
+            modelState = .ready
+            EventReporter.shared.capture(level: .info, engine: "local", event: "model_loaded",
+                message: "MLX model loaded (\(MLXEngine.modelId))")
         } catch {
-            modelState = .failed("Draft model: \(error.localizedDescription)")
+            modelState = .failed(error.localizedDescription)
             EventReporter.shared.capture(level: .error, engine: "local", event: "model_load_failed",
-                message: "Draft model load failed: \(error.localizedDescription)")
-            return
+                message: "MLX model load failed: \(error.localizedDescription)")
         }
-
-        // Load vision model (optional — degrades to voice-only if missing)
-        if fm.fileExists(atPath: visionPath) {
-            do {
-                try await visionEngine.load(path: visionPath, contextSize: 4096)
-                visionAvailable = true
-            } catch {
-                EventReporter.shared.capture(level: .warning, engine: "local", event: "vision_model_load_failed",
-                    message: "Vision model load failed: \(error.localizedDescription)")
-            }
-        } else {
-            EventReporter.shared.capture(level: .info, engine: "local", event: "vision_model_missing",
-                message: "Vision model not found — context extraction disabled")
-        }
-
-        modelState = .ready
-        let visionStatus = visionAvailable ? "vision + draft" : "draft only"
-        EventReporter.shared.capture(level: .info, engine: "local", event: "models_loaded",
-            message: "LLM models loaded (\(visionStatus))")
     }
 
     func cleanup() {
         Task {
-            await visionEngine.unload()
             await draftEngine.unload()
         }
-        visionAvailable = false
         modelState = .notLoaded
     }
 }

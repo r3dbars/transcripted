@@ -212,7 +212,7 @@ class StyleEngine: ObservableObject {
     // MARK: - Incremental Style Refinement
 
     /// Regenerate the Style Summary using local LLM — incremental refinement based on recent training pairs
-    func regenerateStyleSummary(draftEngine: LlamaEngine) async {
+    func regenerateStyleSummary(draftEngine: MLXEngine) async {
         let currentProfile = extractStyleSummary()
         let examples = extractRecentExamplesText(last: 20)
         guard !examples.isEmpty else { return }
@@ -517,7 +517,7 @@ class StyleEngine: ObservableObject {
 
     /// Import bulk writing samples from onboarding and generate initial style profile.
     /// Raw samples are used for analysis only — NOT persisted in style.md.
-    func importBulkSamples(rawText: String, draftEngine: LlamaEngine) async throws -> String {
+    func importBulkSamples(rawText: String, draftEngine: MLXEngine) async throws -> String {
         let userName = UserDefaults.standard.string(forKey: "user-display-name")
 
         // Send to local LLM for analysis
