@@ -275,43 +275,51 @@ class Transcription: ObservableObject {
 
             AppLogger.transcription.info("System audio transcribed", ["utterances": "\(systemUtterances.count)", "speakers": "\(Set(systemUtterances.map { $0.speakerId }).count)"])
 
-            // Step 4: Transcribe mic audio with Parakeet
+            // Step 4: Transcribe mic audio per-segment using energy-based silence detection
             await MainActor.run {
                 self.processingStatus = "Transcribing mic audio..."
             }
 
-            AppLogger.transcription.info("Transcribing mic audio with Parakeet")
-            let micText = try await parakeet.transcribeSegment(samples: micSamples, source: .microphone)
+            // Split mic audio into segments at silence boundaries for accurate timestamps
+            let micSegments = Self.detectSpeechSegments(samples: micSamples, sampleRate: 16000)
+            AppLogger.transcription.info("Mic audio segmented by silence", ["segments": "\(micSegments.count)"])
 
-            onProgress?(0.80)
-
-            // Create mic utterances — split by sentence/silence boundaries
             var micUtterances: [TranscriptionUtterance] = []
-            if !micText.isEmpty {
-                // Split into chunks by sentence boundaries for better timestamps
-                let micDuration = Double(micSamples.count) / 16000.0
-                let sentences = splitIntoSentences(micText)
-                let timePerSentence = micDuration / Double(max(1, sentences.count))
 
-                for (i, sentence) in sentences.enumerated() {
-                    let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmed.isEmpty else { continue }
+            for (index, segment) in micSegments.enumerated() {
+                try Task.checkCancellation()
 
-                    micUtterances.append(TranscriptionUtterance(
-                        start: Double(i) * timePerSentence,
-                        end: Double(i + 1) * timePerSentence,
-                        channel: 0,
-                        speakerId: 0,
-                        persistentSpeakerId: nil,
-                        matchSimilarity: nil,
-                        transcript: trimmed
-                    ))
-                }
+                let segmentSamples = AudioResampler.extractSlice(
+                    from: micSamples,
+                    sampleRate: 16000,
+                    startTime: segment.start,
+                    endTime: segment.end
+                )
+
+                // Skip very short segments (< 0.5s)
+                guard segmentSamples.count >= 8000 else { continue }
+
+                let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .microphone)
+                guard !text.isEmpty else { continue }
+
+                micUtterances.append(TranscriptionUtterance(
+                    start: segment.start,
+                    end: segment.end,
+                    channel: 0,
+                    speakerId: 0,
+                    persistentSpeakerId: nil,
+                    matchSimilarity: nil,
+                    transcript: text
+                ))
+
+                // Update progress (65% to 90% during mic transcription)
+                let micProgress = 0.65 + (Double(index + 1) / Double(max(1, micSegments.count))) * 0.25
+                onProgress?(micProgress)
             }
 
             AppLogger.transcription.info("Mic audio transcribed", ["utterances": "\(micUtterances.count)"])
 
-            onProgress?(0.90)
+            onProgress?(0.95)
 
             let processingTime = Date().timeIntervalSince(processingStartTime)
 
@@ -431,36 +439,96 @@ class Transcription: ObservableObject {
         return Double(dotProduct / denom)
     }
 
-    // MARK: - Text Splitting
+    // MARK: - Silence-Based Speech Segmentation
 
-    /// Split text into sentences for approximate timestamp assignment
-    private nonisolated func splitIntoSentences(_ text: String) -> [String] {
-        // Split on sentence-ending punctuation
-        var sentences: [String] = []
-        var current = ""
+    /// A time range representing a speech segment in the audio.
+    private struct SpeechSegment {
+        let start: Double   // seconds
+        let end: Double     // seconds
+    }
 
-        for char in text {
-            current.append(char)
-            if char == "." || char == "!" || char == "?" {
-                let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    sentences.append(trimmed)
+    /// Detect speech segments by finding silence gaps in the audio.
+    /// Computes RMS energy per frame and splits at gaps where energy drops
+    /// below threshold for at least `minSilenceDuration`.
+    ///
+    /// - Parameters:
+    ///   - samples: 16kHz mono Float32 audio samples
+    ///   - sampleRate: Sample rate (16000)
+    /// - Returns: Array of speech segments with start/end times
+    nonisolated private static func detectSpeechSegments(
+        samples: [Float],
+        sampleRate: Double
+    ) -> [SpeechSegment] {
+        guard !samples.isEmpty else { return [] }
+
+        let frameSamples = Int(sampleRate * 0.025)  // 25ms frames (400 samples at 16kHz)
+        let hopSamples = Int(sampleRate * 0.010)    // 10ms hop
+        let silenceThreshold: Float = 0.01          // RMS below this = silence
+        let minSilenceDuration: Double = 0.4        // 400ms gap to split
+        let minSegmentDuration: Double = 0.5        // Don't create segments shorter than this
+
+        // Compute RMS energy per frame
+        let totalFrames = max(1, (samples.count - frameSamples) / hopSamples + 1)
+        var isVoiced = [Bool](repeating: false, count: totalFrames)
+
+        for i in 0..<totalFrames {
+            let start = i * hopSamples
+            let end = min(start + frameSamples, samples.count)
+            let count = end - start
+            guard count > 0 else { continue }
+
+            var sumSquares: Float = 0
+            vDSP_dotpr(
+                Array(samples[start..<end]), 1,
+                Array(samples[start..<end]), 1,
+                &sumSquares,
+                vDSP_Length(count)
+            )
+            let rms = sqrt(sumSquares / Float(count))
+            isVoiced[i] = rms >= silenceThreshold
+        }
+
+        // Find speech regions: contiguous voiced frames, split at silence gaps
+        var segments: [SpeechSegment] = []
+        var speechStart: Int? = nil
+        var silenceFrameCount = 0
+        let minSilenceFrames = Int(minSilenceDuration / 0.010)
+
+        for i in 0..<totalFrames {
+            if isVoiced[i] {
+                if speechStart == nil {
+                    speechStart = i
                 }
-                current = ""
+                silenceFrameCount = 0
+            } else {
+                silenceFrameCount += 1
+                if let start = speechStart, silenceFrameCount >= minSilenceFrames {
+                    // End of speech region — segment boundary
+                    let segStart = Double(start * hopSamples) / sampleRate
+                    let segEnd = Double((i - silenceFrameCount + 1) * hopSamples) / sampleRate
+                    if segEnd - segStart >= minSegmentDuration {
+                        segments.append(SpeechSegment(start: segStart, end: segEnd))
+                    }
+                    speechStart = nil
+                }
             }
         }
 
-        // Don't lose trailing text without punctuation
-        let remaining = current.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !remaining.isEmpty {
-            sentences.append(remaining)
+        // Close final segment
+        if let start = speechStart {
+            let segStart = Double(start * hopSamples) / sampleRate
+            let segEnd = Double(samples.count) / sampleRate
+            if segEnd - segStart >= minSegmentDuration {
+                segments.append(SpeechSegment(start: segStart, end: segEnd))
+            }
         }
 
-        // If no sentence boundaries found, return the whole text
-        if sentences.isEmpty && !text.isEmpty {
-            sentences.append(text)
+        // Fallback: if no segments detected (very quiet recording or constant noise),
+        // treat the entire track as one segment
+        if segments.isEmpty {
+            segments.append(SpeechSegment(start: 0, end: Double(samples.count) / sampleRate))
         }
 
-        return sentences
+        return segments
     }
 }

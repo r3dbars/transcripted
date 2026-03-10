@@ -939,8 +939,9 @@ struct PillAnimationTiming {
 
 extension Animation {
     /// Primary pill morph animation (idle ↔ recording)
-    /// PHASE 4: Uses unified timing from PillAnimationTiming
-    static let pillMorph = Animation.spring(response: PillAnimationTiming.morphDuration, dampingFraction: 0.8)
+    /// Note: spring `response` controls oscillation period, not duration.
+    /// 0.3 gives a quick but natural feel (0.175 was too fast / jittery).
+    static let pillMorph = Animation.spring(response: 0.3, dampingFraction: 0.8)
 
     /// Tray expand/collapse animation
     static let trayExpand = Animation.spring(response: PillAnimationTiming.trayDuration, dampingFraction: 0.85)

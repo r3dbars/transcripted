@@ -46,16 +46,47 @@ struct FailedTranscription: Identifiable, Codable, Equatable {
     }
 
     /// Whether this failure could succeed if retried.
-    /// Permanent failures (empty audio, too short) will never succeed — the data is gone.
+    /// Uses PipelineError classification when available, falls back to keyword matching
+    /// for entries persisted before typed errors were introduced.
     var isRetryable: Bool {
+        if let typed = pipelineError {
+            return typed.isRetryable
+        }
+        // Legacy fallback: keyword matching for pre-typed-error entries
         let permanent = [
             "Empty audio file",
             "no samples recorded",
             "at least 1 second",
             "Invalid audio data",
-            "Recording too short"
+            "Recording too short",
+            "Invalid audio format",
+            "System audio is required"
         ]
         return !permanent.contains(where: { errorMessage.localizedCaseInsensitiveContains($0) })
+    }
+
+    /// Attempt to reconstruct the typed PipelineError from the stored message.
+    /// Returns nil for legacy entries that don't match any known pattern.
+    private var pipelineError: PipelineError? {
+        if errorMessage.contains("no samples recorded") || errorMessage.contains("Empty audio file") {
+            return .emptyAudioFile
+        }
+        if errorMessage.contains("Recording too short") || errorMessage.contains("at least") {
+            return .recordingTooShort(duration: 0)
+        }
+        if errorMessage.contains("Invalid audio") {
+            return .invalidAudioFormat(detail: errorMessage)
+        }
+        if errorMessage.contains("System audio is required") {
+            return .missingSystemAudio
+        }
+        if errorMessage.contains("model not loaded") {
+            return .modelNotLoaded(model: "Unknown")
+        }
+        if errorMessage.contains("Failed to save") {
+            return .saveFailed(detail: errorMessage)
+        }
+        return nil
     }
 
     /// Checks if the audio files still exist on disk
