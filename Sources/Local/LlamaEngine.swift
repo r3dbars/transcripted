@@ -61,13 +61,23 @@ actor LlamaEngine {
 
     // MARK: - Non-Streaming Completion
 
-    /// Generate a complete response (blocks until done).
+    /// Generate a complete response (blocks until done). Strips any `<think>` blocks from Qwen3.5.
     func complete(prompt: String, systemPrompt: String? = nil, maxTokens: Int = 1024, temperature: Float = 0.7) async throws -> String {
         var result = ""
         for try await token in generate(prompt: prompt, systemPrompt: systemPrompt, maxTokens: maxTokens, temperature: temperature) {
             result += token
         }
-        return result
+        return Self.stripThinkingBlocks(result)
+    }
+
+    /// Remove `<think>...</think>` blocks that Qwen3.5 may emit despite /no_think.
+    private static func stripThinkingBlocks(_ text: String) -> String {
+        var cleaned = text
+        while let start = cleaned.range(of: "<think>"), let end = cleaned.range(of: "</think>") {
+            guard start.lowerBound <= end.lowerBound else { break }
+            cleaned.removeSubrange(start.lowerBound..<end.upperBound)
+        }
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Streaming Generation
@@ -108,19 +118,31 @@ actor LlamaEngine {
             throw LocalLLMError.contextOverflow
         }
 
-        // Clear KV cache for fresh generation
-        llama_kv_self_clear(context)
+        // Clear memory (KV cache) for fresh generation
+        let mem = llama_get_memory(context)
+        llama_memory_clear(mem, true)
 
-        // Create batch and process prompt
-        var batch = llama_batch_init(Int32(promptTokens.count), 0, 1)
+        // Process prompt in chunks of n_batch (512) to avoid exceeding llama.cpp's batch limit.
+        // A single llama_decode call with more tokens than n_batch triggers ggml_abort.
+        let nBatch = 512
+        var batch = llama_batch_init(Int32(nBatch), 0, 1)
         defer { llama_batch_free(batch) }
 
-        for (i, token) in promptTokens.enumerated() {
-            llama_batch_add(&batch, token, Int32(i), [llama_seq_id(0)], i == promptTokens.count - 1)
-        }
-
-        guard llama_decode(context, batch) == 0 else {
-            throw LocalLLMError.generationFailed("Prompt decode failed")
+        var i = 0
+        while i < promptTokens.count {
+            guard !Task.isCancelled else {
+                throw LocalLLMError.cancelled
+            }
+            batch.n_tokens = 0
+            let chunkEnd = min(i + nBatch, promptTokens.count)
+            for j in i..<chunkEnd {
+                let isLast = (j == promptTokens.count - 1)
+                llama_batch_add(&batch, promptTokens[j], Int32(j), [llama_seq_id(0)], isLast)
+            }
+            guard llama_decode(context, batch) == 0 else {
+                throw LocalLLMError.generationFailed("Prompt decode failed at token \(i)")
+            }
+            i = chunkEnd
         }
 
         // Set up sampler chain
@@ -168,12 +190,13 @@ actor LlamaEngine {
 
     private func formatChatPrompt(systemPrompt: String?, userMessage: String, model: OpaquePointer) -> String {
         // Build ChatML format manually — reliable across all Qwen models
+        // Pre-fill assistant with empty think block to skip reasoning and go straight to output
         var parts: [String] = []
         if let sys = systemPrompt, !sys.isEmpty {
             parts.append("<|im_start|>system\n\(sys)<|im_end|>")
         }
         parts.append("<|im_start|>user\n\(userMessage)<|im_end|>")
-        parts.append("<|im_start|>assistant\n")
+        parts.append("<|im_start|>assistant\n<think>\n</think>\n")
         return parts.joined(separator: "\n")
     }
 

@@ -9,26 +9,30 @@ import AppKit
 
 enum LocalVisionExtractor {
 
-    /// Extract structured conversation context from a screenshot using local OCR + LLM.
-    static func extractContext(imageData: Data, engine: LlamaEngine, systemPrompt: String) async throws -> CapturedContext {
-        // Step 1: OCR — extract all text from the screenshot
+    /// Extract conversation context from a screenshot using Apple Vision OCR only (no LLM).
+    /// Returns raw OCR text as the conversation field — the drafting model interprets it directly.
+    static func extractContext(imageData: Data) async throws -> CapturedContext {
         let ocrText = try await performOCR(imageData: imageData)
 
         guard !ocrText.isEmpty else {
             return CapturedContext.parse(from: "")
         }
 
-        // Step 2: LLM — parse OCR text into structured fields
-        let userMessage = "Parse the following OCR text from a screenshot into the structured format described. Output ONLY the labeled sections.\n\nOCR TEXT:\n\(ocrText)"
+        // Truncate to ~3000 chars: keep first 500 (app header) + last 2500 (recent messages)
+        let trimmedOCR: String
+        if ocrText.count > 3000 {
+            let header = String(ocrText.prefix(500))
+            let recent = String(ocrText.suffix(2500))
+            trimmedOCR = header + "\n...\n" + recent
+        } else {
+            trimmedOCR = ocrText
+        }
 
-        let rawText = try await engine.complete(
-            prompt: userMessage,
-            systemPrompt: systemPrompt,
-            maxTokens: DraftConstants.visionMaxTokens,
-            temperature: 0.1  // Low temp for structured extraction
-        )
-
-        return CapturedContext.parse(from: rawText)
+        // Build a CapturedContext with raw OCR as the conversation.
+        // Platform/formality detection happens via PlatformFormatter from the source app.
+        var context = CapturedContext()
+        context.conversation = trimmedOCR
+        return context
     }
 
     // MARK: - Apple Vision OCR

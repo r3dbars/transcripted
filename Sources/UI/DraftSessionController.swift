@@ -443,29 +443,21 @@ class DraftSessionController: ObservableObject {
             return
         }
 
-        guard appState.localInference.isReady, let imageData = imageData else {
-            appState.logger.log("SESSION | model not ready or no screenshot, proceeding voice-only")
+        guard let imageData = imageData else {
+            appState.logger.log("SESSION | no screenshot, proceeding voice-only")
             overlayController?.hasContext = false
             return
         }
 
-        let userName = UserDefaults.standard.string(forKey: "user-display-name")
-        let appName = sourceApp?.localizedName
-        let extractionPrompt = appState.promptStore.contextExtractionPrompt(userName: userName, appName: appName)
-
         do {
-            let context = try await DraftConstants.withTimeout(seconds: DraftConstants.localVisionTimeoutSeconds) {
-                try await LocalVisionExtractor.extractContext(
-                    imageData: imageData,
-                    engine: appState.localInference.visionEngine,
-                    systemPrompt: extractionPrompt
-                )
-            }
+            // OCR only — no LLM call. Raw text goes directly into the drafting prompt.
+            let context = try await LocalVisionExtractor.extractContext(imageData: imageData)
             lastCapturedContext = context
-            appState.logger.log("SESSION | vision complete — platform=\(context.platform ?? "nil")")
+            let charCount = context.conversation?.count ?? 0
+            appState.logger.log("SESSION | OCR complete — \(charCount) chars extracted")
         } catch {
-            appState.logger.log("SESSION | vision timeout/error: \(error.localizedDescription), proceeding voice-only")
-            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "vision_timeout",
+            appState.logger.log("SESSION | OCR error: \(error.localizedDescription), proceeding voice-only")
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "ocr_failed",
                 message: error.localizedDescription)
             overlayController?.hasContext = false
         }
