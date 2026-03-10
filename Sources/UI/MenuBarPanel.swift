@@ -47,12 +47,12 @@ struct MenuBarPanelView: View {
                         PermissionsOnboardingView.markCompleted()
                     })
                 } else if !appState.styleEngine.hasCompletedOnboarding {
-                    StyleOnboardingView(styleEngine: appState.styleEngine, draftEngine: appState.drafter)
+                    StyleOnboardingView(styleEngine: appState.styleEngine)
                 }
             }
             #else
             if !appState.styleEngine.hasCompletedOnboarding {
-                StyleOnboardingView(styleEngine: appState.styleEngine, localInference: appState.localInference)
+                StyleOnboardingView(styleEngine: appState.styleEngine)
             }
             #endif
         }

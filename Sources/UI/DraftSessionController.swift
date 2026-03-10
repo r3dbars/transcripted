@@ -199,7 +199,7 @@ class DraftSessionController: ObservableObject {
             if let context = lastCapturedContext, context.hasConversation {
                 userMessage = context.draftingPrompt(userInstructions: voiceText)
             } else {
-                userMessage = "The user dictated the following message. Clean it up, fix grammar, and make it sound natural while preserving their intent and tone. Do NOT add greetings, sign-offs, or change the meaning. Output ONLY the cleaned-up message.\n\nDICTATED:\n\(voiceText.trimmingCharacters(in: .whitespacesAndNewlines))"
+                userMessage = "Clean up this dictation. Fix grammar, keep their tone. Output only the message.\n\n\(voiceText.trimmingCharacters(in: .whitespacesAndNewlines))"
             }
 
             let stream = await appState.localInference.draftEngine.generate(

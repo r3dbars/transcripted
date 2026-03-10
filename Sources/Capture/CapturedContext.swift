@@ -38,6 +38,7 @@ struct CapturedContext {
     }
 
     /// Build the full drafting prompt — conversation context + user's voice instructions
+    /// Compact format optimized for small local models.
     func draftingPrompt(userInstructions: String) -> String {
         var prompt = ""
 
@@ -52,39 +53,15 @@ struct CapturedContext {
         }
 
         if let conversation = conversation {
-            prompt += "\nSCREEN TEXT (OCR from the user's current conversation window):\n\(conversation)\n"
+            prompt += "\nCONVERSATION:\n\(conversation)\n"
         }
 
         let trimmedInstructions = userInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedInstructions.isEmpty {
-            prompt += "\nUSER'S INSTRUCTIONS:\n\(trimmedInstructions)\n"
+            prompt += "\nUSER WANTS TO SAY:\n\(trimmedInstructions)\n"
         }
 
-        prompt += """
-
-        INSTRUCTIONS:
-        You are ghostwriting a reply for the user in this conversation.
-
-        1. USER'S INSTRUCTIONS are your primary directive — accomplish this goal above all else.
-           Don't let style patterns override or distort what the user is trying to say. They may be:
-           - A specific idea: "say yes to lunch" → draft a message expressing that intent
-           - A tone/style directive: "make it short and funny" → you decide WHAT to say based on the conversation, applying their constraint
-           - A mix of both: "decline politely, say I'm busy" → use their intent with their tone guidance
-
-        2. SCREEN TEXT is OCR-captured text from the user's messaging window. It may contain UI chrome, timestamps, and formatting artifacts — focus on the actual messages. You are replying to the most recent message directed at the user.
-
-        3. Match the conversational energy. If messages in the thread are 5-10 words, don't write a paragraph. If they're detailed, match that depth. Read the room.
-
-        4. Don't parrot. Never echo back what the other person just said. "Thanks for the update on the deployment" is robotic — "nice, thanks" is human.
-
-        5. Don't add AI fluff. No "Hey!" greetings unless the conversation warrants one. No sign-offs like "Let me know!" unless the user asked for that. No exclamation points unless the user's style uses them.
-
-        6. Output ONLY the reply text. No labels, no quotes, no explanations, no alternatives.
-
-        7. Don't prepend agreement phrases ("Yeah exactly..", "This is interesting!") unless \
-        the user's instructions or the conversation genuinely call for agreement. Most \
-        replies work better jumping straight to the point.
-        """
+        prompt += "\nWrite a reply. Match the conversation's length and energy. Output only the message text."
 
         return prompt
     }
