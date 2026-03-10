@@ -179,7 +179,7 @@ class DraftSessionController: ObservableObject {
                     message: "Local LLM not loaded")
                 visionTask?.cancel()
                 visionTask = nil
-                overlayController.showError("Model not loaded")
+                overlayController.showError(appState.localInference.statusLabel)
                 isInSession = false
                 return
             }

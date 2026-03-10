@@ -22,22 +22,6 @@ else
     echo "Parakeet models not found — Parakeet engine will attempt runtime download"
 fi
 
-# Bundle GGUF LLM models
-LLM_MODELS_DIR="$APP_BUNDLE/Contents/Resources/llm-models"
-mkdir -p "$LLM_MODELS_DIR"
-if [ -f "models/vision-parser.gguf" ]; then
-    echo "Bundling vision model..."
-    cp "models/vision-parser.gguf" "$LLM_MODELS_DIR/"
-else
-    echo "vision-parser.gguf not found in models/ — app will fail to load vision model"
-fi
-if [ -f "models/draft-model.gguf" ]; then
-    echo "Bundling draft model..."
-    cp "models/draft-model.gguf" "$LLM_MODELS_DIR/"
-else
-    echo "draft-model.gguf not found in models/ — app will fail to load draft model"
-fi
-
 # Copy Info.plist
 cp Info.plist "$APP_BUNDLE/Contents/"
 
@@ -57,25 +41,28 @@ cat > "$BUILD_DIR/Draft.entitlements" << 'EOF'
 </plist>
 EOF
 
-# FluidAudio (required — Parakeet STT engine)
-# Run build-fluidaudio.sh first to build these artifacts
-if [ ! -f "fluidaudio-libs/libFluidAudioAll.a" ] || [ ! -d "fluidaudio-modules/FluidAudio.swiftmodule" ]; then
-    echo "FluidAudio not found — required for Parakeet STT engine"
-    echo "   Run build-fluidaudio.sh first to build FluidAudio."
+# Unified dependencies (FluidAudio + mlx-swift-lm)
+# Run build-deps.sh first to build these artifacts
+if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ]; then
+    echo "Dependencies not found — required for Parakeet STT + local LLM inference"
+    echo "   Run build-deps.sh first to build dependencies."
     exit 1
 fi
-echo "FluidAudio found"
-FLUID_FLAGS="-Ifluidaudio-modules -Ifluidaudio-modules/FastClusterWrapper -Ifluidaudio-modules/MachTaskSelfWrapper -Ifluidaudio-modules/yyjson -Lfluidaudio-libs -lFluidAudioAll -framework CoreML -framework CoreAudio"
+echo "Dependencies found"
 
-# llama.cpp (required — local LLM inference)
-# Run build-llamacpp.sh first to build these artifacts
-if [ ! -f "llamacpp-libs/libLlamaCppAll.a" ] || [ ! -d "llamacpp-modules/include" ]; then
-    echo "llama.cpp not found — required for local LLM inference"
-    echo "   Run build-llamacpp.sh first to build llama.cpp."
-    exit 1
-fi
-echo "llama.cpp found"
-LLAMA_FLAGS="-Illamacpp-modules/include -Lllamacpp-libs -lLlamaCppAll"
+# Build the -I flags for all module directories
+DEPS_MODULE_FLAGS="-Ideps-modules"
+for dir in deps-modules/*/; do
+    [ -d "$dir" ] && DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
+done
+
+DEPS_FLAGS="$DEPS_MODULE_FLAGS -Ldeps-libs -lDraftDeps -framework CoreML -framework CoreAudio"
+
+# Bundle Metal libraries if present
+# MLX searches for mlx.metallib next to the binary first (Contents/MacOS/)
+for metallib in deps-libs/*.metallib; do
+    [ -f "$metallib" ] && cp "$metallib" "$APP_BUNDLE/Contents/MacOS/"
+done
 
 # Compile
 echo "Compiling..."
@@ -93,10 +80,11 @@ swiftc \
     -framework MetalKit \
     -framework Accelerate \
     -framework Vision \
+    -framework MetalPerformanceShaders \
+    -framework MetalPerformanceShadersGraph \
     -lsqlite3 \
     -lc++ \
-    $FLUID_FLAGS \
-    $LLAMA_FLAGS \
+    $DEPS_FLAGS \
     $(find Sources -name '*.swift') \
     -parse-as-library \
     -target arm64-apple-macos14.0 \
