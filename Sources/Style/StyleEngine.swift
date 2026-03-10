@@ -41,63 +41,28 @@ class StyleEngine: ObservableObject {
 
     // MARK: - Public Interface
 
-    /// Build system prompt — style profile + reference samples + structured instructions
+    /// Build system prompt — condensed style profile + compact rules (optimized for small local models)
     func buildSystemPrompt() -> String {
-        let summary = extractStyleSummary()
-        guard !summary.isEmpty else {
+        let condensed = extractCondensedProfile()
+        guard !condensed.isEmpty else {
             return promptStore?.config.draftingSystem ?? DefaultPrompts.draftingSystem
         }
 
-        // Pull 2-3 diverse reference samples from training pairs
-        let samples = extractReferenceSamples(count: 3)
-        var samplesBlock = ""
-        if !samples.isEmpty {
-            let sampleEntries = samples.map { s in
-                "<sample platform=\"\(s.platform)\">\n\(s.text)\n</sample>"
-            }.joined(separator: "\n")
-            samplesBlock = "\n<reference_messages>\n\(sampleEntries)\n</reference_messages>\n"
-        }
-
         return """
-            <primary_goal>
-            Your #1 job is to accomplish the user's communicative intent. They will tell you \
-            what they want to say — your draft must deliver that message clearly and completely. \
-            Getting the intent right matters more than sounding exactly like them.
-            </primary_goal>
+            You ghostwrite messages for the user. Deliver their intent first, then apply their style.
 
-            <style_profile>
-            \(summary)
-            </style_profile>
-            \(samplesBlock)
-            <how_to_use_style>
-            Style is a finishing layer, not the primary directive. After you've nailed the intent:
-            - Apply their natural voice and phrasing patterns
-            - Match their typical message length for this platform
-            - Respect the NEVER list (these are things they'd never write)
-            - Use signature phrases only when they fit naturally — never force them
-            - If a signature opener ("Yeah exactly..") doesn't add value, skip it and jump \
-            straight to the content. Most messages work better without a filler opener.
-            </how_to_use_style>
+            \(condensed)
 
-            <instructions>
-            - Output ONLY the message text. No labels, no explanations, no meta-commentary.
-            - INTENT FIRST: Deliver the user's message accurately and completely before \
-            applying any style. Don't sacrifice clarity or meaning for style matching.
-            - DON'T DEFAULT TO OPENERS: Only use agreement phrases like "Yeah exactly..", \
-            "Yeah that tracks..", or "This is interesting!" when they genuinely fit the \
-            conversational context (e.g., actively agreeing with a specific point someone made). \
-            For most messages, jump straight to the substance.
-            - Match the platform register — they write differently on Slack vs. email vs. iMessage.
-            - Don't over-polish — if they write casually, keep it casual. If they use fragments, use fragments.
-            - Match their typical message length. Don't elaborate beyond what they said.
-            - Do NOT write like a helpful AI assistant. No "I hope this helps", no "Let me know if \
-            you need anything", no corporate pleasantries. Write like a real person.
-            </instructions>
+            Rules:
+            - Output ONLY the message text. No labels, explanations, or alternatives.
+            - Say what the user asked you to say. Intent beats style when they conflict.
+            - Match message length to the conversation energy. Don't over-elaborate.
+            - No AI fluff: no "I hope this helps", no unnecessary greetings or sign-offs.
             """
     }
 
-    /// Extract just the Style Summary section from style.md
-    private func extractStyleSummary() -> String {
+    /// Extract just the Style Summary section from style.md (full verbose version, used by refinement)
+    func extractStyleSummary() -> String {
         guard let summaryStart = styleFileContents.range(of: "## Style Summary\n") else { return "" }
         let afterSummary = styleFileContents[summaryStart.upperBound...]
         // Summary ends at "## Examples" or end of file
@@ -107,6 +72,110 @@ class StyleEngine: ObservableObject {
         }
         let summary = String(afterSummary).trimmingCharacters(in: .whitespacesAndNewlines)
         return summary == "(Will be generated after 5 examples)" ? "" : summary
+    }
+
+    /// Extract a condensed style profile for the drafting model (optimized for small local models).
+    /// Pulls just: one-line tone summary, ALWAYS bullets, NEVER bullets, signature phrases.
+    /// Strips verbose prose, proof citations, and AI Draft comparison examples.
+    private func extractCondensedProfile() -> String {
+        let full = extractStyleSummary()
+        guard !full.isEmpty else { return "" }
+
+        var parts: [String] = []
+
+        // Extract a one-line tone summary from **Tone & Voice** section
+        if let toneStart = full.range(of: "**Tone & Voice**") {
+            let afterTone = full[toneStart.upperBound...]
+            // Take just the first sentence
+            let toneText = String(afterTone.prefix(while: { $0 != "\n" || false }))
+            let firstLine = afterTone.components(separatedBy: "\n").first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? ""
+            // Take up to the first period
+            if let periodIdx = firstLine.firstIndex(of: ".") {
+                parts.append("STYLE: \(String(firstLine[...periodIdx]).trimmingCharacters(in: .whitespaces))")
+            } else if !firstLine.isEmpty {
+                parts.append("STYLE: \(firstLine.trimmingCharacters(in: .whitespaces))")
+            }
+        }
+
+        // Extract ALWAYS bullets — strip "(Proof: ...)" citations
+        if let alwaysStart = full.range(of: "**ALWAYS**") {
+            let afterAlways = full[alwaysStart.upperBound...]
+            let alwaysEnd = afterAlways.range(of: "**NEVER**") ?? afterAlways.endIndex ..< afterAlways.endIndex
+            let alwaysSection = String(afterAlways[..<alwaysEnd.lowerBound])
+            let bullets = alwaysSection
+                .components(separatedBy: "\n")
+                .filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("*") || $0.trimmingCharacters(in: .whitespaces).hasPrefix("-") }
+                .map { line -> String in
+                    var cleaned = line.trimmingCharacters(in: .whitespaces)
+                    // Remove leading bullet marker
+                    if cleaned.hasPrefix("*   ") { cleaned = String(cleaned.dropFirst(4)) }
+                    else if cleaned.hasPrefix("* ") { cleaned = String(cleaned.dropFirst(2)) }
+                    else if cleaned.hasPrefix("- ") { cleaned = String(cleaned.dropFirst(2)) }
+                    // Strip proof citations like "(Proof: ...)"
+                    if let proofRange = cleaned.range(of: " (Proof:", options: .caseInsensitive) {
+                        cleaned = String(cleaned[..<proofRange.lowerBound])
+                    }
+                    // Strip trailing period if present
+                    if cleaned.hasSuffix(".") { cleaned = String(cleaned.dropLast()) }
+                    return "- \(cleaned)"
+                }
+            if !bullets.isEmpty {
+                parts.append("\nALWAYS:\n\(bullets.joined(separator: "\n"))")
+            }
+        }
+
+        // Extract NEVER bullets — only the first line of each, strip sub-bullets with AI Draft examples
+        if let neverStart = full.range(of: "**NEVER**") {
+            let afterNever = full[neverStart.upperBound...]
+            // NEVER section runs to the next ** section or end
+            let neverEnd = afterNever.range(of: "\n**", range: afterNever.startIndex..<afterNever.endIndex)
+            let neverSection = neverEnd != nil ? String(afterNever[..<neverEnd!.lowerBound]) : String(afterNever)
+            let bullets = neverSection
+                .components(separatedBy: "\n")
+                .filter { line in
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    // Only top-level bullets (start with * or -), skip indented sub-bullets
+                    let isTopLevel = (trimmed.hasPrefix("*") || trimmed.hasPrefix("-")) && !line.hasPrefix("    ")
+                    // Skip lines that are AI Draft examples or corrections
+                    let isExample = trimmed.contains("*AI Draft") || trimmed.contains("*Your Style") || trimmed.contains("*Correction")
+                    return isTopLevel && !isExample
+                }
+                .map { line -> String in
+                    var cleaned = line.trimmingCharacters(in: .whitespaces)
+                    if cleaned.hasPrefix("*   ") { cleaned = String(cleaned.dropFirst(4)) }
+                    else if cleaned.hasPrefix("* ") { cleaned = String(cleaned.dropFirst(2)) }
+                    else if cleaned.hasPrefix("- ") { cleaned = String(cleaned.dropFirst(2)) }
+                    if cleaned.hasSuffix(".") { cleaned = String(cleaned.dropLast()) }
+                    return "- \(cleaned)"
+                }
+            if !bullets.isEmpty {
+                parts.append("\nNEVER:\n\(bullets.joined(separator: "\n"))")
+            }
+        }
+
+        // Extract signature phrases — just the quoted phrases
+        if let phrasesStart = full.range(of: "**Signature Phrases**") {
+            let afterPhrases = full[phrasesStart.upperBound...]
+            let phrasesEnd = afterPhrases.range(of: "\n**") ?? afterPhrases.endIndex ..< afterPhrases.endIndex
+            let phrasesSection = String(afterPhrases[..<phrasesEnd.lowerBound])
+            let phrases = phrasesSection
+                .components(separatedBy: "\n")
+                .compactMap { line -> String? in
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    guard trimmed.hasPrefix("*") || trimmed.hasPrefix("-") else { return nil }
+                    // Extract just the quoted phrase
+                    if let firstQuote = trimmed.firstIndex(of: "\""),
+                       let secondQuote = trimmed[trimmed.index(after: firstQuote)...].firstIndex(of: "\"") {
+                        return String(trimmed[trimmed.index(after: firstQuote)..<secondQuote])
+                    }
+                    return nil
+                }
+            if !phrases.isEmpty {
+                parts.append("\nPHRASES: \(phrases.joined(separator: ", "))")
+            }
+        }
+
+        return parts.joined(separator: "\n")
     }
 
     // MARK: - Reference Sample Extraction
@@ -540,6 +609,21 @@ class StyleEngine: ObservableObject {
 
         saveStyleFile()
         return analysis
+    }
+
+    /// Save a pre-generated style profile (from Claude/ChatGPT paste-back).
+    /// Wraps the profile in the standard style.md structure without running any analysis.
+    func saveImportedProfile(_ profile: String) {
+        styleFileContents = """
+        # Writing Style Profile
+
+        ## Style Summary
+        \(profile)
+
+        ## Examples
+        """
+
+        saveStyleFile()
     }
 
     // MARK: - File I/O
