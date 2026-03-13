@@ -20,7 +20,7 @@ Thanks for your interest in contributing to Transcripted! This guide will help y
 
 2. Open the project in Xcode:
    ```bash
-   open Murmur.xcodeproj
+   open Transcripted.xcodeproj
    ```
 
 3. Set your **Development Team** in the Signing & Capabilities tab — the project has a placeholder team ID that you'll need to replace with your own.
@@ -63,11 +63,11 @@ The codebase is organized into layers:
 
 | Layer | Directory | Responsibility |
 |-------|-----------|---------------|
-| Core | `Murmur/Core/` | Audio capture, transcription pipeline, data persistence |
-| Services | `Murmur/Services/` | ML models (Parakeet, Sortformer, Qwen), speaker database |
-| UI | `Murmur/UI/` | Floating panel, settings window |
-| Design | `Murmur/Design/` | Design tokens, shared components |
-| Onboarding | `Murmur/Onboarding/` | First-run experience |
+| Core | `Transcripted/Core/` | Audio capture, transcription pipeline, data persistence |
+| Services | `Transcripted/Services/` | ML models (Parakeet, Sortformer, Qwen), speaker database |
+| UI | `Transcripted/UI/` | Floating panel, settings window |
+| Design | `Transcripted/Design/` | Design tokens, shared components |
+| Onboarding | `Transcripted/Onboarding/` | First-run experience |
 
 Each directory has a `CLAUDE.md` file documenting its internals, key types, and modification guidelines. Read the relevant one before making changes in that area.
 
@@ -76,10 +76,10 @@ Each directory has a `CLAUDE.md` file documenting its internals, key types, and 
 Run tests via Xcode (Cmd+U) or from the command line:
 
 ```bash
-xcodebuild -project Murmur.xcodeproj -scheme Murmur test
+xcodebuild -project Transcripted.xcodeproj -scheme Transcripted test
 ```
 
-If you're adding new functionality, please add tests where practical. Test files mirror the source structure under `MurmurTests/`.
+If you're adding new functionality, please add tests where practical. Test files mirror the source structure under `TranscriptedTests/`.
 
 ## Submitting a Pull Request
 

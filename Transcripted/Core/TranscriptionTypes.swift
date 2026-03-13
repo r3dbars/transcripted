@@ -21,6 +21,15 @@ struct TranscriptionResult {
     let systemUtterances: [TranscriptionUtterance]
     let duration: TimeInterval
     let processingTime: TimeInterval
+    let droppedSegments: Int
+
+    init(micUtterances: [TranscriptionUtterance], systemUtterances: [TranscriptionUtterance], duration: TimeInterval, processingTime: TimeInterval, droppedSegments: Int = 0) {
+        self.micUtterances = micUtterances
+        self.systemUtterances = systemUtterances
+        self.duration = duration
+        self.processingTime = processingTime
+        self.droppedSegments = droppedSegments
+    }
 
     /// All utterances merged and sorted by start time
     var allUtterances: [TranscriptionUtterance] {

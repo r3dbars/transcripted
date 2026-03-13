@@ -16,8 +16,8 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A1000028"
                BuildableName = "Transcripted.app"
-               BlueprintName = "Murmur"
-               ReferencedContainer = "container:Murmur.xcodeproj">
+               BlueprintName = "Transcripted"
+               ReferencedContainer = "container:Transcripted.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -35,9 +35,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "T1000300"
-               BuildableName = "MurmurTests.xctest"
-               BlueprintName = "MurmurTests"
-               ReferencedContainer = "container:Murmur.xcodeproj">
+               BuildableName = "TranscriptedTests.xctest"
+               BlueprintName = "TranscriptedTests"
+               ReferencedContainer = "container:Transcripted.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -58,8 +58,8 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A1000028"
             BuildableName = "Transcripted.app"
-            BlueprintName = "Murmur"
-            ReferencedContainer = "container:Murmur.xcodeproj">
+            BlueprintName = "Transcripted"
+            ReferencedContainer = "container:Transcripted.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -75,8 +75,8 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A1000028"
             BuildableName = "Transcripted.app"
-            BlueprintName = "Murmur"
-            ReferencedContainer = "container:Murmur.xcodeproj">
+            BlueprintName = "Transcripted"
+            ReferencedContainer = "container:Transcripted.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

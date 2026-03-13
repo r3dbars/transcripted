@@ -12,9 +12,9 @@
 
 ## Build Commands
 ```bash
-xcodebuild -project Murmur.xcodeproj -scheme Murmur -configuration Debug build
-xcodebuild -project Murmur.xcodeproj -scheme Murmur -configuration Release build
-xcodebuild -project Murmur.xcodeproj -scheme Murmur clean
+xcodebuild -project Transcripted.xcodeproj -scheme Transcripted -configuration Debug build
+xcodebuild -project Transcripted.xcodeproj -scheme Transcripted -configuration Release build
+xcodebuild -project Transcripted.xcodeproj -scheme Transcripted clean
 ```
 Requires: macOS 14.2+, Xcode 15+, Swift 5.9+
 
@@ -23,21 +23,21 @@ Read the component CLAUDE.md in the relevant directory FIRST:
 
 | Task / Issue | Read first |
 |---|---|
-| Audio capture, mic, recording | `Murmur/Core/CLAUDE.md` |
-| System audio, process taps | `Murmur/Core/CLAUDE.md` |
-| Transcription pipeline, saving | `Murmur/Core/CLAUDE.md` |
-| Task queue, retries, progress | `Murmur/Core/CLAUDE.md` |
-| STT model (Parakeet) | `Murmur/Services/CLAUDE.md` |
-| Speaker diarization (Sortformer) | `Murmur/Services/CLAUDE.md` |
-| Speaker matching, voice DB | `Murmur/Services/CLAUDE.md` |
-| Speaker name inference (Qwen) | `Murmur/Services/CLAUDE.md` |
-| Audio resampling | `Murmur/Services/CLAUDE.md` |
-| Floating pill UI, state machine | `Murmur/UI/FloatingPanel/CLAUDE.md` |
-| Transcript tray, speaker naming | `Murmur/UI/FloatingPanel/CLAUDE.md` |
-| Settings window | `Murmur/UI/Settings/CLAUDE.md` |
-| Design tokens, colors, animations | `Murmur/Design/CLAUDE.md` |
-| Onboarding flow | `Murmur/Onboarding/CLAUDE.md` |
-| App entry point, bootstrap | `Murmur/TranscriptedApp.swift` |
+| Audio capture, mic, recording | `Transcripted/Core/CLAUDE.md` |
+| System audio, process taps | `Transcripted/Core/CLAUDE.md` |
+| Transcription pipeline, saving | `Transcripted/Core/CLAUDE.md` |
+| Task queue, retries, progress | `Transcripted/Core/CLAUDE.md` |
+| STT model (Parakeet) | `Transcripted/Services/CLAUDE.md` |
+| Speaker diarization (Sortformer) | `Transcripted/Services/CLAUDE.md` |
+| Speaker matching, voice DB | `Transcripted/Services/CLAUDE.md` |
+| Speaker name inference (Qwen) | `Transcripted/Services/CLAUDE.md` |
+| Audio resampling | `Transcripted/Services/CLAUDE.md` |
+| Floating pill UI, state machine | `Transcripted/UI/FloatingPanel/CLAUDE.md` |
+| Transcript tray, speaker naming | `Transcripted/UI/FloatingPanel/CLAUDE.md` |
+| Settings window | `Transcripted/UI/Settings/CLAUDE.md` |
+| Design tokens, colors, animations | `Transcripted/Design/CLAUDE.md` |
+| Onboarding flow | `Transcripted/Onboarding/CLAUDE.md` |
+| App entry point, bootstrap | `Transcripted/TranscriptedApp.swift` |
 
 ## Critical Invariants (All Changes)
 - All classes use `@available(macOS 26.0, *)` — required for `AudioHardwareCreateProcessTap`
