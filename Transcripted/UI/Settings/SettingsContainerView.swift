@@ -20,6 +20,7 @@ struct SettingsContainerView: View {
     @AppStorage("enableQwenSpeakerInference") private var enableQwenInference: Bool = true
     @AppStorage("enableObsidianFormat") private var enableObsidianFormat: Bool = false
     @AppStorage("enableAgentOutput") private var enableAgentOutput: Bool = true
+    @AppStorage("autoRecordMeetings") private var autoRecordMeetings: Bool = false
 
     @State private var enableSounds: Bool = true
     @State private var qwenModelCached: Bool = false
@@ -63,6 +64,8 @@ struct SettingsContainerView: View {
                     profileSection
 
                     appearanceSection
+
+                    meetingDetectionSection
 
                     speakerIntelligenceSection
 
@@ -582,6 +585,53 @@ struct SettingsContainerView: View {
                         }
                     )
                 )
+            }
+        }
+    }
+
+    // MARK: - Meeting Detection Section
+
+    private var meetingDetectionSection: some View {
+        SettingsSectionCard(icon: "video.fill", title: "Meeting Detection") {
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                SettingsToggleRow(
+                    title: "Auto-Record Meetings",
+                    description: "Starts recording when Zoom, Teams, Webex, or FaceTime detects an active call",
+                    isOn: $autoRecordMeetings
+                )
+
+                if autoRecordMeetings {
+                    Divider().background(Color.panelCharcoalSurface)
+
+                    VStack(alignment: .leading, spacing: Spacing.sm) {
+                        HStack(spacing: Spacing.xs) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 11))
+                                .foregroundColor(.attentionGreen)
+                            Text("Zoom, Microsoft Teams, Webex, FaceTime, Loom")
+                                .font(.caption)
+                                .foregroundColor(.panelTextMuted)
+                        }
+
+                        HStack(spacing: Spacing.xs) {
+                            Image(systemName: "info.circle")
+                                .font(.system(size: 11))
+                                .foregroundColor(.panelTextMuted)
+                            Text("Triggers after 5s of active call audio. Stops 15s after audio drops.")
+                                .font(.caption)
+                                .foregroundColor(.panelTextMuted)
+                        }
+
+                        HStack(spacing: Spacing.xs) {
+                            Image(systemName: "xmark.circle")
+                                .font(.system(size: 11))
+                                .foregroundColor(.panelTextMuted)
+                            Text("Browser meetings (Google Meet, Teams web) require manual start.")
+                                .font(.caption)
+                                .foregroundColor(.panelTextMuted)
+                        }
+                    }
+                }
             }
         }
     }

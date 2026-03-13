@@ -66,6 +66,7 @@
 		A1002015 /* TranscriptionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002005 /* TranscriptionTypes.swift */; };
 		A1002016 /* SpeakerClipExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002006 /* SpeakerClipExtractor.swift */; };
 		A1002018 /* EmbeddingClusterer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002007 /* EmbeddingClusterer.swift */; };
+		MD000011 /* MeetingDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = MD000012 /* MeetingDetector.swift */; };
 		A1003001 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1003002 /* AppLogger.swift */; };
 		A1003003 /* FileLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1003004 /* FileLogger.swift */; };
 		FA000011 /* libFluidAudioAll.a in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000001 /* libFluidAudioAll.a */; };
@@ -171,6 +172,7 @@
 		A1002005 /* TranscriptionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTypes.swift; sourceTree = "<group>"; };
 		A1002006 /* SpeakerClipExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerClipExtractor.swift; sourceTree = "<group>"; };
 		A1002007 /* EmbeddingClusterer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingClusterer.swift; sourceTree = "<group>"; };
+		MD000012 /* MeetingDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDetector.swift; sourceTree = "<group>"; };
 		A1003002 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
 		A1003004 /* FileLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileLogger.swift; sourceTree = "<group>"; };
 		BF26FA6ED2054F3DCF8D0B45 /* ModelSetupStep.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelSetupStep.swift; sourceTree = "<group>"; };
@@ -357,6 +359,7 @@
 				A1002001 /* AudioResampler.swift */,
 				A1002002 /* ParakeetService.swift */,
 				Q1000002 /* QwenService.swift */,
+				MD000012 /* MeetingDetector.swift */,
 				A1002003 /* SortformerService.swift */,
 				A1002004 /* SpeakerDatabase.swift */,
 				A1002006 /* SpeakerClipExtractor.swift */,
@@ -674,6 +677,7 @@
 				A1002015 /* TranscriptionTypes.swift in Sources */,
 				A1002016 /* SpeakerClipExtractor.swift in Sources */,
 				A1002018 /* EmbeddingClusterer.swift in Sources */,
+				MD000011 /* MeetingDetector.swift in Sources */,
 				A100091F /* SpeakerNamingView.swift in Sources */,
 				A1003001 /* AppLogger.swift in Sources */,
 				A1003003 /* FileLogger.swift in Sources */,
