@@ -512,6 +512,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if audio?.isRecording == true {
             audio?.stop()
         }
+        taskManager?.cleanupPendingNaming()
         taskManager?.cancelAll()
 
         // Clean up hotkey monitors

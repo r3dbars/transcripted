@@ -27,13 +27,13 @@ A native macOS app that automatically records, transcribes, and organizes voice 
 
 ```bash
 # Open in Xcode (recommended)
-open Murmur.xcodeproj
+open Transcripted.xcodeproj
 
 # Or build from command line
-xcodebuild -project Murmur.xcodeproj -scheme Murmur -configuration Debug build
+xcodebuild -project Transcripted.xcodeproj -scheme Transcripted -configuration Debug build
 
 # Build for release
-xcodebuild -project Murmur.xcodeproj -scheme Murmur -configuration Release build
+xcodebuild -project Transcripted.xcodeproj -scheme Transcripted -configuration Release build
 ```
 
 ## Permissions
@@ -49,7 +49,7 @@ On first launch, Transcripted requests:
 ## Architecture
 
 ```
-Murmur/
+Transcripted/
 ├── Core/                                  # Business logic (21 files)
 │   ├── Audio.swift                        # Microphone capture via AVAudioEngine
 │   ├── SystemAudioCapture.swift           # System audio via CoreAudio process taps
@@ -166,7 +166,7 @@ Settings are stored in UserDefaults:
 ## Contributing
 
 1. Fork the repo and create your branch from `main`
-2. Open `Murmur.xcodeproj` in Xcode
+2. Open `Transcripted.xcodeproj` in Xcode
 3. Set your own **Development Team** in the Signing & Capabilities tab (the project has a placeholder team ID)
 4. Build and run
 
