@@ -248,6 +248,7 @@ struct StyleOnboardingView: View {
 
         styleEngine.saveImportedProfile(trimmed)
         styleEngine.completeOnboarding()
+        EventTracker.track("onboarding.completed", with: ["example_count": "\(styleEngine.exampleCount)"])
     }
 
     // MARK: - Prompt
