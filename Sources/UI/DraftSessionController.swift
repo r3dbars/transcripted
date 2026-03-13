@@ -29,6 +29,16 @@ class DraftSessionController: ObservableObject {
         }
     }
 
+    /// Unwrap both required dependencies or log a warning and return nil.
+    private func readyState() -> (DraftAppState, FloatingOverlayController)? {
+        guard let appState = appState, let overlayController = overlayController else {
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "session_not_wired",
+                message: "appState or overlayController not set")
+            return nil
+        }
+        return (appState, overlayController)
+    }
+
     private var lastCapturedContext: CapturedContext?
     private var sessionSourceApp: NSRunningApplication?
     private var streamingTask: Task<Void, Never>?
@@ -65,7 +75,7 @@ class DraftSessionController: ObservableObject {
 
     /// Start a new recording session — called on first hotkey press
     func startSession(imageData: Data?, sourceApp: NSRunningApplication?) {
-        guard let appState = appState, let overlayController = overlayController else { return }
+        guard let (appState, overlayController) = readyState() else { return }
         guard !isInSession, !isDictating else { return }
         isInSession = true
         sessionSourceApp = sourceApp
@@ -76,6 +86,7 @@ class DraftSessionController: ObservableObject {
         appState.drafter.clear()
 
         // Show overlay and start recording
+        overlayController.hasContext = true
         overlayController.activeMode = .draft
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
@@ -91,11 +102,11 @@ class DraftSessionController: ObservableObject {
             streamingTask?.cancel()
             streamingTask = Task { [weak self] in
                 guard let self = self else { return }
-                // Poll every 200ms for up to 120 seconds
-                for _ in 0..<600 {
+                // Poll for model readiness (200ms intervals, up to 120s)
+                for _ in 0..<DraftConstants.modelLoadMaxIterations {
                     guard !Task.isCancelled else { return }
                     if await self.appState?.sttRouter.isModelLoaded == true { break }
-                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    try? await Task.sleep(nanoseconds: DraftConstants.modelLoadPollInterval)
                 }
                 guard !Task.isCancelled else { return }
                 guard await self.appState?.sttRouter.isModelLoaded == true else {
@@ -140,7 +151,7 @@ class DraftSessionController: ObservableObject {
 
     /// Stop recording and trigger drafting — called on second hotkey press
     func stopSessionAndDraft() {
-        guard let appState = appState, let overlayController = overlayController else { return }
+        guard let (appState, overlayController) = readyState() else { return }
         guard isInSession else { return }
         overlayController.enterDraftingState()
 
@@ -164,18 +175,18 @@ class DraftSessionController: ObservableObject {
 
             let platform = PlatformFormatter.detect(from: sessionSourceApp)
 
-            guard let auth = AuthCredential.load() else {
-                appState.logger.log("SESSION | no auth credential, cancelling")
-                EventReporter.shared.capture(level: .error, engine: "overlay", event: "auth_missing",
-                    message: "No API credential configured")
+            guard appState.localInference.isReady else {
+                appState.logger.log("SESSION | local model not loaded, cancelling")
+                EventReporter.shared.capture(level: .error, engine: "overlay", event: "model_not_ready",
+                    message: "Local LLM not loaded")
                 visionTask?.cancel()
                 visionTask = nil
-                overlayController.showError("No API key configured")
+                overlayController.showError(appState.localInference.statusLabel)
                 isInSession = false
                 return
             }
 
-            // Wait for vision to complete (or its 8-second timeout) before checking context
+            // Wait for vision to complete (or timeout) before checking context
             await visionTask?.value
             visionTask = nil
 
@@ -190,15 +201,14 @@ class DraftSessionController: ObservableObject {
             if let context = lastCapturedContext, context.hasConversation {
                 userMessage = context.draftingPrompt(userInstructions: voiceText)
             } else {
-                userMessage = "The user dictated the following message. Clean it up, fix grammar, and make it sound natural while preserving their intent and tone. Do NOT add greetings, sign-offs, or change the meaning. Output ONLY the cleaned-up message.\n\nDICTATED:\n\(voiceText.trimmingCharacters(in: .whitespacesAndNewlines))"
+                userMessage = "Clean up this dictation. Fix grammar, keep their tone. Output only the message.\n\n\(voiceText.trimmingCharacters(in: .whitespacesAndNewlines))"
             }
 
-            let model = appState.promptStore.config.draftModel
-            let stream = AnthropicAPI.streamDraft(
-                rawText: userMessage,
-                auth: auth,
-                model: model,
-                systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt
+            let stream = await appState.localInference.draftEngine.generate(
+                prompt: userMessage,
+                systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt,
+                maxTokens: DraftConstants.draftMaxTokens,
+                temperature: 0.7
             )
 
             var fullText = ""
@@ -251,7 +261,7 @@ class DraftSessionController: ObservableObject {
     }
 
     func cancelSession() {
-        guard let appState = appState, let overlayController = overlayController else { return }
+        guard let (appState, overlayController) = readyState() else { return }
         visionTask?.cancel()
         visionTask = nil
         streamingTask?.cancel()
@@ -277,7 +287,7 @@ class DraftSessionController: ObservableObject {
 
     /// Start dictation — show overlay and begin voice recording (no screenshot/vision)
     func startDictation(sourceApp: NSRunningApplication?) {
-        guard let appState = appState, let overlayController = overlayController else { return }
+        guard let (appState, overlayController) = readyState() else { return }
         guard !isDictating, !isInSession else { return }
         isDictating = true
         sessionSourceApp = sourceApp
@@ -297,10 +307,10 @@ class DraftSessionController: ObservableObject {
             streamingTask?.cancel()
             streamingTask = Task { [weak self] in
                 guard let self = self else { return }
-                for _ in 0..<600 {
+                for _ in 0..<DraftConstants.modelLoadMaxIterations {
                     guard !Task.isCancelled else { return }
                     if await self.appState?.sttRouter.isModelLoaded == true { break }
-                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    try? await Task.sleep(nanoseconds: DraftConstants.modelLoadPollInterval)
                 }
                 guard !Task.isCancelled else { return }
                 guard await self.appState?.sttRouter.isModelLoaded == true else {
@@ -337,7 +347,7 @@ class DraftSessionController: ObservableObject {
 
     /// Stop dictation and paste — Parakeet batch transcription
     func stopDictationAndPaste() {
-        guard let appState = appState, let overlayController = overlayController else { return }
+        guard let (appState, overlayController) = readyState() else { return }
         guard isDictating, overlayController.state == .listening else { return }
         // Stay compact during transcription — don't expand to full drafting height.
         // Just update the state for the spinner, keeping the compact panel size.
@@ -345,8 +355,10 @@ class DraftSessionController: ObservableObject {
         overlayController.state = .drafting
 
         appState.sttRouter.stopRecording()
-        Task {
+        streamingTask?.cancel()
+        streamingTask = Task {
             let voiceText = await appState.sttRouter.transcribe()
+            guard !Task.isCancelled else { return }
 
             guard let text = voiceText, !text.isEmpty else {
                 appState.logger.log("DICTATION | no transcription, cancelling")
@@ -357,6 +369,7 @@ class DraftSessionController: ObservableObject {
                 return
             }
 
+            guard !Task.isCancelled else { return }
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
             overlayController.hideWithConfirmAnimation { [weak self] in
@@ -381,7 +394,9 @@ class DraftSessionController: ObservableObject {
 
     /// Cancel dictation without pasting
     func cancelDictation() {
-        guard let appState = appState, let overlayController = overlayController else { return }
+        guard let (appState, overlayController) = readyState() else { return }
+        streamingTask?.cancel()
+        streamingTask = nil
         if appState.sttRouter.isRecording {
             appState.sttRouter.cancel()
         }
@@ -416,32 +431,23 @@ class DraftSessionController: ObservableObject {
             return
         }
 
-        guard let auth = AuthCredential.load(), let imageData = imageData else {
-            appState.logger.log("SESSION | no auth or screenshot, proceeding voice-only")
+        guard let imageData = imageData else {
+            appState.logger.log("SESSION | no screenshot, proceeding voice-only")
+            overlayController?.hasContext = false
             return
         }
 
-        let userName = UserDefaults.standard.string(forKey: "user-display-name")
-        let appName = sourceApp?.localizedName
-        let model = appState.promptStore.config.model
-        let extractionPrompt = appState.promptStore.contextExtractionPrompt(userName: userName, appName: appName)
-
         do {
-            let context = try await AnthropicAPI.withTimeout(seconds: DraftConstants.visionTimeoutSeconds) {
-                try await AnthropicAPI.extractStructuredContext(
-                    imageData: imageData,
-                    auth: auth,
-                    model: model,
-                    systemPrompt: extractionPrompt
-                )
-            }
+            // OCR only — no LLM call. Raw text goes directly into the drafting prompt.
+            let context = try await LocalVisionExtractor.extractContext(imageData: imageData)
             lastCapturedContext = context
-            appState.logger.log("SESSION | vision complete — platform=\(context.platform ?? "nil")")
+            let charCount = context.conversation?.count ?? 0
+            appState.logger.log("SESSION | OCR complete — \(charCount) chars extracted")
         } catch {
-            appState.logger.log("SESSION | vision timeout/error: \(error.localizedDescription), proceeding voice-only")
-            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "vision_timeout",
+            appState.logger.log("SESSION | OCR error: \(error.localizedDescription), proceeding voice-only")
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "ocr_failed",
                 message: error.localizedDescription)
-            // Proceed without context — voiceText alone is enough to draft
+            overlayController?.hasContext = false
         }
     }
 
@@ -513,9 +519,9 @@ class DraftSessionController: ObservableObject {
         }
 
         // Check if style refinement is needed
-        if appState.styleEngine.shouldRefineNow(), let auth = appState.drafter.getAuth() {
+        if appState.styleEngine.shouldRefineNow(), appState.localInference.isReady {
             Task {
-                await appState.styleEngine.regenerateStyleSummary(auth: auth)
+                await appState.styleEngine.regenerateStyleSummary(draftEngine: appState.localInference.draftEngine)
                 appState.logger.log("STYLE | summary updated")
             }
         }
@@ -552,13 +558,17 @@ class DraftSessionController: ObservableObject {
         }
 
         // Simulate Cmd+V — target app is already frontmost (overlay is non-activating)
-        let vDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true)
-        vDown?.flags = .maskCommand
-        vDown?.post(tap: .cghidEventTap)
+        guard let vDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true),
+              let vUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false) else {
+            EventReporter.shared.capture(level: .error, engine: "overlay", event: "cgevent_create_failed",
+                message: "CGEvent creation returned nil — paste will not work")
+            return
+        }
+        vDown.flags = .maskCommand
+        vDown.post(tap: .cghidEventTap)
 
-        let vUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false)
-        vUp?.flags = .maskCommand
-        vUp?.post(tap: .cghidEventTap)
+        vUp.flags = .maskCommand
+        vUp.post(tap: .cghidEventTap)
 
         // Restore clipboard after paste completes.
         // Poll changeCount every 50ms — some apps (rich text editors) write back to the
@@ -573,12 +583,15 @@ class DraftSessionController: ObservableObject {
                 if pasteboard.changeCount != changeCountAfterSet { break }
             }
             pasteboard.clearContents()
-            for typeData in savedItems {
+            let items = savedItems.map { typeData -> NSPasteboardItem in
                 let item = NSPasteboardItem()
                 for (type, data) in typeData {
                     item.setData(data, forType: type)
                 }
-                pasteboard.writeObjects([item])
+                return item
+            }
+            if !items.isEmpty {
+                pasteboard.writeObjects(items)
             }
         }
     }

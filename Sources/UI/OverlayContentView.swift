@@ -11,6 +11,8 @@ struct OverlayContentView: View {
     private var showContentArea: Bool {
         if controller.state == .idle { return false }
         if controller.state == .listening && !controller.transcriptExpanded { return false }
+        // Dictation stays compact during transcription — header spinner is enough
+        if controller.state == .drafting && controller.activeMode == .dictation { return false }
         return true
     }
 
@@ -25,6 +27,7 @@ struct OverlayContentView: View {
             }
             bottomToolbar
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(OverlayTokens.panelBg)
         .clipShape(RoundedRectangle(cornerRadius: OverlayTokens.cornerRadius, style: .continuous))
     }
@@ -51,9 +54,10 @@ struct OverlayContentView: View {
                             .controlSize(.mini)
                             .tint(OverlayTokens.accentGreen)
                         Text("Polishing...")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(OverlayTokens.textSecondary)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(OverlayTokens.textPrimary)
                     }
+                    .frame(maxWidth: .infinity)
                 case (.drafting, _), (.streaming, _):
                     HStack(spacing: 6) {
                         ProgressView()
@@ -83,8 +87,10 @@ struct OverlayContentView: View {
                 }
             }
 
-            // Scrolling waveform during listening; spacer otherwise
-            if controller.state == .listening {
+            // Scrolling waveform during listening; spacer otherwise (skip for dictation drafting — centered above)
+            if controller.state == .drafting && controller.activeMode == .dictation {
+                // No spacer — Polishing content is centered via .frame(maxWidth: .infinity)
+            } else if controller.state == .listening {
                 ScrollingWaveformView(
                     level: sttRouter.audioLevel,
                     isActive: true
@@ -109,11 +115,11 @@ struct OverlayContentView: View {
             Group {
                 switch (controller.state, controller.activeMode) {
                 case (.listening, .draft):
-                    Text("\u{2325}D to stop")
+                    Text("\(controller.draftShortcutHint) to stop")
                         .font(.system(size: 10))
                         .foregroundColor(OverlayTokens.textMuted)
                 case (.listening, .dictation):
-                    Text("\u{2325}Space to stop")
+                    Text("\(controller.dictationShortcutHint) to stop")
                         .font(.system(size: 10))
                         .foregroundColor(OverlayTokens.textMuted)
                 case (.loading, _):
@@ -188,8 +194,8 @@ struct OverlayContentView: View {
                 }
             } else {
                 Text(controller.activeMode == .dictation
-                     ? "Recording... press \u{2325}Space to stop"
-                     : "Recording... press \u{2325}D to stop")
+                     ? "Recording... press \(controller.dictationShortcutHint) to stop"
+                     : "Recording... press \(controller.draftShortcutHint) to stop")
                     .font(.system(size: 12))
                     .foregroundColor(OverlayTokens.textMuted)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -242,12 +248,20 @@ struct OverlayContentView: View {
 
     @ViewBuilder
     private var streamingContent: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            Text(controller.streamingText)
-                .font(.system(size: 13))
-                .foregroundColor(OverlayTokens.textPrimary)
-                .lineLimit(nil)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                Text(controller.streamingText)
+                    .font(.system(size: 13))
+                    .foregroundColor(OverlayTokens.textPrimary)
+                    .lineLimit(nil)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .id("stream")
+            }
+            .onChange(of: controller.streamingText) {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    proxy.scrollTo("stream", anchor: .bottom)
+                }
+            }
         }
         .padding(.horizontal, OverlayTokens.contentPadding)
         .padding(.vertical, 12)
@@ -266,6 +280,9 @@ struct OverlayContentView: View {
                 if keyPress.modifiers.contains(.shift) {
                     return .ignored  // Shift+Enter inserts newline
                 }
+                guard !controller.reviewText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    return .handled  // Swallow Enter on empty text — don't paste nothing
+                }
                 controller.onConfirm?()
                 return .handled
             }
@@ -283,7 +300,7 @@ struct OverlayContentView: View {
 
     @ViewBuilder
     private var idleContent: some View {
-        Text("Press \u{2325}Space or \u{2325}D to start")
+        Text("Press \(controller.dictationShortcutHint) or \(controller.draftShortcutHint) to start")
             .font(.system(size: 12))
             .foregroundColor(OverlayTokens.textMuted)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -296,11 +313,20 @@ struct OverlayContentView: View {
         // Only show bottom toolbar in review mode — listening/drafting/streaming
         // status is already communicated by the header bar (waveform, spinner, etc.)
         if controller.state == .review {
-            Text("\u{21A9} send \u{00B7} Esc cancel")
-                .font(.system(size: 10))
-                .foregroundColor(OverlayTokens.textMuted)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+            HStack {
+                if !controller.hasContext {
+                    Text("voice only")
+                        .font(.system(size: 10))
+                        .foregroundColor(OverlayTokens.textMuted)
+                }
+                Spacer()
+                Text("\u{21A9} send \u{00B7} Esc cancel")
+                    .font(.system(size: 10))
+                    .foregroundColor(OverlayTokens.textMuted)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, OverlayTokens.contentPadding)
+            .padding(.vertical, 8)
         }
     }
 }

@@ -6,9 +6,11 @@ Bootstrap and centralized state management for the Draft macOS app. Three files 
 
 ## Key Files
 
-- `DraftApp.swift` (89 lines) — `@main` entry point: SwiftUI App struct + `DraftAppDelegate` (NSApplicationDelegate) for menubar setup, popover lifecycle, and engine initialization
-- `DraftAppState.swift` (88 lines) — `@MainActor ObservableObject` that owns all engine instances and coordinates initialization/shutdown
+- `DraftApp.swift` (125 lines) — `@main` entry point: SwiftUI App struct + `DraftAppDelegate` (NSApplicationDelegate) for menubar setup, popover lifecycle, and engine initialization
+- `DraftAppState.swift` (188 lines) — `@MainActor ObservableObject` that owns all engine instances and coordinates initialization/shutdown
 - `DraftPaths.swift` (13 lines) — `FileManager` extension providing `draftAppSupportDir` (`~/Library/Application Support/Draft/`)
+- `HotkeyPreferences.swift` (193 lines) — Stores/loads custom hotkey bindings (UserDefaults), Carbon modifier conversion, display strings for shortcut hints
+- `DraftConstants.swift` (126 lines) — Centralized configuration constants (timeouts, thresholds, limits, buffer sizes)
 
 ## Initialization Order (Critical)
 
@@ -29,7 +31,7 @@ The boot sequence in `DraftAppDelegate.applicationDidFinishLaunching()` has stri
    └→ overlayController.setup(sttRouter: appState.sttRouter)  // Creates NSPanel + hosting view
 
 4. Menubar setup
-   └→ NSStatusBar item + NSPopover with MenuBarPanelView
+   └→ NSStatusBar item + empty NSPopover (NO contentViewController — created on-demand in togglePopover())
 
 5. Async initialization (in Task { @MainActor })
    ├→ appState.initialize()     // Engine cross-wiring, analysis start, Parakeet model load

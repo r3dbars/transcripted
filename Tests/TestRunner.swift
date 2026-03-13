@@ -14,7 +14,6 @@ struct TestRunner {
         testMessageFilter()
         testStyleUtils()
         testInsightCard()
-        testIsRetryable()
 
         print("\n\(totalTests) tests, \(passedTests) passed, \(failedTests) failed")
         if failedTests > 0 {

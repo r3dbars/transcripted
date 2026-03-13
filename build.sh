@@ -5,7 +5,7 @@ APP_NAME="Draft"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 
-echo "🔨 Building Draft..."
+echo "Building Draft..."
 
 # Clean
 rm -rf "$BUILD_DIR"
@@ -19,7 +19,7 @@ if [ -d "$PARAKEET_SRC/Encoder.mlmodelc" ]; then
     mkdir -p "$APP_BUNDLE/Contents/Resources/parakeet-models"
     cp -R "$PARAKEET_SRC" "$APP_BUNDLE/Contents/Resources/parakeet-models/"
 else
-    echo "⚠️  Parakeet models not found — Parakeet engine will attempt runtime download"
+    echo "Parakeet models not found — Parakeet engine will attempt runtime download"
 fi
 
 # Copy Info.plist
@@ -33,8 +33,6 @@ cat > "$BUILD_DIR/Draft.entitlements" << 'EOF'
 <dict>
     <key>com.apple.security.app-sandbox</key>
     <false/>
-    <key>com.apple.security.network.client</key>
-    <true/>
     <key>com.apple.security.device.audio-input</key>
     <true/>
     <key>com.apple.security.speech.recognition</key>
@@ -43,15 +41,28 @@ cat > "$BUILD_DIR/Draft.entitlements" << 'EOF'
 </plist>
 EOF
 
-# FluidAudio (required — Parakeet STT engine)
-# Run build-fluidaudio.sh first to build these artifacts
-if [ ! -f "fluidaudio-libs/libFluidAudioAll.a" ] || [ ! -d "fluidaudio-modules/FluidAudio.swiftmodule" ]; then
-    echo "❌ FluidAudio not found — required for Parakeet STT engine"
-    echo "   Run build-fluidaudio.sh first to build FluidAudio."
+# Unified dependencies (FluidAudio + mlx-swift-lm)
+# Run build-deps.sh first to build these artifacts
+if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ]; then
+    echo "Dependencies not found — required for Parakeet STT + local LLM inference"
+    echo "   Run build-deps.sh first to build dependencies."
     exit 1
 fi
-echo "FluidAudio found"
-FLUID_FLAGS="-Ifluidaudio-modules -Ifluidaudio-modules/FastClusterWrapper -Ifluidaudio-modules/MachTaskSelfWrapper -Ifluidaudio-modules/yyjson -Lfluidaudio-libs -lFluidAudioAll -framework CoreML -framework CoreAudio"
+echo "Dependencies found"
+
+# Build the -I flags for all module directories
+DEPS_MODULE_FLAGS="-Ideps-modules"
+for dir in deps-modules/*/; do
+    [ -d "$dir" ] && DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
+done
+
+DEPS_FLAGS="$DEPS_MODULE_FLAGS -Ldeps-libs -lDraftDeps -framework CoreML -framework CoreAudio"
+
+# Bundle Metal libraries if present
+# MLX searches for mlx.metallib next to the binary first (Contents/MacOS/)
+for metallib in deps-libs/*.metallib; do
+    [ -f "$metallib" ] && cp "$metallib" "$APP_BUNDLE/Contents/MacOS/"
+done
 
 # Compile
 echo "Compiling..."
@@ -68,9 +79,12 @@ swiftc \
     -framework Metal \
     -framework MetalKit \
     -framework Accelerate \
+    -framework Vision \
+    -framework MetalPerformanceShaders \
+    -framework MetalPerformanceShadersGraph \
     -lsqlite3 \
     -lc++ \
-    $FLUID_FLAGS \
+    $DEPS_FLAGS \
     $(find Sources -name '*.swift') \
     -parse-as-library \
     -target arm64-apple-macos14.0 \
@@ -78,7 +92,7 @@ swiftc \
     2>&1
 
 if [ $? -ne 0 ]; then
-    echo "❌ Build failed!"
+    echo "Build failed!"
     exit 1
 fi
 
@@ -88,6 +102,6 @@ codesign --force --deep --sign "Apple Development: Justin Betker (LZRN6W4R74)" \
     --entitlements "$BUILD_DIR/Draft.entitlements" \
     "$APP_BUNDLE" 2>&1
 
-echo "✅ Build complete!"
+echo "Build complete!"
 echo "Launching Draft..."
 open "$APP_BUNDLE"

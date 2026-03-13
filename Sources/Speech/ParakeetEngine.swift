@@ -50,6 +50,7 @@ class ParakeetEngine: ObservableObject {
     // FluidAudio ASR
     private var asrManager: AsrManager?
     private var initTask: Task<Void, Never>?
+    private var audioWatchdogTask: Task<Void, Never>?
 
     var isModelLoaded: Bool { asrManager?.isAvailable ?? false }
 
@@ -84,7 +85,8 @@ class ParakeetEngine: ObservableObject {
     /// Bundle path: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/
     func initialize() async {
         guard asrManager == nil else {
-            print("⚠️ PARAKEET | already initialized")
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "already_initialized",
+                message: "initialize() called but ASR manager already exists — ignoring")
             return
         }
 
@@ -145,6 +147,16 @@ class ParakeetEngine: ObservableObject {
         do {
             let inputNode = audioEngine.inputNode
             let nativeFormat = inputNode.outputFormat(forBus: 0)
+
+            // Validate audio format — after sleep, the input node may return a zero-rate
+            // format if CoreAudio hardware hasn't fully reinitialized.
+            guard nativeFormat.sampleRate > 0, nativeFormat.channelCount > 0 else {
+                EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "prewarm_invalid_format",
+                    message: "Audio format invalid during prewarm",
+                    context: ["sample_rate": "\(nativeFormat.sampleRate)", "channels": "\(nativeFormat.channelCount)"])
+                return
+            }
+
             nativeSampleRate = nativeFormat.sampleRate
 
             audioEngine.prepare()
@@ -176,7 +188,6 @@ class ParakeetEngine: ObservableObject {
                 }
             }
         } catch {
-            print("⚠️ PARAKEET | prewarm failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "prewarm_failed",
                 message: error.localizedDescription, context: ["audio_device": inputDeviceName])
         }
@@ -186,41 +197,48 @@ class ParakeetEngine: ObservableObject {
         guard isEnginePrewarmed else { return }
 
         let wasRecording = isRecording
-        if isRecording {
+
+        // Stop the engine FIRST — disconnects from hardware before we touch
+        // inputNode. When a USB device is yanked, accessing audioEngine.inputNode
+        // while the hardware graph is partially torn down can throw an ObjC
+        // exception that the system swallows, corrupting heap metadata.
+        audioEngine.stop()
+        isEnginePrewarmed = false
+
+        if wasRecording {
             stopLiveSpeech()
             audioEngine.inputNode.removeTap(onBus: 0)
             isRecording = false
             audioLevel = 0
         }
 
-        audioEngine.stop()
-        isEnginePrewarmed = false
+        // Always interrupt if a recording was active — don't try to auto-restart.
+        // The new audio pipeline may look functional but silently produce no samples
+        // (e.g., USB dock unplug), leaving the overlay stuck in listening state.
+        if wasRecording {
+            recordingInterrupted = true
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_interrupted",
+                message: "Recording interrupted by device change", context: ["audio_device": inputDeviceName])
+        }
 
-        let newFormat = audioEngine.inputNode.outputFormat(forBus: 0)
-        print("🔄 PARAKEET | audio device changed → \(inputDeviceName) (\(newFormat.sampleRate)Hz), re-warming")
-
-        do {
-            nativeSampleRate = newFormat.sampleRate
-            audioEngine.prepare()
-            try audioEngine.start()
-            isEnginePrewarmed = true
-            print("🔥 PARAKEET | engine re-warmed after device change")
-
-            if wasRecording {
-                if !startRecording() {
-                    recordingInterrupted = true
-                    EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_interrupted",
-                        message: "Re-record failed after device change", context: ["audio_device": inputDeviceName])
-                }
-            }
-        } catch {
-            print("⚠️ PARAKEET | re-warm failed: \(error.localizedDescription)")
-            EventReporter.shared.capture(level: .error, engine: "parakeet", event: "device_change_rewarm_failed",
-                message: error.localizedDescription, context: ["audio_device": inputDeviceName])
-            if wasRecording {
-                recordingInterrupted = true
-                EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_interrupted",
-                    message: "Recording interrupted by device change", context: ["audio_device": inputDeviceName])
+        // Re-warm the engine on the new device after a brief delay to let
+        // CoreAudio finish tearing down the old device graph. Without this,
+        // accessing inputNode immediately can throw an ObjC exception that
+        // kills the process without a crash report.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: DraftConstants.audioRecoveryDelay)
+            guard let self = self else { return }
+            do {
+                let newFormat = self.audioEngine.inputNode.outputFormat(forBus: 0)
+                self.nativeSampleRate = newFormat.sampleRate
+                print("🔄 PARAKEET | audio device changed → \(self.inputDeviceName) (\(newFormat.sampleRate)Hz), re-warming")
+                self.audioEngine.prepare()
+                try self.audioEngine.start()
+                self.isEnginePrewarmed = true
+                print("🔥 PARAKEET | engine re-warmed after device change")
+            } catch {
+                EventReporter.shared.capture(level: .error, engine: "parakeet", event: "device_change_rewarm_failed",
+                    message: error.localizedDescription, context: ["audio_device": self.inputDeviceName])
             }
         }
     }
@@ -248,26 +266,33 @@ class ParakeetEngine: ObservableObject {
                 message: "Recording interrupted by system sleep/wake")
         }
 
-        // Re-warm after a brief delay to let audio hardware reinitialize
+        // Re-warm after a delay to let audio hardware reinitialize.
+        // Retry once if the first attempt fails (CoreAudio may need more time).
         Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 500_000_000)  // 500ms
-            self?.prewarm()
+            try? await Task.sleep(nanoseconds: DraftConstants.audioRewarmDelay)
+            guard let self = self else { return }
+            self.prewarm()
+
+            if !self.isEnginePrewarmed {
+                EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "wake_prewarm_retry",
+                    message: "First prewarm after wake failed, retrying in 1s")
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                self.prewarm()
+            }
         }
     }
 
     // MARK: - Recording
 
-    func startRecording() -> Bool {
+    func startRecording(isRecoveryAttempt: Bool = false) -> Bool {
         guard !isRecording else { return true }
         guard isModelLoaded else {
-            print("⚠️ PARAKEET | cannot start recording — model not loaded")
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "model_not_loaded",
                 message: "Recording attempted without model loaded")
             return false
         }
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         guard micStatus == .authorized else {
-            print("⚠️ PARAKEET | microphone permission not granted (status: \(micStatus.rawValue))")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "mic_not_authorized",
                 message: "Microphone permission status: \(micStatus.rawValue)")
             return false
@@ -349,11 +374,66 @@ class ParakeetEngine: ObservableObject {
         committedLiveText = ""
         startLiveSpeech()
         print("🎤 PARAKEET | recording started (\(inputDeviceName), \(nativeSampleRate)Hz)")
+
+        // Watchdog: detect zombie audio engine (running but no samples flowing after sleep/wake).
+        // Only on first attempt — recovery attempt doesn't re-watchdog to prevent infinite loops.
+        if !isRecoveryAttempt {
+            startAudioWatchdog()
+        }
+
         return true
+    }
+
+    /// Watchdog that detects zombie audio engines — running but producing no samples.
+    /// After sleep/wake, CoreAudio may report the engine as running but the hardware graph
+    /// is disconnected. If no samples arrive within 2 seconds, tear down and retry once.
+    private func startAudioWatchdog() {
+        audioWatchdogTask?.cancel()
+        audioWatchdogTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: DraftConstants.audioWatchdogTimeout)
+            guard let self = self, self.isRecording, !Task.isCancelled else { return }
+
+            self.pendingSamplesLock.lock()
+            let sampleCount = self.pendingSamples.count + self.sampleBuffer.count
+            self.pendingSamplesLock.unlock()
+
+            guard sampleCount == 0 else { return }  // Audio is flowing — all good
+
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "zombie_engine_detected",
+                message: "No audio samples received after recording start — resetting engine",
+                context: ["audio_device": self.inputDeviceName])
+
+            // Full teardown
+            self.stopLiveSpeech()
+            self.audioEngine.inputNode.removeTap(onBus: 0)
+            self.audioEngine.stop()
+            self.isEnginePrewarmed = false
+            self.isRecording = false
+            self.audioLevel = 0
+
+            // Brief delay for hardware to reinitialize
+            try? await Task.sleep(nanoseconds: DraftConstants.audioRecoveryDelay)
+            guard !Task.isCancelled else { return }
+
+            // Retry once — isRecoveryAttempt prevents another watchdog
+            if self.startRecording(isRecoveryAttempt: true) {
+                print("✅ PARAKEET | zombie engine recovered — recording restarted")
+                EventReporter.shared.capture(level: .info, engine: "parakeet", event: "zombie_engine_recovered",
+                    message: "Audio engine recovered after reset")
+            } else {
+                print("❌ PARAKEET | zombie engine recovery failed")
+                EventReporter.shared.capture(level: .error, engine: "parakeet", event: "zombie_engine_recovery_failed",
+                    message: "Audio engine could not recover after reset",
+                    context: ["audio_device": self.inputDeviceName])
+                self.recordingInterrupted = true
+            }
+        }
     }
 
     func stopRecording() {
         guard isRecording else { return }
+        audioWatchdogTask?.cancel()
+        audioWatchdogTask = nil
         stopLiveSpeech()
         audioEngine.inputNode.removeTap(onBus: 0)
         pendingSamplesLock.lock()
@@ -372,7 +452,8 @@ class ParakeetEngine: ObservableObject {
             liveSpeechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
         }
         guard let recognizer = liveSpeechRecognizer, recognizer.isAvailable else {
-            print("⚠️ PARAKEET | Apple Speech unavailable, skipping live transcript")
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "live_speech_unavailable",
+                message: "Apple Speech recognizer unavailable, skipping live transcript")
             return
         }
 
@@ -391,7 +472,8 @@ class ParakeetEngine: ObservableObject {
         }
         liveRestartCount += 1
         if liveRestartCount > 5 {
-            print("⚠️ PARAKEET | live speech restarted too many times, stopping")
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "live_speech_restart_limit",
+                message: "Live speech restarted too many times (>5 in 10s), stopping")
             isLiveSpeechActive = false
             return
         }
@@ -464,7 +546,8 @@ class ParakeetEngine: ObservableObject {
 
     func transcribe() async -> String? {
         guard !isTranscribing else {
-            print("⚠️ PARAKEET | transcription already in progress")
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "transcription_already_active",
+                message: "transcribe() called while transcription already in progress")
             return nil
         }
         pendingSamplesLock.lock()
@@ -472,7 +555,8 @@ class ParakeetEngine: ObservableObject {
         pendingSamples.removeAll(keepingCapacity: true)
         pendingSamplesLock.unlock()
         guard !sampleBuffer.isEmpty else {
-            print("⚠️ PARAKEET | no audio to transcribe")
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "no_audio_samples",
+                message: "No audio samples in buffer when transcribe() called")
             return nil
         }
         guard let manager = asrManager, manager.isAvailable else {
@@ -536,6 +620,8 @@ class ParakeetEngine: ObservableObject {
     // MARK: - Cleanup
 
     func cancel() {
+        audioWatchdogTask?.cancel()
+        audioWatchdogTask = nil
         if isRecording {
             stopLiveSpeech()
             audioEngine.inputNode.removeTap(onBus: 0)

@@ -17,7 +17,7 @@ struct DraftApp: App {
 // MARK: - App Delegate
 
 @MainActor
-class DraftAppDelegate: NSObject, NSApplicationDelegate {
+class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
 
@@ -25,6 +25,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate {
     let overlayController = FloatingOverlayController()
     let sessionController = DraftSessionController()
     var onboardingController: OnboardingWindowController?
+    private var wakeObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Crash reporting — captures ObjC/SwiftUI exceptions + manual Swift error reports
@@ -50,13 +51,30 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Set up popover for Style + Agent panel
+        // NOTE: No contentViewController created here — it's created on-demand in
+        // togglePopover(). A long-lived NSHostingController that's never displayed
+        // still subscribes to @ObservedObject properties via SwiftUI observation.
+        // After minutes of state changes, the stale AttributeGraph can corrupt
+        // pointers that crash when a new hosting controller evaluates its body.
         let pop = NSPopover()
         pop.contentSize = NSSize(width: MenuTokens.panelWidth, height: MenuTokens.panelHeight)
         pop.behavior = .transient
-        pop.contentViewController = NSHostingController(
-            rootView: MenuBarPanelView(appState: appState)
-        )
+        pop.delegate = self
         popover = pop
+
+        // Dismiss popover on system wake — SwiftUI gesture handlers hold stale
+        // AttributeGraph state after sleep, causing EXC_BAD_ACCESS on interaction
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, let popover = self.popover, popover.isShown else { return }
+                popover.performClose(nil)
+                popover.contentViewController = nil
+            }
+        }
 
         // Initialize engines
         Task { @MainActor in
@@ -77,6 +95,9 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if let observer = wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
         #if BETA_BUILD
         BetaTelemetry.shared.shipLogs()
         #endif
@@ -96,15 +117,30 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem?.button, let popover = popover else { return }
         if popover.isShown {
             popover.performClose(nil)
+            popover.contentViewController = nil  // Force SwiftUI view tree teardown
         } else {
             // Recreate the hosting controller each time to guarantee a fresh SwiftUI
             // view tree. A long-lived NSHostingController accumulates stale observation
             // state across show/hide cycles, eventually crashing in body evaluation.
+            // Explicit nil-first ensures the old view tree is fully torn down before
+            // the new one is created — prevents AttributeGraph races where two view
+            // trees observing the same @ObservedObject overlap during teardown/layout.
+            popover.contentViewController = nil
             popover.contentViewController = NSHostingController(
                 rootView: MenuBarPanelView(appState: appState)
             )
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    // MARK: - NSPopoverDelegate
+
+    /// Catches transient (click-outside) dismissals that bypass togglePopover().
+    /// Without this, the stale NSHostingController retains a SwiftUI view tree with
+    /// button gesture handlers that crash after prolonged idle (EXC_BAD_ACCESS in
+    /// _ButtonGesture.internalBody.getter via MainActor.assumeIsolated).
+    func popoverDidClose(_ notification: Notification) {
+        popover?.contentViewController = nil
     }
 }

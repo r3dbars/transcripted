@@ -65,7 +65,7 @@ The `UsageStats` give the user a quick sense of how much value Draft has provide
 
 - JSONL (not JSON array) so the file can be appended atomically without parsing the whole thing
 - `FeedbackStore` conforms to `ObservableObject` with a `@Published var stats` property so SwiftUI views (MenuBarPanel) can reactively display usage statistics
-- File writes via `record()` are synchronous on whatever thread calls them
+- File writes via `record()` dispatch to a shared `JSONLWriter` actor (fire-and-forget `Task`), which reuses a single `FileHandle` across appends
 - File reads via `refreshStats()` dispatch to a `Task.detached` block that calls a `nonisolated static` helper (`parseStats(url:)`) to avoid blocking the main actor. The helper parses the entire JSONL file, decodes each line with a locally-created `JSONDecoder`, and aggregates into a `UsageStats` value. Lines that fail to decode are silently skipped. The result is assigned back to `self.stats` on the main actor.
 - `accepted_text` != `drafted_text` when the user edits the draft in the TextEditor before hitting Copy/Paste — this edit delta is the richest feedback signal
 - An `encoder` is initialized once on `FeedbackStore` and reused for all writes. A `decoder` is created locally inside `parseStats()` for each read pass.
@@ -79,10 +79,10 @@ The `UsageStats` give the user a quick sense of how much value Draft has provide
 
 ## Error Handling
 
-All failure paths log warnings via both `print()` and `EventReporter`:
+Failure paths log via `EventReporter`:
 - `feedback_encode_failed` — if `JSONEncoder` fails to encode the entry
-- `feedback_file_open_failed` — if `FileHandle` cannot open `feedback.jsonl` for appending
-- `feedback_file_create_failed` — if initial file creation fails
+
+File I/O errors (open/write/create) are handled internally by the `JSONLWriter` actor.
 
 `refreshStats()` resets stats to zero defaults if the file is missing or unreadable. Malformed lines are skipped without error.
 
