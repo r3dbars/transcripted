@@ -97,15 +97,6 @@ private actor EventFileWriter {
     }
 }
 
-// MARK: - Sentry Transport (Optional)
-
-// TODO(human): Implement Sentry DSN parsing and HTTP transport
-private struct SentryTransport {
-    func send(_ event: ObservabilityEvent) {
-        // No-op until Sentry DSN is configured
-    }
-}
-
 // MARK: - EventReporter Singleton
 
 @MainActor
@@ -113,7 +104,6 @@ final class EventReporter {
     static let shared = EventReporter()
 
     private let writer = EventFileWriter()
-    private let sentry = SentryTransport()
     private var engineStateSummary: (() -> [String: String])?
 
     private let appVersion: String = {
@@ -165,11 +155,8 @@ final class EventReporter {
             osVersion: osVersion
         )
 
-        Task.detached(priority: .utility) { [writer, sentry, entry] in
+        Task.detached(priority: .utility) { [writer, entry] in
             await writer.append(entry)
-            if entry.level == EventLevel.error.rawValue {
-                sentry.send(entry)
-            }
         }
     }
 }

@@ -4,6 +4,11 @@
 import AppKit
 
 enum PlatformFormatter: String, CaseIterable {
+    // Pre-compiled regexes for post-processing (avoids recompilation per draft)
+    private static let boldRegex = try! NSRegularExpression(pattern: #"\*\*([^*]+)\*\*"#)
+    private static let italicAsteriskRegex = try! NSRegularExpression(pattern: #"\*([^*]+)\*"#)
+    private static let italicUnderscoreRegex = try! NSRegularExpression(pattern: #"_([^_]+)_"#)
+    private static let headerRegex = try! NSRegularExpression(pattern: #"(?m)^#{1,6} "#)
     case slack
     case imessage
     case email
@@ -23,7 +28,7 @@ enum PlatformFormatter: String, CaseIterable {
         }
     }
 
-    /// Instructions appended to the system prompt so Haiku produces platform-native formatting
+    /// Instructions appended to the system prompt so the model produces platform-native formatting
     var formattingInstructions: String {
         switch self {
         case .slack:
@@ -64,50 +69,31 @@ enum PlatformFormatter: String, CaseIterable {
     }
 
     /// Post-process the draft output to fix common formatting issues per platform.
-    /// This is a safety net — the prompt should handle most cases, but Haiku occasionally
+    /// This is a safety net — the prompt should handle most cases, but the model occasionally
     /// forgets and outputs generic markdown.
     func postProcess(_ text: String) -> String {
         switch self {
         case .slack:
             var result = text
             // Fix **bold** → *bold* (Slack uses single asterisks)
-            // Match **text** but not ***text*** (which would be bold+italic)
-            result = result.replacingOccurrences(
-                of: "\\*\\*([^*]+)\\*\\*",
-                with: "*$1*",
-                options: .regularExpression
-            )
+            var range = NSRange(result.startIndex..., in: result)
+            result = Self.boldRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "*$1*")
             // Remove markdown headers (Slack renders them as literal text)
-            result = result.replacingOccurrences(
-                of: "(?m)^#{1,6} ",
-                with: "",
-                options: .regularExpression
-            )
+            range = NSRange(result.startIndex..., in: result)
+            result = Self.headerRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "")
             return result
 
         case .imessage:
             var result = text
             // Strip all markdown formatting
-            result = result.replacingOccurrences(
-                of: "\\*\\*([^*]+)\\*\\*",
-                with: "$1",
-                options: .regularExpression
-            )
-            result = result.replacingOccurrences(
-                of: "\\*([^*]+)\\*",
-                with: "$1",
-                options: .regularExpression
-            )
-            result = result.replacingOccurrences(
-                of: "_([^_]+)_",
-                with: "$1",
-                options: .regularExpression
-            )
-            result = result.replacingOccurrences(
-                of: "(?m)^#{1,6} ",
-                with: "",
-                options: .regularExpression
-            )
+            var range = NSRange(result.startIndex..., in: result)
+            result = Self.boldRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1")
+            range = NSRange(result.startIndex..., in: result)
+            result = Self.italicAsteriskRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1")
+            range = NSRange(result.startIndex..., in: result)
+            result = Self.italicUnderscoreRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1")
+            range = NSRange(result.startIndex..., in: result)
+            result = Self.headerRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "")
             return result
 
         case .email, .discord, .teams, .generic:

@@ -169,11 +169,17 @@ final class BetaTelemetry {
         return result
     }
 
-    /// Redact all lines in a multi-line log chunk.
+    /// Redact all sensitive data in a multi-line log chunk.
+    /// Applies regexes directly on the full chunk (avoids per-line split/rejoin).
     private func redactChunk(_ chunk: String) -> String {
-        chunk.split(separator: "\n", omittingEmptySubsequences: false)
-            .map { redactLogLine(String($0)) }
-            .joined(separator: "\n")
+        var result = chunk
+        var range = NSRange(result.startIndex..., in: result)
+        result = Self.userPathRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "/Users/****/")
+        range = NSRange(result.startIndex..., in: result)
+        result = Self.apiKeyRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "sk-ant-****")
+        range = NSRange(result.startIndex..., in: result)
+        result = Self.bearerRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "Bearer ****")
+        return result
     }
 
     // MARK: - File chunk reading

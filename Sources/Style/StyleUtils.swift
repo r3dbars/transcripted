@@ -21,9 +21,9 @@ enum StyleUtils {
         }
 
         // Mature phase: check if profile has stabilized
-        let recentAvg = averageRecentEditDistance(last: 10, styleFileContents: styleFileContents)
+        let recentAvg = averageRecentEditDistance(last: DraftConstants.refinementDistanceWindow, styleFileContents: styleFileContents)
 
-        if recentAvg < 0.25 {
+        if recentAvg < DraftConstants.editDistanceStabilizedThreshold {
             // Profile is working well — refine every 10
             return exampleCount % 10 == 0
         } else {

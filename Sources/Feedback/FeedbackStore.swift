@@ -1,7 +1,7 @@
 // FeedbackStore.swift
 // Logs every accepted draft to ~/Library/Application Support/Draft/feedback.jsonl
 //
-// WHY: The orchestrator agent reads this file to understand which drafts the user
+// WHY: The AnalysisEngine reads this file to understand which drafts the user
 // accepted, edited, or rejected. It uses these signals to rewrite prompts.json and
 // improve drafting quality over time. Each line is a self-contained JSON record.
 //
@@ -25,7 +25,7 @@ enum AcceptAction: String, Codable {
 struct FeedbackEntry: Codable {
     let timestamp: String
     let rawText: String
-    let draftedText: String      // Original Claude output
+    let draftedText: String      // Original AI output
     let acceptedText: String     // What user actually sent (edited or identical)
     let action: AcceptAction
     let exampleCount: Int        // Style examples at time of accept

@@ -1,5 +1,5 @@
 // CapturedContext.swift
-// Structured data extracted from a screenshot via Haiku Vision
+// Structured data extracted from a screenshot via local OCR
 
 import Foundation
 
@@ -66,7 +66,7 @@ struct CapturedContext {
         return prompt
     }
 
-    /// Parse Haiku's plain-text response into a CapturedContext
+    /// Parse labeled-section text into a CapturedContext
     static func parse(from text: String) -> CapturedContext {
         var context = CapturedContext()
 
@@ -76,17 +76,18 @@ struct CapturedContext {
 
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let upper = trimmed.uppercased()
 
-            if trimmed.uppercased().hasPrefix("PLATFORM:") {
+            if upper.hasPrefix("PLATFORM:") {
                 context.platform = String(trimmed.dropFirst("PLATFORM:".count)).trimmingCharacters(in: .whitespaces).lowercased()
                 inConversation = false
-            } else if trimmed.uppercased().hasPrefix("TALKING TO:") {
+            } else if upper.hasPrefix("TALKING TO:") {
                 context.talkingTo = String(trimmed.dropFirst("TALKING TO:".count)).trimmingCharacters(in: .whitespaces)
                 inConversation = false
-            } else if trimmed.uppercased().hasPrefix("FORMALITY:") {
+            } else if upper.hasPrefix("FORMALITY:") {
                 context.formality = String(trimmed.dropFirst("FORMALITY:".count)).trimmingCharacters(in: .whitespaces).lowercased()
                 inConversation = false
-            } else if trimmed.uppercased().hasPrefix("CONVERSATION:") {
+            } else if upper.hasPrefix("CONVERSATION:") {
                 inConversation = true
             } else if inConversation {
                 conversationLines.append(line)

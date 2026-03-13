@@ -4,7 +4,7 @@
 import Foundation
 
 enum DraftUtils {
-    /// Detect if a draft is Claude refusing/asking for clarification rather than an actual message.
+    /// Detect if a draft is the AI refusing/asking for clarification rather than an actual message.
     /// Used to prevent poisoning the style profile with non-message training pairs.
     static func looksLikeRefusal(_ text: String) -> Bool {
         let lower = text.lowercased()

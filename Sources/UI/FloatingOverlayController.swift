@@ -48,6 +48,14 @@ class FloatingOverlayController: ObservableObject {
     private var dragHandleView: PanelDragView?
     private var escapeMonitor: Any?
 
+    deinit {
+        if let monitor = escapeMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        errorDismissTask?.cancel()
+        loadingTimerTask?.cancel()
+    }
+
     var sttRouter: STTRouter?
 
     func setup(sttRouter: STTRouter) {

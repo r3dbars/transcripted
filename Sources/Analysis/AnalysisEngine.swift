@@ -3,7 +3,7 @@
 //
 // Watches ~/Library/Application Support/Draft/feedback.jsonl using
 // DispatchSource (kernel event-driven, zero polling overhead).
-// When enough new entries accumulate, calls the Anthropic API directly
+// When enough new entries accumulate, runs local LLM inference
 // with context injected upfront — no subprocess, no SSE relay, no port.
 //
 // Replaces: agent/ directory + OrchestratorBridge (analysis portions)
@@ -32,8 +32,8 @@ class AnalysisEngine: ObservableObject {
     private var pendingNewCount = 0
     private var debounceTask: Task<Void, Never>?
 
-    private let minEntries = 5
-    private let debounceSeconds: Double = 30
+    private var minEntries: Int { DraftConstants.analysisMinFeedbackEntries }
+    private var debounceSeconds: Double { DraftConstants.analysisDebounceSeconds }
     private let isoFormatter = ISO8601DateFormatter()
     private let suggestionWriter: JSONLWriter
 
@@ -212,7 +212,7 @@ class AnalysisEngine: ObservableObject {
     private func buildAnalysisSystemPrompt() -> String {
         var parts = [analysisSystemPromptBase]
 
-        if let feedback = loadRecentLines(from: feedbackURL, limit: 50) {
+        if let feedback = loadRecentLines(from: feedbackURL, limit: DraftConstants.analysisFeedbackLines) {
             parts.append("\n<feedback_jsonl>\n\(feedback)\n</feedback_jsonl>")
         }
         do {
@@ -229,7 +229,7 @@ class AnalysisEngine: ObservableObject {
             EventReporter.shared.capture(level: .warning, engine: "analysis", event: "analysis_file_read_failed",
                 message: error.localizedDescription, context: ["path": styleURL.path])
         }
-        if let log = loadRecentLines(from: suggestionLogURL, limit: 20) {
+        if let log = loadRecentLines(from: suggestionLogURL, limit: DraftConstants.analysisSuggestionLines) {
             parts.append("\n<suggestion_log_jsonl>\n\(log)\n</suggestion_log_jsonl>")
         }
 
@@ -312,7 +312,7 @@ You are Draft's writing quality optimizer. Analyze the feedback data and propose
 
 Each feedback entry has:
 - raw_text: user's spoken voice instructions (what they ASKED the AI to do)
-- drafted_text: what Claude produced
+- drafted_text: what the AI produced
 - accepted_text: what the user actually sent (after editing)
 - formality: (optional) detected communication register (casual/professional/formal)
 
