@@ -2,11 +2,11 @@
 
 ## What This Does
 
-Audio recording and transcription via **ParakeetEngine** — a CoreML-based STT engine using FluidAudio's Parakeet TDT V3 (~0.2s latency). `STTRouter` wraps ParakeetEngine with Combine property forwarding and model-readiness gating for SwiftUI binding.
+Audio recording and transcription via **ParakeetEngine** — a CoreML-based STT engine using FluidAudio's Parakeet TDT V3 for final accurate transcription and Parakeet EOU 120M for low-latency live display. `STTRouter` wraps ParakeetEngine with Combine property forwarding and model-readiness gating for SwiftUI binding.
 
 ## Key Files
 
-- `ParakeetEngine.swift` (578 lines) — `@MainActor ObservableObject`: AVAudioEngine tap, NSLock-batched sample collection, live Apple Speech display with restart rate limiting, CoreML batch inference via FluidAudio AsrManager, audio level metering, device change handling, `ParakeetModelState` enum for download/load progress
+- `ParakeetEngine.swift` — `@MainActor ObservableObject`: AVAudioEngine tap, NSLock-batched sample collection, EOU streaming live display via `StreamingEouAsrManager`, CoreML batch inference via FluidAudio `AsrManager`, audio level metering, device change handling, `ParakeetModelState` enum for download/load progress
 - `STTRouter.swift` (54 lines) — Wrapper forwarding 5 `@Published` properties (`isRecording`, `isTranscribing`, `audioLevel`, `liveTranscript`, `recordingInterrupted`) from ParakeetEngine via Combine `assign(to:)`. Gates `startRecording()` on `isModelLoaded` and logs a warning via `EventReporter` if the model is not ready. Passes through `isModelLoaded` and `inputDeviceName` as computed properties. Also exposes `stopRecording()`, `transcribe()`, and `cancel()` as direct pass-throughs to ParakeetEngine.
 - `AudioResampler.swift` (28 lines) — Pure Swift linear-interpolation sample rate conversion (native → 16kHz for Parakeet). No dependencies. Stateless `enum` with a single `resample(_:from:to:)` static method.
 
@@ -15,14 +15,15 @@ Audio recording and transcription via **ParakeetEngine** — a CoreML-based STT 
 ```
 Audio Input (AVAudioEngine tap, mono at native sample rate)
     │
-    ├─→ Consumer 1: Apple Speech (live display only — SFSpeechAudioBufferRecognitionRequest)
-    │   └─→ liveTranscript — shown in overlay during recording
+    ├─→ Consumer 1: Parakeet EOU streaming (live display — StreamingEouAsrManager)
+    │   └─→ resample chunk → 16kHz → process(audioBuffer:) every ~320ms
+    │   └─→ setEouCallback fires on silence → committedStreamText → liveTranscript
     │
-    ├─→ Consumer 2: Parakeet sample buffer (NSLock-protected pendingSamples)
+    ├─→ Consumer 2: Parakeet TDT V3 sample buffer (NSLock-protected pendingSamples)
     │   └─→ Flushed into sampleBuffer on stopRecording() or transcribe()
     │   └─→ Resampled to 16kHz via AudioResampler
     │   └─→ Batch inference via AsrManager.transcribe()
-    │   └─→ Returns final transcript text
+    │   └─→ Returns final transcript text (replaces live display on completion)
     │
     └─→ Consumer 3: Audio level metering (~20Hz throttled)
         └─→ audioLevel (0.0–1.0) — drives waveform animation in overlay
@@ -62,9 +63,9 @@ Uses CoreAudio `AudioObjectGetPropertyData` to read the default input device ID 
 
 `transcribe()` is an async method that performs batch Parakeet inference on accumulated audio. Guards: returns `nil` if already transcribing, if sample buffer is empty, or if `asrManager` is unavailable. Flushes any remaining `pendingSamples` into `sampleBuffer` under lock before inference. Resamples to 16kHz via `AudioResampler`, then calls `manager.transcribe(_:source:)`. Logs RTF (real-time factor = inference time / audio duration) and character count to `EventReporter`. On empty result, logs a warning and returns `nil`. Always clears `sampleBuffer` and resets `isTranscribing` on both success and failure paths.
 
-### Live Speech Restart Rate Limiting
+### EOU Streaming Live Display
 
-Apple Speech recognition tasks can end unexpectedly (e.g., after silence or an internal error). When a task completes or errors during active recording, `startLiveSpeechTask()` automatically restarts it. To prevent infinite restart loops, a rate limiter allows at most 5 restarts within any 10-second window (`liveRestartCount` / `liveRestartWindowStart`). If exceeded, live speech stops gracefully — Parakeet still owns the final transcript so this is display-only degradation.
+`StreamingEouAsrManager` (Parakeet EOU 120M) receives resampled 16kHz audio in ~320ms chunks from the audio tap. End-of-utterance detection fires after 1280ms of silence, committing the utterance to `committedStreamText` and updating `liveTranscript`. EOU model load is non-fatal — if it fails, `liveTranscript` stays empty during recording but the final TDT V3 batch result is unaffected. EOU model is ~120MB vs ~600MB for TDT V3.
 
 ### cancel() and cleanup()
 
@@ -93,9 +94,9 @@ Without the audio engine cleanup, the microphone green dot persists after the en
 
 Pro audio interfaces like BEACN Mic (96kHz/4ch) cause Apple Speech error 1110. Fix: force mono tap format at native sample rate — AVAudioEngine handles channel mixdown automatically. **Do NOT force 16kHz** — sample rate mismatch crashes with an ObjC exception.
 
-### 2. Apple Speech Live Transcript Resets
+### 2. EOU Debounce Delay
 
-Apple Speech silently resets `bestTranscription.formattedString` mid-session. The live transcript tracks `committedLiveText` and detects resets to avoid losing display text. This is display-only — Parakeet owns the final transcript.
+EOU fires after 1280ms of silence. For fast back-to-back phrases, the last phrase may not commit to `liveTranscript` until the user pauses. This is display-only — TDT V3 owns the final accurate transcript and captures everything.
 
 ### 3. Microphone Permission Can Be Revoked at Runtime
 
@@ -106,7 +107,7 @@ Apple Speech silently resets `bestTranscription.formattedString` mid-session. Th
 After modifying ParakeetEngine, verify with these checks:
 
 - **Basic recording:** ⌥D → speak → ⌥D → draft appears with correct transcription
-- **Long recording:** Record 60+ seconds → Apple Speech live text chains tasks seamlessly, Parakeet batch transcription returns full text
+- **Long recording:** Record 60+ seconds → EOU live text updates phrase-by-phrase, Parakeet batch transcription returns full accurate text
 - **Model load:** Check `PARAKEET | models loaded` in debug log on launch
 - **Mic permission:** Revoke mic permission in System Settings → press hotkey → should log warning, not crash
 - **Audio device change:** Plug/unplug USB mic during idle → should log device change and re-warm
