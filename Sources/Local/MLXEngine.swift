@@ -45,10 +45,11 @@ actor MLXEngine {
 
     var modelLoaded: Bool { isLoaded }
 
-    // MARK: - Non-Streaming Completion
+    // MARK: - Shared Input Preparation
 
-    /// Generate a complete response (blocks until done).
-    func complete(prompt: String, systemPrompt: String? = nil, maxTokens: Int = 1024, temperature: Float = 0.7) async throws -> String {
+    /// Build chat messages, prepare MLX input, and create generation parameters.
+    /// Shared by both streaming and non-streaming paths.
+    private func prepareInput(prompt: String, systemPrompt: String?, maxTokens: Int, temperature: Float) async throws -> (MLXLMCommon.LMInput, GenerateParameters) {
         guard let container = container else {
             throw LocalLLMError.generationFailed("Model not loaded")
         }
@@ -59,17 +60,23 @@ actor MLXEngine {
         }
         messages.append(.user(prompt))
 
+        // Disable thinking mode (Qwen3.5 defaults to thinking mode)
         var userInput = UserInput(chat: messages)
         userInput.additionalContext = ["enable_thinking": false]
         let lmInput = try await container.prepare(input: userInput)
 
-        let parameters = GenerateParameters(
-            maxTokens: maxTokens,
-            temperature: temperature
-        )
+        let parameters = GenerateParameters(maxTokens: maxTokens, temperature: temperature)
+        return (lmInput, parameters)
+    }
+
+    // MARK: - Non-Streaming Completion
+
+    /// Generate a complete response (blocks until done).
+    func complete(prompt: String, systemPrompt: String? = nil, maxTokens: Int = 1024, temperature: Float = 0.7) async throws -> String {
+        let (lmInput, parameters) = try await prepareInput(prompt: prompt, systemPrompt: systemPrompt, maxTokens: maxTokens, temperature: temperature)
 
         var result = ""
-        let stream = try await container.generate(input: lmInput, parameters: parameters)
+        let stream = try await container!.generate(input: lmInput, parameters: parameters)
         for try await generation in stream {
             guard !Task.isCancelled else { throw LocalLLMError.cancelled }
             if case .chunk(let text) = generation {
@@ -91,48 +98,23 @@ actor MLXEngine {
             }
             Task {
                 do {
-                    try await self.runGeneration(prompt: prompt, systemPrompt: systemPrompt, maxTokens: maxTokens, temperature: temperature, continuation: continuation)
+                    let (lmInput, parameters) = try await self.prepareInput(prompt: prompt, systemPrompt: systemPrompt, maxTokens: maxTokens, temperature: temperature)
+
+                    let stream = try await self.container!.generate(input: lmInput, parameters: parameters)
+                    for try await generation in stream {
+                        guard !Task.isCancelled else {
+                            continuation.finish(throwing: LocalLLMError.cancelled)
+                            return
+                        }
+                        if case .chunk(let text) = generation {
+                            continuation.yield(text)
+                        }
+                    }
+                    continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
                 }
             }
         }
-    }
-
-    private func runGeneration(prompt: String, systemPrompt: String?, maxTokens: Int, temperature: Float, continuation: AsyncThrowingStream<String, Error>.Continuation) async throws {
-        guard let container = container else {
-            throw LocalLLMError.generationFailed("Model not loaded")
-        }
-
-        // Build chat messages
-        var messages: [Chat.Message] = []
-        if let sys = systemPrompt, !sys.isEmpty {
-            messages.append(.system(sys))
-        }
-        messages.append(.user(prompt))
-
-        // Prepare input with thinking disabled (Qwen3.5 defaults to thinking mode)
-        var userInput = UserInput(chat: messages)
-        userInput.additionalContext = ["enable_thinking": false]
-        let lmInput = try await container.prepare(input: userInput)
-
-        let parameters = GenerateParameters(
-            maxTokens: maxTokens,
-            temperature: temperature
-        )
-
-        // Stream tokens
-        let stream = try await container.generate(input: lmInput, parameters: parameters)
-        for try await generation in stream {
-            guard !Task.isCancelled else {
-                continuation.finish(throwing: LocalLLMError.cancelled)
-                return
-            }
-            if case .chunk(let text) = generation {
-                continuation.yield(text)
-            }
-        }
-
-        continuation.finish()
     }
 }

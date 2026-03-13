@@ -1,7 +1,7 @@
 // LocalVisionExtractor.swift
-// Replaces AnthropicAPI.extractStructuredContext() with fully local pipeline:
-// 1. Apple Vision OCR extracts text from screenshot
-// 2. Small LLM (0.8B) parses OCR text into CapturedContext fields
+// Replaces AnthropicAPI.extractStructuredContext() with fully local Apple Vision OCR.
+// Extracts text from screenshot and returns it as raw conversation context —
+// the drafting model interprets it directly (no separate parsing LLM).
 
 import Foundation
 import Vision
@@ -18,11 +18,11 @@ enum LocalVisionExtractor {
             return CapturedContext.parse(from: "")
         }
 
-        // Truncate to ~3000 chars: keep first 500 (app header) + last 2500 (recent messages)
+        // Truncate long OCR: keep header (app chrome) + recent messages
         let trimmedOCR: String
-        if ocrText.count > 3000 {
-            let header = String(ocrText.prefix(500))
-            let recent = String(ocrText.suffix(2500))
+        if ocrText.count > DraftConstants.ocrMaxCharacters {
+            let header = String(ocrText.prefix(DraftConstants.ocrHeaderCharacters))
+            let recent = String(ocrText.suffix(DraftConstants.ocrRecentCharacters))
             trimmedOCR = header + "\n...\n" + recent
         } else {
             trimmedOCR = ocrText
