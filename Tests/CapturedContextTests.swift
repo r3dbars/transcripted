@@ -92,6 +92,6 @@ func testCapturedContext() {
         assertTrue(prompt.contains("TALKING TO: Sarah"))
         assertTrue(prompt.contains("Coming to lunch?"))
         assertTrue(prompt.contains("say yes"))
-        assertTrue(prompt.contains("INSTRUCTIONS:"), "should include drafting instructions")
+        assertTrue(prompt.contains("Write a reply"), "should include drafting instruction")
     }
 }

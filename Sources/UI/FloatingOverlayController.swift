@@ -20,6 +20,10 @@ class FloatingOverlayController: ObservableObject {
         case review       // Editable draft (draft mode only)
     }
 
+    /// Human-readable shortcut hints for OverlayContentView (reads live from UserDefaults)
+    var draftShortcutHint: String { HotkeyPreferences.displayString(for: HotkeyPreferences.draftBinding()) }
+    var dictationShortcutHint: String { HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding()) }
+
     @Published var state: OverlayState = .idle
     @Published var activeMode: SessionMode = .draft
     @Published var isVisible = false
@@ -28,6 +32,9 @@ class FloatingOverlayController: ObservableObject {
     @Published var errorMessage: String = ""
     @Published var loadingElapsedSeconds: Int = 0
     @Published var transcriptExpanded = false
+    @Published var hasContext: Bool = true
+
+    private var streamingNewlineCount = 0
 
     /// Closures for Enter/Escape in review mode — set by DraftSessionController
     var onConfirm: (() -> Void)?
@@ -45,7 +52,8 @@ class FloatingOverlayController: ObservableObject {
 
     func setup(sttRouter: STTRouter) {
         guard panel == nil else {
-            print("⚠️ OVERLAY | setup() called twice — ignoring")
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "setup_called_twice",
+                message: "setup() called but panel already exists — ignoring")
             return
         }
         self.sttRouter = sttRouter
@@ -229,6 +237,7 @@ class FloatingOverlayController: ObservableObject {
     func startStreaming(near sourceApp: NSRunningApplication? = nil) {
         guard state == .drafting || state == .listening else { return }
         streamingText = ""
+        streamingNewlineCount = 0
         transcriptExpanded = false  // Reset for next session
         state = .streaming
         // Show panel if not visible
@@ -244,8 +253,10 @@ class FloatingOverlayController: ObservableObject {
     func appendStreamToken(_ token: String) {
         guard state == .streaming else { return }
         streamingText += token
+        // Count newlines in incoming token only (O(token_length) instead of O(total_length))
+        for c in token where c == "\n" { streamingNewlineCount += 1 }
         // Dynamically resize as text grows
-        let lineCount = max(1, streamingText.components(separatedBy: "\n").count)
+        let lineCount = max(1, streamingNewlineCount + 1)
         let charEstimate = CGFloat(streamingText.count) / 50.0
         let lines = max(CGFloat(lineCount), charEstimate)
         let estimatedHeight = max(OverlayTokens.panelMinHeight, min(OverlayTokens.panelMaxHeight, lines * 20 + 120))
@@ -272,7 +283,11 @@ class FloatingOverlayController: ObservableObject {
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             completion?()
-            self?._performHide()
+            // completionHandler runs on an arbitrary thread — dispatch to MainActor
+            // to avoid calling @MainActor-isolated _performHide() from a non-isolated context
+            Task { @MainActor [weak self] in
+                self?._performHide()
+            }
         })
 
         if let contentLayer = panel.contentView?.layer {
@@ -306,13 +321,19 @@ class FloatingOverlayController: ObservableObject {
 
         // Fade out after shake completes
         DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(offsets.count)) { [weak self, weak panel] in
-            guard let panel = panel else { self?._performHide(); return }
+            guard let panel = panel else {
+                Task { @MainActor [weak self] in self?._performHide() }
+                return
+            }
             NSAnimationContext.runAnimationGroup({ ctx in
                 ctx.duration = 0.14
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
                 panel.animator().alphaValue = 0
-            }, completionHandler: {
-                self?._performHide()
+            }, completionHandler: { [weak self] in
+                // completionHandler runs on an arbitrary thread — dispatch to MainActor
+                Task { @MainActor [weak self] in
+                    self?._performHide()
+                }
             })
         }
     }
@@ -370,6 +391,7 @@ class FloatingOverlayController: ObservableObject {
     private func _performHide() {
         guard isVisible else { return }  // Prevent double-hide during animation overlap
         removeEscapeMonitor()
+        panel?.ignoresMouseEvents = true  // Block gesture dispatch immediately
         panel?.allowKeyStatus = false
         panel?.orderOut(nil)
         panel?.alphaValue = 1.0  // Reset for next show

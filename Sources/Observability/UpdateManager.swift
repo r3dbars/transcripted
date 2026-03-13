@@ -112,8 +112,12 @@ final class UpdateManager: ObservableObject {
         do {
             try fm.moveItem(at: stagedApp, to: currentURL)
         } catch {
-            // Rollback: move .old back
-            try? fm.moveItem(at: backupURL, to: currentURL)
+            // Rollback: move .old back — if this fails too, the user needs to know
+            do {
+                try fm.moveItem(at: backupURL, to: currentURL)
+            } catch let rollbackError {
+                throw UpdateError.replaceFailed("Move failed AND rollback failed: \(rollbackError.localizedDescription). Restore from: \(backupURL.path)")
+            }
             throw UpdateError.replaceFailed("Move failed: \(error.localizedDescription)")
         }
 
@@ -122,8 +126,14 @@ final class UpdateManager: ObservableObject {
         try? fm.removeItem(at: dmgPath)
 
         // Spawn detached relaunch and terminate
-        spawnRelaunch(appPath: currentURL.path)
-        NSApp.terminate(nil)
+        do {
+            try spawnRelaunch(appPath: currentURL.path)
+            NSApp.terminate(nil)
+        } catch {
+            // App was replaced successfully but relaunch failed — don't terminate
+            // or user loses the app entirely. They can restart manually.
+            state = .failed("Update installed but relaunch failed — please restart Draft manually")
+        }
     }
 
     // MARK: - DMG operations
@@ -131,7 +141,7 @@ final class UpdateManager: ObservableObject {
     private func mountDMG(at path: URL) async throws -> URL {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
-        process.arguments = ["attach", path.path, "-nobrowse", "-noverify", "-noautoopen", "-plist"]
+        process.arguments = ["attach", path.path, "-nobrowse", "-noautoopen", "-plist"]
 
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -172,30 +182,49 @@ final class UpdateManager: ObservableObject {
     // MARK: - Code signature verification
 
     private func verifyCodeSignature(at appURL: URL) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
-        process.arguments = ["--verify", "--deep", "--strict", appURL.path]
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
+        // Step 1: Verify the code signature is valid
+        let verifyProcess = Process()
+        verifyProcess.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        verifyProcess.arguments = ["--verify", "--deep", "--strict", appURL.path]
+        verifyProcess.standardOutput = Pipe()
+        verifyProcess.standardError = Pipe()
 
-        try process.run()
-        process.waitUntilExit()
+        try verifyProcess.run()
+        verifyProcess.waitUntilExit()
 
-        guard process.terminationStatus == 0 else {
+        guard verifyProcess.terminationStatus == 0 else {
+            throw UpdateError.signatureInvalid
+        }
+
+        // Step 2: Verify the signing team ID matches ours
+        let infoProcess = Process()
+        infoProcess.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        infoProcess.arguments = ["-d", "--verbose=2", appURL.path]
+        let infoPipe = Pipe()
+        infoProcess.standardOutput = Pipe()
+        infoProcess.standardError = infoPipe  // codesign -d writes to stderr
+
+        try infoProcess.run()
+        infoProcess.waitUntilExit()
+
+        let infoData = infoPipe.fileHandleForReading.readDataToEndOfFile()
+        let infoText = String(data: infoData, encoding: .utf8) ?? ""
+        let expectedTeamID = "<team-id>"
+        guard infoText.contains("TeamIdentifier=\(expectedTeamID)") else {
             throw UpdateError.signatureInvalid
         }
     }
 
     // MARK: - Relaunch
 
-    private func spawnRelaunch(appPath: String) {
+    private func spawnRelaunch(appPath: String) throws {
         let script = "sleep 2 && open -a \"\(appPath)\""
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = ["-c", script]
         process.standardOutput = Pipe()
         process.standardError = Pipe()
-        try? process.run()
+        try process.run()
         // Do NOT waitUntilExit — this is a detached fire-and-forget
     }
 

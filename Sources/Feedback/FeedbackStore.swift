@@ -57,6 +57,8 @@ class FeedbackStore: ObservableObject {
     private let feedbackURL: URL
     private let encoder: JSONEncoder
     private let isoFormatter: ISO8601DateFormatter
+    private let writer: JSONLWriter
+    private var lastStatsModDate: Date?
 
     init() {
         let storageDir = FileManager.default.draftAppSupportDir
@@ -66,6 +68,7 @@ class FeedbackStore: ObservableObject {
         encoder.outputFormatting = []  // Compact — one record per line
 
         isoFormatter = ISO8601DateFormatter()
+        writer = JSONLWriter(fileURL: feedbackURL)
     }
 
     /// Record a user acceptance signal. Call this whenever Copy or Paste is triggered.
@@ -87,52 +90,33 @@ class FeedbackStore: ObservableObject {
             formality: formality
         )
 
-        guard let data = try? encoder.encode(entry),
-              let line = String(data: data, encoding: .utf8) else {
-            print("⚠️ FEEDBACK | failed to encode feedback entry")
-            Task { @MainActor in
-                EventReporter.shared.capture(level: .error, engine: "feedback", event: "feedback_encode_failed",
-                    message: "Failed to JSON-encode feedback entry")
-            }
+        guard let data = try? encoder.encode(entry) else {
+            EventReporter.shared.capture(level: .error, engine: "feedback", event: "feedback_encode_failed",
+                message: "Failed to JSON-encode feedback entry")
             return
         }
 
-        let lineWithNewline = (line + "\n").data(using: .utf8) ?? Data()
-
-        if FileManager.default.fileExists(atPath: feedbackURL.path) {
-            guard let handle = try? FileHandle(forWritingTo: feedbackURL) else {
-                print("⚠️ FEEDBACK | failed to open feedback.jsonl for writing")
-                Task { @MainActor in
-                    EventReporter.shared.capture(level: .error, engine: "feedback", event: "feedback_file_open_failed",
-                        message: "Failed to open feedback.jsonl for writing")
-                }
-                return
-            }
-            defer { try? handle.close() }
-            handle.seekToEndOfFile()
-            handle.write(lineWithNewline)
-        } else {
-            do {
-                try lineWithNewline.write(to: feedbackURL)
-            } catch {
-                print("⚠️ FEEDBACK | failed to create feedback.jsonl: \(error.localizedDescription)")
-                Task { @MainActor in
-                    EventReporter.shared.capture(level: .error, engine: "feedback", event: "feedback_file_create_failed",
-                        message: error.localizedDescription)
-                }
-            }
-        }
+        let w = writer
+        Task { await w.append(data) }
     }
 
     /// Parse feedback.jsonl and compute aggregate usage stats.
+    /// Skips reparsing if the file hasn't been modified since the last call.
     /// File I/O runs on a background thread to avoid blocking the main actor.
     func refreshStats() {
         let url = feedbackURL
+        // Check modification date — skip expensive reparse if file hasn't changed
+        let currentModDate = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+        if let currentModDate, let lastModDate = lastStatsModDate, currentModDate == lastModDate {
+            return  // File unchanged since last parse
+        }
+        let captured = currentModDate
         Task {
             let computed = await Task.detached {
                 FeedbackStore.parseStats(url: url)
             }.value
             self.stats = computed
+            self.lastStatsModDate = captured
         }
     }
 

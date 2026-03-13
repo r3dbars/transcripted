@@ -16,7 +16,7 @@ enum BetaConfig {
 
     /// Current app version — compared against /config min_version to prompt updates.
     /// Bump this in each release. build-beta.sh can also inject it via sed.
-    static let appVersion = "1.0.1"
+    static let appVersion = "1.0.2"
 
     /// Where to download the latest DMG (GitHub Releases or similar)
     static let updateURL = "https://github.com/r3dbars/Draft/releases/latest"

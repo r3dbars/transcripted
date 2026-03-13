@@ -31,14 +31,15 @@ final class BetaTelemetry {
     // MARK: - Discrete events (fire-and-forget, unchanged)
 
     func sendEvent(type: String, sourceApp: String? = nil, payload: [String: Any] = [:]) {
-        guard let auth = AuthCredential.load() else { return }
+        let token = BetaConfig.userToken
+        guard token != "BETA_TOKEN_PLACEHOLDER" else { return }
         let url = URL(string: "\(BetaConfig.proxyBaseURL)/events")!
 
         Task.detached(priority: .utility) {
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            auth.apply(to: &request)
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
             var body: [String: Any] = [
                 "event_type": type,
@@ -46,7 +47,12 @@ final class BetaTelemetry {
             if let app = sourceApp { body["source_app"] = app }
             if !payload.isEmpty { body["payload"] = payload }
 
-            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            do {
+                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            } catch {
+                fputs("⚠️ TELEMETRY | failed to serialize event body: \(error.localizedDescription)\n", stderr)
+                return
+            }
             _ = try? await URLSession.shared.data(for: request)
         }
     }
@@ -72,7 +78,8 @@ final class BetaTelemetry {
     // MARK: - Quit shipping (synchronous, 3s timeout — called from applicationWillTerminate)
 
     func shipLogs() {
-        guard let auth = AuthCredential.load() else { return }
+        let token = BetaConfig.userToken
+        guard token != "BETA_TOKEN_PLACEHOLDER" else { return }
 
         // Ship any remaining debug log content
         let logChunk = readChunk(from: debugLogURL, offset: &debugLogOffset)
@@ -81,14 +88,19 @@ final class BetaTelemetry {
         guard logChunk != nil || eventChunk != nil else { return }
 
         var body: [String: Any] = [:]
-        if let log = logChunk { body["log_lines"] = log }
-        if let events = eventChunk { body["event_lines"] = events }
+        if let log = logChunk { body["log_lines"] = redactChunk(log) }
+        if let events = eventChunk { body["event_lines"] = redactChunk(events) }
 
         var request = URLRequest(url: URL(string: "\(BetaConfig.proxyBaseURL)/logs")!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        auth.apply(to: &request)
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            fputs("⚠️ TELEMETRY | failed to serialize quit-time log body: \(error.localizedDescription)\n", stderr)
+            return
+        }
 
         // Synchronous wait — applicationWillTerminate can't use async
         let semaphore = DispatchSemaphore(value: 0)
@@ -99,7 +111,8 @@ final class BetaTelemetry {
     // MARK: - Incremental shipping
 
     private func shipIncremental() async {
-        guard let auth = AuthCredential.load() else { return }
+        let token = BetaConfig.userToken
+        guard token != "BETA_TOKEN_PLACEHOLDER" else { return }
 
         // Read new chunks from both files
         var tempDebugOffset = debugLogOffset
@@ -110,14 +123,19 @@ final class BetaTelemetry {
         guard logChunk != nil || eventChunk != nil else { return }
 
         var body: [String: Any] = [:]
-        if let log = logChunk { body["log_lines"] = log }
-        if let events = eventChunk { body["event_lines"] = events }
+        if let log = logChunk { body["log_lines"] = redactChunk(log) }
+        if let events = eventChunk { body["event_lines"] = redactChunk(events) }
 
         var request = URLRequest(url: URL(string: "\(BetaConfig.proxyBaseURL)/logs")!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        auth.apply(to: &request)
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            fputs("⚠️ TELEMETRY | failed to serialize incremental log body: \(error.localizedDescription)\n", stderr)
+            return
+        }
 
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
@@ -129,6 +147,33 @@ final class BetaTelemetry {
         } catch {
             // Leave offsets unchanged — will retry next cycle
         }
+    }
+
+    // MARK: - Log Redaction
+
+    // Pre-compiled regexes — avoids recompilation per log line
+    private static let userPathRegex = try! NSRegularExpression(pattern: #"/Users/[^/]+/"#)
+    private static let apiKeyRegex = try! NSRegularExpression(pattern: #"sk-ant-[A-Za-z0-9_-]+"#)
+    private static let bearerRegex = try! NSRegularExpression(pattern: #"Bearer [A-Za-z0-9._-]+"#)
+
+    /// Strip sensitive data from log lines before shipping to proxy.
+    private func redactLogLine(_ line: String) -> String {
+        var result = line
+        let fullRange = NSRange(result.startIndex..., in: result)
+        // Redact file paths containing usernames: /Users/<name>/ → /Users/****/
+        result = Self.userPathRegex.stringByReplacingMatches(in: result, range: fullRange, withTemplate: "/Users/****/")
+        let range2 = NSRange(result.startIndex..., in: result)
+        result = Self.apiKeyRegex.stringByReplacingMatches(in: result, range: range2, withTemplate: "sk-ant-****")
+        let range3 = NSRange(result.startIndex..., in: result)
+        result = Self.bearerRegex.stringByReplacingMatches(in: result, range: range3, withTemplate: "Bearer ****")
+        return result
+    }
+
+    /// Redact all lines in a multi-line log chunk.
+    private func redactChunk(_ chunk: String) -> String {
+        chunk.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { redactLogLine(String($0)) }
+            .joined(separator: "\n")
     }
 
     // MARK: - File chunk reading

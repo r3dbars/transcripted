@@ -783,14 +783,14 @@ struct OnboardingView: View {
     }
 
     private func importStyle() {
-        guard let auth = AuthCredential.load() else { return }
+        guard appState.localInference.isReady else { return }
         let text = styleImportText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
         isImportingStyle = true
         Task {
             do {
-                _ = try await appState.styleEngine.importBulkSamples(rawText: text, auth: auth)
+                _ = try await appState.styleEngine.importBulkSamples(rawText: text, draftEngine: appState.localInference.draftEngine)
                 showStyleImport = false
             } catch {
                 // Non-fatal — user can still use Draft, style builds naturally

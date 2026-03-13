@@ -34,14 +34,21 @@ class AnalysisEngine: ObservableObject {
 
     private let minEntries = 5
     private let debounceSeconds: Double = 30
+    private let isoFormatter = ISO8601DateFormatter()
+    private let suggestionWriter: JSONLWriter
 
     init() {
         dataDir = FileManager.default.draftAppSupportDir
+        suggestionWriter = JSONLWriter(fileURL: dataDir.appendingPathComponent("suggestion_log.jsonl"))
     }
 
     deinit {
-        fileSource?.cancel()
-        debounceTask?.cancel()
+        let source = fileSource
+        let task = debounceTask
+        let fd = fileDescriptor
+        source?.cancel()
+        task?.cancel()
+        if fd >= 0 { Darwin.close(fd) }
     }
 
     func start() {
@@ -136,10 +143,19 @@ class AnalysisEngine: ObservableObject {
         }
     }
 
+    /// Reference to local inference — set by DraftAppState after init.
+    var localInference: LocalInferenceManager?
+
     // MARK: - Analysis
 
     private func runAnalysis(newEntryCount: Int) async {
-        guard let auth = AuthCredential.load() else { return }
+        guard let localInference = localInference, localInference.isReady else {
+            // Model not ready — re-accumulate entries
+            pendingNewCount += newEntryCount
+            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "analysis_skipped_no_model",
+                message: "Skipped analysis of \(newEntryCount) entries — local model not loaded")
+            return
+        }
         isAnalyzing = true
         defer { isAnalyzing = false }
 
@@ -148,27 +164,48 @@ class AnalysisEngine: ObservableObject {
             \(newEntryCount) new feedback entries have arrived since the last analysis.
             Read the data provided in the system prompt, find the highest-impact pattern
             (the recurring edit that shows the biggest gap between drafted and accepted text),
-            and propose 1–3 focused prompt changes using the propose_prompt_change tool.
+            and propose 1–3 focused prompt changes.
+
+            Output your response as a JSON array of objects, each with these fields:
+            - "prompt_key": key in prompts.json to change
+            - "saw": evidence from the feedback data
+            - "why": reasoning about what's wrong
+            - "current_value": the current prompt value (relevant section)
+            - "proposed_value": the full new value for the key
+
+            Example format:
+            [{"prompt_key": "drafting_system", "saw": "...", "why": "...", "current_value": "...", "proposed_value": "..."}]
             """
 
-        let tools: [[String: Any]] = [InsightCard.toolDefinition]
-
         do {
-            let result = try await callAPIWithToolUse(
+            let response = try await localInference.draftEngine.complete(
+                prompt: userMessage,
                 systemPrompt: systemPrompt,
-                userMessage: userMessage,
-                tools: tools,
-                auth: auth,
-                maxTurns: 3
+                maxTokens: DraftConstants.analysisMaxTokens,
+                temperature: 0.3
             )
-            // Parse tool calls from result and create InsightCards
-            for card in result {
+
+            // Parse JSON array from response
+            let cards = parseInsightCards(from: response)
+            for card in cards {
                 insights.append(card)
             }
         } catch {
-            print("⚠️ ANALYSIS | analysis failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "analysis", event: "analysis_failed",
                 message: error.localizedDescription)
+        }
+    }
+
+    private func parseInsightCards(from response: String) -> [InsightCard] {
+        // Find JSON array in response (model may include text before/after)
+        guard let start = response.firstIndex(of: "["),
+              let end = response.lastIndex(of: "]") else { return [] }
+        let jsonStr = String(response[start...end])
+        guard let data = jsonStr.data(using: .utf8),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+
+        return arr.compactMap { dict in
+            InsightCard.from(toolId: UUID().uuidString, input: dict)
         }
     }
 
@@ -178,11 +215,19 @@ class AnalysisEngine: ObservableObject {
         if let feedback = loadRecentLines(from: feedbackURL, limit: 50) {
             parts.append("\n<feedback_jsonl>\n\(feedback)\n</feedback_jsonl>")
         }
-        if let prompts = try? String(contentsOf: promptsURL, encoding: .utf8) {
+        do {
+            let prompts = try String(contentsOf: promptsURL, encoding: .utf8)
             parts.append("\n<prompts_json>\n\(prompts)\n</prompts_json>")
+        } catch {
+            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "analysis_file_read_failed",
+                message: error.localizedDescription, context: ["path": promptsURL.path])
         }
-        if let style = try? String(contentsOf: styleURL, encoding: .utf8) {
+        do {
+            let style = try String(contentsOf: styleURL, encoding: .utf8)
             parts.append("\n<style_profile>\n\(style)\n</style_profile>")
+        } catch {
+            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "analysis_file_read_failed",
+                message: error.localizedDescription, context: ["path": styleURL.path])
         }
         if let log = loadRecentLines(from: suggestionLogURL, limit: 20) {
             parts.append("\n<suggestion_log_jsonl>\n\(log)\n</suggestion_log_jsonl>")
@@ -191,90 +236,30 @@ class AnalysisEngine: ObservableObject {
         return parts.joined(separator: "\n")
     }
 
-    // MARK: - API with Tool Use
-
-    private func callAPIWithToolUse(
-        systemPrompt: String,
-        userMessage: String,
-        tools: [[String: Any]],
-        auth: AuthCredential,
-        maxTurns: Int
-    ) async throws -> [InsightCard] {
-        var cards: [InsightCard] = []
-        var messages: [[String: Any]] = [["role": "user", "content": userMessage]]
-
-        let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
-        let apiVersion = "2023-06-01"
-
-        for _ in 0..<maxTurns {
-            var request = URLRequest(url: endpoint)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
-            auth.apply(to: &request)
-
-            let body: [String: Any] = [
-                "model": AnthropicAPI.sonnetModel,
-                "max_tokens": 4096,
-                "system": systemPrompt,
-                "messages": messages,
-                "tools": tools
-            ]
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            request.timeoutInterval = 60
-
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                break
-            }
-
-            guard let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let content = dict["content"] as? [[String: Any]]
-            else { break }
-
-            let stopReason = dict["stop_reason"] as? String
-
-            // Collect assistant turn
-            messages.append(["role": "assistant", "content": content])
-
-            // Process tool calls
-            var toolResults: [[String: Any]] = []
-            for block in content {
-                guard block["type"] as? String == "tool_use",
-                      let toolId = block["id"] as? String,
-                      let name = block["name"] as? String,
-                      name == "propose_prompt_change",
-                      let input = block["input"] as? [String: Any],
-                      let card = InsightCard.from(toolId: toolId, input: input)
-                else { continue }
-
-                cards.append(card)
-
-                toolResults.append([
-                    "type": "tool_result",
-                    "tool_use_id": toolId,
-                    "content": "Card emitted with suggestion_id: \(toolId)"
-                ])
-            }
-
-            if toolResults.isEmpty || stopReason == "end_turn" { break }
-
-            // Feed tool results back for next turn
-            messages.append(["role": "user", "content": toolResults])
-        }
-
-        return cards
-    }
-
     // MARK: - File I/O
 
     private func countLines(at url: URL) -> Int {
-        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return 0 }
-        return content.split(separator: "\n", omittingEmptySubsequences: true).count
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return 0 }
+        defer { try? handle.close() }
+        var count = 0
+        while autoreleasepool(invoking: {
+            let chunk = handle.readData(ofLength: 8192)
+            guard !chunk.isEmpty else { return false }
+            for byte in chunk where byte == 0x0A { count += 1 }
+            return true
+        }) {}
+        return count
     }
 
     private func loadRecentLines(from url: URL, limit: Int) -> String? {
-        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let content: String
+        do {
+            content = try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "analysis_file_read_failed",
+                message: error.localizedDescription, context: ["path": url.path, "operation": "loadRecentLines"])
+            return nil
+        }
         let lines = content.split(separator: "\n", omittingEmptySubsequences: true)
         let recent = lines.suffix(limit)
         return recent.isEmpty ? nil : recent.joined(separator: "\n")
@@ -284,7 +269,6 @@ class AnalysisEngine: ObservableObject {
         do {
             let data = try Data(contentsOf: promptsURL)
             guard var dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                print("⚠️ ANALYSIS | prompts.json is not a dictionary")
                 EventReporter.shared.capture(level: .error, engine: "analysis", event: "prompt_write_failed",
                     message: "prompts.json root is not a dictionary", context: ["key": key])
                 return
@@ -293,7 +277,6 @@ class AnalysisEngine: ObservableObject {
             let newData = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys])
             try newData.write(to: promptsURL)
         } catch {
-            print("⚠️ ANALYSIS | failed to write prompt change for key '\(key)': \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "analysis", event: "prompt_write_failed",
                 message: error.localizedDescription, context: ["key": key])
         }
@@ -301,35 +284,24 @@ class AnalysisEngine: ObservableObject {
 
     private func logSuggestion(card: InsightCard, action: String) {
         let entry: [String: Any] = [
-            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "timestamp": isoFormatter.string(from: Date()),
             "suggestion_id": card.suggestionId,
             "prompt_key": card.promptKey,
             "action": action,
             "saw": card.saw,
             "why": card.why
         ]
-        guard let data = try? JSONSerialization.data(withJSONObject: entry),
-              let line = String(data: data, encoding: .utf8)
-        else {
+        let data: Data
+        do {
+            data = try JSONSerialization.data(withJSONObject: entry)
+        } catch {
             EventReporter.shared.capture(level: .warning, engine: "analysis", event: "suggestion_write_failed",
-                message: "Failed to encode suggestion log entry", context: ["action": action, "suggestion_id": card.suggestionId])
+                message: "Failed to serialize suggestion log entry: \(error.localizedDescription)",
+                context: ["action": action, "suggestion_id": card.suggestionId])
             return
         }
-        let lineWithNewline = (line + "\n").data(using: .utf8) ?? Data()
-        do {
-            if FileManager.default.fileExists(atPath: suggestionLogURL.path) {
-                let handle = try FileHandle(forWritingTo: suggestionLogURL)
-                defer { try? handle.close() }
-                handle.seekToEndOfFile()
-                handle.write(lineWithNewline)
-            } else {
-                try lineWithNewline.write(to: suggestionLogURL)
-            }
-        } catch {
-            print("⚠️ ANALYSIS | failed to write suggestion log: \(error.localizedDescription)")
-            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "suggestion_write_failed",
-                message: error.localizedDescription, context: ["action": action, "suggestion_id": card.suggestionId])
-        }
+        let w = suggestionWriter
+        Task { await w.append(data) }
     }
 }
 
@@ -371,7 +343,8 @@ private extension URL {
         do {
             try FileManager.default.createDirectory(at: self, withIntermediateDirectories: true)
         } catch {
-            print("⚠️ ANALYSIS | failed to create directory \(self.path): \(error.localizedDescription)")
+            // Can't call EventReporter.shared.capture() from nonisolated URL extension
+            fputs("⚠️ ANALYSIS | failed to create directory \(self.path): \(error.localizedDescription)\n", stderr)
         }
     }
 }

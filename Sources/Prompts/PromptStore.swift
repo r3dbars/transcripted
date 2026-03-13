@@ -50,8 +50,8 @@ struct PromptConfig: Codable {
 // MARK: - Default Prompt Text (source of truth on first run)
 
 enum DefaultPrompts {
-    static let model = "claude-haiku-4-5-20251001"
-    static let sonnetModel = "claude-sonnet-4-6-20250514"
+    static let model = "local"          // Local inference via MLX (Qwen3.5-4B)
+    static let sonnetModel = "local"    // Local inference via MLX (Qwen3.5-4B)
 
     static let draftingSystem = """
         You are a writing assistant. Take the user's rough spoken text and rewrite it as a clear, \
@@ -276,13 +276,21 @@ class PromptStore: ObservableObject {
         do {
             try FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
         } catch {
-            print("⚠️ PROMPTS | failed to create directory \(storageDir.path): \(error.localizedDescription)")
+            EventReporter.shared.capture(level: .warning, engine: "prompts", event: "directory_create_failed",
+                message: "Failed to create directory \(storageDir.path): \(error.localizedDescription)")
         }
 
-        if FileManager.default.fileExists(atPath: storeURL.path),
-           let data = try? Data(contentsOf: storeURL),
-           let loaded = try? JSONDecoder().decode(PromptConfig.self, from: data) {
-            config = loaded
+        if FileManager.default.fileExists(atPath: storeURL.path) {
+            do {
+                let data = try Data(contentsOf: storeURL)
+                let loaded = try JSONDecoder().decode(PromptConfig.self, from: data)
+                config = loaded
+            } catch {
+                EventReporter.shared.capture(level: .warning, engine: "prompts", event: "prompts_load_failed",
+                    message: "Failed to load prompts.json: \(error.localizedDescription)")
+                config = .defaults
+                Self.write(config: .defaults, to: storeURL)
+            }
         } else {
             config = .defaults
             Self.write(config: .defaults, to: storeURL)
@@ -296,7 +304,8 @@ class PromptStore: ObservableObject {
             let loaded = try JSONDecoder().decode(PromptConfig.self, from: data)
             config = loaded
         } catch {
-            print("⚠️ PROMPTS | failed to reload prompts.json: \(error.localizedDescription)")
+            EventReporter.shared.capture(level: .warning, engine: "prompts", event: "prompts_reload_failed",
+                message: error.localizedDescription, context: ["path": storeURL.path])
         }
     }
 
@@ -342,7 +351,8 @@ class PromptStore: ObservableObject {
             let data = try encoder.encode(config)
             try data.write(to: url)
         } catch {
-            print("⚠️ PROMPTS | failed to write prompts.json: \(error.localizedDescription)")
+            EventReporter.shared.capture(level: .warning, engine: "prompts", event: "prompts_write_failed",
+                message: "Failed to write prompts.json: \(error.localizedDescription)")
         }
     }
 }

@@ -6,28 +6,13 @@ import Foundation
 
 enum DraftConstants {
 
-    // MARK: - API & Network
-
-    /// Delay between retry attempts for transient API errors (nanoseconds)
-    static let apiRetryDelay: UInt64 = 2_000_000_000  // 2 seconds
+    // MARK: - Generation
 
     /// Default max tokens for draft responses
     static let draftMaxTokens = 1024
 
-    /// Max tokens for vision context extraction
-    static let visionMaxTokens = 2048
-
-    /// Max tokens for streaming chat responses
-    static let chatMaxTokens = 2048
-
-    /// Max tokens for Sonnet analysis/refinement calls
-    static let analysisMaxTokens = 4096
-
-    /// Vision extraction timeout (typical calls take 2-6s; 4s was too tight)
-    static let visionTimeoutSeconds: Double = 8.0
-
-    /// HTTP request timeout for Sonnet analysis calls
-    static let analysisHTTPTimeoutSeconds: Double = 60.0
+    /// Max tokens for analysis calls
+    static let analysisMaxTokens = 2048
 
     // MARK: - Audio & Speech
 
@@ -55,8 +40,24 @@ enum DraftConstants {
     /// Live speech restart rate-limit window in seconds
     static let liveSpeechRestartWindowSeconds: TimeInterval = 10.0
 
+    /// Delay for audio engine re-warm after device change (nanoseconds)
+    static let audioRecoveryDelay: UInt64 = 300_000_000  // 300ms
+
     /// Delay for audio engine re-warm after system wake (nanoseconds)
-    static let audioRewarmDelay: UInt64 = 500_000_000  // 500ms
+    /// Increased from 500ms to 1s — CoreAudio needs time to fully reinitialize after sleep
+    static let audioRewarmDelay: UInt64 = 1_000_000_000  // 1 second
+
+    /// Watchdog timeout — if no audio samples arrive within this window after starting
+    /// recording, the engine is likely a zombie (running but disconnected from hardware)
+    static let audioWatchdogTimeout: UInt64 = 2_000_000_000  // 2 seconds
+
+    // MARK: - Model Loading
+
+    /// Polling interval while waiting for voice model to load (nanoseconds)
+    static let modelLoadPollInterval: UInt64 = 200_000_000  // 200ms
+
+    /// Max polling iterations for model load (600 * 200ms = 120s timeout)
+    static let modelLoadMaxIterations = 600
 
     // MARK: - Clipboard
 
@@ -85,9 +86,6 @@ enum DraftConstants {
     /// Minimum feedback entries before triggering analysis
     static let analysisMinFeedbackEntries = 5
 
-    /// Max tool use turns in multi-turn analysis
-    static let analysisMaxToolTurns = 3
-
     // MARK: - Data Limits
 
     /// Default max messages to read from iMessage database
@@ -95,12 +93,6 @@ enum DraftConstants {
 
     /// Max messages to format for analysis during onboarding
     static let imessageAnalysisLimit = 500
-
-    /// Recent feedback log lines injected into chat context
-    static let chatFeedbackContextLines = 25
-
-    /// Recent suggestion log lines injected into chat context
-    static let chatSuggestionContextLines = 10
 
     /// Recent feedback lines for analysis engine
     static let analysisFeedbackLines = 50
@@ -122,5 +114,41 @@ enum DraftConstants {
     // MARK: - Error Display
 
     /// Duration to show error messages in overlay before auto-dismiss (nanoseconds)
-    static let errorDismissDelay: UInt64 = 1_500_000_000  // 1.5 seconds
+    static let errorDismissDelay: UInt64 = 2_500_000_000  // 2.5 seconds
+
+    // MARK: - Local Inference
+
+    /// Max tokens for local style refinement
+    static let localRefinementMaxTokens = 2048
+
+    /// Max tokens for local bulk analysis during onboarding
+    static let localBulkAnalysisMaxTokens = 2048
+
+    /// OCR text truncation limit (total characters kept from screenshot)
+    static let ocrMaxCharacters = 3000
+
+    /// OCR header prefix to keep (app chrome, contact name)
+    static let ocrHeaderCharacters = 500
+
+    /// OCR recent suffix to keep (latest messages)
+    static let ocrRecentCharacters = 2500
+
+    // MARK: - Async Utilities
+
+    /// Run an async operation with a deadline. Throws CancellationError on timeout.
+    static func withTimeout<T: Sendable>(seconds: Double, operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw CancellationError()
+            }
+            guard let result = try await group.next() else {
+                group.cancelAll()
+                throw CancellationError()
+            }
+            group.cancelAll()
+            return result
+        }
+    }
 }
