@@ -11,9 +11,6 @@ enum DraftConstants {
     /// Default max tokens for draft responses
     static let draftMaxTokens = 1024
 
-    /// Max tokens for vision context extraction (structured fields only — kept small)
-    static let visionMaxTokens = 512
-
     /// Max tokens for analysis calls
     static let analysisMaxTokens = 2048
 
@@ -89,9 +86,6 @@ enum DraftConstants {
     /// Minimum feedback entries before triggering analysis
     static let analysisMinFeedbackEntries = 5
 
-    /// Max tool use turns in multi-turn analysis
-    static let analysisMaxToolTurns = 3
-
     // MARK: - Data Limits
 
     /// Default max messages to read from iMessage database
@@ -99,12 +93,6 @@ enum DraftConstants {
 
     /// Max messages to format for analysis during onboarding
     static let imessageAnalysisLimit = 500
-
-    /// Recent feedback log lines injected into chat context
-    static let chatFeedbackContextLines = 25
-
-    /// Recent suggestion log lines injected into chat context
-    static let chatSuggestionContextLines = 10
 
     /// Recent feedback lines for analysis engine
     static let analysisFeedbackLines = 50
@@ -130,14 +118,20 @@ enum DraftConstants {
 
     // MARK: - Local Inference
 
-    /// Vision extraction timeout for local OCR + LLM pipeline
-    static let localVisionTimeoutSeconds: Double = 15.0
-
-    /// Max tokens for local style refinement (smaller than cloud Sonnet)
+    /// Max tokens for local style refinement
     static let localRefinementMaxTokens = 2048
 
     /// Max tokens for local bulk analysis during onboarding
     static let localBulkAnalysisMaxTokens = 2048
+
+    /// OCR text truncation limit (total characters kept from screenshot)
+    static let ocrMaxCharacters = 3000
+
+    /// OCR header prefix to keep (app chrome, contact name)
+    static let ocrHeaderCharacters = 500
+
+    /// OCR recent suffix to keep (latest messages)
+    static let ocrRecentCharacters = 2500
 
     // MARK: - Async Utilities
 

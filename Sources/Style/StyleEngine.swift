@@ -74,6 +74,15 @@ class StyleEngine: ObservableObject {
         return summary == "(Will be generated after 5 examples)" ? "" : summary
     }
 
+    /// Strip markdown bullet prefix (* or -) from a line.
+    private static func stripBulletPrefix(_ s: String) -> String {
+        var c = s
+        if c.hasPrefix("*   ") { c = String(c.dropFirst(4)) }
+        else if c.hasPrefix("* ") { c = String(c.dropFirst(2)) }
+        else if c.hasPrefix("- ") { c = String(c.dropFirst(2)) }
+        return c
+    }
+
     /// Extract a condensed style profile for the drafting model (optimized for small local models).
     /// Pulls just: one-line tone summary, ALWAYS bullets, NEVER bullets, signature phrases.
     /// Strips verbose prose, proof citations, and AI Draft comparison examples.
@@ -86,10 +95,7 @@ class StyleEngine: ObservableObject {
         // Extract a one-line tone summary from **Tone & Voice** section
         if let toneStart = full.range(of: "**Tone & Voice**") {
             let afterTone = full[toneStart.upperBound...]
-            // Take just the first sentence
-            let toneText = String(afterTone.prefix(while: { $0 != "\n" || false }))
             let firstLine = afterTone.components(separatedBy: "\n").first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? ""
-            // Take up to the first period
             if let periodIdx = firstLine.firstIndex(of: ".") {
                 parts.append("STYLE: \(String(firstLine[...periodIdx]).trimmingCharacters(in: .whitespaces))")
             } else if !firstLine.isEmpty {
@@ -106,16 +112,10 @@ class StyleEngine: ObservableObject {
                 .components(separatedBy: "\n")
                 .filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("*") || $0.trimmingCharacters(in: .whitespaces).hasPrefix("-") }
                 .map { line -> String in
-                    var cleaned = line.trimmingCharacters(in: .whitespaces)
-                    // Remove leading bullet marker
-                    if cleaned.hasPrefix("*   ") { cleaned = String(cleaned.dropFirst(4)) }
-                    else if cleaned.hasPrefix("* ") { cleaned = String(cleaned.dropFirst(2)) }
-                    else if cleaned.hasPrefix("- ") { cleaned = String(cleaned.dropFirst(2)) }
-                    // Strip proof citations like "(Proof: ...)"
+                    var cleaned = Self.stripBulletPrefix(line.trimmingCharacters(in: .whitespaces))
                     if let proofRange = cleaned.range(of: " (Proof:", options: .caseInsensitive) {
                         cleaned = String(cleaned[..<proofRange.lowerBound])
                     }
-                    // Strip trailing period if present
                     if cleaned.hasSuffix(".") { cleaned = String(cleaned.dropLast()) }
                     return "- \(cleaned)"
                 }
@@ -127,24 +127,18 @@ class StyleEngine: ObservableObject {
         // Extract NEVER bullets — only the first line of each, strip sub-bullets with AI Draft examples
         if let neverStart = full.range(of: "**NEVER**") {
             let afterNever = full[neverStart.upperBound...]
-            // NEVER section runs to the next ** section or end
             let neverEnd = afterNever.range(of: "\n**", range: afterNever.startIndex..<afterNever.endIndex)
             let neverSection = neverEnd != nil ? String(afterNever[..<neverEnd!.lowerBound]) : String(afterNever)
             let bullets = neverSection
                 .components(separatedBy: "\n")
                 .filter { line in
                     let trimmed = line.trimmingCharacters(in: .whitespaces)
-                    // Only top-level bullets (start with * or -), skip indented sub-bullets
                     let isTopLevel = (trimmed.hasPrefix("*") || trimmed.hasPrefix("-")) && !line.hasPrefix("    ")
-                    // Skip lines that are AI Draft examples or corrections
                     let isExample = trimmed.contains("*AI Draft") || trimmed.contains("*Your Style") || trimmed.contains("*Correction")
                     return isTopLevel && !isExample
                 }
                 .map { line -> String in
-                    var cleaned = line.trimmingCharacters(in: .whitespaces)
-                    if cleaned.hasPrefix("*   ") { cleaned = String(cleaned.dropFirst(4)) }
-                    else if cleaned.hasPrefix("* ") { cleaned = String(cleaned.dropFirst(2)) }
-                    else if cleaned.hasPrefix("- ") { cleaned = String(cleaned.dropFirst(2)) }
+                    var cleaned = Self.stripBulletPrefix(line.trimmingCharacters(in: .whitespaces))
                     if cleaned.hasSuffix(".") { cleaned = String(cleaned.dropLast()) }
                     return "- \(cleaned)"
                 }

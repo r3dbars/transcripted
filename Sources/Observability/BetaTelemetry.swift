@@ -151,25 +151,21 @@ final class BetaTelemetry {
 
     // MARK: - Log Redaction
 
+    // Pre-compiled regexes — avoids recompilation per log line
+    private static let userPathRegex = try! NSRegularExpression(pattern: #"/Users/[^/]+/"#)
+    private static let apiKeyRegex = try! NSRegularExpression(pattern: #"sk-ant-[A-Za-z0-9_-]+"#)
+    private static let bearerRegex = try! NSRegularExpression(pattern: #"Bearer [A-Za-z0-9._-]+"#)
+
     /// Strip sensitive data from log lines before shipping to proxy.
     private func redactLogLine(_ line: String) -> String {
         var result = line
+        let fullRange = NSRange(result.startIndex..., in: result)
         // Redact file paths containing usernames: /Users/<name>/ → /Users/****/
-        if let range = result.range(of: #"/Users/[^/]+/"#, options: .regularExpression) {
-            result = result.replacingCharacters(in: range, with: "/Users/****/")
-        }
-        // Redact API key patterns
-        result = result.replacingOccurrences(
-            of: #"sk-ant-[A-Za-z0-9_-]+"#,
-            with: "sk-ant-****",
-            options: .regularExpression
-        )
-        // Redact Bearer tokens
-        result = result.replacingOccurrences(
-            of: #"Bearer [A-Za-z0-9._-]+"#,
-            with: "Bearer ****",
-            options: .regularExpression
-        )
+        result = Self.userPathRegex.stringByReplacingMatches(in: result, range: fullRange, withTemplate: "/Users/****/")
+        let range2 = NSRange(result.startIndex..., in: result)
+        result = Self.apiKeyRegex.stringByReplacingMatches(in: result, range: range2, withTemplate: "sk-ant-****")
+        let range3 = NSRange(result.startIndex..., in: result)
+        result = Self.bearerRegex.stringByReplacingMatches(in: result, range: range3, withTemplate: "Bearer ****")
         return result
     }
 
