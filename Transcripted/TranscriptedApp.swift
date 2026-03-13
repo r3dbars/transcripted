@@ -48,6 +48,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Configure tooltip delay to 1 second
         UserDefaults.standard.set(1000, forKey: "NSInitialToolTipDelay")
 
+        // Register defaults for new settings (bool keys default to false otherwise)
+        UserDefaults.standard.register(defaults: ["enableAgentOutput": true])
+
         NSApp.setActivationPolicy(.accessory)
 
         // Check if onboarding is needed

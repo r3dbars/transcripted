@@ -211,6 +211,25 @@ class TranscriptSaver {
                 await StatsService.shared.recordSession(metadata)
             }
 
+            // Agent output: write JSON sidecar + index + AGENT.md
+            if UserDefaults.standard.bool(forKey: "enableAgentOutput") {
+                let stem = fileURL.deletingPathExtension().lastPathComponent
+                do {
+                    try AgentOutput.writeTranscriptJSON(
+                        from: result,
+                        speakerMappings: speakerMappings,
+                        speakerDbIds: speakerDbIds,
+                        to: saveDir,
+                        stem: stem
+                    )
+                    try AgentOutput.writeIndex(to: saveDir, speakerDB: SpeakerDatabase.shared)
+                    AgentOutput.writeAgentReadme(to: saveDir)
+                } catch {
+                    AppLogger.pipeline.error("Agent output failed", ["error": error.localizedDescription])
+                    // Non-fatal — Markdown already saved successfully
+                }
+            }
+
             return fileURL
         } catch {
             AppLogger.pipeline.error("Failed to save transcript", ["error": error.localizedDescription])
@@ -519,6 +538,10 @@ class TranscriptSaver {
             AppLogger.pipeline.info("Retroactively updated speaker in transcripts",
                 ["dbId": dbIdString, "name": newName, "files": "\(updatedCount)"])
 
+            // Rebuild agent index if agent output is enabled
+            if UserDefaults.standard.bool(forKey: "enableAgentOutput") {
+                try? AgentOutput.writeIndex(to: dir, speakerDB: SpeakerDatabase.shared)
+            }
         }
     }
 
@@ -575,11 +598,59 @@ class TranscriptSaver {
             try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
             AppLogger.pipeline.info("Updated speaker names in transcript", ["path": transcriptURL.lastPathComponent, "updates": "\(updates.count)"])
 
+            // Update JSON sidecar if agent output is enabled
+            if UserDefaults.standard.bool(forKey: "enableAgentOutput") {
+                updateAgentJSON(transcriptURL: transcriptURL, updates: updates)
+            }
+
             return true
         } catch {
             AppLogger.pipeline.error("Failed to write updated transcript", ["error": error.localizedDescription])
             return false
         }
+    }
+
+    /// Update the JSON sidecar when speaker names change.
+    private static func updateAgentJSON(transcriptURL: URL, updates: [SpeakerNameUpdate]) {
+        let stem = transcriptURL.deletingPathExtension().lastPathComponent
+        let jsonURL = transcriptURL.deletingLastPathComponent().appendingPathComponent("\(stem).json")
+        guard FileManager.default.fileExists(atPath: jsonURL.path),
+              var data = try? Data(contentsOf: jsonURL),
+              var transcript = try? JSONDecoder().decode(AgentTranscript.self, from: data) else { return }
+
+        // Rebuild speakers with updated names
+        var updatedSpeakers = transcript.speakers
+        for update in updates {
+            let systemKey = "system_\(update.sortformerSpeakerId)"
+            if let idx = updatedSpeakers.firstIndex(where: { $0.id == systemKey }) {
+                let old = updatedSpeakers[idx]
+                updatedSpeakers[idx] = AgentSpeaker(
+                    id: old.id,
+                    persistentSpeakerId: old.persistentSpeakerId,
+                    name: update.newName,
+                    confidence: old.confidence,
+                    wordCount: old.wordCount,
+                    speakingSeconds: old.speakingSeconds
+                )
+            }
+        }
+
+        let updated = AgentTranscript(
+            version: transcript.version,
+            recording: transcript.recording,
+            speakers: updatedSpeakers,
+            utterances: transcript.utterances
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let newData = try? encoder.encode(updated) {
+            try? newData.write(to: jsonURL, options: .atomic)
+        }
+
+        // Rebuild index
+        let folder = transcriptURL.deletingLastPathComponent()
+        try? AgentOutput.writeIndex(to: folder, speakerDB: SpeakerDatabase.shared)
     }
 
     /// Notification category identifier for "Show in Finder" action
