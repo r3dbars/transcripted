@@ -83,6 +83,9 @@ class DraftAppState: ObservableObject {
         }
 
         logger.log("APP LAUNCHED | local inference, style: \(styleEngine.exampleCount) examples, model: local")
+        EventTracker.track("app.launched", with: [
+            "style_examples": "\(styleEngine.exampleCount)",
+        ])
 
         // Wire EventReporter with live engine state for context enrichment
         EventReporter.shared.setEngineStateSummary { [weak self] in

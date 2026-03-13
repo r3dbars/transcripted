@@ -404,6 +404,43 @@ struct MenuBarPanelView: View {
 
             Divider()
 
+            // MARK: - Feedback & Logs
+            VStack(spacing: 8) {
+                Text("Feedback")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 8) {
+                    // Open mail with recent logs pre-filled
+                    Button("Send Feedback + Logs") {
+                        let logLines = appState.logger.entries.suffix(80).joined(separator: "\n")
+                        let subject = "Draft Feedback"
+                        let body = "What happened:\n[describe the issue here]\n\n---\nLogs:\n\(logLines)"
+                        let encodedSubject = subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? subject
+                        let encodedBody = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+                        if let url = URL(string: "mailto:hi@draftapp.com?subject=\(encodedSubject)&body=\(encodedBody)") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+
+                    // Copy logs to clipboard — useful if email doesn't work
+                    Button("Copy Logs") {
+                        let logText = appState.logger.entries.suffix(200).joined(separator: "\n")
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(logText, forType: .string)
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Text("Last \(min(appState.logger.entries.count, 200)) log entries")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            Divider()
+
             Button("Quit Draft") {
                 NSApplication.shared.terminate(nil)
             }

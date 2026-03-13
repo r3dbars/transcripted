@@ -59,16 +59,16 @@ Also includes `EventLevel` enum (`error`, `warning`, `info`) and a no-op `Sentry
 
 ```
 Any engine (MainActor)
-  │
-  └─→ EventReporter.shared.capture(level:engine:event:message:context:)
-      │
-      ├─→ Merge caller context with live engine state (engineStateSummary closure)
-      │
-      └─→ Task.detached(priority: .utility)
-          │
-          ├─→ EventFileWriter.append()  ← actor, thread-safe JSONL append
-          │
-          └─→ SentryTransport.send()    ← no-op until DSN configured
+  |
+  +-> EventReporter.shared.capture(level:engine:event:message:context:)
+      |
+      +-> Merge caller context with live engine state (engineStateSummary closure)
+      |
+      +-> Task.detached(priority: .utility)
+          |
+          +-> EventFileWriter.append()  <- actor, thread-safe JSONL append
+          |
+          +-> SentryTransport.send()    <- no-op until DSN configured
 ```
 
 - **EventFileWriter** is an `actor` — serializes all file writes automatically (same pattern as `AppLogFileWriter` in `AppLogger.swift`)
@@ -92,7 +92,7 @@ EventReporter.shared.capture(
 
 3. Choose the right level:
    - `.error` — something broke, user may be affected (API failure, file write failed)
-   - `.warning` — something degraded but has a fallback (vision timeout → voice-only, empty transcription)
+   - `.warning` — something degraded but has a fallback (vision timeout -> voice-only, empty transcription)
    - `.info` — notable operational event (app launched, refusal detected)
 
 ## Reading Events (Claude Code)
@@ -176,3 +176,28 @@ Only `.error` level events are forwarded to Sentry. Warnings and info stay local
 | `chat` | `chat_followup_failed` | error | Follow-up turn after tool use threw an error |
 | `imessage` | `imessage_db_open_failed` | error | Can't open chat.db |
 | `imessage` | `imessage_query_failed` | error | SQLite query fails |
+
+---
+
+## CrashReporter
+
+Lightweight Sentry crash reporting via raw HTTP Store API — no SDK, no dependencies.
+
+**Setup:** Paste Sentry DSN into `sentryDSN` constant at top of `CrashReporter.swift`. Call `CrashReporter.setup()` in `applicationDidFinishLaunching`.
+
+**Usage:**
+```swift
+// Automatic: NSSetUncaughtExceptionHandler catches ObjC/SwiftUI runtime crashes
+// Manual for caught Swift errors:
+CrashReporter.shared.capture(error: error, context: "WhisperEngine.startRecording")
+CrashReporter.shared.capture(message: "Model load failed", level: "warning")
+```
+
+**Why no SDK:** Sentry's SDK requires SPM or CocoaPods. Draft uses raw swiftc. The Store API is stable and handles everything we need.
+
+## Key Decisions
+
+- **Fire-and-forget** — analytics and crash reports never block the UI thread. Tasks are `.detached`.
+- **No batching** — events are sent immediately. At our scale, one request per event is fine.
+- **Fail silently** — if the network is unavailable, the event is lost. That's acceptable.
+- **5s timeout** — reporters use a short timeout so they don't linger on bad connections.

@@ -28,6 +28,9 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var wakeObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Crash reporting — captures ObjC/SwiftUI exceptions + manual Swift error reports
+        CrashReporter.setup()
+
         // Dock icon + menubar
         NSApp.setActivationPolicy(.regular)
 
