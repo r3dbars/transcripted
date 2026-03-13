@@ -45,6 +45,11 @@ class DraftSessionController: ObservableObject {
     private var visionTask: Task<Void, Never>?
     private var sessionStartTime: CFAbsoluteTime = 0
 
+    deinit {
+        streamingTask?.cancel()
+        visionTask?.cancel()
+    }
+
     /// When set, processVision() uses this context directly instead of calling the vision API.
     /// Used by onboarding to inject a fake conversation without requiring screen recording permission.
     var overrideContext: CapturedContext?

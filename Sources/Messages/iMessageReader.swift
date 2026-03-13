@@ -129,7 +129,7 @@ actor iMessageReader {
 
     // MARK: - Format for Analysis
 
-    /// Join messages into a single text block for Sonnet style analysis.
+    /// Join messages into a single text block for style analysis.
     func formatForAnalysis(_ messages: [ImportedMessage], maxMessages: Int = 500) -> String {
         let selected = Array(messages.prefix(maxMessages))
         return selected.map { $0.text }.joined(separator: "\n\n---\n\n")

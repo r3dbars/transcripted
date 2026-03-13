@@ -11,7 +11,6 @@ class DraftAppState: ObservableObject {
     let promptStore = PromptStore()
     let feedbackStore = FeedbackStore()
     let logger = AppLogger()
-    let previousAppTracker = PreviousAppTracker()
     let contextCapture = ContextCaptureEngine()
     let analysisEngine = AnalysisEngine()
     let localInference = LocalInferenceManager()

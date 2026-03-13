@@ -20,6 +20,7 @@ swiftc \
     Sources/Draft/DraftUtils.swift \
     Sources/Messages/MessageFilter.swift \
     Sources/Style/StyleUtils.swift \
+    Sources/DraftConstants.swift \
     Sources/Analysis/InsightCard.swift \
     -framework AppKit \
     -parse-as-library \

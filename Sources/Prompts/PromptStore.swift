@@ -13,8 +13,8 @@ import Foundation
 // MARK: - Prompt Config (serialized to prompts.json)
 
 struct PromptConfig: Codable {
-    var model: String                 // Chat + context capture (Haiku — fast, background use)
-    var draftModel: String            // Message drafting (Sonnet — quality output the user sees)
+    var model: String                 // Context capture (local inference)
+    var draftModel: String            // Message drafting + style analysis (local inference)
     var draftingSystem: String        // Fallback when no style examples yet
     var contextExtraction: String     // Vision prompt for screenshot → conversation text
     var ghostwritingSystem: String    // Full drafting prompt — use {STYLE_SUMMARY} placeholder
@@ -267,7 +267,7 @@ class PromptStore: ObservableObject {
     @Published var config: PromptConfig
 
     private let storeURL: URL
-    let storageDir: URL
+    private let storageDir: URL
 
     init() {
         storageDir = FileManager.default.draftAppSupportDir

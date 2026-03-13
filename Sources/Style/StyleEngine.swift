@@ -1,5 +1,5 @@
 // StyleEngine.swift
-// Manages style.md — the single file that teaches Haiku how the user writes
+// Manages style.md — the single file that teaches the model how the user writes
 
 import Foundation
 import SwiftUI
@@ -305,7 +305,7 @@ class StyleEngine: ObservableObject {
         }
     }
 
-    /// Build the incremental refinement prompt — tells Sonnet to fix what's wrong, not rebuild from scratch
+    /// Build the incremental refinement prompt — tells the model to fix what's wrong, not rebuild from scratch
     private static func buildRefinementPrompt(currentProfile: String) -> String {
         if currentProfile.isEmpty {
             // No existing profile — build from training pairs alone

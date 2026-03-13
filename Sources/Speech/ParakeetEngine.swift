@@ -49,7 +49,6 @@ class ParakeetEngine: ObservableObject {
 
     // FluidAudio ASR
     private var asrManager: AsrManager?
-    private var initTask: Task<Void, Never>?
     private var audioWatchdogTask: Task<Void, Never>?
 
     var isModelLoaded: Bool { asrManager?.isAvailable ?? false }
@@ -300,7 +299,7 @@ class ParakeetEngine: ObservableObject {
 
         recordingInterrupted = false
         sampleBuffer.removeAll(keepingCapacity: true)
-        sampleBuffer.reserveCapacity(Int(nativeSampleRate * 120))
+        sampleBuffer.reserveCapacity(Int(nativeSampleRate * Double(DraftConstants.audioBufferCapacitySeconds)))
 
         let inputNode = audioEngine.inputNode
         let nativeFormat = inputNode.outputFormat(forBus: 0)
@@ -313,7 +312,7 @@ class ParakeetEngine: ObservableObject {
             return false
         }
 
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: monoFormat) { [weak self] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: DraftConstants.audioTapBufferSize, format: monoFormat) { [weak self] buffer, _ in
             guard let self = self,
                   let channelData = buffer.floatChannelData?[0] else { return }
             let frameLength = Int(buffer.frameLength)
@@ -329,7 +328,7 @@ class ParakeetEngine: ObservableObject {
 
             // Consumer 3: Audio level metering (~20Hz throttled)
             let now = CFAbsoluteTimeGetCurrent()
-            guard now - self.lastLevelUpdate > 0.05 else { return }
+            guard now - self.lastLevelUpdate > DraftConstants.audioMeteringInterval else { return }
             self.lastLevelUpdate = now
 
             var sumOfSquares: Float = 0
@@ -339,9 +338,7 @@ class ParakeetEngine: ObservableObject {
             }
             let rms = sqrt(sumOfSquares / Float(max(1, frameLength)))
             let dB = rms > 0.0001 ? 20.0 * log10(rms) : -60.0
-            let floorDB: Float = -50.0
-            let ceilDB: Float = -6.0
-            let normalized = max(0.0, min(1.0, (dB - floorDB) / (ceilDB - floorDB)))
+            let normalized = max(0.0, min(1.0, (dB - DraftConstants.audioLevelFloorDB) / (DraftConstants.audioLevelCeilingDB - DraftConstants.audioLevelFloorDB)))
 
             Task { @MainActor [weak self] in
                 self?.audioLevel = normalized
@@ -466,12 +463,12 @@ class ParakeetEngine: ObservableObject {
 
     private func startLiveSpeechTask(recognizer: SFSpeechRecognizer) {
         let now = CFAbsoluteTimeGetCurrent()
-        if now - liveRestartWindowStart > 10 {
+        if now - liveRestartWindowStart > DraftConstants.liveSpeechRestartWindowSeconds {
             liveRestartCount = 0
             liveRestartWindowStart = now
         }
         liveRestartCount += 1
-        if liveRestartCount > 5 {
+        if liveRestartCount > DraftConstants.liveSpeechMaxRestarts {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "live_speech_restart_limit",
                 message: "Live speech restarted too many times (>5 in 10s), stopping")
             isLiveSpeechActive = false
@@ -635,8 +632,6 @@ class ParakeetEngine: ObservableObject {
     }
 
     func cleanup() {
-        initTask?.cancel()
-        initTask = nil
         asrManager?.cleanup()
         asrManager = nil
         modelDownloadState = .notLoaded

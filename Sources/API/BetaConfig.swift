@@ -11,7 +11,7 @@ enum BetaConfig {
     /// build-beta.sh replaces BETA_TOKEN_PLACEHOLDER with the actual token.
     static let userToken = "BETA_TOKEN_PLACEHOLDER"
 
-    /// Proxy base URL — all API calls route through here instead of api.anthropic.com
+    /// Proxy base URL — telemetry events and log shipping route through here
     static let proxyBaseURL = "https://draft-proxy.tz427gsydr.workers.dev"
 
     /// Current app version — compared against /config min_version to prompt updates.
