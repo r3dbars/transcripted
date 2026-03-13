@@ -17,9 +17,12 @@ struct TranscriptTrayView: View {
     var onOpenFolder: () -> Void
     var onDismiss: (() -> Void)? = nil
 
+    @AppStorage("enableAgentOutput") private var enableAgentOutput: Bool = true
+
     @State private var isAppearing = false
     @State private var copiedId: UUID?
     @State private var copyFailedId: UUID?
+    @State private var agentPromptCopied = false
 
     // Navigation: nil = list mode, non-nil = detail mode
     @State private var selectedTranscript: TranscriptSummary?
@@ -176,20 +179,65 @@ struct TranscriptTrayView: View {
     // MARK: - Footer
 
     private var trayFooter: some View {
-        Button(action: onOpenFolder) {
-            HStack(spacing: 4) {
-                Image(systemName: "folder")
-                    .font(.system(size: 9))
-                Text("Open folder")
-                    .font(.system(size: 10))
+        HStack(spacing: 0) {
+            Button(action: onOpenFolder) {
+                HStack(spacing: 4) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 9))
+                    Text("Open folder")
+                        .font(.system(size: 10))
+                }
+                .foregroundColor(.panelTextMuted)
+                .padding(.horizontal, Spacing.ms)
+                .padding(.vertical, Spacing.xs + 2)
+                .contentShape(Rectangle())
             }
-            .foregroundColor(.panelTextMuted)
-            .padding(.horizontal, Spacing.ms)
-            .padding(.vertical, Spacing.xs + 2)
-            .contentShape(Rectangle())
+            .buttonStyle(PlainButtonStyle())
+
+            Spacer()
+
+            if enableAgentOutput {
+                Button { copyAgentPrompt() } label: {
+                    HStack(spacing: 4) {
+                        if agentPromptCopied {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(.statusSuccessMuted)
+                            Text("Copied!")
+                                .font(.system(size: 10))
+                                .foregroundColor(.statusSuccessMuted)
+                        } else {
+                            Image(systemName: "terminal")
+                                .font(.system(size: 9))
+                            Text("Connect Agent")
+                                .font(.system(size: 10))
+                        }
+                    }
+                    .foregroundColor(.panelTextMuted)
+                    .padding(.horizontal, Spacing.ms)
+                    .padding(.vertical, Spacing.xs + 2)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PlainButtonStyle())
+                .animation(.snappy(duration: 0.15), value: agentPromptCopied)
+            }
         }
-        .buttonStyle(PlainButtonStyle())
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func copyAgentPrompt(filename: String? = nil) {
+        let folder = TranscriptSaver.defaultSaveDirectory
+        let prompt = AgentOutput.clipboardPrompt(folder: folder, filename: filename)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(prompt, forType: .string)
+
+        withAnimation(.snappy(duration: 0.15)) {
+            agentPromptCopied = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation(.snappy(duration: 0.15)) {
+                agentPromptCopied = false
+            }
+        }
     }
 
     // MARK: - Detail Header
@@ -244,39 +292,71 @@ struct TranscriptTrayView: View {
     // MARK: - Detail Footer
 
     private func detailFooter(for transcript: TranscriptSummary) -> some View {
-        Button(action: { copyToClipboard(transcript) }) {
-            HStack(spacing: 4) {
-                if copyFailedId == transcript.id {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.recordingCoral)
-                    Text("Copy failed")
-                        .font(.system(size: 10))
-                        .foregroundColor(.recordingCoral)
-                } else if copiedId == transcript.id {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.statusSuccessMuted)
-                    Text("Copied!")
-                        .font(.system(size: 10))
-                        .foregroundColor(.statusSuccessMuted)
-                } else {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 9))
-                    Text("Copy transcript")
-                        .font(.system(size: 10))
+        HStack(spacing: 0) {
+            Button(action: { copyToClipboard(transcript) }) {
+                HStack(spacing: 4) {
+                    if copyFailedId == transcript.id {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.recordingCoral)
+                        Text("Copy failed")
+                            .font(.system(size: 10))
+                            .foregroundColor(.recordingCoral)
+                    } else if copiedId == transcript.id {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.statusSuccessMuted)
+                        Text("Copied!")
+                            .font(.system(size: 10))
+                            .foregroundColor(.statusSuccessMuted)
+                    } else {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 9))
+                        Text("Copy transcript")
+                            .font(.system(size: 10))
+                    }
                 }
+                .foregroundColor(.panelTextMuted)
+                .padding(.horizontal, Spacing.ms)
+                .padding(.vertical, Spacing.xs + 2)
+                .contentShape(Rectangle())
             }
-            .foregroundColor(.panelTextMuted)
-            .padding(.horizontal, Spacing.ms)
-            .padding(.vertical, Spacing.xs + 2)
-            .contentShape(Rectangle())
+            .buttonStyle(PlainButtonStyle())
+
+            Spacer()
+
+            if enableAgentOutput {
+                Button(action: {
+                    let stem = transcript.title
+                    copyAgentPrompt(filename: stem)
+                }) {
+                    HStack(spacing: 4) {
+                        if agentPromptCopied {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(.statusSuccessMuted)
+                            Text("Copied!")
+                                .font(.system(size: 10))
+                                .foregroundColor(.statusSuccessMuted)
+                        } else {
+                            Image(systemName: "terminal")
+                                .font(.system(size: 9))
+                            Text("Connect Agent")
+                                .font(.system(size: 10))
+                        }
+                    }
+                    .foregroundColor(.panelTextMuted)
+                    .padding(.horizontal, Spacing.ms)
+                    .padding(.vertical, Spacing.xs + 2)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
         }
-        .buttonStyle(PlainButtonStyle())
-        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.panelCharcoal.opacity(0.3))
         .animation(.snappy(duration: 0.15), value: copiedId)
         .animation(.snappy(duration: 0.15), value: copyFailedId)
+        .animation(.snappy(duration: 0.15), value: agentPromptCopied)
     }
 
     // MARK: - Navigation

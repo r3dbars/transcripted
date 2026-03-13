@@ -19,6 +19,7 @@ struct SettingsContainerView: View {
     @AppStorage("useAuroraRecording") private var useAuroraRecording: Bool = false
     @AppStorage("enableQwenSpeakerInference") private var enableQwenInference: Bool = true
     @AppStorage("enableObsidianFormat") private var enableObsidianFormat: Bool = false
+    @AppStorage("enableAgentOutput") private var enableAgentOutput: Bool = true
 
     @State private var enableSounds: Bool = true
     @State private var qwenModelCached: Bool = false
@@ -563,6 +564,24 @@ struct SettingsContainerView: View {
                     isOn: $enableObsidianFormat
                 )
 
+                Divider().background(Color.panelCharcoalSurface)
+
+                SettingsToggleRow(
+                    title: "Agent-Ready Output",
+                    description: "Write structured JSON alongside each transcript for AI agents",
+                    isOn: Binding(
+                        get: { enableAgentOutput },
+                        set: { newValue in
+                            enableAgentOutput = newValue
+                            if newValue {
+                                // Write AGENT.md + rebuild index immediately
+                                let saveDir = TranscriptSaver.defaultSaveDirectory
+                                AgentOutput.writeAgentReadme(to: saveDir)
+                                try? AgentOutput.writeIndex(to: saveDir, speakerDB: SpeakerDatabase.shared)
+                            }
+                        }
+                    )
+                )
             }
         }
     }
