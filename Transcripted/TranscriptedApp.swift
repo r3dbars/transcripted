@@ -28,6 +28,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // New settings window controller (redesigned dashboard)
     var settingsWindowController: SettingsWindowController?
 
+    // Meeting auto-detection
+    var meetingDetector: MeetingDetector?
+
     // Onboarding
     var onboardingWindowController: OnboardingWindowController?
 
@@ -155,6 +158,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         aud.onRecordingComplete = { [weak self] micURL, systemURL in
             self?.handleRecordingComplete(micURL: micURL, systemURL: systemURL)
         }
+
+        // Set up meeting auto-detection
+        let detector = MeetingDetector(audio: aud)
+        detector.onMeetingStart = { [weak self] appName in
+            guard let audio = self?.audio, !audio.isRecording else { return }
+            AppLogger.app.info("Auto-start: meeting detected", ["app": appName])
+            audio.start()
+        }
+        detector.onMeetingEnd = { [weak self] in
+            guard let audio = self?.audio, audio.isRecording else { return }
+            AppLogger.app.info("Auto-stop: meeting ended")
+            audio.stop()
+        }
+        detector.start()
+        meetingDetector = detector
 
         // Create floating panel
         floatingPanel = FloatingPanelController(
