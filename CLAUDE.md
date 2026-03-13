@@ -29,6 +29,7 @@ Read the component CLAUDE.md in the relevant directory FIRST:
 | Task queue, retries, progress | `Transcripted/Core/CLAUDE.md` |
 | STT model (Parakeet) | `Transcripted/Services/CLAUDE.md` |
 | Speaker diarization (Sortformer) | `Transcripted/Services/CLAUDE.md` |
+| Meeting auto-detection | `Transcripted/Services/CLAUDE.md` |
 | Speaker matching, voice DB | `Transcripted/Services/CLAUDE.md` |
 | Speaker name inference (Qwen) | `Transcripted/Services/CLAUDE.md` |
 | Audio resampling | `Transcripted/Services/CLAUDE.md` |

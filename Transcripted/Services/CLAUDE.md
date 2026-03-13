@@ -14,6 +14,7 @@ Local ML inference engines (Parakeet STT, Sortformer diarization), persistent sp
 | `QwenService.swift` | Local Qwen3.5-4B for speaker name inference from transcript | @MainActor, nonisolated for inference |
 | `EmbeddingClusterer.swift` | Post-processing: pairwise merge + DB-informed split | Static methods |
 | `SpeakerClipExtractor.swift` | Extracts 5-8s audio clips per speaker for naming UI | Static methods |
+| `MeetingDetector.swift` | Auto-detects meeting apps + bidirectional audio; fires onMeetingStart/onMeetingEnd callbacks | @MainActor |
 
 ## Key Types
 
