@@ -518,6 +518,7 @@ class TranscriptSaver {
         if updatedCount > 0 {
             AppLogger.pipeline.info("Retroactively updated speaker in transcripts",
                 ["dbId": dbIdString, "name": newName, "files": "\(updatedCount)"])
+
         }
     }
 
@@ -573,6 +574,7 @@ class TranscriptSaver {
         do {
             try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
             AppLogger.pipeline.info("Updated speaker names in transcript", ["path": transcriptURL.lastPathComponent, "updates": "\(updates.count)"])
+
             return true
         } catch {
             AppLogger.pipeline.error("Failed to write updated transcript", ["error": error.localizedDescription])

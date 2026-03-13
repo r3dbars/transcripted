@@ -11,7 +11,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Murmur</string>
+	<string>Transcripted</string>
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
@@ -21,12 +21,12 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Murmur requires microphone access to transcribe your speech to text.</string>
+	<string>Transcripted requires microphone access to transcribe your speech to text.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Murmur uses on-device speech recognition to convert your voice to text privately and securely.</string>
+	<string>Transcripted uses on-device speech recognition to convert your voice to text privately and securely.</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Murmur requires permission to register global hotkeys for quick access to speech transcription.</string>
+	<string>Transcripted requires permission to register global hotkeys for quick access to speech transcription.</string>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>Murmur captures system audio to transcribe meeting participants and other audio playing on your Mac.</string>
+	<string>Transcripted captures system audio to transcribe meeting participants and other audio playing on your Mac.</string>
 </dict>
 </plist>

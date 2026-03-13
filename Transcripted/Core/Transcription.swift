@@ -139,6 +139,7 @@ class Transcription: ObservableObject {
             }
 
             var systemUtterances: [TranscriptionUtterance] = []
+            var droppedSegments = 0
             let totalSegments = speakerSegments.count
 
             // Aggregate embeddings per Sortformer speaker ID for stable matching.
@@ -165,6 +166,24 @@ class Transcription: ObservableObject {
             }
             if filteredSegmentCount > 0 {
                 AppLogger.transcription.info("Filtered low-quality segments from embedding aggregation", ["filtered": "\(filteredSegmentCount)", "total": "\(speakerSegments.count)"])
+            }
+
+            // Ghost speaker fix: speakers whose segments were ALL filtered out have no
+            // aggregated embedding. Use their best available raw segment embedding as a
+            // fallback so every utterance gets a persistent UUID (critical for agent output).
+            let allSpeakerIds = Set(speakerSegments.map { $0.speakerId })
+            let ghostSpeakerIds = allSpeakerIds.subtracting(embeddingsPerSpeaker.keys)
+            for ghostId in ghostSpeakerIds {
+                let bestSegment = speakerSegments
+                    .filter { $0.speakerId == ghostId && $0.embedding != nil && !$0.embedding!.isEmpty }
+                    .max(by: { $0.qualityScore < $1.qualityScore })
+                if let segment = bestSegment, let embedding = segment.embedding {
+                    embeddingsPerSpeaker[ghostId] = [embedding]
+                    AppLogger.transcription.info("Ghost speaker recovered with best-effort embedding", [
+                        "speakerId": "\(ghostId)",
+                        "qualityScore": String(format: "%.2f", segment.qualityScore)
+                    ])
+                }
             }
 
             // Match each speaker's mean embedding against the DB once
@@ -237,7 +256,7 @@ class Transcription: ObservableObject {
                 )
 
                 // Skip very short segments (< 0.5s of audio)
-                guard segmentSamples.count >= 8000 else { continue }
+                guard segmentSamples.count >= 8000 else { droppedSegments += 1; continue }
 
                 let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .system)
 
@@ -297,7 +316,7 @@ class Transcription: ObservableObject {
                 )
 
                 // Skip very short segments (< 0.5s)
-                guard segmentSamples.count >= 8000 else { continue }
+                guard segmentSamples.count >= 8000 else { droppedSegments += 1; continue }
 
                 let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .microphone)
                 guard !text.isEmpty else { continue }
@@ -341,7 +360,8 @@ class Transcription: ObservableObject {
                 micUtterances: micUtterances,
                 systemUtterances: systemUtterances,
                 duration: duration,
-                processingTime: processingTime
+                processingTime: processingTime,
+                droppedSegments: droppedSegments
             )
 
         } catch {

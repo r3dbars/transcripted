@@ -103,7 +103,7 @@
 			containerPortal = A1000032 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = A1000028;
-			remoteInfo = Murmur;
+			remoteInfo = Transcripted;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -113,7 +113,7 @@
 		A1000006 /* Audio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Audio.swift; sourceTree = "<group>"; };
 		A1000014 /* Clipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Clipboard.swift; sourceTree = "<group>"; };
 		A1000016 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		A1000017 /* Murmur.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Murmur.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1000017 /* Transcripted.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Transcripted.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1000018 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1000019 /* Transcripted.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Transcripted.entitlements; sourceTree = "<group>"; };
 		A1000041 /* CoreAudioUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioUtils.swift; sourceTree = "<group>"; };
@@ -197,7 +197,7 @@
 		T1000050 /* StatsDatabaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsDatabaseTests.swift; sourceTree = "<group>"; };
 		T1000008 /* PillStateManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillStateManagerTests.swift; sourceTree = "<group>"; };
 		T1000009 /* SpeakerDatabaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDatabaseTests.swift; sourceTree = "<group>"; };
-		T1000200 /* MurmurTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MurmurTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		T1000200 /* TranscriptedTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TranscriptedTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -229,14 +229,14 @@
 		A1000021 = {
 			isa = PBXGroup;
 			children = (
-				A1000022 /* Murmur */,
-				T1000100 /* MurmurTests */,
+				A1000022 /* Transcripted */,
+				T1000100 /* TranscriptedTests */,
 				A1000023 /* Products */,
 				FA000020 /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
-		A1000022 /* Murmur */ = {
+		A1000022 /* Transcripted */ = {
 			isa = PBXGroup;
 			children = (
 				A1000002 /* TranscriptedApp.swift */,
@@ -249,14 +249,14 @@
 				A1000018 /* Info.plist */,
 				A1000019 /* Transcripted.entitlements */,
 			);
-			path = Murmur;
+			path = Transcripted;
 			sourceTree = "<group>";
 		};
 		A1000023 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				A1000017 /* Murmur.app */,
-				T1000200 /* MurmurTests.xctest */,
+				A1000017 /* Transcripted.app */,
+				T1000200 /* TranscriptedTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -456,7 +456,7 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		T1000100 /* MurmurTests */ = {
+		T1000100 /* TranscriptedTests */ = {
 			isa = PBXGroup;
 			children = (
 				T1000101 /* Core */,
@@ -464,7 +464,7 @@
 				T1000103 /* UI */,
 				T1000104 /* Helpers */,
 			);
-			path = MurmurTests;
+			path = TranscriptedTests;
 			sourceTree = "<group>";
 		};
 		T1000101 /* Core */ = {
@@ -517,9 +517,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		A1000028 /* Murmur */ = {
+		A1000028 /* Transcripted */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = A1000029 /* Build configuration list for PBXNativeTarget "Murmur" */;
+			buildConfigurationList = A1000029 /* Build configuration list for PBXNativeTarget "Transcripted" */;
 			buildPhases = (
 				A1000030 /* Sources */,
 				A1000020 /* Frameworks */,
@@ -529,18 +529,18 @@
 			);
 			dependencies = (
 			);
-			name = Murmur;
+			name = Transcripted;
 			packageProductDependencies = (
 				Q1000012 /* MLXLLM */,
 				Q1000022 /* MLXLMCommon */,
 			);
-			productName = Murmur;
-			productReference = A1000017 /* Murmur.app */;
+			productName = Transcripted;
+			productReference = A1000017 /* Transcripted.app */;
 			productType = "com.apple.product-type.application";
 		};
-		T1000300 /* MurmurTests */ = {
+		T1000300 /* TranscriptedTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = T1000502 /* Build configuration list for PBXNativeTarget "MurmurTests" */;
+			buildConfigurationList = T1000502 /* Build configuration list for PBXNativeTarget "TranscriptedTests" */;
 			buildPhases = (
 				T1000301 /* Sources */,
 				T1000302 /* Frameworks */,
@@ -550,9 +550,9 @@
 			dependencies = (
 				T1000401 /* PBXTargetDependency */,
 			);
-			name = MurmurTests;
-			productName = MurmurTests;
-			productReference = T1000200 /* MurmurTests.xctest */;
+			name = TranscriptedTests;
+			productName = TranscriptedTests;
+			productReference = T1000200 /* TranscriptedTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
@@ -574,7 +574,7 @@
 					};
 				};
 			};
-			buildConfigurationList = A1000033 /* Build configuration list for PBXProject "Murmur" */;
+			buildConfigurationList = A1000033 /* Build configuration list for PBXProject "Transcripted" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -590,8 +590,8 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				A1000028 /* Murmur */,
-				T1000300 /* MurmurTests */,
+				A1000028 /* Transcripted */,
+				T1000300 /* TranscriptedTests */,
 			);
 		};
 /* End PBXProject section */
@@ -706,7 +706,7 @@
 /* Begin PBXTargetDependency section */
 		T1000401 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = A1000028 /* Murmur */;
+			target = A1000028 /* Transcripted */;
 			targetProxy = T1000400 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -836,7 +836,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Murmur/Transcripted.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Transcripted/Transcripted.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -848,7 +848,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Murmur/Info.plist;
+				INFOPLIST_FILE = Transcripted/Info.plist;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -877,7 +877,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Murmur/Transcripted.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Transcripted/Transcripted.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -889,7 +889,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Murmur/Info.plist;
+				INFOPLIST_FILE = Transcripted/Info.plist;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -954,7 +954,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A1000029 /* Build configuration list for PBXNativeTarget "Murmur" */ = {
+		A1000029 /* Build configuration list for PBXNativeTarget "Transcripted" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A1000036 /* Debug */,
@@ -963,7 +963,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		A1000033 /* Build configuration list for PBXProject "Murmur" */ = {
+		A1000033 /* Build configuration list for PBXProject "Transcripted" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A1000034 /* Debug */,
@@ -972,7 +972,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		T1000502 /* Build configuration list for PBXNativeTarget "MurmurTests" */ = {
+		T1000502 /* Build configuration list for PBXNativeTarget "TranscriptedTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				T1000500 /* Debug */,

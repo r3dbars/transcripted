@@ -182,17 +182,14 @@ struct TranscriptTrayView: View {
                     .font(.system(size: 9))
                 Text("Open folder")
                     .font(.system(size: 10))
-                Spacer()
-                Image(systemName: "arrow.forward")
-                    .font(.system(size: 8, weight: .medium))
             }
             .foregroundColor(.panelTextMuted)
             .padding(.horizontal, Spacing.ms)
             .padding(.vertical, Spacing.xs + 2)
-            .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Detail Header
@@ -269,19 +266,14 @@ struct TranscriptTrayView: View {
                     Text("Copy transcript")
                         .font(.system(size: 10))
                 }
-                Spacer()
-                if copiedId != transcript.id && copyFailedId != transcript.id {
-                    Image(systemName: "arrow.forward")
-                        .font(.system(size: 8, weight: .medium))
-                }
             }
             .foregroundColor(.panelTextMuted)
             .padding(.horizontal, Spacing.ms)
             .padding(.vertical, Spacing.xs + 2)
-            .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.panelCharcoal.opacity(0.3))
         .animation(.snappy(duration: 0.15), value: copiedId)
         .animation(.snappy(duration: 0.15), value: copyFailedId)

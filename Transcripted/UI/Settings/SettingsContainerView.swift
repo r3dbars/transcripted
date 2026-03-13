@@ -562,6 +562,7 @@ struct SettingsContainerView: View {
                     description: "Adds tags, [[wiki links]], and aliases to transcripts",
                     isOn: $enableObsidianFormat
                 )
+
             }
         }
     }

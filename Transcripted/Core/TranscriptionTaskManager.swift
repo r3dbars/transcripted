@@ -755,6 +755,18 @@ class TranscriptionTaskManager: ObservableObject {
         }
     }
 
+    /// Clean up any tasks stuck in pendingNaming state.
+    /// Called from applicationWillTerminate to prevent orphaned audio files.
+    func cleanupPendingNaming() {
+        if let request = speakerNamingRequest {
+            try? FileManager.default.removeItem(at: request.micAudioURL)
+            try? FileManager.default.removeItem(at: request.systemAudioURL)
+            SpeakerClipExtractor.cleanupClips(request.speakers)
+            speakerNamingRequest = nil
+            AppLogger.pipeline.info("Cleaned up pending naming on shutdown")
+        }
+    }
+
     /// Cancel all active transcription tasks
     func cancelAll() {
         for (taskId, task) in activeTasks {
