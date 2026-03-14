@@ -211,23 +211,21 @@ class TranscriptSaver {
                 await StatsService.shared.recordSession(metadata)
             }
 
-            // Agent output: write JSON sidecar + index + AGENT.md
-            if UserDefaults.standard.bool(forKey: "enableAgentOutput") {
-                let stem = fileURL.deletingPathExtension().lastPathComponent
-                do {
-                    try AgentOutput.writeTranscriptJSON(
-                        from: result,
-                        speakerMappings: speakerMappings,
-                        speakerDbIds: speakerDbIds,
-                        to: saveDir,
-                        stem: stem
-                    )
-                    try AgentOutput.writeIndex(to: saveDir, speakerDB: SpeakerDatabase.shared)
-                    AgentOutput.writeAgentReadme(to: saveDir)
-                } catch {
-                    AppLogger.pipeline.error("Agent output failed", ["error": error.localizedDescription])
-                    // Non-fatal — Markdown already saved successfully
-                }
+            // Agent output: write JSON sidecar + index + CLAUDE.md
+            let stem = fileURL.deletingPathExtension().lastPathComponent
+            do {
+                try AgentOutput.writeTranscriptJSON(
+                    from: result,
+                    speakerMappings: speakerMappings,
+                    speakerDbIds: speakerDbIds,
+                    to: saveDir,
+                    stem: stem
+                )
+                try AgentOutput.writeIndex(to: saveDir, speakerDB: SpeakerDatabase.shared)
+                AgentOutput.writeAgentReadme(to: saveDir)
+            } catch {
+                AppLogger.pipeline.error("Agent output failed", ["error": error.localizedDescription])
+                // Non-fatal — Markdown already saved successfully
             }
 
             return fileURL
@@ -538,10 +536,8 @@ class TranscriptSaver {
             AppLogger.pipeline.info("Retroactively updated speaker in transcripts",
                 ["dbId": dbIdString, "name": newName, "files": "\(updatedCount)"])
 
-            // Rebuild agent index if agent output is enabled
-            if UserDefaults.standard.bool(forKey: "enableAgentOutput") {
-                try? AgentOutput.writeIndex(to: dir, speakerDB: SpeakerDatabase.shared)
-            }
+            // Rebuild agent index
+            try? AgentOutput.writeIndex(to: dir, speakerDB: SpeakerDatabase.shared)
         }
     }
 
@@ -598,10 +594,8 @@ class TranscriptSaver {
             try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
             AppLogger.pipeline.info("Updated speaker names in transcript", ["path": transcriptURL.lastPathComponent, "updates": "\(updates.count)"])
 
-            // Update JSON sidecar if agent output is enabled
-            if UserDefaults.standard.bool(forKey: "enableAgentOutput") {
-                updateAgentJSON(transcriptURL: transcriptURL, updates: updates)
-            }
+            // Update JSON sidecar
+            updateAgentJSON(transcriptURL: transcriptURL, updates: updates)
 
             return true
         } catch {
