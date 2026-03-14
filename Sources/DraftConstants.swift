@@ -34,12 +34,6 @@ enum DraftConstants {
     /// Target sample rate for Parakeet inference
     static let parakeetSampleRate: Double = 16000.0
 
-    /// Max live speech restarts within the rate-limit window
-    static let liveSpeechMaxRestarts = 5
-
-    /// Live speech restart rate-limit window in seconds
-    static let liveSpeechRestartWindowSeconds: TimeInterval = 10.0
-
     /// Delay for audio engine re-warm after device change (nanoseconds)
     static let audioRecoveryDelay: UInt64 = 300_000_000  // 300ms
 
