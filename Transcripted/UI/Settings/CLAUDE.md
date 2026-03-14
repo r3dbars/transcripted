@@ -46,6 +46,7 @@ Settings window: stats dashboard, speaker voice fingerprints management, app pre
 - `useAuroraRecording` (Bool) — aurora animation enabled
 - `enableQwenSpeakerInference` (Bool) — Qwen speaker name inference enabled
 - `enableUISounds` (Bool) — recording sounds enabled
+- `autoRecordMeetings` (Bool) — auto-start recording when meeting app detects active call
 
 ## Modification Recipes
 
