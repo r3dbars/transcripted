@@ -1,7 +1,8 @@
 // ParakeetEngine.swift
-// FluidAudio-based STT engine — CoreML Parakeet TDT V3 for fast, accurate transcription.
+// FluidAudio-based STT engine — CoreML Parakeet TDT V3 for batch transcription,
+// Parakeet EOU 120M for streaming live display.
 // AVAudioEngine tap → NSLock-batched samples → resampled to 16kHz → AsrManager.transcribe()
-// for batch inference. Live Apple Speech provides display-only streaming text.
+// for final batch inference. StreamingEouAsrManager provides display-only live text.
 
 import AppKit
 import AVFoundation
@@ -9,7 +10,6 @@ import Combine
 import CoreAudio
 import FluidAudio
 import Foundation
-import Speech
 
 enum ParakeetModelState {
     case notLoaded
@@ -37,14 +37,17 @@ class ParakeetEngine: ObservableObject {
     private var isEnginePrewarmed = false
     private var wakeObserver: NSObjectProtocol?
 
-    // Live Apple Speech (display-only — Parakeet owns the final transcript)
-    private var committedLiveText: String = ""
-    private var liveSpeechRecognizer: SFSpeechRecognizer?
-    private var liveRequest: SFSpeechAudioBufferRecognitionRequest?
-    private var liveTask: SFSpeechRecognitionTask?
-    private var isLiveSpeechActive = false
-    private var liveRestartCount = 0
-    private var liveRestartWindowStart: CFAbsoluteTime = 0
+    // Parakeet EOU streaming (display-only live text — TDT V3 owns the final transcript)
+    private var eouManager: StreamingEouAsrManager?
+    private var committedStreamText: String = ""
+    // Accumulates resampled 16kHz samples between tap callbacks before flushing to EOU.
+    // Protected by streamingSamplesLock — accessed from both the audio render thread and MainActor.
+    private let streamingSamplesLock = NSLock()
+    private var streamingSampleBuffer: [Float] = []
+    // ~320ms of audio at 16kHz — matches EOU chunkSize for efficient processing
+    private let eouChunkSamples: Int = 5120
+    // Cached format for makePCMBuffer — always 16kHz mono, no need to recreate per chunk
+    private let eouPCMFormat = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)
     private var configChangeObserver: NSObjectProtocol?
 
     // FluidAudio ASR
@@ -97,7 +100,7 @@ class ParakeetEngine: ObservableObject {
             let loadSource: String
 
             // Try loading from app bundle first (bundled by build.sh)
-            if let bundlePath = bundledModelsPath() {
+            if let bundlePath = bundledModelPath(subdirectory: "parakeet-tdt-0.6b-v3-coreml", checkFile: "Encoder.mlmodelc") {
                 print("📦 PARAKEET | loading from bundle: \(bundlePath.path)")
                 models = try await AsrModels.load(from: bundlePath, version: .v3)
                 loadSource = "bundle"
@@ -114,10 +117,14 @@ class ParakeetEngine: ObservableObject {
 
             asrManager = manager
             modelDownloadState = .ready
-            print("✅ PARAKEET | models loaded and ready (source: \(loadSource))")
+            print("✅ PARAKEET | TDT V3 models loaded (source: \(loadSource))")
             EventReporter.shared.capture(level: .info, engine: "parakeet", event: "models_loaded",
                 message: "Parakeet ASR models initialized successfully",
                 context: ["load_source": loadSource])
+
+            // Load Parakeet EOU streaming model for live display (~120MB, much smaller than TDT V3)
+            await initializeEouModel()
+
         } catch {
             modelDownloadState = .failed(error.localizedDescription)
             print("❌ PARAKEET | model initialization failed: \(error.localizedDescription)")
@@ -126,16 +133,56 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
-    /// Check for Parakeet models bundled inside the app at build time.
-    /// Expected layout: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/
-    private func bundledModelsPath() -> URL? {
+    /// Load Parakeet EOU 120M for streaming live display.
+    /// Non-fatal — if EOU fails, live transcript stays empty but batch result still works.
+    private func initializeEouModel() async {
+        do {
+            let eou = StreamingEouAsrManager(chunkSize: .ms320, eouDebounceMs: 1280)
+
+            // Load from bundle only — EOU model must be bundled by build.sh.
+            // No download fallback (unlike TDT V3) since StreamingEouAsrManager requires a local path.
+            guard let bundlePath = bundledModelPath(subdirectory: "parakeet-eou-120m-coreml", checkFile: "model.mlmodelc") else {
+                print("⚠️ PARAKEET EOU | model not bundled, live display disabled")
+                EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "eou_model_not_bundled",
+                    message: "EOU model not found in app bundle — live display disabled")
+                return
+            }
+            print("📦 PARAKEET EOU | loading from bundle: \(bundlePath.path)")
+            try await eou.loadModels(modelDir: bundlePath)
+
+            // EOU callback fires when a complete utterance is detected (after silence debounce)
+            await eou.setEouCallback { [weak self] transcript in
+                Task { @MainActor [weak self] in
+                    guard let self = self else { return }
+                    let trimmed = transcript.trimmingCharacters(in: .whitespaces)
+                    guard !trimmed.isEmpty else { return }
+                    self.committedStreamText = self.committedStreamText.isEmpty
+                        ? trimmed
+                        : self.committedStreamText + " " + trimmed
+                    self.liveTranscript = self.committedStreamText
+                }
+            }
+
+            eouManager = eou
+            print("✅ PARAKEET EOU | streaming model ready")
+            EventReporter.shared.capture(level: .info, engine: "parakeet", event: "eou_model_loaded",
+                message: "Parakeet EOU streaming model initialized")
+        } catch {
+            // Non-fatal — live display will just stay empty until batch result arrives
+            print("⚠️ PARAKEET EOU | model load failed (live display disabled): \(error.localizedDescription)")
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "eou_model_failed",
+                message: error.localizedDescription)
+        }
+    }
+
+    /// Check for a Parakeet model bundled in the app at build time.
+    /// Expected layout: Contents/Resources/parakeet-models/{subdirectory}/{checkFile}
+    private func bundledModelPath(subdirectory: String, checkFile: String) -> URL? {
         guard let resourcePath = Bundle.main.resourcePath else { return nil }
         let path = URL(fileURLWithPath: resourcePath)
             .appendingPathComponent("parakeet-models")
-            .appendingPathComponent("parakeet-tdt-0.6b-v3-coreml")
-        // Verify the encoder model exists (it's the largest and most critical)
-        let encoderPath = path.appendingPathComponent("Encoder.mlmodelc")
-        guard FileManager.default.fileExists(atPath: encoderPath.path) else { return nil }
+            .appendingPathComponent(subdirectory)
+        guard FileManager.default.fileExists(atPath: path.appendingPathComponent(checkFile).path) else { return nil }
         return path
     }
 
@@ -205,7 +252,10 @@ class ParakeetEngine: ObservableObject {
         isEnginePrewarmed = false
 
         if wasRecording {
-            stopLiveSpeech()
+            streamingSamplesLock.lock()
+            streamingSampleBuffer.removeAll(keepingCapacity: true)
+            streamingSamplesLock.unlock()
+            Task { await eouManager?.reset() }
             audioEngine.inputNode.removeTap(onBus: 0)
             isRecording = false
             audioLevel = 0
@@ -250,7 +300,10 @@ class ParakeetEngine: ObservableObject {
 
         let wasRecording = isRecording
         if isRecording {
-            stopLiveSpeech()
+            streamingSamplesLock.lock()
+            streamingSampleBuffer.removeAll(keepingCapacity: true)
+            streamingSamplesLock.unlock()
+            Task { await eouManager?.reset() }
             audioEngine.inputNode.removeTap(onBus: 0)
             isRecording = false
             audioLevel = 0
@@ -317,8 +370,28 @@ class ParakeetEngine: ObservableObject {
                   let channelData = buffer.floatChannelData?[0] else { return }
             let frameLength = Int(buffer.frameLength)
 
-            // Consumer 1: Apple Speech (live display)
-            self.liveRequest?.append(buffer)
+            // Consumer 1: Parakeet EOU streaming (live display)
+            // Resample to 16kHz, accumulate, flush in ~320ms chunks to StreamingEouAsrManager
+            if let eou = self.eouManager {
+                let rawSamples = Array(UnsafeBufferPointer(start: channelData, count: frameLength))
+                let resampled = AudioResampler.resample(rawSamples, from: self.nativeSampleRate, to: 16000)
+                self.streamingSamplesLock.lock()
+                self.streamingSampleBuffer.append(contentsOf: resampled)
+                var chunk: [Float]? = nil
+                if self.streamingSampleBuffer.count >= self.eouChunkSamples {
+                    // Swap instead of copy — avoids memcpy under lock
+                    chunk = self.streamingSampleBuffer
+                    self.streamingSampleBuffer = []
+                }
+                self.streamingSamplesLock.unlock()
+                if let chunk = chunk, let pcm = self.makePCMBuffer(from: chunk) {
+                    Task {
+                        do { _ = try await eou.process(audioBuffer: pcm) }
+                        catch { EventReporter.shared.capture(level: .warning, engine: "parakeet",
+                            event: "eou_process_error", message: error.localizedDescription) }
+                    }
+                }
+            }
 
             // Consumer 2: Parakeet sample buffer — lock-protected
             let samples = Array(UnsafeBufferPointer(start: channelData, count: frameLength))
@@ -368,8 +441,11 @@ class ParakeetEngine: ObservableObject {
 
         isRecording = true
         liveTranscript = ""
-        committedLiveText = ""
-        startLiveSpeech()
+        committedStreamText = ""
+        streamingSamplesLock.lock()
+        streamingSampleBuffer.removeAll(keepingCapacity: true)
+        streamingSamplesLock.unlock()
+        Task { await eouManager?.reset() }
         print("🎤 PARAKEET | recording started (\(inputDeviceName), \(nativeSampleRate)Hz)")
 
         // Watchdog: detect zombie audio engine (running but no samples flowing after sleep/wake).
@@ -401,7 +477,10 @@ class ParakeetEngine: ObservableObject {
                 context: ["audio_device": self.inputDeviceName])
 
             // Full teardown
-            self.stopLiveSpeech()
+            self.streamingSamplesLock.lock()
+            self.streamingSampleBuffer.removeAll(keepingCapacity: true)
+            self.streamingSamplesLock.unlock()
+            await self.eouManager?.reset()
             self.audioEngine.inputNode.removeTap(onBus: 0)
             self.audioEngine.stop()
             self.isEnginePrewarmed = false
@@ -431,7 +510,18 @@ class ParakeetEngine: ObservableObject {
         guard isRecording else { return }
         audioWatchdogTask?.cancel()
         audioWatchdogTask = nil
-        stopLiveSpeech()
+        // Flush any remaining EOU streaming samples before stopping
+        streamingSamplesLock.lock()
+        let remainingEou: [Float] = streamingSampleBuffer
+        streamingSampleBuffer.removeAll(keepingCapacity: true)
+        streamingSamplesLock.unlock()
+        if let eou = eouManager, !remainingEou.isEmpty, let pcm = makePCMBuffer(from: remainingEou) {
+            Task {
+                do { _ = try await eou.process(audioBuffer: pcm) }
+                catch { EventReporter.shared.capture(level: .warning, engine: "parakeet",
+                    event: "eou_process_error", message: error.localizedDescription) }
+            }
+        }
         audioEngine.inputNode.removeTap(onBus: 0)
         pendingSamplesLock.lock()
         sampleBuffer.append(contentsOf: pendingSamples)
@@ -442,101 +532,23 @@ class ParakeetEngine: ObservableObject {
         print("⏹️ PARAKEET | recording stopped (\(sampleBuffer.count) samples, \(String(format: "%.1f", Double(sampleBuffer.count) / nativeSampleRate))s)")
     }
 
-    // MARK: - Live Apple Speech (display-only)
+    // MARK: - EOU Streaming (live display)
+    // Live display is driven by StreamingEouAsrManager fed via the audio tap (see startRecording).
+    // EOU callback in initializeEouModel() updates committedStreamText → liveTranscript.
+    // No explicit start/stop methods needed — tap feeds the manager, reset() clears state.
 
-    private func startLiveSpeech() {
-        if liveSpeechRecognizer == nil {
-            liveSpeechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
-        }
-        guard let recognizer = liveSpeechRecognizer, recognizer.isAvailable else {
-            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "live_speech_unavailable",
-                message: "Apple Speech recognizer unavailable, skipping live transcript")
-            return
-        }
-
-        isLiveSpeechActive = true
-        liveRestartCount = 0
-        liveRestartWindowStart = CFAbsoluteTimeGetCurrent()
-        startLiveSpeechTask(recognizer: recognizer)
-        print("👂 PARAKEET | live Apple Speech started")
-    }
-
-    private func startLiveSpeechTask(recognizer: SFSpeechRecognizer) {
-        let now = CFAbsoluteTimeGetCurrent()
-        if now - liveRestartWindowStart > DraftConstants.liveSpeechRestartWindowSeconds {
-            liveRestartCount = 0
-            liveRestartWindowStart = now
-        }
-        liveRestartCount += 1
-        if liveRestartCount > DraftConstants.liveSpeechMaxRestarts {
-            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "live_speech_restart_limit",
-                message: "Live speech restarted too many times (>5 in 10s), stopping")
-            isLiveSpeechActive = false
-            return
-        }
-
-        liveRequest?.endAudio()
-        liveTask?.cancel()
-
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-        if #available(macOS 13.0, *), recognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = true
-        }
-        liveRequest = request
-
-        liveTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            if let result = result {
-                let partialText = result.bestTranscription.formattedString
-                    .trimmingCharacters(in: .whitespaces)
-                Task { @MainActor [weak self] in
-                    guard let self = self, !partialText.isEmpty else { return }
-                    let combined = self.committedLiveText.isEmpty
-                        ? partialText
-                        : self.committedLiveText + " " + partialText
-                    // Never shrink the transcript — a new recognition task's early
-                    // partial results can be shorter than what's already committed.
-                    if combined.count >= self.liveTranscript.count {
-                        self.liveTranscript = combined
-                    }
-                }
-
-                if result.isFinal {
-                    let finalText = result.bestTranscription.formattedString
-                        .trimmingCharacters(in: .whitespaces)
-                    Task { @MainActor [weak self] in
-                        guard let self = self, self.isLiveSpeechActive else { return }
-                        if !finalText.isEmpty {
-                            self.committedLiveText = self.committedLiveText.isEmpty
-                                ? finalText
-                                : self.committedLiveText + " " + finalText
-                        }
-                        // Pin display to committed text before restarting — prevents
-                        // the gap between old task ending and new task producing text.
-                        self.liveTranscript = self.committedLiveText
-                        self.startLiveSpeechTask(recognizer: recognizer)
-                    }
-                }
-            } else if let error = error {
-                Task { @MainActor [weak self] in
-                    guard let self = self, self.isLiveSpeechActive else { return }
-                    if !self.liveTranscript.isEmpty {
-                        self.committedLiveText = self.liveTranscript
-                    }
-                    // Pin display to committed text before restarting
-                    self.liveTranscript = self.committedLiveText
-                    self.startLiveSpeechTask(recognizer: recognizer)
-                }
+    /// Convert [Float] samples to AVAudioPCMBuffer for StreamingEouAsrManager.
+    private func makePCMBuffer(from samples: [Float]) -> AVAudioPCMBuffer? {
+        guard let format = eouPCMFormat,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count))
+        else { return nil }
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        if let dest = buffer.floatChannelData?[0] {
+            samples.withUnsafeBufferPointer { src in
+                dest.update(from: src.baseAddress!, count: samples.count)
             }
         }
-    }
-
-    private func stopLiveSpeech() {
-        isLiveSpeechActive = false
-        liveRequest?.endAudio()
-        liveTask?.cancel()
-        liveRequest = nil
-        liveTask = nil
+        return buffer
     }
 
     // MARK: - Transcription
@@ -620,7 +632,10 @@ class ParakeetEngine: ObservableObject {
         audioWatchdogTask?.cancel()
         audioWatchdogTask = nil
         if isRecording {
-            stopLiveSpeech()
+            streamingSamplesLock.lock()
+            streamingSampleBuffer.removeAll(keepingCapacity: true)
+            streamingSamplesLock.unlock()
+            Task { await eouManager?.reset() }
             audioEngine.inputNode.removeTap(onBus: 0)
             isRecording = false
             audioLevel = 0
@@ -628,12 +643,13 @@ class ParakeetEngine: ObservableObject {
         sampleBuffer.removeAll()
         isTranscribing = false
         liveTranscript = ""
-        committedLiveText = ""
+        committedStreamText = ""
     }
 
     func cleanup() {
         asrManager?.cleanup()
         asrManager = nil
+        eouManager = nil
         modelDownloadState = .notLoaded
     }
 
@@ -647,5 +663,6 @@ class ParakeetEngine: ObservableObject {
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
         asrManager?.cleanup()
+        eouManager = nil
     }
 }
