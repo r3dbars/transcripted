@@ -397,6 +397,13 @@ class ParakeetEngine: ObservableObject {
             let samples = Array(UnsafeBufferPointer(start: channelData, count: frameLength))
             self.pendingSamplesLock.lock()
             self.pendingSamples.append(contentsOf: samples)
+            // Enforce hard cap — keep only the most recent audioBufferCapacitySeconds of audio.
+            // Amortized compaction: trim once per second of overflow rather than on every tap
+            // callback, to avoid O(n) memmoves at ~47Hz.
+            let maxSamples = Int(self.nativeSampleRate) * DraftConstants.audioBufferCapacitySeconds
+            if self.pendingSamples.count > maxSamples + Int(self.nativeSampleRate) {
+                self.pendingSamples.removeFirst(self.pendingSamples.count - maxSamples)
+            }
             self.pendingSamplesLock.unlock()
 
             // Consumer 3: Audio level metering (~20Hz throttled)
@@ -576,14 +583,20 @@ class ParakeetEngine: ObservableObject {
         }
 
         isTranscribing = true
-        let samples = sampleBuffer
+        // Swap instead of copy — moves data out of sampleBuffer without allocating a duplicate.
+        // sampleBuffer is cleared immediately, freeing capacity before resampling.
+        var samples: [Float] = []
+        swap(&samples, &sampleBuffer)
         let inputRate = nativeSampleRate
 
         let startTime = CFAbsoluteTimeGetCurrent()
 
-        // Resample to 16kHz for Parakeet inference
+        // Resample to 16kHz for Parakeet inference, then free the native-rate buffer
+        // before inference — avoids holding both the raw and resampled arrays simultaneously.
+        let nativeCount = samples.count
         let resampled = AudioResampler.resample(samples, from: inputRate, to: 16000)
-        print("🔄 PARAKEET | resampled \(samples.count) → \(resampled.count) samples")
+        samples.removeAll()
+        print("🔄 PARAKEET | resampled \(nativeCount) → \(resampled.count) samples")
 
         do {
             let result = try await manager.transcribe(resampled, source: .microphone)
