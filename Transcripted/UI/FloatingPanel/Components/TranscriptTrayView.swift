@@ -21,6 +21,7 @@ struct TranscriptTrayView: View {
     @State private var copiedId: UUID?
     @State private var copyFailedId: UUID?
     @State private var agentPromptCopied = false
+    @State private var exportedId: UUID?
 
     // Navigation: nil = list mode, non-nil = detail mode
     @State private var selectedTranscript: TranscriptSummary?
@@ -289,6 +290,7 @@ struct TranscriptTrayView: View {
 
     private func detailFooter(for transcript: TranscriptSummary) -> some View {
         HStack(spacing: 0) {
+            // Copy transcript
             Button(action: { copyToClipboard(transcript) }) {
                 HStack(spacing: 4) {
                     if copyFailedId == transcript.id {
@@ -308,7 +310,7 @@ struct TranscriptTrayView: View {
                     } else {
                         Image(systemName: "doc.on.doc")
                             .font(.system(size: 9))
-                        Text("Copy transcript")
+                        Text("Copy")
                             .font(.system(size: 10))
                     }
                 }
@@ -318,6 +320,41 @@ struct TranscriptTrayView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(PlainButtonStyle())
+
+            Divider()
+                .frame(height: 12)
+                .background(Color.panelCharcoalElevated)
+
+            // Export menu
+            Menu {
+                Button(action: { exportTranscript(transcript, format: .markdown) }) {
+                    Label("Save as Markdown (.md)", systemImage: "doc.text")
+                }
+                Button(action: { exportTranscript(transcript, format: .plainText) }) {
+                    Label("Save as Plain Text (.txt)", systemImage: "doc.plaintext")
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    if exportedId == transcript.id {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.statusSuccessMuted)
+                        Text("Saved!")
+                            .font(.system(size: 10))
+                            .foregroundColor(.statusSuccessMuted)
+                    } else {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 9))
+                        Text("Export")
+                            .font(.system(size: 10))
+                    }
+                }
+                .foregroundColor(.panelTextMuted)
+                .padding(.horizontal, Spacing.ms)
+                .padding(.vertical, Spacing.xs + 2)
+                .contentShape(Rectangle())
+            }
+            .menuStyle(BorderlessButtonMenuStyle())
 
             Spacer()
 
@@ -336,7 +373,7 @@ struct TranscriptTrayView: View {
                     } else {
                         Image(systemName: "terminal")
                             .font(.system(size: 9))
-                        Text("Connect Agent")
+                        Text("Agent")
                             .font(.system(size: 10))
                     }
                 }
@@ -351,6 +388,20 @@ struct TranscriptTrayView: View {
         .animation(.snappy(duration: 0.15), value: copiedId)
         .animation(.snappy(duration: 0.15), value: copyFailedId)
         .animation(.snappy(duration: 0.15), value: agentPromptCopied)
+        .animation(.snappy(duration: 0.15), value: exportedId)
+    }
+
+    // MARK: - Export Logic
+
+    private func exportTranscript(_ transcript: TranscriptSummary, format: TranscriptExporter.Format) {
+        let lines = detailLines ?? store.displayLines(for: transcript) ?? []
+        TranscriptExporter.export(summary: transcript, lines: lines, format: format)
+        withAnimation(.snappy(duration: 0.15)) { exportedId = transcript.id }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation(.snappy(duration: 0.15)) {
+                if exportedId == transcript.id { exportedId = nil }
+            }
+        }
     }
 
     // MARK: - Navigation
