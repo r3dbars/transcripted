@@ -53,6 +53,7 @@
 		A1001012 /* StatsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001002 /* StatsService.swift */; };
 		A1001013 /* TranscriptScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001003 /* TranscriptScanner.swift */; };
 		A1001020 /* TranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001021 /* TranscriptStore.swift */; };
+		A1001030 /* TranscriptExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001031 /* TranscriptExporter.swift */; };
 		A1001022 /* TranscriptTrayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001023 /* TranscriptTrayView.swift */; };
 		A1001024 /* TranscriptDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001025 /* TranscriptDetailView.swift */; };
 		A1001111 /* SettingsNavigationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001110 /* SettingsNavigationState.swift */; };
@@ -159,6 +160,7 @@
 		A1001002 /* StatsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsService.swift; sourceTree = "<group>"; };
 		A1001003 /* TranscriptScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptScanner.swift; sourceTree = "<group>"; };
 		A1001021 /* TranscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptStore.swift; sourceTree = "<group>"; };
+		A1001031 /* TranscriptExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptExporter.swift; sourceTree = "<group>"; };
 		A1001023 /* TranscriptTrayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptTrayView.swift; sourceTree = "<group>"; };
 		A1001025 /* TranscriptDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptDetailView.swift; sourceTree = "<group>"; };
 		A1001110 /* SettingsNavigationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsNavigationState.swift; sourceTree = "<group>"; };
@@ -289,6 +291,7 @@
 				A1001002 /* StatsService.swift */,
 				A1001003 /* TranscriptScanner.swift */,
 				A1001021 /* TranscriptStore.swift */,
+				A1001031 /* TranscriptExporter.swift */,
 				A1002005 /* TranscriptionTypes.swift */,
 			);
 			path = Core;
@@ -664,6 +667,7 @@
 				A1001012 /* StatsService.swift in Sources */,
 				A1001013 /* TranscriptScanner.swift in Sources */,
 				A1001020 /* TranscriptStore.swift in Sources */,
+				A1001030 /* TranscriptExporter.swift in Sources */,
 				A1001022 /* TranscriptTrayView.swift in Sources */,
 				A1001024 /* TranscriptDetailView.swift in Sources */,
 				A1001111 /* SettingsNavigationState.swift in Sources */,
