@@ -42,6 +42,7 @@ enum SystemAudioStatus: Equatable {
 @available(macOS 26.0, *)
 class Audio: ObservableObject {
     @Published var isRecording: Bool = false
+    @Published private(set) var isMonitoring: Bool = false  // Lightweight level metering without file recording
     private var isStarting: Bool = false  // Prevents double-start during async setup
     @Published var audioLevel: Float = 0.0
     @Published var recordingDuration: TimeInterval = 0.0
@@ -286,6 +287,11 @@ class Audio: ObservableObject {
         guard !isRecording, !isStarting else {
             AppLogger.audio.warning("Already recording or starting, ignoring duplicate start request")
             return
+        }
+
+        // Stop monitoring if active — full recording takes over the engine and taps
+        if isMonitoring {
+            stopMonitoring()
         }
 
         // Pre-flight validation checks
@@ -621,6 +627,83 @@ class Audio: ObservableObject {
         cleanupGroup.notify(queue: .main) { [weak self] in
             self?.originalMicAudioFileURL = nil
             self?.onRecordingComplete?(finalMicURL, finalSystemURL)
+        }
+    }
+
+    // MARK: - Audio Level Monitoring (no file recording)
+
+    /// Start lightweight level metering for mic + system audio without recording to files.
+    /// Used by MeetingDetector to detect bidirectional speech before full recording starts.
+    /// Automatically stops when `start()` is called for full recording.
+    func startMonitoring() {
+        guard !isMonitoring, !isRecording, !isStarting else { return }
+        guard let engine = engine, let inputNode = inputNode else { return }
+
+        AppLogger.audio.info("Starting audio level monitoring")
+
+        let hardwareFormat = inputNode.inputFormat(forBus: 1)
+        guard hardwareFormat.sampleRate > 0, hardwareFormat.channelCount > 0 else {
+            AppLogger.audio.warning("Cannot start monitoring — invalid input format")
+            return
+        }
+
+        // Install mic tap for level metering only (no file writing)
+        inputNode.removeTap(onBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: hardwareFormat) { [weak self] buffer, _ in
+            self?.calculateLevel(buffer: buffer)
+        }
+
+        do {
+            try engine.start()
+        } catch {
+            AppLogger.audio.warning("Failed to start monitoring engine", ["error": error.localizedDescription])
+            inputNode.removeTap(onBus: 0)
+            return
+        }
+
+        // Start system audio capture for level metering only (no file writing)
+        if let capture = systemAudioCapture as? SystemAudioCapture {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                do {
+                    try capture.prepare()
+                    try capture.start { [weak self] systemBuffer in
+                        self?.calculateSystemLevel(buffer: systemBuffer)
+                    }
+                    AppLogger.audioSystem.info("System audio monitoring started")
+                } catch {
+                    AppLogger.audioSystem.warning("System audio monitoring unavailable", ["error": error.localizedDescription])
+                    // Mic monitoring still works — system audio is optional
+                }
+            }
+        }
+
+        DispatchQueue.main.async {
+            self.isMonitoring = true
+        }
+    }
+
+    /// Stop level metering. Called automatically before `start()` begins full recording.
+    func stopMonitoring() {
+        guard isMonitoring else { return }
+
+        AppLogger.audio.info("Stopping audio level monitoring")
+
+        if let engine = engine, let inputNode = inputNode {
+            if engine.isRunning {
+                inputNode.removeTap(onBus: 0)
+                engine.stop()
+            }
+        }
+
+        if let capture = systemAudioCapture as? SystemAudioCapture {
+            capture.stop()
+        }
+
+        DispatchQueue.main.async {
+            self.isMonitoring = false
+            self.audioLevel = 0.0
+            self.audioLevelHistory = Array(repeating: 0.0, count: 15)
+            self.systemAudioLevelHistory = Array(repeating: 0.0, count: 15)
         }
     }
 
