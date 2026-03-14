@@ -29,6 +29,7 @@ Read the component CLAUDE.md in the relevant directory FIRST:
 | Task queue, retries, progress | `Transcripted/Core/CLAUDE.md` |
 | STT model (Parakeet) | `Transcripted/Services/CLAUDE.md` |
 | Speaker diarization (Sortformer) | `Transcripted/Services/CLAUDE.md` |
+| Meeting auto-detection | `Transcripted/Services/CLAUDE.md` |
 | Speaker matching, voice DB | `Transcripted/Services/CLAUDE.md` |
 | Speaker name inference (Qwen) | `Transcripted/Services/CLAUDE.md` |
 | Audio resampling | `Transcripted/Services/CLAUDE.md` |
@@ -41,7 +42,7 @@ Read the component CLAUDE.md in the relevant directory FIRST:
 
 ## Critical Invariants (All Changes)
 - All classes use `@available(macOS 26.0, *)` — required for `AudioHardwareCreateProcessTap`
-- **@MainActor classes:** Audio, Transcription, TranscriptionTaskManager, PillStateManager, ParakeetService, SortformerService, QwenService, StatsService, FailedTranscriptionManager
+- **@MainActor classes:** Audio, Transcription, TranscriptionTaskManager, PillStateManager, ParakeetService, SortformerService, QwenService, StatsService, FailedTranscriptionManager, MeetingDetector
 - **NOT @MainActor:** SystemAudioCapture (DispatchQueue + NSLock), SpeakerDatabase (DispatchQueue + SQLite), StatsDatabase (DispatchQueue)
 - **CoreAudio I/O callbacks run on real-time threads** — NEVER do I/O, locks, allocations, or Objective-C calls inside them. Deep-copy buffers before async dispatch.
 - System audio sample rate: read from aggregate device's nominal rate (not from tap format, which may differ)
