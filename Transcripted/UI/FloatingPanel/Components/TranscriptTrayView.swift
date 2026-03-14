@@ -17,8 +17,6 @@ struct TranscriptTrayView: View {
     var onOpenFolder: () -> Void
     var onDismiss: (() -> Void)? = nil
 
-    @AppStorage("enableAgentOutput") private var enableAgentOutput: Bool = true
-
     @State private var isAppearing = false
     @State private var copiedId: UUID?
     @State private var copyFailedId: UUID?
@@ -196,31 +194,29 @@ struct TranscriptTrayView: View {
 
             Spacer()
 
-            if enableAgentOutput {
-                Button { copyAgentPrompt() } label: {
-                    HStack(spacing: 4) {
-                        if agentPromptCopied {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundColor(.statusSuccessMuted)
-                            Text("Copied!")
-                                .font(.system(size: 10))
-                                .foregroundColor(.statusSuccessMuted)
-                        } else {
-                            Image(systemName: "terminal")
-                                .font(.system(size: 9))
-                            Text("Connect Agent")
-                                .font(.system(size: 10))
-                        }
+            Button { copyAgentPrompt() } label: {
+                HStack(spacing: 4) {
+                    if agentPromptCopied {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.statusSuccessMuted)
+                        Text("Copied!")
+                            .font(.system(size: 10))
+                            .foregroundColor(.statusSuccessMuted)
+                    } else {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 9))
+                        Text("Connect Agent")
+                            .font(.system(size: 10))
                     }
-                    .foregroundColor(.panelTextMuted)
-                    .padding(.horizontal, Spacing.ms)
-                    .padding(.vertical, Spacing.xs + 2)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(PlainButtonStyle())
-                .animation(.snappy(duration: 0.15), value: agentPromptCopied)
+                .foregroundColor(.panelTextMuted)
+                .padding(.horizontal, Spacing.ms)
+                .padding(.vertical, Spacing.xs + 2)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(PlainButtonStyle())
+            .animation(.snappy(duration: 0.15), value: agentPromptCopied)
         }
     }
 
@@ -325,33 +321,31 @@ struct TranscriptTrayView: View {
 
             Spacer()
 
-            if enableAgentOutput {
-                Button(action: {
-                    let stem = transcript.title
-                    copyAgentPrompt(filename: stem)
-                }) {
-                    HStack(spacing: 4) {
-                        if agentPromptCopied {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundColor(.statusSuccessMuted)
-                            Text("Copied!")
-                                .font(.system(size: 10))
-                                .foregroundColor(.statusSuccessMuted)
-                        } else {
-                            Image(systemName: "terminal")
-                                .font(.system(size: 9))
-                            Text("Connect Agent")
-                                .font(.system(size: 10))
-                        }
+            Button(action: {
+                let stem = transcript.title
+                copyAgentPrompt(filename: stem)
+            }) {
+                HStack(spacing: 4) {
+                    if agentPromptCopied {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.statusSuccessMuted)
+                        Text("Copied!")
+                            .font(.system(size: 10))
+                            .foregroundColor(.statusSuccessMuted)
+                    } else {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 9))
+                        Text("Connect Agent")
+                            .font(.system(size: 10))
                     }
-                    .foregroundColor(.panelTextMuted)
-                    .padding(.horizontal, Spacing.ms)
-                    .padding(.vertical, Spacing.xs + 2)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(PlainButtonStyle())
+                .foregroundColor(.panelTextMuted)
+                .padding(.horizontal, Spacing.ms)
+                .padding(.vertical, Spacing.xs + 2)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(PlainButtonStyle())
         }
         .background(Color.panelCharcoal.opacity(0.3))
         .animation(.snappy(duration: 0.15), value: copiedId)
