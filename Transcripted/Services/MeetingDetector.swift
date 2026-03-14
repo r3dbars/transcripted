@@ -3,11 +3,13 @@
 //
 // Detection logic:
 //   1. NSWorkspace notifications track when a known meeting app launches or quits.
-//   2. A 1-second poll checks Audio.audioLevel (mic) + systemAudioLevelHistory (system).
-//   3. Sustained bidirectional speech (both channels above threshold) for ≥5s with a meeting
-//      app running → fire onMeetingStart.
-//   4. Bidirectional audio drops for ≥15s → fire onMeetingEnd.
-//   5. Meeting app quits while recording → onMeetingEnd fires immediately.
+//   2. When a meeting app is detected, Audio.startMonitoring() activates lightweight
+//      mic + system audio level metering (no file recording).
+//   3. A 1-second poll checks Audio.audioLevel (mic) + systemAudioLevelHistory (system).
+//   4. Sustained bidirectional speech (both channels above threshold) for ≥5s with a meeting
+//      app running → fire onMeetingStart. Audio.start() stops monitoring and begins recording.
+//   5. Bidirectional audio drops for ≥15s → fire onMeetingEnd, re-start monitoring.
+//   6. Meeting app quits while recording → onMeetingEnd fires immediately.
 //
 // All of this respects the UserDefaults "autoRecordMeetings" toggle. When disabled the
 // detector still tracks state (published props update) but callbacks never fire — so the
@@ -131,6 +133,7 @@ class MeetingDetector: ObservableObject {
     /// Stop all detection. Safe to call multiple times.
     func stop() {
         stopPolling()
+        audio?.stopMonitoring()
         workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
         workspaceObservers = []
         resetDetectionState()
@@ -146,12 +149,14 @@ class MeetingDetector: ObservableObject {
         AppLogger.app.info("Meeting app launched", ["app": displayName])
         activeMeetingApp = displayName
         isDetecting = true
+        audio?.startMonitoring()
         startPolling()
     }
 
     private func handleMeetingAppQuit() {
         AppLogger.app.info("Meeting app quit", ["app": activeMeetingApp ?? "unknown"])
         stopPolling()
+        audio?.stopMonitoring()
 
         if didTriggerRecording {
             AppLogger.app.info("MeetingDetector: app quit — firing onMeetingEnd")
@@ -213,6 +218,8 @@ class MeetingDetector: ObservableObject {
                         onMeetingEnd?()
                     }
                     resetDetectionState()
+                    // Re-start monitoring so detector can re-arm if conversation resumes
+                    audio.startMonitoring()
                 }
             }
             return
