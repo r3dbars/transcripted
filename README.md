@@ -91,17 +91,61 @@ Every transcript includes YAML frontmatter with date, duration, word count, spea
 
 ## How It Compares
 
-| Feature | Transcripted | Otter.ai | Krisp | Apple Dictation |
-|---------|:---:|:---:|:---:|:---:|
-| Runs 100% locally | ✅ | ❌ | ❌ | Partial |
-| Speaker identification | ✅ | ✅ | ✅ | ❌ |
-| Learns voices over time | ✅ | ❌ | ❌ | ❌ |
-| System audio capture | ✅ | ❌ | ✅ | ❌ |
-| Auto meeting detection | ✅ | ❌ | ✅ | ❌ |
-| Speaker name inference | ✅ | ❌ | ❌ | ❌ |
-| Open source | ✅ | ❌ | ❌ | ❌ |
-| Cost | **Free** | $16.99/mo | $8/mo | Free |
-| Data leaves your machine | **Never** | Always | Always | Sometimes |
+### vs. Cloud Transcription Services
+
+These tools send your audio to remote servers for processing. Some add a visible bot to your meetings.
+
+| | Transcripted | Otter.ai | Fireflies.ai | Fathom | tl;dv |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **Processing** | 100% local | Cloud | Cloud | Cloud | Cloud |
+| **Meeting bot joins call** | No | Yes | Yes | Yes | Yes |
+| **Speaker diarization** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Learns voices over time** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Speaker name inference** | ✅ (on-device LLM) | ❌ | ❌ | ❌ | ❌ |
+| **System audio capture** | ✅ | ❌ (bot captures) | ❌ (bot captures) | ❌ (bot captures) | ❌ (bot captures) |
+| **Auto meeting detection** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Works offline** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Open source** | ✅ MIT | ❌ | ❌ | ❌ | ❌ |
+| **Free tier** | **Unlimited** | 300 min/mo | 20 AI credits/mo | 5 summaries/mo | 10 lifetime summaries |
+| **Paid price** | **Free forever** | $8.33–$30/mo | $10–$39/mo | $15–$39/mo | $18–$59/mo |
+| **Data location** | Your Mac | US cloud | US cloud | US cloud | EU cloud |
+| **Audio retained** | Deleted after transcription | Stored on servers | Stored on servers | Stored on servers | Stored on servers |
+| **Privacy lawsuits** | N/A | [Yes (2025)](https://meetily.ai/blog/meetily-vs-otter-ai-privacy-first-alternative-2025) | [Yes (biometrics)](https://www.ebglaw.com/insights/publications/ai-meeting-assistants-and-biometric-privacy-lessons-from-the-fireflies-ai-lawsuit) | No | No |
+
+### vs. Privacy-Focused & Local Tools
+
+These tools process audio on your device or emphasize privacy. Closer to what Transcripted does.
+
+| | Transcripted | Granola | Krisp | MacWhisper | Meetily |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **Processing** | 100% local | Hybrid (audio local, AI cloud) | On-device (English) | 100% local | 100% local |
+| **STT model** | Parakeet TDT V3 | Proprietary (cloud) | Proprietary | Whisper | Parakeet or Whisper |
+| **Speaker diarization** | ✅ Sortformer | ❌ desktop / ✅ iPhone | ✅ | ⚠️ Beta (WhisperKit) | ⚠️ Proof of concept |
+| **Learns voices over time** | ✅ (256-dim embeddings) | ❌ | ❌ | ❌ | ❌ |
+| **Speaker name inference** | ✅ Qwen 3.5-4B | ❌ | ❌ | ❌ | ❌ |
+| **Meeting bot** | No | No | No | No | No |
+| **System audio capture** | ✅ | ✅ | ✅ (virtual device) | ✅ | ✅ |
+| **Auto meeting detection** | ✅ | ❌ (manual start) | ❌ | ❌ | ❌ |
+| **Works fully offline** | ✅ | ❌ (needs cloud for AI) | ✅ (English only) | ✅ | ✅ |
+| **AI summaries** | ❌ (transcripts only) | ✅ | ✅ | ❌ | ✅ (via Ollama) |
+| **Open source** | ✅ MIT | ❌ | ❌ | ❌ | ✅ MIT |
+| **Cost** | **Free** | $14–$35/mo | $8–$16/mo | $80 one-time | Free (Pro $10/mo) |
+| **Platforms** | macOS | macOS, Windows, iOS | macOS, Windows, mobile | macOS | macOS, Windows |
+
+### vs. Apple Built-in
+
+| | Transcripted | Apple Dictation | Voice Memos | Notes (macOS 15+) |
+|---|:---:|:---:|:---:|:---:|
+| **Speaker diarization** | ✅ up to 4 speakers | ❌ | ❌ | ❌ |
+| **System audio capture** | ✅ | ❌ | ❌ | ❌ |
+| **Auto meeting detection** | ✅ | ❌ | ❌ | ❌ |
+| **Works offline** | ✅ | ✅ (Apple Silicon) | ✅ | ✅ |
+| **Meeting transcription** | ✅ | ❌ (text input only) | ❌ (no speaker labels) | ❌ (no speaker labels) |
+| **Structured output** | Markdown + YAML | Plain text | Searchable text | Inline text |
+| **Voice fingerprints** | ✅ | ❌ | ❌ | ❌ |
+| **Cost** | Free | Free | Free | Free |
+
+Apple's `SpeechAnalyzer` API (WWDC 2025) is fast and efficient, but provides no speaker diarization, no meeting detection, and no system audio capture. Transcripted fills all three gaps.
 
 ---
 
