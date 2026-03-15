@@ -61,29 +61,11 @@ The result: timestamped, speaker-labeled Markdown transcripts saved to your Mac.
 
 ### Sample Output
 
-```markdown
----
-date: 2026-03-14
-duration: "12:47"
-speakers:
-  - name: "Sarah"
-    source: db_match
-    confidence: high
-  - name: "Jack"
-    source: qwen_inferred
-    confidence: medium
-total_word_count: 2341
----
+<p align="center">
+  <img src="docs/screenshots/transcript.png" alt="Transcript output — Markdown with YAML frontmatter, speaker-labeled dialogue" width="720">
+</p>
 
-[00:00] Sarah: Alright, let's kick off the sprint planning.
-[00:03] Jack: Sure. I've got the backlog pulled up.
-[00:08] Sarah: First item — the authentication refactor. Where are we on that?
-[00:14] Jack: I finished the token rotation yesterday. The migration is ready
-       but I want to run it by the security team before we merge.
-[00:23] Sarah: Good call. Let's block that until Tuesday.
-```
-
-Every transcript includes YAML frontmatter with date, duration, word count, speaker metadata, capture quality metrics, and more.
+Every transcript includes YAML frontmatter with date, duration, word count, speaker metadata, capture quality metrics, and more. Transcripts are saved as standard Markdown files — open them in any editor, Obsidian, or your favorite AI tool.
 
 ---
 
@@ -249,46 +231,9 @@ Transcripted walks you through a 4-step onboarding:
 
 ## How It Works
 
-```
-┌─────────────┐     ┌─────────────┐
-│  Microphone  │     │ System Audio │
-│  (your voice)│     │ (Zoom, Meet) │
-└──────┬───────┘     └──────┬───────┘
-       │                     │
-       ▼                     ▼
-┌──────────────────────────────────┐
-│     Audio Capture & Resampling   │
-│       16 kHz · Mono · Float32    │
-└───────────────┬──────────────────┘
-                │
-        ┌───────┴───────┐
-        ▼               ▼
-┌──────────────┐ ┌──────────────┐
-│ Parakeet TDT │ │  Sortformer  │
-│    V3 (STT)  │ │ (Diarization)│
-│  Neural Engine│ │  ≤4 speakers │
-└──────┬───────┘ └──────┬───────┘
-       │                │
-       ▼                ▼
-┌──────────────────────────────────┐
-│   Speaker Matching & Merging     │
-│  256-dim embeddings · SQLite DB  │
-│  Cosine similarity · EMA blend   │
-└───────────────┬──────────────────┘
-                │
-                ▼
-┌──────────────────────────────────┐
-│   Qwen 3.5-4B (Optional)        │
-│   Infers names from context      │
-│   "Hey Sarah" → Speaker 0 = Sarah│
-└───────────────┬──────────────────┘
-                │
-                ▼
-┌──────────────────────────────────┐
-│    Markdown Transcript Output    │
-│  ~/Documents/Transcripted/*.md   │
-└──────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/screenshots/pipeline.png" alt="Processing pipeline — mic and system audio through Parakeet and Sortformer to Markdown output" width="720">
+</p>
 
 ---
 

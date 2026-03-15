@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>How It Works</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    background: #0a0a14;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 1200px;
+    height: 500px;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  .wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .pipeline-title {
+    color: #FFFFFF;
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+
+  .pipeline-subtitle {
+    color: #8A8A8A;
+    font-size: 14px;
+    margin-bottom: 28px;
+  }
+
+  /* Pipeline layout container */
+  .pipeline-area {
+    position: relative;
+    width: 1080px;
+    height: 220px;
+  }
+
+  /* Stage cards */
+  .stage {
+    position: absolute;
+    width: 140px;
+    height: 100px;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    border: 1px solid;
+    z-index: 2;
+  }
+
+  .stage-icon {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+
+  .stage-name {
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+    line-height: 1.2;
+  }
+
+  .stage-sub {
+    color: #6B6B6B;
+    font-size: 11px;
+    text-align: center;
+    line-height: 1.3;
+  }
+
+  .stage-sub2 {
+    color: #6B6B6B;
+    font-size: 10px;
+    text-align: center;
+    margin-top: -2px;
+    font-family: 'SF Mono', 'Menlo', monospace;
+  }
+
+  /* Neural Engine badge */
+  .ne-badge {
+    position: absolute;
+    top: -9px;
+    right: -10px;
+    background: #0a0a14;
+    border: 1px solid rgba(34,197,94,0.4);
+    border-radius: 999px;
+    padding: 2px 7px;
+    font-size: 9px;
+    font-weight: 600;
+    color: #22C55E;
+    white-space: nowrap;
+    z-index: 3;
+  }
+
+  /* Stage positions: center the whole layout */
+  /* Total width: 140 + 60 + 140 + 60 + 140 + 60 + 140 + 60 + 140 = 940 */
+  /* Left offset to center in 1080: (1080 - 940) / 2 = 70, but we have converging inputs */
+  /* Input stages stacked vertically on the left */
+  .s-mic      { top: 0;     left: 20px; }
+  .s-system   { top: 115px; left: 20px; }
+  .s-resample { top: 57px;  left: 220px; }
+  .s-parakeet { top: 57px;  left: 420px; }
+  .s-sortformer { top: 57px; left: 620px; }
+  .s-output   { top: 57px;  left: 820px; width: 160px; }
+
+  /* Color tints */
+  .tint-coral {
+    background: linear-gradient(135deg, rgba(236,72,153,0.10), rgba(236,72,153,0.03));
+    border-color: rgba(236,72,153,0.25);
+  }
+
+  .tint-teal {
+    background: linear-gradient(135deg, rgba(59,130,246,0.10), rgba(59,130,246,0.03));
+    border-color: rgba(59,130,246,0.25);
+  }
+
+  .tint-gray {
+    background: linear-gradient(135deg, rgba(180,180,180,0.06), rgba(180,180,180,0.02));
+    border-color: rgba(180,180,180,0.18);
+  }
+
+  .tint-purple {
+    background: linear-gradient(135deg, rgba(139,92,246,0.10), rgba(139,92,246,0.03));
+    border-color: rgba(139,92,246,0.25);
+  }
+
+  .tint-green {
+    background: linear-gradient(135deg, rgba(34,197,94,0.10), rgba(34,197,94,0.03));
+    border-color: rgba(34,197,94,0.25);
+  }
+
+  /* ---- CSS Icons ---- */
+
+  /* Mic icon */
+  .icon-mic {
+    width: 12px;
+    height: 18px;
+    border: 2px solid #EC4899;
+    border-radius: 6px;
+    position: relative;
+  }
+  .icon-mic::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 16px;
+    height: 8px;
+    border: 2px solid #EC4899;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+  }
+
+  /* Speaker icon */
+  .icon-speaker {
+    width: 28px;
+    height: 22px;
+    position: relative;
+  }
+  .icon-speaker-box {
+    width: 10px;
+    height: 12px;
+    background: #3B82F6;
+    position: absolute;
+    left: 2px;
+    top: 5px;
+    border-radius: 1px;
+  }
+  .icon-speaker-cone {
+    position: absolute;
+    left: 10px;
+    top: 2px;
+    width: 0;
+    height: 0;
+    border-top: 9px solid transparent;
+    border-bottom: 9px solid transparent;
+    border-left: 8px solid #3B82F6;
+  }
+  .icon-speaker-arc1,
+  .icon-speaker-arc2 {
+    position: absolute;
+    border: 1.5px solid transparent;
+    border-right-color: #3B82F6;
+    border-radius: 50%;
+  }
+  .icon-speaker-arc1 { width: 10px; height: 10px; right: 2px; top: 6px; }
+  .icon-speaker-arc2 { width: 16px; height: 16px; right: -1px; top: 3px; }
+
+  /* Waveform icon */
+  .icon-waveform {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 20px;
+  }
+  .icon-waveform .wf-bar {
+    width: 3px;
+    border-radius: 1.5px;
+    background: #999;
+  }
+  .icon-waveform .wf-bar:nth-child(1) { height: 6px; }
+  .icon-waveform .wf-bar:nth-child(2) { height: 14px; }
+  .icon-waveform .wf-bar:nth-child(3) { height: 20px; }
+  .icon-waveform .wf-bar:nth-child(4) { height: 12px; }
+  .icon-waveform .wf-bar:nth-child(5) { height: 8px; }
+
+  /* Brain icon */
+  .icon-brain {
+    width: 24px;
+    height: 22px;
+    position: relative;
+  }
+  .icon-brain .bd {
+    position: absolute;
+    border-radius: 50%;
+    background: #8B5CF6;
+  }
+  .icon-brain .bd:nth-child(1) { width: 8px; height: 8px; top: 0; left: 8px; }
+  .icon-brain .bd:nth-child(2) { width: 6px; height: 6px; top: 4px; left: 1px; }
+  .icon-brain .bd:nth-child(3) { width: 6px; height: 6px; top: 4px; left: 17px; }
+  .icon-brain .bd:nth-child(4) { width: 7px; height: 7px; top: 10px; left: 4px; }
+  .icon-brain .bd:nth-child(5) { width: 7px; height: 7px; top: 10px; left: 13px; }
+  .icon-brain .bd:nth-child(6) { width: 8px; height: 8px; top: 14px; left: 8px; opacity: 0.6; }
+
+  /* People icon */
+  .icon-people {
+    width: 28px;
+    height: 22px;
+    position: relative;
+  }
+  .icon-people .person-head {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: 1.5px solid #8B5CF6;
+    position: absolute;
+    top: 0;
+  }
+  .icon-people .person-head:nth-child(1) { left: 4px; }
+  .icon-people .person-head:nth-child(2) { left: 16px; }
+  .icon-people .person-body {
+    width: 12px;
+    height: 8px;
+    border: 1.5px solid #8B5CF6;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    position: absolute;
+    top: 12px;
+  }
+  .icon-people .person-body:nth-child(3) { left: 2px; }
+  .icon-people .person-body:nth-child(4) { left: 14px; }
+
+  /* Document icon */
+  .icon-doc {
+    width: 16px;
+    height: 20px;
+    border: 1.5px solid #22C55E;
+    border-radius: 2px;
+    position: relative;
+  }
+  .icon-doc::before {
+    content: '';
+    position: absolute;
+    top: 4px;
+    left: 3px;
+    right: 3px;
+    height: 1.5px;
+    background: rgba(34,197,94,0.5);
+    box-shadow: 0 4px 0 rgba(34,197,94,0.5), 0 8px 0 rgba(34,197,94,0.5);
+  }
+  .icon-doc .doc-fold {
+    position: absolute;
+    top: -1px;
+    right: -1px;
+    width: 6px;
+    height: 6px;
+    background: #0a0a14;
+    border-left: 1.5px solid #22C55E;
+    border-bottom: 1.5px solid #22C55E;
+  }
+
+  /* SVG connectors */
+  .connectors {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* Bottom note */
+  .bottom-note {
+    color: #6B6B6B;
+    font-size: 12px;
+    text-align: center;
+    margin-top: 20px;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrapper">
+  <div class="pipeline-title">How It Works</div>
+  <div class="pipeline-subtitle">From audio capture to diarized transcript in seconds</div>
+
+  <div class="pipeline-area">
+    <!-- SVG connectors -->
+    <svg class="connectors" viewBox="0 0 1080 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- Mic -> Resample (V-shape top arm): mic right (160) center-y=50, converge to resample center-y=107 -->
+      <path d="M 160 50 L 190 50 L 190 107 L 220 107" stroke="#4A4A4A" stroke-width="1" fill="none"/>
+      <!-- System -> Resample (V-shape bottom arm): system right (160) center-y=165, converge to 107 -->
+      <path d="M 160 165 L 190 165 L 190 107 L 220 107" stroke="#4A4A4A" stroke-width="1" fill="none"/>
+      <!-- Arrowhead at Resample entry -->
+      <polygon points="220,107 213,103 213,111" fill="#4A4A4A"/>
+
+      <!-- Resample -> Parakeet -->
+      <line x1="360" y1="107" x2="420" y2="107" stroke="#4A4A4A" stroke-width="1"/>
+      <polygon points="420,107 413,103 413,111" fill="#4A4A4A"/>
+
+      <!-- Parakeet -> Sortformer -->
+      <line x1="560" y1="107" x2="620" y2="107" stroke="#4A4A4A" stroke-width="1"/>
+      <polygon points="620,107 613,103 613,111" fill="#4A4A4A"/>
+
+      <!-- Sortformer -> Output -->
+      <line x1="760" y1="107" x2="820" y2="107" stroke="#4A4A4A" stroke-width="1"/>
+      <polygon points="820,107 813,103 813,111" fill="#4A4A4A"/>
+    </svg>
+
+    <!-- Stage 1: Mic Input -->
+    <div class="stage s-mic tint-coral">
+      <div class="stage-icon">
+        <div class="icon-mic"></div>
+      </div>
+      <div class="stage-name">Mic Input</div>
+      <div class="stage-sub">Your voice &middot; 48kHz</div>
+    </div>
+
+    <!-- Stage 2: System Audio -->
+    <div class="stage s-system tint-teal">
+      <div class="stage-icon">
+        <div class="icon-speaker">
+          <div class="icon-speaker-box"></div>
+          <div class="icon-speaker-cone"></div>
+          <div class="icon-speaker-arc1"></div>
+          <div class="icon-speaker-arc2"></div>
+        </div>
+      </div>
+      <div class="stage-name">System Audio</div>
+      <div class="stage-sub">Zoom, Meet &middot; 48kHz</div>
+    </div>
+
+    <!-- Stage 3: Resample -->
+    <div class="stage s-resample tint-gray">
+      <div class="stage-icon">
+        <div class="icon-waveform">
+          <div class="wf-bar"></div>
+          <div class="wf-bar"></div>
+          <div class="wf-bar"></div>
+          <div class="wf-bar"></div>
+          <div class="wf-bar"></div>
+        </div>
+      </div>
+      <div class="stage-name">Resample</div>
+      <div class="stage-sub">16kHz &middot; Mono &middot; Float32</div>
+    </div>
+
+    <!-- Stage 4: Parakeet V3 -->
+    <div class="stage s-parakeet tint-purple">
+      <div class="ne-badge">Neural Engine</div>
+      <div class="stage-icon">
+        <div class="icon-brain">
+          <div class="bd"></div>
+          <div class="bd"></div>
+          <div class="bd"></div>
+          <div class="bd"></div>
+          <div class="bd"></div>
+          <div class="bd"></div>
+        </div>
+      </div>
+      <div class="stage-name">Parakeet V3</div>
+      <div class="stage-sub">Speech &rarr; Text</div>
+    </div>
+
+    <!-- Stage 5: Sortformer -->
+    <div class="stage s-sortformer tint-purple">
+      <div class="ne-badge">Neural Engine</div>
+      <div class="stage-icon">
+        <div class="icon-people">
+          <div class="person-head"></div>
+          <div class="person-head"></div>
+          <div class="person-body"></div>
+          <div class="person-body"></div>
+        </div>
+      </div>
+      <div class="stage-name">Sortformer</div>
+      <div class="stage-sub">Who said what &middot; &le;4 speakers</div>
+    </div>
+
+    <!-- Stage 6: Output -->
+    <div class="stage s-output tint-green">
+      <div class="stage-icon">
+        <div class="icon-doc">
+          <div class="doc-fold"></div>
+        </div>
+      </div>
+      <div class="stage-name">Output</div>
+      <div class="stage-sub">Markdown + YAML</div>
+      <div class="stage-sub2">~/Documents/Transcripted/</div>
+    </div>
+  </div>
+
+  <div class="bottom-note">All processing happens on Apple Neural Engine &middot; No internet required</div>
+</div>
+
+</body>
+</html>

@@ -7,100 +7,158 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
-    background: #0d0d1a;
+    background: #0a0a14;
     display: flex;
     justify-content: center;
     align-items: center;
-    min-height: 100vh;
-    padding: 60px;
+    width: 1200px;
+    height: 700px;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   .diagram {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0;
-    max-width: 800px;
+    width: 100%;
+    padding: 0 56px;
   }
 
   .diagram-title {
-    color: white;
-    font-size: 20px;
-    font-weight: 700;
-    margin-bottom: 8px;
+    color: #FFFFFF;
+    font-size: 22px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    letter-spacing: -0.3px;
   }
 
   .diagram-subtitle {
     color: #8A8A8A;
     font-size: 14px;
-    margin-bottom: 32px;
+    font-weight: 400;
+    margin-bottom: 28px;
   }
 
-  /* Pipeline rows */
+  /* On your Mac boundary */
+  .mac-boundary {
+    border: 1.5px dashed rgba(34,197,94,0.25);
+    border-radius: 20px;
+    padding: 36px 32px 28px;
+    position: relative;
+    width: 100%;
+    max-width: 960px;
+  }
+
+  .mac-label {
+    position: absolute;
+    top: -11px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #0a0a14;
+    padding: 0 14px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+
+  .mac-label-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(34,197,94,0.08);
+    border: 1px solid rgba(34,197,94,0.2);
+    border-radius: 999px;
+    padding: 3px 12px;
+    color: #22C55E;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+  }
+
+  .mac-label-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #22C55E;
+    flex-shrink: 0;
+  }
+
+  /* Pipeline */
   .pipeline {
     display: flex;
     align-items: center;
-    gap: 16px;
-    width: 100%;
     justify-content: center;
+    gap: 0;
+    width: 100%;
   }
 
   .stage {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
   }
 
   .stage-box {
-    width: 140px;
-    height: 80px;
+    width: 152px;
+    height: 96px;
     border-radius: 12px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 6px;
     position: relative;
   }
 
-  .stage-input {
-    background: linear-gradient(135deg, rgba(236,72,153,0.15), rgba(236,72,153,0.05));
-    border: 1px solid rgba(236,72,153,0.3);
+  .stage-coral {
+    background: rgba(236,72,153,0.08);
+    border: 1px solid rgba(236,72,153,0.25);
+  }
+
+  .stage-teal {
+    background: rgba(59,130,246,0.08);
+    border: 1px solid rgba(59,130,246,0.25);
   }
 
   .stage-model {
-    background: linear-gradient(135deg, rgba(59,130,246,0.15), rgba(59,130,246,0.05));
-    border: 1px solid rgba(59,130,246,0.3);
+    background: rgba(59,130,246,0.06);
+    border: 1px solid rgba(59,130,246,0.2);
   }
 
-  .stage-output {
-    background: linear-gradient(135deg, rgba(34,197,94,0.15), rgba(34,197,94,0.05));
-    border: 1px solid rgba(34,197,94,0.3);
+  .stage-green {
+    background: rgba(34,197,94,0.08);
+    border: 1px solid rgba(34,197,94,0.25);
   }
 
   .stage-icon {
-    font-size: 24px;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .stage-name {
-    color: white;
-    font-size: 12px;
+    color: #FFFFFF;
+    font-size: 13px;
     font-weight: 600;
+    letter-spacing: -0.1px;
   }
 
   .stage-detail {
     color: #8A8A8A;
     font-size: 10px;
+    font-weight: 400;
   }
 
   .stage-badge {
     position: absolute;
     top: -8px;
-    right: -8px;
-    background: #1A1A1A;
-    border: 1px solid #2E2E2E;
+    right: -6px;
+    background: #0a0a14;
+    border: 1px solid rgba(34,197,94,0.3);
     border-radius: 999px;
     padding: 2px 8px;
     font-size: 9px;
@@ -109,42 +167,20 @@
     white-space: nowrap;
   }
 
+  /* Arrows */
   .pipe-arrow {
-    color: #555;
-    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
     flex-shrink: 0;
   }
 
-  /* On your Mac boundary */
-  .mac-boundary {
-    border: 2px dashed rgba(34,197,94,0.3);
-    border-radius: 20px;
-    padding: 32px 24px;
-    position: relative;
-    margin-top: 16px;
+  .pipe-arrow svg {
+    overflow: visible;
   }
 
-  .mac-label {
-    position: absolute;
-    top: -12px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: #0d0d1a;
-    padding: 0 16px;
-    color: #22C55E;
-    font-size: 13px;
-    font-weight: 600;
-    white-space: nowrap;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .mac-icon {
-    font-size: 16px;
-  }
-
-  /* Cloud crossed out */
+  /* Cloud section */
   .cloud-section {
     margin-top: 24px;
     display: flex;
@@ -153,70 +189,63 @@
   }
 
   .cloud-box {
-    width: 160px;
-    height: 60px;
+    width: 140px;
+    height: 52px;
     border-radius: 12px;
-    background: rgba(239, 68, 68, 0.08);
-    border: 1px dashed rgba(239, 68, 68, 0.3);
+    background: rgba(239,68,68,0.05);
+    border: 1px dashed rgba(239,68,68,0.2);
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
     position: relative;
+    overflow: hidden;
   }
 
-  .cloud-x {
+  .cloud-strikethrough {
     position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .cloud-x::before {
-    content: '';
-    position: absolute;
-    width: 120%;
-    height: 2px;
-    background: #EF4444;
-    transform: rotate(-15deg);
-    opacity: 0.6;
-  }
-
-  .cloud-icon {
-    font-size: 20px;
-    opacity: 0.3;
+    top: 50%;
+    left: -5%;
+    width: 110%;
+    height: 1.5px;
+    background: rgba(239,68,68,0.5);
+    transform: rotate(-12deg);
+    transform-origin: center;
   }
 
   .cloud-text {
-    color: rgba(239, 68, 68, 0.5);
+    color: rgba(239,68,68,0.4);
     font-size: 12px;
     font-weight: 600;
+    z-index: 1;
   }
 
   .cloud-label {
-    color: #EF4444;
-    font-size: 13px;
+    color: rgba(239,68,68,0.6);
+    font-size: 12px;
     font-weight: 500;
-    opacity: 0.7;
   }
 
   /* Bottom stats */
   .stats-row {
     display: flex;
-    gap: 32px;
-    margin-top: 32px;
+    gap: 36px;
+    margin-top: 28px;
   }
 
   .stat {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
   }
 
   .stat-icon {
-    font-size: 16px;
-    opacity: 0.7;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.6;
   }
 
   .stat-text {
@@ -228,66 +257,142 @@
     color: #22C55E;
     font-weight: 600;
   }
+
+  /* SVG icon helpers */
+  .icon-mic { color: #EC4899; }
+  .icon-speaker { color: #3B82F6; }
+  .icon-brain { color: #7C93DB; }
+  .icon-people { color: #7C93DB; }
+  .icon-doc { color: #22C55E; }
 </style>
 </head>
 <body>
 
 <div class="diagram">
   <div class="diagram-title">Everything stays on your Mac</div>
-  <div class="diagram-subtitle">Zero network connections. Zero cloud dependencies. Fully auditable open source.</div>
+  <div class="diagram-subtitle">Zero network connections. Fully auditable open source.</div>
 
   <div class="mac-boundary">
     <div class="mac-label">
-      <span class="mac-icon">💻</span>
-      On your Mac — Neural Engine
+      <span class="mac-label-badge">
+        <span class="mac-label-dot"></span>
+        On your Mac &middot; Neural Engine
+      </span>
     </div>
 
     <div class="pipeline">
+      <!-- Microphone -->
       <div class="stage">
-        <div class="stage-box stage-input">
-          <div class="stage-icon">🎤</div>
+        <div class="stage-box stage-coral">
+          <div class="stage-icon">
+            <svg width="20" height="28" viewBox="0 0 20 28" fill="none">
+              <rect x="5" y="1" width="10" height="16" rx="5" stroke="#EC4899" stroke-width="1.5" fill="rgba(236,72,153,0.15)"/>
+              <path d="M2 13C2 17.4183 5.58172 21 10 21C14.4183 21 18 17.4183 18 13" stroke="#EC4899" stroke-width="1.5" stroke-linecap="round"/>
+              <line x1="10" y1="21" x2="10" y2="26" stroke="#EC4899" stroke-width="1.5" stroke-linecap="round"/>
+              <line x1="6" y1="26" x2="14" y2="26" stroke="#EC4899" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
           <div class="stage-name">Microphone</div>
           <div class="stage-detail">Your voice</div>
         </div>
       </div>
 
-      <div class="pipe-arrow">→</div>
+      <!-- Arrow -->
+      <div class="pipe-arrow">
+        <svg width="32" height="12" viewBox="0 0 32 12" fill="none">
+          <line x1="0" y1="6" x2="26" y2="6" stroke="#4A4A4A" stroke-width="1"/>
+          <polyline points="24,2 30,6 24,10" stroke="#4A4A4A" stroke-width="1" fill="none" stroke-linejoin="round"/>
+        </svg>
+      </div>
 
+      <!-- System Audio -->
       <div class="stage">
-        <div class="stage-box stage-input">
-          <div class="stage-icon">🔊</div>
+        <div class="stage-box stage-teal">
+          <div class="stage-icon">
+            <svg width="26" height="22" viewBox="0 0 26 22" fill="none">
+              <path d="M3 8H6L12 3V19L6 14H3C1.9 14 1 13.1 1 12V10C1 8.9 1.9 8 3 8Z" stroke="#3B82F6" stroke-width="1.5" fill="rgba(59,130,246,0.15)" stroke-linejoin="round"/>
+              <path d="M16 5C17.8 6.5 19 8.6 19 11C19 13.4 17.8 15.5 16 17" stroke="#3B82F6" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+              <path d="M20 2C22.7 4.3 24.5 7.4 24.5 11C24.5 14.6 22.7 17.7 20 20" stroke="#3B82F6" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.5"/>
+            </svg>
+          </div>
           <div class="stage-name">System Audio</div>
-          <div class="stage-detail">Zoom, Meet, Teams</div>
+          <div class="stage-detail">Zoom &middot; Meet &middot; Teams</div>
         </div>
       </div>
 
-      <div class="pipe-arrow">→</div>
+      <!-- Arrow -->
+      <div class="pipe-arrow">
+        <svg width="32" height="12" viewBox="0 0 32 12" fill="none">
+          <line x1="0" y1="6" x2="26" y2="6" stroke="#4A4A4A" stroke-width="1"/>
+          <polyline points="24,2 30,6 24,10" stroke="#4A4A4A" stroke-width="1" fill="none" stroke-linejoin="round"/>
+        </svg>
+      </div>
 
+      <!-- Parakeet V3 -->
       <div class="stage">
         <div class="stage-box stage-model">
           <div class="stage-badge">On-device</div>
-          <div class="stage-icon">🧠</div>
+          <div class="stage-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <circle cx="6" cy="6" r="2.5" stroke="#7C93DB" stroke-width="1.2" fill="rgba(124,147,219,0.15)"/>
+              <circle cx="18" cy="6" r="2.5" stroke="#7C93DB" stroke-width="1.2" fill="rgba(124,147,219,0.15)"/>
+              <circle cx="12" cy="18" r="2.5" stroke="#7C93DB" stroke-width="1.2" fill="rgba(124,147,219,0.15)"/>
+              <circle cx="12" cy="11" r="2" stroke="#7C93DB" stroke-width="1.2" fill="rgba(124,147,219,0.2)"/>
+              <line x1="8" y1="7" x2="10.5" y2="10" stroke="#7C93DB" stroke-width="0.8" opacity="0.6"/>
+              <line x1="16" y1="7" x2="13.5" y2="10" stroke="#7C93DB" stroke-width="0.8" opacity="0.6"/>
+              <line x1="12" y1="13" x2="12" y2="15.5" stroke="#7C93DB" stroke-width="0.8" opacity="0.6"/>
+            </svg>
+          </div>
           <div class="stage-name">Parakeet V3</div>
-          <div class="stage-detail">Speech → Text</div>
+          <div class="stage-detail">Speech &rarr; Text &middot; 600MB</div>
         </div>
       </div>
 
-      <div class="pipe-arrow">→</div>
+      <!-- Arrow -->
+      <div class="pipe-arrow">
+        <svg width="32" height="12" viewBox="0 0 32 12" fill="none">
+          <line x1="0" y1="6" x2="26" y2="6" stroke="#4A4A4A" stroke-width="1"/>
+          <polyline points="24,2 30,6 24,10" stroke="#4A4A4A" stroke-width="1" fill="none" stroke-linejoin="round"/>
+        </svg>
+      </div>
 
+      <!-- Sortformer -->
       <div class="stage">
         <div class="stage-box stage-model">
           <div class="stage-badge">On-device</div>
-          <div class="stage-icon">👥</div>
+          <div class="stage-icon">
+            <svg width="26" height="22" viewBox="0 0 26 22" fill="none">
+              <circle cx="9" cy="7" r="4" stroke="#7C93DB" stroke-width="1.3" fill="rgba(124,147,219,0.12)"/>
+              <circle cx="17" cy="7" r="4" stroke="#7C93DB" stroke-width="1.3" fill="rgba(124,147,219,0.12)"/>
+              <path d="M1 20C1 16.7 3.7 14 7 14H11C14.3 14 17 16.7 17 20" stroke="#7C93DB" stroke-width="1.3" stroke-linecap="round" fill="none"/>
+              <path d="M15 14H19C22.3 14 25 16.7 25 20" stroke="#7C93DB" stroke-width="1.3" stroke-linecap="round" fill="none"/>
+            </svg>
+          </div>
           <div class="stage-name">Sortformer</div>
           <div class="stage-detail">Who said what</div>
         </div>
       </div>
 
-      <div class="pipe-arrow">→</div>
+      <!-- Arrow -->
+      <div class="pipe-arrow">
+        <svg width="32" height="12" viewBox="0 0 32 12" fill="none">
+          <line x1="0" y1="6" x2="26" y2="6" stroke="#4A4A4A" stroke-width="1"/>
+          <polyline points="24,2 30,6 24,10" stroke="#4A4A4A" stroke-width="1" fill="none" stroke-linejoin="round"/>
+        </svg>
+      </div>
 
+      <!-- Transcript -->
       <div class="stage">
-        <div class="stage-box stage-output">
-          <div class="stage-icon">📝</div>
+        <div class="stage-box stage-green">
+          <div class="stage-icon">
+            <svg width="20" height="24" viewBox="0 0 20 24" fill="none">
+              <rect x="1" y="1" width="18" height="22" rx="3" stroke="#22C55E" stroke-width="1.3" fill="rgba(34,197,94,0.1)"/>
+              <line x1="5" y1="7" x2="15" y2="7" stroke="#22C55E" stroke-width="1" stroke-linecap="round" opacity="0.6"/>
+              <line x1="5" y1="11" x2="13" y2="11" stroke="#22C55E" stroke-width="1" stroke-linecap="round" opacity="0.6"/>
+              <line x1="5" y1="15" x2="11" y2="15" stroke="#22C55E" stroke-width="1" stroke-linecap="round" opacity="0.6"/>
+              <line x1="5" y1="19" x2="9" y2="19" stroke="#22C55E" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
+            </svg>
+          </div>
           <div class="stage-name">Transcript</div>
           <div class="stage-detail">Markdown + YAML</div>
         </div>
@@ -295,26 +400,47 @@
     </div>
   </div>
 
+  <!-- Cloud crossed out -->
   <div class="cloud-section">
     <div class="cloud-box">
-      <div class="cloud-x"></div>
-      <span class="cloud-icon">☁️</span>
-      <span class="cloud-text">Cloud servers</span>
+      <svg width="28" height="20" viewBox="0 0 28 20" fill="none" style="opacity: 0.3; z-index: 1;">
+        <path d="M22 16H7C3.7 16 1 13.3 1 10C1 7.2 3 4.8 5.7 4.2C6.5 2 8.6 0.5 11 0.5C13.3 0.5 15.3 1.8 16.2 3.8C16.8 3.5 17.4 3.3 18 3.3C20.2 3.3 22 5 22.2 7.2C24.4 7.8 26 9.7 26 12C26 14.8 23.8 16 22 16Z" stroke="#EF4444" stroke-width="1.2" fill="none"/>
+      </svg>
+      <span class="cloud-text">Cloud</span>
+      <div class="cloud-strikethrough"></div>
     </div>
     <div class="cloud-label">No data sent. No API calls. Works offline.</div>
   </div>
 
+  <!-- Stats row -->
   <div class="stats-row">
     <div class="stat">
-      <span class="stat-icon">🔒</span>
+      <div class="stat-icon">
+        <svg width="14" height="16" viewBox="0 0 14 16" fill="none">
+          <rect x="2" y="7" width="10" height="8" rx="2" stroke="#B0B0B0" stroke-width="1.2" fill="none"/>
+          <path d="M4 7V5C4 3.3 5.3 2 7 2C8.7 2 10 3.3 10 5V7" stroke="#B0B0B0" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+          <circle cx="7" cy="11" r="1" fill="#B0B0B0"/>
+        </svg>
+      </div>
       <span class="stat-text">Network connections: <span class="stat-value">0</span></span>
     </div>
     <div class="stat">
-      <span class="stat-icon">💰</span>
+      <div class="stat-icon">
+        <svg width="14" height="16" viewBox="0 0 14 16" fill="none">
+          <circle cx="7" cy="8" r="6" stroke="#B0B0B0" stroke-width="1.2" fill="none"/>
+          <text x="7" y="11" text-anchor="middle" fill="#B0B0B0" font-size="8" font-weight="600" font-family="-apple-system, sans-serif">$</text>
+        </svg>
+      </div>
       <span class="stat-text">Monthly cost: <span class="stat-value">$0</span></span>
     </div>
     <div class="stat">
-      <span class="stat-icon">📂</span>
+      <div class="stat-icon">
+        <svg width="16" height="14" viewBox="0 0 16 14" fill="none">
+          <path d="M1 5L1 11C1 12.1 1.9 13 3 13H13C14.1 13 15 12.1 15 11V5" stroke="#B0B0B0" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+          <path d="M1 5L3 1H13L15 5" stroke="#B0B0B0" stroke-width="1.2" fill="none" stroke-linejoin="round"/>
+          <line x1="4" y1="8" x2="12" y2="8" stroke="#B0B0B0" stroke-width="1" stroke-linecap="round" opacity="0.6"/>
+        </svg>
+      </div>
       <span class="stat-text">Data location: <span class="stat-value">~/Documents/Transcripted/</span></span>
     </div>
   </div>

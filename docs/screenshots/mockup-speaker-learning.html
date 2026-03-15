@@ -7,28 +7,37 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
-    background: #0d0d1a;
+    background: #0a0a14;
     display: flex;
     justify-content: center;
     align-items: center;
-    min-height: 100vh;
-    padding: 60px;
+    width: 1200px;
+    height: 520px;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   .container {
     display: flex;
-    gap: 32px;
-    align-items: stretch;
+    gap: 0;
+    align-items: center;
+    justify-content: center;
   }
 
   .panel {
-    width: 340px;
     background: #1A1A1A;
     border-radius: 12px;
     border: 1px solid #2E2E2E;
-    padding: 24px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    padding: 22px 24px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.2);
+  }
+
+  .panel-left {
+    width: 320px;
+  }
+
+  .panel-right {
+    width: 400px;
   }
 
   .panel-label {
@@ -36,43 +45,57 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 1.5px;
-    margin-bottom: 16px;
+    margin-bottom: 14px;
     padding-bottom: 8px;
     border-bottom: 1px solid #2E2E2E;
   }
 
-  .label-before { color: #8A8A8A; }
-  .label-after { color: #22C55E; }
+  .label-before {
+    color: #6B6B6B;
+    border-bottom-color: #2E2E2E;
+  }
 
+  .label-after {
+    color: #22C55E;
+    border-bottom-color: rgba(34,197,94,0.25);
+  }
+
+  /* Transcript lines */
   .transcript-line {
     display: flex;
     gap: 8px;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     font-size: 13px;
     line-height: 1.5;
+    align-items: baseline;
+  }
+
+  .transcript-line:last-of-type {
+    margin-bottom: 0;
   }
 
   .ts {
-    color: #8A8A8A;
-    font-family: 'SF Mono', monospace;
+    color: #6B6B6B;
+    font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
     font-size: 11px;
-    min-width: 44px;
+    min-width: 40px;
     flex-shrink: 0;
   }
 
   .speaker {
     font-weight: 600;
     white-space: nowrap;
+    margin-right: 2px;
   }
 
   .text {
     color: #B0B0B0;
   }
 
-  /* Before speakers are generic */
-  .sp-generic { color: #8A8A8A; }
+  /* Generic speakers */
+  .sp-generic { color: #6B6B6B; }
 
-  /* After speakers are colored */
+  /* Named speakers */
   .sp-sarah { color: #EC4899; }
   .sp-jack { color: #3B82F6; }
   .sp-lisa { color: #22C55E; }
@@ -83,28 +106,54 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-  }
-
-  .arrow-main {
-    font-size: 28px;
-    color: #555;
+    gap: 10px;
+    padding: 0 20px;
+    flex-shrink: 0;
   }
 
   .arrow-label {
-    color: #8A8A8A;
-    font-size: 10px;
+    color: #6B6B6B;
+    font-size: 11px;
     text-align: center;
     max-width: 80px;
-    line-height: 1.3;
+    line-height: 1.4;
+    font-weight: 400;
+  }
+
+  /* Amber info bar */
+  .info-bar {
+    margin-top: 14px;
+    padding: 10px 12px;
+    background: rgba(212,160,61,0.06);
+    border: 1px solid rgba(212,160,61,0.18);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .info-bar-icon {
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .info-bar-text {
+    color: rgba(212,160,61,0.8);
+    font-size: 10.5px;
+    line-height: 1.4;
+    font-weight: 500;
   }
 
   /* Speaker cards */
   .speaker-cards {
-    margin-top: 16px;
+    margin-top: 14px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
   }
 
   .speaker-card {
@@ -113,18 +162,19 @@
     gap: 10px;
     background: #242424;
     border-radius: 8px;
-    padding: 8px 12px;
+    padding: 6px 10px;
     border: 1px solid #2E2E2E;
+    height: 40px;
   }
 
   .speaker-avatar {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     color: white;
     flex-shrink: 0;
@@ -134,17 +184,20 @@
   .av-jack { background: linear-gradient(135deg, #3B82F6, #60A5FA); }
   .av-lisa { background: linear-gradient(135deg, #22C55E, #4ADE80); }
 
-  .speaker-info { flex: 1; }
+  .speaker-info { flex: 1; min-width: 0; }
 
   .speaker-name-label {
     font-size: 13px;
     font-weight: 600;
-    color: white;
+    color: #FFFFFF;
+    line-height: 1.2;
   }
 
   .speaker-meta {
     font-size: 10px;
-    color: #8A8A8A;
+    color: #6B6B6B;
+    line-height: 1.2;
+    margin-top: 1px;
   }
 
   .speaker-confidence {
@@ -152,43 +205,29 @@
     font-weight: 600;
     padding: 2px 8px;
     border-radius: 999px;
+    flex-shrink: 0;
   }
 
   .conf-high {
-    background: rgba(34,197,94,0.15);
+    background: rgba(34,197,94,0.12);
     color: #22C55E;
   }
 
   .conf-med {
-    background: rgba(59,130,246,0.15);
+    background: rgba(59,130,246,0.12);
     color: #60A5FA;
-  }
-
-  /* Embedding visualization */
-  .embedding-bars {
-    display: flex;
-    gap: 1px;
-    height: 16px;
-    align-items: flex-end;
-    margin-top: 4px;
-  }
-
-  .emb-bar {
-    width: 2px;
-    border-radius: 1px;
-    opacity: 0.6;
   }
 </style>
 </head>
 <body>
 
 <div class="container">
-  <!-- Before: Generic speakers -->
-  <div class="panel">
-    <div class="panel-label label-before">First Meeting — Day 1</div>
+  <!-- LEFT: First Meeting -->
+  <div class="panel panel-left">
+    <div class="panel-label label-before">First Meeting</div>
 
     <div class="transcript-line">
-      <span class="ts">[00:00]</span>
+      <span class="ts">00:02</span>
       <span class="text">
         <span class="speaker sp-generic">Speaker 1:</span>
         Let's kick off the sprint planning.
@@ -196,7 +235,7 @@
     </div>
 
     <div class="transcript-line">
-      <span class="ts">[00:03]</span>
+      <span class="ts">00:05</span>
       <span class="text">
         <span class="speaker sp-generic">Speaker 2:</span>
         Sure. I've got the backlog pulled up.
@@ -204,55 +243,67 @@
     </div>
 
     <div class="transcript-line">
-      <span class="ts">[00:08]</span>
+      <span class="ts">00:11</span>
       <span class="text">
         <span class="speaker sp-generic">Speaker 1:</span>
-        The auth refactor — where are we?
+        The auth refactor -- where are we?
       </span>
     </div>
 
     <div class="transcript-line">
-      <span class="ts">[00:14]</span>
+      <span class="ts">00:18</span>
       <span class="text">
         <span class="speaker sp-generic">Speaker 3:</span>
-        I can help with the security review.
+        I can take on the security review.
       </span>
     </div>
 
-    <div style="margin-top: 16px; padding: 12px; background: rgba(212,160,61,0.1); border: 1px solid rgba(212,160,61,0.2); border-radius: 8px;">
-      <div style="color: #D4A03D; font-size: 11px; font-weight: 600;">Voice fingerprints created</div>
-      <div style="color: #8A8A8A; font-size: 10px; margin-top: 4px;">3 new 256-dim embeddings stored in SQLite</div>
+    <div class="info-bar">
+      <div class="info-bar-icon">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <circle cx="7" cy="7" r="6" stroke="#D4A03D" stroke-width="1.2" fill="none" opacity="0.6"/>
+          <circle cx="7" cy="7" r="1.5" fill="#D4A03D" opacity="0.5"/>
+          <line x1="7" y1="3.5" x2="7" y2="5" stroke="#D4A03D" stroke-width="1" stroke-linecap="round" opacity="0.5"/>
+          <line x1="10.5" y1="7" x2="9" y2="7" stroke="#D4A03D" stroke-width="1" stroke-linecap="round" opacity="0.5"/>
+          <line x1="7" y1="10.5" x2="7" y2="9" stroke="#D4A03D" stroke-width="1" stroke-linecap="round" opacity="0.5"/>
+          <line x1="3.5" y1="7" x2="5" y2="7" stroke="#D4A03D" stroke-width="1" stroke-linecap="round" opacity="0.5"/>
+        </svg>
+      </div>
+      <span class="info-bar-text">3 new voice fingerprints created &middot; 256-dim embeddings stored</span>
     </div>
   </div>
 
-  <!-- Arrow -->
+  <!-- CENTER: Arrow -->
   <div class="arrow-container">
-    <div class="arrow-main">→</div>
+    <svg width="48" height="16" viewBox="0 0 48 16" fill="none">
+      <line x1="0" y1="8" x2="40" y2="8" stroke="#4A4A4A" stroke-width="1"/>
+      <polyline points="38,3 46,8 38,13" stroke="#4A4A4A" stroke-width="1" fill="none" stroke-linejoin="round"/>
+    </svg>
     <div class="arrow-label">Learns voices over time</div>
   </div>
 
-  <!-- After: Named speakers -->
-  <div class="panel">
-    <div class="panel-label label-after">Same Team — Day 30</div>
+  <!-- RIGHT: After 30 Days -->
+  <div class="panel panel-right">
+    <div class="panel-label label-after">After 30 Days</div>
 
     <div class="transcript-line">
-      <span class="ts">[00:00]</span>
+      <span class="ts">00:02</span>
       <span class="text">
         <span class="speaker sp-sarah">Sarah:</span>
-        Let's review the Q2 roadmap.
+        Let's review the Q2 roadmap changes.
       </span>
     </div>
 
     <div class="transcript-line">
-      <span class="ts">[00:04]</span>
+      <span class="ts">00:06</span>
       <span class="text">
         <span class="speaker sp-jack">Jack:</span>
-        I've prioritized the top 5 items.
+        I've prioritized the top five items.
       </span>
     </div>
 
     <div class="transcript-line">
-      <span class="ts">[00:11]</span>
+      <span class="ts">00:13</span>
       <span class="text">
         <span class="speaker sp-sarah">Sarah:</span>
         Great. What about the API migration?
@@ -260,7 +311,7 @@
     </div>
 
     <div class="transcript-line">
-      <span class="ts">[00:16]</span>
+      <span class="ts">00:19</span>
       <span class="text">
         <span class="speaker sp-lisa">Lisa:</span>
         Already started. Should be done by Friday.
@@ -271,8 +322,8 @@
       <div class="speaker-card">
         <div class="speaker-avatar av-sarah">S</div>
         <div class="speaker-info">
-          <div class="speaker-name-label">Sarah Chen</div>
-          <div class="speaker-meta">23 meetings · voice matched</div>
+          <div class="speaker-name-label">Sarah</div>
+          <div class="speaker-meta">23 meetings &middot; voice matched</div>
         </div>
         <div class="speaker-confidence conf-high">high</div>
       </div>
@@ -280,8 +331,8 @@
       <div class="speaker-card">
         <div class="speaker-avatar av-jack">J</div>
         <div class="speaker-info">
-          <div class="speaker-name-label">Jack Rivera</div>
-          <div class="speaker-meta">18 meetings · Qwen inferred</div>
+          <div class="speaker-name-label">Jack</div>
+          <div class="speaker-meta">18 meetings &middot; voice matched</div>
         </div>
         <div class="speaker-confidence conf-high">high</div>
       </div>
@@ -289,8 +340,8 @@
       <div class="speaker-card">
         <div class="speaker-avatar av-lisa">L</div>
         <div class="speaker-info">
-          <div class="speaker-name-label">Lisa Park</div>
-          <div class="speaker-meta">9 meetings · voice matched</div>
+          <div class="speaker-name-label">Lisa</div>
+          <div class="speaker-meta">9 meetings &middot; voice matched</div>
         </div>
         <div class="speaker-confidence conf-med">medium</div>
       </div>

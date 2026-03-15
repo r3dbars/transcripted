@@ -7,13 +7,14 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
-    background: #0d0d1a;
+    background: linear-gradient(160deg, #0a0a14 0%, #111128 100%);
     display: flex;
     justify-content: center;
     align-items: center;
     min-height: 100vh;
     padding: 40px;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   .states-container {
@@ -23,277 +24,37 @@
     align-items: center;
   }
 
-  .state-row {
+  /* ========== Row 1: Idle States ========== */
+  .idle-row {
     display: flex;
     align-items: center;
-    gap: 24px;
+    gap: 28px;
   }
 
-  .state-label {
-    width: 120px;
-    text-align: right;
-  }
-
-  .state-name {
-    color: #B0B0B0;
-    font-size: 14px;
-    font-weight: 600;
-    margin-bottom: 2px;
-  }
-
-  .state-desc {
-    color: #8A8A8A;
-    font-size: 11px;
-  }
-
-  .arrow {
-    color: #8A8A8A;
-    font-size: 20px;
-    margin: 0 8px;
-  }
-
-  /* Idle pill */
+  /* Tiny idle pill */
   .pill-idle {
     width: 40px;
     height: 20px;
     border-radius: 10px;
     background: #1A1A1A;
     border: 1px solid #2E2E2E;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3), 0 0 4px rgba(255,255,255,0.05);
     display: flex;
     align-items: center;
     justify-content: center;
+    box-shadow:
+      0 1px 3px rgba(0,0,0,0.3),
+      0 4px 8px rgba(0,0,0,0.15);
   }
 
-  .pill-idle-inner {
+  .pill-idle-dot {
     width: 6px;
     height: 6px;
     border-radius: 50%;
     background: linear-gradient(135deg, #EC4899, #3B82F6);
-    opacity: 0.6;
+    opacity: 0.55;
   }
 
-  /* Idle expanded */
-  .pill-idle-expanded {
-    width: 200px;
-    height: 44px;
-    border-radius: 12px;
-    background: #1A1A1A;
-    border: 1px solid #2E2E2E;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    display: flex;
-    align-items: center;
-    padding: 0 8px;
-    gap: 8px;
-  }
-
-  .expanded-btn {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: #242424;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #B0B0B0;
-    font-size: 14px;
-  }
-
-  .expanded-brand {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-  }
-
-  .brand-icon {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #EC4899, #FF6B6B);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 9px;
-    color: white;
-  }
-
-  .brand-text {
-    color: #B0B0B0;
-    font-size: 7px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-  }
-
-  /* Recording pill */
-  .pill-recording {
-    width: 200px;
-    height: 44px;
-    border-radius: 12px;
-    background: #1A1A1A;
-    position: relative;
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 12px;
-    box-shadow:
-      0 0 20px rgba(236, 72, 153, 0.25),
-      0 4px 12px rgba(0,0,0,0.4);
-  }
-
-  .pill-recording::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background:
-      radial-gradient(ellipse 80px 40px at 25% 50%, rgba(236, 72, 153, 0.55), transparent),
-      radial-gradient(ellipse 80px 40px at 75% 50%, rgba(59, 130, 246, 0.50), transparent);
-    mix-blend-mode: screen;
-  }
-
-  .pill-recording::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 12px;
-    border: 1px solid;
-    border-image: linear-gradient(90deg, rgba(236,72,153,0.4), rgba(59,130,246,0.4)) 1;
-  }
-
-  .waveform {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    z-index: 2;
-  }
-
-  .wave-bar {
-    width: 3px;
-    border-radius: 2px;
-    background: linear-gradient(to top, #EC4899, #F472B6);
-  }
-
-  .wave-bar:nth-child(1) { height: 6px; }
-  .wave-bar:nth-child(2) { height: 12px; }
-  .wave-bar:nth-child(3) { height: 16px; }
-  .wave-bar:nth-child(4) { height: 10px; }
-  .wave-bar:nth-child(5) { height: 14px; }
-  .wave-bar:nth-child(6) { height: 8px; }
-
-  .rec-timer {
-    color: white;
-    font-size: 16px;
-    font-weight: 600;
-    z-index: 2;
-  }
-
-  .stop-btn {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: #EF4444;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2;
-  }
-
-  .stop-icon {
-    width: 10px;
-    height: 10px;
-    background: white;
-    border-radius: 2px;
-  }
-
-  /* Processing pill */
-  .pill-processing {
-    width: 200px;
-    height: 44px;
-    border-radius: 12px;
-    background: #1A1A1A;
-    position: relative;
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-  }
-
-  .pill-processing::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background:
-      radial-gradient(ellipse 80px 40px at 25% 50%, rgba(236, 72, 153, 0.35), transparent),
-      radial-gradient(ellipse 80px 40px at 75% 50%, rgba(59, 130, 246, 0.30), transparent);
-    mix-blend-mode: screen;
-  }
-
-  .processing-text {
-    color: white;
-    font-size: 14px;
-    font-weight: 600;
-    z-index: 2;
-  }
-
-  .processing-dots {
-    color: #B0B0B0;
-    font-size: 14px;
-    z-index: 2;
-    letter-spacing: 2px;
-  }
-
-  /* Success pill */
-  .pill-success {
-    width: 200px;
-    height: 44px;
-    border-radius: 12px;
-    background: #1A1A1A;
-    position: relative;
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    border: 1px solid rgba(34, 197, 94, 0.5);
-    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-  }
-
-  .pill-success::before {
-    content: '';
-    position: absolute;
-    left: -20px;
-    top: -20px;
-    width: 160px;
-    height: 84px;
-    background: radial-gradient(ellipse at center, rgba(34,197,94,0.20) 0%, rgba(34,197,94,0.08) 50%, transparent 70%);
-  }
-
-  .success-check {
-    color: #22C55E;
-    font-size: 22px;
-    font-weight: 600;
-    z-index: 2;
-  }
-
-  .success-text {
-    color: white;
-    font-size: 14px;
-    font-weight: 600;
-    z-index: 2;
-  }
-
-  /* Flow arrows between pills */
-  .flow {
-    display: flex;
-    align-items: center;
-    gap: 32px;
-  }
-
+  /* Arrow */
   .flow-arrow {
     display: flex;
     flex-direction: column;
@@ -301,15 +62,300 @@
     gap: 4px;
   }
 
-  .flow-arrow-line {
-    color: #555;
-    font-size: 20px;
+  .flow-arrow-symbol {
+    color: #4A4A4A;
+    font-size: 18px;
+    font-weight: 300;
   }
 
   .flow-arrow-label {
-    color: #8A8A8A;
+    color: #6B6B6B;
     font-size: 10px;
-    white-space: nowrap;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+  }
+
+  /* Expanded idle pill */
+  .pill-idle-expanded {
+    width: 180px;
+    height: 40px;
+    border-radius: 12px;
+    background: #1A1A1A;
+    border: 1px solid #2E2E2E;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    gap: 6px;
+    box-shadow:
+      0 1px 3px rgba(0,0,0,0.3),
+      0 8px 24px rgba(0,0,0,0.2);
+  }
+
+  .idle-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #242424;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .idle-btn svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .idle-brand {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .idle-brand-text {
+    color: #6B6B6B;
+    font-size: 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+
+  /* State label */
+  .state-label {
+    color: #6B6B6B;
+    font-size: 11px;
+    font-weight: 400;
+    text-align: center;
+    margin-top: 10px;
+    letter-spacing: 0.2px;
+  }
+
+  /* Separator */
+  .separator {
+    width: 680px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #2E2E2E 20%, #2E2E2E 80%, transparent);
+  }
+
+  /* ========== Row 2: Recording Flow ========== */
+  .recording-row {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+  }
+
+  /* Recording pill */
+  .pill-recording {
+    width: 180px;
+    height: 40px;
+    border-radius: 12px;
+    background: #1A1A1A;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+    box-shadow:
+      0 0 16px rgba(236, 72, 153, 0.2),
+      0 0 16px rgba(59, 130, 246, 0.15),
+      0 4px 12px rgba(0,0,0,0.5);
+  }
+
+  /* Aurora border glow */
+  .pill-recording::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: 13px;
+    background: linear-gradient(90deg, rgba(236,72,153,0.3), rgba(59,130,246,0.3));
+    z-index: 0;
+  }
+
+  /* Inner bg over border */
+  .pill-recording-inner {
+    position: absolute;
+    inset: 1px;
+    border-radius: 11px;
+    background: #1A1A1A;
+    z-index: 1;
+  }
+
+  /* Aurora fog inside */
+  .pill-recording-aurora {
+    position: absolute;
+    inset: 1px;
+    border-radius: 11px;
+    overflow: hidden;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  .pill-recording-aurora::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 70px 35px at 20% 50%, rgba(236, 72, 153, 0.45), transparent),
+      radial-gradient(ellipse 70px 35px at 80% 50%, rgba(59, 130, 246, 0.40), transparent);
+  }
+
+  .waveform {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    z-index: 3;
+    height: 20px;
+  }
+
+  .wave-bar {
+    width: 2.5px;
+    border-radius: 2px;
+    background: linear-gradient(to top, #EC4899, #F472B6);
+  }
+
+  .wave-bar:nth-child(1) { height: 7px; }
+  .wave-bar:nth-child(2) { height: 13px; }
+  .wave-bar:nth-child(3) { height: 17px; }
+  .wave-bar:nth-child(4) { height: 11px; }
+  .wave-bar:nth-child(5) { height: 15px; }
+
+  .rec-timer {
+    color: #FFFFFF;
+    font-size: 16px;
+    font-weight: 600;
+    z-index: 3;
+    letter-spacing: 0.5px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stop-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #EF4444;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 3;
+    flex-shrink: 0;
+  }
+
+  .stop-icon {
+    width: 8px;
+    height: 8px;
+    background: white;
+    border-radius: 1.5px;
+  }
+
+  /* Processing pill */
+  .pill-processing {
+    width: 180px;
+    height: 40px;
+    border-radius: 12px;
+    background: #1A1A1A;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow:
+      0 1px 3px rgba(0,0,0,0.3),
+      0 8px 24px rgba(0,0,0,0.2);
+  }
+
+  .pill-processing::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: 13px;
+    background: linear-gradient(90deg, rgba(236,72,153,0.15), rgba(59,130,246,0.15));
+    z-index: 0;
+  }
+
+  .pill-processing-inner {
+    position: absolute;
+    inset: 1px;
+    border-radius: 11px;
+    background: #1A1A1A;
+    z-index: 1;
+  }
+
+  .pill-processing-aurora {
+    position: absolute;
+    inset: 1px;
+    border-radius: 11px;
+    overflow: hidden;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  .pill-processing-aurora::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 70px 35px at 20% 50%, rgba(236, 72, 153, 0.25), transparent),
+      radial-gradient(ellipse 70px 35px at 80% 50%, rgba(59, 130, 246, 0.20), transparent);
+  }
+
+  .processing-text {
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 500;
+    z-index: 3;
+    letter-spacing: 0.2px;
+  }
+
+  /* Success pill */
+  .pill-success {
+    width: 180px;
+    height: 40px;
+    border-radius: 12px;
+    background: #1A1A1A;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    box-shadow:
+      0 0 12px rgba(34, 197, 94, 0.1),
+      0 1px 3px rgba(0,0,0,0.3),
+      0 8px 24px rgba(0,0,0,0.2);
+  }
+
+  .pill-success-glow {
+    position: absolute;
+    left: -10px;
+    top: -10px;
+    width: 120px;
+    height: 60px;
+    background: radial-gradient(ellipse at center, rgba(34,197,94,0.18) 0%, rgba(34,197,94,0.06) 50%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .success-check {
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .success-check svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .success-text {
+    color: #FFFFFF;
+    font-size: 14px;
+    font-weight: 600;
+    z-index: 2;
+    letter-spacing: 0.2px;
   }
 </style>
 </head>
@@ -317,38 +363,58 @@
 
 <div class="states-container">
   <!-- Row 1: Idle states -->
-  <div class="flow">
-    <div style="text-align: center;">
+  <div class="idle-row">
+    <div>
       <div class="pill-idle">
-        <div class="pill-idle-inner"></div>
+        <div class="pill-idle-dot"></div>
       </div>
-      <div style="color: #8A8A8A; font-size: 11px; margin-top: 8px;">Idle (40×20)</div>
+      <div class="state-label">Idle &middot; 40x20</div>
     </div>
 
     <div class="flow-arrow">
-      <div class="flow-arrow-line">→</div>
-      <div class="flow-arrow-label">hover</div>
+      <span class="flow-arrow-symbol">&rarr;</span>
+      <span class="flow-arrow-label">hover</span>
     </div>
 
-    <div style="text-align: center;">
+    <div>
       <div class="pill-idle-expanded">
-        <div class="expanded-btn">🎤</div>
-        <div class="expanded-brand">
-          <div class="brand-icon">〰</div>
-          <div class="brand-text">Transcripted</div>
+        <!-- Mic icon button -->
+        <div class="idle-btn">
+          <svg viewBox="0 0 24 24" fill="none">
+            <rect x="9" y="3" width="6" height="11" rx="3" fill="#B0B0B0"/>
+            <path d="M6 11a6 6 0 0 0 12 0" stroke="#B0B0B0" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+            <line x1="12" y1="17" x2="12" y2="21" stroke="#B0B0B0" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
         </div>
-        <div class="expanded-btn">📋</div>
+        <!-- Brand text -->
+        <div class="idle-brand">
+          <span class="idle-brand-text">Transcripted</span>
+        </div>
+        <!-- Transcript icon button -->
+        <div class="idle-btn">
+          <svg viewBox="0 0 24 24" fill="none">
+            <rect x="4" y="3" width="16" height="18" rx="2" stroke="#B0B0B0" stroke-width="1.5" fill="none"/>
+            <line x1="8" y1="8" x2="16" y2="8" stroke="#B0B0B0" stroke-width="1.2" stroke-linecap="round"/>
+            <line x1="8" y1="12" x2="16" y2="12" stroke="#B0B0B0" stroke-width="1.2" stroke-linecap="round"/>
+            <line x1="8" y1="16" x2="13" y2="16" stroke="#B0B0B0" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+        </div>
       </div>
-      <div style="color: #8A8A8A; font-size: 11px; margin-top: 8px;">Expanded (200×44)</div>
+      <div class="state-label">Hover &middot; 180x40</div>
     </div>
   </div>
 
-  <!-- Row 2: Recording -->
-  <div class="flow">
-    <div style="text-align: center;">
+  <!-- Separator line -->
+  <div class="separator"></div>
+
+  <!-- Row 2: Recording flow -->
+  <div class="recording-row">
+    <!-- Recording -->
+    <div>
       <div class="pill-recording">
+        <div class="pill-recording-inner"></div>
+        <div class="pill-recording-aurora"></div>
         <div class="waveform">
-          <div class="wave-bar"></div>
           <div class="wave-bar"></div>
           <div class="wave-bar"></div>
           <div class="wave-bar"></div>
@@ -360,33 +426,41 @@
           <div class="stop-icon"></div>
         </div>
       </div>
-      <div style="color: #8A8A8A; font-size: 11px; margin-top: 8px;">Recording — aurora fog (coral mic + teal system)</div>
+      <div class="state-label">Recording &middot; aurora glow</div>
     </div>
 
     <div class="flow-arrow">
-      <div class="flow-arrow-line">→</div>
-      <div class="flow-arrow-label">stop</div>
+      <span class="flow-arrow-symbol">&rarr;</span>
+      <span class="flow-arrow-label">stop</span>
     </div>
 
-    <div style="text-align: center;">
+    <!-- Processing -->
+    <div>
       <div class="pill-processing">
-        <div class="processing-text">Transcribing</div>
-        <div class="processing-dots">...</div>
+        <div class="pill-processing-inner"></div>
+        <div class="pill-processing-aurora"></div>
+        <span class="processing-text">Transcribing...</span>
       </div>
-      <div style="color: #8A8A8A; font-size: 11px; margin-top: 8px;">Processing — dimmer aurora, status text</div>
+      <div class="state-label">Processing &middot; dimmer aurora</div>
     </div>
 
     <div class="flow-arrow">
-      <div class="flow-arrow-line">→</div>
-      <div class="flow-arrow-label">done</div>
+      <span class="flow-arrow-symbol">&rarr;</span>
+      <span class="flow-arrow-label">done</span>
     </div>
 
-    <div style="text-align: center;">
+    <!-- Success -->
+    <div>
       <div class="pill-success">
-        <div class="success-check">✓</div>
-        <div class="success-text">Saved</div>
+        <div class="pill-success-glow"></div>
+        <div class="success-check">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M5 13l4 4L19 7" stroke="#22C55E" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <span class="success-text">Saved</span>
       </div>
-      <div style="color: #8A8A8A; font-size: 11px; margin-top: 8px;">Success — green glow, checkmark bounce</div>
+      <div class="state-label">Success &middot; green glow</div>
     </div>
   </div>
 </div>
