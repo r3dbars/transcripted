@@ -358,16 +358,26 @@ class Transcription: ObservableObject {
 
             onProgress?(1.0)
 
+            // Merge consecutive utterances from the same speaker when the gap is small.
+            // Sortformer segments often break mid-sentence, producing fragments like:
+            //   [00:03] "Opus four point six and"
+            //   [00:10] "Sonnet four point six just went live"
+            // Merging produces cleaner, more readable transcripts.
+            let mergedSystemUtterances = Self.mergeConsecutiveUtterances(systemUtterances, maxGap: 1.5)
+            let mergedMicUtterances = Self.mergeConsecutiveUtterances(micUtterances, maxGap: 1.5)
+
             AppLogger.transcription.info("Local transcription complete", [
-                "micUtterances": "\(micUtterances.count)",
-                "systemUtterances": "\(systemUtterances.count)",
-                "systemSpeakers": "\(Set(systemUtterances.map { $0.speakerId }).count)",
-                "processingTime": "\(String(format: "%.1f", processingTime))s"
+                "micUtterances": "\(mergedMicUtterances.count)",
+                "systemUtterances": "\(mergedSystemUtterances.count)",
+                "systemSpeakers": "\(Set(mergedSystemUtterances.map { $0.speakerId }).count)",
+                "processingTime": "\(String(format: "%.1f", processingTime))s",
+                "mergedSystem": "\(systemUtterances.count) → \(mergedSystemUtterances.count)",
+                "mergedMic": "\(micUtterances.count) → \(mergedMicUtterances.count)"
             ])
 
             return TranscriptionResult(
-                micUtterances: micUtterances,
-                systemUtterances: systemUtterances,
+                micUtterances: mergedMicUtterances,
+                systemUtterances: mergedSystemUtterances,
                 duration: duration,
                 processingTime: processingTime,
                 droppedSegments: droppedSegments
@@ -381,6 +391,46 @@ class Transcription: ObservableObject {
             }
             throw error
         }
+    }
+
+    // MARK: - Utterance Merging
+
+    /// Merge consecutive utterances from the same speaker when the time gap between them
+    /// is smaller than `maxGap` seconds. This produces cleaner transcripts by joining
+    /// fragments that Sortformer split mid-sentence.
+    nonisolated static func mergeConsecutiveUtterances(
+        _ utterances: [TranscriptionUtterance],
+        maxGap: Double
+    ) -> [TranscriptionUtterance] {
+        guard utterances.count > 1 else { return utterances }
+
+        var merged: [TranscriptionUtterance] = []
+        var current = utterances[0]
+
+        for next in utterances.dropFirst() {
+            let sameSpeaker = current.speakerId == next.speakerId
+                && current.channel == next.channel
+            let smallGap = (next.start - current.end) < maxGap
+
+            if sameSpeaker && smallGap {
+                // Merge: extend current to cover both, join text
+                current = TranscriptionUtterance(
+                    start: current.start,
+                    end: next.end,
+                    channel: current.channel,
+                    speakerId: current.speakerId,
+                    persistentSpeakerId: current.persistentSpeakerId ?? next.persistentSpeakerId,
+                    matchSimilarity: current.matchSimilarity ?? next.matchSimilarity,
+                    transcript: current.transcript.trimmingCharacters(in: .whitespaces)
+                        + " " + next.transcript.trimmingCharacters(in: .whitespaces)
+                )
+            } else {
+                merged.append(current)
+                current = next
+            }
+        }
+        merged.append(current)
+        return merged
     }
 
     // MARK: - Embedding Utilities

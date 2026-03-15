@@ -163,7 +163,15 @@ class TranscriptionTaskManager: ObservableObject {
             }
         }
 
-        // Safety: free memory if pipeline never uses it (cancelled recording, all speakers known)
+        // Don't start the timeout yet — it will be started after the pipeline finishes
+        // or if the recording is cancelled. This prevents Qwen from unloading during
+        // long recordings (the old 5-minute timeout would fire mid-recording).
+    }
+
+    /// Start the Qwen safety timeout. Call this after the transcription pipeline finishes
+    /// (or if the recording is cancelled) to free memory if Qwen wasn't consumed.
+    private func startQwenTimeout() {
+        qwenTimeoutTask?.cancel()
         qwenTimeoutTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(300))
             guard !Task.isCancelled else { return }
@@ -239,6 +247,11 @@ class TranscriptionTaskManager: ObservableObject {
         displayStatus = .gettingReady
 
         AppLogger.pipeline.info("Starting transcription task", ["taskId": "\(task.id)", "activeCount": "\(activeCount)"])
+
+        // Start Qwen safety timeout now that recording is done and pipeline is starting.
+        // The pipeline will call cleanupQwen() when it's done with Qwen, so this timeout
+        // only fires as a safety net if the task is cancelled before reaching Qwen cleanup.
+        startQwenTimeout()
 
         // Create async task
         let asyncTask = Task {
