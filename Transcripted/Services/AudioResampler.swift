@@ -135,6 +135,7 @@ enum AudioResampler {
         let chunkFrames = AVAudioFrameCount(srcFormat.sampleRate * chunkDuration)
 
         var conversionError: NSError?
+        var inputBlockError: Error?
         let status = converter.convert(to: dstBuffer, error: &conversionError) { _, outStatus in
             // Check if we've read all frames
             guard file.framePosition < file.length else {
@@ -144,6 +145,9 @@ enum AudioResampler {
 
             let framesToRead = min(chunkFrames, AVAudioFrameCount(file.length - file.framePosition))
             guard let srcBuffer = AVAudioPCMBuffer(pcmFormat: srcFormat, frameCapacity: framesToRead) else {
+                inputBlockError = NSError(domain: "AudioResampler", code: 5, userInfo: [
+                    NSLocalizedDescriptionKey: "Buffer allocation failed during resampling at frame \(file.framePosition)/\(file.length)"
+                ])
                 outStatus.pointee = .endOfStream
                 return nil
             }
@@ -151,6 +155,7 @@ enum AudioResampler {
             do {
                 try file.read(into: srcBuffer, frameCount: framesToRead)
             } catch {
+                inputBlockError = error
                 outStatus.pointee = .endOfStream
                 return nil
             }
@@ -161,6 +166,16 @@ enum AudioResampler {
 
         if status == .error, let conversionError {
             throw conversionError
+        }
+
+        if let inputBlockError { throw inputBlockError }
+
+        // Validate output length — catch silent truncation from converter issues
+        let expectedMinFrames = Int(Double(srcFrames) * ratio * 0.9)
+        if Int(dstBuffer.frameLength) < expectedMinFrames {
+            AppLogger.transcription.warning("Audio resampling produced fewer frames than expected", [
+                "expected": "\(expectedMinFrames)", "actual": "\(dstBuffer.frameLength)", "source": url.lastPathComponent
+            ])
         }
 
         guard let floatData = dstBuffer.floatChannelData else {

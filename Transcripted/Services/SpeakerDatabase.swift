@@ -55,12 +55,27 @@ final class SpeakerDatabase {
 
     private func openDatabase() {
         if sqlite3_open(dbPath.path, &db) != SQLITE_OK {
-            AppLogger.speakers.error("Failed to open database", ["path": dbPath.path])
+            let sqliteError = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+            AppLogger.speakers.error("Failed to open speaker database — all speaker operations will be skipped", ["path": dbPath.path, "sqlite_error": sqliteError])
             isDatabaseOpen = false
         } else {
             isDatabaseOpen = true
+            // Restrict file permissions to owner-only (600) — speakers.sqlite contains voice fingerprints
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dbPath.path)
             // WAL mode for crash safety, busy timeout to avoid SQLITE_BUSY, NORMAL sync for performance
-            sqlite3_exec(db, "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;", nil, nil, nil)
+            let pragmas = [
+                ("journal_mode=WAL", "WAL"),
+                ("busy_timeout=5000", "busy_timeout"),
+                ("synchronous=NORMAL", "synchronous")
+            ]
+            for (pragma, name) in pragmas {
+                var errorMessage: UnsafeMutablePointer<CChar>?
+                if sqlite3_exec(db, "PRAGMA \(pragma);", nil, nil, &errorMessage) != SQLITE_OK {
+                    let detail = errorMessage.map { String(cString: $0) } ?? "unknown"
+                    AppLogger.speakers.error("PRAGMA failed", ["pragma": name, "detail": detail])
+                    sqlite3_free(errorMessage)
+                }
+            }
             AppLogger.speakers.info("Opened database", ["path": dbPath.path])
         }
     }
@@ -124,12 +139,18 @@ final class SpeakerDatabase {
 
     /// Execute multiple writes atomically — if the app crashes mid-block, all changes are rolled back.
     private func transaction(_ block: () throws -> Void) rethrows {
-        sqlite3_exec(db, "BEGIN EXCLUSIVE", nil, nil, nil)
+        if sqlite3_exec(db, "BEGIN EXCLUSIVE", nil, nil, nil) != SQLITE_OK {
+            AppLogger.speakers.error("Transaction BEGIN EXCLUSIVE failed", ["sqlite_error": dbErrorMessage()])
+        }
         do {
             try block()
-            sqlite3_exec(db, "COMMIT", nil, nil, nil)
+            if sqlite3_exec(db, "COMMIT", nil, nil, nil) != SQLITE_OK {
+                AppLogger.speakers.error("Transaction COMMIT failed", ["sqlite_error": dbErrorMessage()])
+            }
         } catch {
-            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            if sqlite3_exec(db, "ROLLBACK", nil, nil, nil) != SQLITE_OK {
+                AppLogger.speakers.error("Transaction ROLLBACK failed", ["sqlite_error": dbErrorMessage()])
+            }
             throw error
         }
     }
@@ -190,7 +211,7 @@ final class SpeakerDatabase {
 
     private func addOrUpdateSpeakerImpl(embedding: [Float], existingId: UUID?) -> SpeakerProfile {
         guard isDatabaseOpen else {
-            AppLogger.speakers.error("addOrUpdateSpeaker skipped — database not open")
+            AppLogger.speakers.error("CRITICAL: addOrUpdateSpeaker returning in-memory-only profile — database not open, speaker will NOT be persisted", ["existingId": existingId?.uuidString ?? "new"])
             return SpeakerProfile(id: existingId ?? UUID(), displayName: nil, nameSource: nil, embedding: embedding, firstSeen: Date(), lastSeen: Date(), callCount: 1, confidence: 0.5, disputeCount: 0)
         }
 
@@ -206,6 +227,7 @@ final class SpeakerDatabase {
             let normalized = l2Normalize(blended)
             let newConfidence = min(1.0, existing.confidence + 0.1)
 
+            var sqlSucceeded = false
             let sql = """
             UPDATE speakers SET embedding = ?, last_seen = ?, call_count = call_count + 1, confidence = ?
             WHERE id = ?;
@@ -219,11 +241,17 @@ final class SpeakerDatabase {
                 sqlite3_bind_text(statement, 4, (existingId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 if sqlite3_step(statement) != SQLITE_DONE {
                     AppLogger.speakers.error("Failed to update speaker embedding", ["sqlite_error": dbErrorMessage(), "id": existingId.uuidString])
+                } else {
+                    sqlSucceeded = true
                 }
             } else {
                 AppLogger.speakers.error("Failed to prepare update speaker", ["sqlite_error": dbErrorMessage()])
             }
             sqlite3_finalize(statement)
+
+            if !sqlSucceeded {
+                AppLogger.speakers.error("CRITICAL: speaker update was NOT persisted to database — returning stale profile", ["id": existingId.uuidString])
+            }
 
             return SpeakerProfile(
                 id: existingId,
@@ -242,6 +270,7 @@ final class SpeakerDatabase {
             let normalized = l2Normalize(embedding)
             let embeddingData = normalized.withUnsafeBufferPointer { Data(buffer: $0) }
 
+            var sqlSucceeded = false
             let sql = """
             INSERT INTO speakers (id, embedding, first_seen, last_seen, call_count, confidence)
             VALUES (?, ?, ?, ?, 1, 0.5);
@@ -254,11 +283,17 @@ final class SpeakerDatabase {
                 sqlite3_bind_text(statement, 4, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 if sqlite3_step(statement) != SQLITE_DONE {
                     AppLogger.speakers.error("Failed to insert new speaker", ["sqlite_error": dbErrorMessage(), "id": newId.uuidString])
+                } else {
+                    sqlSucceeded = true
                 }
             } else {
                 AppLogger.speakers.error("Failed to prepare insert speaker", ["sqlite_error": dbErrorMessage()])
             }
             sqlite3_finalize(statement)
+
+            if !sqlSucceeded {
+                AppLogger.speakers.error("CRITICAL: new speaker was NOT persisted to database — profile exists only in memory", ["id": newId.uuidString])
+            }
 
             AppLogger.speakers.info("Created new speaker", ["id": "\(newId)"])
             return SpeakerProfile(
@@ -287,7 +322,10 @@ final class SpeakerDatabase {
     }
 
     private func setDisplayNameImpl(id: UUID, name: String, source: String) {
-        guard isDatabaseOpen else { return }
+        guard isDatabaseOpen else {
+            AppLogger.speakers.error("setDisplayName failed — database not open", ["speakerId": id.uuidString, "name": name])
+            return
+        }
         let sql = "UPDATE speakers SET display_name = ?, name_source = ? WHERE id = ?;"
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
@@ -375,13 +413,26 @@ final class SpeakerDatabase {
                 let confidence = sqlite3_column_double(statement, 7)
                 let disputeCount = Int(sqlite3_column_int(statement, 8))
 
+                let parsedId = UUID(uuidString: idStr)
+                if parsedId == nil {
+                    AppLogger.speakers.warning("Corrupt speaker UUID in database, using random UUID", ["raw_id": idStr])
+                }
+                let firstSeen = isoFormatter.date(from: firstSeenStr)
+                if firstSeen == nil {
+                    AppLogger.speakers.warning("Corrupt first_seen date in database, using current date", ["raw_date": firstSeenStr, "id": idStr])
+                }
+                let lastSeen = isoFormatter.date(from: lastSeenStr)
+                if lastSeen == nil {
+                    AppLogger.speakers.warning("Corrupt last_seen date in database, using current date", ["raw_date": lastSeenStr, "id": idStr])
+                }
+
                 speakers.append(SpeakerProfile(
-                    id: UUID(uuidString: idStr) ?? UUID(),
+                    id: parsedId ?? UUID(),
                     displayName: displayName,
                     nameSource: nameSource,
                     embedding: embedding,
-                    firstSeen: isoFormatter.date(from: firstSeenStr) ?? Date(),
-                    lastSeen: isoFormatter.date(from: lastSeenStr) ?? Date(),
+                    firstSeen: firstSeen ?? Date(),
+                    lastSeen: lastSeen ?? Date(),
                     callCount: callCount,
                     confidence: confidence,
                     disputeCount: disputeCount
@@ -444,6 +495,8 @@ final class SpeakerDatabase {
                     disputeCount: disputeCount
                 )
             }
+        } else {
+            AppLogger.speakers.error("Failed to prepare getSpeaker query", ["sqlite_error": dbErrorMessage(), "id": id.uuidString])
         }
         sqlite3_finalize(statement)
         return profile
@@ -507,7 +560,16 @@ final class SpeakerDatabase {
 
         // Blend embeddings weighted by call count (stronger profile dominates)
         let totalCalls = Float(source.callCount + target.callCount)
-        guard totalCalls > 0, source.embedding.count == target.embedding.count else { return }
+        guard totalCalls > 0, source.embedding.count == target.embedding.count else {
+            AppLogger.speakers.warning("Merge aborted — embedding dimension mismatch or zero calls", [
+                "sourceId": "\(sourceId)",
+                "targetId": "\(targetId)",
+                "sourceDim": "\(source.embedding.count)",
+                "targetDim": "\(target.embedding.count)",
+                "totalCalls": "\(Int(totalCalls))"
+            ])
+            return
+        }
 
         let sourceWeight = Float(source.callCount) / totalCalls
         let targetWeight = Float(target.callCount) / totalCalls

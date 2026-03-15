@@ -25,6 +25,15 @@ class RecordingValidator {
 
     /// Performs all pre-recording validation checks
     static func validateRecordingConditions() -> ValidationResult {
+        // Validate custom save path if set
+        if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
+           !customPath.isEmpty {
+            let savePathResult = validateSavePath(URL(fileURLWithPath: customPath))
+            if case .failure(_) = savePathResult {
+                return savePathResult
+            }
+        }
+
         // Check disk space
         if let diskSpaceResult = checkDiskSpace(), case .failure(_) = diskSpaceResult {
             return diskSpaceResult
@@ -90,6 +99,35 @@ class RecordingValidator {
         } catch {
             return .failure("No write permission to Documents folder. Please check app permissions.")
         }
+    }
+
+    // MARK: - Save Path Validation
+
+    /// System directories that must never be used as a transcript save location.
+    private static let forbiddenPrefixes = ["/System", "/Library", "/usr", "/bin", "/sbin", "/private"]
+
+    /// Validates a custom save path is safe to use.
+    /// Resolves symlinks and rejects paths containing `..` traversals or targeting system directories.
+    /// - Parameter url: The candidate save directory URL
+    /// - Returns: `.success` if the path is safe, `.failure` with reason otherwise
+    static func validateSavePath(_ url: URL) -> ValidationResult {
+        let resolved = url.resolvingSymlinksInPath()
+        let resolvedPath = resolved.path
+
+        // Reject paths with ".." components (directory traversal)
+        let components = resolved.pathComponents
+        if components.contains("..") {
+            return .failure("Save path cannot contain '..' components")
+        }
+
+        // Reject system directories
+        for prefix in forbiddenPrefixes {
+            if resolvedPath.hasPrefix(prefix) {
+                return .failure("Cannot save transcripts to system directory: \(prefix)")
+            }
+        }
+
+        return .success
     }
 
     /// Checks if audio devices are accessible

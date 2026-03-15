@@ -16,6 +16,7 @@ struct AuroraRecordingView: View {
     @State private var isStopHovered = false
     @State private var isTranscriptsHovered = false
     @State private var collapseTask: Task<Void, Never>?
+    @State private var initialCollapseTask: Task<Void, Never>?
 
     // Smoothed audio levels (prevents jitter)
     @State private var smoothedMicLevel: CGFloat = 0
@@ -67,12 +68,17 @@ struct AuroraRecordingView: View {
         }
         .onAppear {
             // Auto-collapse after 5 seconds of initial display
-            Task {
+            initialCollapseTask = Task {
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
                     isExpanded = false
                 }
             }
+        }
+        .onDisappear {
+            initialCollapseTask?.cancel()
+            collapseTask?.cancel()
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Recording in progress, \(formatDurationAccessible(audio.recordingDuration))")

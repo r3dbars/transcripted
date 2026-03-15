@@ -226,7 +226,6 @@ enum ContextualError: Equatable {
     case transcriptionFailed(message: String)
     case networkError(message: String)
     case storageFull(message: String)
-    case invalidAPIKey(message: String)
     case permissionDenied(message: String)
     case unknown(message: String)
 
@@ -242,8 +241,6 @@ enum ContextualError: Equatable {
             return .networkError(message: message)
         } else if lowercased.contains("disk") || lowercased.contains("storage") || lowercased.contains("space") || lowercased.contains("full") {
             return .storageFull(message: message)
-        } else if lowercased.contains("api key") || lowercased.contains("apikey") || lowercased.contains("invalid key") || lowercased.contains("authentication") {
-            return .invalidAPIKey(message: message)
         } else if lowercased.contains("permission") || lowercased.contains("denied") || lowercased.contains("access") {
             return .permissionDenied(message: message)
         } else {
@@ -257,7 +254,6 @@ enum ContextualError: Equatable {
         case .transcriptionFailed: return "waveform.badge.exclamationmark"
         case .networkError: return "wifi.exclamationmark"
         case .storageFull: return "externaldrive.badge.xmark"
-        case .invalidAPIKey: return "key.slash.fill"
         case .permissionDenied: return "lock.shield.fill"
         case .unknown: return "exclamationmark.triangle.fill"
         }
@@ -269,7 +265,6 @@ enum ContextualError: Equatable {
         case .transcriptionFailed: return "Transcription Failed"
         case .networkError: return "Connection Lost"
         case .storageFull: return "Storage Full"
-        case .invalidAPIKey: return "Invalid API Key"
         case .permissionDenied: return "Permission Denied"
         case .unknown: return "Error"
         }
@@ -281,7 +276,6 @@ enum ContextualError: Equatable {
         case .transcriptionFailed: return "Tap to retry"
         case .networkError: return "Check internet connection"
         case .storageFull: return "Free up disk space"
-        case .invalidAPIKey: return "Update key in Settings"
         case .permissionDenied: return "Grant access in System Settings"
         case .unknown: return "Try again"
         }
@@ -293,7 +287,7 @@ enum ContextualError: Equatable {
             return .statusWarningMuted  // Amber for permission issues
         case .networkError, .storageFull:
             return .statusWarningMuted  // Amber for recoverable issues
-        case .transcriptionFailed, .invalidAPIKey, .unknown:
+        case .transcriptionFailed, .unknown:
             return .statusErrorMuted    // Red for errors
         }
     }

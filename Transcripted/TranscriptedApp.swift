@@ -136,6 +136,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         audio = aud
         taskManager = tm
 
+        // Clean up orphaned audio files from previous crashes
+        cleanupOrphanedAudioFiles(failedManager: ftm)
+
         // Initialize local models in background (Parakeet + Sortformer + Qwen pre-cache in parallel)
         AppLogger.app.info("Creating model init task")
         Task { @MainActor in
@@ -201,6 +204,48 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Register global hotkey: ⌘⇧R to toggle recording
         registerGlobalHotkey()
+    }
+
+    /// Delete orphaned audio files (meeting_*_mic.wav, meeting_*_system.wav) that are not
+    /// referenced by the failed transcription queue. These can persist after crashes when
+    /// the app exits between recording and transcription completion.
+    private func cleanupOrphanedAudioFiles(failedManager: FailedTranscriptionManager) {
+        let saveDir = TranscriptSaver.defaultSaveDirectory
+        guard FileManager.default.fileExists(atPath: saveDir.path) else { return }
+
+        // Collect all audio URLs referenced by the failed transcription queue
+        var referencedPaths: Set<String> = []
+        for failed in failedManager.failedTranscriptions {
+            referencedPaths.insert(failed.micAudioURL.path)
+            if let systemURL = failed.systemAudioURL {
+                referencedPaths.insert(systemURL.path)
+            }
+        }
+
+        // Scan for orphaned meeting audio files
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: saveDir,
+            includingPropertiesForKeys: nil
+        ) else { return }
+
+        var deletedCount = 0
+        for fileURL in contents {
+            let name = fileURL.lastPathComponent
+            guard name.hasPrefix("meeting_"),
+                  (name.hasSuffix("_mic.wav") || name.hasSuffix("_system.wav")),
+                  !referencedPaths.contains(fileURL.path) else { continue }
+
+            do {
+                try FileManager.default.removeItem(at: fileURL)
+                deletedCount += 1
+            } catch {
+                AppLogger.app.warning("Failed to delete orphaned audio file", ["file": name, "error": error.localizedDescription])
+            }
+        }
+
+        if deletedCount > 0 {
+            AppLogger.app.info("Cleaned up orphaned audio files", ["count": "\(deletedCount)"])
+        }
     }
 
     /// Pre-cache Qwen model so it's ready for first recording.
@@ -500,11 +545,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             AppLogger.app.info("Recording health", ["quality": health.captureQuality.rawValue, "gaps": "\(health.audioGaps)", "switches": "\(health.deviceSwitches)"])
         }
 
-        // Get output folder from settings
-        let outputFolder: URL
+        // Get output folder from settings, with path safety validation
+        var outputFolder: URL
         if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
            !customPath.isEmpty {
-            outputFolder = URL(fileURLWithPath: customPath)
+            let candidateURL = URL(fileURLWithPath: customPath)
+            let validation = RecordingValidator.validateSavePath(candidateURL)
+            if validation.isValid {
+                outputFolder = candidateURL
+            } else {
+                AppLogger.app.warning("Custom save path rejected, falling back to default", ["path": customPath, "reason": validation.errorMessage ?? "unknown"])
+                let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                outputFolder = documentsPath.appendingPathComponent("Transcripted")
+            }
         } else {
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             outputFolder = documentsPath.appendingPathComponent("Transcripted")

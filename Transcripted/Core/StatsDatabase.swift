@@ -46,6 +46,8 @@ final class StatsDatabase {
             isDatabaseOpen = false
         } else {
             isDatabaseOpen = true
+            // Restrict file permissions to owner-only (600) — stats.sqlite contains recording history
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dbPath.path)
             // WAL mode for crash safety, busy timeout to avoid SQLITE_BUSY, NORMAL sync for performance
             sqlite3_exec(db, "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;", nil, nil, nil)
             AppLogger.stats.info("Opened database", ["path": dbPath.path])
