@@ -10,7 +10,7 @@
 
 One JSON object per line, appended on every Copy or Paste action. It also parses the feedback log to compute aggregate usage statistics displayed in the MenuBarPanel.
 
-## File: FeedbackStore.swift (~172 lines)
+## File: FeedbackStore.swift (~156 lines)
 
 Contains three components:
 

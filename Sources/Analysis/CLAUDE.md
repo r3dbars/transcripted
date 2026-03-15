@@ -6,8 +6,8 @@ Native Swift replacement for the Python orchestrator agent. Watches `~/Library/A
 
 ## Key Files
 
-- `AnalysisEngine.swift` (~365 lines) — `@MainActor ObservableObject` with DispatchSource file watching, debounced local analysis, InsightCard management, EventReporter observability, and proper deinit cleanup
-- `InsightCard.swift` (~71 lines) — Model struct for insight cards + shared `toolDefinition` and `from()` factory (used by AnalysisEngine)
+- `AnalysisEngine.swift` (~350 lines) — `@MainActor ObservableObject` with DispatchSource file watching, debounced local analysis, InsightCard management, EventReporter observability, and proper deinit cleanup
+- `InsightCard.swift` (~51 lines) — Model struct for insight cards + shared `toolDefinition` and `from()` factory (used by AnalysisEngine)
 
 ## How It Works
 

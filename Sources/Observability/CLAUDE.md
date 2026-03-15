@@ -12,7 +12,7 @@ Same directory as `feedback.jsonl` and `prompts.json`. Claude Code reads this fi
 
 ## Key Files
 
-- `EventReporter.swift` (~164 lines) — Centralized JSONL event writer + Sentry stub (details below)
+- `EventReporter.swift` (~162 lines) — Centralized JSONL event writer + Sentry stub (details below)
 - `BetaTelemetry.swift` (~159 lines) — `#if BETA_BUILD` gated: batched event shipping to proxy Worker, incremental log/events.jsonl upload (60s timer), synchronous quit-time flush, crash-safe offset tracking, log redaction (paths, tokens)
 - `UpdateManager.swift` (~225 lines) — DMG download, mount, staged app replacement with backup/rollback, version comparison via Info.plist, user-facing update prompts, team ID verification (XG6WL66WUQ)
 - `AppLogger.swift` (~110 lines) — Debug logger writing to `~/draft-debug.log` with timestamps, actor-isolated file writer, throttled logging, log rotation (>500KB → last 1000 lines), session separators

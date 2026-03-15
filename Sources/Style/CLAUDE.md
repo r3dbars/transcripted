@@ -6,7 +6,7 @@ Learns the user's writing style through training pairs (AI draft vs. what the us
 
 ## Key Files
 
-- `StyleEngine.swift` (~580 lines) — `@MainActor ObservableObject` managing style.md, training pair collection, incremental refinement, and onboarding state
+- `StyleEngine.swift` (~650 lines) — `@MainActor ObservableObject` managing style.md, training pair collection, incremental refinement, and onboarding state
 - `StyleUtils.swift` (~70 lines) — Pure utility functions extracted from StyleEngine: `shouldRefineNow()`, `averageRecentEditDistance()`, `extractRecentEditDistances()`, `wordEditDistance()`, `extractRecentExamplesText()`. Stateless enum with static methods — no `@MainActor`, no ObservableObject. StyleEngine delegates to these.
 
 ## How It Works

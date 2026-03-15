@@ -2,30 +2,37 @@
 
 ## What This Does
 
-Orchestrates the "rough text -> polished message" workflow. The active drafting path runs entirely on-device via MLXEngine (Qwen3.5-4B-4bit). PlatformFormatter detects the target messaging platform and provides formatting rules. DraftUtils contains the refusal detection utility.
+Lightweight state holder for the drafting flow. DraftEngine stores the original AI draft (for style learning comparisons) and holds references to StyleEngine and PromptStore. The actual drafting orchestration -- prompt assembly, streaming generation, vision context -- happens in `DraftSessionController` (Sources/UI/), which calls `MLXEngine.generate()` directly. PlatformFormatter detects the target messaging platform and provides formatting rules. DraftUtils contains refusal detection.
 
 ## Key Files
 
-- `DraftEngine.swift` (154 lines) -- `@MainActor ObservableObject` with legacy API-calling methods (`draftWithContext`, `draftMessage`). These are no longer the active path. The live drafting flow goes through `DraftSessionController` -> `MLXEngine.generate()` directly.
-- `PlatformFormatter.swift` (118 lines) -- Detects target platform (Slack/iMessage/email/Discord/Teams) and provides formatting rules
-- `DraftUtils.swift` (~25 lines) -- Extracted pure utility: `looksLikeRefusal()` checks if a draft is the model refusing rather than actually drafting. Used by `DraftSessionController` to skip recording refusals as training pairs. Detects 13 refusal phrases covering: missing context requests ("i need the actual", "could you provide"), readiness declarations ("i'm ready to help"), screenshot descriptions ("the screenshot shows", "i don't see a conversation"), and wrong-content indicators ("not a messaging conversation").
+- `DraftEngine.swift` (26 lines) -- `@MainActor ObservableObject` that holds draft state: `originalDraft`, `lastRawText`, and optional references to `StyleEngine` and `PromptStore`. Has a single `clear()` method.
+- `PlatformFormatter.swift` (104 lines) -- Detects target platform (Slack/iMessage/email/Discord/Teams) from bundle identifier and provides two layers of formatting control: prompt-level instructions and regex post-processing.
+- `DraftUtils.swift` (28 lines) -- Stateless enum with `looksLikeRefusal()`: checks if a draft is the model refusing/asking for clarification rather than an actual message. Detects 13 refusal phrases. Used by `DraftSessionController` to skip recording refusals as training pairs.
 
 ## How It Works
 
-### Active Drafting Path (DraftSessionController -> MLXEngine)
+### DraftEngine (State Holder)
 
-The floating overlay flow in `DraftSessionController` (in `Sources/UI/DraftSessionController.swift`) calls `MLXEngine.generate()` directly for streaming token-by-token output. This is the only active drafting path. The flow:
+DraftEngine is not an orchestrator. It holds three pieces of state:
 
-1. Receives voice text + context (from Apple Vision OCR) + detected `PlatformFormatter`
+- `originalDraft` (`@Published`) -- Snapshot of the AI's output before the user edits it in the overlay TextEditor. Used by StyleEngine to compute edit distance between what the AI produced and what the user accepted.
+- `lastRawText` -- The raw voice transcription from the user's last draft request. Exposed for FeedbackStore logging.
+- `styleEngine` / `promptStore` -- Optional references set by `DraftAppState.initialize()` during boot. Not used by DraftEngine itself -- exposed so other components can access them through `appState.drafter`.
+
+`clear()` resets both `originalDraft` and `lastRawText` to empty strings.
+
+### Active Drafting Path
+
+The actual drafting flow lives in `DraftSessionController` (Sources/UI/). The path:
+
+1. Receives voice text + context (from LocalVisionExtractor OCR) + detected `PlatformFormatter`
 2. Builds system prompt: style profile + platform formatting instructions
 3. Assembles the user message with conversation context + voice instructions
 4. Calls `MLXEngine.generate(prompt:systemPrompt:maxTokens:)` -- returns `AsyncThrowingStream<String, Error>`
 5. Tokens stream into the floating overlay in real-time (~30-50 tok/s on Apple Silicon)
 6. Applies `platform.postProcess()` as a safety net for formatting fixes
-
-### DraftEngine (Legacy)
-
-`DraftEngine.swift` is still compiled but its `draftWithContext()` and `draftMessage()` methods are legacy from the API era. They are not called in the active flow. DraftEngine remains as a lightweight `@MainActor ObservableObject` for any residual state management.
+7. Stores the final draft in `DraftEngine.originalDraft` for style learning
 
 ### PlatformFormatter
 
@@ -39,10 +46,12 @@ Detects the target messaging platform from the app's bundle identifier and provi
 - **Teams** -- Standard markdown, clean and professional
 - **Generic** -- No special instructions
 
-**Post-processing** (`postProcess()`): Regex-based safety net for when the model ignores formatting instructions:
+**Post-processing** (`postProcess()`): Pre-compiled regex safety net for when the model ignores formatting instructions:
 - **Slack** -- `**bold**` -> `*bold*`, strips `##` headers
 - **iMessage** -- Strips ALL markdown formatting (bold, italic, headers)
 - Others -- Pass-through (markdown renders fine)
+
+Four regexes are compiled once as static properties (`boldRegex`, `italicAsteriskRegex`, `italicUnderscoreRegex`, `headerRegex`) to avoid recompilation per draft.
 
 ### Bundle ID Mapping
 
@@ -56,51 +65,60 @@ com.microsoft.teams         -> .teams
 (anything else)             -> .generic
 ```
 
+### DraftUtils -- Refusal Detection
+
+`looksLikeRefusal()` checks if a draft contains phrases indicating the model refused or asked for clarification instead of producing an actual message. Covers 13 phrases in three categories:
+
+- **Missing context requests:** "i need the actual", "could you provide", "i'd need to see", "please provide", "i don't have enough"
+- **Readiness/deflection:** "i'm ready to help", "i can't write", "go ahead and share", "what did the person say"
+- **Screenshot/content descriptions:** "the screenshot shows", "i don't see a conversation", "not a messaging conversation", "i need more context"
+
+Used by `DraftSessionController.confirmAndInject()` to skip recording refusals as training pairs, preventing style profile poisoning.
+
 ## Public Interface
 
 ```swift
-// DraftEngine (legacy -- not used in active drafting path)
-@Published var draftedText: String       // Model's polished output
-@Published var originalDraft: String     // Snapshot of model output before user edits (for style learning)
-@Published var isDrafting: Bool          // Loading state
-@Published var error: String?            // Error message if drafting fails
-var styleEngine: StyleEngine?            // Set after init
-var promptStore: PromptStore?            // Set after init
-var lastRawText: String                  // The raw user input from the last draft
+// DraftEngine (@MainActor ObservableObject)
+@Published var originalDraft: String    // AI's output before user edits
+var styleEngine: StyleEngine?           // Set by DraftAppState.initialize()
+var promptStore: PromptStore?           // Set by DraftAppState.initialize()
+var lastRawText: String                 // Raw voice text from last draft
+func clear()                            // Resets originalDraft and lastRawText
 
-func draftMessage(from rawText: String)                                          // Legacy plain drafting
-func draftWithContext(voiceText: String, context: CapturedContext?, platform: PlatformFormatter)  // Legacy context-aware
-func clear()
-
-// PlatformFormatter
+// PlatformFormatter (enum, CaseIterable)
 static func detect(from app: NSRunningApplication?) -> PlatformFormatter
-var formattingInstructions: String    // System prompt addition
+var formattingInstructions: String       // System prompt addition
 func postProcess(_ text: String) -> String  // Post-draft formatting fixes
+
+// DraftUtils (stateless enum)
+static func looksLikeRefusal(_ text: String) -> Bool
 ```
 
 ## Dependencies
 
-- `MLXEngine` (from Local/) -- on-device LLM inference (called by DraftSessionController, not DraftEngine directly)
-- `StyleEngine` (from Style/) -- optional reference for personalized prompts
-- `PromptStore` (from Prompts/) -- provides configurable prompt templates
-- `DefaultPrompts` (from Prompts/) -- fallback prompt constants
-- `CapturedContext` (from Capture/) -- structured conversation context (now populated by Apple Vision OCR)
-- `PlatformFormatter` (local) -- platform-specific formatting
-- `EventReporter` (from Observability/) -- error/warning event logging
+- `StyleEngine` (from Style/) -- optional reference for personalized prompts (held, not called)
+- `PromptStore` (from Prompts/) -- optional reference for prompt templates (held, not called)
+- `AppKit` -- `NSRunningApplication` for platform detection
+- `CapturedContext` (from Capture/) -- consumed by DraftSessionController, not DraftEngine directly
+
+Note: DraftEngine has no dependency on MLXEngine, AnthropicAPI, or any network/inference layer. It is purely a state container.
 
 ## Design Notes
 
-DraftEngine is intentionally separate from the speech engine. They don't know about each other -- the UI coordinates them. StyleEngine is injected as an optional reference, keeping the dependency lightweight. PlatformFormatter is detected at draft time from the paste target app.
+DraftEngine is intentionally minimal. It was originally an orchestrator that called AnthropicAPI directly, but that responsibility moved to DraftSessionController when the app switched to local inference. DraftEngine remains as the canonical location for draft state because multiple components need to read `originalDraft` (StyleEngine for training pairs, FeedbackStore for logging).
 
-**Active path:** `DraftSessionController` calls `MLXEngine.generate()` directly for streaming drafts. DraftEngine's `draftWithContext()` and `draftMessage()` are legacy methods preserved for compatibility but not invoked in the current flow. PlatformFormatter is still used by both paths.
+PlatformFormatter is stateless and deterministic -- safe to call from any context. The pre-compiled regexes avoid per-draft compilation overhead.
 
 ## Verification
 
-After modifying DraftEngine or PlatformFormatter, verify with these checks:
+After modifying any file in this folder:
 
-- **Streaming draft:** Capture a conversation (Option+D) -> speak instructions -> Option+D -> verify tokens stream into the overlay in real-time
-- **originalDraft snapshot:** Draft a message -> edit the output text -> accept -> check `style.md` -- `AI_DRAFT` should be the original, `USER_SENT` should be your edited version
-- **Platform formatting:** Capture from Slack -> draft -> verify no `**bold**` or `## headers` in output (Slack uses `*bold*`). Capture from iMessage -> verify no markdown at all.
-- **PlatformFormatter detection:** Check debug log for platform name in brackets: `[slack]`, `[imessage]`, `[email]`, etc.
-- **Refusal detection:** DraftUtils.looksLikeRefusal() should catch model refusals and prevent them from being recorded as training pairs
-- **Error state:** If drafting fails, the overlay should show an error message, not crash
+```bash
+bash build.sh && bash run-tests.sh
+```
+
+- **Platform formatting:** Capture from Slack -> draft -> verify no `**bold**` or `## headers` in output. Capture from iMessage -> verify no markdown at all.
+- **PlatformFormatter detection:** Check debug log for platform name.
+- **originalDraft snapshot:** Draft a message -> edit the output text -> accept -> check `style.md` -- `AI_DRAFT` should be the original, `USER_SENT` should be your edited version.
+- **Refusal detection:** `DraftUtils.looksLikeRefusal()` should catch model refusals and prevent them from being recorded as training pairs. Covered by unit tests in `Tests/DraftUtilsTests.swift`.
+- **State clearing:** After `clear()`, both `originalDraft` and `lastRawText` should be empty strings.

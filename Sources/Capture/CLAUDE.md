@@ -6,8 +6,8 @@ Captures a screenshot of the user's current app window, runs Apple Vision OCR (v
 
 ## Key Files
 
-- `ContextCaptureEngine.swift` (~197 lines) — Hotkey registration (Carbon), screenshot capture, dual-mode routing with cross-mode switching to DraftSessionController
-- `CapturedContext.swift` (~121 lines) — Structured data extracted from a screenshot (platform, talkingTo, formality, conversation) + parser + prompt builder
+- `ContextCaptureEngine.swift` (~206 lines) — Hotkey registration (Carbon), screenshot capture, dual-mode routing with cross-mode switching to DraftSessionController
+- `CapturedContext.swift` (~104 lines) — Structured data extracted from a screenshot (platform, talkingTo, formality, conversation) + parser + prompt builder
 - `ScreenCapture.swift` (~46 lines) — Low-level window capture via CGWindowListCreateImage
 - `PreviousAppTracker.swift` (~25 lines) — Observes `NSWorkspace.didDeactivateApplicationNotification` to remember the last non-Draft app for paste-back fallback
 
