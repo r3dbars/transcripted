@@ -7,45 +7,55 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
-    background: linear-gradient(135deg, #0d0d1a 0%, #1a1a2e 50%, #16213e 100%);
+    background: linear-gradient(160deg, #0a0a14 0%, #111128 100%);
     display: flex;
     justify-content: center;
     align-items: center;
     min-height: 100vh;
-    padding: 60px;
+    padding: 40px;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   .scene {
     position: relative;
-    width: 900px;
-    height: 520px;
+    width: 860px;
+    height: 540px;
   }
 
-  /* Fake meeting app window */
+  /* Meeting window */
   .meeting-window {
     position: absolute;
-    top: 0; left: 0;
-    width: 900px;
-    height: 520px;
-    background: #111;
+    top: 30px;
+    left: 0;
+    width: 860px;
+    height: 480px;
+    background: #111111;
     border-radius: 12px;
     overflow: hidden;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-    border: 1px solid #333;
+    box-shadow:
+      0 1px 3px rgba(0,0,0,0.3),
+      0 8px 24px rgba(0,0,0,0.2),
+      0 20px 60px rgba(0,0,0,0.4);
+    border: 1px solid #2A2A2A;
   }
 
+  /* Titlebar */
   .meeting-titlebar {
-    height: 36px;
-    background: #1e1e1e;
+    height: 38px;
+    background: #1C1C1C;
     display: flex;
     align-items: center;
-    padding: 0 12px;
+    padding: 0 14px;
     gap: 8px;
-    border-bottom: 1px solid #333;
+    border-bottom: 1px solid #2A2A2A;
   }
 
-  .titlebar-dot { width: 12px; height: 12px; border-radius: 50%; }
+  .titlebar-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+  }
   .dot-red { background: #FF5F57; }
   .dot-yellow { background: #FEBC2E; }
   .dot-green { background: #28C840; }
@@ -53,197 +63,189 @@
   .titlebar-text {
     flex: 1;
     text-align: center;
-    color: #888;
+    color: #777;
     font-size: 13px;
     font-weight: 500;
+    letter-spacing: 0.1px;
   }
 
-  .meeting-body {
-    display: flex;
-    height: calc(100% - 36px);
-  }
+  /* Spacer to balance traffic lights */
+  .titlebar-spacer { width: 52px; }
 
   /* Video grid */
   .video-grid {
-    flex: 1;
     display: grid;
     grid-template-columns: 1fr 1fr;
     grid-template-rows: 1fr 1fr;
     gap: 2px;
+    height: calc(100% - 38px - 52px);
+    background: #0A0A0A;
     padding: 2px;
-    background: #000;
   }
 
   .video-tile {
-    background: #1a1a2a;
+    background: linear-gradient(180deg, #161620 0%, #12121C 100%);
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     position: relative;
+    overflow: hidden;
+  }
+
+  .video-tile.speaking {
+    box-shadow: inset 0 0 0 2px rgba(34, 197, 94, 0.6);
   }
 
   .avatar {
-    width: 64px;
-    height: 64px;
+    width: 60px;
+    height: 60px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 24px;
+    font-size: 22px;
     font-weight: 600;
     color: white;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
   }
 
   .avatar-1 { background: linear-gradient(135deg, #EC4899, #F472B6); }
   .avatar-2 { background: linear-gradient(135deg, #3B82F6, #60A5FA); }
   .avatar-3 { background: linear-gradient(135deg, #22C55E, #4ADE80); }
-  .avatar-4 { background: linear-gradient(135deg, #D4A03D, #FBBF24); }
+  .avatar-4 { background: linear-gradient(135deg, #8B5CF6, #A78BFA); }
 
   .video-name {
-    color: #ccc;
-    font-size: 13px;
+    color: #CCCCCC;
+    font-size: 12px;
     font-weight: 500;
+    letter-spacing: 0.2px;
   }
 
-  .video-mic {
+  /* Mic indicator (SVG-based) */
+  .video-mic-indicator {
     position: absolute;
-    bottom: 8px;
-    left: 8px;
+    bottom: 10px;
+    left: 10px;
     width: 24px;
     height: 24px;
     border-radius: 50%;
-    background: rgba(0,0,0,0.6);
+    background: rgba(0,0,0,0.55);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 11px;
   }
 
-  .speaking-ring {
-    position: absolute;
-    inset: 0;
-    border: 2px solid #22C55E;
-    border-radius: inherit;
-    opacity: 0;
+  .video-mic-indicator svg {
+    width: 12px;
+    height: 12px;
   }
 
-  .video-tile.speaking .speaking-ring {
-    opacity: 1;
-    animation: pulse-ring 2s ease-in-out infinite;
-  }
-
-  @keyframes pulse-ring {
-    0%, 100% { opacity: 0.3; }
-    50% { opacity: 1; }
-  }
-
-  /* Meeting bottom bar */
+  /* Bottom toolbar */
   .meeting-bar {
     position: absolute;
     bottom: 0;
     left: 0;
     right: 0;
-    height: 56px;
-    background: #1e1e1e;
-    border-top: 1px solid #333;
+    height: 52px;
+    background: #1C1C1C;
+    border-top: 1px solid #2A2A2A;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 16px;
+    gap: 12px;
   }
 
   .bar-btn {
-    width: 40px;
-    height: 40px;
+    width: 36px;
+    height: 36px;
     border-radius: 50%;
+    background: #333;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 16px;
-    color: #ccc;
-    background: #333;
     border: none;
+    cursor: default;
   }
 
-  .bar-btn.end { background: #EF4444; color: white; width: 60px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+  .bar-btn svg {
+    width: 16px;
+    height: 16px;
+  }
 
-  /* The Transcripted floating pill - Recording state */
+  .bar-btn.muted {
+    background: #EF4444;
+  }
+
+  .bar-btn.end-call {
+    background: #EF4444;
+    width: 56px;
+    border-radius: 18px;
+    margin-left: 8px;
+  }
+
+  .bar-btn.end-call span {
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+
+  /* ========== Transcripted Floating Pill ========== */
   .pill {
     position: absolute;
-    top: 50px;
-    right: 40px;
-    width: 200px;
-    height: 44px;
+    top: 52px;
+    right: 20px;
+    width: 180px;
+    height: 40px;
     border-radius: 12px;
     background: #1A1A1A;
-    overflow: hidden;
     z-index: 100;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 12px;
-    border: 1px solid transparent;
+    padding: 0 10px;
     box-shadow:
-      0 0 20px rgba(236, 72, 153, 0.25),
-      0 4px 12px rgba(0,0,0,0.4);
+      0 0 16px rgba(236, 72, 153, 0.2),
+      0 0 16px rgba(59, 130, 246, 0.15),
+      0 4px 12px rgba(0,0,0,0.5);
   }
 
-  /* Aurora fog background */
+  /* Aurora glow behind pill */
   .pill::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: 13px;
+    background: linear-gradient(90deg, rgba(236,72,153,0.3), rgba(59,130,246,0.3));
+    z-index: -1;
+  }
+
+  /* Inner aurora fog */
+  .pill-aurora {
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .pill-aurora::before {
     content: '';
     position: absolute;
     inset: 0;
     background:
-      radial-gradient(ellipse 80px 40px at 25% 50%, rgba(236, 72, 153, 0.55), transparent),
-      radial-gradient(ellipse 80px 40px at 75% 50%, rgba(59, 130, 246, 0.50), transparent);
-    mix-blend-mode: screen;
-    animation: aurora-shift 3s ease-in-out infinite;
+      radial-gradient(ellipse 70px 35px at 20% 50%, rgba(236, 72, 153, 0.45), transparent),
+      radial-gradient(ellipse 70px 35px at 80% 50%, rgba(59, 130, 246, 0.40), transparent);
+    animation: aurora-breathe 3s ease-in-out infinite;
   }
 
-  .pill::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 12px;
-    border: 1px solid;
-    border-image: linear-gradient(90deg, rgba(236,72,153,0.4), rgba(59,130,246,0.4)) 1;
-    pointer-events: none;
+  @keyframes aurora-breathe {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
   }
 
-  @keyframes aurora-shift {
-    0%, 100% { opacity: 0.7; transform: scale(1); }
-    50% { opacity: 1; transform: scale(1.05); }
-  }
-
-  .pill-timer {
-    color: white;
-    font-size: 16px;
-    font-weight: 600;
-    z-index: 2;
-    letter-spacing: 0.5px;
-  }
-
-  .pill-stop {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: #EF4444;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2;
-  }
-
-  .pill-stop-icon {
-    width: 12px;
-    height: 12px;
-    background: white;
-    border-radius: 2px;
-  }
-
-  /* Waveform bars */
+  /* Waveform */
   .waveform {
     display: flex;
     align-items: center;
@@ -253,60 +255,66 @@
   }
 
   .wave-bar {
-    width: 3px;
+    width: 2.5px;
     border-radius: 2px;
     background: linear-gradient(to top, #EC4899, #F472B6);
     animation: wave 1.2s ease-in-out infinite;
   }
 
-  .wave-bar:nth-child(1) { height: 8px; animation-delay: 0s; }
-  .wave-bar:nth-child(2) { height: 14px; animation-delay: 0.1s; }
-  .wave-bar:nth-child(3) { height: 18px; animation-delay: 0.2s; }
-  .wave-bar:nth-child(4) { height: 12px; animation-delay: 0.3s; }
-  .wave-bar:nth-child(5) { height: 16px; animation-delay: 0.15s; }
-  .wave-bar:nth-child(6) { height: 10px; animation-delay: 0.25s; }
+  .wave-bar:nth-child(1) { height: 7px; animation-delay: 0s; }
+  .wave-bar:nth-child(2) { height: 13px; animation-delay: 0.12s; }
+  .wave-bar:nth-child(3) { height: 17px; animation-delay: 0.24s; }
+  .wave-bar:nth-child(4) { height: 11px; animation-delay: 0.18s; }
+  .wave-bar:nth-child(5) { height: 15px; animation-delay: 0.08s; }
 
   @keyframes wave {
     0%, 100% { transform: scaleY(0.5); }
-    50% { transform: scaleY(1.2); }
+    50% { transform: scaleY(1.15); }
   }
 
-  /* Label */
-  .hero-label {
-    position: absolute;
-    top: 40px;
-    right: 260px;
+  .pill-timer {
+    color: #FFFFFF;
+    font-size: 16px;
+    font-weight: 600;
+    z-index: 2;
+    letter-spacing: 0.5px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .pill-stop {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #EF4444;
     display: flex;
     align-items: center;
-    gap: 8px;
-    z-index: 100;
+    justify-content: center;
+    z-index: 2;
+    flex-shrink: 0;
   }
 
-  .hero-label-text {
-    color: rgba(255,255,255,0.6);
-    font-size: 12px;
-    font-weight: 500;
-    white-space: nowrap;
+  .pill-stop-icon {
+    width: 8px;
+    height: 8px;
+    background: white;
+    border-radius: 1.5px;
   }
 
-  .hero-label-arrow {
-    color: rgba(255,255,255,0.3);
-    font-size: 16px;
-  }
-
-  /* Transcript preview floating */
+  /* ========== Transcript Card ========== */
   .transcript-preview {
     position: absolute;
-    bottom: 80px;
-    right: 40px;
-    width: 320px;
-    background: rgba(36, 36, 36, 0.95);
-    backdrop-filter: blur(20px);
+    bottom: 10px;
+    right: 20px;
+    width: 300px;
+    background: #1E1E22;
     border-radius: 12px;
     border: 1px solid #2E2E2E;
-    padding: 16px;
+    padding: 14px 16px;
     z-index: 100;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    box-shadow:
+      0 1px 3px rgba(0,0,0,0.3),
+      0 8px 24px rgba(0,0,0,0.2),
+      0 16px 48px rgba(0,0,0,0.3);
   }
 
   .transcript-header {
@@ -314,12 +322,12 @@
     align-items: center;
     justify-content: space-between;
     margin-bottom: 12px;
-    padding-bottom: 8px;
+    padding-bottom: 10px;
     border-bottom: 1px solid #2E2E2E;
   }
 
   .transcript-title {
-    color: white;
+    color: #FFFFFF;
     font-size: 13px;
     font-weight: 600;
   }
@@ -327,7 +335,7 @@
   .transcript-live {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
     color: #22C55E;
     font-size: 11px;
     font-weight: 500;
@@ -342,7 +350,7 @@
   }
 
   @keyframes pulse-dot {
-    0%, 100% { opacity: 0.5; }
+    0%, 100% { opacity: 0.4; }
     50% { opacity: 1; }
   }
 
@@ -350,16 +358,28 @@
     display: flex;
     gap: 8px;
     margin-bottom: 8px;
-    font-size: 12px;
-    line-height: 1.5;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .transcript-line:last-child {
+    margin-bottom: 0;
   }
 
   .transcript-timestamp {
-    color: #8A8A8A;
-    font-family: 'SF Mono', 'Menlo', monospace;
-    font-size: 11px;
+    color: #6B6B6B;
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 10px;
     white-space: nowrap;
-    min-width: 42px;
+    min-width: 36px;
+    padding-top: 2px;
+    flex-shrink: 0;
+  }
+
+  .transcript-content {
+    color: #B0B0B0;
+    font-size: 13px;
+    line-height: 1.55;
   }
 
   .transcript-speaker {
@@ -369,16 +389,11 @@
 
   .speaker-sarah { color: #EC4899; }
   .speaker-jack { color: #3B82F6; }
-  .speaker-lisa { color: #22C55E; }
-
-  .transcript-text {
-    color: #B0B0B0;
-  }
 
   .transcript-cursor {
     display: inline-block;
     width: 2px;
-    height: 14px;
+    height: 13px;
     background: #EC4899;
     animation: blink 1s step-end infinite;
     vertical-align: text-bottom;
@@ -394,70 +409,126 @@
 <body>
 
 <div class="scene">
-  <!-- Fake Zoom-like meeting window -->
+  <!-- Meeting Window -->
   <div class="meeting-window">
     <div class="meeting-titlebar">
       <div class="titlebar-dot dot-red"></div>
       <div class="titlebar-dot dot-yellow"></div>
       <div class="titlebar-dot dot-green"></div>
-      <div class="titlebar-text">Zoom Meeting — Sprint Planning</div>
+      <div class="titlebar-text">Sprint Planning &mdash; Zoom</div>
+      <div class="titlebar-spacer"></div>
     </div>
-    <div class="meeting-body">
-      <div class="video-grid">
-        <div class="video-tile speaking">
-          <div class="speaking-ring"></div>
-          <div class="avatar avatar-1">S</div>
-          <div class="video-name">Sarah Chen</div>
-          <div class="video-mic">🎤</div>
+
+    <div class="video-grid">
+      <!-- Sarah - speaking -->
+      <div class="video-tile speaking">
+        <div class="avatar avatar-1">S</div>
+        <div class="video-name">Sarah Chen</div>
+        <div class="video-mic-indicator">
+          <svg viewBox="0 0 24 24" fill="none">
+            <rect x="9" y="2" width="6" height="12" rx="3" fill="#CCCCCC"/>
+            <path d="M5 11a7 7 0 0 0 14 0" stroke="#CCCCCC" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+            <line x1="12" y1="18" x2="12" y2="22" stroke="#CCCCCC" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
         </div>
-        <div class="video-tile">
-          <div class="avatar avatar-2">J</div>
-          <div class="video-name">Jack Rivera</div>
-          <div class="video-mic">🎤</div>
+      </div>
+
+      <!-- Jack -->
+      <div class="video-tile">
+        <div class="avatar avatar-2">J</div>
+        <div class="video-name">Jack Rivera</div>
+        <div class="video-mic-indicator">
+          <svg viewBox="0 0 24 24" fill="none">
+            <rect x="9" y="2" width="6" height="12" rx="3" fill="#CCCCCC"/>
+            <path d="M5 11a7 7 0 0 0 14 0" stroke="#CCCCCC" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+            <line x1="12" y1="18" x2="12" y2="22" stroke="#CCCCCC" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
         </div>
-        <div class="video-tile">
-          <div class="avatar avatar-3">L</div>
-          <div class="video-name">Lisa Park</div>
-          <div class="video-mic" style="color: #EF4444">🔇</div>
+      </div>
+
+      <!-- Lisa - muted -->
+      <div class="video-tile">
+        <div class="avatar avatar-3">L</div>
+        <div class="video-name">Lisa Park</div>
+        <div class="video-mic-indicator">
+          <svg viewBox="0 0 24 24" fill="none">
+            <rect x="9" y="2" width="6" height="12" rx="3" fill="#666666"/>
+            <path d="M5 11a7 7 0 0 0 14 0" stroke="#666666" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+            <line x1="12" y1="18" x2="12" y2="22" stroke="#666666" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="4" y1="4" x2="20" y2="20" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+          </svg>
         </div>
-        <div class="video-tile">
-          <div class="avatar avatar-4">Y</div>
-          <div class="video-name">You</div>
-          <div class="video-mic">🎤</div>
+      </div>
+
+      <!-- You -->
+      <div class="video-tile">
+        <div class="avatar avatar-4">Y</div>
+        <div class="video-name">You</div>
+        <div class="video-mic-indicator">
+          <svg viewBox="0 0 24 24" fill="none">
+            <rect x="9" y="2" width="6" height="12" rx="3" fill="#CCCCCC"/>
+            <path d="M5 11a7 7 0 0 0 14 0" stroke="#CCCCCC" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+            <line x1="12" y1="18" x2="12" y2="22" stroke="#CCCCCC" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
         </div>
       </div>
     </div>
+
+    <!-- Bottom toolbar -->
     <div class="meeting-bar">
-      <div class="bar-btn">🎤</div>
-      <div class="bar-btn">📹</div>
-      <div class="bar-btn">🖥️</div>
-      <div class="bar-btn">💬</div>
-      <div class="bar-btn end">End</div>
+      <!-- Mic -->
+      <div class="bar-btn">
+        <svg viewBox="0 0 24 24" fill="none">
+          <rect x="9" y="2" width="6" height="12" rx="3" fill="#CCCCCC"/>
+          <path d="M5 11a7 7 0 0 0 14 0" stroke="#CCCCCC" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+          <line x1="12" y1="18" x2="12" y2="22" stroke="#CCCCCC" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <!-- Camera -->
+      <div class="bar-btn">
+        <svg viewBox="0 0 24 24" fill="none">
+          <rect x="2" y="5" width="14" height="14" rx="2" stroke="#CCCCCC" stroke-width="1.5" fill="none"/>
+          <path d="M16 10l5-3v10l-5-3" stroke="#CCCCCC" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <!-- Screen share -->
+      <div class="bar-btn">
+        <svg viewBox="0 0 24 24" fill="none">
+          <rect x="3" y="4" width="18" height="13" rx="2" stroke="#CCCCCC" stroke-width="1.5" fill="none"/>
+          <line x1="8" y1="21" x2="16" y2="21" stroke="#CCCCCC" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="12" y1="17" x2="12" y2="21" stroke="#CCCCCC" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <!-- Chat -->
+      <div class="bar-btn">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H7l-4 4V6a2 2 0 0 1 2-2z" stroke="#CCCCCC" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <!-- End -->
+      <div class="bar-btn end-call">
+        <span>End</span>
+      </div>
     </div>
   </div>
 
-  <!-- Transcripted floating pill (recording state) -->
-  <div class="hero-label">
-    <span class="hero-label-text">Transcripted is recording</span>
-    <span class="hero-label-arrow">→</span>
-  </div>
-
+  <!-- ========== Transcripted Floating Pill ========== -->
   <div class="pill">
+    <div class="pill-aurora"></div>
     <div class="waveform">
       <div class="wave-bar"></div>
       <div class="wave-bar"></div>
       <div class="wave-bar"></div>
       <div class="wave-bar"></div>
       <div class="wave-bar"></div>
-      <div class="wave-bar"></div>
     </div>
-    <div class="pill-timer">12:47</div>
+    <div class="pill-timer">5:23</div>
     <div class="pill-stop">
       <div class="pill-stop-icon"></div>
     </div>
   </div>
 
-  <!-- Live transcript preview -->
+  <!-- ========== Live Transcript Card ========== -->
   <div class="transcript-preview">
     <div class="transcript-header">
       <div class="transcript-title">Live Transcript</div>
@@ -468,24 +539,24 @@
     </div>
 
     <div class="transcript-line">
-      <span class="transcript-timestamp">[12:31]</span>
-      <span class="transcript-text">
+      <span class="transcript-timestamp">5:12</span>
+      <span class="transcript-content">
         <span class="transcript-speaker speaker-sarah">Sarah:</span>
-        First item — the auth refactor. Where are we?
+        First item &mdash; the auth refactor. Where are we?
       </span>
     </div>
 
     <div class="transcript-line">
-      <span class="transcript-timestamp">[12:36]</span>
-      <span class="transcript-text">
+      <span class="transcript-timestamp">5:17</span>
+      <span class="transcript-content">
         <span class="transcript-speaker speaker-jack">Jack:</span>
         Token rotation is done. Migration is ready but I want security to review.
       </span>
     </div>
 
     <div class="transcript-line">
-      <span class="transcript-timestamp">[12:44]</span>
-      <span class="transcript-text">
+      <span class="transcript-timestamp">5:22</span>
+      <span class="transcript-content">
         <span class="transcript-speaker speaker-sarah">Sarah:</span>
         Good call. Let's block that until<span class="transcript-cursor"></span>
       </span>

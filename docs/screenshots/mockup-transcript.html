@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Transcripted — Transcript Output</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    background: #0a0a14;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow: hidden;
+    width: 1200px;
+    height: 620px;
+  }
+
+  .scene {
+    position: relative;
+    width: 1200px;
+    height: 620px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background:
+      radial-gradient(ellipse 600px 400px at 58% 50%, rgba(59, 130, 246, 0.04), transparent),
+      radial-gradient(ellipse 500px 350px at 52% 45%, rgba(236, 72, 153, 0.03), transparent),
+      linear-gradient(160deg, #0a0a14 0%, #0f0f20 50%, #0a0a14 100%);
+  }
+
+  /* Side label */
+  .side-label {
+    position: absolute;
+    left: 52px;
+    top: 50%;
+    transform: translateY(-40%);
+    text-align: right;
+    width: 150px;
+  }
+
+  .side-label-tag {
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 1.8px;
+    text-transform: uppercase;
+    color: #555;
+    margin-bottom: 7px;
+  }
+
+  .side-label-value {
+    font-size: 12px;
+    color: #888;
+    line-height: 1.55;
+  }
+
+  /* Main card */
+  .card {
+    width: 740px;
+    background: #1A1A1A;
+    border: 1px solid #2E2E2E;
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow:
+      0 2px 8px rgba(0,0,0,0.3),
+      0 8px 32px rgba(0,0,0,0.25),
+      0 24px 64px rgba(0,0,0,0.2);
+    margin-left: 36px;
+    position: relative;
+  }
+
+  /* Subtle top-edge highlight */
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 24px;
+    right: 24px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
+    z-index: 1;
+  }
+
+  /* File header bar */
+  .file-header {
+    display: flex;
+    align-items: center;
+    padding: 10px 20px;
+    background: #161619;
+    border-bottom: 1px solid #2A2A2A;
+    gap: 8px;
+  }
+
+  .file-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+  }
+
+  .file-name {
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 11px;
+    color: #777;
+    letter-spacing: 0.2px;
+  }
+
+  .file-path {
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 10px;
+    color: #444;
+    margin-left: auto;
+  }
+
+  /* Card body */
+  .card-body {
+    padding: 20px 26px 18px;
+  }
+
+  /* YAML frontmatter block */
+  .frontmatter {
+    background: #131317;
+    border: 1px solid #2A2A2A;
+    border-radius: 8px;
+    padding: 13px 16px;
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 11.5px;
+    line-height: 1.5;
+    margin-bottom: 16px;
+  }
+
+  .yaml-delimiter { color: #555; }
+  .yaml-key { color: #3B82F6; }
+  .yaml-value { color: #B0B0B0; }
+  .yaml-string-sarah { color: #EC4899; }
+  .yaml-string-jack { color: #3B82F6; }
+  .yaml-muted { color: #6B6B6B; }
+  .yaml-green { color: #22C55E; }
+  .yaml-amber { color: #D4A03D; }
+
+  /* Divider */
+  .divider {
+    height: 1px;
+    background: #2E2E2E;
+    margin: 0 0 14px 0;
+  }
+
+  /* Transcript body */
+  .transcript-body {
+    margin-bottom: 14px;
+  }
+
+  .t-line {
+    line-height: 20px;
+    margin-bottom: 7px;
+    font-size: 12.5px;
+  }
+
+  .t-line:last-child {
+    margin-bottom: 0;
+  }
+
+  .t-ts {
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 10.5px;
+    color: #4A4A4A;
+    margin-right: 8px;
+  }
+
+  .t-speaker-sarah {
+    color: #EC4899;
+    font-weight: 600;
+  }
+
+  .t-speaker-jack {
+    color: #3B82F6;
+    font-weight: 600;
+  }
+
+  .t-text {
+    color: #B0B0B0;
+  }
+
+  /* Footer */
+  .card-footer {
+    border-top: 1px solid #2A2A2A;
+    padding-top: 12px;
+  }
+
+  .card-footer-text {
+    font-size: 10.5px;
+    color: #555;
+    letter-spacing: 0.15px;
+  }
+</style>
+</head>
+<body>
+
+<div class="scene">
+
+  <!-- Side label -->
+  <div class="side-label">
+    <div class="side-label-tag">Output Format</div>
+    <div class="side-label-value">Markdown + YAML<br>frontmatter</div>
+  </div>
+
+  <!-- Main transcript card -->
+  <div class="card">
+
+    <!-- File header -->
+    <div class="file-header">
+      <!-- Markdown icon (SVG) -->
+      <svg class="file-icon" viewBox="0 0 16 16" fill="none">
+        <rect x="0.5" y="0.5" width="15" height="15" rx="2" stroke="#555" stroke-width="1"/>
+        <path d="M3 11V5l2.5 3L8 5v6M10 8.5v-3l1.5 2 1.5-2v3" stroke="#777" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+      <span class="file-name">2026-03-14_sprint-planning.md</span>
+      <span class="file-path">~/Documents/Transcripted/</span>
+    </div>
+
+    <div class="card-body">
+
+      <!-- YAML Frontmatter -->
+      <div class="frontmatter">
+        <div><span class="yaml-delimiter">---</span></div>
+        <div><span class="yaml-key">date</span><span class="yaml-muted">:</span> <span class="yaml-value">2026-03-14</span></div>
+        <div><span class="yaml-key">duration</span><span class="yaml-muted">:</span> <span class="yaml-value">12:47</span></div>
+        <div><span class="yaml-key">speakers</span><span class="yaml-muted">:</span></div>
+        <div>&nbsp;&nbsp;<span class="yaml-muted">-</span> <span class="yaml-key">name</span><span class="yaml-muted">:</span> <span class="yaml-string-sarah">Sarah</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;<span class="yaml-key">source</span><span class="yaml-muted">:</span> <span class="yaml-muted">db_match</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;<span class="yaml-key">confidence</span><span class="yaml-muted">:</span> <span class="yaml-green">high</span></div>
+        <div>&nbsp;&nbsp;<span class="yaml-muted">-</span> <span class="yaml-key">name</span><span class="yaml-muted">:</span> <span class="yaml-string-jack">Jack</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;<span class="yaml-key">source</span><span class="yaml-muted">:</span> <span class="yaml-muted">qwen_inferred</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;<span class="yaml-key">confidence</span><span class="yaml-muted">:</span> <span class="yaml-amber">medium</span></div>
+        <div><span class="yaml-key">total_word_count</span><span class="yaml-muted">:</span> <span class="yaml-value">2341</span></div>
+        <div><span class="yaml-delimiter">---</span></div>
+      </div>
+
+      <!-- Divider -->
+      <div class="divider"></div>
+
+      <!-- Transcript body -->
+      <div class="transcript-body">
+        <div class="t-line">
+          <span class="t-ts">[00:00]</span>
+          <span class="t-speaker-sarah">Sarah:</span>
+          <span class="t-text"> Alright, let's kick off the sprint planning.</span>
+        </div>
+        <div class="t-line">
+          <span class="t-ts">[00:03]</span>
+          <span class="t-speaker-jack">Jack:</span>
+          <span class="t-text"> Sure. I've got the backlog pulled up.</span>
+        </div>
+        <div class="t-line">
+          <span class="t-ts">[00:08]</span>
+          <span class="t-speaker-sarah">Sarah:</span>
+          <span class="t-text"> First item &mdash; the authentication refactor. Where are we on that?</span>
+        </div>
+        <div class="t-line">
+          <span class="t-ts">[00:14]</span>
+          <span class="t-speaker-jack">Jack:</span>
+          <span class="t-text"> Token rotation is done. Migration is ready but I want security to review before we merge.</span>
+        </div>
+        <div class="t-line">
+          <span class="t-ts">[00:23]</span>
+          <span class="t-speaker-sarah">Sarah:</span>
+          <span class="t-text"> Good call. Let's block that until Tuesday. What about the onboarding redesign?</span>
+        </div>
+        <div class="t-line">
+          <span class="t-ts">[00:29]</span>
+          <span class="t-speaker-jack">Jack:</span>
+          <span class="t-text"> Still scoping. I think we need another day with design.</span>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="card-footer">
+        <div class="card-footer-text">Generated by Transcripted &middot; Parakeet + Sortformer (local) &middot; 2,341 words &middot; 2 speakers</div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
