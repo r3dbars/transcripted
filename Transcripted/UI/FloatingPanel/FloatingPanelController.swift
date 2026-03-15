@@ -5,6 +5,7 @@ import Combine
 // MARK: - Window Controller
 
 @available(macOS 26.0, *)
+@MainActor
 class FloatingPanelController: NSWindowController, NSWindowDelegate {
     private var taskManager: TranscriptionTaskManager
     private var audio: Audio

@@ -19,6 +19,7 @@ struct SpeakerNamingView: View {
     @State private var isAppearing = false
     @State private var updates: [UUID: SpeakerNameUpdate] = [:]
     @State private var canDismiss = false
+    @State private var dismissGuardTask: Task<Void, Never>?
     @StateObject private var clipPlayer = ClipAudioPlayer()
 
     var body: some View {
@@ -66,11 +67,17 @@ struct SpeakerNamingView: View {
         .onAppear {
             withAnimation(.trayExpand) { isAppearing = true }
             // Prevent accidental dismissal — button enables after 3s
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                withAnimation(.easeInOut(duration: 0.2)) { canDismiss = true }
+            canDismiss = false
+            dismissGuardTask = Task {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    withAnimation(.easeInOut(duration: 0.2)) { canDismiss = true }
+                }
             }
         }
         .onDisappear {
+            dismissGuardTask?.cancel()
             isAppearing = false
             clipPlayer.stop()
         }

@@ -35,6 +35,9 @@ final class FileLogger: @unchecked Sendable {
             FileManager.default.createFile(atPath: logFileURL.path, contents: nil)
         }
 
+        // Restrict file permissions to owner-only (600) — log may contain transcript snippets
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: logFileURL.path)
+
         // Open file handle for appending
         fileHandle = try? FileHandle(forWritingTo: logFileURL)
         fileHandle?.seekToEndOfFile()

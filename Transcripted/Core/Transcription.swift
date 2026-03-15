@@ -91,12 +91,11 @@ class Transcription: ObservableObject {
             AppLogger.transcription.info("Loading and resampling audio to 16kHz")
             let resampleStart = CFAbsoluteTimeGetCurrent()
 
-            // Resample both files in parallel — they're independent I/O + compute
-            // Using async let (not Task {}) so cancellation propagates correctly
-            async let systemSamplesAsync = AudioResampler.loadAndResample(url: systemURL, targetRate: 16000)
-            async let micSamplesAsync = AudioResampler.loadAndResample(url: micURL, targetRate: 16000)
-            let systemSamples = try await systemSamplesAsync
-            let micSamples = try await micSamplesAsync
+            // Load sequentially to avoid both resampling buffers in memory simultaneously.
+            // async let forces concurrent resampling (~460MB peak for long recordings);
+            // sequential means only one resampling buffer exists at a time.
+            let systemSamples = try await AudioResampler.loadAndResample(url: systemURL, targetRate: 16000)
+            let micSamples = try await AudioResampler.loadAndResample(url: micURL, targetRate: 16000)
 
             let resampleTime = CFAbsoluteTimeGetCurrent() - resampleStart
             AppLogger.transcription.info("Resampling completed in \(String(format: "%.2f", resampleTime))s")
@@ -550,21 +549,21 @@ class Transcription: ObservableObject {
         let totalFrames = max(1, (samples.count - frameSamples) / hopSamples + 1)
         var isVoiced = [Bool](repeating: false, count: totalFrames)
 
-        for i in 0..<totalFrames {
-            let start = i * hopSamples
-            let end = min(start + frameSamples, samples.count)
-            let count = end - start
-            guard count > 0 else { continue }
+        samples.withUnsafeBufferPointer { ptr in
+            for i in 0..<totalFrames {
+                let start = i * hopSamples
+                let end = min(start + frameSamples, samples.count)
+                let count = end - start
+                guard count > 0 else { continue }
 
-            var sumSquares: Float = 0
-            vDSP_dotpr(
-                Array(samples[start..<end]), 1,
-                Array(samples[start..<end]), 1,
-                &sumSquares,
-                vDSP_Length(count)
-            )
-            let rms = sqrt(sumSquares / Float(count))
-            isVoiced[i] = rms >= silenceThreshold
+                var sumSquares: Float = 0
+                vDSP_dotpr(ptr.baseAddress! + start, 1,
+                           ptr.baseAddress! + start, 1,
+                           &sumSquares,
+                           vDSP_Length(count))
+                let rms = sqrt(sumSquares / Float(count))
+                isVoiced[i] = rms >= silenceThreshold
+            }
         }
 
         // Find speech regions: contiguous voiced frames, split at silence gaps

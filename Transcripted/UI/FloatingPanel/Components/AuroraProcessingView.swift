@@ -17,7 +17,6 @@ struct AuroraProcessingView: View {
     // Warning state tracking
     @State private var stepStartTime: Date = Date()
     @State private var stepElapsedTime: TimeInterval = 0
-    @State private var timerCancellable: Timer?
 
     // Fixed expanded dimensions (no collapse for processing - users want to see status)
     private let width: CGFloat = 200
@@ -42,11 +41,12 @@ struct AuroraProcessingView: View {
                 }
             }
 
-            // Start tracking step elapsed time
-            startStepTimer()
+            // Reset step timer on appear
+            stepStartTime = Date()
+            stepElapsedTime = 0
         }
-        .onDisappear {
-            stopStepTimer()
+        .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
+            stepElapsedTime = Date().timeIntervalSince(stepStartTime)
         }
         .onChange(of: status) { _, _ in
             // Reset step timer when status changes
@@ -271,19 +271,6 @@ struct AuroraProcessingView: View {
         }
     }
 
-    // MARK: - Timer Helpers
-
-    private func startStepTimer() {
-        stepStartTime = Date()
-        timerCancellable = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            stepElapsedTime = Date().timeIntervalSince(stepStartTime)
-        }
-    }
-
-    private func stopStepTimer() {
-        timerCancellable?.invalidate()
-        timerCancellable = nil
-    }
 }
 
 // MARK: - Preview

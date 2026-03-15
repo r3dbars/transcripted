@@ -158,14 +158,44 @@ class Audio: ObservableObject {
     private var inputChannelCount: AVAudioChannelCount = 1
 
     // Throttle system audio visualizer updates (skip every other callback)
+    // Protected by systemLevelLock — accessed from I/O callback thread
     private var systemLevelUpdateCounter: Int = 0
+    private let systemLevelLock = NSLock()
 
     // Debug: Track system audio buffer count
-    private var systemBufferCount: Int = 0
+    // Protected by systemBufferCountLock — accessed from I/O callback dispatch and main thread
+    private var _systemBufferCount: Int = 0
+    private let systemBufferCountLock = NSLock()
+    private var systemBufferCount: Int {
+        get {
+            systemBufferCountLock.lock()
+            defer { systemBufferCountLock.unlock() }
+            return _systemBufferCount
+        }
+        set {
+            systemBufferCountLock.lock()
+            defer { systemBufferCountLock.unlock() }
+            _systemBufferCount = newValue
+        }
+    }
 
     // System audio status observation
     private var systemAudioCancellable: AnyCancellable?
-    private var systemAudioSilenceStart: Date?
+    // Protected by systemSilenceLock — written from callback thread, reset on main thread
+    private var _systemAudioSilenceStart: Date?
+    private let systemSilenceLock = NSLock()
+    private var systemAudioSilenceStart: Date? {
+        get {
+            systemSilenceLock.lock()
+            defer { systemSilenceLock.unlock() }
+            return _systemAudioSilenceStart
+        }
+        set {
+            systemSilenceLock.lock()
+            defer { systemSilenceLock.unlock() }
+            _systemAudioSilenceStart = newValue
+        }
+    }
     private let systemAudioSilenceThreshold: TimeInterval = 10  // 10s of silence = warning
 
     // Sleep/wake notification observers (stored for cleanup in deinit)
@@ -305,7 +335,7 @@ class Audio: ObservableObject {
         // Set isStarting to prevent double-start during async setup
         isStarting = true
         error = nil
-        systemBufferCount = 0  // Reset debug counter
+        systemBufferCount = 0  // Reset debug counter (lock-protected)
         resetSilenceTracking()  // Start fresh silence tracking
         systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
         systemAudioSilenceStart = nil  // Reset system audio silence tracking
@@ -403,12 +433,13 @@ class Audio: ObservableObject {
                         AVLinearPCMIsNonInterleaved: !tapFormat.isInterleaved
                     ]
 
-                    strongSelf.systemAudioFile = try AVAudioFile(
+                    let file = try AVAudioFile(
                         forWriting: fileURL,
                         settings: settings,
                         commonFormat: .pcmFormatFloat32,
                         interleaved: tapFormat.isInterleaved
                     )
+                    strongSelf.systemAudioFileQueue.sync { strongSelf.systemAudioFile = file }
                     AppLogger.audioSystem.info("System audio file created before I/O proc", ["sampleRate": "\(Int(sampleRate))", "channels": "\(tapFormat.channelCount)"])
 
                     // Step 4: Now start the I/O proc with a lightweight callback
@@ -815,13 +846,14 @@ class Audio: ObservableObject {
 
         // Check if we need to create a new file due to format change
         // Must check BOTH sample rate AND channel count changes
-        let sampleRateChanged = micAudioFile.map { recordingFormat.sampleRate != $0.processingFormat.sampleRate } ?? false
+        // All micAudioFile accesses wrapped in micAudioFileQueue.sync for thread safety
+        let sampleRateChanged = micAudioFileQueue.sync { micAudioFile.map { recordingFormat.sampleRate != $0.processingFormat.sampleRate } ?? false }
         let channelCountChanged = oldChannelCount != recordingFormat.channelCount
 
         if sampleRateChanged || channelCountChanged {
             let changeReason = sampleRateChanged ? "Sample rate" : "Channel count"
             AppLogger.audioMic.warning("Format changed, closing old file and creating new segment", ["reason": changeReason])
-            micAudioFile = nil
+            micAudioFileQueue.sync { micAudioFile = nil }
 
             // Create new file segment as mono
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -841,12 +873,13 @@ class Audio: ObservableObject {
                 }
                 self.monoOutputFormat = monoFormat
 
-                micAudioFile = try AVAudioFile(
+                let newFile = try AVAudioFile(
                     forWriting: fileURL,
                     settings: monoFormat.settings,
                     commonFormat: monoFormat.commonFormat,
                     interleaved: monoFormat.isInterleaved
                 )
+                micAudioFileQueue.sync { micAudioFile = newFile }
                 AppLogger.audioMic.info("Created recovery audio file", ["file": fileURL.lastPathComponent])
 
                 // Update file URL reference
@@ -1069,9 +1102,15 @@ class Audio: ObservableObject {
 
     private func calculateSystemLevel(buffer: AVAudioPCMBuffer) {
         // Throttle updates: only update every 4th callback (~2x faster than mic instead of ~8x)
-        systemLevelUpdateCounter += 1
-        guard systemLevelUpdateCounter >= 4 else { return }
-        systemLevelUpdateCounter = 0
+        let shouldProcess: Bool = systemLevelLock.withLock {
+            systemLevelUpdateCounter += 1
+            if systemLevelUpdateCounter >= 4 {
+                systemLevelUpdateCounter = 0
+                return true
+            }
+            return false
+        }
+        guard shouldProcess else { return }
 
         guard let data = buffer.floatChannelData else { return }
 
@@ -1109,7 +1148,8 @@ class Audio: ObservableObject {
                 systemAudioSilenceStart = Date()
             }
 
-            let silenceDuration = Date().timeIntervalSince(systemAudioSilenceStart!)
+            guard let silenceStart = systemAudioSilenceStart else { return }
+            let silenceDuration = Date().timeIntervalSince(silenceStart)
             if silenceDuration > systemAudioSilenceThreshold {
                 // Prolonged silence - show warning (but only if not already in a worse state)
                 DispatchQueue.main.async { [weak self] in

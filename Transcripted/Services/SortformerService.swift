@@ -142,6 +142,10 @@ class SortformerService: ObservableObject {
             return intId
         }
         // Fallback: try direct Int parsing
-        return Int(id) ?? 0
+        if let directId = Int(id) {
+            return directId
+        }
+        AppLogger.transcription.error("speakerIdFromString failed to parse speaker ID, falling back to 0", ["raw_id": id])
+        return 0
     }
 }
