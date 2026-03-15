@@ -18,7 +18,7 @@ struct ReadyStep: View {
         ("capsule.portrait", "Look for the floating pill above your dock", .terracotta),
         ("hand.tap", "Tap the pill to start recording", .recordingRed),
         ("keyboard", "Pro tip: Use ⌘⇧R for instant recording", .processingPurple),
-        ("sparkles", "AI extracts insights when you stop", .successGreen)
+        ("doc.text", "Your transcript is saved with speaker labels", .successGreen)
     ]
 
     var body: some View {
@@ -74,7 +74,7 @@ struct ReadyStep: View {
                     .font(.displayLarge)
                     .foregroundColor(.charcoal)
 
-                Text("Your next meeting will never be the same")
+                Text("Every word captured, every speaker identified")
                     .font(.bodyLarge)
                     .foregroundColor(.softCharcoal)
             }

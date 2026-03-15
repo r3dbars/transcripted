@@ -39,7 +39,7 @@ struct WelcomeStep: View {
                 .offset(y: showContent ? 0 : 10)
 
             // Single tagline
-            Text("Turn every meeting into action")
+            Text("Never miss a word")
                 .font(.headingMedium)
                 .foregroundColor(.softCharcoal)
                 .opacity(showContent ? 1 : 0)

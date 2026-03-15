@@ -16,8 +16,8 @@ struct HowItWorksStep: View {
     private let phases: [(caption: String, icon: String, color: Color)] = [
         ("Recording your conversation...", "mic.fill", .recordingRed),
         ("Transcribing speech to text...", "text.quote", .terracotta),
-        ("AI finding what matters...", "sparkles", .processingPurple),
-        ("Insights ready!", "checklist", .successGreen)
+        ("Identifying speakers...", "person.2.fill", .processingPurple),
+        ("Transcript ready!", "doc.text.fill", .successGreen)
     ]
 
     var body: some View {
@@ -104,9 +104,9 @@ struct HowItWorksStep: View {
         case 1:
             TranscribingPhaseView()
         case 2:
-            AnalyzingPhaseView()
+            IdentifyingSpeakersPhaseView()
         default:
-            InsightsPhaseView()
+            TranscriptReadyPhaseView()
         }
     }
 }
@@ -174,9 +174,9 @@ private struct TranscribingPhaseView: View {
     @State private var visibleLines: Int = 0
 
     private let sampleLines = [
-        "\"Let's follow up with the design team...\"",
-        "\"I'll take the lead on competitor analysis...\"",
-        "\"We're targeting March 15th for launch...\""
+        "\"Great, let's go through the project update...\"",
+        "\"The new design is looking really solid...\"",
+        "\"I agree, let's finalize the timeline tomorrow.\""
     ]
 
     var body: some View {
@@ -206,107 +206,148 @@ private struct TranscribingPhaseView: View {
     }
 }
 
-// MARK: - Analyzing Phase (Simplified - Full particle in Demo)
+// MARK: - Identifying Speakers Phase
 
 @available(macOS 26.0, *)
-private struct AnalyzingPhaseView: View {
-    @State private var sparkleRotation: Double = 0
-    @State private var pulseScale: CGFloat = 1.0
-    @State private var glowOpacity: Double = 0.3
+private struct IdentifyingSpeakersPhaseView: View {
+    @State private var avatarsVisible: Int = 0
+    @State private var connectionsVisible: Bool = false
+    @State private var labelsVisible: Int = 0
+
+    private let speakers: [(label: String, color: Color, xOffset: CGFloat, yOffset: CGFloat)] = [
+        ("Speaker 1", .terracotta, -50, -20),
+        ("Speaker 2", .processingPurple, 50, -20),
+        ("Speaker 3", .successGreen, 0, 40)
+    ]
 
     var body: some View {
         ZStack {
-            // Glow effect
-            Circle()
-                .fill(Color.processingPurple.opacity(0.2))
-                .frame(width: 140, height: 140)
-                .blur(radius: 25)
-                .opacity(glowOpacity)
+            // Connection lines between speakers
+            if connectionsVisible {
+                Path { path in
+                    path.move(to: CGPoint(x: 310, y: 120))
+                    path.addLine(to: CGPoint(x: 410, y: 120))
+                    path.move(to: CGPoint(x: 310, y: 120))
+                    path.addLine(to: CGPoint(x: 360, y: 180))
+                    path.move(to: CGPoint(x: 410, y: 120))
+                    path.addLine(to: CGPoint(x: 360, y: 180))
+                }
+                .stroke(Color.processingPurple.opacity(0.3), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                .transition(.opacity)
+            }
 
-            // AI sparkle effect
-            Image(systemName: "sparkles")
-                .font(.system(size: 64))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [.processingPurple, .terracotta],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .rotationEffect(.degrees(sparkleRotation))
-                .scaleEffect(pulseScale)
+            // Speaker avatars with labels
+            ForEach(0..<speakers.count, id: \.self) { index in
+                VStack(spacing: 6) {
+                    ZStack {
+                        Circle()
+                            .fill(speakers[index].color.opacity(0.15))
+                            .frame(width: 52, height: 52)
 
-            // Processing text
-            Text("Analyzing...")
-                .font(.caption)
-                .fontWeight(.medium)
-                .foregroundColor(.softCharcoal)
-                .offset(y: 65)
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 24))
+                            .foregroundColor(speakers[index].color)
+                    }
+
+                    if index < labelsVisible {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(speakers[index].color)
+                                .frame(width: 6, height: 6)
+                            Text(speakers[index].label)
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.charcoal)
+                        }
+                        .transition(.opacity.combined(with: .offset(y: 4)))
+                    }
+                }
+                .offset(x: speakers[index].xOffset, y: speakers[index].yOffset)
+                .scaleEffect(index < avatarsVisible ? 1.0 : 0.5)
+                .opacity(index < avatarsVisible ? 1.0 : 0.0)
+            }
         }
         .onAppear {
-            withAnimation(.linear(duration: 3).repeatForever(autoreverses: false)) {
-                sparkleRotation = 360
+            // Stagger avatar appearances
+            for i in 0..<speakers.count {
+                withAnimation(.bouncy.delay(Double(i) * 0.25)) {
+                    avatarsVisible = i + 1
+                }
             }
-            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-                pulseScale = 1.15
-                glowOpacity = 0.5
+            // Show connections after avatars
+            withAnimation(.easeOut(duration: 0.4).delay(0.75)) {
+                connectionsVisible = true
+            }
+            // Stagger label appearances
+            for i in 0..<speakers.count {
+                withAnimation(.smooth.delay(Double(i) * 0.2 + 0.9)) {
+                    labelsVisible = i + 1
+                }
             }
         }
     }
 }
 
-// MARK: - Insights Phase
+// MARK: - Transcript Ready Phase
 
 @available(macOS 26.0, *)
-private struct InsightsPhaseView: View {
-    @State private var cardsVisible: Int = 0
+private struct TranscriptReadyPhaseView: View {
+    @State private var linesVisible: Int = 0
 
-    private let insights = [
-        ("Follow up with design team", "Due Friday", Color.terracotta),
-        ("Launch date: March 15th", "Decision made", Color.successGreen),
-        ("Competitor analysis assigned", "In progress", Color.processingPurple)
+    private let transcriptLines: [(timestamp: String, speaker: String, text: String, color: Color)] = [
+        ("[00:12]", "Speaker 1", "Great, let's get started.", .terracotta),
+        ("[00:18]", "Speaker 2", "Sounds good, I have the update.", .processingPurple),
+        ("[00:25]", "Speaker 1", "Perfect, walk us through the changes.", .terracotta)
     ]
 
     var body: some View {
-        VStack(spacing: Spacing.ms) {
-            ForEach(0..<insights.count, id: \.self) { index in
-                HStack {
+        VStack(alignment: .leading, spacing: Spacing.ms) {
+            // Mini transcript header
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "doc.text.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.successGreen)
+                Text("Transcript")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(.softCharcoal)
+                    .tracking(1.0)
+                Spacer()
+            }
+            .padding(.bottom, Spacing.xs)
+
+            ForEach(0..<transcriptLines.count, id: \.self) { index in
+                let line = transcriptLines[index]
+                HStack(alignment: .top, spacing: Spacing.sm) {
+                    Text(line.timestamp)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.softCharcoal)
+                        .frame(width: 44, alignment: .leading)
+
                     Circle()
-                        .fill(insights[index].2)
-                        .frame(width: 10, height: 10)
+                        .fill(line.color)
+                        .frame(width: 8, height: 8)
+                        .offset(y: 4)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(insights[index].0)
-                            .font(.bodyMedium)
-                            .fontWeight(.medium)
-                            .foregroundColor(.charcoal)
-
-                        Text(insights[index].1)
+                        Text(line.speaker)
                             .font(.caption)
-                            .foregroundColor(.softCharcoal)
+                            .fontWeight(.semibold)
+                            .foregroundColor(line.color)
+                        Text("\"\(line.text)\"")
+                            .font(.transcript)
+                            .foregroundColor(.charcoal)
                     }
-
-                    Spacer()
-
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(insights[index].2)
-                        .font(.system(size: 18))
                 }
-                .padding(.horizontal, Spacing.md)
-                .padding(.vertical, Spacing.ms)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm)
-                        .fill(Color.cream)
-                )
-                .opacity(index < cardsVisible ? 1 : 0)
-                .offset(x: index < cardsVisible ? 0 : 30)
+                .opacity(index < linesVisible ? 1 : 0)
+                .offset(y: index < linesVisible ? 0 : 8)
             }
         }
         .padding(Spacing.xl)
         .onAppear {
-            for i in 0..<insights.count {
-                withAnimation(.bouncy.delay(Double(i) * 0.2)) {
-                    cardsVisible = i + 1
+            for i in 0..<transcriptLines.count {
+                withAnimation(.smooth.delay(Double(i) * 0.3)) {
+                    linesVisible = i + 1
                 }
             }
         }
