@@ -25,7 +25,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     let overlayController = FloatingOverlayController()
     let sessionController = DraftSessionController()
     var onboardingController: OnboardingWindowController?
-    private var wakeObserver: NSObjectProtocol?
+    private var sleepWakeObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Crash reporting — captures ObjC/SwiftUI exceptions + manual Swift error reports
@@ -62,19 +62,64 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         pop.delegate = self
         popover = pop
 
-        // Dismiss popover on system wake — SwiftUI gesture handlers hold stale
-        // AttributeGraph state after sleep, causing EXC_BAD_ACCESS on interaction
-        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+        // RELIABILITY: Aggressively tear down the SwiftUI view tree whenever the
+        // system state changes. NSHostingController's internal AttributeGraph accumulates
+        // stale pointers over sleep/wake, screen lock, and prolonged background time.
+        // A _ButtonGesture callback on a stale view dereferences a null pointer → SIGSEGV.
+        //
+        // Three categories of events that corrupt the graph:
+        // 1. System sleep/wake (hardware state change)
+        // 2. Screen sleep/wake (display off, lid close, screen lock)
+        // 3. App deactivation (user switched away for extended time)
+        //
+        // Cost of tearing down too often: zero — togglePopover() recreates the VC each
+        // time anyway. Cost of not tearing down: hard crash with no recovery.
+
+        // System sleep/wake (NSWorkspace notifications)
+        // All of these tear down the popover. didWake also runs engine recovery.
+        let popoverTeardownEvents: [NSNotification.Name] = [
+            NSWorkspace.willSleepNotification,
+            NSWorkspace.didWakeNotification,
+            NSWorkspace.screensDidSleepNotification,
+            NSWorkspace.screensDidWakeNotification,
+            NSWorkspace.sessionDidResignActiveNotification,  // fast user switch
+        ]
+        for name in popoverTeardownEvents {
+            let observer = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.tearDownPopoverViewTree()
+                }
+            }
+            sleepWakeObservers.append(observer)
+        }
+
+        // Engine recovery on wake — hotkeys, file watchers, MLX model health check
+        let wakeRecoveryObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, let popover = self.popover, popover.isShown else { return }
-                popover.performClose(nil)
-                popover.contentViewController = nil
+                self?.appState.handleSystemWake()
             }
         }
+        sleepWakeObservers.append(wakeRecoveryObserver)
+
+        // App deactivation (NSApplication notification — separate center from NSWorkspace)
+        let appObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.tearDownPopoverViewTree()
+            }
+        }
+        sleepWakeObservers.append(appObserver)
 
         // Initialize engines
         Task { @MainActor in
@@ -95,8 +140,9 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        if let observer = wakeObserver {
+        for observer in sleepWakeObservers {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            NotificationCenter.default.removeObserver(observer)
         }
         #if BETA_BUILD
         BetaTelemetry.shared.shipLogs()
@@ -111,6 +157,16 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         controller.appState = appState
         controller.show()
         onboardingController = controller
+    }
+
+    /// Nil the popover's contentViewController to destroy the SwiftUI view tree.
+    /// Safe to call at any time — the VC is recreated on next togglePopover() open.
+    private func tearDownPopoverViewTree() {
+        guard let popover = popover else { return }
+        if popover.isShown {
+            popover.performClose(nil)
+        }
+        popover.contentViewController = nil
     }
 
     @objc func togglePopover() {
