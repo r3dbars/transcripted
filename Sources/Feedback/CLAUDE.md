@@ -26,7 +26,7 @@ Also includes `AcceptAction` enum (`copy`, `paste`).
 {
   "timestamp": "2026-02-17T16:30:00Z",
   "raw_text": "the user's original spoken/typed input",
-  "drafted_text": "what Claude produced",
+  "drafted_text": "what the model produced",
   "accepted_text": "what was actually copied/pasted (may differ if user edited the draft)",
   "action": "copy" | "paste",
   "example_count": 5,
@@ -48,7 +48,7 @@ struct UsageStats {
 }
 ```
 
-Computed by `refreshStats()` from the feedback log. `minutesSaved` is estimated at ~40 WPM average typing speed: `(wordsDrafted + wordsAccepted) / 40`. This accounts for both the words Claude drafted (which the user would have had to type themselves) and the words in the final accepted version (the actual typing savings). These stats are displayed in the MenuBarPanel stats section, where the "saved" label has a hover tooltip breaking down `wordsDrafted` and `wordsAccepted`.
+Computed by `refreshStats()` from the feedback log. `minutesSaved` is estimated at ~40 WPM average typing speed: `(wordsDrafted + wordsAccepted) / 40`. This accounts for both the words the model drafted (which the user would have had to type themselves) and the words in the final accepted version (the actual typing savings). These stats are displayed in the MenuBarPanel stats section, where the "saved" label has a hover tooltip breaking down `wordsDrafted` and `wordsAccepted`.
 
 ## Why
 

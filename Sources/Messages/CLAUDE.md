@@ -15,7 +15,7 @@ Reads the user's sent iMessages from `~/Library/Messages/chat.db` for automatic 
 2. Queries sent messages with a `LEFT JOIN` on the `handle` table to retrieve the contact handle ID alongside each message: `is_from_me = 1 AND text IS NOT NULL AND text != ''` with `ORDER BY date DESC LIMIT ?` (parameterized, default 2000)
 3. Applies quality filters **in Swift only** — no SQL-level word/length filters
 4. Returns `[ImportedMessage]` structs (containing `text`, `date`, and `handleId`) shown in preview UI
-5. `formatForAnalysis()` joins messages for the Sonnet analysis call
+5. `formatForAnalysis()` joins messages for the local LLM analysis call (Qwen3.5-4B via MLX)
 6. Raw messages are discarded after profile generation — never saved
 
 ## Permission

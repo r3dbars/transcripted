@@ -1,5 +1,5 @@
 // LocalLLMError.swift
-// Error types for local LLM inference — replaces AnthropicAPIError.
+// Error types for local LLM inference.
 
 import Foundation
 

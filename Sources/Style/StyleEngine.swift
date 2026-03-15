@@ -605,7 +605,7 @@ class StyleEngine: ObservableObject {
         return analysis
     }
 
-    /// Save a pre-generated style profile (from Claude/ChatGPT paste-back).
+    /// Save a pre-generated style profile (from external paste-back).
     /// Wraps the profile in the standard style.md structure without running any analysis.
     func saveImportedProfile(_ profile: String) {
         styleFileContents = """

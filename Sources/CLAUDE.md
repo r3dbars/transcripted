@@ -20,7 +20,7 @@ The boot sequence in `DraftAppDelegate.applicationDidFinishLaunching()` has stri
 1. Engine construction (all happen in DraftAppState.init — synchronous)
    └→ DraftEngine, StyleEngine, PromptStore, FeedbackStore, AppLogger,
       PreviousAppTracker, ContextCaptureEngine, AnalysisEngine,
-      StreamingChatEngine, STTRouter
+      LocalInferenceManager, STTRouter
 
 2. Wiring (in applicationDidFinishLaunching — order matters)
    ├→ sessionController.appState = appState           // Session needs all engines
@@ -48,7 +48,6 @@ The boot sequence in `DraftAppDelegate.applicationDidFinishLaunching()` has stri
 
 ```
 initialize() [guarded by isInitialized flag]
-├→ drafter.checkCredential()                    // Load auth from Keychain
 ├→ drafter.styleEngine = styleEngine            // DraftEngine needs style prompts
 ├→ drafter.promptStore = promptStore            // DraftEngine needs model config
 ├→ styleEngine.promptStore = promptStore        // StyleEngine needs fallback prompts
@@ -92,6 +91,6 @@ When adding a new engine to the app:
 ## Verification
 
 - **Launch:** `bash build.sh` → app launches, menubar icon appears, debug log shows `APP LAUNCHED`
-- **Initialization order:** Check `~/draft-debug.log` for `APP LAUNCHED` with auth mode and example count
+- **Initialization order:** Check `~/draft-debug.log` for `APP LAUNCHED` with example count
 - **Shutdown:** Quit app → green mic dot disappears, no crash
 - **Popover:** Click menubar icon rapidly → no hang or crash (NSHostingController recreated each time)

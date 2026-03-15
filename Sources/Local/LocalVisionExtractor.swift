@@ -1,5 +1,5 @@
 // LocalVisionExtractor.swift
-// Replaces AnthropicAPI.extractStructuredContext() with fully local Apple Vision OCR.
+// Fully local Apple Vision OCR for extracting conversation context from screenshots.
 // Extracts text from screenshot and returns it as raw conversation context —
 // the drafting model interprets it directly (no separate parsing LLM).
 

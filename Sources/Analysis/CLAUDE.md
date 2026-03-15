@@ -2,12 +2,12 @@
 
 ## What This Does
 
-Native Swift replacement for the Python orchestrator agent. Watches `~/Library/Application Support/Draft/feedback.jsonl` for new accepted drafts, uses Claude Sonnet to analyze editing patterns, and proposes prompt improvements as InsightCards displayed in AgentSection (menubar panel). Runs entirely in-process — no subprocess, no SSE relay, no port conflicts.
+Native Swift replacement for the Python orchestrator agent. Watches `~/Library/Application Support/Draft/feedback.jsonl` for new accepted drafts, uses the local LLM (Qwen3.5-4B via MLX) to analyze editing patterns, and proposes prompt improvements as InsightCards displayed in AgentSection (menubar panel). Runs entirely in-process — no subprocess, no external API calls, no port conflicts.
 
 ## Key Files
 
-- `AnalysisEngine.swift` (~365 lines) — `@MainActor ObservableObject` with DispatchSource file watching, debounced Sonnet analysis, InsightCard management, EventReporter observability, and proper deinit cleanup
-- `InsightCard.swift` (~71 lines) — Model struct for insight cards + shared `toolDefinition` and `from()` factory (used by both StreamingChatEngine and AnalysisEngine)
+- `AnalysisEngine.swift` (~365 lines) — `@MainActor ObservableObject` with DispatchSource file watching, debounced local analysis, InsightCard management, EventReporter observability, and proper deinit cleanup
+- `InsightCard.swift` (~71 lines) — Model struct for insight cards + shared `toolDefinition` and `from()` factory (used by AnalysisEngine)
 
 ## How It Works
 
@@ -16,10 +16,10 @@ Native Swift replacement for the Python orchestrator agent. Watches `~/Library/A
 Uses a kernel-level `DispatchSource.makeFileSystemObjectSource` on `feedback.jsonl`'s file descriptor with `.write` event mask. When FeedbackStore appends a new line, the OS notifies AnalysisEngine immediately — zero polling overhead.
 
 ```
-feedback.jsonl write event → onFeedbackFileChanged()
-  → count new lines (current - lastLineCount)
-  → accumulate in pendingNewCount
-  → scheduleDebounce()
+feedback.jsonl write event -> onFeedbackFileChanged()
+  -> count new lines (current - lastLineCount)
+  -> accumulate in pendingNewCount
+  -> scheduleDebounce()
 ```
 
 ### Debounce + Minimum Threshold
@@ -31,11 +31,12 @@ feedback.jsonl write event → onFeedbackFileChanged()
 ### Analysis Flow
 
 ```
-scheduleDebounce() → [30s] → runAnalysis(newEntryCount:)
-  → buildAnalysisSystemPrompt()     ← injects feedback + prompts + style + suggestion log
-  → callAPIWithToolUse()            ← Sonnet with propose_prompt_change tool
-  → InsightCards added to @Published insights array
-  → AgentSection displays cards with Apply/Skip buttons
+scheduleDebounce() -> [30s] -> runAnalysis(newEntryCount:)
+  -> buildAnalysisSystemPrompt()     <- injects feedback + prompts + style + suggestion log
+  -> MLXEngine.complete()            <- local inference with tool definition in system prompt
+  -> Parse JSON InsightCards from response
+  -> InsightCards added to @Published insights array
+  -> AgentSection displays cards with Apply/Skip buttons
 ```
 
 ### System Prompt Construction
@@ -51,29 +52,24 @@ scheduleDebounce() → [30s] → runAnalysis(newEntryCount:)
 
 The suggestion log prevents re-proposing recently skipped changes.
 
-### Tool Use Loop
+### Local Inference with Tool Parsing
 
-`callAPIWithToolUse()` implements a multi-turn conversation with Sonnet:
+AnalysisEngine calls `MLXEngine.complete()` with the `propose_prompt_change` tool definition embedded in the system prompt. The model returns its analysis as JSON-formatted InsightCard proposals, which are parsed from the response text using `InsightCard.from()`.
 
-1. Send user message + system prompt + `propose_prompt_change` tool definition
-2. Parse response for `tool_use` blocks → create `InsightCard` via `InsightCard.from()`
-3. Feed `tool_result` messages back for next turn
-4. Loop up to `maxTurns: 3` (or until `stop_reason == "end_turn"` or no tool calls)
+This is a single-turn completion — no multi-turn tool use loop. The system prompt instructs the model to output structured JSON matching the tool schema, and the response is parsed directly.
 
-Uses `AnthropicAPI.sonnetModel` for the model and `JSONSerialization` for the request body (tool use requires mixed-type arrays that `Codable` can't handle cleanly).
-
-Analysis failures are logged via both `print("⚠️ ANALYSIS | analysis failed: ...")` and `EventReporter.shared.capture(level: .error, engine: "analysis", event: "analysis_failed", ...)` — makes debugging visible in both console and `events.jsonl` when the API call fails.
+Analysis failures are logged via both `print("WARNING ANALYSIS | analysis failed: ...")` and `EventReporter.shared.capture(level: .error, engine: "analysis", event: "analysis_failed", ...)` — makes debugging visible in both console and `events.jsonl` when local inference fails.
 
 ### Apply / Skip Actions
 
 | Action | What Happens |
 |--------|-------------|
 | **Apply** | `writePromptChange()` updates the key in `prompts.json`, posts `.promptsDidChange` notification (PromptStore reloads), logs to `suggestion_log.jsonl` |
-| **Skip** | Logs to `suggestion_log.jsonl` only (for meta-learning — Sonnet sees skipped suggestions) |
+| **Skip** | Logs to `suggestion_log.jsonl` only (for meta-learning — the model sees skipped suggestions in future analysis runs) |
 
 ### InsightCard Shared Tool Definition
 
-`InsightCard.toolDefinition` and `InsightCard.from(toolId:input:)` are defined once in `InsightCard.swift` and shared by both `AnalysisEngine` and `StreamingChatEngine`. This eliminates tool schema duplication — any change to the tool schema propagates to both engines automatically.
+`InsightCard.toolDefinition` and `InsightCard.from(toolId:input:)` are defined once in `InsightCard.swift` and used by `AnalysisEngine`. This keeps the tool schema in a single location.
 
 ## Data Files
 
@@ -87,7 +83,7 @@ All in `~/Library/Application Support/Draft/`:
 
 ```swift
 @Published var insights: [InsightCard]   // Cards displayed in AgentSection
-@Published var isAnalyzing: Bool         // True during Sonnet API call
+@Published var isAnalyzing: Bool         // True during local inference
 
 var isConnected: Bool       // Always true (native — no subprocess to monitor)
 var agentStatus: String     // "Analyzing feedback..." or "Watching for feedback..."
@@ -96,7 +92,7 @@ func start()                // Begin watching feedback.jsonl (called by DraftApp
 func stop()                 // Stop watching, cancel pending tasks
 
 // deinit cancels fileSource and debounceTask — prevents leaked file descriptor + DispatchSource after dealloc
-func addInsight(_ card: InsightCard)  // Add card from external source (StreamingChatEngine passthrough)
+func addInsight(_ card: InsightCard)  // Add card from external source
 func apply(_ card: InsightCard)       // Write change to prompts.json + notify
 func skip(_ card: InsightCard)        // Log skip to suggestion_log.jsonl
 ```
@@ -109,10 +105,10 @@ Posted when `apply()` writes to `prompts.json`. `DraftAppState` observes this no
 
 After modifying AnalysisEngine, verify with these checks:
 
-- **File watching:** Accept 5+ drafts → check debug log for analysis trigger after ~30s debounce
+- **File watching:** Accept 5+ drafts -> check debug log for analysis trigger after ~30s debounce
 - **InsightCards appear:** After analysis completes, AgentSection should show cards with Apply/Skip buttons
-- **Apply works:** Click Apply on a card → check `prompts.json` for the updated key → check `suggestion_log.jsonl` for the apply entry
-- **Skip logged:** Click Skip → check `suggestion_log.jsonl` for the skip entry with rationale
-- **No startup trigger:** Relaunch app with existing feedback.jsonl → should NOT trigger analysis on startup (only new entries count)
-- **Debounce:** Accept drafts rapidly → analysis should fire once ~30s after the last accept, not per-draft
+- **Apply works:** Click Apply on a card -> check `prompts.json` for the updated key -> check `suggestion_log.jsonl` for the apply entry
+- **Skip logged:** Click Skip -> check `suggestion_log.jsonl` for the skip entry with rationale
+- **No startup trigger:** Relaunch app with existing feedback.jsonl -> should NOT trigger analysis on startup (only new entries count)
+- **Debounce:** Accept drafts rapidly -> analysis should fire once ~30s after the last accept, not per-draft
 - **Build:** `bash build.sh` — must compile cleanly

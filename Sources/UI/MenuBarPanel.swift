@@ -52,7 +52,7 @@ struct MenuBarPanelView: View {
             }
             #else
             if !appState.styleEngine.hasCompletedOnboarding {
-                StyleOnboardingView(styleEngine: appState.styleEngine)
+                StyleOnboardingView(styleEngine: appState.styleEngine, localInference: appState.localInference)
             }
             #endif
         }

@@ -36,7 +36,7 @@ struct PromptConfig: Codable {
     static var defaults: PromptConfig {
         PromptConfig(
             model: DefaultPrompts.model,
-            draftModel: DefaultPrompts.sonnetModel,
+            draftModel: DefaultPrompts.defaultDraftModel,
             draftingSystem: DefaultPrompts.draftingSystem,
             contextExtraction: DefaultPrompts.contextExtraction,
             ghostwritingSystem: DefaultPrompts.ghostwritingSystem,
@@ -51,7 +51,7 @@ struct PromptConfig: Codable {
 
 enum DefaultPrompts {
     static let model = "local"          // Local inference via MLX (Qwen3.5-4B)
-    static let sonnetModel = "local"    // Local inference via MLX (Qwen3.5-4B)
+    static let defaultDraftModel = "local"    // Local inference via MLX (Qwen3.5-4B)
 
     static let draftingSystem = """
         You are a writing assistant. Take the user's rough spoken text and rewrite it as a clear, \
@@ -60,7 +60,7 @@ enum DefaultPrompts {
         """
 
     // NOTE: This prompt contains {USER_NAME} and {APP_NAME} placeholders that are
-    // replaced at runtime by ContextCaptureEngine before being sent to the API.
+    // replaced at runtime by ContextCaptureEngine before being sent to the model.
     // The orchestrator agent should preserve these placeholders when rewriting.
     static let contextExtraction = """
         You are extracting a conversation from a screenshot.

@@ -9,7 +9,7 @@
 // {
 //   "timestamp": "2026-02-17T16:30:00Z",
 //   "raw_text": "user's spoken/typed input",
-//   "drafted_text": "what Claude produced",
+//   "drafted_text": "what the model produced",
 //   "accepted_text": "what was actually copied/pasted (may differ if user edited)",
 //   "action": "copy" | "paste",
 //   "example_count": 5
