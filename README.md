@@ -37,6 +37,8 @@ Draft does dictation *and* something no other tool offers: **AI drafting with fu
 
 ## How Dictation Mode works
 
+![Dictation Mode — speak and your words are typed](docs/screenshots/dictation-mode.png)
+
 Dictation mode is the simplest way to get your voice into any text field on your Mac. It works in every app — Slack, iMessage, Notes, your browser, anywhere you can type.
 
 ### Step by step
@@ -65,6 +67,8 @@ Dictation mode is the simplest way to get your voice into any text field on your
 ---
 
 ## How Draft Mode works
+
+![Draft Mode — speak your intent, get a polished reply](docs/screenshots/draft-mode.png)
 
 Draft mode is the feature that sets Draft apart from every other voice-to-text app. Instead of transcribing exactly what you say, it **reads the conversation you're looking at**, **listens to your intent**, and **writes a complete message in your personal writing style**.
 
