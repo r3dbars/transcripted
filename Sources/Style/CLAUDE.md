@@ -2,7 +2,7 @@
 
 ## What This Does
 
-Learns the user's writing style through training pairs (AI draft vs. what the user actually sent) and incrementally refines a style profile that personalizes how Haiku drafts messages. Includes a first-launch onboarding flow for instant profile generation.
+Learns the user's writing style through training pairs (AI draft vs. what the user actually sent) and incrementally refines a style profile that personalizes how the local LLM drafts messages. Includes a first-launch onboarding flow for instant profile generation.
 
 ## Key Files
 
@@ -15,12 +15,12 @@ Learns the user's writing style through training pairs (AI draft vs. what the us
 
 Solves the **cold start problem** — without onboarding, the first 10+ drafts are generic because Draft doesn't know how you write yet.
 
-1. After auth setup, `StyleOnboardingView` appears (gated by `hasCompletedOnboarding`)
+1. `StyleOnboardingView` appears (gated by `hasCompletedOnboarding`)
 2. User chooses a source: **Import from iMessages** (recommended) or **Paste Samples Manually**
 3. iMessage path: `iMessageReader` reads `~/Library/Messages/chat.db` (requires Full Disk Access, no date filter, no SQL word filter — just `is_from_me = 1` with `LIMIT 2000`, Swift-level `shouldSkip()` filters to 2+ character messages), shows preview, user approves. Includes optional "Add Slack, email, or other writing samples" expandable section — if provided, combined text (iMessages + supplement) is sent together.
 4. Manual path: User pastes real writing samples (Slack messages, texts, emails — messy is fine)
-5. Either path calls `importBulkSamples()` which reads the user's display name from UserDefaults (`"user-display-name"`) and sends text to **Sonnet** with a specialized `bulkAnalysisPrompt(userName:)`. The name helps Sonnet identify which messages belong to the user vs. other participants. When iMessage + supplementary text are combined, the joined text is passed as a single string.
-6. Sonnet returns a comprehensive 500-800 word style profile analyzing 9 dimensions (sections listed under Profile Structure below)
+5. Either path calls `importBulkSamples()` which reads the user's display name from UserDefaults (`"user-display-name"`) and runs analysis via the **local LLM (Qwen3.5-4B via MLX)** with a specialized `bulkAnalysisPrompt(userName:)`. The name helps the model identify which messages belong to the user vs. other participants. When iMessage + supplementary text are combined, the joined text is passed as a single string.
+6. The model returns a comprehensive 500-800 word style profile analyzing 9 dimensions (sections listed under Profile Structure below)
 7. **Only the generated profile is saved** — raw samples/messages are discarded after analysis
 8. User can review, add more samples and regenerate, or accept
 9. "Skip for Now" is always available — the incremental system works without onboarding
@@ -43,19 +43,19 @@ Refinement frequency adapts based on example count and profile quality:
 
 - **Examples 1-20:** Refine every **3** accepted drafts (early learning phase — each data point matters)
 - **Examples 21+, avg edit distance < 0.25:** Refine every **10** (profile is working well — user barely edits)
-- **Examples 21+, avg edit distance ≥ 0.25:** Refine every **5** (still learning — something's off)
+- **Examples 21+, avg edit distance >= 0.25:** Refine every **5** (still learning — something's off)
 
 `shouldRefineNow()` encapsulates this logic. It reads the last 10 edit distances from style.md to determine which phase the profile is in.
 
 ### Recency-Weighted Refinement
 
-`regenerateStyleSummary()` sends only the **last 20 examples** to Sonnet (via `extractRecentExamplesText(last:)`), not all accumulated history. Early examples were recorded when the profile was poor — those lessons are already encoded in the profile. Sending stale examples wastes tokens and adds noise.
+`regenerateStyleSummary()` sends only the **last 20 examples** to the local LLM (via `extractRecentExamplesText(last:)`), not all accumulated history. Early examples were recorded when the profile was poor — those lessons are already encoded in the profile. Sending stale examples wastes tokens and adds noise.
 
 ### Incremental (Not Rebuild)
 
-`buildRefinementPrompt(currentProfile:)` (a `private static` method) builds the Sonnet prompt with two branches:
+`buildRefinementPrompt(currentProfile:)` (a `private static` method) builds the prompt with two branches:
 
-- **Has existing profile:** "Here's the current profile. Here are training pairs showing what the AI got wrong. Fix the profile based on these patterns." Includes contamination auditing: Sonnet is told to REMOVE patterns from the current profile that were incorrectly attributed from AI_DRAFT text.
+- **Has existing profile:** "Here's the current profile. Here are training pairs showing what the AI got wrong. Fix the profile based on these patterns." Includes contamination auditing: the model is told to REMOVE patterns from the current profile that were incorrectly attributed from AI_DRAFT text.
 - **No existing profile:** "Build a profile from these training pairs. The USER_SENT versions are ground truth."
 
 Both branches include:
@@ -64,7 +64,7 @@ Both branches include:
 - **Formality-aware rules** — when FORMALITY data is available, NEVER rules should be context-specific (e.g., "NEVER X in professional Slack" not just "NEVER X")
 - **Evidence Rule** — every claimed pattern must include 1-2 direct quotes from USER_SENT as proof
 
-The profile gets surgically adjusted based on actual errors, not reconstructed. Sonnet is told to PRESERVE patterns from the current profile that have USER_SENT evidence, REMOVE contaminated patterns, and FIX dimensions where training pairs show clear errors.
+The profile gets surgically adjusted based on actual errors, not reconstructed. The model is told to PRESERVE patterns from the current profile that have USER_SENT evidence, REMOVE contaminated patterns, and FIX dimensions where training pairs show clear errors.
 
 ### Application — Ghostwriting System Prompt (Intent-First)
 
@@ -80,7 +80,7 @@ When a style profile exists, it assembles a structured system prompt with an **i
 
 **Key design decision:** The old `<the_test>` framing ("could they tell it wasn't written by them?") was removed because it pulled the AI toward style mimicry at the expense of intent delivery. Intent accomplishment is now the primary directive, with style as a finishing layer.
 
-The XML structure lets Haiku parse the prompt sections independently (per Anthropic's prompt engineering guidance). The reference samples provide "ground truth" — descriptions tell Haiku what patterns to follow, but samples demonstrate the actual rhythm and cadence.
+The XML structure lets the model parse the prompt sections independently. The reference samples provide "ground truth" — descriptions tell the model what patterns to follow, but samples demonstrate the actual rhythm and cadence.
 
 ### Profile Structure
 
@@ -98,7 +98,7 @@ The analysis and refinement prompts generate profiles with these **required sect
 
 ### Cost Model
 
-Style Summary + 2-3 reference samples (~1200-1500 tokens) are injected into the system prompt. Drafting cost stays roughly constant regardless of example count. Refinement frequency decreases as the profile improves (every 3 → every 5 → every 10), and only the last 20 examples are sent to Sonnet per refinement.
+All inference runs locally via MLX (Qwen3.5-4B-4bit). No API costs. Style Summary + 2-3 reference samples (~1200-1500 tokens) are injected into the system prompt. Drafting cost stays roughly constant regardless of example count. Refinement frequency decreases as the profile improves (every 3 -> every 5 -> every 10), and only the last 20 examples are sent per refinement.
 
 ## File Format (style.md)
 
@@ -107,7 +107,7 @@ Style Summary + 2-3 reference samples (~1200-1500 tokens) are injected into the 
 
 ## Style Summary
 **Tone & Voice**
-[Sonnet-generated analysis...]
+[Generated analysis...]
 
 **Sentence Patterns**
 [...]
@@ -142,7 +142,7 @@ AI_DRAFT:
 Hey Sarah! That sounds great, I'm totally in for lunch tomorrow.
 
 USER_SENT:
-hey! yeah totally down for lunch tmrw 👍
+hey! yeah totally down for lunch tmrw
 ```
 
 `FORMALITY` and `USER_INSTRUCTIONS` are optional — older examples or examples without voice instructions omit them.
@@ -161,8 +161,8 @@ func buildSystemPrompt() -> String              // Returns style-aware or Prompt
 func recordExample(aiDraft: String, userFinal: String, platform: String,
                    userInstructions: String? = nil, formality: String? = nil)  // Saves training pair
 func shouldRefineNow() -> Bool                   // Graduated refinement scheduling
-func regenerateStyleSummary(auth: AuthCredential) async // Recency-weighted Sonnet refinement (last 20 examples)
-func importBulkSamples(rawText: String, auth: AuthCredential) async throws -> String  // Onboarding
+func regenerateStyleSummary(draftEngine: MLXEngine) async // Recency-weighted local refinement (last 20 examples)
+func importBulkSamples(rawText: String, draftEngine: MLXEngine) async throws -> String  // Onboarding
 func completeOnboarding()                        // Sets hasCompletedOnboarding = true
 ```
 
@@ -179,20 +179,20 @@ func completeOnboarding()                        // Sets hasCompletedOnboarding 
 
 ## Error Handling
 
-Both `saveStyleFile()` and `loadStyleFile()` use `do/catch` with `print("⚠️ STYLE | ...")` for debug log visibility, plus `EventReporter.shared.capture()` for structured observability:
+Both `saveStyleFile()` and `loadStyleFile()` use `do/catch` with `print("WARNING STYLE | ...")` for debug log visibility, plus `EventReporter.shared.capture()` for structured observability:
 - `saveStyleFile()` — logs to print and reports `style_file_write_failed` (level: error)
 - `loadStyleFile()` — reports `style_file_read_failed` (level: warning) via EventReporter (no print, since the file may legitimately not exist yet)
-- `regenerateStyleSummary()` — prints warning and reports `style_refinement_failed` (level: error) on Sonnet call failure
+- `regenerateStyleSummary()` — prints warning and reports `style_refinement_failed` (level: error) on local inference failure
 
 ## Verification
 
 After modifying StyleEngine, verify with these checks:
 
-- **Training pair saved:** Accept a draft → open `~/Library/Application Support/Draft/style.md` → new `### Example N` should have `AI_DRAFT`, `USER_SENT`, `PLATFORM`, `EDIT_DISTANCE`
-- **Edit detection:** Edit a draft before accepting → `AI_DRAFT` should differ from `USER_SENT`, edit distance > 0
-- **No-edit detection:** Accept without editing → `AI_DRAFT` equals `USER_SENT`, edit distance = 0 (or near 0)
-- **Graduated frequency:** Check debug log for `🔄 STYLE | refinement triggered at N examples` — should fire at 3, 6, 9... (early) then 10, 20... (stabilized)
-- **Recency window:** During refinement, only the last 20 examples should be sent to Sonnet (check prompt size in console if debugging)
-- **Onboarding:** Reset with `defaults delete com.justinbetker.draft style-onboarding-completed` → relaunch → onboarding should appear. After completing, style.md should have profile but NO raw pasted text
+- **Training pair saved:** Accept a draft -> open `~/Library/Application Support/Draft/style.md` -> new `### Example N` should have `AI_DRAFT`, `USER_SENT`, `PLATFORM`, `EDIT_DISTANCE`
+- **Edit detection:** Edit a draft before accepting -> `AI_DRAFT` should differ from `USER_SENT`, edit distance > 0
+- **No-edit detection:** Accept without editing -> `AI_DRAFT` equals `USER_SENT`, edit distance = 0 (or near 0)
+- **Graduated frequency:** Check debug log for `STYLE | refinement triggered at N examples` — should fire at 3, 6, 9... (early) then 10, 20... (stabilized)
+- **Recency window:** During refinement, only the last 20 examples should be sent to the local LLM (check prompt size in console if debugging)
+- **Onboarding:** Reset with `defaults delete com.justinbetker.draft style-onboarding-completed` -> relaunch -> onboarding should appear. After completing, style.md should have profile but NO raw pasted text
 - **Debug monitoring:** `tail -f ~/draft-debug.log | grep STYLE` shows all style events in real time
 - **Inspect style.md directly:** `cat ~/Library/Application\ Support/Draft/style.md` to see current profile + examples

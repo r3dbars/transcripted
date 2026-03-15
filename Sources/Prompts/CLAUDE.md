@@ -1,4 +1,4 @@
-# Prompts — PromptStore
+# Prompts -- PromptStore
 
 ## What This Is
 
@@ -12,11 +12,11 @@
 
 Contains three components:
 
-1. **`PromptConfig`** — A `Codable` struct that maps 1:1 to the keys in `prompts.json`. Uses `CodingKeys` to translate between Swift camelCase properties and snake_case JSON keys. Has a `static var defaults` factory that pulls from `DefaultPrompts`.
+1. **`PromptConfig`** -- A `Codable` struct that maps 1:1 to the keys in `prompts.json`. Uses `CodingKeys` to translate between Swift camelCase properties and snake_case JSON keys. Has a `static var defaults` factory that pulls from `DefaultPrompts`.
 
-2. **`DefaultPrompts`** — An enum (no cases) with static constants for every prompt and both model identifiers. Also contains a `Tier` enum (`early`, `growing`, `mature`) and a `styleAnalysis(tier:)` method that builds tiered style analysis prompts from a shared base string plus tier-specific sections.
+2. **`DefaultPrompts`** -- An enum (no cases) with static constants for every prompt. Also contains a `Tier` enum (`early`, `growing`, `mature`) and a `styleAnalysis(tier:)` method that builds tiered style analysis prompts from a shared base string plus tier-specific sections.
 
-3. **`PromptStore`** — An `@MainActor ObservableObject` class with `@Published var config: PromptConfig`. Loads `prompts.json` on init, writes defaults to disk if the file is missing or corrupt. Exposes `let storageDir: URL` (the app support directory) for use by other engines. Uses `FileManager.default.draftAppSupportDir` (an extension defined elsewhere) for the base path.
+3. **`PromptStore`** -- An `@MainActor ObservableObject` class with `@Published var config: PromptConfig`. Loads `prompts.json` on init, writes defaults to disk if the file is missing or corrupt. Exposes `let storageDir: URL` (the app support directory) for use by other engines. Uses `FileManager.default.draftAppSupportDir` (an extension defined elsewhere) for the base path.
 
 ## Why
 
@@ -26,20 +26,27 @@ Prompts are now editable without recompiling. The native `AnalysisEngine` (in `S
 
 | Key | Used by | Placeholders |
 |-----|---------|-------------|
-| `model` | Vision extraction (context capture via Haiku) | — |
-| `draft_model` | Message drafting (Sonnet — quality output the user sees) | — |
-| `drafting_system` | DraftEngine fallback when no style examples yet | — |
-| `context_extraction` | Vision prompt for screenshot → conversation | `{USER_NAME}`, `{APP_NAME}` |
-| `ghostwriting_system` | Main drafting prompt with style profile | `{STYLE_SUMMARY}` |
-| `style_analysis_early` | Style analysis with < 10 examples | — |
-| `style_analysis_growing` | Style analysis with 10–19 examples | — |
-| `style_analysis_mature` | Style analysis with 20+ examples | — |
+| `model` | **Vestigial** -- no longer determines which model is used | -- |
+| `draft_model` | **Vestigial** -- no longer determines which model is used | -- |
+| `drafting_system` | DraftEngine fallback when no style examples yet | -- |
+| `context_extraction` | **Vestigial** -- vision now uses Apple Vision OCR (VNRecognizeTextRequest), not an LLM | `{USER_NAME}`, `{APP_NAME}` |
+| `ghostwriting_system` | Main drafting prompt with style profile (used by MLXEngine) | `{STYLE_SUMMARY}` |
+| `style_analysis_early` | Style analysis with < 10 examples (used by MLXEngine) | -- |
+| `style_analysis_growing` | Style analysis with 10-19 examples (used by MLXEngine) | -- |
+| `style_analysis_mature` | Style analysis with 20+ examples (used by MLXEngine) | -- |
+
+### Vestigial Keys
+
+The `model`, `draft_model`, and `context_extraction` keys remain in `prompts.json` from the API era but are no longer functionally used:
+
+- **`model` and `draft_model`**: The actual model is determined by `MLXEngine.modelId` (`mlx-community/Qwen3.5-4B-4bit`), which is hardcoded in `Sources/Local/MLXEngine.swift`. These JSON keys are ignored at runtime.
+- **`context_extraction`**: Vision/OCR now uses Apple's `VNRecognizeTextRequest` via `LocalVisionExtractor`, not an LLM vision prompt. The key is preserved for backward compatibility but its value is not read.
 
 ## Placeholders
 
-- `{STYLE_SUMMARY}` — replaced at runtime by `PromptStore.ghostwritingPrompt(styleSummary:)` with the user's style profile from style.md
-- `{USER_NAME}` — replaced by `PromptStore.contextExtractionPrompt(userName:appName:)` with the user's name (or a fallback: "Identify the user based on which side of the conversation they appear on.")
-- `{APP_NAME}` — replaced with the source app name (or a fallback: "Identify which messaging app this is from the UI.")
+- `{STYLE_SUMMARY}` -- replaced at runtime by `PromptStore.ghostwritingPrompt(styleSummary:)` with the user's style profile from style.md
+- `{USER_NAME}` -- replaced by `PromptStore.contextExtractionPrompt(userName:appName:)` (vestigial -- this method is no longer called in the active path)
+- `{APP_NAME}` -- replaced with the source app name (vestigial -- same as above)
 
 **Important**: The analysis engine must preserve these placeholders when rewriting prompts.
 
@@ -48,13 +55,13 @@ Prompts are now editable without recompiling. The native `AnalysisEngine` (in `S
 | Method | Purpose |
 |--------|---------|
 | `reload()` | Re-reads `prompts.json` from disk. Call after the analysis engine rewrites prompts. |
-| `ghostwritingPrompt(styleSummary:)` | Returns `ghostwritingSystem` with `{STYLE_SUMMARY}` replaced. |
-| `styleAnalysisPrompt(forExampleCount:)` | Returns the appropriate tiered prompt: `early` (< 10 examples), `growing` (10-19), or `mature` (>= 20). |
-| `contextExtractionPrompt(userName:appName:)` | Returns `contextExtraction` with `{USER_NAME}` and `{APP_NAME}` replaced by descriptive clauses. |
+| `ghostwritingPrompt(styleSummary:)` | Returns `ghostwritingSystem` with `{STYLE_SUMMARY}` replaced. Used by the active drafting path. |
+| `styleAnalysisPrompt(forExampleCount:)` | Returns the appropriate tiered prompt: `early` (< 10 examples), `growing` (10-19), or `mature` (>= 20). Used by StyleEngine via MLXEngine. |
+| `contextExtractionPrompt(userName:appName:)` | Vestigial -- was used for LLM-based vision extraction. Vision now uses Apple Vision OCR. |
 
 ## Fallbacks
 
-If `prompts.json` is missing or corrupt, `PromptStore` initializes with hardcoded defaults from `DefaultPrompts` (defined in `PromptStore.swift`) and writes them to disk via a private static `write(config:to:)` helper. Individual engines also carry last-resort fallbacks — the app never crashes due to missing prompts.
+If `prompts.json` is missing or corrupt, `PromptStore` initializes with hardcoded defaults from `DefaultPrompts` (defined in `PromptStore.swift`) and writes them to disk via a private static `write(config:to:)` helper. Individual engines also carry last-resort fallbacks -- the app never crashes due to missing prompts.
 
 ## Updating Prompts
 
@@ -63,8 +70,6 @@ If `prompts.json` is missing or corrupt, `PromptStore` initializes with hardcode
 
 ## Model Selection
 
-Two model keys in `prompts.json`:
-- `model` — Used for vision extraction / context capture (default: `claude-haiku-4-5-20251001`)
-- `draft_model` — Used for message drafting, the text the user actually sees (default: `claude-sonnet-4-6-20250514`)
+All inference runs on-device via MLXEngine using the `mlx-community/Qwen3.5-4B-4bit` model (~30-50 tok/s on Apple Silicon). The model is determined by `MLXEngine.modelId` in `Sources/Local/MLXEngine.swift`, not by any key in `prompts.json`.
 
-`DefaultPrompts` also exposes these as `DefaultPrompts.model` and `DefaultPrompts.sonnetModel` for use as fallbacks. Style refinement and analysis always use Sonnet (`AnthropicAPI.sonnetModel`) regardless of these settings — they need deeper reasoning.
+The `model` and `draft_model` keys in `prompts.json` are vestigial from when the app used the Anthropic API with separate models for different tasks (e.g., Haiku for vision, Sonnet for drafting). They are no longer read at runtime. To change the model, update `MLXEngine.modelId` in Swift source and rebuild.

@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A macOS utility that captures rough spoken (or typed) thoughts and uses Claude Haiku to polish them into well-crafted messages matching the user's personal writing style. Features a floating overlay UI (non-activating NSPanel), global hotkey screen capture for full conversation context extraction, token-by-token streaming, and platform-aware formatting. Built with SwiftUI, Apple Speech Framework, and the Anthropic Messages API.
+A macOS utility that captures rough spoken (or typed) thoughts and uses a local LLM (Qwen 3.5-4B via MLX) to polish them into well-crafted messages matching the user's personal writing style. Features a floating overlay UI (non-activating NSPanel), global hotkey screen capture for full conversation context extraction, token-by-token streaming, and platform-aware formatting. Built with SwiftUI, Apple Speech Framework, and on-device MLX inference — fully local, no external APIs.
 
 ## Architecture
 
@@ -15,14 +15,15 @@ Sources/
 ├── HotkeyPreferences.swift  ← Stores/loads custom hotkey bindings (UserDefaults), Carbon modifier conversion, display strings
 ├── CLAUDE.md                ← Initialization order and boot sequence documentation
 ├── Speech/                  ← ParakeetEngine (CoreML STT) + STTRouter
-├── API/                     ← Anthropic API client (text + vision + streaming) + AuthCredential + Keychain + ChatMessage
+├── API/                     ← BetaConfig (#if BETA_BUILD gated) — no API client
 ├── Draft/                   ← DraftEngine + PlatformFormatter + DraftUtils — orchestrates drafting
 ├── Style/                   ← StyleEngine + StyleUtils — learns user's writing voice + onboarding
+├── Local/                   ← MLXEngine — on-device LLM inference (Qwen 3.5-4B-4bit via mlx-swift-lm)
 ├── Prompts/                 ← PromptStore — externalized prompts (prompts.json)
 ├── Feedback/                ← FeedbackStore — accept/edit signal logging (feedback.jsonl) + UsageStats
 ├── Messages/                ← iMessage database reader (SQLite, onboarding import) + MessageFilter
-├── Capture/                 ← Screen capture, context extraction, hotkey registration, three-way routing, PreviousAppTracker
-├── Analysis/                ← AnalysisEngine + InsightCard — native Swift feedback analyzer (replaces Python agent)
+├── Capture/                 ← Screen capture, context extraction (Apple Vision OCR), hotkey registration, three-way routing, PreviousAppTracker
+├── Analysis/                ← AnalysisEngine + InsightCard — native Swift feedback analyzer
 ├── Accessibility/           ← AccessibilityBridge — AXUIElement queries for text field position + value
 ├── Observability/           ← EventReporter + AppLogger + JSONLWriter — centralized error/warning/info tracking (events.jsonl)
 └── UI/                      ← UI layer (16 files): floating overlay, MenuBarPanel, onboarding, AgentSection
@@ -44,18 +45,19 @@ bash run-tests.sh    # Run 159 unit tests (pure functions only, ~2s)
 
 ## Key Features
 
+- **Fully local inference** — All LLM work runs on-device via MLX (Qwen 3.5-4B-4bit, ~30-50 tok/s). No API keys, no accounts, no network required
 - **Floating overlay UI** — Non-activating NSPanel appears over the user's current app; target app stays frontmost so paste works without re-activation
-- **Voice-to-text** — Speak rough thoughts, Draft polishes them via Haiku with token-by-token streaming
-- **Full conversation context** — Option+Space screenshots the current app, Haiku Vision extracts the entire visible conversation thread (all messages, participants, platform, formality)
+- **Voice-to-text** — Speak rough thoughts, Draft polishes them via the local model with token-by-token streaming
+- **Full conversation context** — Option+D screenshots the current app, Apple Vision OCR extracts the entire visible conversation thread (all messages, participants, platform, formality)
 - **Platform-aware formatting** — Detects Slack/iMessage/email/Discord/Teams and adjusts drafting style (e.g., no subject lines for Slack, casual for iMessage)
-- **Style learning** — Every accepted draft saves a training pair (AI output vs. what you actually sent); Sonnet incrementally refines your style profile with graduated frequency
-- **Style onboarding** — New users can import iMessages automatically (recommended) or paste samples manually; Sonnet builds an immediate style profile (no cold start)
+- **Style learning** — Every accepted draft saves a training pair (AI output vs. what you actually sent); MLXEngine incrementally refines your style profile with graduated frequency
+- **Style onboarding** — New users can import iMessages automatically (recommended) or paste samples manually; local MLX analysis builds an immediate style profile (no cold start)
 - **Combined onboarding** — iMessage import path includes optional "Add Slack, email, or other writing samples" section to supplement with additional sources for a richer profile
 - **iMessage import** — Optional onboarding path that reads `~/Library/Messages/chat.db` for zero-effort style profile generation (requires Full Disk Access)
 - **Paste to source app** — Injects the polished message into the exact app that was screenshotted, with clipboard save/restore
 - **Frictionless keyboard flow** — ⌥D to start draft → speak → ⌥D to draft → Enter to inject → Escape to cancel at any time. ⌥Space for dictation → speak → ⌥Space to paste. No clicking required
 - **Menu bar dashboard** — Single-pane menubar popover (440x520) with status, usage stats (words dictated, messages drafted, time saved), shortcut pills, compact/expandable writing style, and agent section (insight cards + chat). System-adaptive colors via `MenuTokens`
-- **Native analysis engine** — Swift-native AnalysisEngine watches feedback via DispatchSource, uses Sonnet to analyze patterns, and proposes prompt improvements as InsightCards in the agent section
+- **Native analysis engine** — Swift-native AnalysisEngine watches feedback via DispatchSource, uses the local model to analyze patterns, and proposes prompt improvements as InsightCards in the agent section
 - **Reliability hardened** — All force-unwraps guarded, stale Tasks cancelled before replacement, deinits on all engines (Carbon hotkeys, audio engine, file watchers), NSLock-batched audio samples, global Escape monitor, streaming state guards
 - **Observability** — `EventReporter` captures 43 structured events across 11 engines to `events.jsonl`. See "Diagnosing Issues" below.
 
@@ -82,7 +84,7 @@ If the user describes the problem area (e.g., "voice didn't work", "draft was we
 | "Voice/mic didn't work" | `parakeet` |
 | "Draft was bad/empty/refused" | `overlay`, `draft` |
 | "Nothing happened on hotkey" | `capture`, `overlay` |
-| "API error / auth issue" | `anthropic`, `draft` |
+| "Model failed to load" | `mlx`, `draft` |
 | "Style seems off" | `style` |
 | "Paste didn't work" | `overlay` |
 | "Screen capture failed" | `capture` |
@@ -96,7 +98,7 @@ grep '"engine":"parakeet"' ~/Library/Application\ Support/Draft/events.jsonl | t
 `events.jsonl` gives structured data; the debug log gives the full narrative:
 
 ```bash
-tail -200 ~/draft-debug.log | grep -E "SESSION|PARAKEET|VISION|STYLE|DICTATION"
+tail -200 ~/draft-debug.log | grep -E "SESSION|PARAKEET|VISION|STYLE|DICTATION|MLX"
 ```
 
 ### Step 4: Cross-reference and diagnose
@@ -106,14 +108,13 @@ Read both logs together. Common patterns:
 | events.jsonl event | Likely cause | Fix direction |
 |--------------------|-------------|---------------|
 | `prewarm_failed` | Audio device issue or model missing | Check mic permissions, re-download model |
-| `api_http_error` + status 401 | Auth expired | Regenerate API key or subscription token |
-| `api_http_error` + status 529 | Anthropic overloaded | Transient — retry |
-| `vision_timeout` | Slow network or complex screenshot | Increase timeout or check network |
-| `draft_empty` | API returned nothing | Check prompt, check auth |
-| `stream_draft_failed` | Network interruption during streaming | Check connectivity |
-| `refusal_detected` | Claude refused to ghostwrite | Check prompt for missing context signals |
-| `subscription_expired` | OAuth token expired | Run `claude setup-token` and update |
-| `style_refinement_failed` | Sonnet call failed during refinement | Check auth and API status |
+| `mlx_load_failed` | Model not downloaded or corrupted | Re-download Qwen model (~2.5GB) |
+| `mlx_generate_failed` | Model inference error | Check available memory, restart app |
+| `vision_timeout` | Complex screenshot or slow OCR | Increase timeout or simplify capture |
+| `draft_empty` | Model returned nothing | Check prompt, check model state |
+| `stream_draft_failed` | Model inference interrupted | Check memory pressure, restart app |
+| `refusal_detected` | Model refused to ghostwrite | Check prompt for missing context signals |
+| `style_refinement_failed` | Local model call failed during refinement | Check model state and memory |
 | `mic_not_authorized` | User revoked mic permission at runtime | Re-grant in System Settings |
 
 ### Step 5: Suggest a fix or investigate further
@@ -152,8 +153,8 @@ After identifying the error, either:
        │                 └─→ Live transcription shown in overlay
        │
        └─→ [PARALLEL B] Vision processing (stored as visionTask)
-                         └─→ AnthropicAPI.withTimeout(seconds: 8) {
-                               extractStructuredContext(imageData)
+                         └─→ DraftConstants.withTimeout(seconds: 8) {
+                               extractStructuredContext(imageData)  // Apple Vision OCR
                              }
                          └─→ Returns CapturedContext → stored as lastCapturedContext
 
@@ -163,7 +164,7 @@ After identifying the error, either:
    ├─→ await visionTask?.value  ← waits for vision to complete (or 8s timeout)
    ├─→ Build prompt: CapturedContext.draftingPrompt(userInstructions:)
    ├─→ StyleEngine.buildSystemPrompt() + PlatformFormatter.formattingInstructions
-   └─→ AnthropicAPI.streamDraft() → tokens stream into overlay in real-time
+   └─→ MLXEngine.generate() → tokens stream into overlay in real-time
        └─→ Overlay transitions: listening → drafting → streaming → review
        └─→ Auto-focus: TextEditor receives keyboard focus via @FocusState
 
@@ -175,7 +176,7 @@ After identifying the error, either:
    │   ├─→ looksLikeRefusal() check — skip training if refusal detected
    │   ├─→ styleEngine.recordExample(aiDraft:userFinal:platform:userInstructions:formality:)
    │   ├─→ feedbackStore.record() → append to feedback.jsonl
-   │   └─→ shouldRefineNow() → maybe trigger Sonnet refinement via regenerateStyleSummary()
+   │   └─→ shouldRefineNow() → maybe trigger local MLX refinement via regenerateStyleSummary()
    │
    ├─→ Escape → cancelSession() → shake animation + hide overlay, discard draft
    │
@@ -184,7 +185,7 @@ After identifying the error, either:
 
 ### No-Context Fallback
 
-If vision times out (> 8s) or fails, the fallback prompt asks Claude to "clean up and polish the dictation" rather than "write a reply" — the latter confuses Claude when there's no conversation context.
+If vision times out (> 8s) or fails, the fallback prompt asks the model to "clean up and polish the dictation" rather than "write a reply" — the latter confuses the model when there's no conversation context.
 
 ### Refusal Detection
 
@@ -202,12 +203,12 @@ If vision times out (> 8s) or fails, the fallback prompt asks Claude to "clean u
 
 1. **`Sources/Style/StyleEngine.swift`** — Add the field to the `exampleBlock` string in `recordExample()`, update `extractRecentEditDistances()` if it's a parseable metric
 2. **`Sources/UI/DraftSessionController.swift`** — Pass the new data into `recordExample()` from `confirmAndInject()`
-3. **`Sources/Style/StyleEngine.swift`** — Update `buildRefinementPrompt()` to tell Sonnet about the new field
+3. **`Sources/Style/StyleEngine.swift`** — Update `buildRefinementPrompt()` to tell the model about the new field
 4. **`Sources/Style/CLAUDE.md`** — Update the file format example
 
 ### To change the refinement logic:
 
-1. **`Sources/Style/StyleEngine.swift`** — Modify `shouldRefineNow()` for frequency, `extractRecentExamplesText(last:)` for window size, `buildRefinementPrompt()` for what Sonnet sees
+1. **`Sources/Style/StyleEngine.swift`** — Modify `shouldRefineNow()` for frequency, `extractRecentExamplesText(last:)` for window size, `buildRefinementPrompt()` for what the model sees
 2. **`Sources/UI/DraftSessionController.swift`** — The call site in `confirmAndInject()` calls `shouldRefineNow()` — usually no changes needed here
 
 ### To modify the vision extraction prompt:
@@ -247,15 +248,14 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 ## Key Decisions
 
 - **Single binary, no Xcode project** — compiled with `swiftc` directly via `build.sh`
-- **Zero third-party dependencies** — only Apple frameworks and URLSession for HTTP
-- **Credentials in macOS Keychain** — not UserDefaults, not hardcoded, not env vars
-- **Two auth modes supported** — API key (`x-api-key`) OR Claude subscription token (`Authorization: Bearer`) via `AuthCredential` enum. See `Sources/API/CLAUDE.md`.
+- **Fully local inference** — all LLM work runs on-device via MLX (Qwen 3.5-4B-4bit, ~30-50 tok/s on Apple Silicon). No API keys, no accounts, no network required for core functionality
+- **Zero third-party dependencies** — only Apple frameworks + FluidAudio/MLX built from source
 - **Sandbox disabled** (`com.apple.security.app-sandbox: false`) — required for microphone + screen capture
 - **Carbon RegisterEventHotKey** for global hotkey — OS-level interception, works in any app
 - **Synchronous screenshot in hotkey callback** — captures frontmost app + screenshot before window focus shifts to Draft
 - **Non-activating NSPanel** — the floating overlay doesn't steal focus from the target app, so paste-back works without re-activation
-- **Token-by-token streaming** — `AnthropicAPI.streamDraft()` returns `AsyncThrowingStream<String, Error>`, first token appears ~200ms after request
-- **Plain-text vision extraction** — Haiku Vision returns labeled sections (PLATFORM/TALKING TO/FORMALITY/CONVERSATION), parsed by `CapturedContext.parse()`. No JSON — simpler and handles variable-length conversations
+- **Token-by-token streaming** — `MLXEngine.generate()` returns `AsyncThrowingStream<String, Error>`, first token appears ~200ms after request
+- **Apple Vision OCR for context extraction** — `VNRecognizeTextRequest` extracts text from screenshots, parsed by `CapturedContext.parse()` into labeled sections (PLATFORM/TALKING TO/FORMALITY/CONVERSATION). Fully on-device, no cloud OCR
 - **Source app stored on capture** — The exact `NSRunningApplication` is saved at hotkey time, so paste-back targets the right app even if focus changes
 - **Externalized prompts** — All system prompts live in `~/Library/Application Support/Draft/prompts.json`, loaded by `PromptStore`. The analysis engine can rewrite prompts without recompiling. Engines read from `promptStore` with hardcoded fallbacks in `DefaultPrompts`.
 - **Feedback logging + usage stats** — Every accepted draft appends a JSON line to `~/Library/Application Support/Draft/feedback.jsonl` with raw text, AI draft, user's accepted version, action (copy/paste), example count, and formality. `FeedbackStore.refreshStats()` parses the log to compute aggregate usage stats (words dictated, messages drafted, time saved) displayed in the menubar panel.
@@ -269,12 +269,11 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - **All engines have deinits** — `ContextCaptureEngine` (Carbon hotkeys), `AnalysisEngine` (DispatchSource + debounce task), `ParakeetEngine` (audio engine stop + AsrManager cleanup). Missing deinits leak OS-level resources.
 - **Fresh NSHostingController per popover open** — Recreating the hosting controller on each menubar popover toggle prevents stale SwiftUI observation state from accumulating across show/hide cycles. A long-lived `NSHostingController` eventually crashes in `body` evaluation after hours of use.
 - **Intent-first drafting** — System prompt prioritizes accomplishing the user's communicative intent over style mimicry. `<primary_goal>` appears before `<style_profile>`, and style is framed as a "finishing layer" via `<how_to_use_style>`. The user message prompt reinforces this with "accomplish this goal above all else" and an anti-opener rule. See `Sources/Style/CLAUDE.md` § "Application — Ghostwriting System Prompt (Intent-First)".
-- **API retry for transient errors** — `draft()` and `streamDraft()` automatically retry once after a 2-second delay for HTTP 529/503 (Anthropic overloaded) and network errors (timeout, connection lost). `streamDraft()` only retries the connection phase — once tokens have been yielded, retrying would duplicate output.
 - **Clipboard restore via changeCount polling** — `pasteWithClipboardRestore()` polls `NSPasteboard.changeCount` every 50ms with a 2-second timeout (some apps write back to clipboard on paste, which triggers early restore). Replaces the old fixed 500ms delay.
 - **Debug log rotation** — `AppLogFileWriter` preserves logs across sessions (no wipe on launch). Files over 500KB are rotated to the last 1000 lines. Session separators mark boundaries.
 - **Centralized constants** — `DraftConstants` enum in `Sources/DraftConstants.swift` holds timeouts, thresholds, retry delays, buffer sizes, and data limits. Use these instead of inline magic numbers when modifying configuration-like values.
-- **Pure-function test suite** — 159 tests in `Tests/` covering CapturedContext, PlatformFormatter, DraftUtils, MessageFilter, StyleUtils, InsightCard, and AnthropicAPIError. Compiled with `swiftc` (no Xcode/XCTest dependency), runs in ~2 seconds. **Always run `bash build.sh && bash run-tests.sh` after modifying any Swift file.**
-- **Extracted pure utilities for testability** — `StyleUtils`, `DraftUtils`, `MessageFilter` are stateless enums with static methods, extracted from `@MainActor ObservableObject` classes so they can be tested without SwiftUI. `AnthropicAPITypes.swift` holds the error enum and Codable types separate from the API client.
+- **Pure-function test suite** — 159 tests in `Tests/` covering CapturedContext, PlatformFormatter, DraftUtils, MessageFilter, StyleUtils, InsightCard, and error types. Compiled with `swiftc` (no Xcode/XCTest dependency), runs in ~2 seconds. **Always run `bash build.sh && bash run-tests.sh` after modifying any Swift file.**
+- **Extracted pure utilities for testability** — `StyleUtils`, `DraftUtils`, `MessageFilter` are stateless enums with static methods, extracted from `@MainActor ObservableObject` classes so they can be tested without SwiftUI.
 
 ## Project-Wide Learnings
 
@@ -297,18 +296,19 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - **Clipboard safety on inject** — `pasteWithClipboardRestore()` saves the user's clipboard, sets the draft text, simulates ⌘V, then restores after 500ms. The non-activating panel means the target app stays frontmost
 - **`.onAppear` re-fires when `.id()` changes** — Never mutate the value driving `.id()` inside `.onAppear`, or you get an infinite view recreation loop that starves the main thread
 
-### API & Auth
+### Local Inference (MLX)
 
-- **No official Anthropic Swift SDK** — raw URLSession with Codable + JSONSerialization for vision. → See `Sources/API/CLAUDE.md`
-- **Claude subscription auth requires the `oauth-2025-04-20` beta header** — without it, the API rejects OAuth tokens (`sk-ant-oat...`) with a 401. Set automatically by `AuthCredential.apply(to:)`. Users generate tokens via `claude setup-token`. Tokens expire and must be regenerated
-- **Auth is abstracted behind `AuthCredential`** — never pass raw `apiKey: String` around. Use `AuthCredential.load()` and `auth.apply(to: &request)`. → See `Sources/API/CLAUDE.md`
-- **AnthropicAPI is a thin HTTP client** — model and prompts are passed by callers, not hardcoded. Only `sonnetModel` remains as a constant. → See `Sources/API/CLAUDE.md`
+- **MLXEngine is a Swift actor** — wraps mlx-swift-lm for thread-safe model access. See `Sources/Local/CLAUDE.md`
+- **Model: `mlx-community/Qwen3.5-4B-4bit`** — downloaded from HuggingFace on first use (~2.5GB), cached at `~/Library/Caches/models/mlx-community/Qwen3.5-4B-4bit/`
+- **Thinking mode disabled** — `userInput.additionalContext = ["enable_thinking": false]` to avoid reasoning tokens in output
+- **Performance: 30-50 tok/s on Apple Silicon** — sufficient for real-time streaming in the overlay
+- **Metal shaders must be colocated** — `mlx.metallib` must be placed next to the binary (`Contents/MacOS/`). MLX searches colocated first
 
 ### Vision & Context Capture
 
 - **Global hotkey timing is critical** — screenshot AND frontmost app reference must be captured synchronously in the C callback before any `Task { @MainActor }` dispatch, or window focus shifts and you capture Draft instead of the target app. → See `Sources/Capture/CLAUDE.md`
-- **Haiku confuses message content with metadata** — the vision prompt must explicitly say "look at the conversation HEADER/TITLE BAR for the contact name, NOT names mentioned inside messages"
-- **Vision race condition requires explicit await** — `stopSessionAndDraft()` must `await visionTask?.value` before reading `lastCapturedContext`. Vision timeout is 8 seconds (4s was too aggressive — typical calls take 2-6s)
+- **Apple Vision OCR for context extraction** — `VNRecognizeTextRequest` extracts text from screenshots on-device. Results are parsed by `CapturedContext.parse()` into structured sections
+- **Vision race condition requires explicit await** — `stopSessionAndDraft()` must `await visionTask?.value` before reading `lastCapturedContext`. Vision timeout is 8 seconds
 - **Hotkey labels in ContextCaptureEngine** — ⌥D = hotkey ID 1 (draft mode), ⌥Space = hotkey ID 2 (dictation mode). Both use signature `0x44524654` ('DRFT'). → See `Sources/Capture/CLAUDE.md`
 
 ### Concurrency & Initialization
@@ -329,7 +329,7 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - `SwiftUI` — UI
 - `AVFoundation` — Audio engine / microphone
 - `Speech` — Apple Speech recognition (used by ParakeetEngine for live display)
-- `Security` — Keychain access
+- `Vision` — Apple Vision framework (VNRecognizeTextRequest for OCR context extraction)
 - `AppKit` — macOS-specific (NSPasteboard, NSWorkspace, NSRunningApplication, NSPanel)
 - `ApplicationServices` — Accessibility API (AXUIElement queries in AccessibilityBridge)
 - `Carbon` — Global hotkey registration (RegisterEventHotKey)
@@ -338,5 +338,5 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - `CoreAudio` — Audio device queries (input device name via AudioObjectGetPropertyData)
 - `Combine` — Required by SwiftUI internally
 - `SQLite3` (via `-lsqlite3`) — iMessage database reading for style onboarding
-- `Metal` / `MetalKit` / `Accelerate` — Indirect dependencies via FluidAudio (CoreML Parakeet inference)
+- `Metal` / `MetalKit` / `Accelerate` — MLX inference backend + FluidAudio (CoreML Parakeet inference)
 - `libc++` (via `-lc++`) — Required by FluidAudio's C++ components

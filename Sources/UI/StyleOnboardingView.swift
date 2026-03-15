@@ -1,26 +1,44 @@
 // StyleOnboardingView.swift
-// Onboarding: intro (name) → build style profile with Claude or ChatGPT → paste back
+// Onboarding: intro (name) → source choice → (iMessage / paste samples) → local analysis → result
 
 import SwiftUI
 import AppKit
 
 struct StyleOnboardingView: View {
     @ObservedObject var styleEngine: StyleEngine
+    @ObservedObject var localInference: LocalInferenceManager
 
-    enum Step { case intro, buildProfile }
+    enum Step { case intro, sourceChoice, imessagePreview, samples, result }
 
     @State private var step: Step = .intro
     @State private var nameInput = UserDefaults.standard.string(forKey: "user-display-name") ?? ""
-    @State private var pastedProfile = ""
-    @State private var saveError: String?
+    @State private var pastedSamples = ""
+    @State private var generatedProfile = ""
+    @State private var errorMessage: String?
+    @State private var isAnalyzing = false
+
+    // iMessage state
+    @State private var loadedMessages: [iMessageReader.ImportedMessage] = []
+    @State private var imessageError: String?
+    @State private var isLoadingMessages = false
+    @State private var supplementText = ""
+    @State private var showSupplement = false
+
+    private let reader = iMessageReader()
 
     var body: some View {
         VStack(spacing: 0) {
             switch step {
             case .intro:
                 introView
-            case .buildProfile:
-                buildProfileView
+            case .sourceChoice:
+                sourceChoiceView
+            case .imessagePreview:
+                imessagePreviewView
+            case .samples:
+                samplesView
+            case .result:
+                resultView
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -68,7 +86,7 @@ struct StyleOnboardingView: View {
             Button(action: {
                 let trimmed = nameInput.trimmingCharacters(in: .whitespacesAndNewlines)
                 UserDefaults.standard.set(trimmed, forKey: "user-display-name")
-                withAnimation { step = .buildProfile }
+                withAnimation { step = .sourceChoice }
             }) {
                 HStack {
                     Text("Next — Build My Writing Profile")
@@ -97,114 +115,304 @@ struct StyleOnboardingView: View {
         .padding(30)
     }
 
-    // MARK: - Step 2: Build Profile with Claude or ChatGPT
+    // MARK: - Step 2: Source Choice
 
-    private var buildProfileView: some View {
+    private var sourceChoiceView: some View {
+        VStack(spacing: 20) {
+            Spacer()
+
+            Image(systemName: "sparkles")
+                .font(.system(size: 36))
+                .foregroundColor(.purple)
+
+            Text("Build Your Writing Profile")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text("Draft analyzes your writing on-device to learn your style.\nChoose how to provide samples:")
+                .font(.callout)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 400)
+
+            VStack(spacing: 12) {
+                // iMessage import card
+                Button(action: { loadIMessages() }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "message.fill")
+                            .font(.title2)
+                            .foregroundColor(.blue)
+                            .frame(width: 32)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Import from iMessages")
+                                .font(.body)
+                                .fontWeight(.medium)
+                            Text("Recommended — zero effort, best results")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(14)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .cornerRadius(10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.blue.opacity(0.3), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+
+                // Paste samples card
+                Button(action: { withAnimation { step = .samples } }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "doc.on.clipboard")
+                            .font(.title2)
+                            .foregroundColor(.purple)
+                            .frame(width: 32)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Paste Writing Samples")
+                                .font(.body)
+                                .fontWeight(.medium)
+                            Text("Paste Slack messages, emails, or texts")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(14)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .cornerRadius(10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.purple.opacity(0.3), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 30)
+
+            if isLoadingMessages {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading messages...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            if let error = imessageError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 30)
+            }
+
+            Button("Skip for Now") {
+                styleEngine.completeOnboarding()
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.secondary)
+            .font(.caption)
+
+            Spacer()
+        }
+        .padding(24)
+    }
+
+    // MARK: - Step 3a: iMessage Preview
+
+    private var imessagePreviewView: some View {
+        VStack(spacing: 12) {
+            Text("Your Messages")
+                .font(.title2)
+                .fontWeight(.semibold)
+                .padding(.top, 16)
+
+            Text("\(loadedMessages.count) messages loaded — these stay on your device.")
+                .font(.callout)
+                .foregroundColor(.secondary)
+
+            // Message preview
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(loadedMessages.prefix(50), id: \.text) { msg in
+                        Text(msg.text)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if loadedMessages.count > 50 {
+                        Text("... and \(loadedMessages.count - 50) more")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .italic()
+                    }
+                }
+                .padding(10)
+            }
+            .background(Color(nsColor: .textBackgroundColor))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+            )
+            .padding(.horizontal, 20)
+
+            // Supplement section
+            DisclosureGroup(isExpanded: $showSupplement) {
+                TextEditor(text: $supplementText)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(height: 60)
+                    .scrollContentBackground(.hidden)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .cornerRadius(6)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
+            } label: {
+                Text("Add Slack, email, or other writing samples")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 20)
+
+            if let error = errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+
+            HStack(spacing: 12) {
+                Button("Back") {
+                    withAnimation { step = .sourceChoice }
+                }
+                .buttonStyle(.bordered)
+
+                Button(action: { analyzeIMessages() }) {
+                    HStack {
+                        if isAnalyzing {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(isAnalyzing ? "Analyzing..." : "Analyze These Messages")
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 16)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.purple)
+                .disabled(isAnalyzing || !localInference.isReady)
+            }
+
+            if !localInference.isReady {
+                Text("Waiting for language model to load...")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            }
+
+            Button("Skip for Now") {
+                styleEngine.completeOnboarding()
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.secondary)
+            .font(.caption)
+            .padding(.bottom, 8)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    // MARK: - Step 3b: Paste Samples
+
+    private var samplesView: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 36))
+            VStack(spacing: 14) {
+                Image(systemName: "doc.on.clipboard")
+                    .font(.system(size: 32))
                     .foregroundColor(.purple)
                     .padding(.top, 16)
 
-                Text("Build Your Writing Profile")
+                Text("Paste Your Writing")
                     .font(.title2)
                     .fontWeight(.semibold)
 
-                Text("Click a button to open a prompt in Claude or ChatGPT.\nPaste the result back here.")
+                Text("Paste messages you've written — Slack, texts, emails.\nMessy is fine. The more, the better.")
                     .font(.callout)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 400)
+                    .frame(maxWidth: 380)
 
-                // Claude / ChatGPT buttons
-                HStack(spacing: 12) {
-                    Button(action: { openProfilePrompt(service: .claude) }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "sparkle")
-                                .font(.system(size: 14))
-                            Text("Build with Claude")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
+                TextEditor(text: $pastedSamples)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(maxWidth: .infinity, minHeight: 150, maxHeight: 200)
+                    .scrollContentBackground(.hidden)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
+                    .overlay(alignment: .topLeading) {
+                        if pastedSamples.isEmpty {
+                            Text("Paste your messages here...\ne.g. Slack threads, text conversations, emails")
+                                .foregroundColor(.secondary)
+                                .italic()
+                                .font(.caption)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 8)
+                                .allowsHitTesting(false)
                         }
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 16)
-                        .background(Color(red: 0.85, green: 0.65, blue: 0.45).opacity(0.15))
-                        .cornerRadius(8)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color(red: 0.85, green: 0.65, blue: 0.45).opacity(0.4), lineWidth: 1)
-                        )
                     }
-                    .buttonStyle(.plain)
 
-                    Button(action: { openProfilePrompt(service: .chatgpt) }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "circle.hexagonpath")
-                                .font(.system(size: 14))
-                            Text("Build with ChatGPT")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                        }
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 16)
-                        .background(Color.green.opacity(0.08))
-                        .cornerRadius(8)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.green.opacity(0.3), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                // Paste box
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Paste your generated profile here:")
+                HStack {
+                    let wordCount = pastedSamples.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
+                    Text("\(wordCount) words")
                         .font(.caption)
                         .foregroundColor(.secondary)
-
-                    TextEditor(text: $pastedProfile)
-                        .font(.system(.caption, design: .monospaced))
-                        .frame(maxWidth: .infinity, minHeight: 150, maxHeight: 200)
-                        .scrollContentBackground(.hidden)
-                        .background(Color(nsColor: .textBackgroundColor))
-                        .cornerRadius(8)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                        )
-                        .overlay(alignment: .topLeading) {
-                            if pastedProfile.isEmpty {
-                                Text("Copy the output from Claude or ChatGPT\nand paste it here...")
-                                    .foregroundColor(.secondary)
-                                    .italic()
-                                    .font(.caption)
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 8)
-                                    .allowsHitTesting(false)
-                            }
-                        }
+                    Spacer()
                 }
 
-                if let error = saveError {
+                if let error = errorMessage {
                     Text(error)
                         .font(.caption)
                         .foregroundColor(.red)
                 }
 
-                // Save button
-                Button(action: { saveProfile() }) {
-                    HStack {
-                        Image(systemName: "checkmark")
-                        Text("Save My Profile")
+                HStack(spacing: 12) {
+                    Button("Back") {
+                        withAnimation { step = .sourceChoice }
                     }
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 24)
+                    .buttonStyle(.bordered)
+
+                    Button(action: { analyzePastedSamples() }) {
+                        HStack {
+                            if isAnalyzing {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text(isAnalyzing ? "Analyzing..." : "Build My Profile")
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 16)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.purple)
+                    .disabled(pastedSamples.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isAnalyzing || !localInference.isReady)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.purple)
-                .disabled(pastedProfile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if !localInference.isReady {
+                    Text("Waiting for language model to load...")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
 
                 Button("Skip for Now") {
                     styleEngine.completeOnboarding()
@@ -218,45 +426,129 @@ struct StyleOnboardingView: View {
         }
     }
 
+    // MARK: - Step 4: Result
+
+    private var resultView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 32))
+                .foregroundColor(.green)
+                .padding(.top, 16)
+
+            Text("Your Writing Profile")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            ScrollView {
+                Text(generatedProfile)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+            }
+            .background(Color(nsColor: .textBackgroundColor))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.green.opacity(0.3), lineWidth: 1)
+            )
+            .padding(.horizontal, 20)
+
+            HStack(spacing: 12) {
+                Button("Add More & Regenerate") {
+                    withAnimation { step = .sourceChoice }
+                }
+                .buttonStyle(.bordered)
+
+                Button(action: {
+                    styleEngine.completeOnboarding()
+                    EventTracker.track("onboarding.completed", with: ["source": "local"])
+                }) {
+                    HStack {
+                        Image(systemName: "checkmark")
+                        Text("Looks Good")
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 16)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.purple)
+            }
+            .padding(.bottom, 12)
+        }
+        .padding(.horizontal, 4)
+    }
+
     // MARK: - Actions
 
-    private enum AIService { case claude, chatgpt }
-
-    private func openProfilePrompt(service: AIService) {
-        let prompt = Self.styleProfilePrompt
-        guard let encoded = prompt.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return }
-
-        let urlString: String
-        switch service {
-        case .claude:
-            urlString = "https://claude.ai/new?q=\(encoded)"
-        case .chatgpt:
-            urlString = "https://chatgpt.com/?q=\(encoded)"
-        }
-
-        if let url = URL(string: urlString) {
-            NSWorkspace.shared.open(url)
+    private func loadIMessages() {
+        isLoadingMessages = true
+        imessageError = nil
+        Task {
+            do {
+                let messages = try await reader.readMessages(limit: DraftConstants.imessageDefaultLimit)
+                loadedMessages = messages
+                isLoadingMessages = false
+                withAnimation { step = .imessagePreview }
+            } catch let error as iMessageReader.ReaderError {
+                isLoadingMessages = false
+                switch error {
+                case .accessDenied:
+                    imessageError = "Full Disk Access required. Open System Settings > Privacy & Security > Full Disk Access and add Draft."
+                case .databaseNotFound:
+                    imessageError = "iMessage database not found. Try pasting samples instead."
+                case .databaseEmpty:
+                    imessageError = "No substantive messages found. Try pasting samples instead."
+                case .queryFailed(let msg):
+                    imessageError = "Failed to read messages: \(msg)"
+                }
+            } catch {
+                isLoadingMessages = false
+                imessageError = "Failed to load messages: \(error.localizedDescription)"
+            }
         }
     }
 
-    private func saveProfile() {
-        let trimmed = pastedProfile.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            saveError = "Please paste your generated profile first"
-            return
+    private func analyzeIMessages() {
+        guard localInference.isReady else { return }
+        isAnalyzing = true
+        errorMessage = nil
+        Task {
+            do {
+                var rawText = await reader.formatForAnalysis(loadedMessages, maxMessages: DraftConstants.imessageAnalysisLimit)
+                let supplement = supplementText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !supplement.isEmpty {
+                    rawText += "\n\n--- Additional Samples ---\n\n" + supplement
+                }
+                let profile = try await styleEngine.importBulkSamples(rawText: rawText, draftEngine: localInference.draftEngine)
+                generatedProfile = profile
+                isAnalyzing = false
+                withAnimation { step = .result }
+            } catch {
+                isAnalyzing = false
+                errorMessage = "Analysis failed: \(error.localizedDescription)"
+            }
         }
-
-        styleEngine.saveImportedProfile(trimmed)
-        styleEngine.completeOnboarding()
-        EventTracker.track("onboarding.completed", with: ["example_count": "\(styleEngine.exampleCount)"])
     }
 
-    // MARK: - Prompt
+    private func analyzePastedSamples() {
+        guard localInference.isReady else { return }
+        let text = pastedSamples.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
 
-    /// The prompt injected into Claude or ChatGPT to generate a writing style profile.
-    /// Short enough to fit in a URL query param. Leverages the AI's memory of the user's
-    /// conversation history so they just hit enter and get the profile immediately.
-    static let styleProfilePrompt = """
-    Based on everything you know about how I write from our conversations, generate a writing style profile for me. Use these exact section headers in bold: Tone and Voice, Sentence Patterns, Openings and Closings, Punctuation and Formatting, Signature Phrases (bullet list of my phrases in quotes), ALWAYS (5-10 bullet rules a ghostwriter must follow), NEVER (5-10 bullet rules for things I would never write). Write in second person. Be specific and quote my actual phrases. Start directly with the first section, no title. Output plain text I can copy-paste.
-    """
+        isAnalyzing = true
+        errorMessage = nil
+        Task {
+            do {
+                let profile = try await styleEngine.importBulkSamples(rawText: text, draftEngine: localInference.draftEngine)
+                generatedProfile = profile
+                isAnalyzing = false
+                withAnimation { step = .result }
+            } catch {
+                isAnalyzing = false
+                errorMessage = "Analysis failed: \(error.localizedDescription)"
+            }
+        }
+    }
 }

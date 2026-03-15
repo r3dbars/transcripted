@@ -2,24 +2,23 @@
 
 ## What This Does
 
-SwiftUI views for the Draft app. The primary UI is a **floating overlay** (non-activating NSPanel) that appears over the user's current app for the hotkey → speak → draft → review → inject flow. A **menubar popover** hosts a single-pane layout with status, usage stats, shortcut pills, writing style, and agent section.
+SwiftUI views for the Draft app. The primary UI is a **floating overlay** (non-activating NSPanel) that appears over the user's current app for the hotkey -> speak -> draft -> review -> inject flow. A **menubar popover** hosts a single-pane layout with status, usage stats, shortcut pills, writing style, and agent section.
 
 ## Key Files
 
 - `FloatingOverlayPanel.swift` (~37 lines) — NSPanel subclass (non-activating, dynamic key status)
 - `FloatingOverlayController.swift` (~433 lines) — State machine, animations, panel lifecycle, global Escape monitor
 - `OverlayContentView.swift` (~312 lines) — SwiftUI views for all 6 overlay states (idle/loading/listening/drafting/streaming/review)
-- `DraftSessionController.swift` (~579 lines) — Session orchestration for draft mode (⌥D) and dictation mode (⌥Space)
+- `DraftSessionController.swift` (~579 lines) — Session orchestration for draft mode (option+D) and dictation mode (option+Space)
 - `OverlayTokens.swift` (~48 lines) — Design tokens: `OverlayTokens` for floating overlay (translucent dark), `MenuTokens` for menubar panel (system-adaptive colors, layout constants)
-- `PanelDragView.swift` (~37 lines) — AppKit drag helper (mouseDown → performDrag)
-- `MenuBarPanel.swift` (~415 lines) — Single-pane menubar popover (440x520): header (status dot), usage stats, shortcut pills, writing style (compact/expandable), agent section, onboarding gates, settings gear
-- `OnboardingView.swift` (~876 lines) — 8-step interactive onboarding: welcome → permissions → try dictation → try drafting → fake conversation → try context draft → style setup → complete. The largest UI file.
+- `PanelDragView.swift` (~37 lines) — AppKit drag helper (mouseDown -> performDrag)
+- `MenuBarPanel.swift` (~415 lines) — Single-pane menubar popover (440x520): header (status dot), usage stats, shortcut pills, writing style (compact/expandable), agent section, onboarding gate, settings gear
+- `OnboardingView.swift` (~876 lines) — 8-step interactive onboarding: welcome -> permissions -> try dictation -> try drafting -> fake conversation -> try context draft -> style setup -> complete. The largest UI file.
 - `OnboardingWindowController.swift` (~88 lines) — NSWindowController that hosts the onboarding SwiftUI view in a standalone window
 - `PermissionsOnboardingView.swift` (~252 lines) — Permission checker for mic, speech, screen capture with live polling and System Settings deep links
 - `HotkeyRecorderView.swift` (~142 lines) — Compact keyboard shortcut recorder for settings popover, uses NSEvent local monitor for key capture
-- `AgentTab.swift` (~287 lines) — `AgentSection` struct: simplified insight cards (Apply/Skip) + streaming chat interface with expandable tool use indicators
-- `StyleOnboardingView.swift` (~664 lines) — 5-step onboarding: intro → source choice → (iMessage/paste) → result
-- `APIKeyEntryView.swift` (~231 lines) — Auth setup overlay: name + API key or subscription token
+- `AgentTab.swift` (~287 lines) — `AgentSection` struct: simplified insight cards (Apply/Skip) + chat interface with expandable tool use indicators
+- `StyleOnboardingView.swift` (~664 lines) — 5-step onboarding: intro -> source choice -> (iMessage/paste) -> result
 - `ScrollingWaveformView.swift` (~147 lines) — Real-time scrolling waveform for overlay header bar, Canvas + TimelineView at 60fps, ring buffer for audio level samples
 - `AnimatedTranscriptView.swift` (~81 lines) — Animated live transcript with word-by-word fade-in via custom `FlowLayout` (SwiftUI Layout protocol)
 
@@ -27,18 +26,18 @@ SwiftUI views for the Draft app. The primary UI is a **floating overlay** (non-a
 
 ```
 FloatingOverlay (hotkey flow)          MenuBarPanel (configuration)
-┌──────────────────────────┐          ┌───────────────────────────┐
-│ FloatingOverlayPanel     │          │ Single-pane ScrollView    │
-│ (NSPanel, non-activating)│          │ ├── Header (status dot)   │
-│                          │          │ ├── Stats (words/msgs)    │
-│ States:                  │          │ ├── Shortcuts (⌥D / ⌥Space)│
-│ idle → listening →       │          │ ├── Writing Style (card)  │
-│ drafting → streaming →   │          │ └── AgentSection (cards+chat)│
-│ review                   │          │                           │
-├──────────────────────────┤          │ Onboarding gates:         │
-│ DraftSessionController   │          │ APIKeyEntryView (overlay) │
-│ (orchestrates full flow) │          │ StyleOnboardingView       │
-└──────────────────────────┘          └───────────────────────────┘
++----------------------------+        +-----------------------------+
+| FloatingOverlayPanel       |        | Single-pane ScrollView      |
+| (NSPanel, non-activating)  |        | +-- Header (status dot)     |
+|                            |        | +-- Stats (words/msgs)      |
+| States:                    |        | +-- Shortcuts (option+D/Space)|
+| idle -> listening ->       |        | +-- Writing Style (card)    |
+| drafting -> streaming ->   |        | +-- AgentSection (cards+chat)|
+| review                     |        |                             |
++----------------------------+        | Onboarding gate:            |
+| DraftSessionController     |        | StyleOnboardingView         |
+| (orchestrates full flow)   |        +-----------------------------+
++----------------------------+
 ```
 
 ## FloatingOverlay — The Primary UI (v2)
@@ -54,26 +53,26 @@ FloatingOverlay (hotkey flow)          MenuBarPanel (configuration)
 ### Session Modes
 
 `FloatingOverlayController.SessionMode` enum governs behavior differences:
-- **`.draft`** (⌥D) — screenshot + voice + AI rewrite + review
-- **`.dictation`** (⌥Space) — voice + batch transcribe + auto-paste
+- **`.draft`** (option+D) — screenshot + voice + AI rewrite + review
+- **`.dictation`** (option+Space) — voice + batch transcribe + auto-paste
 
-The `activeMode` is set by `DraftSessionController` before showing the overlay. `OverlayContentView` uses it to render mode-specific text (e.g., "Draft" vs "Dictate" header, "⌥D to stop" vs "⌥Space to stop" hints, "Drafting..." vs "Polishing..." spinner).
+The `activeMode` is set by `DraftSessionController` before showing the overlay. `OverlayContentView` uses it to render mode-specific text (e.g., "Draft" vs "Dictate" header, "option+D to stop" vs "option+Space to stop" hints, "Drafting..." vs "Polishing..." spinner).
 
 ### State Machine
 
 ```
-idle → listening → drafting → streaming → review → idle
-  ↑         ↓          ↓           ↓          ↓
-  └─────── (Escape cancels from any active state) ──┘
+idle -> listening -> drafting -> streaming -> review -> idle
+  ^         |          |           |          |
+  +-------- (Escape cancels from any active state) ---+
 ```
 
 | State | Trigger | UI | Key Status | Escape Handling |
 |-------|---------|-----|------------|-----------------|
-| `idle` | Session end/cancel | Hidden | false | — |
-| `listening` | ⌥D/⌥Space (start) | Waveform + live transcription | false | Global monitor → cancel |
-| `drafting` | ⌥D/⌥Space (stop) | Spinner + "Drafting..."/"Polishing..." (mode-dependent), or error message | false | Global monitor → cancel |
-| `streaming` | First API token | Spinner + "Drafting..." header, tokens scrolling in content area | false | Global monitor → cancel |
-| `review` | Stream complete | Editable TextEditor + hint bar | true | SwiftUI .onKeyPress → cancel |
+| `idle` | Session end/cancel | Hidden | false | -- |
+| `listening` | option+D/Space (start) | Waveform + live transcription | false | Global monitor -> cancel |
+| `drafting` | option+D/Space (stop) | Spinner + "Drafting..."/"Polishing..." (mode-dependent), or error message | false | Global monitor -> cancel |
+| `streaming` | First token from MLXEngine | Spinner + "Drafting..." header, tokens scrolling in content area | false | Global monitor -> cancel |
+| `review` | Stream complete | Editable TextEditor + hint bar | true | SwiftUI .onKeyPress -> cancel |
 
 **State transition guards:** `startStreaming()` requires `.drafting` or `.listening`, `appendStreamToken()` requires `.streaming`, `finishStreaming()` requires `.streaming`. This prevents the overlay from entering `.review` when not actually streaming.
 
@@ -113,18 +112,22 @@ Without this, rapid hotkey taps create orphaned tasks that both write to the ove
 ### Session Lifecycle
 
 ```
-startSession()          — ⌥D first press: clear state, show overlay, start voice + vision in parallel
-stopSessionAndDraft()   — ⌥D second press: stop voice, await vision, build prompt, stream draft
+startSession()          — option+D first press: clear state, show overlay, start voice + vision in parallel
+stopSessionAndDraft()   — option+D second press: stop voice, await vision, build prompt, stream draft
 confirmAndInject()      — Enter in review: hide overlay (shrink animation), paste to target app, record training pair
-cancelSession()         — Escape or ⌥D during any state: hide overlay (shake animation), discard draft
-startDictation()        — ⌥Space first press: show overlay, start voice recording (no screenshot)
-stopDictationAndPaste() — ⌥Space second press: stop voice, batch transcribe, paste directly
+cancelSession()         — Escape or option+D during any state: hide overlay (shake animation), discard draft
+startDictation()        — option+Space first press: show overlay, start voice recording (no screenshot)
+stopDictationAndPaste() — option+Space second press: stop voice, batch transcribe, paste directly
 cancelDictation()       — Escape during dictation: hide overlay (shake animation), discard
 ```
 
-### Vision Race Condition Fix
+### Vision Processing
 
-Vision processing (`processVision()`) runs in a parallel `Task` stored as `visionTask`. When the user stops speaking, `stopSessionAndDraft()` **awaits `visionTask?.value`** before checking `lastCapturedContext`. This ensures vision results are available even when the user speaks quickly. The vision call has an 8-second timeout via `AnthropicAPI.withTimeout(seconds: 8)`.
+Vision processing (`processVision()`) uses `LocalVisionExtractor` (Apple Vision OCR) to extract text from the screenshot. This runs in a parallel `Task` stored as `visionTask`. When the user stops speaking, `stopSessionAndDraft()` **awaits `visionTask?.value`** before checking `lastCapturedContext`. This ensures vision results are available even when the user speaks quickly. The vision call has a timeout via `DraftConstants.withTimeout()`.
+
+### Streaming via MLXEngine
+
+`DraftSessionController` calls `MLXEngine.generate()` for streaming token-by-token draft output. Tokens are fed to the overlay via `overlayController.appendStreamToken()` as they arrive. The first token triggers the `.streaming` state transition.
 
 ### Error Display
 
@@ -136,7 +139,7 @@ Vision processing (`processVision()`) runs in a parallel `Task` stored as `visio
 
 ### No-Context Fallback
 
-If vision fails or times out, the fallback prompt asks Claude to "clean up and polish the dictation" rather than "write a reply" — the latter confuses Claude when there's no conversation context.
+If vision fails or times out, the fallback prompt asks the model to "clean up and polish the dictation" rather than "write a reply" — the latter confuses the model when there's no conversation context.
 
 ### Refusal Detection
 
@@ -150,7 +153,7 @@ If vision fails or times out, the fallback prompt asks Claude to "clean up and p
 
 The Carbon hotkey callback in `ContextCaptureEngine.swift` routes to `DraftSessionController`:
 
-**⌥D (Draft mode — hotkey ID 1):**
+**option+D (Draft mode -- hotkey ID 1):**
 
 | Session State | Action |
 |---------------|--------|
@@ -158,7 +161,7 @@ The Carbon hotkey callback in `ContextCaptureEngine.swift` routes to `DraftSessi
 | Listening/drafting/streaming | `stopSessionAndDraft()` |
 | Review | `cancelSession()` |
 
-**⌥Space (Dictation mode — hotkey ID 2):**
+**option+Space (Dictation mode -- hotkey ID 2):**
 
 | Session State | Action |
 |---------------|--------|
@@ -170,8 +173,8 @@ The Carbon hotkey callback in `ContextCaptureEngine.swift` routes to `DraftSessi
 - **Enter** — Inject draft to target app (review mode)
 - **Shift+Enter** — Insert newline (review mode)
 - **Escape** — Cancel session/dictation (works in ALL states: listening, drafting, streaming, review)
-- **⌥D** — Start draft / stop recording / cancel during review
-- **⌥Space** — Start dictation / stop and paste
+- **option+D** — Start draft / stop recording / cancel during review
+- **option+Space** — Start dictation / stop and paste
 
 ### Key Implementation Details
 
@@ -181,7 +184,7 @@ The Carbon hotkey callback in `ContextCaptureEngine.swift` routes to `DraftSessi
 
 ## Animation System
 
-**Entrance:** Spring animation (scale 0.88 → 1.0 via `CASpringAnimation`) + 200ms fade-in on `showPanel()`.
+**Entrance:** Spring animation (scale 0.88 -> 1.0 via `CASpringAnimation`) + 200ms fade-in on `showPanel()`.
 
 Two hide animations signal different outcomes:
 
@@ -200,13 +203,13 @@ Single-pane menubar popover (440x520, `MenuTokens` design tokens) with a continu
 
 1. **Header** — "Draft" title + status dot (green = model loaded, orange = loading)
 2. **Stats** — Three-column HStack: words dictated, messages drafted, time saved. Data from `FeedbackStore.stats`, refreshed on `.onAppear`
-3. **Shortcuts** — Pill-shaped badges showing `⌥D Draft` and `⌥Space Dictation`
+3. **Shortcuts** — Pill-shaped badges showing `option+D Draft` and `option+Space Dictation`
 4. **Writing Style** — Section header with example count badge + expandable card. Shows compact preview of `style.md` (extracted from "## Style Summary" section, up to 6 lines), expands to full scrollable content with "Show more/Show less" toggle. Empty state: "Accept a draft to start learning your style"
-5. **Agent** — `AgentSection` (from `AgentTab.swift`): insight cards + streaming chat interface
+5. **Agent** — `AgentSection` (from `AgentTab.swift`): insight cards + chat interface
 
 Additional features:
-- **Onboarding gates** — sequential ZStack overlays: `APIKeyEntryView` → `StyleOnboardingView`
-- **Settings gear** — top-right overlay button with popover: name field, transcription engine info (Parakeet CoreML with download progress), auth mode display + "Switch Auth Method", Quit button
+- **Onboarding gate** — `StyleOnboardingView` overlay (no auth setup needed — all inference is local)
+- **Settings gear** — top-right overlay button with popover: name field, transcription engine info (Parakeet CoreML with download progress), Quit button
 
 ### NSHostingController Lifecycle
 
@@ -230,7 +233,7 @@ The `NSHostingController` is **recreated on every popover open** inside `DraftAp
 }
 ```
 
-This guarantees a fresh SwiftUI view tree on each open. A long-lived `NSHostingController` accumulates stale observation state across show/hide cycles and can crash in body evaluation. Do NOT cache the hosting controller or use `.id()` tricks (e.g., a `popoverGeneration` counter) — a `.id()` change on the root view triggers an infinite `.onAppear` → re-layout → `.onAppear` loop. Just recreate the controller.
+This guarantees a fresh SwiftUI view tree on each open. A long-lived `NSHostingController` accumulates stale observation state across show/hide cycles and can crash in body evaluation. Do NOT cache the hosting controller or use `.id()` tricks (e.g., a `popoverGeneration` counter) — a `.id()` change on the root view triggers an infinite `.onAppear` -> re-layout -> `.onAppear` loop. Just recreate the controller.
 
 ## AgentSection — Chat Tool Indicators
 
@@ -260,44 +263,38 @@ Button(action: {
 5-step flow as a full-screen overlay (two branching paths after source choice):
 
 ```
-.intro → .sourceChoice → .imessagePreview (if iMessage) → .result
-                       ↘ .samples (if manual paste)     → .result
+.intro -> .sourceChoice -> .imessagePreview (if iMessage) -> .result
+                         \ .samples (if manual paste)     -> .result
 ```
+
+Takes `styleEngine: StyleEngine` and `localInference: LocalInferenceManager` parameters.
 
 1. **Intro** — Welcome message, name input field (saved to UserDefaults for vision identity)
 2. **Source Choice** — Two cards: "Import from iMessages" (recommended) or "Paste Samples Manually"
-3a. **iMessage Preview** — Read-only ScrollView showing loaded messages, privacy notice, "Analyze These Messages" button. Includes expandable "Add Slack, email, or other writing samples" section.
+3a. **iMessage Preview** — Read-only ScrollView showing loaded messages via `iMessageReader`, privacy notice, "Analyze These Messages" button. Includes expandable "Add Slack, email, or other writing samples" section.
 3b. **Samples** — Large TextEditor for pasting writing samples, word count indicator, "Build My Profile" button
-4. **Result** — Shows generated profile, "Looks Good" to accept, "Add More & Regenerate" goes back
+4. **Result** — Shows generated profile (analyzed locally via MLXEngine), "Looks Good" to accept, "Add More & Regenerate" goes back
 
-## Auth Setup Flow
-
-1. On launch, if `drafter.hasCredential` is false → `APIKeyEntryView` overlay appears
-2. Overlay shows name input + segmented picker (API Key / Claude Subscription)
-3. API Key tab: `SecureField` for `sk-ant-api...` with prefix validation (rejects `sk-ant-oat` tokens with a redirect hint)
-4. Subscription tab: step-by-step instructions for `claude setup-token` + paste field
-5. "Connect" saves to Keychain → overlay dismisses
-6. Gear icon → popover shows current auth mode + "Switch Auth Method" → clears Keychain → overlay reappears
+All analysis runs on-device via `StyleEngine.importBulkSamples(rawText:draftEngine:)` which uses `MLXEngine` for local inference. No external API calls.
 
 ## Verification
 
 After modifying UI components, verify with these checks:
 
-- **Full draft flow:** ⌥D over Slack → speak → ⌥D → tokens stream → draft appears editable → Enter → text pasted to Slack
-- **Full dictation flow:** ⌥Space → speak → ⌥Space → text pasted directly
+- **Full draft flow:** option+D over Slack -> speak -> option+D -> tokens stream -> draft appears editable -> Enter -> text pasted to Slack
+- **Full dictation flow:** option+Space -> speak -> option+Space -> text pasted directly
 - **Auto-focus:** After draft streams in, cursor should be blinking in the TextEditor without clicking
 - **Enter/Escape:** Enter injects, Escape cancels, Shift+Enter inserts newline
-- **Escape during listening:** ⌥D to start → Escape → overlay shakes and disappears (no crash)
-- **Escape during dictation:** ⌥Space to start → Escape → overlay shakes and disappears
-- **Escape during streaming:** ⌥D → speak → ⌥D → while tokens streaming, Escape → cancels cleanly
-- **Double hotkey tap:** Rapidly press ⌥D twice → should not create parallel streaming tasks
+- **Escape during listening:** option+D to start -> Escape -> overlay shakes and disappears (no crash)
+- **Escape during dictation:** option+Space to start -> Escape -> overlay shakes and disappears
+- **Escape during streaming:** option+D -> speak -> option+D -> while tokens streaming, Escape -> cancels cleanly
+- **Double hotkey tap:** Rapidly press option+D twice -> should not create parallel streaming tasks
 - **Vision context:** Check debug log — `"vision complete"` should appear BEFORE `"streaming draft"`, and `context: yes` in the streaming log
-- **Cancel during review:** ⌥D while draft is showing → overlay hides (shake animation), nothing injected
+- **Cancel during review:** option+D while draft is showing -> overlay hides (shake animation), nothing injected
 - **Paste-back:** Draft injected into correct target app (overlay is non-activating)
-- **Onboarding gates:** Gear → "Switch Auth Method" → auth overlay appears
-- **Stats section:** Opens menubar panel → words dictated, messages drafted, time saved are visible
+- **Stats section:** Opens menubar panel -> words dictated, messages drafted, time saved are visible
 - **Style section:** Shows style.md preview in expandable card; "Show more" expands full content
 - **Agent section:** Insight cards appear with Apply/Skip buttons; chat interface works
-- **Rapid menubar clicking:** Click the menubar icon quickly multiple times — should NOT cause hangs, spinning beachballs, or crashes. Each open recreates the hosting controller cleanly; closing before re-opening calls `performClose` which is synchronous and safe.
+- **Rapid menubar clicking:** Click the menubar icon quickly multiple times -> should NOT cause hangs, spinning beachballs, or crashes. Each open recreates the hosting controller cleanly; closing before re-opening calls `performClose` which is synchronous and safe.
 - **Debug log:** `tail -f ~/draft-debug.log | grep "SESSION\|DICTATION\|REVIEW"` shows all events
-- **Build:** `bash build.sh` — must compile cleanly (pre-existing warnings only: CGWindowListCreateImage deprecation, `_performHide()` actor isolation in animation callbacks)
+- **Build:** `bash build.sh` -- must compile cleanly (pre-existing warnings only: CGWindowListCreateImage deprecation, `_performHide()` actor isolation in animation callbacks)

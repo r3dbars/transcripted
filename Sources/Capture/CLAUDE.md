@@ -2,7 +2,7 @@
 
 ## What This Does
 
-Captures a screenshot of the user's current app window, sends it to Haiku Vision to extract the full conversation thread, and stores the source app reference for paste-back. Two global hotkeys handle two distinct modes: Option+D for draft mode (screenshot + voice + AI rewrite) and Option+Space for dictation mode (voice only + light polish + auto-paste). Both hotkeys route through `DraftSessionController` with cross-mode switching support.
+Captures a screenshot of the user's current app window, runs Apple Vision OCR (via `LocalVisionExtractor`) to extract the full conversation thread as text, and stores the source app reference for paste-back. Two global hotkeys handle two distinct modes: Option+D for draft mode (screenshot + voice + AI rewrite) and Option+Space for dictation mode (voice only + light polish + auto-paste). Both hotkeys route through `DraftSessionController` with cross-mode switching support.
 
 ## Key Files
 
@@ -28,8 +28,8 @@ Captures a screenshot of the user's current app window, sends it to Haiku Vision
 | Listening/drafting/streaming | `stopSessionAndDraft()` — stops voice, awaits vision, streams draft |
 | Review | `cancelSession()` — hides overlay, discards draft |
 
-4. **Vision runs in parallel** — `DraftSessionController.startSession()` fires vision processing as a parallel `Task` stored as `visionTask`. Voice recording runs simultaneously.
-5. **Vision awaited before drafting** — `stopSessionAndDraft()` calls `await visionTask?.value` before checking `lastCapturedContext`, ensuring vision results are available even when the user speaks quickly.
+4. **Vision runs in parallel** — `DraftSessionController.startSession()` fires OCR processing as a parallel `Task` stored as `visionTask`. The `LocalVisionExtractor` uses Apple's `VNRecognizeTextRequest` to extract text from the screenshot. Voice recording runs simultaneously.
+5. **Vision awaited before drafting** — `stopSessionAndDraft()` calls `await visionTask?.value` before checking `lastCapturedContext`, ensuring OCR results are available even when the user speaks quickly.
 
 ### Dictation Mode (Option+Space)
 
@@ -99,16 +99,16 @@ The C callback can't capture Swift closures, so a `weak` module-level reference 
 
 ## Vision Race Condition Fix
 
-Vision API calls typically take 2-6 seconds. If the user speaks quickly (< 2s), `stopSessionAndDraft()` would fire before vision completes. The fix:
+Apple Vision OCR is fast but not instant. If the user speaks very quickly (< 1s), `stopSessionAndDraft()` could fire before OCR completes. The fix:
 
 1. `startSession()` stores the vision Task handle as `visionTask`
 2. `stopSessionAndDraft()` calls `await visionTask?.value` before reading `lastCapturedContext`
-3. Vision has an 8-second timeout via `AnthropicAPI.withTimeout(seconds: 8)`
-4. If vision times out, a no-context fallback prompt asks Claude to "clean up and polish the dictation" (not "write a reply" — that confuses Claude without conversation context)
+3. Vision has an 8-second timeout via `DraftConstants.withTimeout(seconds: 8)`
+4. If vision times out, a no-context fallback prompt asks the local model to clean up and polish the dictation (not "write a reply" — that confuses the model without conversation context)
 
 ## CapturedContext Struct
 
-Plain Swift struct (no Codable) with labeled fields parsed from Haiku's plain-text response:
+Plain Swift struct (no Codable) with labeled fields. The primary path is `LocalVisionExtractor` filling fields directly from OCR output. The `parse()` static method still exists for compatibility.
 
 ```swift
 struct CapturedContext {
@@ -120,7 +120,7 @@ struct CapturedContext {
     var hasConversation: Bool   // True if conversation is non-empty
     var displayText: String     // Transparent labeled sections for the UI TextEditor
     func draftingPrompt(userInstructions: String) -> String  // Assembles full prompt for DraftEngine
-    static func parse(from text: String) -> CapturedContext  // Parses Haiku's plain-text response
+    static func parse(from text: String) -> CapturedContext  // Parses labeled text response (legacy path)
 }
 ```
 
@@ -206,8 +206,8 @@ After modifying capture or context extraction, verify with these checks:
 - **Dictation routing:** Option+Space starts dictation (no screenshot) -> Option+Space stops and pastes
 - **Cross-mode switching:** Option+D during active dictation cancels dictation and starts draft session; Option+Space during active draft cancels session and starts dictation
 - **Vision race condition:** Speak quickly (< 2s) after Option+D -> debug log should show `"vision complete"` BEFORE `"streaming draft"`, with `context: yes`
-- **Vision timeout:** If vision takes > 8s, fallback prompt fires -> draft should still appear (without context)
-- **Hotkey capture:** Open Slack/iMessage -> press Option+D -> check debug log for vision processing
+- **Vision timeout:** If OCR takes > 8s, fallback prompt fires -> draft should still appear (without context)
+- **Hotkey capture:** Open Slack/iMessage -> press Option+D -> check debug log for OCR processing
 - **Source app stored:** After capture, paste-back should target the correct app
 - **Permission denied:** If Screen Recording permission is missing, should show error message (not crash)
 - **Parse accuracy:** Check that `CapturedContext.parse()` correctly splits the labeled sections — `platform` should be lowercase, `talkingTo` should be the name from the header (not from message content)
