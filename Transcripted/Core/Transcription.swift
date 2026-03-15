@@ -173,12 +173,14 @@ class Transcription: ObservableObject {
             // fallback so every utterance gets a persistent UUID (critical for agent output).
             let allSpeakerIds = Set(speakerSegments.map { $0.speakerId })
             let ghostSpeakerIds = allSpeakerIds.subtracting(embeddingsPerSpeaker.keys)
+            var ghostSpeakerIdSet = Set<Int>()
             for ghostId in ghostSpeakerIds {
                 let bestSegment = speakerSegments
                     .filter { $0.speakerId == ghostId && $0.embedding != nil && !$0.embedding!.isEmpty }
                     .max(by: { $0.qualityScore < $1.qualityScore })
                 if let segment = bestSegment, let embedding = segment.embedding {
                     embeddingsPerSpeaker[ghostId] = [embedding]
+                    ghostSpeakerIdSet.insert(ghostId)
                     AppLogger.transcription.info("Ghost speaker recovered with best-effort embedding", [
                         "speakerId": "\(ghostId)",
                         "qualityScore": String(format: "%.2f", segment.qualityScore)
@@ -196,10 +198,17 @@ class Transcription: ObservableObject {
 
                 // Adaptive threshold: require higher similarity when we have fewer segments.
                 // A single 2s segment can false-match at 0.79; 4+ segments give a reliable mean.
-                let adaptiveThreshold: Double = switch embeddings.count {
-                    case 1: 0.85       // single segment — need near-certainty
-                    case 2...3: 0.78   // few segments — still cautious
-                    default: 0.70      // 4+ segments — reliable mean embedding
+                // Ghost speakers (all segments filtered as low quality) use a stricter threshold
+                // since their embeddings are unreliable and prone to false DB matches.
+                let isGhost = ghostSpeakerIdSet.contains(speakerId)
+                let adaptiveThreshold: Double = if isGhost {
+                    0.92  // ghost speaker — embedding is low quality, require very high similarity
+                } else {
+                    switch embeddings.count {
+                        case 1: 0.85       // single segment — need near-certainty
+                        case 2...3: 0.78   // few segments — still cautious
+                        default: 0.70      // 4+ segments — reliable mean embedding
+                    }
                 }
 
                 // Match only against profiles that existed BEFORE this recording
