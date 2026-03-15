@@ -106,6 +106,57 @@ class DraftAppState: ObservableObject {
     // Beta config check removed — no cloud dependency
     #endif
 
+    // MARK: - Wake Recovery
+
+    /// Centralized recovery after system wake. Each subsystem that holds OS-level resources
+    /// (file descriptors, audio hardware, Metal contexts, Carbon hotkeys) must be checked
+    /// and restored here. ParakeetEngine handles its own wake via NSWorkspace observer.
+    func handleSystemWake() {
+        logger.log("WAKE | system wake detected — running recovery checks")
+
+        // 1. Carbon hotkeys — can become unresponsive after sleep. Re-register.
+        contextCapture.unregisterHotkey()
+        contextCapture.registerHotkey()
+        logger.log("WAKE | hotkeys re-registered")
+
+        // 2. Analysis engine file watcher — DispatchSource file descriptors can stale.
+        #if !BETA_BUILD
+        analysisEngine.stop()
+        analysisEngine.start()
+        logger.log("WAKE | analysis file watcher restarted")
+        #endif
+
+        // 3. MLX model — Metal GPU contexts can become invalid after sleep.
+        //    If the model was loaded, verify it's still responsive. If not, reload.
+        if localInference.isReady {
+            Task {
+                do {
+                    // Quick health check — generate a single token
+                    let _ = try await localInference.draftEngine.complete(
+                        prompt: "hi",
+                        systemPrompt: "Reply with OK",
+                        maxTokens: 4,
+                        temperature: 0
+                    )
+                    logger.log("WAKE | MLX model health check passed")
+                } catch {
+                    logger.log("WAKE | MLX model health check failed: \(error.localizedDescription), reloading")
+                    EventReporter.shared.capture(level: .warning, engine: "local",
+                        event: "wake_model_stale",
+                        message: "MLX model unresponsive after wake, reloading: \(error.localizedDescription)")
+                    localInference.cleanup()
+                    await localInference.initialize()
+                }
+            }
+        }
+
+        // ParakeetEngine handles its own wake recovery via NSWorkspace.didWakeNotification
+        // observer installed during prewarm(). No action needed here.
+
+        EventReporter.shared.capture(level: .info, engine: "app", event: "wake_recovery",
+            message: "System wake recovery completed")
+    }
+
     func shutdown() {
         #if BETA_BUILD
         BetaTelemetry.shared.stopPeriodicShipping()
