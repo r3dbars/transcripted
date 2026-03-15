@@ -255,8 +255,8 @@ class Transcription: ObservableObject {
                     endTime: segment.endTime
                 )
 
-                // Skip very short segments (< 0.5s of audio)
-                guard segmentSamples.count >= 8000 else { droppedSegments += 1; continue }
+                // Skip segments shorter than 1s — Parakeet requires at least 16,000 samples
+                guard segmentSamples.count >= 16000 else { droppedSegments += 1; continue }
 
                 let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .system)
 
@@ -315,8 +315,8 @@ class Transcription: ObservableObject {
                     endTime: segment.end
                 )
 
-                // Skip very short segments (< 0.5s)
-                guard segmentSamples.count >= 8000 else { droppedSegments += 1; continue }
+                // Skip segments shorter than 1s — Parakeet requires at least 16,000 samples
+                guard segmentSamples.count >= 16000 else { droppedSegments += 1; continue }
 
                 let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .microphone)
                 guard !text.isEmpty else { continue }
