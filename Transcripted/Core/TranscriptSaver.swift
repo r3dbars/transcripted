@@ -648,85 +648,29 @@ class TranscriptSaver {
     }
 
     /// Notification category identifier for "Show in Finder" action
-    fileprivate static let notificationCategoryId = "TRANSCRIPT_SAVED"
-    fileprivate static let showInFinderActionId = "SHOW_IN_FINDER"
-
-    /// Set up notification categories (call once at app startup)
-    static func registerNotificationCategories() {
-        let showAction = UNNotificationAction(
-            identifier: showInFinderActionId,
-            title: "Show in Finder",
-            options: .foreground
-        )
-        let category = UNNotificationCategory(
-            identifier: notificationCategoryId,
-            actions: [showAction],
-            intentIdentifiers: []
-        )
-        UNUserNotificationCenter.current().setNotificationCategories([category])
-    }
+    static let notificationCategoryId = "TRANSCRIPT_SAVED"
+    static let showInFinderActionId = "SHOW_IN_FINDER"
 
     /// Show macOS notification that transcript was saved
-    private static func showSaveNotification(fileURL: URL) {
+    static func showSaveNotification(fileURL: URL) {
         let center = UNUserNotificationCenter.current()
 
-        // Set delegate so we receive action callbacks
-        if notificationDelegate == nil {
-            let delegate = SaveNotificationDelegate()
-            notificationDelegate = delegate
-            center.delegate = delegate
-        }
+        let content = UNMutableNotificationContent()
+        content.title = "Transcript Saved"
+        content.body = fileURL.lastPathComponent
+        content.categoryIdentifier = notificationCategoryId
+        content.userInfo = ["fileURL": fileURL.path]
 
-        // Store the file URL for the "Show in Finder" action
-        notificationDelegate?.latestFileURL = fileURL
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString,
+            content: content,
+            trigger: nil // deliver immediately
+        )
 
-        center.requestAuthorization(options: [.alert]) { granted, _ in
-            guard granted else { return }
-
-            let content = UNMutableNotificationContent()
-            content.title = "Transcript Saved"
-            content.body = fileURL.lastPathComponent
-            content.categoryIdentifier = notificationCategoryId
-
-            let request = UNNotificationRequest(
-                identifier: UUID().uuidString,
-                content: content,
-                trigger: nil // deliver immediately
-            )
-
-            center.add(request) { error in
-                if let error = error {
-                    AppLogger.pipeline.error("Failed to deliver notification", ["error": error.localizedDescription])
-                }
+        center.add(request) { error in
+            if let error = error {
+                AppLogger.pipeline.error("Failed to deliver notification", ["error": error.localizedDescription])
             }
         }
-    }
-
-    private static var notificationDelegate: SaveNotificationDelegate?
-}
-
-/// Delegate to handle UNUserNotification actions (e.g., "Show in Finder")
-private class SaveNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
-    var latestFileURL: URL?
-
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse,
-        withCompletionHandler completionHandler: @escaping () -> Void
-    ) {
-        if response.actionIdentifier == TranscriptSaver.showInFinderActionId,
-           let url = latestFileURL {
-            NSWorkspace.shared.activateFileViewerSelecting([url])
-        }
-        completionHandler()
-    }
-
-    // Show notifications even when app is in foreground
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-        completionHandler([.banner])
     }
 }
