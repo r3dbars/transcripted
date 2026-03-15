@@ -4,6 +4,8 @@
 
 Draft is a macOS app that turns your voice into perfectly written messages — in *your* personal writing style. It runs 100% on-device. No cloud. No API keys. No subscriptions.
 
+![Draft floating over a Slack conversation, composing a reply in your voice](docs/screenshots/hero.png)
+
 ---
 
 ## Why Draft exists
@@ -145,6 +147,8 @@ This means Draft knows the difference between "reply to my mom on iMessage" and 
 
 ## Platform-aware formatting
 
+![Same spoken intent, three different outputs for Slack, iMessage, and Email](docs/screenshots/platform-formatting.png)
+
 Different apps expect different formatting. Draft detects the app you're in and adjusts automatically:
 
 | Platform | What changes |
@@ -161,6 +165,8 @@ You never pick a mode. Draft reads the bundle ID of the app in focus and adapts.
 ---
 
 ## Style learning
+
+![Before and after style learning — generic AI vs. your actual voice](docs/screenshots/style-learning.png)
 
 This is the core idea. Draft doesn't just polish text — it **learns how *you* write** and produces messages that are indistinguishable from ones you'd type yourself.
 
@@ -185,6 +191,8 @@ Early on (first 20 drafts), Draft refines your profile every 3 accepted messages
 
 ### Cold-start onboarding
 
+![Style onboarding — import from iMessages or paste samples](docs/screenshots/onboarding.png)
+
 You don't have to wait 20 drafts to get good results. On first launch, Draft offers two ways to bootstrap your style profile immediately:
 
 - **Import from iMessages** (recommended) — Draft reads your sent messages from iMessage and analyzes them locally to build an instant profile. Requires Full Disk Access permission. Your messages are analyzed on-device and discarded after profile generation.
@@ -195,6 +203,8 @@ Either way, the analysis runs entirely on your Mac using the local language mode
 ---
 
 ## 100% local — nothing leaves your Mac
+
+![Privacy architecture — everything runs on your Mac](docs/screenshots/privacy-architecture.png)
 
 Draft is built on the principle that your voice, your writing style, and your conversations should never leave your computer.
 
@@ -248,6 +258,8 @@ When you open Draft for the first time, it will:
 
 After setup, Draft lives in your menu bar. The models are cached locally and load automatically on future launches.
 
+![Menubar panel — stats, shortcuts, writing style, and agent insights](docs/screenshots/menubar-panel.png)
+
 ### Updating
 
 When a new version is available, Draft will prompt you to update. Updates download and install automatically.
@@ -277,6 +289,8 @@ No Xcode project. No CocoaPods. No SPM. Just `swiftc` and Apple frameworks.
 ---
 
 ## Keyboard shortcuts
+
+![Keyboard shortcut cheatsheet](docs/screenshots/shortcuts.png)
 
 These are the default shortcuts. You can customize them in Draft's settings (click the menu bar icon, then the gear icon).
 
