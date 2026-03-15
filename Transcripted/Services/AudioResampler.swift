@@ -81,6 +81,11 @@ enum AudioResampler {
     /// Hardware-accelerated resampling via AVAudioConverter.
     /// Handles channel mixing (stereo→mono) and sample rate conversion in one pass
     /// using Apple's polyphase anti-aliasing filter (vDSP under the hood).
+    ///
+    /// Uses a single convert() call with a streaming input block that reads chunks
+    /// from the file on demand. This avoids the AVAudioConverter terminal state bug
+    /// where signaling .endOfStream between chunks causes the converter to stop
+    /// processing subsequent data.
     private static func convertToMono(url: URL, targetRate: Double) throws -> [Float] {
         let file = try AVAudioFile(forReading: url)
         let srcFormat = file.processingFormat
@@ -115,58 +120,56 @@ enum AudioResampler {
 
         let ratio = targetRate / srcFormat.sampleRate
 
-        // Process in chunks to avoid multi-GB allocations for long recordings
-        // 30 seconds at 48kHz stereo float32 ≈ 11MB per chunk (vs 2.6GB for a 2-hour file)
-        let chunkDuration: Double = 30.0  // seconds
-        let chunkFrames = AVAudioFrameCount(srcFormat.sampleRate * chunkDuration)
-        var allSamples: [Float] = []
-        allSamples.reserveCapacity(Int(Double(srcFrames) * ratio) + 16)
-
-        while file.framePosition < file.length {
-            let framesToRead = min(chunkFrames, AVAudioFrameCount(file.length - file.framePosition))
-
-            guard let srcBuffer = AVAudioPCMBuffer(pcmFormat: srcFormat, frameCapacity: framesToRead) else {
-                throw NSError(domain: "AudioResampler", code: 1, userInfo: [
-                    NSLocalizedDescriptionKey: "Failed to create source audio buffer"
-                ])
-            }
-            try file.read(into: srcBuffer, frameCount: framesToRead)
-
-            let dstFrames = AVAudioFrameCount(Double(framesToRead) * ratio) + 16
-            guard let dstBuffer = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: dstFrames) else {
-                throw NSError(domain: "AudioResampler", code: 1, userInfo: [
-                    NSLocalizedDescriptionKey: "Failed to create destination audio buffer"
-                ])
-            }
-
-            var inputConsumed = false
-            var conversionError: NSError?
-            let status = converter.convert(to: dstBuffer, error: &conversionError) { _, outStatus in
-                if inputConsumed {
-                    outStatus.pointee = .endOfStream
-                    return nil
-                }
-                inputConsumed = true
-                outStatus.pointee = .haveData
-                return srcBuffer
-            }
-
-            if status == .error, let conversionError {
-                throw conversionError
-            }
-
-            guard let floatData = dstBuffer.floatChannelData else {
-                throw NSError(domain: "AudioResampler", code: 2, userInfo: [
-                    NSLocalizedDescriptionKey: "Failed to get float channel data from converted buffer"
-                ])
-            }
-
-            allSamples.append(contentsOf: UnsafeBufferPointer(start: floatData[0], count: Int(dstBuffer.frameLength)))
-            // Do NOT reset converter between chunks — resetting discards the polyphase
-            // filter's internal state, causing tiny clicks at chunk boundaries.
+        // Allocate output buffer for the entire converted result
+        let totalDstFrames = AVAudioFrameCount(Double(srcFrames) * ratio) + 64
+        guard let dstBuffer = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: totalDstFrames) else {
+            throw NSError(domain: "AudioResampler", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Failed to create destination audio buffer"
+            ])
         }
 
-        return allSamples
+        // Read chunks from the file on demand inside the input block.
+        // The converter calls this block repeatedly until we signal .endOfStream,
+        // keeping the converter in a continuous state (no terminal state between chunks).
+        let chunkDuration: Double = 30.0  // seconds per read
+        let chunkFrames = AVAudioFrameCount(srcFormat.sampleRate * chunkDuration)
+
+        var conversionError: NSError?
+        let status = converter.convert(to: dstBuffer, error: &conversionError) { _, outStatus in
+            // Check if we've read all frames
+            guard file.framePosition < file.length else {
+                outStatus.pointee = .endOfStream
+                return nil
+            }
+
+            let framesToRead = min(chunkFrames, AVAudioFrameCount(file.length - file.framePosition))
+            guard let srcBuffer = AVAudioPCMBuffer(pcmFormat: srcFormat, frameCapacity: framesToRead) else {
+                outStatus.pointee = .endOfStream
+                return nil
+            }
+
+            do {
+                try file.read(into: srcBuffer, frameCount: framesToRead)
+            } catch {
+                outStatus.pointee = .endOfStream
+                return nil
+            }
+
+            outStatus.pointee = .haveData
+            return srcBuffer
+        }
+
+        if status == .error, let conversionError {
+            throw conversionError
+        }
+
+        guard let floatData = dstBuffer.floatChannelData else {
+            throw NSError(domain: "AudioResampler", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "Failed to get float channel data from converted buffer"
+            ])
+        }
+
+        return Array(UnsafeBufferPointer(start: floatData[0], count: Int(dstBuffer.frameLength)))
     }
 
     /// Extract a time slice from samples array.
