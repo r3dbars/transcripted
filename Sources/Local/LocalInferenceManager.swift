@@ -66,9 +66,9 @@ class LocalInferenceManager: ObservableObject {
     }
 
     func cleanup() {
+        modelState = .notLoaded
         Task {
             await draftEngine.unload()
         }
-        modelState = .notLoaded
     }
 }

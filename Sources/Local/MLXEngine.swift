@@ -10,6 +10,7 @@ import MLXLMCommon
 actor MLXEngine {
     private var container: ModelContainer?
     private var isLoaded = false
+    private var isGenerating = false
 
     static let modelId = "mlx-community/Qwen3.5-4B-4bit"
 
@@ -38,18 +39,22 @@ actor MLXEngine {
     }
 
     /// Unload model and free memory.
+    /// Sets isLoaded = false before nilling container so any in-flight check sees it immediately.
     func unload() {
-        container = nil
         isLoaded = false
+        container = nil
     }
 
     var modelLoaded: Bool { isLoaded }
 
+    /// Whether a generation is currently in progress (prevents concurrent model access).
+    var isBusy: Bool { isGenerating }
+
     // MARK: - Shared Input Preparation
 
     /// Build chat messages, prepare MLX input, and create generation parameters.
-    /// Shared by both streaming and non-streaming paths.
-    private func prepareInput(prompt: String, systemPrompt: String?, maxTokens: Int, temperature: Float) async throws -> (MLXLMCommon.LMInput, GenerateParameters) {
+    /// Returns the container alongside prepared input so callers don't need a separate actor hop.
+    private func prepareInput(prompt: String, systemPrompt: String?, maxTokens: Int, temperature: Float) async throws -> (ModelContainer, MLXLMCommon.LMInput, GenerateParameters) {
         guard let container = container else {
             throw LocalLLMError.generationFailed("Model not loaded")
         }
@@ -66,17 +71,22 @@ actor MLXEngine {
         let lmInput = try await container.prepare(input: userInput)
 
         let parameters = GenerateParameters(maxTokens: maxTokens, temperature: temperature)
-        return (lmInput, parameters)
+        return (container, lmInput, parameters)
     }
 
     // MARK: - Non-Streaming Completion
 
     /// Generate a complete response (blocks until done).
+    /// Guarded by isGenerating to prevent concurrent model access.
     func complete(prompt: String, systemPrompt: String? = nil, maxTokens: Int = 1024, temperature: Float = 0.7) async throws -> String {
-        let (lmInput, parameters) = try await prepareInput(prompt: prompt, systemPrompt: systemPrompt, maxTokens: maxTokens, temperature: temperature)
+        guard !isGenerating else { throw LocalLLMError.generationFailed("Model busy") }
+        isGenerating = true
+        defer { isGenerating = false }
+
+        let (container, lmInput, parameters) = try await prepareInput(prompt: prompt, systemPrompt: systemPrompt, maxTokens: maxTokens, temperature: temperature)
 
         var result = ""
-        let stream = try await container!.generate(input: lmInput, parameters: parameters)
+        let stream = try await container.generate(input: lmInput, parameters: parameters)
         for try await generation in stream {
             guard !Task.isCancelled else { throw LocalLLMError.cancelled }
             if case .chunk(let text) = generation {
@@ -90,17 +100,25 @@ actor MLXEngine {
     // MARK: - Streaming Generation
 
     /// Stream tokens one at a time. Same signature as the old LlamaEngine.generate().
+    /// Guarded by isGenerating — cleared when the internal Task completes (via defer).
     func generate(prompt: String, systemPrompt: String? = nil, maxTokens: Int = 1024, temperature: Float = 0.7) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { [weak self] continuation in
+        guard !isGenerating else {
+            return AsyncThrowingStream { $0.finish(throwing: LocalLLMError.generationFailed("Model busy")) }
+        }
+        isGenerating = true
+
+        return AsyncThrowingStream { [weak self] continuation in
             guard let self = self else {
                 continuation.finish(throwing: LocalLLMError.generationFailed("Engine deallocated"))
                 return
             }
             Task {
+                // Always clear isGenerating when this task exits, regardless of success/failure/cancellation
+                defer { Task { await self.clearGenerating() } }
                 do {
-                    let (lmInput, parameters) = try await self.prepareInput(prompt: prompt, systemPrompt: systemPrompt, maxTokens: maxTokens, temperature: temperature)
+                    let (container, lmInput, parameters) = try await self.prepareInput(prompt: prompt, systemPrompt: systemPrompt, maxTokens: maxTokens, temperature: temperature)
 
-                    let stream = try await self.container!.generate(input: lmInput, parameters: parameters)
+                    let stream = try await container.generate(input: lmInput, parameters: parameters)
                     for try await generation in stream {
                         guard !Task.isCancelled else {
                             continuation.finish(throwing: LocalLLMError.cancelled)
@@ -116,5 +134,9 @@ actor MLXEngine {
                 }
             }
         }
+    }
+
+    private func clearGenerating() {
+        isGenerating = false
     }
 }

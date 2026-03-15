@@ -25,7 +25,8 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     let overlayController = FloatingOverlayController()
     let sessionController = DraftSessionController()
     var onboardingController: OnboardingWindowController?
-    private var sleepWakeObservers: [NSObjectProtocol] = []
+    private var workspaceObservers: [NSObjectProtocol] = []
+    private var appObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Crash reporting — captures ObjC/SwiftUI exceptions + manual Swift error reports
@@ -94,7 +95,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                     self?.tearDownPopoverViewTree()
                 }
             }
-            sleepWakeObservers.append(observer)
+            workspaceObservers.append(observer)
         }
 
         // Engine recovery on wake — hotkeys, file watchers, MLX model health check
@@ -107,7 +108,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 self?.appState.handleSystemWake()
             }
         }
-        sleepWakeObservers.append(wakeRecoveryObserver)
+        workspaceObservers.append(wakeRecoveryObserver)
 
         // App deactivation (NSApplication notification — separate center from NSWorkspace)
         let appObserver = NotificationCenter.default.addObserver(
@@ -119,7 +120,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 self?.tearDownPopoverViewTree()
             }
         }
-        sleepWakeObservers.append(appObserver)
+        appObservers.append(appObserver)
 
         // Initialize engines
         Task { @MainActor in
@@ -140,8 +141,10 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        for observer in sleepWakeObservers {
+        for observer in workspaceObservers {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        for observer in appObservers {
             NotificationCenter.default.removeObserver(observer)
         }
         #if BETA_BUILD

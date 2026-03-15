@@ -91,6 +91,13 @@ class AnalysisEngine: ObservableObject {
     // MARK: - File Watching
 
     private func startFileWatcher() {
+        // Guard against double-start (e.g., wake recovery calling start() while watcher is active)
+        guard fileDescriptor < 0 else {
+            EventReporter.shared.capture(level: .warning, engine: "analysis", event: "file_watcher_already_active",
+                message: "startFileWatcher() called but file descriptor already open — ignoring")
+            return
+        }
+
         // Create file if it doesn't exist yet so we can watch it
         if !FileManager.default.fileExists(atPath: feedbackURL.path) {
             FileManager.default.createFile(atPath: feedbackURL.path, contents: nil)
@@ -275,7 +282,7 @@ class AnalysisEngine: ObservableObject {
             }
             dict[key] = value
             let newData = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys])
-            try newData.write(to: promptsURL)
+            try newData.write(to: promptsURL, options: .atomic)
         } catch {
             EventReporter.shared.capture(level: .error, engine: "analysis", event: "prompt_write_failed",
                 message: error.localizedDescription, context: ["key": key])

@@ -20,6 +20,7 @@ class DraftAppState: ObservableObject {
     #endif
 
     private var promptsObserver: NSObjectProtocol?
+    private var wakeHealthCheckTask: Task<Void, Never>?
     private var isInitialized = false
 
     func initialize() async {
@@ -128,24 +129,39 @@ class DraftAppState: ObservableObject {
 
         // 3. MLX model — Metal GPU contexts can become invalid after sleep.
         //    If the model was loaded, verify it's still responsive. If not, reload.
+        //    Skip if a session is active or the model is mid-generation.
         if localInference.isReady {
-            Task {
-                do {
-                    // Quick health check — generate a single token
-                    let _ = try await localInference.draftEngine.complete(
-                        prompt: "hi",
-                        systemPrompt: "Reply with OK",
-                        maxTokens: 4,
-                        temperature: 0
-                    )
-                    logger.log("WAKE | MLX model health check passed")
-                } catch {
-                    logger.log("WAKE | MLX model health check failed: \(error.localizedDescription), reloading")
-                    EventReporter.shared.capture(level: .warning, engine: "local",
-                        event: "wake_model_stale",
-                        message: "MLX model unresponsive after wake, reloading: \(error.localizedDescription)")
-                    localInference.cleanup()
-                    await localInference.initialize()
+            let sessionActive = contextCapture.sessionController?.isInSession == true
+                || contextCapture.sessionController?.isDictating == true
+            if sessionActive {
+                logger.log("WAKE | skipping MLX health check — session active")
+            } else {
+                wakeHealthCheckTask?.cancel()
+                wakeHealthCheckTask = Task {
+                    guard !Task.isCancelled else { return }
+                    // Skip if model is busy (actor-isolated check)
+                    guard await !localInference.draftEngine.isBusy else {
+                        logger.log("WAKE | skipping MLX health check — model generating")
+                        return
+                    }
+                    do {
+                        // Quick health check — generate a single token
+                        let _ = try await localInference.draftEngine.complete(
+                            prompt: "hi",
+                            systemPrompt: "Reply with OK",
+                            maxTokens: 4,
+                            temperature: 0
+                        )
+                        logger.log("WAKE | MLX model health check passed")
+                    } catch {
+                        guard !Task.isCancelled else { return }
+                        logger.log("WAKE | MLX model health check failed: \(error.localizedDescription), reloading")
+                        EventReporter.shared.capture(level: .warning, engine: "local",
+                            event: "wake_model_stale",
+                            message: "MLX model unresponsive after wake, reloading: \(error.localizedDescription)")
+                        localInference.cleanup()
+                        await localInference.initialize()
+                    }
                 }
             }
         }
@@ -161,6 +177,8 @@ class DraftAppState: ObservableObject {
         #if BETA_BUILD
         BetaTelemetry.shared.stopPeriodicShipping()
         #endif
+        wakeHealthCheckTask?.cancel()
+        wakeHealthCheckTask = nil
         analysisEngine.stop()
         sttRouter.parakeetEngine.cleanup()
         localInference.cleanup()

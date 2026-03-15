@@ -474,6 +474,12 @@ class ParakeetEngine: ObservableObject {
             guard let self = self, self.isRecording, !Task.isCancelled else { return }
 
             self.pendingSamplesLock.lock()
+            // Re-check isRecording after lock — recording may have stopped between
+            // the guard above and lock acquisition
+            guard self.isRecording else {
+                self.pendingSamplesLock.unlock()
+                return
+            }
             let sampleCount = self.pendingSamples.count + self.sampleBuffer.count
             self.pendingSamplesLock.unlock()
 
@@ -660,6 +666,14 @@ class ParakeetEngine: ObservableObject {
     }
 
     func cleanup() {
+        if let observer = configChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            configChangeObserver = nil
+        }
+        if let observer = wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            wakeObserver = nil
+        }
         asrManager?.cleanup()
         asrManager = nil
         eouManager = nil
