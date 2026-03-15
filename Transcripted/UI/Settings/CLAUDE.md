@@ -1,7 +1,7 @@
 # Settings — CLAUDE.md
 
 ## Purpose
-Settings window: stats dashboard, speaker voice fingerprints management, app preferences, and transcript migration.
+Settings window (single-page view, no sidebar/tabs): stats dashboard, speaker voice fingerprints management, app preferences, and transcript migration.
 
 ## Files
 
@@ -9,7 +9,6 @@ Settings window: stats dashboard, speaker voice fingerprints management, app pre
 |---|---|
 | `SettingsWindowController.swift` | NSWindowController, 800×600 fixed window, dark aqua appearance |
 | `SettingsContainerView.swift` | Single-page scrolling layout: stats → failed transcriptions → speakers → preferences |
-| `SettingsSidebarView.swift` | Left sidebar navigation (Dashboard, Speakers, Preferences tabs) |
 | `Models/SettingsNavigationState.swift` | Tab state, migration progress tracking |
 | `Components/SettingsSectionCard.swift` | Reusable card wrapper, CoralToggle, SettingsToggleRow, SettingsTextField |
 
@@ -45,6 +44,7 @@ Settings window: stats dashboard, speaker voice fingerprints management, app pre
 - `userName` (String) — user's name for speaker attribution
 - `useAuroraRecording` (Bool) — aurora animation enabled
 - `enableQwenSpeakerInference` (Bool) — Qwen speaker name inference enabled
+- `enableObsidianFormat` (Bool) — Obsidian-compatible transcript format
 - `enableUISounds` (Bool) — recording sounds enabled
 - `autoRecordMeetings` (Bool) — auto-start recording when meeting app detects active call
 

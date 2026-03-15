@@ -47,18 +47,18 @@ Local ML inference engines (Parakeet STT, Sortformer diarization), persistent sp
 
 ## Speaker Matching Algorithm
 - **Embeddings**: 256-dim WeSpeaker, L2-normalized, cosine similarity via Accelerate vDSP
-- **Adaptive threshold**: 0.85 (1 segment) → 0.80 (2) → 0.75 (3) → 0.70 (4+ segments)
+- **Adaptive threshold**: 0.85 (1 segment) → 0.78 (2–3) → 0.70 (4+ segments). Ghost speakers (all segments filtered): 0.92
 - **EMA blending**: alpha=0.15 for embedding updates on match
 - **Post-processing** (EmbeddingClusterer):
   - Pairwise merge: union-find transitive, 0.85 cosine threshold
   - DB-informed split: per-segment 0.62 threshold, requires 8+ segments per profile to split
-- **Name variants**: 34 hardcoded pairs ("mike"↔"michael", "nate"↔"nathan", etc.) in `areNameVariants()`
+- **Name variants**: ~20 name variant groups (52 entries, e.g. "mike"↔"michael", "nate"↔"nathan") in `areNameVariants()`
 - **Pruning**: `pruneWeakProfiles()` removes unnamed profiles with 1 call, low confidence, >1hr stale
 
 ## Model Lifecycle
 - **Parakeet + Sortformer**: Loaded at app startup via `Transcription.initializeModels()`. From bundle (`Contents/Resources/*-models/`) or HuggingFace download on first run.
-- **Qwen**: Loaded on-demand when unidentified speakers exist. `loadModel()` → `inferSpeakerNames()` → `unload()`. Requires ~4GB free memory (checked via `mach_host_self()` free pages). Model cached at `~/Library/Caches/models/mlx-community/Qwen3.5-4B-4bit/`.
-- **State progression**: `.notLoaded` → `.loading` → `.ready` | `.failed(String)`
+- **Qwen**: Loaded on-demand when unidentified speakers exist. `loadModel()` → `inferSpeakerNames()` → `unload()`. Requires ~3GB free memory (checked via `mach_host_self()` free pages). Model cached at `~/Library/Caches/models/mlx-community/Qwen3.5-4B-4bit/`.
+- **State progression**: `.notLoaded` → `.loading` → `.ready` | `.failed(String)`. QwenModelState also has `.downloading(progress: Double)` between `.notLoaded` and `.loading`.
 
 ## Modification Recipes
 

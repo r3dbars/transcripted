@@ -14,9 +14,9 @@ Audio capture, transcription pipeline, task management, transcript saving, stati
 | `TranscriptionTypes.swift` | Engine-agnostic types: TranscriptionResult, SpeakerNamingRequest, etc. | Value types |
 | `TranscriptSaver.swift` | Markdown output with YAML frontmatter, retroactive speaker updates | Static methods |
 | `TranscriptStore.swift` | ObservableObject for transcript tray (recent 10, copy-to-clipboard) | @MainActor |
-| `TranscriptScanner.swift` | Transcript file discovery, migration to StatsDB | Static methods |
+| `TranscriptScanner.swift` | Transcript file discovery & parsing | Static methods |
 | `TranscriptUtils.swift` | Summary updates, file renaming | Static methods |
-| `RecordingValidator.swift` | Pre-recording checks: disk space, permissions, devices | Static methods |
+| `RecordingValidator.swift` | Pre-recording checks: disk space, permissions, devices, save path validation | Static methods |
 | `FailedTranscriptionManager.swift` | Persistent retry queue (JSON at ~/Documents/Transcripted/failed_transcriptions.json) | @MainActor |
 | `StatsService.swift` | Recording statistics, streaks, motivational messages | @MainActor, singleton |
 | `StatsDatabase.swift` | SQLite persistence for stats (recordings, daily_activity tables) | DispatchQueue serial |
@@ -24,12 +24,14 @@ Audio capture, transcription pipeline, task management, transcript saving, stati
 | `DateFormattingHelper.swift` | Cached date formatters | Static methods |
 | `Clipboard.swift` | NSPasteboard copy | Static methods |
 | `CoreAudioUtils.swift` | AudioObjectID extensions, property reading helpers | Extensions |
+| `AgentOutput.swift` | Agent-consumable JSON sidecars + index + CLAUDE.md for output directory | Static methods |
+| `TranscriptExporter.swift` | Export transcripts as Markdown or plain text via NSSavePanel | Static methods |
 | `Logging/AppLogger.swift` | Unified logging with subsystem loggers (os.Logger + file) | Sendable singleton |
 | `Logging/FileLogger.swift` | JSON Lines logger at ~/Library/Logs/Transcripted/app.jsonl | DispatchQueue serial |
 
 ## Key Types
 
-**Audio**: `@Published isRecording`, `audioLevel` (0-1), `recordingDuration`, `audioLevelHistory` ([Float], 15 samples), `systemAudioStatus`, `recordingGaps`. Callbacks: `onRecordingStart`, `onRecordingComplete(micURL, systemURL)`.
+**Audio**: `@Published isRecording`, `isMonitoring`, `audioLevel` (0-1), `recordingDuration`, `audioLevelHistory` ([Float], 15 samples), `systemAudioLevelHistory`, `silenceDuration`, `isSilent`, `systemAudioStatus`, `recordingGaps`. Callbacks: `onRecordingStart`, `onRecordingComplete(micURL, systemURL)`.
 
 **SystemAudioCapture**: `prepare()` → `start(bufferCallback:)` → `stop()`. Exposes `audioFormat` after prepare. Recovery: `recoverFromOutputChange()` on device switch. Watchdog: 3s silence timeout.
 
