@@ -41,7 +41,7 @@ Read the component CLAUDE.md in the relevant directory FIRST:
 | App entry point, bootstrap | `Transcripted/TranscriptedApp.swift` |
 
 ## Critical Invariants (All Changes)
-- All classes use `@available(macOS 26.0, *)` — required for `AudioHardwareCreateProcessTap`
+- `@available` varies: macOS 26.0 for Core/UI classes (AudioHardwareCreateProcessTap), macOS 14.0 for Services
 - **@MainActor classes:** Audio, Transcription, TranscriptionTaskManager, PillStateManager, ParakeetService, SortformerService, QwenService, StatsService, FailedTranscriptionManager, MeetingDetector
 - **NOT @MainActor:** SystemAudioCapture (DispatchQueue + NSLock), SpeakerDatabase (DispatchQueue + SQLite), StatsDatabase (DispatchQueue)
 - **CoreAudio I/O callbacks run on real-time threads** — NEVER do I/O, locks, allocations, or Objective-C calls inside them. Deep-copy buffers before async dispatch.

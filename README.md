@@ -157,9 +157,9 @@ Apple's `SpeechAnalyzer` API (WWDC 2025) is fast and efficient, but provides no 
   <img src="docs/screenshots/speaker-learning.png" alt="Speaker identification improves over time — from generic labels to named speakers" width="720">
 </p>
 
-- **Persistent voice fingerprints** — Stores 256-dimensional voice embeddings in a local SQLite database. Uses cosine similarity matching with adaptive thresholds that relax as more speech segments are available (0.85 → 0.80 → 0.75 → 0.70). Embeddings are refined over time using exponential moving average blending (α=0.15).
+- **Persistent voice fingerprints** — Stores 256-dimensional voice embeddings in a local SQLite database. Uses cosine similarity matching with adaptive thresholds that relax as more speech segments are available (0.85 → 0.78 → 0.70). Embeddings are refined over time using exponential moving average blending (α=0.15).
 - **Qwen speaker naming** — An optional on-device LLM (Qwen 3.5-4B, 4-bit quantized) that analyzes the first 15 minutes of transcript text to infer speaker names from conversational context (e.g., "Hey Sarah, can you pull up the report?"). Loads on-demand, unloads immediately after inference.
-- **Smart post-processing** — Pairwise speaker merging via union-find transitive closure, database-informed splitting for mismatched segments, and 34 hardcoded name variant pairs (Mike↔Michael, Nate↔Nathan, etc.).
+- **Smart post-processing** — Pairwise speaker merging via union-find transitive closure, database-informed splitting for mismatched segments, and ~20 name variant groups (52 variant entries covering ~20 name groups, e.g. Mike↔Michael, Nate↔Nathan, etc.).
 
 ### Output
 
@@ -205,12 +205,13 @@ open Transcripted.xcodeproj
 
 ### First Launch
 
-Transcripted walks you through a 4-step onboarding:
+Transcripted walks you through a 5-step onboarding:
 
 1. **Welcome** — Introduction to the app
 2. **How It Works** — Animated walkthrough of the recording → transcription → analysis pipeline
 3. **Permissions** — Microphone access (required). Screen Recording permission is needed separately for system audio capture.
-4. **Ready** — Quick-start tips and you're good to go
+4. **Model Setup** — Downloads and initializes speech recognition models (~600 MB for Parakeet). Progress is shown during download.
+5. **Ready** — Quick-start tips and you're good to go
 
 ### Permissions
 
@@ -218,6 +219,8 @@ Transcripted walks you through a 4-step onboarding:
 |------------|---------|:--------:|
 | Microphone | Capture your voice | ✅ Yes |
 | Screen Recording | Capture system audio from Zoom, Meet, Teams, etc. | For system audio |
+| Notifications | Transcript saved alerts | Optional |
+| Accessibility | Global hotkey from other apps | For global hotkey |
 
 ### Keyboard Shortcuts
 
@@ -270,7 +273,9 @@ Transcripted/
 │   ├── TranscriptExporter.swift # Export to Markdown / plain text
 │   ├── StatsService.swift       # Recording statistics aggregation
 │   ├── StatsDatabase.swift      # SQLite stats persistence
-│   └── FailedTranscriptionManager.swift  # Retry queue for failed jobs
+│   ├── FailedTranscriptionManager.swift  # Retry queue for failed jobs
+│   ├── RecordingValidator.swift    # Pre-recording validation (permissions, disk, path safety)
+│   └── AgentOutput.swift           # JSON sidecar + index for agent workflows
 │
 ├── Services/                    # ML models & external integrations
 │   ├── ParakeetService.swift    # Parakeet TDT V3 (speech-to-text)
@@ -278,7 +283,9 @@ Transcripted/
 │   ├── QwenService.swift        # Qwen 3.5-4B (speaker name inference)
 │   ├── SpeakerDatabase.swift    # Voice fingerprint storage (SQLite)
 │   ├── AudioResampler.swift     # Resampling to 16kHz mono Float32
-│   └── MeetingDetector.swift    # Auto-detection of meeting apps
+│   ├── MeetingDetector.swift    # Auto-detection of meeting apps
+│   ├── EmbeddingClusterer.swift    # Post-processing speaker segments (merge + split)
+│   └── SpeakerClipExtractor.swift  # Audio clips for speaker naming UI
 │
 ├── UI/
 │   ├── FloatingPanel/           # Floating pill UI + aurora animations
@@ -289,7 +296,7 @@ Transcripted/
 │   └── Settings/                # Settings window + stats dashboard
 │
 ├── Design/                      # Design tokens, colors, shared components
-├── Onboarding/                  # First-run experience (4 steps)
+├── Onboarding/                  # First-run experience (5 steps)
 └── TranscriptedApp.swift        # App entry point (LSUIElement — no dock icon)
 ```
 
@@ -341,16 +348,18 @@ The speaker identification pipeline works in several stages:
 | Segments | Threshold | Rationale |
 |----------|-----------|-----------|
 | 1 | 0.85 | High confidence needed with limited data |
-| 2 | 0.80 | Slightly relaxed |
-| 3 | 0.75 | More data to confirm |
+| 2–3 | 0.78 | Slightly relaxed with more data |
 | 4+ | 0.70 | Sufficient data for lower threshold |
+| Ghost (low quality) | 0.92 | Strict threshold for segments filtered as low quality |
+
+Ghost speakers (all segments filtered as low quality) use a stricter 0.92 threshold to prevent false matches against established profiles.
 
 **3. EMA blending** — When a match is found, the stored embedding is updated: `new = (1 - 0.15) × old + 0.15 × new`. This allows voice profiles to adapt over time (e.g., different microphones, colds).
 
 **4. Post-processing:**
 - **Pairwise merge** — Union-find transitive closure at 0.85 cosine threshold merges over-segmented speakers.
 - **DB-informed split** — Per-segment 0.62 threshold with ≥8 segments required, splits incorrectly merged speakers.
-- **Name variants** — 34 hardcoded pairs handle common nicknames (Mike↔Michael, Nate↔Nathan, etc.).
+- **Name variants** — ~20 name variant groups (52 variant entries) handle common nicknames (Mike↔Michael, Nate↔Nathan, etc.).
 - **Pruning** — Removes unnamed profiles with 1 call, low confidence, and >1 hour since last seen.
 
 **5. Name inference** — Qwen 3.5-4B analyzes the first 15 minutes of transcript text to infer names from conversational cues. Critical rule: "Hey Jack" means Jack is the *listener*, not the speaker.

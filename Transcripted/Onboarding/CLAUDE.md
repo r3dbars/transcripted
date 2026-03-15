@@ -1,7 +1,7 @@
 # Onboarding — CLAUDE.md
 
 ## Purpose
-Four-step first-launch onboarding flow: Welcome → How It Works → Permissions → Ready. Gates app setup behind microphone permission.
+Five-step first-launch onboarding flow: Welcome → How It Works → Permissions → Model Setup → Ready. Gates app setup behind microphone permission and model initialization.
 
 ## Files
 
@@ -13,14 +13,16 @@ Four-step first-launch onboarding flow: Welcome → How It Works → Permissions
 | `Steps/WelcomeStep.swift` | Step 1: App intro with icon and tagline |
 | `Steps/HowItWorksStep.swift` | Step 2: Auto-advancing 4-phase animation (Recording → Transcribing → Analyzing → Insights) |
 | `Steps/PermissionsStep.swift` | Step 3: Microphone permission request with status-dependent UI |
-| `Steps/ReadyStep.swift` | Step 4: Celebration + Quick Start Guide (4 tips) |
+| `Steps/ModelSetupStep.swift` | Step 4: Downloads and initializes Parakeet + Sortformer models |
+| `Steps/ReadyStep.swift` | Step 5: Celebration + Quick Start Guide (4 tips) |
 | `Animations/ParticleExplosionView.swift` | Celebration particle effects |
 
 ## Key Types
 
 **OnboardingState** (@Observable class):
-- `currentStep: OnboardingStep` — `.welcome(0)` → `.howItWorks(1)` → `.permissions(2)` → `.ready(3)`
+- `currentStep: OnboardingStep` — `.welcome(0)` → `.howItWorks(1)` → `.permissions(2)` → `.modelSetup(3)` → `.ready(4)`
 - `microphoneStatus: AVAuthorizationStatus`
+- `parakeetReady`, `sortformerReady`, `modelError`, `isLoadingModels`, `modelsReady`
 - Computed: `microphoneGranted`, `allPermissionsGranted`, `canProceed` (varies by step), `stepProgress` (0.0-1.0)
 - `advance()`, `goBack()`, `goToStep(_:)` — navigation
 - `requestMicrophonePermission()` async — requests and updates status
@@ -44,8 +46,9 @@ Four-step first-launch onboarding flow: Welcome → How It Works → Permissions
 ```
 App launch → OnboardingState.hasCompletedOnboarding() check
   → false: show OnboardingWindow
-    Step 1 (Welcome) → Step 2 (How It Works) → Step 3 (Permissions) → Step 4 (Ready)
+    Step 1 (Welcome) → Step 2 (How It Works) → Step 3 (Permissions) → Step 4 (Model Setup) → Step 5 (Ready)
     Step 3 blocks advance until microphone granted
+    Step 4 downloads and initializes Parakeet + Sortformer models
     → completeOnboarding() → onComplete → TranscriptedApp.setupApp()
   → true: skip directly to setupApp()
 ```

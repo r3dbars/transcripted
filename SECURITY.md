@@ -6,12 +6,15 @@ Transcripted processes all audio **100% locally** on your Mac. No audio, transcr
 
 Data stored locally:
 
-| Data | Location |
-|------|----------|
-| Transcripts | `~/Documents/Transcripted/` |
-| Speaker voice fingerprints | `~/Documents/Transcripted/speakers.sqlite` |
-| Recording statistics | `~/Documents/Transcripted/stats.sqlite` |
-| Application logs | `~/Library/Logs/Transcripted/app.jsonl` |
+| Data | Location | Format |
+|------|----------|--------|
+| Transcripts | `~/Documents/Transcripted/` | Markdown |
+| Speaker voice fingerprints | `~/Documents/Transcripted/speakers.sqlite` | SQLite |
+| Recording statistics | `~/Documents/Transcripted/stats.sqlite` | SQLite |
+| Speaker clips | `~/Documents/Transcripted/speaker_clips/` | WAV |
+| Failed queue | `~/Documents/Transcripted/failed_transcriptions.json` | JSON |
+| Application logs | `~/Library/Logs/Transcripted/app.jsonl` | JSON Lines |
+| Qwen model cache | `~/Library/Caches/models/mlx-community/` | MLX 4-bit |
 
 Audio recordings are deleted after successful transcription.
 
