@@ -19,9 +19,7 @@
 </p>
 
 <p align="center">
-  <!-- TODO: Replace with actual demo GIF/screenshot -->
-  <!-- <img src="assets/demo.gif" alt="Transcripted Demo" width="720"> -->
-  <em>Demo GIF coming soon — recording, transcription, and speaker-labeled output in action.</em>
+  <img src="docs/screenshots/hero.png" alt="Transcripted recording a Zoom meeting with live transcript" width="720">
 </p>
 
 ---
@@ -151,10 +149,20 @@ Apple's `SpeechAnalyzer` API (WWDC 2025) is fast and efficient, but provides no 
 
 ## Features
 
+### The Floating Pill
+
+<p align="center">
+  <img src="docs/screenshots/pill-states.png" alt="Pill UI states — idle, recording, processing, saved" width="720">
+</p>
+
 ### Recording
 
 - **Floating pill UI** — A Dynamic Island-style interface (40×20px idle, 180×40px recording) that floats above all windows without interrupting your workflow. Includes aurora animations with color-coded audio sources (coral for mic, teal for system audio).
 - **Dual audio capture** — Records both your microphone and system audio simultaneously. Captures audio from Zoom, Google Meet, Microsoft Teams, Webex, FaceTime, Loom — anything that plays through your speakers.
+<p align="center">
+  <img src="docs/screenshots/auto-detect.png" alt="Auto meeting detection — monitors for Zoom, Teams, Webex, FaceTime, Loom" width="720">
+</p>
+
 - **Auto-meeting detection** — Monitors for meeting apps (Zoom, Teams, Webex, FaceTime, Loom) and automatically starts recording when it detects sustained bidirectional speech for 5+ seconds. Stops when audio drops for 15+ seconds or the meeting app quits.
 - **Global hotkey** — Press **⌘⇧R** from any app to toggle recording. No need to switch windows.
 - **Recording health monitoring** — Real-time quality tracking: capture quality grades (excellent/good/fair/degraded), audio gap detection, and device switch monitoring.
@@ -163,6 +171,10 @@ Apple's `SpeechAnalyzer` API (WWDC 2025) is fast and efficient, but provides no 
 
 - **Parakeet TDT V3** — NVIDIA's speech-to-text model running on Apple's Neural Engine. Processes audio locally with no internet dependency.
 - **Sortformer diarization** — Identifies up to 4 simultaneous speakers and labels who said what at each timestamp.
+<p align="center">
+  <img src="docs/screenshots/speaker-learning.png" alt="Speaker identification improves over time — from generic labels to named speakers" width="720">
+</p>
+
 - **Persistent voice fingerprints** — Stores 256-dimensional voice embeddings in a local SQLite database. Uses cosine similarity matching with adaptive thresholds that relax as more speech segments are available (0.85 → 0.80 → 0.75 → 0.70). Embeddings are refined over time using exponential moving average blending (α=0.15).
 - **Qwen speaker naming** — An optional on-device LLM (Qwen 3.5-4B, 4-bit quantized) that analyzes the first 15 minutes of transcript text to infer speaker names from conversational context (e.g., "Hey Sarah, can you pull up the report?"). Loads on-demand, unloads immediately after inference.
 - **Smart post-processing** — Pairwise speaker merging via union-find transitive closure, database-informed splitting for mismatched segments, and 34 hardcoded name variant pairs (Mike↔Michael, Nate↔Nathan, etc.).
@@ -426,6 +438,10 @@ Transcripted monitors for these meeting apps by bundle ID:
 ---
 
 ## Privacy & Security
+
+<p align="center">
+  <img src="docs/screenshots/privacy.png" alt="Privacy architecture — everything stays on your Mac" width="720">
+</p>
 
 Transcripted is built on a simple principle: **your conversations are yours**.
 

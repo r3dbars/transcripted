@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Privacy Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    background: #0d0d1a;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 60px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .diagram {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    max-width: 800px;
+  }
+
+  .diagram-title {
+    color: white;
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .diagram-subtitle {
+    color: #8A8A8A;
+    font-size: 14px;
+    margin-bottom: 32px;
+  }
+
+  /* Pipeline rows */
+  .pipeline {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .stage-box {
+    width: 140px;
+    height: 80px;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    position: relative;
+  }
+
+  .stage-input {
+    background: linear-gradient(135deg, rgba(236,72,153,0.15), rgba(236,72,153,0.05));
+    border: 1px solid rgba(236,72,153,0.3);
+  }
+
+  .stage-model {
+    background: linear-gradient(135deg, rgba(59,130,246,0.15), rgba(59,130,246,0.05));
+    border: 1px solid rgba(59,130,246,0.3);
+  }
+
+  .stage-output {
+    background: linear-gradient(135deg, rgba(34,197,94,0.15), rgba(34,197,94,0.05));
+    border: 1px solid rgba(34,197,94,0.3);
+  }
+
+  .stage-icon {
+    font-size: 24px;
+  }
+
+  .stage-name {
+    color: white;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .stage-detail {
+    color: #8A8A8A;
+    font-size: 10px;
+  }
+
+  .stage-badge {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    background: #1A1A1A;
+    border: 1px solid #2E2E2E;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 9px;
+    font-weight: 600;
+    color: #22C55E;
+    white-space: nowrap;
+  }
+
+  .pipe-arrow {
+    color: #555;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+
+  /* On your Mac boundary */
+  .mac-boundary {
+    border: 2px dashed rgba(34,197,94,0.3);
+    border-radius: 20px;
+    padding: 32px 24px;
+    position: relative;
+    margin-top: 16px;
+  }
+
+  .mac-label {
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #0d0d1a;
+    padding: 0 16px;
+    color: #22C55E;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .mac-icon {
+    font-size: 16px;
+  }
+
+  /* Cloud crossed out */
+  .cloud-section {
+    margin-top: 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .cloud-box {
+    width: 160px;
+    height: 60px;
+    border-radius: 12px;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px dashed rgba(239, 68, 68, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    position: relative;
+  }
+
+  .cloud-x {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .cloud-x::before {
+    content: '';
+    position: absolute;
+    width: 120%;
+    height: 2px;
+    background: #EF4444;
+    transform: rotate(-15deg);
+    opacity: 0.6;
+  }
+
+  .cloud-icon {
+    font-size: 20px;
+    opacity: 0.3;
+  }
+
+  .cloud-text {
+    color: rgba(239, 68, 68, 0.5);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .cloud-label {
+    color: #EF4444;
+    font-size: 13px;
+    font-weight: 500;
+    opacity: 0.7;
+  }
+
+  /* Bottom stats */
+  .stats-row {
+    display: flex;
+    gap: 32px;
+    margin-top: 32px;
+  }
+
+  .stat {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .stat-icon {
+    font-size: 16px;
+    opacity: 0.7;
+  }
+
+  .stat-text {
+    color: #B0B0B0;
+    font-size: 12px;
+  }
+
+  .stat-value {
+    color: #22C55E;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<div class="diagram">
+  <div class="diagram-title">Everything stays on your Mac</div>
+  <div class="diagram-subtitle">Zero network connections. Zero cloud dependencies. Fully auditable open source.</div>
+
+  <div class="mac-boundary">
+    <div class="mac-label">
+      <span class="mac-icon">💻</span>
+      On your Mac — Neural Engine
+    </div>
+
+    <div class="pipeline">
+      <div class="stage">
+        <div class="stage-box stage-input">
+          <div class="stage-icon">🎤</div>
+          <div class="stage-name">Microphone</div>
+          <div class="stage-detail">Your voice</div>
+        </div>
+      </div>
+
+      <div class="pipe-arrow">→</div>
+
+      <div class="stage">
+        <div class="stage-box stage-input">
+          <div class="stage-icon">🔊</div>
+          <div class="stage-name">System Audio</div>
+          <div class="stage-detail">Zoom, Meet, Teams</div>
+        </div>
+      </div>
+
+      <div class="pipe-arrow">→</div>
+
+      <div class="stage">
+        <div class="stage-box stage-model">
+          <div class="stage-badge">On-device</div>
+          <div class="stage-icon">🧠</div>
+          <div class="stage-name">Parakeet V3</div>
+          <div class="stage-detail">Speech → Text</div>
+        </div>
+      </div>
+
+      <div class="pipe-arrow">→</div>
+
+      <div class="stage">
+        <div class="stage-box stage-model">
+          <div class="stage-badge">On-device</div>
+          <div class="stage-icon">👥</div>
+          <div class="stage-name">Sortformer</div>
+          <div class="stage-detail">Who said what</div>
+        </div>
+      </div>
+
+      <div class="pipe-arrow">→</div>
+
+      <div class="stage">
+        <div class="stage-box stage-output">
+          <div class="stage-icon">📝</div>
+          <div class="stage-name">Transcript</div>
+          <div class="stage-detail">Markdown + YAML</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cloud-section">
+    <div class="cloud-box">
+      <div class="cloud-x"></div>
+      <span class="cloud-icon">☁️</span>
+      <span class="cloud-text">Cloud servers</span>
+    </div>
+    <div class="cloud-label">No data sent. No API calls. Works offline.</div>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat">
+      <span class="stat-icon">🔒</span>
+      <span class="stat-text">Network connections: <span class="stat-value">0</span></span>
+    </div>
+    <div class="stat">
+      <span class="stat-icon">💰</span>
+      <span class="stat-text">Monthly cost: <span class="stat-value">$0</span></span>
+    </div>
+    <div class="stat">
+      <span class="stat-icon">📂</span>
+      <span class="stat-text">Data location: <span class="stat-value">~/Documents/Transcripted/</span></span>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

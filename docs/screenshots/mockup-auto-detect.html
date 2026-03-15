@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Auto Meeting Detection</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    background: #0d0d1a;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 60px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .container {
+    max-width: 780px;
+  }
+
+  .title {
+    color: white;
+    font-size: 20px;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 8px;
+  }
+
+  .subtitle {
+    color: #8A8A8A;
+    font-size: 14px;
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    position: relative;
+  }
+
+  /* Vertical line */
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 24px;
+    top: 24px;
+    bottom: 24px;
+    width: 2px;
+    background: linear-gradient(to bottom, #2E2E2E, #22C55E 30%, #22C55E 70%, #2E2E2E);
+  }
+
+  .step {
+    display: flex;
+    gap: 20px;
+    padding: 16px 0;
+    align-items: flex-start;
+  }
+
+  .step-dot {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+    z-index: 2;
+    border: 2px solid;
+  }
+
+  .dot-detect {
+    background: rgba(59,130,246,0.15);
+    border-color: rgba(59,130,246,0.4);
+  }
+
+  .dot-listen {
+    background: rgba(212,160,61,0.15);
+    border-color: rgba(212,160,61,0.4);
+  }
+
+  .dot-record {
+    background: rgba(236,72,153,0.15);
+    border-color: rgba(236,72,153,0.4);
+  }
+
+  .dot-stop {
+    background: rgba(34,197,94,0.15);
+    border-color: rgba(34,197,94,0.4);
+  }
+
+  .step-content {
+    flex: 1;
+    padding-top: 4px;
+  }
+
+  .step-title {
+    color: white;
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .step-desc {
+    color: #B0B0B0;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .step-detail {
+    color: #8A8A8A;
+    font-size: 11px;
+    margin-top: 6px;
+    font-style: italic;
+  }
+
+  .app-badges {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+
+  .app-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #242424;
+    border: 1px solid #2E2E2E;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: #B0B0B0;
+  }
+
+  .app-badge-icon {
+    font-size: 16px;
+  }
+
+  .audio-meter {
+    display: flex;
+    gap: 3px;
+    align-items: flex-end;
+    height: 20px;
+    margin-top: 8px;
+  }
+
+  .meter-bar {
+    width: 4px;
+    border-radius: 2px;
+    animation: meter-bounce 1.5s ease-in-out infinite;
+  }
+
+  .meter-mic { background: #EC4899; }
+  .meter-sys { background: #3B82F6; }
+
+  .meter-bar:nth-child(1) { height: 6px; animation-delay: 0s; }
+  .meter-bar:nth-child(2) { height: 12px; animation-delay: 0.1s; }
+  .meter-bar:nth-child(3) { height: 16px; animation-delay: 0.2s; }
+  .meter-bar:nth-child(4) { height: 8px; animation-delay: 0.3s; }
+  .meter-bar:nth-child(5) { height: 4px; }
+  .meter-bar:nth-child(6) { height: 10px; animation-delay: 0.15s; }
+  .meter-bar:nth-child(7) { height: 18px; animation-delay: 0.25s; }
+  .meter-bar:nth-child(8) { height: 12px; animation-delay: 0.05s; }
+  .meter-bar:nth-child(9) { height: 6px; animation-delay: 0.35s; }
+
+  @keyframes meter-bounce {
+    0%, 100% { transform: scaleY(0.5); }
+    50% { transform: scaleY(1.2); }
+  }
+
+  .meter-labels {
+    display: flex;
+    gap: 16px;
+    margin-top: 4px;
+  }
+
+  .meter-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    color: #8A8A8A;
+  }
+
+  .meter-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+
+  .dot-mic { background: #EC4899; }
+  .dot-sys { background: #3B82F6; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="title">Auto Meeting Detection</div>
+  <div class="subtitle">Transcripted watches for meeting apps and starts recording when it hears conversation.</div>
+
+  <div class="timeline">
+    <!-- Step 1: App detected -->
+    <div class="step">
+      <div class="step-dot dot-detect">📱</div>
+      <div class="step-content">
+        <div class="step-title">Meeting app launches</div>
+        <div class="step-desc">Transcripted monitors for these apps via NSWorkspace:</div>
+        <div class="app-badges">
+          <div class="app-badge"><span class="app-badge-icon">📹</span> Zoom</div>
+          <div class="app-badge"><span class="app-badge-icon">👥</span> Teams</div>
+          <div class="app-badge"><span class="app-badge-icon">🌐</span> Webex</div>
+          <div class="app-badge"><span class="app-badge-icon">📞</span> FaceTime</div>
+          <div class="app-badge"><span class="app-badge-icon">🎥</span> Loom</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Listening -->
+    <div class="step">
+      <div class="step-dot dot-listen">👂</div>
+      <div class="step-content">
+        <div class="step-title">Lightweight audio monitoring begins</div>
+        <div class="step-desc">Polls mic + system audio levels every 1 second. No recording yet — just listening for bidirectional speech.</div>
+        <div class="audio-meter">
+          <div class="meter-bar meter-mic"></div>
+          <div class="meter-bar meter-mic"></div>
+          <div class="meter-bar meter-mic"></div>
+          <div class="meter-bar meter-mic"></div>
+          <div class="meter-bar" style="width: 8px; background: transparent;"></div>
+          <div class="meter-bar meter-sys"></div>
+          <div class="meter-bar meter-sys"></div>
+          <div class="meter-bar meter-sys"></div>
+          <div class="meter-bar meter-sys"></div>
+        </div>
+        <div class="meter-labels">
+          <div class="meter-label"><div class="meter-dot dot-mic"></div> Your mic</div>
+          <div class="meter-label"><div class="meter-dot dot-sys"></div> System audio</div>
+        </div>
+        <div class="step-detail">Threshold: both channels > 0.02 for 5+ continuous seconds</div>
+      </div>
+    </div>
+
+    <!-- Step 3: Recording -->
+    <div class="step">
+      <div class="step-dot dot-record">🔴</div>
+      <div class="step-content">
+        <div class="step-title">Bidirectional speech detected — recording starts</div>
+        <div class="step-desc">Both you and someone else are talking. Transcripted starts capturing mic + system audio automatically.</div>
+        <div class="step-detail">The floating pill appears with the aurora recording animation.</div>
+      </div>
+    </div>
+
+    <!-- Step 4: Auto-stop -->
+    <div class="step">
+      <div class="step-dot dot-stop">✅</div>
+      <div class="step-content">
+        <div class="step-title">Meeting ends — auto-stop and transcribe</div>
+        <div class="step-desc">Recording stops when audio drops below threshold for 15+ seconds, or when the meeting app quits.</div>
+        <div class="step-detail">Transcript is processed through Parakeet + Sortformer and saved automatically.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

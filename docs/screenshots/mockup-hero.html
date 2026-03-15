@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Transcripted Hero</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    background: linear-gradient(135deg, #0d0d1a 0%, #1a1a2e 50%, #16213e 100%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 60px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .scene {
+    position: relative;
+    width: 900px;
+    height: 520px;
+  }
+
+  /* Fake meeting app window */
+  .meeting-window {
+    position: absolute;
+    top: 0; left: 0;
+    width: 900px;
+    height: 520px;
+    background: #111;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    border: 1px solid #333;
+  }
+
+  .meeting-titlebar {
+    height: 36px;
+    background: #1e1e1e;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    gap: 8px;
+    border-bottom: 1px solid #333;
+  }
+
+  .titlebar-dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot-red { background: #FF5F57; }
+  .dot-yellow { background: #FEBC2E; }
+  .dot-green { background: #28C840; }
+
+  .titlebar-text {
+    flex: 1;
+    text-align: center;
+    color: #888;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .meeting-body {
+    display: flex;
+    height: calc(100% - 36px);
+  }
+
+  /* Video grid */
+  .video-grid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 2px;
+    padding: 2px;
+    background: #000;
+  }
+
+  .video-tile {
+    background: #1a1a2a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+
+  .avatar {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    font-weight: 600;
+    color: white;
+    margin-bottom: 8px;
+  }
+
+  .avatar-1 { background: linear-gradient(135deg, #EC4899, #F472B6); }
+  .avatar-2 { background: linear-gradient(135deg, #3B82F6, #60A5FA); }
+  .avatar-3 { background: linear-gradient(135deg, #22C55E, #4ADE80); }
+  .avatar-4 { background: linear-gradient(135deg, #D4A03D, #FBBF24); }
+
+  .video-name {
+    color: #ccc;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .video-mic {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+  }
+
+  .speaking-ring {
+    position: absolute;
+    inset: 0;
+    border: 2px solid #22C55E;
+    border-radius: inherit;
+    opacity: 0;
+  }
+
+  .video-tile.speaking .speaking-ring {
+    opacity: 1;
+    animation: pulse-ring 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-ring {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+  }
+
+  /* Meeting bottom bar */
+  .meeting-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: #1e1e1e;
+    border-top: 1px solid #333;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+  }
+
+  .bar-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    color: #ccc;
+    background: #333;
+    border: none;
+  }
+
+  .bar-btn.end { background: #EF4444; color: white; width: 60px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+
+  /* The Transcripted floating pill - Recording state */
+  .pill {
+    position: absolute;
+    top: 50px;
+    right: 40px;
+    width: 200px;
+    height: 44px;
+    border-radius: 12px;
+    background: #1A1A1A;
+    overflow: hidden;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    border: 1px solid transparent;
+    box-shadow:
+      0 0 20px rgba(236, 72, 153, 0.25),
+      0 4px 12px rgba(0,0,0,0.4);
+  }
+
+  /* Aurora fog background */
+  .pill::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 80px 40px at 25% 50%, rgba(236, 72, 153, 0.55), transparent),
+      radial-gradient(ellipse 80px 40px at 75% 50%, rgba(59, 130, 246, 0.50), transparent);
+    mix-blend-mode: screen;
+    animation: aurora-shift 3s ease-in-out infinite;
+  }
+
+  .pill::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    border: 1px solid;
+    border-image: linear-gradient(90deg, rgba(236,72,153,0.4), rgba(59,130,246,0.4)) 1;
+    pointer-events: none;
+  }
+
+  @keyframes aurora-shift {
+    0%, 100% { opacity: 0.7; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.05); }
+  }
+
+  .pill-timer {
+    color: white;
+    font-size: 16px;
+    font-weight: 600;
+    z-index: 2;
+    letter-spacing: 0.5px;
+  }
+
+  .pill-stop {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #EF4444;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+  }
+
+  .pill-stop-icon {
+    width: 12px;
+    height: 12px;
+    background: white;
+    border-radius: 2px;
+  }
+
+  /* Waveform bars */
+  .waveform {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    z-index: 2;
+    height: 20px;
+  }
+
+  .wave-bar {
+    width: 3px;
+    border-radius: 2px;
+    background: linear-gradient(to top, #EC4899, #F472B6);
+    animation: wave 1.2s ease-in-out infinite;
+  }
+
+  .wave-bar:nth-child(1) { height: 8px; animation-delay: 0s; }
+  .wave-bar:nth-child(2) { height: 14px; animation-delay: 0.1s; }
+  .wave-bar:nth-child(3) { height: 18px; animation-delay: 0.2s; }
+  .wave-bar:nth-child(4) { height: 12px; animation-delay: 0.3s; }
+  .wave-bar:nth-child(5) { height: 16px; animation-delay: 0.15s; }
+  .wave-bar:nth-child(6) { height: 10px; animation-delay: 0.25s; }
+
+  @keyframes wave {
+    0%, 100% { transform: scaleY(0.5); }
+    50% { transform: scaleY(1.2); }
+  }
+
+  /* Label */
+  .hero-label {
+    position: absolute;
+    top: 40px;
+    right: 260px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 100;
+  }
+
+  .hero-label-text {
+    color: rgba(255,255,255,0.6);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .hero-label-arrow {
+    color: rgba(255,255,255,0.3);
+    font-size: 16px;
+  }
+
+  /* Transcript preview floating */
+  .transcript-preview {
+    position: absolute;
+    bottom: 80px;
+    right: 40px;
+    width: 320px;
+    background: rgba(36, 36, 36, 0.95);
+    backdrop-filter: blur(20px);
+    border-radius: 12px;
+    border: 1px solid #2E2E2E;
+    padding: 16px;
+    z-index: 100;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+
+  .transcript-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #2E2E2E;
+  }
+
+  .transcript-title {
+    color: white;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .transcript-live {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: #22C55E;
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #22C55E;
+    animation: pulse-dot 1.5s ease-in-out infinite;
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+  }
+
+  .transcript-line {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .transcript-timestamp {
+    color: #8A8A8A;
+    font-family: 'SF Mono', 'Menlo', monospace;
+    font-size: 11px;
+    white-space: nowrap;
+    min-width: 42px;
+  }
+
+  .transcript-speaker {
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .speaker-sarah { color: #EC4899; }
+  .speaker-jack { color: #3B82F6; }
+  .speaker-lisa { color: #22C55E; }
+
+  .transcript-text {
+    color: #B0B0B0;
+  }
+
+  .transcript-cursor {
+    display: inline-block;
+    width: 2px;
+    height: 14px;
+    background: #EC4899;
+    animation: blink 1s step-end infinite;
+    vertical-align: text-bottom;
+    margin-left: 2px;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="scene">
+  <!-- Fake Zoom-like meeting window -->
+  <div class="meeting-window">
+    <div class="meeting-titlebar">
+      <div class="titlebar-dot dot-red"></div>
+      <div class="titlebar-dot dot-yellow"></div>
+      <div class="titlebar-dot dot-green"></div>
+      <div class="titlebar-text">Zoom Meeting — Sprint Planning</div>
+    </div>
+    <div class="meeting-body">
+      <div class="video-grid">
+        <div class="video-tile speaking">
+          <div class="speaking-ring"></div>
+          <div class="avatar avatar-1">S</div>
+          <div class="video-name">Sarah Chen</div>
+          <div class="video-mic">🎤</div>
+        </div>
+        <div class="video-tile">
+          <div class="avatar avatar-2">J</div>
+          <div class="video-name">Jack Rivera</div>
+          <div class="video-mic">🎤</div>
+        </div>
+        <div class="video-tile">
+          <div class="avatar avatar-3">L</div>
+          <div class="video-name">Lisa Park</div>
+          <div class="video-mic" style="color: #EF4444">🔇</div>
+        </div>
+        <div class="video-tile">
+          <div class="avatar avatar-4">Y</div>
+          <div class="video-name">You</div>
+          <div class="video-mic">🎤</div>
+        </div>
+      </div>
+    </div>
+    <div class="meeting-bar">
+      <div class="bar-btn">🎤</div>
+      <div class="bar-btn">📹</div>
+      <div class="bar-btn">🖥️</div>
+      <div class="bar-btn">💬</div>
+      <div class="bar-btn end">End</div>
+    </div>
+  </div>
+
+  <!-- Transcripted floating pill (recording state) -->
+  <div class="hero-label">
+    <span class="hero-label-text">Transcripted is recording</span>
+    <span class="hero-label-arrow">→</span>
+  </div>
+
+  <div class="pill">
+    <div class="waveform">
+      <div class="wave-bar"></div>
+      <div class="wave-bar"></div>
+      <div class="wave-bar"></div>
+      <div class="wave-bar"></div>
+      <div class="wave-bar"></div>
+      <div class="wave-bar"></div>
+    </div>
+    <div class="pill-timer">12:47</div>
+    <div class="pill-stop">
+      <div class="pill-stop-icon"></div>
+    </div>
+  </div>
+
+  <!-- Live transcript preview -->
+  <div class="transcript-preview">
+    <div class="transcript-header">
+      <div class="transcript-title">Live Transcript</div>
+      <div class="transcript-live">
+        <div class="live-dot"></div>
+        Recording
+      </div>
+    </div>
+
+    <div class="transcript-line">
+      <span class="transcript-timestamp">[12:31]</span>
+      <span class="transcript-text">
+        <span class="transcript-speaker speaker-sarah">Sarah:</span>
+        First item — the auth refactor. Where are we?
+      </span>
+    </div>
+
+    <div class="transcript-line">
+      <span class="transcript-timestamp">[12:36]</span>
+      <span class="transcript-text">
+        <span class="transcript-speaker speaker-jack">Jack:</span>
+        Token rotation is done. Migration is ready but I want security to review.
+      </span>
+    </div>
+
+    <div class="transcript-line">
+      <span class="transcript-timestamp">[12:44]</span>
+      <span class="transcript-text">
+        <span class="transcript-speaker speaker-sarah">Sarah:</span>
+        Good call. Let's block that until<span class="transcript-cursor"></span>
+      </span>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
