@@ -20,6 +20,12 @@ actor JSONLWriter {
             lineData = data + Data([0x0A])
         }
 
+        // Detect stale file descriptor — file may have been rotated or deleted externally
+        if handle != nil && !FileManager.default.fileExists(atPath: fileURL.path) {
+            try? handle?.close()
+            handle = nil
+        }
+
         if FileManager.default.fileExists(atPath: fileURL.path) {
             if handle == nil {
                 handle = try? FileHandle(forWritingTo: fileURL)

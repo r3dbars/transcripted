@@ -43,6 +43,7 @@ class DraftSessionController: ObservableObject {
     private var sessionSourceApp: NSRunningApplication?
     private var streamingTask: Task<Void, Never>?
     private var visionTask: Task<Void, Never>?
+    private var clipboardRestoreTask: Task<Void, Never>?
     private var sessionStartTime: CFAbsoluteTime = 0
 
     deinit {
@@ -231,6 +232,8 @@ class DraftSessionController: ObservableObject {
                 }
             } catch {
                 guard !Task.isCancelled else { return }
+                visionTask?.cancel()
+                visionTask = nil
                 appState.logger.log("SESSION | stream error: \(error.localizedDescription)")
                 EventReporter.shared.capture(level: .error, engine: "overlay", event: "stream_draft_failed",
                     message: error.localizedDescription)
@@ -432,6 +435,7 @@ class DraftSessionController: ObservableObject {
         // Use injected context if provided (e.g., onboarding demo)
         if let override = overrideContext {
             lastCapturedContext = override
+            overrideContext = nil
             appState.logger.log("SESSION | using override context — platform=\(override.platform ?? "nil")")
             return
         }
@@ -537,6 +541,15 @@ class DraftSessionController: ObservableObject {
 
     private func pasteWithClipboardRestore(_ text: String) {
         guard let appState = appState else { return }
+
+        // Check Accessibility permission BEFORE modifying clipboard
+        guard AXIsProcessTrusted() else {
+            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+            _ = AXIsProcessTrustedWithOptions(options)
+            appState.logger.log("SESSION | requesting Accessibility permission")
+            return
+        }
+
         let pasteboard = NSPasteboard.general
 
         // Save current clipboard contents
@@ -553,14 +566,6 @@ class DraftSessionController: ObservableObject {
         // Set our drafted text
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-
-        // Check Accessibility permission
-        guard AXIsProcessTrusted() else {
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
-            appState.logger.log("SESSION | requesting Accessibility permission")
-            return
-        }
 
         // Simulate Cmd+V — target app is already frontmost (overlay is non-activating)
         guard let vDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true),
@@ -581,7 +586,8 @@ class DraftSessionController: ObservableObject {
         // back to a 2-second timeout (more conservative than the old 500ms for slow
         // Electron apps like Slack/Teams).
         let changeCountAfterSet = pasteboard.changeCount
-        Task { @MainActor in
+        clipboardRestoreTask?.cancel()
+        clipboardRestoreTask = Task { @MainActor in
             let startTime = CFAbsoluteTimeGetCurrent()
             while CFAbsoluteTimeGetCurrent() - startTime < DraftConstants.clipboardRestoreTimeout {
                 try? await Task.sleep(nanoseconds: DraftConstants.clipboardPollInterval)

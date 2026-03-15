@@ -40,6 +40,10 @@ enum LocalVisionExtractor {
     private static func performOCR(imageData: Data) async throws -> String {
         guard let image = NSImage(data: imageData),
               let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            Task { @MainActor in
+                EventReporter.shared.capture(level: .warning, engine: "capture", event: "vision_decode_failed",
+                    message: "Failed to decode screenshot image data (\(imageData.count) bytes)")
+            }
             return ""
         }
 

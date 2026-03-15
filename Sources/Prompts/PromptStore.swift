@@ -349,7 +349,7 @@ class PromptStore: ObservableObject {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(config)
-            try data.write(to: url)
+            try data.write(to: url, options: .atomic)
         } catch {
             EventReporter.shared.capture(level: .warning, engine: "prompts", event: "prompts_write_failed",
                 message: "Failed to write prompts.json: \(error.localizedDescription)")

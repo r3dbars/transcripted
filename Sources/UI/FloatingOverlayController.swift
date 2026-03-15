@@ -44,6 +44,7 @@ class FloatingOverlayController: ObservableObject {
 
     private var panel: FloatingOverlayPanel?
     private var hostingView: NSHostingView<AnyView>?
+    private var blurView: NSVisualEffectView?
 
     private var dragHandleView: PanelDragView?
     private var escapeMonitor: Any?
@@ -83,6 +84,7 @@ class FloatingOverlayController: ObservableObject {
         blurView.frame = panel.contentView?.bounds ?? .zero
         blurView.autoresizingMask = [.width, .height]
         panel.contentView?.addSubview(blurView)
+        self.blurView = blurView
 
         let content = OverlayContentView(sttRouter: sttRouter, controller: self)
         let hosting = NSHostingView(rootView: AnyView(content))
@@ -116,9 +118,38 @@ class FloatingOverlayController: ObservableObject {
         self.hostingView = hosting
     }
 
+    /// Recreate NSHostingView to prevent stale SwiftUI AttributeGraph accumulation across sessions.
+    /// Same principle as the menubar popover's per-open NSHostingController recreation.
+    private func recreateHostingView() {
+        guard let panel = panel, let sttRouter = sttRouter else { return }
+
+        hostingView?.removeFromSuperview()
+
+        let content = OverlayContentView(sttRouter: sttRouter, controller: self)
+        let hosting = NSHostingView(rootView: AnyView(content))
+        hosting.frame = panel.contentView?.bounds ?? .zero
+        hosting.autoresizingMask = [.width, .height]
+
+        if let blur = blurView {
+            panel.contentView?.addSubview(hosting, positioned: .above, relativeTo: blur)
+        } else {
+            panel.contentView?.addSubview(hosting)
+        }
+
+        // Re-add drag handle on top of new hosting view
+        if let dragView = dragHandleView {
+            panel.contentView?.addSubview(dragView, positioned: .above, relativeTo: hosting)
+        }
+
+        self.hostingView = hosting
+    }
+
     /// Unified show method — positions the panel near the user's cursor/text field
     func showPanel(near sourceApp: NSRunningApplication?) {
         guard let panel = panel else { return }
+
+        // Recreate SwiftUI view tree each session to prevent stale state accumulation
+        recreateHostingView()
 
         let rawTargetRect = sourceApp.flatMap { AccessibilityBridge.focusedTextFieldRect(for: $0) }
         // Start compact (header-only) for listening; full height for other states
@@ -414,6 +445,8 @@ class FloatingOverlayController: ObservableObject {
         streamingText = ""
         errorMessage = ""
         transcriptExpanded = false  // Each new session starts collapsed
+        onConfirm = nil
+        onCancel = nil
     }
 
     // MARK: - Global Escape Monitor

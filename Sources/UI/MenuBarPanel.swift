@@ -18,6 +18,27 @@ struct MenuBarPanelView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     headerSection
+
+                    if let error = appState.contextCapture.hotkeyError {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                            Text(error)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Button("Dismiss") {
+                                appState.contextCapture.hotkeyError = nil
+                            }
+                            .font(.caption)
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 8)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(6)
+                    }
+
                     sectionDivider
 
                     statsSection

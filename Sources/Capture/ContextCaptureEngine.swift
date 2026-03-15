@@ -82,6 +82,9 @@ class ContextCaptureEngine: ObservableObject {
     @Published var draftShortcutDisplay: String = HotkeyPreferences.displayString(for: HotkeyPreferences.draftBinding())
     @Published var dictationShortcutDisplay: String = HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
 
+    /// Non-nil when hotkey registration failed — shown as a dismissible banner in MenuBarPanel
+    @Published var hotkeyError: String?
+
     /// Set by DraftAppDelegate to wire the hotkey to the session controller
     var sessionController: DraftSessionController? {
         didSet {
@@ -139,6 +142,7 @@ class ContextCaptureEngine: ObservableObject {
     private func registerHotkeysFromPreferences() {
         let draftBinding = HotkeyPreferences.draftBinding()
         let dictationBinding = HotkeyPreferences.dictationBinding()
+        var errors: [String] = []
 
         // Draft mode — hotkey ID 1
         let draftHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 1)  // 'DRFT'
@@ -151,6 +155,7 @@ class ContextCaptureEngine: ObservableObject {
             &hotkeyRef
         )
         if draftStatus != noErr {
+            errors.append("Draft shortcut")
             EventReporter.shared.capture(level: .error, engine: "capture", event: "hotkey_register_failed",
                 message: "Draft hotkey registration failed", context: ["os_status": "\(draftStatus)"])
         }
@@ -166,9 +171,13 @@ class ContextCaptureEngine: ObservableObject {
             &dictationHotkeyRef
         )
         if dictationStatus != noErr {
+            errors.append("Dictation shortcut")
             EventReporter.shared.capture(level: .error, engine: "capture", event: "hotkey_register_failed",
                 message: "Dictation hotkey registration failed", context: ["os_status": "\(dictationStatus)"])
         }
+
+        // Surface registration failures to the user via MenuBarPanel
+        hotkeyError = errors.isEmpty ? nil : "\(errors.joined(separator: " and ")) failed to register"
 
         // Update display strings
         draftShortcutDisplay = HotkeyPreferences.displayString(for: draftBinding)
