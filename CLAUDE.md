@@ -26,8 +26,8 @@ Sources/
 ├── Analysis/                ← AnalysisEngine + InsightCard — native Swift feedback analyzer
 ├── Accessibility/           ← AccessibilityBridge — AXUIElement queries for text field position + value
 ├── Observability/           ← EventReporter + AppLogger + JSONLWriter — centralized error/warning/info tracking (events.jsonl)
-└── UI/                      ← UI layer (16 files): floating overlay, MenuBarPanel, onboarding, AgentSection
-Tests/                       ← Pure-function test suite (159 tests, no XCTest, 2s compile+run)
+└── UI/                      ← UI layer (15 files): floating overlay, MenuBarPanel, onboarding, AgentSection
+Tests/                       ← Pure-function test suite (147 tests, no XCTest, 2s compile+run)
 run-tests.sh                 ← Compiles and runs the test suite
 ```
 
@@ -272,7 +272,7 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - **Clipboard restore via changeCount polling** — `pasteWithClipboardRestore()` polls `NSPasteboard.changeCount` every 50ms with a 2-second timeout (some apps write back to clipboard on paste, which triggers early restore). Replaces the old fixed 500ms delay.
 - **Debug log rotation** — `AppLogFileWriter` preserves logs across sessions (no wipe on launch). Files over 500KB are rotated to the last 1000 lines. Session separators mark boundaries.
 - **Centralized constants** — `DraftConstants` enum in `Sources/DraftConstants.swift` holds timeouts, thresholds, retry delays, buffer sizes, and data limits. Use these instead of inline magic numbers when modifying configuration-like values.
-- **Pure-function test suite** — 159 tests in `Tests/` covering CapturedContext, PlatformFormatter, DraftUtils, MessageFilter, StyleUtils, InsightCard, and error types. Compiled with `swiftc` (no Xcode/XCTest dependency), runs in ~2 seconds. **Always run `bash build.sh && bash run-tests.sh` after modifying any Swift file.**
+- **Pure-function test suite** — 147 tests in `Tests/` covering CapturedContext, PlatformFormatter, DraftUtils, MessageFilter, StyleUtils, InsightCard, and error types. Compiled with `swiftc` (no Xcode/XCTest dependency), runs in ~2 seconds. **Always run `bash build.sh && bash run-tests.sh` after modifying any Swift file.**
 - **Extracted pure utilities for testability** — `StyleUtils`, `DraftUtils`, `MessageFilter` are stateless enums with static methods, extracted from `@MainActor ObservableObject` classes so they can be tested without SwiftUI.
 
 ## Project-Wide Learnings

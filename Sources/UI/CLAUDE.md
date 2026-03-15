@@ -7,18 +7,18 @@ SwiftUI views for the Draft app. The primary UI is a **floating overlay** (non-a
 ## Key Files
 
 - `FloatingOverlayPanel.swift` (~37 lines) — NSPanel subclass (non-activating, dynamic key status)
-- `FloatingOverlayController.swift` (~433 lines) — State machine, animations, panel lifecycle, global Escape monitor
-- `OverlayContentView.swift` (~312 lines) — SwiftUI views for all 6 overlay states (idle/loading/listening/drafting/streaming/review)
-- `DraftSessionController.swift` (~579 lines) — Session orchestration for draft mode (option+D) and dictation mode (option+Space)
+- `FloatingOverlayController.swift` (~460 lines) — State machine, animations, panel lifecycle, global Escape monitor
+- `OverlayContentView.swift` (~332 lines) — SwiftUI views for all 6 overlay states (idle/loading/listening/drafting/streaming/review)
+- `DraftSessionController.swift` (~603 lines) — Session orchestration for draft mode (option+D) and dictation mode (option+Space)
 - `OverlayTokens.swift` (~48 lines) — Design tokens: `OverlayTokens` for floating overlay (translucent dark), `MenuTokens` for menubar panel (system-adaptive colors, layout constants)
 - `PanelDragView.swift` (~37 lines) — AppKit drag helper (mouseDown -> performDrag)
-- `MenuBarPanel.swift` (~415 lines) — Single-pane menubar popover (440x520): header (status dot), usage stats, shortcut pills, writing style (compact/expandable), agent section, onboarding gate, settings gear
+- `MenuBarPanel.swift` (~451 lines) — Single-pane menubar popover (440x520): header (status dot), usage stats, shortcut pills, writing style (compact/expandable), agent section, onboarding gate, settings gear
 - `OnboardingView.swift` (~876 lines) — 8-step interactive onboarding: welcome -> permissions -> try dictation -> try drafting -> fake conversation -> try context draft -> style setup -> complete. The largest UI file.
 - `OnboardingWindowController.swift` (~88 lines) — NSWindowController that hosts the onboarding SwiftUI view in a standalone window
 - `PermissionsOnboardingView.swift` (~252 lines) — Permission checker for mic, speech, screen capture with live polling and System Settings deep links
 - `HotkeyRecorderView.swift` (~142 lines) — Compact keyboard shortcut recorder for settings popover, uses NSEvent local monitor for key capture
-- `AgentTab.swift` (~287 lines) — `AgentSection` struct: simplified insight cards (Apply/Skip) + chat interface with expandable tool use indicators
-- `StyleOnboardingView.swift` (~664 lines) — 5-step onboarding: intro -> source choice -> (iMessage/paste) -> result
+- `AgentTab.swift` (~101 lines) — `AgentSection` struct: pending insight cards (Apply/Skip) from AnalysisEngine. Chat removed (low value relative to complexity for local inference)
+- `StyleOnboardingView.swift` (~554 lines) — 5-step onboarding: intro -> source choice -> (iMessage/paste) -> result
 - `ScrollingWaveformView.swift` (~147 lines) — Real-time scrolling waveform for overlay header bar, Canvas + TimelineView at 60fps, ring buffer for audio level samples
 - `AnimatedTranscriptView.swift` (~81 lines) — Animated live transcript with word-by-word fade-in via custom `FlowLayout` (SwiftUI Layout protocol)
 
@@ -32,7 +32,7 @@ FloatingOverlay (hotkey flow)          MenuBarPanel (configuration)
 |                            |        | +-- Stats (words/msgs)      |
 | States:                    |        | +-- Shortcuts (option+D/Space)|
 | idle -> listening ->       |        | +-- Writing Style (card)    |
-| drafting -> streaming ->   |        | +-- AgentSection (cards+chat)|
+| drafting -> streaming ->   |        | +-- AgentSection (cards)     |
 | review                     |        |                             |
 +----------------------------+        | Onboarding gate:            |
 | DraftSessionController     |        | StyleOnboardingView         |
@@ -205,7 +205,7 @@ Single-pane menubar popover (440x520, `MenuTokens` design tokens) with a continu
 2. **Stats** — Three-column HStack: words dictated, messages drafted, time saved. Data from `FeedbackStore.stats`, refreshed on `.onAppear`
 3. **Shortcuts** — Pill-shaped badges showing `option+D Draft` and `option+Space Dictation`
 4. **Writing Style** — Section header with example count badge + expandable card. Shows compact preview of `style.md` (extracted from "## Style Summary" section, up to 6 lines), expands to full scrollable content with "Show more/Show less" toggle. Empty state: "Accept a draft to start learning your style"
-5. **Agent** — `AgentSection` (from `AgentTab.swift`): insight cards + chat interface
+5. **Agent** — `AgentSection` (from `AgentTab.swift`): pending insight cards with Apply/Skip actions
 
 Additional features:
 - **Onboarding gate** — `StyleOnboardingView` overlay (no auth setup needed — all inference is local)
@@ -234,10 +234,6 @@ The `NSHostingController` is **recreated on every popover open** inside `DraftAp
 ```
 
 This guarantees a fresh SwiftUI view tree on each open. A long-lived `NSHostingController` accumulates stale observation state across show/hide cycles and can crash in body evaluation. Do NOT cache the hosting controller or use `.id()` tricks (e.g., a `popoverGeneration` counter) — a `.id()` change on the root view triggers an infinite `.onAppear` -> re-layout -> `.onAppear` loop. Just recreate the controller.
-
-## AgentSection — Chat Tool Indicators
-
-Chat messages with role `.tool` are rendered as compact, expandable tool indicators (wrench icon + label) instead of regular bubbles. Clicking expands to show the tool's detail text (file path, command, etc.) in a monospaced code block. The `expandedTools` `Set<String>` tracks which tool messages are currently expanded.
 
 ## AgentSection — Defensive Card ID Capture
 
@@ -294,7 +290,7 @@ After modifying UI components, verify with these checks:
 - **Paste-back:** Draft injected into correct target app (overlay is non-activating)
 - **Stats section:** Opens menubar panel -> words dictated, messages drafted, time saved are visible
 - **Style section:** Shows style.md preview in expandable card; "Show more" expands full content
-- **Agent section:** Insight cards appear with Apply/Skip buttons; chat interface works
+- **Agent section:** Insight cards appear with Apply/Skip buttons
 - **Rapid menubar clicking:** Click the menubar icon quickly multiple times -> should NOT cause hangs, spinning beachballs, or crashes. Each open recreates the hosting controller cleanly; closing before re-opening calls `performClose` which is synchronous and safe.
 - **Debug log:** `tail -f ~/draft-debug.log | grep "SESSION\|DICTATION\|REVIEW"` shows all events
 - **Build:** `bash build.sh` -- must compile cleanly (pre-existing warnings only: CGWindowListCreateImage deprecation, `_performHide()` actor isolation in animation callbacks)

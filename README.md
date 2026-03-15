@@ -353,7 +353,7 @@ Sources/
 └── UI/            ← Floating overlay, menubar panel, onboarding
 ```
 
-~50 files. ~9,600 lines of Swift. Zero third-party runtime dependencies — only Apple frameworks plus FluidAudio and MLX built from source.
+~50 files. ~10,000 lines of Swift. Zero third-party runtime dependencies — only Apple frameworks plus FluidAudio and MLX built from source.
 
 Each subfolder has its own `CLAUDE.md` with detailed component documentation — architecture decisions, gotchas, and modification guides.
 

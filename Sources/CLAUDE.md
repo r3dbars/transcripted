@@ -6,11 +6,11 @@ Bootstrap and centralized state management for the Draft macOS app. Three files 
 
 ## Key Files
 
-- `DraftApp.swift` (125 lines) — `@main` entry point: SwiftUI App struct + `DraftAppDelegate` (NSApplicationDelegate) for menubar setup, popover lifecycle, and engine initialization
-- `DraftAppState.swift` (188 lines) — `@MainActor ObservableObject` that owns all engine instances and coordinates initialization/shutdown
+- `DraftApp.swift` (146 lines) — `@main` entry point: SwiftUI App struct + `DraftAppDelegate` (NSApplicationDelegate) for menubar setup, popover lifecycle, and engine initialization
+- `DraftAppState.swift` (122 lines) — `@MainActor ObservableObject` that owns all engine instances and coordinates initialization/shutdown
 - `DraftPaths.swift` (13 lines) — `FileManager` extension providing `draftAppSupportDir` (`~/Library/Application Support/Draft/`)
 - `HotkeyPreferences.swift` (193 lines) — Stores/loads custom hotkey bindings (UserDefaults), Carbon modifier conversion, display strings for shortcut hints
-- `DraftConstants.swift` (126 lines) — Centralized configuration constants (timeouts, thresholds, limits, buffer sizes)
+- `DraftConstants.swift` (148 lines) — Centralized configuration constants (timeouts, thresholds, limits, buffer sizes)
 
 ## Initialization Order (Critical)
 
@@ -51,9 +51,7 @@ initialize() [guarded by isInitialized flag]
 ├→ drafter.styleEngine = styleEngine            // DraftEngine needs style prompts
 ├→ drafter.promptStore = promptStore            // DraftEngine needs model config
 ├→ styleEngine.promptStore = promptStore        // StyleEngine needs fallback prompts
-├→ chatEngine.promptStore = promptStore         // Chat needs model config
 ├→ analysisEngine.start()                       // Start feedback file watcher
-├→ chatEngine.onInsightProposed → analysisEngine.addInsight  // Chat → insight cards
 ├→ NotificationCenter observer: .promptsDidChange → promptStore.reload()
 ├→ Task { sttRouter.parakeetEngine.initialize() + prewarm() }  // Non-blocking model load
 ├→ EventReporter.shared.setEngineStateSummary { ... }  // Context enrichment
