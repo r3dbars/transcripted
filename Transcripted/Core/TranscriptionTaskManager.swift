@@ -174,7 +174,7 @@ class TranscriptionTaskManager: ObservableObject {
         }
     }
 
-    /// Check if enough memory is available for Qwen (~2.5GB model, require 4GB headroom).
+    /// Check if enough memory is available for Qwen (~2.5GB model, require 3GB headroom).
     /// Returns true if memory is sufficient or the check is unavailable.
     nonisolated private func hasMemoryForQwen() -> Bool {
         let hostPort = mach_host_self()
@@ -189,7 +189,12 @@ class TranscriptionTaskManager: ObservableObject {
         guard result == KERN_SUCCESS else { return true }  // if check fails, allow the attempt
         let pageSize = UInt64(vm_kernel_page_size)
         let freeBytes = (UInt64(stats.free_count) + UInt64(stats.inactive_count)) * pageSize
-        let requiredBytes: UInt64 = 4 * 1024 * 1024 * 1024
+        let requiredBytes: UInt64 = 3 * 1024 * 1024 * 1024
+        AppLogger.pipeline.debug("Qwen memory check", [
+            "freeGB": String(format: "%.1f", Double(freeBytes) / 1_073_741_824),
+            "requiredGB": "3.0",
+            "sufficient": freeBytes >= requiredBytes ? "yes" : "no"
+        ])
         return freeBytes >= requiredBytes
     }
 
