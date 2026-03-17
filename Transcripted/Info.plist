@@ -28,5 +28,13 @@
 	<string>Transcripted captures system audio to transcribe meeting participants and other audio playing on your Mac.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>Transcripted needs access to Reminders to save action items from your meetings.</string>
+	<key>SUFeedURL</key>
+	<string>https://r3dbars.github.io/transcripted/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>SPARKLE_PUBLIC_KEY_PLACEHOLDER</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 </dict>
 </plist>
