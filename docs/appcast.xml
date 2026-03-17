@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Transcripted</title>
+    <link>https://r3dbars.github.io/transcripted/appcast.xml</link>
+    <description>Transcripted update feed</description>
+    <language>en</language>
+    <!-- Items are prepended by the release workflow -->
+  </channel>
+</rss>

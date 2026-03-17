@@ -1,0 +1,151 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: Transcripted
+  SCHEME: Transcripted
+  BUNDLE_ID: com.transcripted.app
+
+jobs:
+  build-and-release:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Install Apple certificate
+        env:
+          DEVELOPER_ID_CERT: ${{ secrets.DEVELOPER_ID_CERT }}
+          DEVELOPER_ID_PASSWORD: ${{ secrets.DEVELOPER_ID_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}
+        run: |
+          # Create temporary keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # Import certificate
+          CERT_PATH=$RUNNER_TEMP/certificate.p12
+          echo -n "$DEVELOPER_ID_CERT" | base64 --decode -o $CERT_PATH
+          security import $CERT_PATH -P "$DEVELOPER_ID_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+      - name: Build Release
+        run: |
+          xcodebuild -project ${{ env.APP_NAME }}.xcodeproj \
+            -scheme ${{ env.SCHEME }} \
+            -configuration Release \
+            -derivedDataPath build \
+            -destination "generic/platform=macOS" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Developer ID Application" \
+            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }} \
+            MARKETING_VERSION=${{ steps.version.outputs.version }} \
+            CURRENT_PROJECT_VERSION=${{ steps.version.outputs.version }}
+
+      - name: Locate app bundle
+        id: app
+        run: |
+          APP_PATH=$(find build/Build/Products/Release -name "*.app" -maxdepth 1 | head -1)
+          echo "path=$APP_PATH" >> $GITHUB_OUTPUT
+          echo "Found app at: $APP_PATH"
+
+      - name: Create ZIP for Sparkle
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${{ steps.app.outputs.path }}" \
+            "${{ env.APP_NAME }}.zip"
+
+      - name: Create DMG
+        run: |
+          chmod +x scripts/create-dmg.sh
+          ./scripts/create-dmg.sh "${{ steps.app.outputs.path }}" .
+
+      - name: Notarize DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          chmod +x scripts/notarize.sh
+          DMG_FILE=$(ls *.dmg | head -1)
+          ./scripts/notarize.sh "$DMG_FILE" "$APPLE_ID" "$APPLE_TEAM_ID" "$APPLE_APP_PASSWORD"
+
+      - name: Notarize ZIP
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          chmod +x scripts/notarize.sh
+          ./scripts/notarize.sh "${{ env.APP_NAME }}.zip" "$APPLE_ID" "$APPLE_TEAM_ID" "$APPLE_APP_PASSWORD"
+
+      - name: Sign update with Sparkle EdDSA
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          # Download Sparkle tools
+          SPARKLE_VERSION="2.8.0"
+          curl -sL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz" | tar xJ -C /tmp/sparkle
+
+          # Sign the ZIP and capture signature + length
+          SIGN_OUTPUT=$(echo "$SPARKLE_PRIVATE_KEY" | /tmp/sparkle/bin/sign_update "${{ env.APP_NAME }}.zip" --ed-key-file -)
+          echo "sparkle_signature=$(echo "$SIGN_OUTPUT" | grep 'sparkle:edSignature' | sed 's/.*"\(.*\)".*/\1/')" >> $GITHUB_OUTPUT
+          echo "sparkle_length=$(wc -c < "${{ env.APP_NAME }}.zip" | tr -d ' ')" >> $GITHUB_OUTPUT
+        id: sparkle
+
+      - name: Generate appcast item
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DATE=$(date -u +"%a, %d %b %Y %H:%M:%S %z")
+          ZIP_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/${{ env.APP_NAME }}.zip"
+
+          cat > appcast-item.xml << XMLEOF
+              <item>
+                <title>Version ${VERSION}</title>
+                <pubDate>${DATE}</pubDate>
+                <sparkle:version>${VERSION}</sparkle:version>
+                <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+                <sparkle:minimumSystemVersion>14.2</sparkle:minimumSystemVersion>
+                <description><![CDATA[<h2>What's New in ${VERSION}</h2><p>See full release notes on GitHub.</p>]]></description>
+                <enclosure
+                  url="${ZIP_URL}"
+                  sparkle:edSignature="${{ steps.sparkle.outputs.sparkle_signature }}"
+                  length="${{ steps.sparkle.outputs.sparkle_length }}"
+                  type="application/octet-stream" />
+              </item>
+          XMLEOF
+
+          echo "Generated appcast item for v${VERSION}"
+          cat appcast-item.xml
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DMG_FILE=$(ls *.dmg | head -1)
+
+          gh release create "v${VERSION}" \
+            --title "Transcripted v${VERSION}" \
+            --generate-notes \
+            "$DMG_FILE" \
+            "${{ env.APP_NAME }}.zip" \
+            appcast-item.xml
+
+      - name: Cleanup keychain
+        if: always()
+        run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true

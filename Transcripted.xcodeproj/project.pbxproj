@@ -77,6 +77,8 @@
 		FA000015 /* CoreML.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000005 /* CoreML.framework */; };
 		FA000016 /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000006 /* CoreAudio.framework */; };
 		Q1000001 /* QwenService.swift in Sources */ = {isa = PBXBuildFile; fileRef = Q1000002 /* QwenService.swift */; };
+		A2000001 /* DiagnosticExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* DiagnosticExporter.swift */; };
+		A2000003 /* CrashReporting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004 /* CrashReporting.swift */; };
 		Q1000011 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = Q1000012 /* MLXLLM */; };
 		Q1000021 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = Q1000022 /* MLXLMCommon */; };
 		T1000011 /* TestFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000001 /* TestFixtures.swift */; };
@@ -161,6 +163,8 @@
 		A1001003 /* TranscriptScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptScanner.swift; sourceTree = "<group>"; };
 		A1001021 /* TranscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptStore.swift; sourceTree = "<group>"; };
 		A1001031 /* TranscriptExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptExporter.swift; sourceTree = "<group>"; };
+		A2000002 /* DiagnosticExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticExporter.swift; sourceTree = "<group>"; };
+		A2000004 /* CrashReporting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashReporting.swift; sourceTree = "<group>"; };
 		A1001023 /* TranscriptTrayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptTrayView.swift; sourceTree = "<group>"; };
 		A1001025 /* TranscriptDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptDetailView.swift; sourceTree = "<group>"; };
 		A1001110 /* SettingsNavigationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsNavigationState.swift; sourceTree = "<group>"; };
@@ -293,6 +297,8 @@
 				A1001021 /* TranscriptStore.swift */,
 				A1001031 /* TranscriptExporter.swift */,
 				A1002005 /* TranscriptionTypes.swift */,
+				A2000002 /* DiagnosticExporter.swift */,
+				A2000004 /* CrashReporting.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -687,6 +693,8 @@
 				A1003003 /* FileLogger.swift in Sources */,
 				Q1000001 /* QwenService.swift in Sources */,
 				4CAF116349811906B83C0406 /* ModelSetupStep.swift in Sources */,
+				A2000001 /* DiagnosticExporter.swift in Sources */,
+				A2000003 /* CrashReporting.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

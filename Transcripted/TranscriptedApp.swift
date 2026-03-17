@@ -3,6 +3,9 @@ import AppKit
 import AVFoundation
 import Combine
 import UserNotifications
+#if canImport(Sparkle)
+import Sparkle
+#endif
 
 @available(macOS 26.0, *)
 @main
@@ -35,6 +38,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
     // Onboarding
     var onboardingWindowController: OnboardingWindowController?
 
+    // Auto-updates (Sparkle)
+    #if canImport(Sparkle)
+    var updaterController: SPUStandardUpdaterController?
+    #endif
+
     // Global hotkey monitors
     private var globalHotkeyMonitor: Any?
     private var localHotkeyMonitor: Any?
@@ -48,6 +56,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Initialize logger (creates log directory, opens file handle)
         _ = AppLogger.shared
+
+        // Initialize crash reporting (opt-in, respects user consent)
+        CrashReporting.initialize()
 
         // Configure tooltip delay to 1 second
         UserDefaults.standard.set(1000, forKey: "NSInitialToolTipDelay")
@@ -77,6 +88,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
 
     /// Set up the main app after onboarding or on subsequent launches
     private func setupApp() {
+        // Initialize Sparkle auto-updater
+        #if canImport(Sparkle)
+        updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+        #endif
+
         // Register notification categories and request permission
         registerNotificationCategories()
 
@@ -122,7 +138,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Failed Transcriptions...", action: #selector(openFailedTranscriptions), keyEquivalent: "f"))
         menu.addItem(NSMenuItem.separator())
+        #if canImport(Sparkle)
+        menu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: ""))
+        #endif
         menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "Export Diagnostics...", action: #selector(exportDiagnostics), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Report Issue...", action: #selector(reportIssue), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         #if DEBUG
         menu.addItem(NSMenuItem(title: "Reset Onboarding (Debug)", action: #selector(resetOnboarding), keyEquivalent: ""))
@@ -645,6 +667,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         }
 
         settingsWindowController?.showWindow()
+    }
+
+    #if canImport(Sparkle)
+    @objc func checkForUpdates() {
+        updaterController?.checkForUpdates(nil)
+    }
+    #endif
+
+    @objc func exportDiagnostics() {
+        DiagnosticExporter.exportDiagnostics()
+    }
+
+    @objc func reportIssue() {
+        let url = DiagnosticExporter.gitHubIssueURL()
+        NSWorkspace.shared.open(url)
     }
 
     /// Handle recording completion - trigger transcription
