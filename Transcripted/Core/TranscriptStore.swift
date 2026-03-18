@@ -13,6 +13,7 @@ struct TranscriptSummary: Identifiable {
     let date: Date
     let duration: String   // e.g. "47:32"
     let speakerCount: Int
+    let speakerNames: [String]  // Parsed from YAML frontmatter
 }
 
 // MARK: - TranscriptLine
@@ -192,6 +193,7 @@ final class TranscriptStore: ObservableObject {
         var date: Date = fileCreationDate(url)
         var duration = ""
         var speakerCount = 0
+        var speakerNames: [String] = []
 
         // Parse YAML frontmatter for structured fields
         if raw.hasPrefix("---"),
@@ -225,6 +227,26 @@ final class TranscriptStore: ObservableObject {
                     break
                 }
             }
+
+            // Parse speaker names from YAML speakers block
+            var inSpeakersBlock = false
+            for line in yaml.components(separatedBy: "\n") {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("speakers:") {
+                    inSpeakersBlock = true
+                    continue
+                }
+                if inSpeakersBlock && !line.hasPrefix(" ") && !line.hasPrefix("\t") && !trimmed.isEmpty {
+                    inSpeakersBlock = false
+                }
+                if inSpeakersBlock && trimmed.hasPrefix("name:") {
+                    let name = trimmed.replacingOccurrences(of: "name:", with: "")
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+                    if !name.isEmpty && name != "Unknown" {
+                        speakerNames.append(name)
+                    }
+                }
+            }
         }
 
         // Prefer a markdown heading title over the filename
@@ -244,7 +266,8 @@ final class TranscriptStore: ObservableObject {
             title: title,
             date: date,
             duration: duration,
-            speakerCount: speakerCount
+            speakerCount: speakerCount,
+            speakerNames: speakerNames
         )
     }
 

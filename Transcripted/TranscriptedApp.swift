@@ -429,45 +429,65 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         center.setNotificationCategories([autoDetectCategory, savedCategory])
 
         center.requestAuthorization(options: [.alert, .sound]) { granted, error in
-            if let error = error {
+            if granted {
+                AppLogger.app.info("Notification permission granted")
+            } else if let error = error {
                 AppLogger.app.warning("Notification permission error", ["error": error.localizedDescription])
+            } else {
+                AppLogger.app.info("Notification permission denied by user")
             }
         }
     }
 
-    /// Notify user that auto-detect started a recording
+    /// Notify user that auto-detect started a recording.
+    /// Guards on authorization status to avoid UNErrorDomain error 1.
     private func sendAutoDetectStartNotification(appName: String) {
-        let content = UNMutableNotificationContent()
-        content.title = "Recording Started"
-        content.body = "Transcripted detected \(appName) and started recording."
-        content.categoryIdentifier = "AUTO_DETECT_RECORDING"
-        content.sound = .default
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized else {
+                AppLogger.app.debug("Skipping auto-detect start notification — not authorized")
+                return
+            }
 
-        let request = UNNotificationRequest(
-            identifier: "auto-detect-start",
-            content: content,
-            trigger: nil
-        )
-        UNUserNotificationCenter.current().add(request)
+            let content = UNMutableNotificationContent()
+            content.title = "Recording Started"
+            content.body = "Transcripted detected \(appName) and started recording."
+            content.categoryIdentifier = "AUTO_DETECT_RECORDING"
+            content.sound = .default
+
+            let request = UNNotificationRequest(
+                identifier: "auto-detect-start",
+                content: content,
+                trigger: nil
+            )
+            UNUserNotificationCenter.current().add(request)
+        }
     }
 
-    /// Notify user that auto-detect stopped a recording
+    /// Notify user that auto-detect stopped a recording.
+    /// Guards on authorization status to avoid UNErrorDomain error 1.
     private func sendAutoDetectStopNotification(duration: TimeInterval) {
-        let minutes = Int(duration) / 60
-        let seconds = Int(duration) % 60
-        let durationStr = String(format: "%d:%02d", minutes, seconds)
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized else {
+                AppLogger.app.debug("Skipping auto-detect stop notification — not authorized")
+                return
+            }
 
-        let content = UNMutableNotificationContent()
-        content.title = "Recording Saved"
-        content.body = "\(durationStr) meeting transcribed."
-        content.sound = .default
+            let minutes = Int(duration) / 60
+            let seconds = Int(duration) % 60
+            let durationStr = String(format: "%d:%02d", minutes, seconds)
 
-        let request = UNNotificationRequest(
-            identifier: "auto-detect-stop",
-            content: content,
-            trigger: nil
-        )
-        UNUserNotificationCenter.current().add(request)
+            let content = UNMutableNotificationContent()
+            content.title = "Recording Saved"
+            content.body = "\(durationStr) meeting transcribed."
+            content.sound = .default
+
+            let request = UNNotificationRequest(
+                identifier: "auto-detect-stop",
+                content: content,
+                trigger: nil
+            )
+            UNUserNotificationCenter.current().add(request)
+        }
     }
 
     // MARK: - UNUserNotificationCenterDelegate

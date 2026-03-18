@@ -35,7 +35,8 @@ struct ModelSetupStep: View {
                     title: "Speech Recognition",
                     description: "Parakeet TDT V3 — converts speech to text",
                     isReady: state.parakeetReady,
-                    isLoading: state.isLoadingModels && !state.parakeetReady
+                    isLoading: state.isLoadingModels && !state.parakeetReady,
+                    loadingText: "Downloading speech models (~600 MB)..."
                 )
                 .offset(x: card1Appeared ? 0 : 40)
                 .opacity(card1Appeared ? 1 : 0)
@@ -45,7 +46,8 @@ struct ModelSetupStep: View {
                     title: "Speaker Diarization",
                     description: "Sortformer — identifies who said what",
                     isReady: state.sortformerReady,
-                    isLoading: state.isLoadingModels && !state.sortformerReady
+                    isLoading: state.isLoadingModels && !state.sortformerReady,
+                    loadingText: "Downloading diarization models..."
                 )
                 .offset(x: card2Appeared ? 0 : 40)
                 .opacity(card2Appeared ? 1 : 0)
@@ -89,6 +91,10 @@ struct ModelSetupStep: View {
                     Text("No cloud APIs, no internet required after setup")
                         .font(.caption)
                         .foregroundColor(.softCharcoal.opacity(0.7))
+
+                    Text("English only · macOS 14.2+ · 16 GB RAM recommended")
+                        .font(.caption)
+                        .foregroundColor(.softCharcoal.opacity(0.5))
                 }
                 .padding(.bottom, Spacing.lg)
             }
@@ -152,6 +158,7 @@ private struct ModelDownloadCard: View {
     let description: String
     let isReady: Bool
     let isLoading: Bool
+    let loadingText: String
 
     @State private var isHovered = false
 
@@ -190,7 +197,7 @@ private struct ModelDownloadCard: View {
                     .foregroundColor(.softCharcoal)
 
                 if isLoading {
-                    Text("Initializing...")
+                    Text(loadingText)
                         .font(.caption)
                         .foregroundColor(.terracotta)
                 } else if isReady {

@@ -182,7 +182,7 @@ class TranscriptionTaskManager: ObservableObject {
         }
     }
 
-    /// Check if enough memory is available for Qwen (~2.5GB model, require 3GB headroom).
+    /// Check if enough memory is available for Qwen (~2.5GB model, require 2GB headroom).
     /// Returns true if memory is sufficient or the check is unavailable.
     nonisolated private func hasMemoryForQwen() -> Bool {
         let hostPort = mach_host_self()
@@ -197,10 +197,10 @@ class TranscriptionTaskManager: ObservableObject {
         guard result == KERN_SUCCESS else { return true }  // if check fails, allow the attempt
         let pageSize = UInt64(vm_kernel_page_size)
         let freeBytes = (UInt64(stats.free_count) + UInt64(stats.inactive_count)) * pageSize
-        let requiredBytes: UInt64 = 3 * 1024 * 1024 * 1024
+        let requiredBytes: UInt64 = 2 * 1024 * 1024 * 1024
         AppLogger.pipeline.debug("Qwen memory check", [
             "freeGB": String(format: "%.1f", Double(freeBytes) / 1_073_741_824),
-            "requiredGB": "3.0",
+            "requiredGB": "2.0",
             "sufficient": freeBytes >= requiredBytes ? "yes" : "no"
         ])
         return freeBytes >= requiredBytes
@@ -501,6 +501,13 @@ class TranscriptionTaskManager: ObservableObject {
                         )
 
                         if !inferenceText.isEmpty {
+                            // Free ~1.5 GB — transcription is done, these models aren't needed during speaker naming
+                            await MainActor.run {
+                                self.transcription.parakeet.cleanup()
+                                self.transcription.sortformer.cleanup()
+                            }
+                            AppLogger.pipeline.info("Unloaded Parakeet + Sortformer before Qwen inference")
+
                             do {
                                 // Wait for pre-loaded model (started when recording began)
                                 if let preloadTask = await MainActor.run(body: { self.qwenPreloadTask }) {
@@ -529,12 +536,21 @@ class TranscriptionTaskManager: ObservableObject {
                                 }
                                 await MainActor.run { self.cleanupQwen() }
 
+                                // Reload for next recording (~0.3s from cache)
+                                await self.transcription.initializeModels()
+                                AppLogger.pipeline.info("Reloaded Parakeet + Sortformer after Qwen cleanup")
+
                                 AppLogger.pipeline.info("Qwen speaker inference complete", [
                                     "suggestions": "\(qwenSuggestions.filter { $0.value != "Unknown" }.count)",
                                     "total": "\(qwenSuggestions.count)"
                                 ])
                             } catch {
                                 await MainActor.run { self.cleanupQwen() }
+
+                                // Reload for next recording (~0.3s from cache)
+                                await self.transcription.initializeModels()
+                                AppLogger.pipeline.info("Reloaded Parakeet + Sortformer after Qwen cleanup")
+
                                 AppLogger.pipeline.warning("Qwen inference failed, falling back to manual naming", [
                                     "error": error.localizedDescription
                                 ])
@@ -815,25 +831,51 @@ class TranscriptionTaskManager: ObservableObject {
     // MARK: - Qwen Transcript Builder
 
     /// Build a text representation of system audio transcript for Qwen speaker name inference.
-    /// Uses the first 15 minutes — enough to capture late introductions without excessive tokens.
+    /// Samples strategically: first 5 min + last 5 min + evenly spaced middle samples,
+    /// capped at 8000 characters to stay within Qwen's effective context window.
+    /// This captures greetings, mid-meeting name references, and closing "Thanks, [name]" patterns.
     nonisolated private func buildTranscriptTextForInference(
         utterances: [TranscriptionUtterance],
         speakerMappings: [String: SpeakerMapping]
     ) -> String {
-        let maxSeconds: Double = 900  // 15 minutes
-        let filtered = utterances
-            .filter { $0.start < maxSeconds }
-            .sorted { $0.start < $1.start }
+        let sorted = utterances.sorted { $0.start < $1.start }
+        guard !sorted.isEmpty else { return "" }
 
-        guard !filtered.isEmpty else { return "" }
+        let maxChars = 8000
+        let totalDuration = sorted.last!.start
 
-        return filtered.map { utterance in
+        // Strategy: first 5 min + last 5 min + ~20 samples from middle
+        let firstWindow = sorted.filter { $0.start < 300 }
+        let lastWindow = sorted.filter { $0.start > totalDuration - 300 }
+        let middleUtterances = sorted.filter { $0.start >= 300 && $0.start <= totalDuration - 300 }
+
+        var selected = firstWindow
+        if !middleUtterances.isEmpty {
+            let step = max(1, middleUtterances.count / 20)
+            for i in stride(from: 0, to: middleUtterances.count, by: step) {
+                selected.append(middleUtterances[i])
+            }
+        }
+        selected.append(contentsOf: lastWindow)
+
+        // Deduplicate by start time and sort
+        var seenStarts = Set<Double>()
+        selected = selected.filter { seenStarts.insert($0.start).inserted }
+        selected.sort { $0.start < $1.start }
+
+        // Format and truncate to budget
+        var result = ""
+        for utterance in selected {
             let mins = Int(utterance.start) / 60
             let secs = Int(utterance.start) % 60
             let key = "system_\(utterance.speakerId)"
             let label = speakerMappings[key]?.displayName ?? "Speaker \(utterance.speakerId)"
-            return "[\(String(format: "%02d:%02d", mins, secs))] [\(label)] \(utterance.transcript)"
-        }.joined(separator: "\n")
+            let line = "[\(String(format: "%02d:%02d", mins, secs))] [\(label)] \(utterance.transcript)\n"
+            if result.count + line.count > maxChars { break }
+            result += line
+        }
+
+        return result
     }
 
     // MARK: - Failure Notifications (UX: Doherty Threshold - users need immediate feedback)
@@ -858,29 +900,32 @@ class TranscriptionTaskManager: ObservableObject {
         return frames / sampleRate
     }
 
-    /// Send a macOS notification when transcription fails
+    /// Send a macOS notification when transcription fails.
+    /// Guards on authorization status to avoid UNErrorDomain error 1.
     private func sendFailureNotification(errorMessage: String) {
-        let content = UNMutableNotificationContent()
-        content.title = "Transcription Failed"
-        content.body = "Recording saved. Tap to retry."
-        content.sound = .default
-        content.categoryIdentifier = "TRANSCRIPTION_FAILURE"
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized else {
+                AppLogger.pipeline.debug("Skipping failure notification — not authorized")
+                return
+            }
 
-        // Add error details as user info for potential use
-        content.userInfo = ["errorMessage": errorMessage]
+            let content = UNMutableNotificationContent()
+            content.title = "Transcription Failed"
+            content.body = "Recording saved. Tap to retry."
+            content.sound = .default
+            content.categoryIdentifier = "TRANSCRIPTION_FAILURE"
+            content.userInfo = ["errorMessage": errorMessage]
 
-        // Create the request with a unique identifier
-        let request = UNNotificationRequest(
-            identifier: "transcription-failure-\(UUID().uuidString)",
-            content: content,
-            trigger: nil  // nil = deliver immediately
-        )
+            let request = UNNotificationRequest(
+                identifier: "transcription-failure-\(UUID().uuidString)",
+                content: content,
+                trigger: nil
+            )
 
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error = error {
-                AppLogger.app.warning("Failed to send notification", ["error": "\(error.localizedDescription)"])
-            } else {
-                AppLogger.app.info("Failure notification sent")
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error = error {
+                    AppLogger.app.warning("Failed to send notification", ["error": "\(error.localizedDescription)"])
+                }
             }
         }
     }
