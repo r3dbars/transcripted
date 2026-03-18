@@ -727,7 +727,7 @@ class Audio: ObservableObject {
         }
 
         if let capture = systemAudioCapture as? SystemAudioCapture {
-            capture.stop()
+            capture.stopSync()  // Synchronous — avoids race where delayed cleanup destroys the next recording's tap
         }
 
         DispatchQueue.main.async {
