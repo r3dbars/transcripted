@@ -191,23 +191,43 @@ class Transcription: ObservableObject {
             // (existingProfiles was already snapshotted above for post-processing)
             var speakerMatchResults: [Int: (persistentId: UUID, similarity: Double)] = [:]
             var speakerNewProfiles: [Int: UUID] = [:]
+            var speakerIdRemap: [Int: Int] = [:]
 
             for (speakerId, embeddings) in embeddingsPerSpeaker {
                 let meanEmbedding = Self.computeMeanEmbedding(embeddings)
 
+                let isGhost = ghostSpeakerIdSet.contains(speakerId)
+
+                // Ghost speakers have unreliable embeddings (laughter, coughs, codec artifacts).
+                // Don't create new DB profiles for them — force-merge into the closest real speaker.
+                if isGhost {
+                    var bestNonGhostId: Int?
+                    var bestSimilarity: Double = -1
+                    for (otherId, otherEmbeddings) in embeddingsPerSpeaker where !ghostSpeakerIdSet.contains(otherId) {
+                        let otherMean = Self.computeMeanEmbedding(otherEmbeddings)
+                        let sim = Self.cosineSimilarityStatic(meanEmbedding, otherMean)
+                        if sim > bestSimilarity {
+                            bestSimilarity = sim
+                            bestNonGhostId = otherId
+                        }
+                    }
+                    if let targetId = bestNonGhostId {
+                        speakerIdRemap[speakerId] = targetId
+                        AppLogger.transcription.info("Ghost speaker force-merged", [
+                            "ghostSpk": "\(speakerId)",
+                            "into": "\(targetId)",
+                            "similarity": String(format: "%.3f", bestSimilarity)
+                        ])
+                    }
+                    continue  // Skip DB matching/creation entirely
+                }
+
                 // Adaptive threshold: require higher similarity when we have fewer segments.
                 // A single 2s segment can false-match at 0.79; 4+ segments give a reliable mean.
-                // Ghost speakers (all segments filtered as low quality) use a stricter threshold
-                // since their embeddings are unreliable and prone to false DB matches.
-                let isGhost = ghostSpeakerIdSet.contains(speakerId)
-                let adaptiveThreshold: Double = if isGhost {
-                    0.92  // ghost speaker — embedding is low quality, require very high similarity
-                } else {
-                    switch embeddings.count {
-                        case 1: 0.85       // single segment — need near-certainty
-                        case 2...3: 0.78   // few segments — still cautious
-                        default: 0.70      // 4+ segments — reliable mean embedding
-                    }
+                let adaptiveThreshold: Double = switch embeddings.count {
+                    case 1: 0.85       // single segment — need near-certainty
+                    case 2...3: 0.78   // few segments — still cautious
+                    default: 0.70      // 4+ segments — reliable mean embedding
                 }
 
                 // Match only against profiles that existed BEFORE this recording
@@ -235,7 +255,6 @@ class Transcription: ObservableObject {
             // Fixes cross-cluster fragmentation: if Sortformer split one person
             // into spk1 and spk3, and DB matching identified both as the same
             // profile, unify them under the speaker ID with the most segments.
-            var speakerIdRemap: [Int: Int] = [:]
             let profileToSpeakers = Dictionary(grouping: speakerMatchResults.keys) { speakerMatchResults[$0]!.persistentId }
             for (_, matchedSpeakerIds) in profileToSpeakers where matchedSpeakerIds.count >= 2 {
                 let sorted = matchedSpeakerIds.sorted { a, b in

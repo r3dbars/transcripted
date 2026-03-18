@@ -85,7 +85,7 @@ class QwenService: ObservableObject {
         }
     }
 
-    /// Extract speaker names from transcript text (up to first 15 minutes).
+    /// Extract speaker names from transcript text.
     /// Returns a mapping of sortformer speaker IDs to inferred names.
     /// Example: ["0": "Jack", "1": "Sarah", "2": "Unknown"]
     nonisolated func inferSpeakerNames(transcript: String) async throws -> [String: String] {
@@ -137,19 +137,22 @@ class QwenService: ObservableObject {
         - Lines with a real name like [Jenny] or [Jenny?] are ALREADY IDENTIFIED. Ignore them.
         - Return a JSON object mapping speaker numbers to names.
         - Use "Unknown" if you cannot find a name.
+        - Names often appear as: "[Name], did you...", "[Name], can you...", "Thanks [Name]", "pass it to [Name]", "over to [Name]"
+        - The speaker who talks NEXT after being addressed by name IS that person.
+        - Scan the ENTIRE transcript, not just the beginning. Names often appear late in meetings.
 
         CRITICAL RULE — "Hey Jack" DOES NOT MEAN THE SPEAKER IS JACK:
         When someone SAYS a name, they are talking TO that person, not introducing themselves.
         The name belongs to the LISTENER, not the speaker.
 
-        EXAMPLE 1:
+        EXAMPLE 1 — Greeting identifies the listener:
         [00:00] [Speaker 0] Hey Jack, how are you?
         [00:05] [Speaker 1] I'm doing great, thanks!
 
         Speaker 0 said "Hey Jack" → Speaker 0 is talking TO Jack → Speaker 1 is Jack.
         Answer: {"0": "Unknown", "1": "Jack"}
 
-        EXAMPLE 2:
+        EXAMPLE 2 — Self-introduction:
         [00:00] [Speaker 0] Welcome everyone. I'm Sarah from marketing.
         [00:10] [Speaker 1] Thanks Sarah. This is Mike.
         [00:20] [Speaker 0] Great, Mike. Let's get started.
@@ -158,7 +161,7 @@ class QwenService: ObservableObject {
         Speaker 1 said "This is Mike" → Speaker 1 is Mike.
         Answer: {"0": "Sarah", "1": "Mike"}
 
-        EXAMPLE 3:
+        EXAMPLE 3 — Handoff and back-reference:
         [00:00] [Speaker 0] Let me hand it over to David.
         [00:05] [Speaker 1] Thanks! So as I was saying...
         [00:15] [Speaker 0] Good point. Alex, what do you think?
@@ -168,6 +171,33 @@ class QwenService: ObservableObject {
         Speaker 0 said "Alex, what do you think?" → Speaker 2 is Alex.
         Speaker 2 said "what David said" confirms Speaker 1 is David.
         Answer: {"0": "Unknown", "1": "David", "2": "Alex"}
+
+        EXAMPLE 4 — Mid-conversation direct address:
+        [10:00] [Speaker 0] So I think we should move forward with that. Speaker 1, what do you think?
+        [10:05] [Speaker 0] Keen, did you have anything you wanted to talk about?
+        [10:10] [Speaker 2] Yeah, I just think some things we've noticed...
+
+        Speaker 0 said "Keen, did you have anything?" → Speaker 2 is Keen.
+        Answer: {"0": "Unknown", "1": "Unknown", "2": "Keen"}
+
+        EXAMPLE 5 — Handoff / passing to someone:
+        [15:00] [Speaker 0] Let me pass it to Sarah for the update.
+        [15:05] [Speaker 1] Thanks. So the latest on the project is...
+        [20:00] [Speaker 0] Jack, can you walk us through the demo?
+        [20:05] [Speaker 2] Sure, so what I built is...
+
+        Speaker 0 said "pass it to Sarah" → Speaker 1 is Sarah.
+        Speaker 0 said "Jack, can you walk us through" → Speaker 2 is Jack.
+        Answer: {"0": "Unknown", "1": "Sarah", "2": "Jack"}
+
+        EXAMPLE 6 — Back-references that confirm identity:
+        [05:00] [Speaker 0] Great work on the dashboard, James.
+        [05:05] [Speaker 1] Thanks, I spent most of the week on it.
+        [30:00] [Speaker 2] I agree with what James said earlier.
+
+        Speaker 0 said "Great work... James" to Speaker 1 → Speaker 1 is James.
+        Speaker 2 said "what James said" referring to Speaker 1 → confirms Speaker 1 is James.
+        Answer: {"0": "Unknown", "1": "James", "2": "Unknown"}
 
         OUTPUT FORMAT:
         Return ONLY a JSON object like {"0": "Sarah", "1": "Unknown"}

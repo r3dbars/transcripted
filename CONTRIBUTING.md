@@ -23,7 +23,7 @@ Thanks for your interest in contributing to Transcripted! This guide will help y
    open Transcripted.xcodeproj
    ```
 
-3. Set your **Development Team** in the Signing & Capabilities tab — the project has a placeholder team ID that you'll need to replace with your own.
+3. Set your **Development Team** in Xcode: select the Transcripted target → Signing & Capabilities → change the Team to your own Apple Developer account. The project ships with an empty team ID.
 
 4. Build and run (Cmd+R).
 
@@ -34,7 +34,7 @@ Thanks for your interest in contributing to Transcripted! This guide will help y
 The FluidAudio static library (`fluidaudio-libs/libFluidAudioAll.a`) is pre-built and included in the repo. If you need to rebuild it:
 
 ```bash
-./build-fluidaudio.sh
+./scripts/build-fluidaudio.sh
 ```
 
 ## Making Changes
@@ -54,8 +54,8 @@ refactor/description # Code refactoring
 
 - Follow existing Swift conventions in the codebase
 - Use `// MARK:` comments to organize sections within files
-- Keep `@MainActor` annotations correct — see `CLAUDE.md` for which classes require it
 - Never do I/O, locks, or allocations inside CoreAudio real-time callbacks
+- Keep `@MainActor` annotations correct (see Threading below)
 
 ### Architecture
 
@@ -69,7 +69,19 @@ The codebase is organized into layers:
 | Design | `Transcripted/Design/` | Design tokens, shared components |
 | Onboarding | `Transcripted/Onboarding/` | First-run experience |
 
-Each directory has a `CLAUDE.md` file documenting its internals, key types, and modification guidelines. Read the relevant one before making changes in that area.
+### Threading
+
+Transcripted has strict threading rules due to CoreAudio's real-time requirements:
+
+| Component | Thread | Notes |
+|-----------|--------|-------|
+| Audio, Transcription, TaskManager | `@MainActor` | UI-bound state |
+| PillStateManager, all Services | `@MainActor` | UI-bound state |
+| SystemAudioCapture | `DispatchQueue` + `NSLock` | Real-time audio I/O |
+| SpeakerDatabase, StatsDatabase | Serial `DispatchQueue` | Sync reads, async writes |
+| CoreAudio I/O callbacks | Real-time thread | **No I/O, locks, allocations, or ObjC calls** |
+
+CoreAudio I/O callbacks run on real-time threads. Buffers are deep-copied before async dispatch — never processed in-place.
 
 ### Testing
 

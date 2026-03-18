@@ -1,0 +1,13 @@
+# Binary files
+*.a binary
+*.png binary
+*.icns binary
+*.wav binary
+
+# Swift module files
+*.swiftmodule binary
+*.swiftdoc binary
+*.swiftsourceinfo binary
+
+# Large binaries - mark for tracking awareness
+fluidaudio-libs/** binary

@@ -62,8 +62,6 @@ struct SettingsContainerView: View {
                     // Preferences
                     profileSection
 
-                    appearanceSection
-
                     meetingDetectionSection
 
                     speakerIntelligenceSection
@@ -771,6 +769,10 @@ struct SettingsContainerView: View {
                     .font(.caption)
                     .foregroundColor(.panelTextMuted)
                     .padding(.top, Spacing.xs)
+
+                Text("English only · macOS 14.2+ · 16 GB RAM recommended")
+                    .font(.caption)
+                    .foregroundColor(.panelTextMuted)
             }
         }
     }
@@ -843,10 +845,15 @@ struct SettingsTopBar: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.panelTextMuted)
 
-                Text(audioDeviceName)
-                    .font(.system(size: 12))
-                    .foregroundColor(.panelTextSecondary)
-                    .lineLimit(1)
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(audioDeviceName)
+                        .font(.system(size: 12))
+                        .foregroundColor(.panelTextSecondary)
+                        .lineLimit(1)
+                    Text("System default")
+                        .font(.system(size: 9))
+                        .foregroundColor(.panelTextMuted)
+                }
             }
         }
         .padding(.horizontal, Spacing.lg)

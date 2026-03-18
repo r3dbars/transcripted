@@ -527,6 +527,14 @@ struct TranscriptRowView: View {
                         .foregroundColor(.panelTextMuted)
                     }
                 }
+
+                if !transcript.speakerNames.isEmpty {
+                    Text(transcript.speakerNames.joined(separator: ", "))
+                        .font(.system(size: 10))
+                        .foregroundColor(.panelTextMuted)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
 
             Spacer(minLength: Spacing.xs)
