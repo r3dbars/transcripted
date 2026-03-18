@@ -16,13 +16,15 @@ import Accelerate
 enum EmbeddingClusterer {
 
     /// Post-process Sortformer segments: merge fragmented speakers,
-    /// then split clusters that contain multiple known DB voices.
+    /// absorb tiny orphan clusters, then split clusters that contain
+    /// multiple known DB voices.
     static func postProcess(
         segments: [SpeakerSegment],
         existingProfiles: [SpeakerProfile]
     ) -> [SpeakerSegment] {
         guard segments.count >= 2 else { return segments }
         var result = pairwiseMerge(segments: segments)
+        result = absorbSmallClusters(segments: result)
         result = dbInformedSplit(segments: result, profiles: existingProfiles)
         return result
     }
@@ -98,6 +100,98 @@ enum EmbeddingClusterer {
         return segments.map { segment in
             let newId = mergeMap[segment.speakerId] ?? segment.speakerId
             guard newId != segment.speakerId else { return segment }
+            return SpeakerSegment(
+                speakerId: newId,
+                startTime: segment.startTime,
+                endTime: segment.endTime,
+                embedding: segment.embedding,
+                qualityScore: segment.qualityScore
+            )
+        }
+    }
+
+    // MARK: - Small Cluster Absorption
+
+    /// Absorb tiny speaker clusters into the most similar larger cluster.
+    ///
+    /// Short interjections ("Mm-hmm", "Yeah") produce noisier embeddings that
+    /// often don't meet the strict pairwise merge threshold (0.85). When a
+    /// cluster's total speaking time is very small, it's almost certainly a
+    /// fragment of a real speaker rather than a distinct person. We use a
+    /// relaxed similarity threshold to merge these back.
+    ///
+    /// Safety: genuinely different speakers rarely exceed 0.6 cosine similarity,
+    /// so the 0.72 threshold won't incorrectly merge distinct people.
+    static func absorbSmallClusters(
+        segments: [SpeakerSegment],
+        minClusterDuration: Double = 30.0,
+        absorptionThreshold: Float = 0.72
+    ) -> [SpeakerSegment] {
+        // Compute total speaking duration per speaker
+        var durationPerSpeaker: [Int: Double] = [:]
+        for seg in segments {
+            durationPerSpeaker[seg.speakerId, default: 0] += seg.duration
+        }
+
+        let smallIds = Set(durationPerSpeaker.filter { $0.value < minClusterDuration }.map { $0.key })
+        let largeIds = Set(durationPerSpeaker.filter { $0.value >= minClusterDuration }.map { $0.key })
+
+        guard !smallIds.isEmpty, !largeIds.isEmpty else { return segments }
+
+        // Quality-filtered mean embeddings for all clusters
+        var embeddings = computeMeanEmbeddingsPerSpeaker(segments: segments)
+
+        // Small clusters may have NO quality-filtered segments (all too short/quiet).
+        // Fall back to unfiltered embeddings so we have something to compare.
+        for smallId in smallIds where embeddings[smallId] == nil {
+            let rawEmbeddings = segments
+                .filter { $0.speakerId == smallId }
+                .compactMap { $0.embedding }
+                .filter { !$0.isEmpty }
+            if !rawEmbeddings.isEmpty {
+                embeddings[smallId] = Transcription.computeMeanEmbedding(rawEmbeddings)
+            }
+        }
+
+        // Try to absorb each small cluster into the best-matching large one
+        var mergeMap: [Int: Int] = [:]
+        for smallId in smallIds {
+            guard let smallEmb = embeddings[smallId] else { continue }
+
+            var bestId: Int?
+            var bestSim: Float = 0
+
+            for largeId in largeIds {
+                guard let largeEmb = embeddings[largeId] else { continue }
+                let sim = Float(Transcription.cosineSimilarityStatic(smallEmb, largeEmb))
+                if sim > bestSim {
+                    bestSim = sim
+                    bestId = largeId
+                }
+            }
+
+            if let targetId = bestId, bestSim >= absorptionThreshold {
+                mergeMap[smallId] = targetId
+                AppLogger.transcription.info("Absorbing small cluster", [
+                    "smallSpk": "spk\(smallId)",
+                    "duration": String(format: "%.1fs", durationPerSpeaker[smallId] ?? 0),
+                    "into": "spk\(targetId)",
+                    "similarity": String(format: "%.3f", bestSim)
+                ])
+            } else {
+                AppLogger.transcription.debug("Small cluster not absorbed", [
+                    "smallSpk": "spk\(smallId)",
+                    "duration": String(format: "%.1fs", durationPerSpeaker[smallId] ?? 0),
+                    "bestSim": String(format: "%.3f", bestSim),
+                    "threshold": String(format: "%.2f", absorptionThreshold)
+                ])
+            }
+        }
+
+        guard !mergeMap.isEmpty else { return segments }
+
+        return segments.map { segment in
+            guard let newId = mergeMap[segment.speakerId] else { return segment }
             return SpeakerSegment(
                 speakerId: newId,
                 startTime: segment.startTime,
