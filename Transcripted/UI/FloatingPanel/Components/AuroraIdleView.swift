@@ -105,35 +105,6 @@ struct AuroraIdleView: View {
             .offset(x: -20, y: -14)
     }
 
-    // MARK: - Branding View
-
-    private var brandingView: some View {
-        VStack(spacing: 1) {
-            // Coral circle with waveform icon - compact for 44px pill
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.recordingCoral, Color.recordingCoralDeep],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 20, height: 20)
-
-                Image(systemName: "waveform")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.white)
-            }
-
-            // App name - tiny, below logo
-            Text("Transcripted")
-                .font(.system(size: 7, weight: .medium))
-                .foregroundColor(.panelTextSecondary)
-                .tracking(0.3)
-        }
-    }
-
     // MARK: - Expanded Content
 
     private var expandedContent: some View {
@@ -163,13 +134,9 @@ struct AuroraIdleView: View {
 
             Spacer()
 
-            // Center: App branding (logo + name) with optional processing indicator
-            ZStack {
-                brandingView
-                if backgroundTaskCount > 0 {
-                    ProcessingPulseDot()
-                        .offset(x: 16, y: -12)
-                }
+            // Center: processing indicator (when background tasks active)
+            if backgroundTaskCount > 0 {
+                ProcessingPulseDot()
             }
 
             Spacer()
