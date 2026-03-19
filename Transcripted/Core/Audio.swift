@@ -332,6 +332,75 @@ class Audio: ObservableObject {
             return
         }
 
+        // Check microphone permission and request if not determined
+        // This allows users who skipped permission during onboarding to grant it at record time
+        let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        if microphoneStatus == .notDetermined {
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        // Permission granted, proceed with start
+                        self.startAudioCaptureAsync()
+                    } else {
+                        // Permission denied
+                        DispatchQueue.main.async {
+                            self.error = "Microphone access is required to record. Please grant permission in System Settings."
+                            self.isStarting = false
+                        }
+                    }
+                }
+            }
+            return
+        } else if microphoneStatus == .denied {
+            // Permission explicitly denied
+            DispatchQueue.main.async {
+                self.error = "Microphone access denied. Please grant permission in System Settings."
+                self.isStarting = false
+            }
+            return
+        }
+
+        // Set isStarting to prevent double-start during async setup
+        isStarting = true
+        error = nil
+        systemBufferCount = 0  // Reset debug counter (lock-protected)
+        resetSilenceTracking()  // Start fresh silence tracking
+        systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
+        systemAudioSilenceStart = nil  // Reset system audio silence tracking
+
+        // Reset health tracking for new recording session
+        recordingGaps = []
+        deviceSwitchCount = 0
+        sleepTimestamp = nil
+        lastRecoveryTime = nil
+        consecutiveMicWriteErrors = 0
+        consecutiveSystemWriteErrors = 0
+
+        AppLogger.audio.info("Starting audio capture")
+
+        onRecordingStart?()
+
+        Task {
+            do {
+                try await startAudioCapture()
+                await MainActor.run {
+                    self.isRecording = true
+                    self.isStarting = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.error = "Failed to start recording: \(error.localizedDescription)"
+                    self.isRecording = false
+                    self.isStarting = false
+                    self.stop()
+                }
+            }
+        }
+    }
+
+    /// Helper method to start audio capture asynchronously
+    /// Used when permission is already granted or after permission request completes
+    private func startAudioCaptureAsync() {
         // Set isStarting to prevent double-start during async setup
         isStarting = true
         error = nil

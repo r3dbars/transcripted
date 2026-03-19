@@ -139,8 +139,14 @@ class RecordingValidator {
 
         // Check if microphone is authorized
         let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        if microphoneStatus == .denied {
+            return .failure("Microphone access denied. Please grant microphone permissions in System Settings.")
+        }
+
+        // If not authorized (notDetermined or restricted), allow recording to proceed
+        // but warn that recording will fail until permission is granted
         if microphoneStatus != .authorized {
-            return .failure("Microphone access not authorized. Please grant microphone permissions in System Settings.")
+            return .success
         }
 
         return .success
