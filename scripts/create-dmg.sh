@@ -28,8 +28,8 @@ echo "    Version: ${VERSION}"
 cp -R "${APP_PATH}" "${STAGING_DIR}/${APP_NAME}.app"
 ln -s /Applications "${STAGING_DIR}/Applications"
 
-# Create temporary DMG
-TEMP_DMG="${STAGING_DIR}/temp.dmg"
+# Create temporary DMG (outside staging dir to avoid self-copy)
+TEMP_DMG="$(mktemp -d)/temp.dmg"
 hdiutil create -volname "${VOLUME_NAME}" \
     -srcfolder "${STAGING_DIR}" \
     -ov -format UDRW \
@@ -44,6 +44,7 @@ hdiutil convert "${TEMP_DMG}" \
 
 # Clean up
 rm -rf "${STAGING_DIR}"
+rm -f "${TEMP_DMG}"
 
 echo "==> DMG created: ${FINAL_DMG}"
 echo "    Size: $(du -h "${FINAL_DMG}" | cut -f1)"
