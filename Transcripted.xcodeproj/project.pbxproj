@@ -29,6 +29,7 @@
 		A1000110 /* HowItWorksStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000111 /* HowItWorksStep.swift */; };
 		A1000112 /* PermissionsStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000113 /* PermissionsStep.swift */; };
 		A1000116 /* ReadyStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000117 /* ReadyStep.swift */; };
+		A1000108 /* PreviewStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000109 /* PreviewStep.swift */; };
 		A1000200 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000201 /* DesignTokens.swift */; };
 		A1000202 /* PremiumComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000203 /* PremiumComponents.swift */; };
 		A1000204 /* ParticleExplosionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000205 /* ParticleExplosionView.swift */; };
@@ -138,6 +139,7 @@
 		A1000111 /* HowItWorksStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HowItWorksStep.swift; sourceTree = "<group>"; };
 		A1000113 /* PermissionsStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsStep.swift; sourceTree = "<group>"; };
 		A1000117 /* ReadyStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadyStep.swift; sourceTree = "<group>"; };
+		A1000109 /* PreviewStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewStep.swift; sourceTree = "<group>"; };
 		A1000201 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
 		A1000203 /* PremiumComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumComponents.swift; sourceTree = "<group>"; };
 		A1000205 /* ParticleExplosionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParticleExplosionView.swift; sourceTree = "<group>"; };
@@ -339,6 +341,7 @@
 				A1000111 /* HowItWorksStep.swift */,
 				A1000113 /* PermissionsStep.swift */,
 				A1000117 /* ReadyStep.swift */,
+				A1000109 /* PreviewStep.swift */,
 				BF26FA6ED2054F3DCF8D0B45 /* ModelSetupStep.swift */,
 			);
 			path = Steps;
@@ -652,6 +655,7 @@
 				A1000110 /* HowItWorksStep.swift in Sources */,
 				A1000112 /* PermissionsStep.swift in Sources */,
 				A1000116 /* ReadyStep.swift in Sources */,
+				A1000108 /* PreviewStep.swift in Sources */,
 				A1000200 /* DesignTokens.swift in Sources */,
 				A1000202 /* PremiumComponents.swift in Sources */,
 				A1000204 /* ParticleExplosionView.swift in Sources */,

@@ -57,6 +57,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         // Initialize logger (creates log directory, opens file handle)
         _ = AppLogger.shared
 
+        // Log app version and build number
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        print("[Transcripted] v\(version) build \(build)")
+
         // Configure tooltip delay to 1 second
         UserDefaults.standard.set(1000, forKey: "NSInitialToolTipDelay")
 
