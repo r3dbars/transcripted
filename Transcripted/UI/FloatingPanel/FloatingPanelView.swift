@@ -20,9 +20,6 @@ struct FloatingPanelView: View {
     @ObservedObject var pillStateManager: PillStateManager
     @ObservedObject var failedTranscriptionManager: FailedTranscriptionManager
 
-    // User preference for aurora recording indicator
-    @AppStorage("useAuroraRecording") private var useAuroraRecording: Bool = false
-
     // Accessibility
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -209,17 +206,11 @@ struct FloatingPanelView: View {
                 forceExpanded: trayState == .transcripts
             )
         case .recording:
-            if useAuroraRecording {
-                AuroraRecordingView(audio: audio, onStop: {
-                    audio.stop()
-                }, onTranscripts: {
-                    toggleTranscriptTray()
-                })
-            } else {
-                PillRecordingView(audio: audio) {
-                    audio.stop()
-                }
-            }
+            AuroraRecordingView(audio: audio, onStop: {
+                audio.stop()
+            }, onTranscripts: {
+                toggleTranscriptTray()
+            })
         case .processing:
             // Show success view for transcript saved, processing aurora otherwise
             switch taskManager.displayStatus {

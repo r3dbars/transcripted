@@ -16,7 +16,6 @@ struct SettingsContainerView: View {
 
     @AppStorage("transcriptSaveLocation") private var saveLocation: String = ""
     @AppStorage("userName") private var userName: String = ""
-    @AppStorage("useAuroraRecording") private var useAuroraRecording: Bool = false
     @AppStorage("enableQwenSpeakerInference") private var enableQwenInference: Bool = true
     @AppStorage("enableObsidianFormat") private var enableObsidianFormat: Bool = false
     @AppStorage("autoRecordMeetings") private var autoRecordMeetings: Bool = false
@@ -527,43 +526,6 @@ struct SettingsContainerView: View {
                     defaultPath: "~/Documents/Transcripted/",
                     onChoose: chooseSaveFolder
                 )
-            }
-        }
-    }
-
-    // MARK: - Appearance Section
-
-    private var appearanceSection: some View {
-        SettingsSectionCard(icon: "paintbrush.fill", title: "Appearance") {
-            VStack(spacing: Spacing.md) {
-                SettingsToggleRow(
-                    title: "Aurora Recording Indicator",
-                    description: "Flowing color animation during recording",
-                    isOn: $useAuroraRecording
-                )
-
-                Divider().background(Color.panelCharcoalSurface)
-
-                SettingsToggleRow(
-                    title: "Sound Feedback",
-                    description: "Play sounds when recording starts/stops",
-                    isOn: Binding(
-                        get: { enableSounds },
-                        set: { newValue in
-                            enableSounds = newValue
-                            UserDefaults.standard.set(newValue, forKey: "enableUISounds")
-                        }
-                    )
-                )
-
-                Divider().background(Color.panelCharcoalSurface)
-
-                SettingsToggleRow(
-                    title: "Obsidian-Friendly Format",
-                    description: "Adds tags, [[wiki links]], and aliases to transcripts",
-                    isOn: $enableObsidianFormat
-                )
-
             }
         }
     }
