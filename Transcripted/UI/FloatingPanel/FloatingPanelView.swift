@@ -81,7 +81,7 @@ struct FloatingPanelView: View {
             // MARK: - Toast Notifications (float above pill)
             ZStack {
                 Color.clear
-                    .frame(height: trayState == .transcripts ? 0 : 60)
+                    .frame(height: trayState != .none ? 0 : 60)
 
                 // Toast notification for errors (appears above pill, auto-dismisses)
                 if showErrorToast, let error = currentError {
@@ -203,7 +203,7 @@ struct FloatingPanelView: View {
                 onTranscripts: { toggleTranscriptTray() },
                 failedCount: failedTranscriptionManager.failedTranscriptions.count,
                 backgroundTaskCount: taskManager.backgroundTaskCount,
-                forceExpanded: trayState == .transcripts
+                forceExpanded: trayState != .none
             )
         case .recording:
             AuroraRecordingView(audio: audio, onStop: {
