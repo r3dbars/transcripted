@@ -29,9 +29,9 @@
 	<key>NSRemindersUsageDescription</key>
 	<string>Transcripted needs access to Reminders to save action items from your meetings.</string>
 	<key>SUFeedURL</key>
-	<string>https://r3dbars.github.io/transcripted/appcast.xml</string>
+	<string>https://transcripted.app/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>SPARKLE_PUBLIC_KEY_PLACEHOLDER</string>
+	<string>Ib6MHm4eeZYjhsZblNT0DEo3LzK9fYvBLkmqvw/Vo7Q=</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUScheduledCheckInterval</key>
