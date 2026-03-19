@@ -73,6 +73,8 @@ xcodebuild -project "${PROJECT_DIR}/${APP_NAME}.xcodeproj" \
     CODE_SIGN_STYLE=Manual \
     CODE_SIGN_IDENTITY="Developer ID Application" \
     DEVELOPMENT_TEAM="${APPLE_TEAM_ID}" \
+    ENABLE_HARDENED_RUNTIME=YES \
+    CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
     MARKETING_VERSION="${VERSION}" \
     CURRENT_PROJECT_VERSION="${VERSION}" \
     | tail -5
@@ -83,6 +85,29 @@ if [ -z "${APP_PATH}" ] || [ ! -d "${APP_PATH}" ]; then
     exit 1
 fi
 echo "    App: ${APP_PATH}"
+
+# --- Re-sign embedded frameworks and helpers ---
+echo "==> Re-signing embedded binaries with Developer ID + hardened runtime..."
+SIGN_IDENTITY="Developer ID Application: Justin Betker (${APPLE_TEAM_ID})"
+
+# Sign all nested binaries inside Sparkle framework (XPC services, helpers)
+find "${APP_PATH}/Contents/Frameworks" -type f -perm +111 -o -name "*.dylib" | while read -r binary; do
+    codesign --force --options runtime --timestamp --sign "${SIGN_IDENTITY}" "${binary}" 2>/dev/null || true
+done
+
+# Sign XPC services and .app bundles inside frameworks
+find "${APP_PATH}/Contents/Frameworks" -name "*.xpc" -o -name "*.app" | while read -r bundle; do
+    codesign --force --deep --options runtime --timestamp --sign "${SIGN_IDENTITY}" "${bundle}" 2>/dev/null || true
+done
+
+# Sign the Sparkle framework itself
+find "${APP_PATH}/Contents/Frameworks" -name "*.framework" | while read -r framework; do
+    codesign --force --options runtime --timestamp --sign "${SIGN_IDENTITY}" "${framework}" 2>/dev/null || true
+done
+
+# Re-sign the main app (picks up everything)
+codesign --force --deep --options runtime --timestamp --sign "${SIGN_IDENTITY}" "${APP_PATH}"
+echo "    Signing verified: $(codesign -dv "${APP_PATH}" 2>&1 | grep 'Authority='| head -1)"
 
 # --- Create output directory ---
 OUTPUT_DIR="${PROJECT_DIR}/release-${VERSION}"
