@@ -82,6 +82,27 @@ struct PermissionsStep: View {
                     ))
                     .padding(.bottom, Spacing.lg)
             }
+            
+            // "Continue without mic" link (only shown when mic is not granted)
+            if !state.microphoneGranted {
+                VStack(spacing: Spacing.xs) {
+                    Text("You can grant microphone access anytime from the menu bar")
+                        .font(.bodySmall)
+                        .foregroundColor(.softCharcoal.opacity(0.7))
+                    
+                    Button(action: {
+                        // User can proceed without granting
+                        state.advance()
+                    }) {
+                        Text("Continue without mic")
+                            .font(.bodyMedium)
+                            .foregroundColor(.terracotta.opacity(0.9))
+                            .underline()
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, Spacing.md)
+            }
         }
         .onAppear {
             state.checkPermissions()

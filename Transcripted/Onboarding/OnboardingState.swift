@@ -14,14 +14,16 @@ class OnboardingState {
     enum OnboardingStep: Int, CaseIterable {
         case welcome = 0
         case howItWorks = 1
-        case permissions = 2
-        case modelSetup = 3
-        case ready = 4
+        case preview = 2
+        case permissions = 3
+        case modelSetup = 4
+        case ready = 5
 
         var title: String {
             switch self {
             case .welcome: return "Welcome"
             case .howItWorks: return "How It Works"
+            case .preview: return "Preview"
             case .permissions: return "Permissions"
             case .modelSetup: return "Model Setup"
             case .ready: return "Ready"
@@ -68,8 +70,11 @@ class OnboardingState {
 
     var canProceed: Bool {
         switch currentStep {
+        case .preview:
+            return true
         case .permissions:
-            return allPermissionsGranted
+            // Soft gate: allow proceeding without mic permission
+            return true
         case .modelSetup:
             return modelsReady
         default:

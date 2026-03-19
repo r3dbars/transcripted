@@ -103,6 +103,8 @@ struct OnboardingContainerView: View {
             WelcomeStep()
         case .howItWorks:
             HowItWorksStep()
+        case .preview:
+            PreviewStep()
         case .permissions:
             PermissionsStep(state: state)
         case .modelSetup:
@@ -176,6 +178,8 @@ struct OnboardingContainerView: View {
         case .welcome:
             return "Get Started"
         case .howItWorks:
+            return "Continue"
+        case .preview:
             return "Continue"
         case .permissions:
             return state.canProceed ? "Continue" : "Grant Permissions"
