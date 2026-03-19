@@ -118,6 +118,37 @@ class DiagnosticExporter {
         }
     }
 
+    /// One-click bug report: exports diagnostics to Desktop, opens pre-filled GitHub issue,
+    /// and reveals the zip so the user can drag it into the issue.
+    @MainActor
+    static func reportIssue() {
+        let desktopURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
+        let filename = "Transcripted-Diagnostics-\(DateFormattingHelper.formatFilename(Date())).zip"
+        let zipURL = desktopURL.appendingPathComponent(filename)
+
+        Task.detached(priority: .userInitiated) {
+            // Export diagnostics
+            var zipCreated = false
+            do {
+                try createDiagnosticZip(at: zipURL)
+                zipCreated = true
+            } catch {
+                AppLogger.app.error("Failed to create diagnostic export for bug report", ["error": error.localizedDescription])
+            }
+
+            await MainActor.run {
+                // Open GitHub issue with system info pre-filled
+                let issueURL = gitHubIssueURL()
+                NSWorkspace.shared.open(issueURL)
+
+                // Reveal the zip on Desktop so user can drag-and-drop into the issue
+                if zipCreated {
+                    NSWorkspace.shared.activateFileViewerSelecting([zipURL])
+                }
+            }
+        }
+    }
+
     /// Generate a pre-filled GitHub issue URL with system info
     static func gitHubIssueURL(title: String = "", body: String = "") -> URL {
         var components = URLComponents(string: "https://github.com/r3dbars/transcripted/issues/new")!
@@ -135,6 +166,7 @@ class DiagnosticExporter {
         ```
         \(systemInfo)
         ```
+        > Attach the diagnostic zip from your Desktop if available.
         """
         queryItems.append(URLQueryItem(name: "body", value: fullBody))
         components.queryItems = queryItems

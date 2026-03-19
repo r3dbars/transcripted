@@ -25,5 +25,7 @@ What actually happened.
 - Transcripted version/commit:
 - Audio source (mic, Zoom, Meet, etc.):
 
-**Logs**
-If applicable, include relevant entries from `~/Library/Logs/Transcripted/app.jsonl`.
+**Diagnostics**
+Please attach the diagnostic zip. You can generate one from the menu bar: **Transcripted > Report a Bug...** (this auto-exports to your Desktop).
+
+If you opened this issue via the app, the zip should already be on your Desktop — just drag it here.

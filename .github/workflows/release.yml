@@ -107,30 +107,59 @@ jobs:
           echo "sparkle_length=$(wc -c < "${{ env.APP_NAME }}.zip" | tr -d ' ')" >> $GITHUB_OUTPUT
         id: sparkle
 
-      - name: Generate appcast item
+      - name: Update appcast on website
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           DATE=$(date -u +"%a, %d %b %Y %H:%M:%S %z")
           ZIP_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/${{ env.APP_NAME }}.zip"
+          SIGNATURE="${{ steps.sparkle.outputs.sparkle_signature }}"
+          LENGTH="${{ steps.sparkle.outputs.sparkle_length }}"
 
-          cat > appcast-item.xml << XMLEOF
-              <item>
-                <title>Version ${VERSION}</title>
-                <pubDate>${DATE}</pubDate>
-                <sparkle:version>${VERSION}</sparkle:version>
-                <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
-                <sparkle:minimumSystemVersion>14.2</sparkle:minimumSystemVersion>
-                <description><![CDATA[<h2>What's New in ${VERSION}</h2><p>See full release notes on GitHub.</p>]]></description>
-                <enclosure
-                  url="${ZIP_URL}"
-                  sparkle:edSignature="${{ steps.sparkle.outputs.sparkle_signature }}"
-                  length="${{ steps.sparkle.outputs.sparkle_length }}"
-                  type="application/octet-stream" />
-              </item>
-          XMLEOF
+          # Clone the webapp repo
+          git clone https://x-access-token:${GH_TOKEN}@github.com/r3dbars/transcripted-webapp.git /tmp/webapp
 
-          echo "Generated appcast item for v${VERSION}"
-          cat appcast-item.xml
+          # Update appcast.xml with new release item
+          python3 << 'PYEOF'
+          import os
+          version = os.environ["VERSION"]
+          date = os.environ["DATE"]
+          zip_url = os.environ["ZIP_URL"]
+          sig = os.environ["SIGNATURE"]
+          length = os.environ["LENGTH"]
+
+          item = f"""    <item>
+              <title>Version {version}</title>
+              <pubDate>{date}</pubDate>
+              <sparkle:version>{version}</sparkle:version>
+              <sparkle:shortVersionString>{version}</sparkle:shortVersionString>
+              <sparkle:minimumSystemVersion>14.2</sparkle:minimumSystemVersion>
+              <description><![CDATA[<h2>What's New in {version}</h2><p>See full release notes on GitHub.</p>]]></description>
+              <enclosure
+                url="{zip_url}"
+                sparkle:edSignature="{sig}"
+                length="{length}"
+                type="application/octet-stream" />
+            </item>"""
+
+          appcast = open("/tmp/webapp/public/appcast.xml").read()
+          appcast = appcast.replace("</channel>", item + "\n  </channel>")
+          open("/tmp/webapp/public/appcast.xml", "w").write(appcast)
+          print(f"Updated appcast.xml with v{version}")
+          PYEOF
+
+          # Copy DMG to webapp for direct download
+          DMG_FILE=$(ls $GITHUB_WORKSPACE/*.dmg | head -1)
+          cp "$DMG_FILE" /tmp/webapp/public/download/Transcripted.dmg
+
+          # Commit and push to webapp repo (triggers Cloudflare deploy)
+          cd /tmp/webapp
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/appcast.xml public/download/Transcripted.dmg
+          git commit -m "release: v${VERSION} — update appcast + DMG"
+          git push origin main
 
       - name: Create GitHub Release
         env:
@@ -143,8 +172,7 @@ jobs:
             --title "Transcripted v${VERSION}" \
             --generate-notes \
             "$DMG_FILE" \
-            "${{ env.APP_NAME }}.zip" \
-            appcast-item.xml
+            "${{ env.APP_NAME }}.zip"
 
       - name: Cleanup keychain
         if: always()

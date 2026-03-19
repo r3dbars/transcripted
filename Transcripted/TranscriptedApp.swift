@@ -57,9 +57,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         // Initialize logger (creates log directory, opens file handle)
         _ = AppLogger.shared
 
-        // Initialize crash reporting (opt-in, respects user consent)
-        CrashReporting.initialize()
-
         // Configure tooltip delay to 1 second
         UserDefaults.standard.set(1000, forKey: "NSInitialToolTipDelay")
 
@@ -144,7 +141,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Export Diagnostics...", action: #selector(exportDiagnostics), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Report Issue...", action: #selector(reportIssue), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Report a Bug...", action: #selector(reportIssue), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         #if DEBUG
         menu.addItem(NSMenuItem(title: "Reset Onboarding (Debug)", action: #selector(resetOnboarding), keyEquivalent: ""))
@@ -700,8 +697,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
     }
 
     @objc func reportIssue() {
-        let url = DiagnosticExporter.gitHubIssueURL()
-        NSWorkspace.shared.open(url)
+        DiagnosticExporter.reportIssue()
     }
 
     /// Handle recording completion - trigger transcription
