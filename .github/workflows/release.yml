@@ -68,15 +68,23 @@ jobs:
           echo "path=$APP_PATH" >> $GITHUB_OUTPUT
           echo "Found app at: $APP_PATH"
 
-      - name: Free disk space
+      - name: Free disk space before packaging
         run: |
           echo "Disk before cleanup:"
           df -h /
-          # Remove build intermediates (keep only the final .app)
-          rm -rf build/Build/Intermediates*
+          # Remove Xcode caches and build intermediates aggressively
+          rm -rf build/Build/Intermediates.noindex
+          rm -rf build/Build/Intermediates
           rm -rf build/SourcePackages
           rm -rf ~/Library/Developer/Xcode/DerivedData
           rm -rf ~/Library/Caches/org.swift.swiftpm
+          rm -rf ~/Library/Caches/com.apple.dt.Xcode
+          # Remove simulator runtimes (huge, not needed)
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes 2>/dev/null || true
+          # Remove unused Xcode components
+          sudo rm -rf /Applications/Xcode_*.app/Contents/Developer/Platforms/iPhoneOS.platform 2>/dev/null || true
+          sudo rm -rf /Applications/Xcode_*.app/Contents/Developer/Platforms/WatchOS.platform 2>/dev/null || true
+          sudo rm -rf /Applications/Xcode_*.app/Contents/Developer/Platforms/tvOS.platform 2>/dev/null || true
           echo "Disk after cleanup:"
           df -h /
 
