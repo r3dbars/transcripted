@@ -194,8 +194,11 @@ echo "==> Updating webapp..."
 WEBAPP_DIR="/Users/redbars/redbars/code/transcripted-webapp"
 
 if [ -d "${WEBAPP_DIR}" ]; then
-    # Copy DMG for direct download
-    cp "${DMG_FILE}" "${WEBAPP_DIR}/public/download/Transcripted.dmg"
+    # Update download links in index.astro to point to this release's DMG
+    DMG_URL="https://github.com/r3dbars/transcripted/releases/download/${TAG}/${APP_NAME}-${VERSION}.dmg"
+    sed -i '' "s|https://github.com/r3dbars/transcripted/releases/download/v[^\"]*\.dmg|${DMG_URL}|g" \
+        "${WEBAPP_DIR}/src/pages/index.astro"
+    echo "    Updated download links to ${DMG_URL}"
 
     # Update appcast if we have a Sparkle signature
     if [ -n "${SPARKLE_SIGNATURE}" ]; then
@@ -233,7 +236,7 @@ PYEOF
 
     # Commit and push webapp
     cd "${WEBAPP_DIR}"
-    git add public/download/Transcripted.dmg public/appcast.xml
+    git add src/pages/index.astro public/appcast.xml
     git commit -m "release: ${TAG} — update DMG + appcast"
     git push origin main
     echo "    Webapp pushed (Cloudflare will deploy)"
@@ -245,5 +248,5 @@ fi
 echo ""
 echo "==> Release ${TAG} complete!"
 echo "    GitHub:  https://github.com/r3dbars/transcripted/releases/tag/${TAG}"
-echo "    Website: https://transcripted.app/download/Transcripted.dmg (after Cloudflare deploys)"
+echo "    Website: https://transcripted.app (after Cloudflare deploys)"
 echo "    Output:  ${OUTPUT_DIR}/"
