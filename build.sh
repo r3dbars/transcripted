@@ -22,6 +22,22 @@ else
     echo "Parakeet models not found — Parakeet engine will attempt runtime download"
 fi
 
+# Bundle Parakeet EOU streaming model (live transcription display)
+# DownloadUtils nests inside the cache dir as <folderName>/, so check both possible paths
+EOU_SRC="$HOME/Library/Application Support/FluidAudio/Models/parakeet-eou-streaming/320ms"
+if [ -d "$EOU_SRC/streaming_encoder.mlmodelc" ]; then
+    true  # use as-is
+elif [ -d "$EOU_SRC/parakeet-eou-streaming/320ms/streaming_encoder.mlmodelc" ]; then
+    EOU_SRC="$EOU_SRC/parakeet-eou-streaming/320ms"
+fi
+if [ -d "$EOU_SRC/streaming_encoder.mlmodelc" ]; then
+    echo "Bundling Parakeet EOU streaming model..."
+    mkdir -p "$APP_BUNDLE/Contents/Resources/parakeet-models/parakeet-eou-120m-coreml"
+    cp -R "$EOU_SRC/"* "$APP_BUNDLE/Contents/Resources/parakeet-models/parakeet-eou-120m-coreml/"
+else
+    echo "Parakeet EOU model not found — will attempt runtime download"
+fi
+
 # Copy Info.plist
 cp Info.plist "$APP_BUNDLE/Contents/"
 
@@ -98,7 +114,7 @@ fi
 
 # Sign
 echo "Signing..."
-codesign --force --deep --sign "Apple Development: Justin Betker (LZRN6W4R74)" \
+codesign --force --deep --sign "7AC6EF5E8D58DD881DF96F173B2CD3DC41273A44" \
     --entitlements "$BUILD_DIR/Draft.entitlements" \
     "$APP_BUNDLE" 2>&1
 

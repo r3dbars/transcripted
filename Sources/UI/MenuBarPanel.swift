@@ -19,6 +19,11 @@ struct MenuBarPanelView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     headerSection
 
+                    // Model download progress (prominent, shown during first launch)
+                    if !appState.sttRouter.isModelLoaded || !appState.localInference.isReady {
+                        modelDownloadSection
+                    }
+
                     if let error = appState.contextCapture.hotkeyError {
                         HStack(spacing: 6) {
                             Image(systemName: "exclamationmark.triangle.fill")
@@ -99,6 +104,123 @@ struct MenuBarPanelView: View {
             return appState.localInference.statusLabel
         }
         return "Ready"
+    }
+
+    // MARK: - Model Download Progress
+
+    private var modelDownloadSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Voice model (Parakeet)
+            modelDownloadRow(
+                label: "Voice model",
+                detail: "Parakeet CoreML (~600 MB)",
+                state: appState.sttRouter.parakeetEngine.modelDownloadState,
+                isReady: appState.sttRouter.isModelLoaded
+            )
+
+            // Language model (Qwen)
+            modelDownloadRow(
+                label: "Language model",
+                detail: "Qwen 3.5-4B (~2.5 GB)",
+                state: appState.localInference.modelState,
+                isReady: appState.localInference.isReady
+            )
+
+            Text("Models download once and run locally on your Mac.")
+                .font(.caption2)
+                .foregroundColor(MenuTokens.textSecondary)
+        }
+        .padding(10)
+        .background(MenuTokens.cardBackground)
+        .cornerRadius(8)
+        .padding(.bottom, 4)
+    }
+
+    private func modelDownloadRow(label: String, detail: String, state: Any, isReady: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(label)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                Spacer()
+                if isReady {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(MenuTokens.statusGreen)
+                        .font(.caption)
+                } else {
+                    modelStatusLabel(state)
+                }
+            }
+            Text(detail)
+                .font(.caption2)
+                .foregroundColor(MenuTokens.textSecondary)
+            if !isReady {
+                modelProgressBar(state)
+            }
+        }
+    }
+
+    private func modelStatusLabel(_ state: Any) -> some View {
+        Group {
+            if let parakeetState = state as? ParakeetModelState {
+                switch parakeetState {
+                case .downloading(let progress):
+                    Text("\(Int(progress * 100))%")
+                        .font(.caption2)
+                        .foregroundColor(MenuTokens.textSecondary)
+                case .loading:
+                    Text("Loading...")
+                        .font(.caption2)
+                        .foregroundColor(MenuTokens.textSecondary)
+                case .failed(let reason):
+                    Text("Failed")
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                        .help(reason)
+                default:
+                    Text("Waiting...")
+                        .font(.caption2)
+                        .foregroundColor(MenuTokens.textSecondary)
+                }
+            } else if let modelState = state as? ModelState {
+                switch modelState {
+                case .downloading(let progress):
+                    Text("\(Int(progress * 100))%")
+                        .font(.caption2)
+                        .foregroundColor(MenuTokens.textSecondary)
+                case .loading:
+                    Text("Loading...")
+                        .font(.caption2)
+                        .foregroundColor(MenuTokens.textSecondary)
+                case .failed(let reason):
+                    Text("Failed")
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                        .help(reason)
+                default:
+                    Text("Waiting...")
+                        .font(.caption2)
+                        .foregroundColor(MenuTokens.textSecondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func modelProgressBar(_ state: Any) -> some View {
+        if let parakeetState = state as? ParakeetModelState,
+           case .downloading(let progress) = parakeetState {
+            ProgressView(value: progress)
+                .tint(MenuTokens.statusGreen)
+        } else if let modelState = state as? ModelState,
+                  case .downloading(let progress) = modelState {
+            ProgressView(value: progress)
+                .tint(MenuTokens.statusGreen)
+        } else {
+            ProgressView()
+                .progressViewStyle(.linear)
+                .tint(MenuTokens.statusOrange)
+        }
     }
 
     // MARK: - Header

@@ -38,7 +38,7 @@ class ParakeetEngine: ObservableObject {
     private var wakeObserver: NSObjectProtocol?
 
     // Parakeet EOU streaming (display-only live text — TDT V3 owns the final transcript)
-    private var eouManager: StreamingEouAsrManager?
+    private nonisolated(unsafe) var eouManager: StreamingEouAsrManager?
     private var committedStreamText: String = ""
     // Accumulates resampled 16kHz samples between tap callbacks before flushing to EOU.
     // Protected by streamingSamplesLock — accessed from both the audio render thread and MainActor.
@@ -92,6 +92,16 @@ class ParakeetEngine: ObservableObject {
             return
         }
 
+        // Request microphone permission early so it's granted before first recording
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            let granted = await withCheckedContinuation { continuation in
+                AVCaptureDevice.requestAccess(for: .audio) { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+            print("🎤 PARAKEET | microphone permission \(granted ? "granted" : "denied")")
+        }
+
         modelDownloadState = .loading
         print("🔄 PARAKEET | initializing models...")
 
@@ -108,7 +118,19 @@ class ParakeetEngine: ObservableObject {
                 // Fallback: download from HuggingFace (~600MB on first run)
                 print("🌐 PARAKEET | models not bundled, downloading (~600MB)...")
                 modelDownloadState = .downloading(progress: 0.0)
-                models = try await AsrModels.downloadAndLoad(version: .v3)
+                models = try await AsrModels.downloadAndLoad(version: .v3) { [weak self] progress in
+                    Task { @MainActor in
+                        self?.modelDownloadState = .downloading(progress: progress.fractionCompleted)
+                        switch progress.phase {
+                        case .listing:
+                            print("🌐 PARAKEET | listing model files...")
+                        case .downloading(let completed, let total):
+                            print("🌐 PARAKEET | downloading \(completed)/\(total) files (\(Int(progress.fractionCompleted * 100))%)...")
+                        case .compiling(let name):
+                            print("🌐 PARAKEET | compiling \(name)...")
+                        }
+                    }
+                }
                 loadSource = "download"
             }
 
@@ -139,18 +161,47 @@ class ParakeetEngine: ObservableObject {
         do {
             let eou = StreamingEouAsrManager(chunkSize: .ms320, eouDebounceMs: 1280)
 
-            // Load from bundle only — EOU model must be bundled by build.sh.
-            // No download fallback (unlike TDT V3) since StreamingEouAsrManager requires a local path.
-            guard let bundlePath = bundledModelPath(subdirectory: "parakeet-eou-120m-coreml", checkFile: "model.mlmodelc") else {
-                print("⚠️ PARAKEET EOU | model not bundled, live display disabled")
-                EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "eou_model_not_bundled",
-                    message: "EOU model not found in app bundle — live display disabled")
-                return
+            let modelDir: URL
+            if let bundlePath = bundledModelPath(subdirectory: "parakeet-eou-120m-coreml", checkFile: "streaming_encoder.mlmodelc") {
+                print("📦 PARAKEET EOU | loading from bundle: \(bundlePath.path)")
+                modelDir = bundlePath
+            } else {
+                // Download from HuggingFace (~120MB) and cache locally
+                // DownloadUtils nests inside <directory>/<repo.folderName>/, so we use the parent
+                let cacheBase = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+                    .appendingPathComponent("FluidAudio/Models", isDirectory: true)
+                let expectedDir = cacheBase.appendingPathComponent("parakeet-eou-streaming/320ms", isDirectory: true)
+                let checkFile = expectedDir.appendingPathComponent("streaming_encoder.mlmodelc")
+                if FileManager.default.fileExists(atPath: checkFile.path) {
+                    print("📦 PARAKEET EOU | loading from cache: \(expectedDir.path)")
+                    modelDir = expectedDir
+                } else {
+                    print("🌐 PARAKEET EOU | downloading streaming model (~120MB)...")
+                    let modelNames = ["streaming_encoder", "decoder", "joint_decision"]
+                    _ = try await DownloadUtils.loadModels(
+                        .parakeetEou320,
+                        modelNames: modelNames,
+                        directory: cacheBase
+                    )
+                    print("✅ PARAKEET EOU | download complete")
+                    modelDir = expectedDir
+                }
             }
-            print("📦 PARAKEET EOU | loading from bundle: \(bundlePath.path)")
-            try await eou.loadModels(modelDir: bundlePath)
+            try await eou.loadModels(modelDir: modelDir)
 
-            // EOU callback fires when a complete utterance is detected (after silence debounce)
+            // Partial callback fires on every chunk with new tokens — live "ghost text" display
+            await eou.setPartialCallback { [weak self] partial in
+                Task { @MainActor [weak self] in
+                    guard let self = self else { return }
+                    let trimmed = partial.trimmingCharacters(in: .whitespaces)
+                    guard !trimmed.isEmpty else { return }
+                    self.liveTranscript = self.committedStreamText.isEmpty
+                        ? trimmed
+                        : self.committedStreamText + " " + trimmed
+                }
+            }
+
+            // EOU callback fires after silence — commits the utterance so partial text resets
             await eou.setEouCallback { [weak self] transcript in
                 Task { @MainActor [weak self] in
                     guard let self = self else { return }
