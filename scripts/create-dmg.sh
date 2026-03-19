@@ -33,16 +33,14 @@ TEMP_DMG="${STAGING_DIR}/temp.dmg"
 hdiutil create -volname "${VOLUME_NAME}" \
     -srcfolder "${STAGING_DIR}" \
     -ov -format UDRW \
-    "${TEMP_DMG}" \
-    -quiet
+    "${TEMP_DMG}"
 
 # Convert to compressed read-only DMG
 FINAL_DMG="${OUTPUT_DIR}/${DMG_NAME}"
 hdiutil convert "${TEMP_DMG}" \
     -format UDZO \
     -imagekey zlib-level=9 \
-    -o "${FINAL_DMG}" \
-    -quiet
+    -o "${FINAL_DMG}"
 
 # Clean up
 rm -rf "${STAGING_DIR}"
