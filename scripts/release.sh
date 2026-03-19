@@ -88,7 +88,7 @@ echo "    App: ${APP_PATH}"
 
 # --- Re-sign embedded frameworks and helpers ---
 echo "==> Re-signing embedded binaries with Developer ID + hardened runtime..."
-SIGN_IDENTITY="Developer ID Application: Justin Betker (${APPLE_TEAM_ID})"
+SIGN_IDENTITY="7AC6EF5E8D58DD881DF96F173B2CD3DC41273A44"
 
 # Sign all nested binaries inside Sparkle framework (XPC services, helpers)
 find "${APP_PATH}/Contents/Frameworks" -type f -perm +111 -o -name "*.dylib" | while read -r binary; do
