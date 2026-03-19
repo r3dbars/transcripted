@@ -68,6 +68,18 @@ jobs:
           echo "path=$APP_PATH" >> $GITHUB_OUTPUT
           echo "Found app at: $APP_PATH"
 
+      - name: Free disk space
+        run: |
+          echo "Disk before cleanup:"
+          df -h /
+          # Remove build intermediates (keep only the final .app)
+          rm -rf build/Build/Intermediates*
+          rm -rf build/SourcePackages
+          rm -rf ~/Library/Developer/Xcode/DerivedData
+          rm -rf ~/Library/Caches/org.swift.swiftpm
+          echo "Disk after cleanup:"
+          df -h /
+
       - name: Create ZIP for Sparkle
         run: |
           ditto -c -k --sequesterRsrc --keepParent \
