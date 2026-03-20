@@ -19,9 +19,6 @@ enum DraftConstants {
     /// Max tokens for analysis calls
     static let analysisMaxTokens = 2048
 
-    /// Pipeline version for draft generation
-    static let appPipelineVersion = 2
-
     // MARK: - Audio & Speech
 
     /// Audio buffer pre-allocation capacity in seconds
