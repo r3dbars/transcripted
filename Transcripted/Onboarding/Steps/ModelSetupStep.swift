@@ -1,7 +1,8 @@
+import Combine
 import SwiftUI
 
 /// Model Setup step - Downloads and initializes AI models
-/// Shows progress for Parakeet (STT) and Sortformer (diarization)
+/// Shows progress for Parakeet (STT) and PyAnnote (diarization)
 /// Aesthetic: Warm, reassuring progress indicators matching onboarding style
 @available(macOS 26.0, *)
 struct ModelSetupStep: View {
@@ -11,6 +12,14 @@ struct ModelSetupStep: View {
     @State private var titleOffset: CGFloat = 10
     @State private var card1Appeared: Bool = false
     @State private var card2Appeared: Bool = false
+    @State private var currentTipIndex: Int = 0
+
+    private let tips = [
+        "Your transcripts never leave your Mac",
+        "Use \u{2318}\u{21E7}R to start recording instantly",
+        "Transcripted identifies unlimited speakers",
+        "Works with Zoom, Teams, Meet, and any audio",
+    ]
 
     var body: some View {
         VStack(spacing: Spacing.lg) {
@@ -36,7 +45,8 @@ struct ModelSetupStep: View {
                     description: "Parakeet TDT V3 — converts speech to text",
                     isReady: state.parakeetReady,
                     isLoading: state.isLoadingModels && !state.parakeetReady,
-                    loadingText: "Downloading speech models (~600 MB)..."
+                    progress: state.parakeetProgress,
+                    phaseText: state.parakeetPhase
                 )
                 .offset(x: card1Appeared ? 0 : 40)
                 .opacity(card1Appeared ? 1 : 0)
@@ -47,7 +57,8 @@ struct ModelSetupStep: View {
                     description: "PyAnnote — identifies who said what",
                     isReady: state.diarizationReady,
                     isLoading: state.isLoadingModels && !state.diarizationReady,
-                    loadingText: "Downloading diarization models..."
+                    progress: state.diarizationProgress,
+                    phaseText: state.diarizationPhase
                 )
                 .offset(x: card2Appeared ? 0 : 40)
                 .opacity(card2Appeared ? 1 : 0)
@@ -81,22 +92,21 @@ struct ModelSetupStep: View {
                 .transition(.opacity)
             }
 
-            // Info text
+            // Rotating tips
             if !state.modelsReady && state.modelError == nil {
-                VStack(spacing: Spacing.xs) {
-                    Text("Everything runs 100% on your Mac")
-                        .font(.bodySmall)
-                        .foregroundColor(.softCharcoal)
-
-                    Text("No cloud APIs, no internet required after setup")
-                        .font(.caption)
-                        .foregroundColor(.softCharcoal.opacity(0.7))
-
-                    Text("English only · macOS 14.2+ · 16 GB RAM recommended")
-                        .font(.caption)
-                        .foregroundColor(.softCharcoal.opacity(0.5))
-                }
-                .padding(.bottom, Spacing.lg)
+                Text(tips[currentTipIndex])
+                    .font(.bodySmall)
+                    .foregroundColor(.softCharcoal)
+                    .contentTransition(.opacity)
+                    .animation(.easeInOut(duration: 0.4), value: currentTipIndex)
+                    .padding(.bottom, Spacing.lg)
+                    .onReceive(
+                        Timer.publish(every: 4, on: .main, in: .common).autoconnect()
+                    ) { _ in
+                        withAnimation {
+                            currentTipIndex = (currentTipIndex + 1) % tips.count
+                        }
+                    }
             }
 
             // Success message
@@ -158,56 +168,78 @@ private struct ModelDownloadCard: View {
     let description: String
     let isReady: Bool
     let isLoading: Bool
-    let loadingText: String
+    let progress: Double
+    let phaseText: String
 
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: Spacing.md) {
-            // Status icon
-            ZStack {
-                Circle()
-                    .fill(statusColor.opacity(0.12))
-                    .frame(width: 44, height: 44)
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.md) {
+                // Status icon
+                ZStack {
+                    Circle()
+                        .fill(statusColor.opacity(0.12))
+                        .frame(width: 44, height: 44)
 
-                if isReady {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.successGreen)
-                } else if isLoading {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                        .tint(.terracotta)
-                } else {
-                    Image(systemName: icon)
-                        .font(.system(size: 18, weight: .medium))
+                    if isReady {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.successGreen)
+                    } else if isLoading {
+                        // Show percentage inside circle
+                        Text("\(Int(progress * 100))%")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.terracotta)
+                    } else {
+                        Image(systemName: icon)
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.softCharcoal)
+                    }
+                }
+
+                // Text
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.bodyMedium)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.charcoal)
+
+                    Text(description)
+                        .font(.bodySmall)
                         .foregroundColor(.softCharcoal)
+
+                    if isLoading {
+                        Text(phaseText)
+                            .font(.caption)
+                            .foregroundColor(.terracotta)
+                            .lineLimit(1)
+                    } else if isReady {
+                        Text("Ready")
+                            .font(.caption)
+                            .foregroundColor(.successGreen)
+                    }
                 }
+
+                Spacer()
             }
 
-            // Text
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.bodyMedium)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.charcoal)
+            // Progress bar
+            if isLoading {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.terracotta.opacity(0.12))
+                            .frame(height: 6)
 
-                Text(description)
-                    .font(.bodySmall)
-                    .foregroundColor(.softCharcoal)
-
-                if isLoading {
-                    Text(loadingText)
-                        .font(.caption)
-                        .foregroundColor(.terracotta)
-                } else if isReady {
-                    Text("Ready")
-                        .font(.caption)
-                        .foregroundColor(.successGreen)
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.terracotta)
+                            .frame(width: max(0, geo.size.width * progress), height: 6)
+                            .animation(.smooth, value: progress)
+                    }
                 }
+                .frame(height: 6)
             }
-
-            Spacer()
         }
         .padding(Spacing.md)
         .background(
