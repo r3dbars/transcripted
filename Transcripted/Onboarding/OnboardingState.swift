@@ -58,12 +58,12 @@ class OnboardingState {
     // MARK: - Model Setup State
 
     var parakeetReady = false
-    var sortformerReady = false
+    var diarizationReady = false
     var modelError: String?
     var isLoadingModels = false
 
     var modelsReady: Bool {
-        parakeetReady && sortformerReady
+        parakeetReady && diarizationReady
     }
 
     // MARK: - Computed Properties
@@ -194,11 +194,11 @@ class OnboardingState {
         modelError = nil
 
         let parakeet = ParakeetService()
-        let sortformer = SortformerService()
+        let diarization = DiarizationService()
 
         // Initialize both in parallel
         async let p: Void = parakeet.initialize()
-        async let s: Void = sortformer.initialize()
+        async let s: Void = diarization.initialize()
         await p
         await s
 
@@ -209,9 +209,9 @@ class OnboardingState {
             modelError = "Speech recognition: \(e)"
         }
 
-        if case .ready = sortformer.modelState {
-            sortformerReady = true
-        } else if case .failed(let e) = sortformer.modelState {
+        if case .ready = diarization.modelState {
+            diarizationReady = true
+        } else if case .failed(let e) = diarization.modelState {
             modelError = (modelError != nil ? modelError! + "\n" : "") + "Speaker diarization: \(e)"
         }
 

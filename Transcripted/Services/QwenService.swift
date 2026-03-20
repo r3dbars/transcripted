@@ -86,7 +86,7 @@ class QwenService: ObservableObject {
     }
 
     /// Extract speaker names from transcript text.
-    /// Returns a mapping of sortformer speaker IDs to inferred names.
+    /// Returns a mapping of diarizer speaker IDs to inferred names.
     /// Example: ["0": "Jack", "1": "Sarah", "2": "Unknown"]
     nonisolated func inferSpeakerNames(transcript: String) async throws -> [String: String] {
         guard let container = await MainActor.run(body: { self.modelContainer }) else {
