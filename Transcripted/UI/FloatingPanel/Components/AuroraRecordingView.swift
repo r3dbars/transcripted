@@ -12,19 +12,14 @@ struct AuroraRecordingView: View {
     var onTranscripts: (() -> Void)? = nil
 
     @Environment(\.accessibilityReduceMotion) var reduceMotion
-    @State private var isExpanded = true  // Start expanded, auto-collapse after 5s
     @State private var isStopHovered = false
     @State private var isTranscriptsHovered = false
-    @State private var collapseTask: Task<Void, Never>?
-    @State private var initialCollapseTask: Task<Void, Never>?
 
     // Smoothed audio levels (prevents jitter)
     @State private var smoothedMicLevel: CGFloat = 0
     @State private var smoothedSystemLevel: CGFloat = 0
 
-    // Collapsed/expanded dimensions
-    private let collapsedWidth: CGFloat = 72
-    private let collapsedHeight: CGFloat = 36
+    // Fixed dimensions — always expanded during recording
     private let expandedWidth: CGFloat = 200
     private let expandedHeight: CGFloat = 44
 
@@ -37,52 +32,13 @@ struct AuroraRecordingView: View {
             auroraBackground
                 .clipShape(Capsule())
 
-            // Expanded content (timer + stop button)
-            if isExpanded {
-                expandedContent
-                    .transition(.opacity.animation(.easeOut(duration: 0.1)))
-            }
+            // Always-visible content (timer + stop button)
+            expandedContent
         }
-        .frame(
-            width: isExpanded ? expandedWidth : collapsedWidth,
-            height: isExpanded ? expandedHeight : collapsedHeight
-        )
-        .animation(.spring(response: 0.15, dampingFraction: 0.8), value: isExpanded)
-        .onHover { hovering in
-            if hovering {
-                // Cancel any pending collapse and expand immediately
-                collapseTask?.cancel()
-                collapseTask = nil
-                isExpanded = true
-            } else {
-                // Start collapse timer when mouse leaves
-                collapseTask = Task {
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    if !Task.isCancelled {
-                        await MainActor.run {
-                            isExpanded = false
-                        }
-                    }
-                }
-            }
-        }
-        .onAppear {
-            // Auto-collapse after 5 seconds of initial display
-            initialCollapseTask = Task {
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    isExpanded = false
-                }
-            }
-        }
-        .onDisappear {
-            initialCollapseTask?.cancel()
-            collapseTask?.cancel()
-        }
+        .frame(width: expandedWidth, height: expandedHeight)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Recording in progress, \(formatDurationAccessible(audio.recordingDuration))")
-        .accessibilityHint("Hover to reveal controls")
+        .accessibilityHint("Click stop to end recording")
     }
 
     // MARK: - Aurora Background (Gemini-style fog layers)

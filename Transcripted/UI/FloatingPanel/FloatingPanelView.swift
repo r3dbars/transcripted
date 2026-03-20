@@ -27,6 +27,13 @@ struct FloatingPanelView: View {
     @State private var showErrorToast = false
     @State private var currentError: ContextualError?
 
+    // Speaker naming dismiss guard — tracks when naming tray appeared
+    @State private var speakerNamingAppearDate: Date?
+    private var canDismissSpeakerNaming: Bool {
+        guard let appeared = speakerNamingAppearDate else { return false }
+        return Date().timeIntervalSince(appeared) >= 3.0
+    }
+
     // Attention prompt states
     @State private var showSilencePrompt = false
     @State private var silencePromptDismissed = false  // Prevents re-showing after dismiss
@@ -70,6 +77,12 @@ struct FloatingPanelView: View {
                         withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
                             trayState = .none
                         }
+                    },
+                    onRecord: {
+                        withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                            trayState = .none
+                        }
+                        audio.start()
                     }
                 )
                 .transition(.asymmetric(
@@ -95,6 +108,47 @@ struct FloatingPanelView: View {
 
             // MARK: - Pill Content (centered, morphs between states)
             pillContent
+                .contextMenu {
+                    if pillStateManager.state == .recording {
+                        Button(action: { audio.stop() }) {
+                            Label("Stop Recording", systemImage: "stop.fill")
+                        }
+                    } else if pillStateManager.state == .idle {
+                        Button(action: { audio.start() }) {
+                            Label("Start Recording", systemImage: "mic.fill")
+                        }
+                    }
+
+                    Button(action: { toggleTranscriptTray() }) {
+                        Label("View Transcripts", systemImage: "clock.arrow.circlepath")
+                    }
+
+                    Button(action: { openTranscriptsFolder() }) {
+                        Label("Open Transcripts Folder", systemImage: "folder")
+                    }
+
+                    if failedTranscriptionManager.failedTranscriptions.count > 0 {
+                        Button(action: { toggleTranscriptTray() }) {
+                            Label("Failed Transcriptions (\(failedTranscriptionManager.failedTranscriptions.count))", systemImage: "exclamationmark.triangle")
+                        }
+                    }
+
+                    Divider()
+
+                    Button(action: {
+                        NSApp.sendAction(Selector(("openSettings")), to: nil, from: nil)
+                    }) {
+                        Label("Settings...", systemImage: "gear")
+                    }
+
+                    Divider()
+
+                    Button(action: {
+                        NSApplication.shared.terminate(nil)
+                    }) {
+                        Label("Quit Transcripted", systemImage: "power")
+                    }
+                }
                 .animation(.pillMorph, value: pillStateManager.state)
                 .padding(.bottom, 10)
         }
@@ -156,8 +210,10 @@ struct FloatingPanelView: View {
                 transcriptStore.refresh()
                 installEscapeMonitor()
             case .speakerNaming:
+                speakerNamingAppearDate = Date()
                 installEscapeMonitor()
             case .none:
+                speakerNamingAppearDate = nil
                 removeEscapeMonitor()
             }
         }
@@ -215,7 +271,25 @@ struct FloatingPanelView: View {
             // Show success view for transcript saved, processing aurora otherwise
             switch taskManager.displayStatus {
             case .transcriptSaved:
-                AuroraSuccessView(successType: .transcriptSaved)
+                AuroraSuccessView(
+                    successType: .transcriptSaved,
+                    transcriptURL: taskManager.lastSavedTranscriptURL,
+                    onCopyTranscript: {
+                        guard let url = taskManager.lastSavedTranscriptURL else { return }
+                        let summary = TranscriptSummary(
+                            url: url,
+                            title: url.deletingPathExtension().lastPathComponent,
+                            date: Date(),
+                            duration: "",
+                            speakerCount: 0,
+                            speakerNames: []
+                        )
+                        if let text = transcriptStore.copyableText(for: summary), !text.isEmpty {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(text, forType: .string)
+                        }
+                    }
+                )
             default:
                 AuroraProcessingView(status: taskManager.displayStatus)
             }
@@ -236,12 +310,15 @@ struct FloatingPanelView: View {
         guard escapeLocalMonitor == nil else { return }
 
         // Local monitor: catches Escape when our app is frontmost
-        // Naming tray is sticky — escape only dismisses the transcript tray
         escapeLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 {
                 if trayState == .speakerNaming {
-                    // Naming tray is sticky — escape does nothing but don't swallow the event
-                    return event
+                    // Allow escape dismiss after 3-second guard
+                    guard canDismissSpeakerNaming else { return event }
+                    if let request = taskManager.speakerNamingRequest {
+                        request.onComplete([])
+                    }
+                    return nil
                 }
                 guard trayState == .transcripts else { return event }  // Don't swallow escape app-wide
                 withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
@@ -257,9 +334,15 @@ struct FloatingPanelView: View {
         escapeGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 {
                 DispatchQueue.main.async {
-                    guard self.trayState == .transcripts else { return }
-                    withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
-                        self.trayState = .none
+                    if self.trayState == .speakerNaming {
+                        guard self.canDismissSpeakerNaming else { return }
+                        if let request = self.taskManager.speakerNamingRequest {
+                            request.onComplete([])
+                        }
+                    } else if self.trayState == .transcripts {
+                        withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                            self.trayState = .none
+                        }
                     }
                 }
             }

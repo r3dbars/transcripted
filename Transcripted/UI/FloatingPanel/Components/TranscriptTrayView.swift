@@ -16,6 +16,7 @@ struct TranscriptTrayView: View {
     @ObservedObject var store: TranscriptStore
     var onOpenFolder: () -> Void
     var onDismiss: (() -> Void)? = nil
+    var onRecord: (() -> Void)? = nil
 
     @State private var isAppearing = false
     @State private var copiedId: UUID?
@@ -195,29 +196,11 @@ struct TranscriptTrayView: View {
 
             Spacer()
 
-            Button { copyAgentPrompt() } label: {
-                HStack(spacing: 4) {
-                    if agentPromptCopied {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.statusSuccessMuted)
-                        Text("Copied!")
-                            .font(.system(size: 10))
-                            .foregroundColor(.statusSuccessMuted)
-                    } else {
-                        Image(systemName: "terminal")
-                            .font(.system(size: 9))
-                        Text("Connect Agent")
-                            .font(.system(size: 10))
-                    }
-                }
+            Text("\(store.transcripts.count) transcript\(store.transcripts.count == 1 ? "" : "s")")
+                .font(.system(size: 10))
                 .foregroundColor(.panelTextMuted)
                 .padding(.horizontal, Spacing.ms)
                 .padding(.vertical, Spacing.xs + 2)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(PlainButtonStyle())
-            .animation(.snappy(duration: 0.15), value: agentPromptCopied)
         }
     }
 
@@ -358,31 +341,28 @@ struct TranscriptTrayView: View {
 
             Spacer()
 
-            Button(action: {
-                let stem = transcript.title
-                copyAgentPrompt(filename: stem)
-            }) {
-                HStack(spacing: 4) {
-                    if agentPromptCopied {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.statusSuccessMuted)
-                        Text("Copied!")
-                            .font(.system(size: 10))
-                            .foregroundColor(.statusSuccessMuted)
-                    } else {
-                        Image(systemName: "terminal")
-                            .font(.system(size: 9))
-                        Text("Agent")
-                            .font(.system(size: 10))
-                    }
+            // Overflow menu: Agent + Open in Finder
+            Menu {
+                Button(action: {
+                    let stem = transcript.title
+                    copyAgentPrompt(filename: stem)
+                }) {
+                    Label("Connect Agent", systemImage: "terminal")
                 }
-                .foregroundColor(.panelTextMuted)
-                .padding(.horizontal, Spacing.ms)
-                .padding(.vertical, Spacing.xs + 2)
-                .contentShape(Rectangle())
+                Button(action: {
+                    NSWorkspace.shared.selectFile(transcript.url.path, inFileViewerRootedAtPath: transcript.url.deletingLastPathComponent().path)
+                }) {
+                    Label("Open in Finder", systemImage: "folder")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.panelTextMuted)
+                    .padding(.horizontal, Spacing.ms)
+                    .padding(.vertical, Spacing.xs + 2)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(PlainButtonStyle())
+            .menuStyle(BorderlessButtonMenuStyle())
         }
         .background(Color.panelCharcoal.opacity(0.3))
         .animation(.snappy(duration: 0.15), value: copiedId)
@@ -425,7 +405,7 @@ struct TranscriptTrayView: View {
 
     private var emptyState: some View {
         VStack(spacing: Spacing.sm) {
-            Image(systemName: "waveform.slash")
+            Image(systemName: "mic.badge.plus")
                 .font(.system(size: 24, weight: .light))
                 .foregroundColor(.panelTextMuted)
 
@@ -437,6 +417,25 @@ struct TranscriptTrayView: View {
                 .font(.system(size: 11))
                 .foregroundColor(.panelTextMuted)
                 .multilineTextAlignment(.center)
+
+            if let onRecord {
+                Button(action: onRecord) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 10, weight: .medium))
+                        Text("Start Recording")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(.accentBlue)
+                    .padding(.horizontal, Spacing.ms)
+                    .padding(.vertical, Spacing.xs + 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                            .fill(Color.accentBlue.opacity(0.12))
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
         }
         .padding(.vertical, Spacing.xl)
         .padding(.horizontal, Spacing.md)
@@ -495,7 +494,7 @@ struct TranscriptRowView: View {
                 Text(transcript.title)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.panelTextPrimary)
-                    .lineLimit(2)
+                    .lineLimit(1)
                     .truncationMode(.tail)
 
                 HStack(spacing: 4) {
@@ -528,14 +527,7 @@ struct TranscriptRowView: View {
                     }
                 }
 
-                if !transcript.speakerNames.isEmpty {
-                    Text(transcript.speakerNames.joined(separator: ", "))
-                        .font(.system(size: 10))
-                        .foregroundColor(.panelTextMuted)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            }
+}
 
             Spacer(minLength: Spacing.xs)
 
