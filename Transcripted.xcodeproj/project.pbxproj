@@ -26,13 +26,9 @@
 		A1000102 /* OnboardingWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000103 /* OnboardingWindow.swift */; };
 		A1000104 /* OnboardingContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000105 /* OnboardingContainerView.swift */; };
 		A1000106 /* WelcomeStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000107 /* WelcomeStep.swift */; };
-		A1000110 /* HowItWorksStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000111 /* HowItWorksStep.swift */; };
 		A1000112 /* PermissionsStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000113 /* PermissionsStep.swift */; };
-		A1000116 /* ReadyStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000117 /* ReadyStep.swift */; };
-		A1000108 /* PreviewStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000109 /* PreviewStep.swift */; };
 		A1000200 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000201 /* DesignTokens.swift */; };
 		A1000202 /* PremiumComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000203 /* PremiumComponents.swift */; };
-		A1000204 /* ParticleExplosionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000205 /* ParticleExplosionView.swift */; };
 		A1000301 /* DateParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000311 /* DateParser.swift */; };
 		A1000500 /* TranscriptUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000501 /* TranscriptUtils.swift */; };
 		A1000803 /* DateFormattingHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000802 /* DateFormattingHelper.swift */; };
@@ -136,13 +132,9 @@
 		A1000103 /* OnboardingWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingWindow.swift; sourceTree = "<group>"; };
 		A1000105 /* OnboardingContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingContainerView.swift; sourceTree = "<group>"; };
 		A1000107 /* WelcomeStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeStep.swift; sourceTree = "<group>"; };
-		A1000111 /* HowItWorksStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HowItWorksStep.swift; sourceTree = "<group>"; };
 		A1000113 /* PermissionsStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsStep.swift; sourceTree = "<group>"; };
-		A1000117 /* ReadyStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadyStep.swift; sourceTree = "<group>"; };
-		A1000109 /* PreviewStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewStep.swift; sourceTree = "<group>"; };
 		A1000201 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
 		A1000203 /* PremiumComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumComponents.swift; sourceTree = "<group>"; };
-		A1000205 /* ParticleExplosionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParticleExplosionView.swift; sourceTree = "<group>"; };
 		A1000311 /* DateParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParser.swift; sourceTree = "<group>"; };
 		A1000501 /* TranscriptUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptUtils.swift; sourceTree = "<group>"; };
 		A1000802 /* DateFormattingHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateFormattingHelper.swift; sourceTree = "<group>"; };
@@ -329,7 +321,6 @@
 				A1000103 /* OnboardingWindow.swift */,
 				A1000105 /* OnboardingContainerView.swift */,
 				A1000121 /* Steps */,
-				A1000220 /* Animations */,
 			);
 			path = Onboarding;
 			sourceTree = "<group>";
@@ -338,10 +329,7 @@
 			isa = PBXGroup;
 			children = (
 				A1000107 /* WelcomeStep.swift */,
-				A1000111 /* HowItWorksStep.swift */,
 				A1000113 /* PermissionsStep.swift */,
-				A1000117 /* ReadyStep.swift */,
-				A1000109 /* PreviewStep.swift */,
 				BF26FA6ED2054F3DCF8D0B45 /* ModelSetupStep.swift */,
 			);
 			path = Steps;
@@ -354,14 +342,6 @@
 				A1000203 /* PremiumComponents.swift */,
 			);
 			path = Design;
-			sourceTree = "<group>";
-		};
-		A1000220 /* Animations */ = {
-			isa = PBXGroup;
-			children = (
-				A1000205 /* ParticleExplosionView.swift */,
-			);
-			path = Animations;
 			sourceTree = "<group>";
 		};
 		A1000320 /* Services */ = {
@@ -652,13 +632,9 @@
 				A1000102 /* OnboardingWindow.swift in Sources */,
 				A1000104 /* OnboardingContainerView.swift in Sources */,
 				A1000106 /* WelcomeStep.swift in Sources */,
-				A1000110 /* HowItWorksStep.swift in Sources */,
 				A1000112 /* PermissionsStep.swift in Sources */,
-				A1000116 /* ReadyStep.swift in Sources */,
-				A1000108 /* PreviewStep.swift in Sources */,
 				A1000200 /* DesignTokens.swift in Sources */,
 				A1000202 /* PremiumComponents.swift in Sources */,
-				A1000204 /* ParticleExplosionView.swift in Sources */,
 				A1000301 /* DateParser.swift in Sources */,
 				A1000803 /* DateFormattingHelper.swift in Sources */,
 				A1000911 /* PillStateManager.swift in Sources */,
