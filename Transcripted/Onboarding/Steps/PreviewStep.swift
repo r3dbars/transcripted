@@ -56,7 +56,7 @@ struct PreviewStep: View {
             .padding(Spacing.md)
             .background(
                 RoundedRectangle(cornerRadius: Radius.lg)
-                    .fill(Color.cardBackground)
+                    .fill(Color.warmCream)
                     .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
             )
             .padding(.horizontal, Spacing.md)
