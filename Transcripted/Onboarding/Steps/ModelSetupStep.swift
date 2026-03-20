@@ -44,9 +44,9 @@ struct ModelSetupStep: View {
                 ModelDownloadCard(
                     icon: "person.2.fill",
                     title: "Speaker Diarization",
-                    description: "Sortformer — identifies who said what",
-                    isReady: state.sortformerReady,
-                    isLoading: state.isLoadingModels && !state.sortformerReady,
+                    description: "PyAnnote — identifies who said what",
+                    isReady: state.diarizationReady,
+                    isLoading: state.isLoadingModels && !state.diarizationReady,
                     loadingText: "Downloading diarization models..."
                 )
                 .offset(x: card2Appeared ? 0 : 40)
@@ -252,7 +252,7 @@ private struct ModelDownloadCard: View {
 #Preview("Ready") {
     let state = OnboardingState()
     state.parakeetReady = true
-    state.sortformerReady = true
+    state.diarizationReady = true
     return ModelSetupStep(state: state)
         .frame(width: 720, height: 680)
         .background(Color.cream)

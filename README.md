@@ -95,13 +95,13 @@ open Transcripted.xcodeproj
 Transcripted captures audio from your microphone and system output, runs speech-to-text locally on the Neural Engine, identifies who is speaking, and saves structured Markdown transcripts to your filesystem. Speaker fingerprints persist across sessions — the app learns voices over time.
 
 <p align="center">
-  <img src="docs/screenshots/pipeline.png" width="720" alt="Processing pipeline — audio through Parakeet and Sortformer to Markdown" />
+  <img src="docs/screenshots/pipeline.png" width="720" alt="Processing pipeline — audio through Parakeet and PyAnnote diarization to Markdown" />
 </p>
 
 | Model | Role | Size |
 |---|---|---|
 | **Parakeet TDT V3** | Speech-to-text | ~600 MB |
-| **Sortformer** | Speaker diarization (up to 4 speakers) | Bundled |
+| **PyAnnote** | Speaker diarization (unlimited speakers) | Bundled |
 | **WeSpeaker** | Voice embeddings (256-dim fingerprints) | Bundled |
 | **Qwen 3.5-4B** | Speaker name inference from context | ~2.5 GB (optional) |
 
@@ -134,7 +134,7 @@ All models run locally via [FluidAudio](https://github.com/FluidAudio) — no in
 
 - **Persistent voice fingerprints** — Voice embeddings stored in a local SQLite database. Returning speakers are recognized across sessions, even weeks apart.
 - **Speaker name inference** — On-device Qwen 3.5-4B LLM analyzes conversation context ("Hey Sarah, can you pull up the report?") to infer and assign speaker names automatically.
-- **Up to 4 speakers** — Sortformer diarization handles multi-speaker conversations with speaker-turn detection.
+- **Unlimited speakers** — PyAnnote offline diarization handles multi-speaker conversations with no speaker limit. Sortformer streaming available for future real-time preview.
 - **Smart post-processing** — Automatic speaker merging, database-informed splitting, and name variant handling (Mike↔Michael, Nate↔Nathan, etc.).
 
 ### Output
@@ -203,7 +203,7 @@ Nice. I saw the metrics this morning — the P99 latency improvement is signific
 | | Transcripted | Granola | Krisp | MacWhisper | Meetily |
 |---|:---:|:---:|:---:|:---:|:---:|
 | **Processing** | 100% local | Hybrid (cloud AI) | On-device | 100% local | 100% local |
-| **Speaker diarization** | ✅ Sortformer | ❌ desktop | ✅ | ⚠️ Beta | ⚠️ PoC |
+| **Speaker diarization** | ✅ PyAnnote | ❌ desktop | ✅ | ⚠️ Beta | ⚠️ PoC |
 | **Learns voices** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Name inference** | ✅ Qwen | ❌ | ❌ | ❌ | ❌ |
 | **Auto meeting detection** | ✅ | ❌ | ❌ | ❌ | ❌ |
@@ -218,7 +218,7 @@ Nice. I saw the metrics this morning — the P99 latency improvement is signific
 
 | | Transcripted | Apple Dictation | Voice Memos | Notes (macOS 15+) |
 |---|:---:|:---:|:---:|:---:|
-| **Speaker diarization** | ✅ up to 4 | ❌ | ❌ | ❌ |
+| **Speaker diarization** | ✅ unlimited | ❌ | ❌ | ❌ |
 | **System audio capture** | ✅ | ❌ | ❌ | ❌ |
 | **Auto meeting detection** | ✅ | ❌ | ❌ | ❌ |
 | **Voice fingerprints** | ✅ | ❌ | ❌ | ❌ |
@@ -307,7 +307,7 @@ Transcripted/
 │
 ├── Services/                    # ML models & integrations
 │   ├── ParakeetService.swift    # Parakeet TDT V3 (speech-to-text)
-│   ├── SortformerService.swift  # Sortformer (speaker diarization)
+│   ├── DiarizationService.swift # Speaker diarization (PyAnnote offline + Sortformer streaming)
 │   ├── QwenService.swift        # Qwen 3.5-4B (speaker name inference)
 │   ├── SpeakerDatabase.swift    # Voice fingerprint storage (SQLite)
 │   ├── MeetingDetector.swift    # Auto-detection of meeting apps
@@ -408,7 +408,8 @@ Contributions welcome — bug reports, feature requests, docs, or code. See [CON
 ## Acknowledgements
 
 - **[NVIDIA NeMo](https://github.com/NVIDIA/NeMo)** — Parakeet TDT V3 and Sortformer models
-- **[FluidAudio](https://github.com/FluidAudio)** — Swift framework for running NeMo models on Apple Silicon
+- **[PyAnnote](https://github.com/pyannote/pyannote-audio)** — Speaker diarization pipeline (segmentation + VBx clustering)
+- **[FluidAudio](https://github.com/FluidAudio)** — Swift framework for running NeMo and PyAnnote models on Apple Silicon
 - **[WeSpeaker](https://github.com/wenet-e2e/wespeaker)** — Speaker embedding extraction
 - **[Qwen](https://github.com/QwenLM/Qwen)** — On-device LLM for speaker name inference
 - **[MLX](https://github.com/ml-explore/mlx)** — Apple's machine learning framework for efficient on-device inference

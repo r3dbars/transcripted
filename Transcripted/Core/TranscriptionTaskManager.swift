@@ -349,7 +349,7 @@ class TranscriptionTaskManager: ObservableObject {
         healthInfo: RecordingHealthInfo?
     ) async throws -> URL {
 
-        AppLogger.pipeline.info("Using local Parakeet + Sortformer pipeline")
+        AppLogger.pipeline.info("Using local Parakeet + PyAnnote pipeline")
 
         // Phase 1: Transcribe with local models
         let result = try await transcription.transcribeMultichannel(
@@ -542,7 +542,7 @@ class TranscriptionTaskManager: ObservableObject {
 
                                 // Reload for next recording (~0.3s from cache)
                                 await self.transcription.initializeModels()
-                                AppLogger.pipeline.info("Reloaded Parakeet + Sortformer after Qwen cleanup")
+                                AppLogger.pipeline.info("Reloaded Parakeet + diarization after Qwen cleanup")
 
                                 AppLogger.pipeline.info("Qwen speaker inference complete", [
                                     "suggestions": "\(qwenSuggestions.filter { $0.value != "Unknown" }.count)",
@@ -553,7 +553,7 @@ class TranscriptionTaskManager: ObservableObject {
 
                                 // Reload for next recording (~0.3s from cache)
                                 await self.transcription.initializeModels()
-                                AppLogger.pipeline.info("Reloaded Parakeet + Sortformer after Qwen cleanup")
+                                AppLogger.pipeline.info("Reloaded Parakeet + diarization after Qwen cleanup")
 
                                 AppLogger.pipeline.warning("Qwen inference failed, falling back to manual naming", [
                                     "error": error.localizedDescription
