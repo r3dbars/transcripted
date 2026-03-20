@@ -129,12 +129,20 @@ enum EmbeddingClusterer {
     /// fragment of a real speaker rather than a distinct person. We use a
     /// relaxed similarity threshold to merge these back.
     ///
-    /// Safety: genuinely different speakers rarely exceed 0.6 cosine similarity,
-    /// so the 0.72 threshold won't incorrectly merge distinct people.
+    /// Two-tier thresholds:
+    /// - Micro-clusters (< `microClusterDuration`): Forced absorption with a
+    ///   very low floor (0.15). These are almost certainly noise/interjections
+    ///   rather than distinct speakers. The floor only rejects near-zero or
+    ///   negative similarity (silence, corruption).
+    /// - Small clusters (< `minClusterDuration`): Standard relaxed threshold
+    ///   (0.72). Safety: genuinely different speakers rarely exceed 0.6 cosine
+    ///   similarity, so this won't incorrectly merge distinct people.
     static func absorbSmallClusters(
         segments: [SpeakerSegment],
         minClusterDuration: Double = 30.0,
-        absorptionThreshold: Float = 0.72
+        absorptionThreshold: Float = 0.72,
+        microClusterDuration: Double = 10.0,
+        microAbsorptionThreshold: Float = 0.15
     ) -> [SpeakerSegment] {
         // Compute total speaking duration per speaker
         var durationPerSpeaker: [Int: Double] = [:]
@@ -179,20 +187,28 @@ enum EmbeddingClusterer {
                 }
             }
 
-            if let targetId = bestId, bestSim >= absorptionThreshold {
+            // Two-tier threshold: micro-clusters (very short) use a much lower
+            // floor since they can't plausibly be a distinct speaker.
+            let duration = durationPerSpeaker[smallId] ?? 0
+            let isMicro = duration < microClusterDuration
+            let effectiveThreshold = isMicro ? microAbsorptionThreshold : absorptionThreshold
+
+            if let targetId = bestId, bestSim >= effectiveThreshold {
                 mergeMap[smallId] = targetId
-                AppLogger.transcription.info("Absorbing small cluster", [
+                AppLogger.transcription.info("Absorbing \(isMicro ? "micro" : "small") cluster", [
                     "smallSpk": "spk\(smallId)",
-                    "duration": String(format: "%.1fs", durationPerSpeaker[smallId] ?? 0),
+                    "duration": String(format: "%.1fs", duration),
                     "into": "spk\(targetId)",
-                    "similarity": String(format: "%.3f", bestSim)
+                    "similarity": String(format: "%.3f", bestSim),
+                    "threshold": String(format: "%.2f", effectiveThreshold)
                 ])
             } else {
                 AppLogger.transcription.debug("Small cluster not absorbed", [
                     "smallSpk": "spk\(smallId)",
-                    "duration": String(format: "%.1fs", durationPerSpeaker[smallId] ?? 0),
+                    "duration": String(format: "%.1fs", duration),
                     "bestSim": String(format: "%.3f", bestSim),
-                    "threshold": String(format: "%.2f", absorptionThreshold)
+                    "threshold": String(format: "%.2f", effectiveThreshold),
+                    "isMicro": "\(isMicro)"
                 ])
             }
         }

@@ -129,6 +129,96 @@ final class EmbeddingClustererTests: XCTestCase {
         XCTAssertEqual(Set(result.map { $0.speakerId }).count, 1)
     }
 
+    // MARK: - Small Cluster Absorption
+
+    func testAbsorbSmallClusterAboveThreshold() {
+        // Large cluster: speaker 0 with 40s total (above 30s threshold)
+        // Small cluster: speaker 1 with 6s total (below 30s threshold)
+        // Embeddings are similar enough (cos ≈ 0.75) to exceed the 0.72 standard threshold
+        let embA: [Float] = [1.0, 0.0, 0.0, 0.0]
+        let embB: [Float] = [0.75, 0.66, 0.0, 0.0] // cos(A,B) ≈ 0.75
+
+        // 20 segments × 2s each = 40s for speaker 0
+        let largeSeg = (0..<20).map { i in
+            SpeakerSegment(speakerId: 0, startTime: Double(i) * 2.0, endTime: Double(i) * 2.0 + 2.0,
+                           embedding: embA, qualityScore: 0.8)
+        }
+        // 2 segments × 3s each = 6s for speaker 1
+        let smallSeg = [
+            SpeakerSegment(speakerId: 1, startTime: 50.0, endTime: 53.0, embedding: embB, qualityScore: 0.8),
+            SpeakerSegment(speakerId: 1, startTime: 55.0, endTime: 58.0, embedding: embB, qualityScore: 0.8)
+        ]
+
+        let result = EmbeddingClusterer.absorbSmallClusters(segments: largeSeg + smallSeg)
+        let uniqueIds = Set(result.map { $0.speakerId })
+        XCTAssertEqual(uniqueIds.count, 1, "Small cluster with sim 0.75 should be absorbed (threshold 0.72)")
+    }
+
+    func testAbsorbSmallClusterBelowThresholdNotAbsorbed() {
+        // Large cluster: speaker 0 with 40s
+        // Small cluster: speaker 1 with 20s, very different embedding
+        // Similarity is low but duration is above micro threshold (10s)
+        let embA: [Float] = [1.0, 0.0, 0.0, 0.0]
+        let embB: [Float] = [0.0, 1.0, 0.0, 0.0] // cos(A,B) = 0.0 (orthogonal)
+
+        let largeSeg = (0..<20).map { i in
+            SpeakerSegment(speakerId: 0, startTime: Double(i) * 2.0, endTime: Double(i) * 2.0 + 2.0,
+                           embedding: embA, qualityScore: 0.8)
+        }
+        // 10 segments × 2s = 20s — small but NOT micro
+        let smallSeg = (0..<10).map { i in
+            SpeakerSegment(speakerId: 1, startTime: 50.0 + Double(i) * 2.0,
+                           endTime: 52.0 + Double(i) * 2.0,
+                           embedding: embB, qualityScore: 0.8)
+        }
+
+        let result = EmbeddingClusterer.absorbSmallClusters(segments: largeSeg + smallSeg)
+        let uniqueIds = Set(result.map { $0.speakerId })
+        XCTAssertEqual(uniqueIds.count, 2, "Small (non-micro) cluster with 0 similarity should NOT be absorbed")
+    }
+
+    func testAbsorbMicroClusterForcedAbsorption() {
+        // Large cluster: speaker 0 with 40s
+        // Micro cluster: speaker 1 with 6s (below 10s micro threshold)
+        // Low similarity (0.22) — would NOT pass standard 0.72 threshold,
+        // but SHOULD pass micro threshold (0.15)
+        let embA: [Float] = [1.0, 0.0, 0.0, 0.0]
+        let embB: [Float] = [0.22, 0.97, 0.0, 0.0] // cos(A,B) ≈ 0.22
+
+        let largeSeg = (0..<20).map { i in
+            SpeakerSegment(speakerId: 0, startTime: Double(i) * 2.0, endTime: Double(i) * 2.0 + 2.0,
+                           embedding: embA, qualityScore: 0.8)
+        }
+        let microSeg = [
+            SpeakerSegment(speakerId: 1, startTime: 50.0, endTime: 53.0, embedding: embB, qualityScore: 0.8),
+            SpeakerSegment(speakerId: 1, startTime: 55.0, endTime: 58.3, embedding: embB, qualityScore: 0.8)
+        ]
+
+        let result = EmbeddingClusterer.absorbSmallClusters(segments: largeSeg + microSeg)
+        let uniqueIds = Set(result.map { $0.speakerId })
+        XCTAssertEqual(uniqueIds.count, 1, "Micro cluster (6.3s) with sim 0.22 should be force-absorbed (micro threshold 0.15)")
+    }
+
+    func testAbsorbMicroClusterNearZeroSimilarityRejected() {
+        // Even micro clusters should NOT be absorbed if similarity is near zero
+        // (likely silence or corrupt embedding)
+        let embA: [Float] = [1.0, 0.0, 0.0, 0.0]
+        let embB: [Float] = [0.05, 0.99, 0.0, 0.0] // cos(A,B) ≈ 0.05
+
+        let largeSeg = (0..<20).map { i in
+            SpeakerSegment(speakerId: 0, startTime: Double(i) * 2.0, endTime: Double(i) * 2.0 + 2.0,
+                           embedding: embA, qualityScore: 0.8)
+        }
+        let microSeg = [
+            SpeakerSegment(speakerId: 1, startTime: 50.0, endTime: 53.0, embedding: embB, qualityScore: 0.8),
+            SpeakerSegment(speakerId: 1, startTime: 55.0, endTime: 58.0, embedding: embB, qualityScore: 0.8)
+        ]
+
+        let result = EmbeddingClusterer.absorbSmallClusters(segments: largeSeg + microSeg)
+        let uniqueIds = Set(result.map { $0.speakerId })
+        XCTAssertEqual(uniqueIds.count, 2, "Micro cluster with near-zero similarity (0.05) should NOT be absorbed")
+    }
+
     // MARK: - Helpers
 
     /// Create a unit vector along the given axis (4-dimensional for simplicity)

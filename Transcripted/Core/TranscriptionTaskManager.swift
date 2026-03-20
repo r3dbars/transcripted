@@ -505,12 +505,21 @@ class TranscriptionTaskManager: ObservableObject {
                         )
 
                         if !inferenceText.isEmpty {
-                            // Free ~1.5 GB — transcription is done, these models aren't needed during speaker naming
-                            await MainActor.run {
-                                self.transcription.parakeet.cleanup()
-                                self.transcription.diarization.cleanup()
+                            // On machines with ≥12 GB RAM, Parakeet (CoreML/ANE ~600 MB) and
+                            // diarization (~80 MB) coexist with Qwen (MLX/GPU ~2.5 GB) without
+                            // memory pressure. Only unload on smaller machines.
+                            let totalMemoryGB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
+                            let shouldUnloadForQwen = totalMemoryGB < 12
+
+                            if shouldUnloadForQwen {
+                                await MainActor.run {
+                                    self.transcription.parakeet.cleanup()
+                                    self.transcription.diarization.cleanup()
+                                }
+                                AppLogger.pipeline.info("Unloaded Parakeet + diarization models before Qwen inference (RAM: \(String(format: "%.0f", totalMemoryGB)) GB)")
+                            } else {
+                                AppLogger.pipeline.info("Keeping models resident during Qwen inference (RAM: \(String(format: "%.0f", totalMemoryGB)) GB)")
                             }
-                            AppLogger.pipeline.info("Unloaded Parakeet + diarization models before Qwen inference")
 
                             do {
                                 // Wait for pre-loaded model (started when recording began)
@@ -540,9 +549,10 @@ class TranscriptionTaskManager: ObservableObject {
                                 }
                                 await MainActor.run { self.cleanupQwen() }
 
-                                // Reload for next recording (~0.3s from cache)
-                                await self.transcription.initializeModels()
-                                AppLogger.pipeline.info("Reloaded Parakeet + diarization after Qwen cleanup")
+                                if shouldUnloadForQwen {
+                                    await self.transcription.initializeModels()
+                                    AppLogger.pipeline.info("Reloaded Parakeet + diarization after Qwen cleanup")
+                                }
 
                                 AppLogger.pipeline.info("Qwen speaker inference complete", [
                                     "suggestions": "\(qwenSuggestions.filter { $0.value != "Unknown" }.count)",
@@ -551,9 +561,10 @@ class TranscriptionTaskManager: ObservableObject {
                             } catch {
                                 await MainActor.run { self.cleanupQwen() }
 
-                                // Reload for next recording (~0.3s from cache)
-                                await self.transcription.initializeModels()
-                                AppLogger.pipeline.info("Reloaded Parakeet + diarization after Qwen cleanup")
+                                if shouldUnloadForQwen {
+                                    await self.transcription.initializeModels()
+                                    AppLogger.pipeline.info("Reloaded Parakeet + diarization after Qwen cleanup")
+                                }
 
                                 AppLogger.pipeline.warning("Qwen inference failed, falling back to manual naming", [
                                     "error": error.localizedDescription
