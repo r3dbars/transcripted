@@ -114,6 +114,9 @@ class TranscriptionTaskManager: ObservableObject {
     // Speaker naming flow — published when post-meeting naming is needed
     @Published var speakerNamingRequest: SpeakerNamingRequest? = nil
 
+    // Last saved transcript URL — used by success view for Open/Copy actions
+    @Published var lastSavedTranscriptURL: URL? = nil
+
     private var activeTasks: [UUID: Task<Void, Never>] = [:]
     let transcription = Transcription()
 
@@ -274,8 +277,9 @@ class TranscriptionTaskManager: ObservableObject {
                 )
 
                 await MainActor.run {
+                    self.lastSavedTranscriptURL = transcriptURL
                     self.displayStatus = .transcriptSaved
-                    self.scheduleStatusReset()
+                    self.scheduleStatusReset(delay: 4)
                 }
 
                 await MainActor.run {
@@ -444,7 +448,7 @@ class TranscriptionTaskManager: ObservableObject {
         speakerDB.mergeDuplicates()
         speakerDB.pruneWeakProfiles()
 
-        // Build sortformer-ID → persistent DB UUID mapping for YAML
+        // Build diarizer speaker-ID → persistent DB UUID mapping for YAML
         var speakerDbIds: [String: UUID] = [:]
         for utterance in result.systemUtterances {
             let sid = String(utterance.speakerId)
@@ -504,9 +508,9 @@ class TranscriptionTaskManager: ObservableObject {
                             // Free ~1.5 GB — transcription is done, these models aren't needed during speaker naming
                             await MainActor.run {
                                 self.transcription.parakeet.cleanup()
-                                self.transcription.sortformer.cleanup()
+                                self.transcription.diarization.cleanup()
                             }
-                            AppLogger.pipeline.info("Unloaded Parakeet + Sortformer before Qwen inference")
+                            AppLogger.pipeline.info("Unloaded Parakeet + diarization models before Qwen inference")
 
                             do {
                                 // Wait for pre-loaded model (started when recording began)
@@ -684,8 +688,9 @@ class TranscriptionTaskManager: ObservableObject {
                 failedTranscriptionManager.removeFailedTranscription(id: failedId)
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
+                self.lastSavedTranscriptURL = transcriptURL
                 self.displayStatus = .transcriptSaved
-                self.scheduleStatusReset()
+                self.scheduleStatusReset(delay: 4)
             }
 
             return true
@@ -762,6 +767,11 @@ class TranscriptionTaskManager: ObservableObject {
 
         // Clear the naming request
         self.speakerNamingRequest = nil
+
+        // Re-show success view after naming so user can Copy/Open the transcript
+        self.lastSavedTranscriptURL = transcriptURL
+        self.displayStatus = .transcriptSaved
+        self.scheduleStatusReset(delay: 8)
 
         AppLogger.pipeline.info("Speaker naming complete", [
             "named": "\(updates.count)",

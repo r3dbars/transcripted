@@ -98,6 +98,17 @@ struct SpeakerNamingView: View {
                 .tracking(0.8)
 
             Spacer()
+
+            if canDismiss {
+                Button(action: submitNaming) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.panelTextMuted)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help("Dismiss")
+                .transition(.opacity)
+            }
         }
         .padding(.horizontal, Spacing.ms)
         .padding(.vertical, Spacing.xs + 2)
