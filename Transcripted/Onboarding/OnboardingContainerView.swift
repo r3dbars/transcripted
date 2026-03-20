@@ -53,12 +53,10 @@ struct OnboardingContainerView: View {
                     .animation(reduceMotion ? .none : .smooth, value: state.currentStep)
                     .onChange(of: state.modelsReady) { _, ready in
                         if ready && state.currentStep == .modelSetup {
-                            // Brief delay so user sees the success checkmarks
+                            // Brief delay so user sees the success checkmarks, then auto-complete
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                direction = .forward
-                                withAnimation(reduceMotion ? .none : .smooth) {
-                                    state.advance()
-                                }
+                                state.completeOnboarding()
+                                onComplete()
                             }
                         }
                     }
@@ -101,16 +99,10 @@ struct OnboardingContainerView: View {
         switch state.currentStep {
         case .welcome:
             WelcomeStep()
-        case .howItWorks:
-            HowItWorksStep()
-        case .preview:
-            PreviewStep()
         case .permissions:
             PermissionsStep(state: state)
         case .modelSetup:
             ModelSetupStep(state: state)
-        case .ready:
-            ReadyStep()
         }
     }
 
@@ -150,7 +142,8 @@ struct OnboardingContainerView: View {
                 PremiumButton(
                     title: "Start Using Transcripted",
                     icon: "arrow.right",
-                    variant: .primary
+                    variant: .primary,
+                    isDisabled: !state.modelsReady
                 ) {
                     state.completeOnboarding()
                     onComplete()
@@ -177,16 +170,10 @@ struct OnboardingContainerView: View {
         switch state.currentStep {
         case .welcome:
             return "Get Started"
-        case .howItWorks:
-            return "Continue"
-        case .preview:
-            return "Continue"
         case .permissions:
-            return state.canProceed ? "Continue" : "Grant Permissions"
+            return "Continue"
         case .modelSetup:
-            return state.modelsReady ? "Continue" : "Setting Up..."
-        case .ready:
-            return "Start Using Transcripted"
+            return state.modelsReady ? "Start Using Transcripted" : "Setting Up..."
         }
     }
 
@@ -195,11 +182,9 @@ struct OnboardingContainerView: View {
         case .welcome:
             return "arrow.right"
         case .permissions:
-            return state.canProceed ? "arrow.right" : "lock.open"
+            return "arrow.right"
         case .modelSetup:
             return state.modelsReady ? "arrow.right" : "arrow.down.circle"
-        default:
-            return "arrow.right"
         }
     }
 

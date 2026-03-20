@@ -13,20 +13,14 @@ class OnboardingState {
 
     enum OnboardingStep: Int, CaseIterable {
         case welcome = 0
-        case howItWorks = 1
-        case preview = 2
-        case permissions = 3
-        case modelSetup = 4
-        case ready = 5
+        case permissions = 1
+        case modelSetup = 2
 
         var title: String {
             switch self {
             case .welcome: return "Welcome"
-            case .howItWorks: return "How It Works"
-            case .preview: return "Preview"
             case .permissions: return "Permissions"
             case .modelSetup: return "Model Setup"
-            case .ready: return "Ready"
             }
         }
     }
@@ -59,6 +53,10 @@ class OnboardingState {
 
     var parakeetReady = false
     var diarizationReady = false
+    var parakeetProgress: Double = 0
+    var diarizationProgress: Double = 0
+    var parakeetPhase: String = ""
+    var diarizationPhase: String = ""
     var modelError: String?
     var isLoadingModels = false
 
@@ -70,15 +68,12 @@ class OnboardingState {
 
     var canProceed: Bool {
         switch currentStep {
-        case .preview:
+        case .welcome:
             return true
         case .permissions:
-            // Soft gate: allow proceeding without mic permission
             return true
         case .modelSetup:
             return modelsReady
-        default:
-            return true
         }
     }
 
@@ -87,7 +82,7 @@ class OnboardingState {
     }
 
     var isLastStep: Bool {
-        currentStep == .ready
+        currentStep == .modelSetup
     }
 
     var stepProgress: Double {
@@ -184,14 +179,22 @@ class OnboardingState {
 
     // MARK: - Model Loading
 
-    /// Download and initialize Parakeet + Sortformer models.
-    /// These temporary instances trigger the download/cache so models are on disk
-    /// for the real Transcription object created in setupApp().
+    /// Download and initialize Parakeet + diarization models with progress tracking.
+    /// Monitors the FluidAudio cache directory to estimate download progress.
     @MainActor
     func loadModels() async {
         guard !isLoadingModels else { return }
         isLoadingModels = true
         modelError = nil
+        parakeetProgress = 0
+        diarizationProgress = 0
+        parakeetPhase = "Downloading..."
+        diarizationPhase = "Downloading..."
+
+        // Start monitoring download progress on disk
+        let progressTask = Task { @MainActor in
+            await monitorDownloadProgress()
+        }
 
         let parakeet = ParakeetService()
         let diarization = DiarizationService()
@@ -202,20 +205,84 @@ class OnboardingState {
         await p
         await s
 
+        progressTask.cancel()
+
         // Check results
         if case .ready = parakeet.modelState {
             parakeetReady = true
+            parakeetProgress = 1.0
+            parakeetPhase = "Ready"
         } else if case .failed(let e) = parakeet.modelState {
             modelError = "Speech recognition: \(e)"
         }
 
         if case .ready = diarization.modelState {
             diarizationReady = true
+            diarizationProgress = 1.0
+            diarizationPhase = "Ready"
         } else if case .failed(let e) = diarization.modelState {
             modelError = (modelError != nil ? modelError! + "\n" : "") + "Speaker diarization: \(e)"
         }
 
         isLoadingModels = false
+    }
+
+    // Expected model sizes (bytes) for progress estimation
+    private static let expectedParakeetSize: Double = 483_000_000  // ~461 MB on disk
+    private static let expectedDiarizationSize: Double = 36_000_000 // ~34 MB on disk
+
+    /// Poll the FluidAudio Models directory to estimate download progress
+    @MainActor
+    private func monitorDownloadProgress() async {
+        let modelsDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/FluidAudio/Models")
+        let parakeetDir = modelsDir.appendingPathComponent("parakeet-tdt-0.6b-v3-coreml")
+        let diarizationDir = modelsDir.appendingPathComponent("speaker-diarization-coreml")
+
+        while !Task.isCancelled {
+            let parakeetBytes = Self.directorySize(parakeetDir)
+            let diarizationBytes = Self.directorySize(diarizationDir)
+
+            let pProgress = min(parakeetBytes / Self.expectedParakeetSize, 0.99)
+            let sProgress = min(diarizationBytes / Self.expectedDiarizationSize, 0.99)
+
+            if !parakeetReady {
+                parakeetProgress = pProgress
+                if pProgress > 0.95 {
+                    parakeetPhase = "Compiling models..."
+                } else if pProgress > 0 {
+                    let mb = Int(parakeetBytes / 1_000_000)
+                    parakeetPhase = "Downloading... \(mb) MB"
+                }
+            }
+
+            if !diarizationReady {
+                diarizationProgress = sProgress
+                if sProgress > 0.95 {
+                    diarizationPhase = "Compiling models..."
+                } else if sProgress > 0 {
+                    let mb = Int(diarizationBytes / 1_000_000)
+                    diarizationPhase = "Downloading... \(mb) MB"
+                }
+            }
+
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+    }
+
+    /// Calculate total size of a directory in bytes
+    private static func directorySize(_ url: URL) -> Double {
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles]) else {
+            return 0
+        }
+        var total: Double = 0
+        for case let fileURL as URL in enumerator {
+            if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                total += Double(size)
+            }
+        }
+        return total
     }
 
     // MARK: - Completion
