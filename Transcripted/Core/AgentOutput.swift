@@ -185,7 +185,7 @@ enum AgentOutput {
                 date: dateString,
                 durationSeconds: Int(result.duration),
                 droppedSegments: result.droppedSegments,
-                engines: AgentEngines(stt: "parakeet-tdt-v3", diarization: "sortformer")
+                engines: AgentEngines(stt: "parakeet-tdt-v3", diarization: "pyannote-offline")
             ),
             speakers: speakers,
             utterances: utterances

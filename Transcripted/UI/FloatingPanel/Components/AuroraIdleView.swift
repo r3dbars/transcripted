@@ -41,6 +41,13 @@ struct AuroraIdleView: View {
             idleBackground
                 .clipShape(Capsule())
 
+            // Subtle mic icon in collapsed state to signal clickability
+            if !isExpanded {
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.panelTextMuted.opacity(0.4))
+            }
+
             // Background processing badge (top-left when collapsed)
             if backgroundTaskCount > 0 && !isExpanded {
                 processingBadge
@@ -65,9 +72,14 @@ struct AuroraIdleView: View {
         .onHover { hovering in
             isHoverExpanded = hovering
         }
+        .onTapGesture {
+            if !isExpanded {
+                onRecord()
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Ready to record")
-        .accessibilityHint("Hover to reveal controls")
+        .accessibilityHint("Click to start recording, or hover to reveal controls")
     }
 
     // MARK: - Idle Background
@@ -79,9 +91,15 @@ struct AuroraIdleView: View {
         }
         .overlay(
             Capsule()
-                .strokeBorder(Color.panelCharcoalSurface, lineWidth: 1)
+                .strokeBorder(
+                    failedCount > 0
+                        ? Color.recordingCoral.opacity(0.3)
+                        : Color.panelCharcoalSurface,
+                    lineWidth: failedCount > 0 ? 1.5 : 1
+                )
         )
         .shadow(color: Color.black.opacity(0.3), radius: 8, y: 2)
+        .glowPulse(when: backgroundTaskCount > 0 && !isExpanded, color: .recordingCoral)
     }
 
     // MARK: - Failed Badge
@@ -89,10 +107,10 @@ struct AuroraIdleView: View {
     private var failedBadge: some View {
         Circle()
             .fill(Color.red)
-            .frame(width: 14, height: 14)
+            .frame(width: 18, height: 18)
             .overlay(
                 Text("\(min(failedCount, 9))")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundColor(.white)
             )
             .offset(x: 28, y: -14)
@@ -218,7 +236,7 @@ struct ProcessingPulseDot: View {
     var body: some View {
         Circle()
             .fill(Color.recordingCoral.opacity(0.9))
-            .frame(width: 8, height: 8)
+            .frame(width: 12, height: 12)
             .scaleEffect(isPulsing ? 1.2 : 0.8)
             .opacity(isPulsing ? 1.0 : 0.5)
             .animation(

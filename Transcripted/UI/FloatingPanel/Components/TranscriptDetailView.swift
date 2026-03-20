@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - MessageGroup
 
-/// Groups consecutive transcript lines from the same speaker for iMessage-style rendering.
+/// Groups consecutive transcript lines from the same speaker for rendering.
 /// Presentation-only model — stays in this file, not in TranscriptStore.
 struct MessageGroup: Identifiable {
     /// Deterministic ID derived from content so SwiftUI doesn't re-render unchanged groups
@@ -14,7 +14,7 @@ struct MessageGroup: Identifiable {
     /// "You" → nil (iMessage convention: no label for self).
     /// "System/Speaker 1" → "Speaker 1".
     var displayName: String? {
-        guard !isUser, let speaker else { return nil }
+        guard let speaker else { return nil }
         let parts = speaker.split(separator: "/", maxSplits: 1)
         return parts.count == 2 ? String(parts[1]) : speaker
     }
@@ -55,8 +55,8 @@ struct MessageGroup: Identifiable {
 
 // MARK: - TranscriptDetailView
 
-/// Scrollable chat-bubble view showing a transcript as an iMessage-style conversation.
-/// "You" (mic) messages are right-aligned with a blue tint; other speakers are left-aligned.
+/// Scrollable dialogue view showing a transcript in a compact, full-width block format.
+/// Each speaker block has a colored left border, speaker name + timestamp header, and full-width text.
 @available(macOS 14.0, *)
 struct TranscriptDetailView: View {
     let lines: [TranscriptLine]
@@ -70,99 +70,81 @@ struct TranscriptDetailView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 10) {
                     ForEach(groups) { group in
-                        MessageGroupView(group: group)
+                        DialogueBlockView(group: group)
                     }
-                    // Invisible anchor at the bottom
-                    Color.clear.frame(height: 1).id("bottom")
+                    // Invisible anchor at the top
+                    Color.clear.frame(height: 1).id("top")
                 }
                 .padding(.horizontal, Spacing.ms)
                 .padding(.vertical, Spacing.sm)
             }
             .frame(maxHeight: 280)
             .onAppear {
-                // Scroll to bottom so user sees most recent messages first
-                proxy.scrollTo("bottom", anchor: .bottom)
+                // Scroll to top — transcripts are read chronologically
+                proxy.scrollTo(groups.first?.id, anchor: .top)
             }
         }
     }
 }
 
-// MARK: - MessageGroupView
+// MARK: - DialogueBlockView
 
-/// Renders a group of consecutive messages from the same speaker.
-/// Right-aligned for user, left-aligned for others, with a spacer on the opposite side.
+/// A compact dialogue block: speaker name + timestamp on one line, full-width text below.
+/// Uses a 3px colored left border per speaker for visual differentiation.
 @available(macOS 14.0, *)
-private struct MessageGroupView: View {
+private struct DialogueBlockView: View {
     let group: MessageGroup
 
-    var body: some View {
-        HStack(alignment: .bottom, spacing: 0) {
-            if group.isUser { Spacer(minLength: 48) }
-
-            VStack(alignment: group.isUser ? .trailing : .leading, spacing: 2) {
-                // Speaker label (only for non-user groups)
-                if let name = group.displayName {
-                    Text(name)
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.panelTextMuted)
-                        .padding(.horizontal, 4)
-                }
-
-                // Timestamp
-                if let ts = group.timestamp {
-                    Text(ts)
-                        .font(.system(size: 8, design: .monospaced))
-                        .foregroundColor(.panelTextMuted.opacity(0.7))
-                        .padding(.horizontal, 4)
-                }
-
-                // Bubbles
-                ForEach(group.lines) { line in
-                    ChatBubbleView(text: line.text, isUser: group.isUser, speakerName: group.displayName)
-                }
-            }
-
-            if !group.isUser { Spacer(minLength: 48) }
-        }
-    }
-}
-
-// MARK: - ChatBubbleView
-
-/// A single chat bubble with rounded corners and tinted background.
-/// Non-user speakers get distinct colors based on their name for visual differentiation.
-@available(macOS 14.0, *)
-private struct ChatBubbleView: View {
-    let text: String
-    let isUser: Bool
-    var speakerName: String? = nil
-
-    /// Stable color per speaker name using hash — produces a muted, readable tint
-    private var bubbleColor: Color {
-        guard !isUser, let name = speakerName else {
-            return isUser ? Color.chatBubbleUser : Color.panelCharcoalSurface
+    /// Stable color per speaker name using hash
+    private var speakerColor: Color {
+        guard let name = group.displayName ?? group.speaker else {
+            return group.isUser ? .accentBlue : .panelTextMuted
         }
         let speakerColors: [Color] = [
-            Color(hue: 0.55, saturation: 0.35, brightness: 0.28),  // muted blue
-            Color(hue: 0.75, saturation: 0.30, brightness: 0.28),  // muted purple
-            Color(hue: 0.45, saturation: 0.35, brightness: 0.25),  // muted teal
-            Color(hue: 0.10, saturation: 0.35, brightness: 0.28),  // muted amber
-            Color(hue: 0.90, saturation: 0.30, brightness: 0.28),  // muted rose
+            Color(hue: 0.55, saturation: 0.35, brightness: 0.55),  // muted blue
+            Color(hue: 0.75, saturation: 0.30, brightness: 0.55),  // muted purple
+            Color(hue: 0.45, saturation: 0.35, brightness: 0.50),  // muted teal
+            Color(hue: 0.10, saturation: 0.35, brightness: 0.55),  // muted amber
+            Color(hue: 0.90, saturation: 0.30, brightness: 0.55),  // muted rose
         ]
+        if group.isUser { return .accentBlue }
         let index = abs(name.hashValue) % speakerColors.count
         return speakerColors[index]
     }
 
     var body: some View {
-        Text(text)
-            .font(.system(size: 11))
-            .foregroundColor(.panelTextPrimary)
-            .textSelection(.enabled)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                    .fill(bubbleColor)
-            )
+        HStack(spacing: 0) {
+            // Colored left border
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(speakerColor)
+                .frame(width: 3)
+
+            VStack(alignment: .leading, spacing: 3) {
+                // Header: speaker name + timestamp
+                HStack {
+                    Text(group.displayName ?? (group.isUser ? "You" : "Speaker"))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(speakerColor)
+
+                    Spacer()
+
+                    if let ts = group.timestamp {
+                        Text(ts)
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundColor(.panelTextMuted.opacity(0.7))
+                    }
+                }
+
+                // Full-width text content
+                ForEach(group.lines) { line in
+                    Text(line.text)
+                        .font(.system(size: 12))
+                        .foregroundColor(.panelTextPrimary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.leading, 8)
+        }
     }
 }

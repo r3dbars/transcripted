@@ -66,7 +66,7 @@ final class AgentOutputTests: XCTestCase {
         XCTAssertEqual(decoded.version, "1.0")
         XCTAssertEqual(decoded.recording.durationSeconds, 120)
         XCTAssertEqual(decoded.recording.engines.stt, "parakeet-tdt-v3")
-        XCTAssertEqual(decoded.recording.engines.diarization, "sortformer")
+        XCTAssertEqual(decoded.recording.engines.diarization, "pyannote-offline")
     }
 
     func testJSONContainsAllSpeakers() throws {

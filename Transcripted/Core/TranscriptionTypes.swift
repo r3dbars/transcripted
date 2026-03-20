@@ -155,7 +155,7 @@ struct IdentifiedSpeaker: Codable {
 /// Metadata about the transcription engines used
 struct TranscriptionMetadata {
     let transcriptionEngine: String     // "parakeet_local"
-    let diarizationEngine: String       // "sortformer_local"
+    let diarizationEngine: String       // "pyannote_offline"
     let micWordCount: Int
     let systemWordCount: Int
     let micSpeakerCount: Int
