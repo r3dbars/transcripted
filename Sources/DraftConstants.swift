@@ -7,6 +7,10 @@ import Foundation
 
 enum DraftConstants {
 
+    // MARK: - Versioning
+
+    static let appPipelineVersion = 2
+
     // MARK: - Generation
 
     /// Default max tokens for draft responses
@@ -14,6 +18,9 @@ enum DraftConstants {
 
     /// Max tokens for analysis calls
     static let analysisMaxTokens = 2048
+
+    /// Pipeline version for draft generation
+    static let appPipelineVersion = 2
 
     // MARK: - Audio & Speech
 
