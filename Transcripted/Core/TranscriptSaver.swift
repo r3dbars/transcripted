@@ -671,6 +671,34 @@ class TranscriptSaver {
         var result = content
         result.replaceSubrange(breakdownRange, with: newBreakdown)
 
+        // Update YAML frontmatter: system_speakers should reflect consolidated count
+        let oldSystemSpeakers = lines.count
+        let newSystemSpeakers = statsByName.count
+        result = result.replacingOccurrences(
+            of: "system_speakers: \(oldSystemSpeakers)",
+            with: "system_speakers: \(newSystemSpeakers)"
+        )
+
+        // Update analytics section: "Speakers Detected" for remote participants
+        result = result.replacingOccurrences(
+            of: "- **Speakers Detected:** \(oldSystemSpeakers)\n\n#### Remote Speaker Breakdown",
+            with: "- **Speakers Detected:** \(newSystemSpeakers)\n\n#### Remote Speaker Breakdown"
+        )
+
+        // Update footer speaker count.
+        // The footer uses total = mic_speakers + system_speakers.
+        // We can't know mic_speakers from here, so fix the total by the same delta.
+        let delta = oldSystemSpeakers - newSystemSpeakers
+        let footerPattern = #"\| (\d+) speakers\*"#
+        if let footerRegex = try? NSRegularExpression(pattern: footerPattern),
+           let footerMatch = footerRegex.firstMatch(in: result, range: NSRange(location: 0, length: (result as NSString).length)),
+           let oldTotal = Int((result as NSString).substring(with: footerMatch.range(at: 1))) {
+            let newTotal = oldTotal - delta
+            let oldFooterFragment = "| \(oldTotal) speakers*"
+            let newFooterFragment = "| \(newTotal) speakers*"
+            result = result.replacingOccurrences(of: oldFooterFragment, with: newFooterFragment)
+        }
+
         AppLogger.pipeline.info("Consolidated duplicate speaker names in breakdown", [
             "before": "\(lines.count)",
             "after": "\(statsByName.count)"

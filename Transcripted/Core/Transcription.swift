@@ -416,10 +416,14 @@ class Transcription: ObservableObject {
 
     /// Merge consecutive utterances from the same speaker when the time gap between them
     /// is smaller than `maxGap` seconds. This produces cleaner transcripts by joining
-    /// fragments that Sortformer split mid-sentence.
+    /// fragments that the diarizer split mid-sentence.
+    ///
+    /// A `maxDuration` cap prevents runaway merges — even if the speaker and gap criteria
+    /// are met, an utterance won't grow beyond this many seconds of continuous speech.
     nonisolated static func mergeConsecutiveUtterances(
         _ utterances: [TranscriptionUtterance],
-        maxGap: Double
+        maxGap: Double,
+        maxDuration: Double = 30.0
     ) -> [TranscriptionUtterance] {
         guard utterances.count > 1 else { return utterances }
 
@@ -430,8 +434,9 @@ class Transcription: ObservableObject {
             let sameSpeaker = current.speakerId == next.speakerId
                 && current.channel == next.channel
             let smallGap = (next.start - current.end) < maxGap
+            let withinDurationCap = (next.end - current.start) <= maxDuration
 
-            if sameSpeaker && smallGap {
+            if sameSpeaker && smallGap && withinDurationCap {
                 // Merge: extend current to cover both, join text
                 current = TranscriptionUtterance(
                     start: current.start,
