@@ -34,24 +34,24 @@ class Transcription: ObservableObject {
     @Published var lastSavedFileURL: URL?
 
     let parakeet: ParakeetService
-    let sortformer: SortformerService
+    let diarization: DiarizationService
     let speakerDB: SpeakerDatabase
 
     init() {
         self.parakeet = ParakeetService()
-        self.sortformer = SortformerService()
+        self.diarization = DiarizationService()
         self.speakerDB = SpeakerDatabase.shared
     }
 
     /// Initialize local models. Call once at app startup.
     func initializeModels() async {
         await parakeet.initialize()
-        await sortformer.initialize()
+        await diarization.initialize()
     }
 
     // MARK: - Local Multichannel Transcription
 
-    /// Transcribe mic + system audio using local Parakeet STT + Sortformer diarization.
+    /// Transcribe mic + system audio using local Parakeet STT + offline diarization.
     ///
     /// Pipeline:
     /// 1. Load & resample both audio files to 16kHz mono
@@ -105,27 +105,28 @@ class Transcription: ObservableObject {
 
             onProgress?(0.10)
 
-            // Step 2: Run Sortformer on system audio → speaker segments
+            // Step 2: Run offline diarization on system audio → speaker segments
             await MainActor.run {
-                self.processingStatus = "Identifying speakers..."
+                self.processingStatus = "Analyzing speakers..."
             }
 
-            AppLogger.transcription.info("Running Sortformer diarization on system audio")
-            let rawSegments = try await sortformer.diarize(samples: systemSamples, sampleRate: 16000)
+            AppLogger.transcription.info("Running offline diarization on system audio")
+            let rawSegments = try await diarization.diarizeOffline(samples: systemSamples, sampleRate: 16000)
 
-            // Post-process Sortformer segments:
-            // 1. Pairwise merge fixes fragmentation (same speaker split across IDs)
-            // 2. DB-informed split fixes merging (different speakers collapsed into one ID)
+            // Post-process diarization segments:
+            // PyAnnote's VBx already handles speaker merging, so skip pairwise merge.
+            // DB-informed split still valuable — VBx has no knowledge of stored profiles.
             let existingProfiles = speakerDB.allSpeakers()
             let speakerSegments = EmbeddingClusterer.postProcess(
                 segments: rawSegments,
-                existingProfiles: existingProfiles
+                existingProfiles: existingProfiles,
+                skipPairwiseMerge: true
             )
 
-            let sortformerSpeakerCount = Set(rawSegments.map { $0.speakerId }).count
+            let rawSpeakerCount = Set(rawSegments.map { $0.speakerId }).count
             let postProcessedSpeakerCount = Set(speakerSegments.map { $0.speakerId }).count
             AppLogger.transcription.info("Post-processed speaker segments", [
-                "sortformer": "\(sortformerSpeakerCount)",
+                "diarizer": "\(rawSpeakerCount)",
                 "after": "\(postProcessedSpeakerCount)",
                 "segments": "\(speakerSegments.count)"
             ])
@@ -377,7 +378,7 @@ class Transcription: ObservableObject {
             onProgress?(1.0)
 
             // Merge consecutive utterances from the same speaker when the gap is small.
-            // Sortformer segments often break mid-sentence, producing fragments like:
+            // Diarizer segments often break mid-sentence, producing fragments like:
             //   [00:03] "Opus four point six and"
             //   [00:10] "Sonnet four point six just went live"
             // Merging produces cleaner, more readable transcripts.

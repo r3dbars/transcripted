@@ -1,11 +1,15 @@
 // EmbeddingClusterer.swift
-// Post-processes Sortformer speaker segments to fix two failure modes:
+// Post-processes diarization speaker segments to fix two failure modes:
 //
-// 1. Fragmentation: Same speaker split across multiple Sortformer IDs.
+// Supports both Sortformer (streaming) and PyAnnote (offline) pipelines.
+//
+// 1. Fragmentation: Same speaker split across multiple diarizer IDs.
 //    Fixed by pairwise merge — compare mean embeddings of every speaker pair
 //    and merge those above a high cosine similarity threshold.
+//    Note: Skipped for PyAnnote offline output, where VBx clustering already
+//    handles speaker merging/fragmentation.
 //
-// 2. Merging: Different speakers collapsed into one Sortformer ID.
+// 2. Merging: Different speakers collapsed into one diarizer ID.
 //    Fixed by DB-informed split — compare per-segment embeddings against
 //    known speaker profiles and split clusters that contain 2+ distinct voices.
 
@@ -15,15 +19,20 @@ import Accelerate
 @available(macOS 26.0, *)
 enum EmbeddingClusterer {
 
-    /// Post-process Sortformer segments: merge fragmented speakers,
+    /// Post-process diarization segments: merge fragmented speakers,
     /// absorb tiny orphan clusters, then split clusters that contain
     /// multiple known DB voices.
+    ///
+    /// - Parameter skipPairwiseMerge: Set `true` for PyAnnote offline output,
+    ///   where VBx clustering already handles speaker merging. Default `false`
+    ///   for Sortformer streaming output.
     static func postProcess(
         segments: [SpeakerSegment],
-        existingProfiles: [SpeakerProfile]
+        existingProfiles: [SpeakerProfile],
+        skipPairwiseMerge: Bool = false
     ) -> [SpeakerSegment] {
         guard segments.count >= 2 else { return segments }
-        var result = pairwiseMerge(segments: segments)
+        var result = skipPairwiseMerge ? segments : pairwiseMerge(segments: segments)
         result = absorbSmallClusters(segments: result)
         result = dbInformedSplit(segments: result, profiles: existingProfiles)
         return result

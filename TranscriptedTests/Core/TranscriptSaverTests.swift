@@ -82,7 +82,7 @@ final class TranscriptSaverTests: XCTestCase {
 
         XCTAssertTrue(content.hasPrefix("---\n"))
         XCTAssertTrue(content.contains("transcription_engine: parakeet_local"))
-        XCTAssertTrue(content.contains("diarization_engine: sortformer_local"))
+        XCTAssertTrue(content.contains("diarization_engine: pyannote_offline"))
     }
 
     func testSaveTranscriptContainsUtteranceCounts() throws {

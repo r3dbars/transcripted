@@ -63,7 +63,7 @@
 		A1001147 /* SettingsSectionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001146 /* SettingsSectionCard.swift */; };
 		A1002011 /* AudioResampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002001 /* AudioResampler.swift */; };
 		A1002012 /* ParakeetService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002002 /* ParakeetService.swift */; };
-		A1002013 /* SortformerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002003 /* SortformerService.swift */; };
+		A1002013 /* DiarizationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002003 /* DiarizationService.swift */; };
 		A1002014 /* SpeakerDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002004 /* SpeakerDatabase.swift */; };
 		A1002015 /* TranscriptionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002005 /* TranscriptionTypes.swift */; };
 		A1002016 /* SpeakerClipExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002006 /* SpeakerClipExtractor.swift */; };
@@ -174,7 +174,7 @@
 		A1001146 /* SettingsSectionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSectionCard.swift; sourceTree = "<group>"; };
 		A1002001 /* AudioResampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioResampler.swift; sourceTree = "<group>"; };
 		A1002002 /* ParakeetService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParakeetService.swift; sourceTree = "<group>"; };
-		A1002003 /* SortformerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SortformerService.swift; sourceTree = "<group>"; };
+		A1002003 /* DiarizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiarizationService.swift; sourceTree = "<group>"; };
 		A1002004 /* SpeakerDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDatabase.swift; sourceTree = "<group>"; };
 		A1002005 /* TranscriptionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTypes.swift; sourceTree = "<group>"; };
 		A1002006 /* SpeakerClipExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerClipExtractor.swift; sourceTree = "<group>"; };
@@ -371,7 +371,7 @@
 				A1002002 /* ParakeetService.swift */,
 				Q1000002 /* QwenService.swift */,
 				MD000012 /* MeetingDetector.swift */,
-				A1002003 /* SortformerService.swift */,
+				A1002003 /* DiarizationService.swift */,
 				A1002004 /* SpeakerDatabase.swift */,
 				A1002006 /* SpeakerClipExtractor.swift */,
 				A1002007 /* EmbeddingClusterer.swift */,
@@ -687,7 +687,7 @@
 				A1001147 /* SettingsSectionCard.swift in Sources */,
 				A1002011 /* AudioResampler.swift in Sources */,
 				A1002012 /* ParakeetService.swift in Sources */,
-				A1002013 /* SortformerService.swift in Sources */,
+				A1002013 /* DiarizationService.swift in Sources */,
 				A1002014 /* SpeakerDatabase.swift in Sources */,
 				A1002015 /* TranscriptionTypes.swift in Sources */,
 				A1002016 /* SpeakerClipExtractor.swift in Sources */,
