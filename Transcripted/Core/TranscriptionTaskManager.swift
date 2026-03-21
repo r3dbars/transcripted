@@ -496,6 +496,7 @@ class TranscriptionTaskManager: ObservableObject {
                 if !clips.isEmpty {
                     // Run Qwen inference for unidentified speakers (if enabled)
                     var qwenSuggestions: [String: String] = [:]
+                    var qwenMeetingTitle: String? = nil
                     let unidentifiedClips = clips.filter { $0.currentName == nil }
 
                     if !unidentifiedClips.isEmpty && QwenService.isEnabled && QwenService.isModelCached {
@@ -545,7 +546,9 @@ class TranscriptionTaskManager: ObservableObject {
                                 }
 
                                 if let qwen, case .ready = await qwen.modelState {
-                                    qwenSuggestions = try await qwen.inferSpeakerNames(transcript: inferenceText)
+                                    let output = try await qwen.inferSpeakerNames(transcript: inferenceText)
+                                    qwenSuggestions = output.speakers
+                                    qwenMeetingTitle = output.meetingTitle
                                 }
                                 await MainActor.run { self.cleanupQwen() }
 
@@ -554,9 +557,15 @@ class TranscriptionTaskManager: ObservableObject {
                                     AppLogger.pipeline.info("Reloaded Parakeet + diarization after Qwen cleanup")
                                 }
 
+                                // Retroactively add meeting title to transcript YAML
+                                if let title = qwenMeetingTitle {
+                                    TranscriptSaver.retroactivelyUpdateTitle(transcriptURL: savedURL, title: title)
+                                }
+
                                 AppLogger.pipeline.info("Qwen speaker inference complete", [
                                     "suggestions": "\(qwenSuggestions.filter { $0.value != "Unknown" }.count)",
-                                    "total": "\(qwenSuggestions.count)"
+                                    "total": "\(qwenSuggestions.count)",
+                                    "title": qwenMeetingTitle ?? "(none)"
                                 ])
                             } catch {
                                 await MainActor.run { self.cleanupQwen() }
