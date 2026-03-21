@@ -77,6 +77,7 @@ class DiarizationService: ObservableObject {
 
     /// Load Sortformer streaming models from the app bundle or download from HuggingFace.
     private func initializeStreaming() async throws {
+        let loadStart = Date()
         let manager = DiarizerManager(config: .default)
 
         if let bundlePath = bundledModelsPath(directory: "sortformer-models") {
@@ -84,18 +85,20 @@ class DiarizationService: ObservableObject {
             let models = try await DiarizerModels.load(from: bundlePath)
             manager.initialize(models: models)
         } else {
-            AppLogger.transcription.info("Sortformer models not bundled, downloading")
+            AppLogger.transcription.info("Sortformer models not bundled, loading from cache or downloading")
             let models = try await DiarizerModels.download()
             manager.initialize(models: models)
         }
 
         diarizerManager = manager
-        AppLogger.transcription.info("Sortformer streaming models loaded")
+        let elapsed = String(format: "%.1fs", Date().timeIntervalSince(loadStart))
+        AppLogger.transcription.info("Sortformer streaming models loaded", ["elapsed": elapsed])
     }
 
     /// Load PyAnnote offline diarization models from the app bundle or download.
     private func initializeOffline() async throws {
         offlineModelState = .loading
+        let loadStart = Date()
 
         let manager = OfflineDiarizerManager(config: .default)
 
@@ -104,13 +107,14 @@ class DiarizationService: ObservableObject {
             let models = try await OfflineDiarizerModels.load(from: bundlePath)
             manager.initialize(models: models)
         } else {
-            AppLogger.transcription.info("Offline diarizer models not bundled, downloading")
+            AppLogger.transcription.info("Offline diarizer models not bundled, loading from cache or downloading")
             try await manager.prepareModels()
         }
 
         offlineDiarizerManager = manager
         offlineModelState = .ready
-        AppLogger.transcription.info("Offline diarizer models loaded")
+        let elapsed = String(format: "%.1fs", Date().timeIntervalSince(loadStart))
+        AppLogger.transcription.info("Offline diarizer models loaded", ["elapsed": elapsed])
     }
 
     /// Check for diarization models bundled inside the app at build time.
