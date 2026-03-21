@@ -816,25 +816,31 @@ class TranscriptSaver {
     static let notificationCategoryId = "TRANSCRIPT_SAVED"
     static let showInFinderActionId = "SHOW_IN_FINDER"
 
-    /// Show macOS notification that transcript was saved
+    /// Show macOS notification that transcript was saved.
+    /// Guards on authorization status to avoid UNErrorDomain error 1.
     static func showSaveNotification(fileURL: URL) {
-        let center = UNUserNotificationCenter.current()
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized else {
+                AppLogger.pipeline.debug("Skipping save notification — not authorized")
+                return
+            }
 
-        let content = UNMutableNotificationContent()
-        content.title = "Transcript Saved"
-        content.body = fileURL.lastPathComponent
-        content.categoryIdentifier = notificationCategoryId
-        content.userInfo = ["fileURL": fileURL.path]
+            let content = UNMutableNotificationContent()
+            content.title = "Transcript Saved"
+            content.body = fileURL.lastPathComponent
+            content.categoryIdentifier = notificationCategoryId
+            content.userInfo = ["fileURL": fileURL.path]
 
-        let request = UNNotificationRequest(
-            identifier: UUID().uuidString,
-            content: content,
-            trigger: nil // deliver immediately
-        )
+            let request = UNNotificationRequest(
+                identifier: UUID().uuidString,
+                content: content,
+                trigger: nil // deliver immediately
+            )
 
-        center.add(request) { error in
-            if let error = error {
-                AppLogger.pipeline.error("Failed to deliver notification", ["error": error.localizedDescription])
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error = error {
+                    AppLogger.pipeline.error("Failed to deliver notification", ["error": error.localizedDescription])
+                }
             }
         }
     }

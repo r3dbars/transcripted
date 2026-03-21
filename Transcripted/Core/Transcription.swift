@@ -43,8 +43,15 @@ class Transcription: ObservableObject {
         self.speakerDB = SpeakerDatabase.shared
     }
 
+    private var hasInitialized = false
+
     /// Initialize local models. Call once at app startup.
     func initializeModels() async {
+        guard !hasInitialized else {
+            AppLogger.transcription.debug("Models already initialized, skipping")
+            return
+        }
+        hasInitialized = true
         await parakeet.initialize()
         await diarization.initialize()
     }

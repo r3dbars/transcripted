@@ -490,7 +490,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
             if granted {
                 AppLogger.app.info("Notification permission granted")
             } else if let error = error {
-                AppLogger.app.warning("Notification permission error", ["error": error.localizedDescription])
+                AppLogger.app.debug("Notification permission error", ["error": error.localizedDescription])
             } else {
                 AppLogger.app.info("Notification permission denied by user")
             }

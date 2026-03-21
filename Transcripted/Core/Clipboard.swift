@@ -14,20 +14,28 @@ class Clipboard {
         showNotification(text: text)
     }
 
+    /// Guards on authorization status to avoid UNErrorDomain error 1.
     private static func showNotification(text: String) {
-        let content = UNMutableNotificationContent()
-        content.title = "Transcripted"
-        content.body = "Transcription copied: \(String(text.prefix(100)))"
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized else {
+                AppLogger.pipeline.debug("Skipping clipboard notification — not authorized")
+                return
+            }
 
-        let request = UNNotificationRequest(
-            identifier: UUID().uuidString,
-            content: content,
-            trigger: nil
-        )
+            let content = UNMutableNotificationContent()
+            content.title = "Transcripted"
+            content.body = "Transcription copied: \(String(text.prefix(100)))"
 
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error = error {
-                AppLogger.pipeline.warning("Notification failed", ["error": error.localizedDescription])
+            let request = UNNotificationRequest(
+                identifier: UUID().uuidString,
+                content: content,
+                trigger: nil
+            )
+
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error = error {
+                    AppLogger.pipeline.warning("Notification failed", ["error": error.localizedDescription])
+                }
             }
         }
     }
