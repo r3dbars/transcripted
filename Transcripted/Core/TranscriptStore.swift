@@ -223,6 +223,10 @@ final class TranscriptStore: ObservableObject {
                     }
                 case "time":
                     timeOfDay = val
+                case "title":
+                    if !val.isEmpty {
+                        title = val
+                    }
                 case "duration":
                     duration = val
                 case "mic_speakers", "system_speakers":

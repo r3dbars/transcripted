@@ -49,8 +49,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
     private var localHotkeyMonitor: Any?
 
     // Enhanced menu bar
+    private var statsMenuItem: NSMenuItem?
     private var recordingToggleMenuItem: NSMenuItem?
     private var durationMenuItem: NSMenuItem?
+    private var failedMenuItem: NSMenuItem?
+    private var failedSeparator: NSMenuItem?
+    private var processingMenuItem: NSMenuItem?
     private var durationTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
 
@@ -110,6 +114,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         let menu = NSMenu()
         menu.delegate = self
 
+        // Stats line (disabled, gray text)
+        let stats = NSMenuItem(title: "No meetings yet", action: nil, keyEquivalent: "")
+        stats.isEnabled = false
+        statsMenuItem = stats
+        menu.addItem(stats)
+
+        menu.addItem(NSMenuItem.separator())
+
         // Start/Stop Recording with hotkey hint
         let toggleItem = NSMenuItem(title: "Start Recording", action: #selector(toggleRecording), keyEquivalent: "R")
         toggleItem.keyEquivalentModifierMask = [.command, .shift]
@@ -125,35 +137,59 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
 
         menu.addItem(NSMenuItem.separator())
 
-        // Recent Transcripts section
-        let recentHeader = NSMenuItem(title: "Recent Transcripts", action: nil, keyEquivalent: "")
-        recentHeader.isEnabled = false
-        menu.addItem(recentHeader)
+        // Recent Transcripts (5 slots, populated dynamically)
         for _ in 0..<5 {
             let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             item.isHidden = true
             item.tag = 100
             menu.addItem(item)
         }
+        menu.addItem(NSMenuItem(title: "Open Transcripts Folder...", action: #selector(openTranscriptsFolder), keyEquivalent: ""))
+
+        // Conditional status section (failed + processing)
+        let failSep = NSMenuItem.separator()
+        failSep.isHidden = true
+        failedSeparator = failSep
+        menu.addItem(failSep)
+
+        let failed = NSMenuItem(title: "Failed Transcriptions...", action: #selector(openFailedTranscriptions), keyEquivalent: "")
+        failed.isHidden = true
+        failedMenuItem = failed
+        menu.addItem(failed)
+
+        let processing = NSMenuItem(title: "Transcribing...", action: nil, keyEquivalent: "")
+        processing.isHidden = true
+        processing.isEnabled = false
+        processingMenuItem = processing
+        menu.addItem(processing)
 
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Show/Hide Window", action: #selector(toggleWindow), keyEquivalent: ""))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Failed Transcriptions...", action: #selector(openFailedTranscriptions), keyEquivalent: "f"))
-        menu.addItem(NSMenuItem.separator())
+
+        // Settings & Updates
+        menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
         #if canImport(Sparkle)
         menu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: ""))
         #endif
-        menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
+
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Export Diagnostics...", action: #selector(exportDiagnostics), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Report a Bug...", action: #selector(reportIssue), keyEquivalent: ""))
-        menu.addItem(NSMenuItem.separator())
+
+        // Help submenu
+        let helpItem = NSMenuItem(title: "Help", action: nil, keyEquivalent: "")
+        let helpMenu = NSMenu()
+        helpMenu.addItem(NSMenuItem(title: "Report a Bug...", action: #selector(reportIssue), keyEquivalent: ""))
+        helpMenu.addItem(NSMenuItem(title: "Export Diagnostics...", action: #selector(exportDiagnostics), keyEquivalent: ""))
+        helpMenu.addItem(NSMenuItem.separator())
+        helpMenu.addItem(NSMenuItem(title: "Show/Hide Pill", action: #selector(toggleWindow), keyEquivalent: ""))
+        helpItem.submenu = helpMenu
+        menu.addItem(helpItem)
+
         #if DEBUG
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Reset Onboarding (Debug)", action: #selector(resetOnboarding), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Test Naming Tray (Debug)", action: #selector(testNamingTray), keyEquivalent: ""))
-        menu.addItem(NSMenuItem.separator())
         #endif
+
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit Transcripted", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem?.menu = menu
 
@@ -586,6 +622,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
     // MARK: - NSMenuDelegate
 
     func menuWillOpen(_ menu: NSMenu) {
+        // Update stats line
+        let totalRec = StatsService.shared.totalRecordings
+        let totalHrs = StatsService.shared.totalHoursTranscribed
+        if totalRec > 0 {
+            let hrsStr = totalHrs < 1 ? String(format: "%.0fm", totalHrs * 60) : String(format: "%.1f hrs", totalHrs)
+            statsMenuItem?.title = "\(totalRec) meeting\(totalRec == 1 ? "" : "s") · \(hrsStr)"
+        } else {
+            statsMenuItem?.title = "No meetings yet"
+        }
+
         // Update duration display
         if let audio = audio, audio.isRecording {
             let totalSeconds = Int(audio.recordingDuration)
@@ -597,11 +643,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
             durationMenuItem?.isHidden = true
         }
 
-        // Populate recent transcripts
+        // Populate recent transcripts with human-readable labels
         let recentItems = menu.items.filter { $0.tag == 100 }
         let saveDir = TranscriptSaver.defaultSaveDirectory
 
-        var recentFiles: [(name: String, url: URL)] = []
+        var recentSummaries: [(label: String, url: URL)] = []
         if let files = try? FileManager.default.contentsOfDirectory(at: saveDir, includingPropertiesForKeys: [.contentModificationDateKey])
             .filter({ $0.pathExtension == "md" }) {
             let sorted = files.sorted { a, b in
@@ -609,14 +655,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
                 let bDate = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
                 return aDate > bDate
             }
-            recentFiles = sorted.prefix(5).map { (name: $0.deletingPathExtension().lastPathComponent, url: $0) }
+            recentSummaries = sorted.prefix(5).map { url in
+                (label: Self.formatMenuLabel(for: url), url: url)
+            }
         }
 
         for (index, item) in recentItems.enumerated() {
-            if index < recentFiles.count {
-                let file = recentFiles[index]
-                item.title = "  \(file.name)"
-                item.representedObject = file.url
+            if index < recentSummaries.count {
+                let summary = recentSummaries[index]
+                item.title = summary.label
+                item.representedObject = summary.url
                 item.action = #selector(openRecentTranscript(_:))
                 item.target = self
                 item.isHidden = false
@@ -624,6 +672,143 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
             } else {
                 item.isHidden = true
             }
+        }
+
+        // Conditional: failed transcriptions
+        let failedCount = failedTranscriptionManager?.failedTranscriptions.count ?? 0
+        if failedCount > 0 {
+            failedMenuItem?.title = "⚠ \(failedCount) Failed — Retry..."
+            failedMenuItem?.isHidden = false
+            failedSeparator?.isHidden = false
+        } else {
+            failedMenuItem?.isHidden = true
+            failedSeparator?.isHidden = failedCount == 0 && !(taskManager?.displayStatus.isProcessing ?? false)
+        }
+
+        // Conditional: processing status
+        if let status = taskManager?.displayStatus, status.isProcessing {
+            let pct = Int(status.progress * 100)
+            processingMenuItem?.title = "\(status.statusText) \(pct)%"
+            processingMenuItem?.isHidden = false
+            failedSeparator?.isHidden = false
+        } else {
+            processingMenuItem?.isHidden = true
+        }
+    }
+
+    // MARK: - Menu Label Formatting
+
+    /// Build a human-readable label for a transcript file in the menu.
+    /// Format: "Title · Today 2:30 PM" or "Today at 2:30 PM · 3 speakers"
+    private static func formatMenuLabel(for url: URL) -> String {
+        // Quick-parse YAML frontmatter for title, date, time, speaker info
+        guard let raw = try? String(contentsOf: url, encoding: .utf8) else {
+            return url.deletingPathExtension().lastPathComponent
+        }
+
+        var title: String? = nil
+        var dateStr: String? = nil
+        var timeStr: String? = nil
+        var speakerCount = 0
+        var speakerNames: [String] = []
+
+        if raw.hasPrefix("---"),
+           let endRange = raw.range(of: "\n---\n", range: raw.index(raw.startIndex, offsetBy: 3)..<raw.endIndex) {
+            let yaml = String(raw[raw.index(raw.startIndex, offsetBy: 4)..<endRange.lowerBound])
+
+            for line in yaml.components(separatedBy: "\n") {
+                let parts = line.split(separator: ":", maxSplits: 1).map { String($0).trimmingCharacters(in: .whitespaces) }
+                guard parts.count == 2 else { continue }
+                let key = parts[0]
+                let val = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+
+                switch key {
+                case "title": if !val.isEmpty { title = val }
+                case "date": dateStr = val
+                case "time": timeStr = val
+                case "mic_speakers", "system_speakers":
+                    speakerCount += Int(val) ?? 0
+                default: break
+                }
+            }
+
+            // Parse speaker names
+            var inSpeakers = false
+            for line in yaml.components(separatedBy: "\n") {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("speakers:") { inSpeakers = true; continue }
+                if inSpeakers && !line.hasPrefix(" ") && !line.hasPrefix("\t") && !trimmed.isEmpty { inSpeakers = false }
+                if inSpeakers && trimmed.hasPrefix("name:") {
+                    let name = trimmed.replacingOccurrences(of: "name:", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+                    if !name.isEmpty && name != "Unknown" && name != "You" && !name.hasPrefix("Speaker ") {
+                        speakerNames.append(name)
+                    }
+                }
+            }
+        }
+
+        // Build date component
+        let dateComponent: String
+        if let ds = dateStr, let ts = timeStr {
+            let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
+            let tf = DateFormatter(); tf.dateFormat = "HH:mm:ss"
+            if let d = df.date(from: ds), let t = tf.date(from: ts) {
+                let cal = Calendar.current
+                let timeComps = cal.dateComponents([.hour, .minute], from: t)
+                if let fullDate = cal.date(bySettingHour: timeComps.hour ?? 0, minute: timeComps.minute ?? 0, second: 0, of: d) {
+                    let timeFmt = DateFormatter()
+                    timeFmt.dateFormat = "h:mm a"
+                    let timeLabel = timeFmt.string(from: fullDate)
+
+                    if cal.isDateInToday(d) {
+                        dateComponent = "Today \(timeLabel)"
+                    } else if cal.isDateInYesterday(d) {
+                        dateComponent = "Yesterday \(timeLabel)"
+                    } else {
+                        let dayFmt = DateFormatter()
+                        dayFmt.dateFormat = "MMM d"
+                        dateComponent = "\(dayFmt.string(from: d)) \(timeLabel)"
+                    }
+                } else {
+                    dateComponent = ds
+                }
+            } else {
+                dateComponent = ds
+            }
+        } else {
+            // Fallback to file modification date
+            let modDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
+            let timeFmt = DateFormatter()
+            timeFmt.dateFormat = "h:mm a"
+            let cal = Calendar.current
+            if cal.isDateInToday(modDate) {
+                dateComponent = "Today \(timeFmt.string(from: modDate))"
+            } else if cal.isDateInYesterday(modDate) {
+                dateComponent = "Yesterday \(timeFmt.string(from: modDate))"
+            } else {
+                let dayFmt = DateFormatter()
+                dayFmt.dateFormat = "MMM d h:mm a"
+                dateComponent = dayFmt.string(from: modDate)
+            }
+        }
+
+        // Build speaker component
+        let speakerComponent: String
+        if !speakerNames.isEmpty {
+            speakerComponent = speakerNames.prefix(2).joined(separator: ", ")
+        } else if speakerCount > 0 {
+            speakerComponent = "\(speakerCount) speaker\(speakerCount == 1 ? "" : "s")"
+        } else {
+            speakerComponent = ""
+        }
+
+        // Compose final label
+        if let title = title {
+            return speakerComponent.isEmpty ? "\(title) · \(dateComponent)" : "\(title) · \(dateComponent)"
+        } else if !speakerComponent.isEmpty {
+            return "\(dateComponent) · \(speakerComponent)"
+        } else {
+            return dateComponent
         }
     }
 
@@ -661,6 +846,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         if let window = floatingPanel?.window {
             window.isVisible ? window.orderOut(nil) : window.makeKeyAndOrderFront(nil)
         }
+    }
+
+    @objc func openTranscriptsFolder() {
+        NSWorkspace.shared.open(TranscriptSaver.defaultSaveDirectory)
     }
 
     @objc func openFailedTranscriptions() {

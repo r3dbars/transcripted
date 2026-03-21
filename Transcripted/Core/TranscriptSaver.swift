@@ -194,7 +194,7 @@ class TranscriptSaver {
             counter += 1
         }
 
-        let markdown = formatTranscriptMarkdown(result: result, speakerMappings: speakerMappings, speakerSources: speakerSources, speakerDbIds: speakerDbIds, date: Date(), healthInfo: healthInfo)
+        let markdown = formatTranscriptMarkdown(result: result, speakerMappings: speakerMappings, speakerSources: speakerSources, speakerDbIds: speakerDbIds, date: Date(), meetingTitle: meetingTitle, healthInfo: healthInfo)
 
         do {
             try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
@@ -243,6 +243,7 @@ class TranscriptSaver {
         speakerSources: [String: String] = [:],
         speakerDbIds: [String: UUID] = [:],
         date: Date,
+        meetingTitle: String? = nil,
         healthInfo: RecordingHealthInfo? = nil
     ) -> String {
         let dateFormatter = DateFormatter()
@@ -282,6 +283,11 @@ class TranscriptSaver {
         system_speakers: \(result.systemSpeakerCount)
         total_word_count: \(totalWordCount)
         """
+
+        // Add meeting title if available (from Qwen inference)
+        if let title = meetingTitle, !title.isEmpty {
+            yaml += "\ntitle: \"\(Self.escapeYAML(title))\""
+        }
 
         // Add recording health metadata (Phase 3: Post-hoc transparency)
         if let health = healthInfo {
@@ -538,6 +544,62 @@ class TranscriptSaver {
 
             // Rebuild agent index
             try? AgentOutput.writeIndex(to: dir, speakerDB: SpeakerDatabase.shared)
+        }
+    }
+
+    // MARK: - Retroactive Title Update
+
+    /// Insert or update the title field in a transcript's YAML frontmatter.
+    /// Called after Qwen inference completes (which runs after initial save).
+    /// Thread-safe: serialized via fileUpdateQueue.
+    @discardableResult
+    static func retroactivelyUpdateTitle(transcriptURL: URL, title: String) -> Bool {
+        fileUpdateQueue.sync {
+            guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
+                AppLogger.pipeline.error("Failed to read transcript for title update", ["path": transcriptURL.path])
+                return false
+            }
+
+            // Only update YAML frontmatter
+            guard content.hasPrefix("---"),
+                  let endRange = content.range(
+                      of: "\n---\n",
+                      range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex
+                  ) else {
+                return false
+            }
+
+            let yamlRange = content.startIndex..<endRange.upperBound
+            var yaml = String(content[yamlRange])
+
+            if yaml.contains("\ntitle:") {
+                // Replace existing title
+                let lines = yaml.components(separatedBy: "\n")
+                let updatedLines = lines.map { line -> String in
+                    if line.trimmingCharacters(in: .whitespaces).hasPrefix("title:") {
+                        return "title: \"\(escapeYAML(title))\""
+                    }
+                    return line
+                }
+                yaml = updatedLines.joined(separator: "\n")
+            } else {
+                // Insert title after total_word_count (or before closing ---)
+                yaml = yaml.replacingOccurrences(
+                    of: "\n---\n",
+                    with: "\ntitle: \"\(escapeYAML(title))\"\n---\n"
+                )
+            }
+
+            content.replaceSubrange(yamlRange, with: yaml)
+
+            do {
+                try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
+                AppLogger.pipeline.info("Retroactively updated meeting title", ["file": transcriptURL.lastPathComponent, "title": title])
+                return true
+            } catch {
+                AppLogger.pipeline.warning("Failed to update title retroactively", ["error": error.localizedDescription])
+                return false
+            }
         }
     }
 
