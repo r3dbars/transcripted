@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		MB000001 /* MenuBarStatRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = MB000002 /* MenuBarStatRow.swift */; };
 		4CAF116349811906B83C0406 /* ModelSetupStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF26FA6ED2054F3DCF8D0B45 /* ModelSetupStep.swift */; };
 		A1000001 /* TranscriptedApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002 /* TranscriptedApp.swift */; };
 		A1000003 /* Transcription.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000004 /* Transcription.swift */; };
@@ -113,6 +114,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		MB000002 /* MenuBarStatRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarStatRow.swift; sourceTree = "<group>"; };
 		A1000002 /* TranscriptedApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptedApp.swift; sourceTree = "<group>"; };
 		A1000004 /* Transcription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcription.swift; sourceTree = "<group>"; };
 		A1000006 /* Audio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Audio.swift; sourceTree = "<group>"; };
@@ -303,11 +305,20 @@
 		A1000025 /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				MB000010 /* MenuBar */,
 				A1000910 /* FloatingPanel */,
 				A1001100 /* Settings */,
 				A1000059 /* FailedTranscriptionsView.swift */,
 			);
 			path = UI;
+			sourceTree = "<group>";
+		};
+		MB000010 /* MenuBar */ = {
+			isa = PBXGroup;
+			children = (
+				MB000002 /* MenuBarStatRow.swift */,
+			);
+			path = MenuBar;
 			sourceTree = "<group>";
 		};
 		A1000027 /* Resources */ = {
@@ -620,6 +631,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				MB000001 /* MenuBarStatRow.swift in Sources */,
 				A1000001 /* TranscriptedApp.swift in Sources */,
 				A1000003 /* Transcription.swift in Sources */,
 				A1000050 /* TranscriptionTaskManager.swift in Sources */,

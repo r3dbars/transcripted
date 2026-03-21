@@ -41,6 +41,14 @@ final class StatsService: ObservableObject {
     /// Motivational message based on stats
     @Published private(set) var motivationalMessage: String = ""
 
+    /// Today's stats (for menu bar)
+    @Published private(set) var todayRecordings: Int = 0
+    @Published private(set) var todayDurationSeconds: Int = 0
+
+    /// This week's stats (for menu bar)
+    @Published private(set) var weekRecordings: Int = 0
+    @Published private(set) var weekDurationSeconds: Int = 0
+
     // MARK: - Private
 
     private let database = StatsDatabase.shared
@@ -66,6 +74,16 @@ final class StatsService: ObservableObject {
         if totalRecordings > 0 {
             averageMeetingDuration = Double(totalSeconds) / Double(totalRecordings)
         }
+
+        // Get today's stats (for menu bar)
+        let todayStats = database.getStatsForLastDays(0)
+        todayRecordings = todayStats.recordings
+        todayDurationSeconds = todayStats.durationSeconds
+
+        // Get this week's stats (for menu bar)
+        let weekStats = database.getStatsForLastDays(7)
+        weekRecordings = weekStats.recordings
+        weekDurationSeconds = weekStats.durationSeconds
 
         // Get last 30 days stats
         let thirtyDayStats = database.getStatsForLastDays(30)
@@ -220,6 +238,34 @@ final class StatsService: ObservableObject {
         } else {
             return "\(minutes)m"
         }
+    }
+
+    /// Compact duration for menu bar (e.g., "0m", "47m", "1.5h", "2h")
+    static func formatDurationCompact(_ seconds: Int) -> String {
+        let hours = Double(seconds) / 3600.0
+        if hours >= 1 {
+            let rounded = (hours * 10).rounded() / 10
+            if rounded == rounded.rounded() {
+                return "\(Int(rounded))h"
+            }
+            return String(format: "%.1fh", rounded)
+        }
+        return "\(seconds / 60)m"
+    }
+
+    /// Format today's duration compactly
+    var formattedTodayDuration: String {
+        Self.formatDurationCompact(todayDurationSeconds)
+    }
+
+    /// Format this week's duration (e.g., "5h 30m")
+    var formattedWeekDuration: String {
+        let hours = weekDurationSeconds / 3600
+        let minutes = (weekDurationSeconds % 3600) / 60
+        if hours > 0 {
+            return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+        }
+        return "\(minutes)m"
     }
 
     /// Format average meeting duration
