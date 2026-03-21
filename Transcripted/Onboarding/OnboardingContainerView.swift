@@ -51,15 +51,6 @@ struct OnboardingContainerView: View {
                     .transition(reduceMotion ? .opacity : pageTransition)
                     .id(state.currentStep)
                     .animation(reduceMotion ? .none : .smooth, value: state.currentStep)
-                    .onChange(of: state.modelsReady) { _, ready in
-                        if ready && state.currentStep == .modelSetup {
-                            // Brief delay so user sees the success checkmarks, then auto-complete
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                state.completeOnboarding()
-                                onComplete()
-                            }
-                        }
-                    }
 
                 // Navigation buttons
                 navigationButtons
@@ -72,7 +63,6 @@ struct OnboardingContainerView: View {
             }
         }
         .frame(width: 720, height: 680)
-        .clipShape(RoundedRectangle(cornerRadius: Radius.xl))
         .shadow(color: .black.opacity(0.15), radius: 30, y: 10)
         .onAppear {
             state.checkPermissions()
