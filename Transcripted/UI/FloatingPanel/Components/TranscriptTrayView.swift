@@ -155,7 +155,12 @@ struct TranscriptTrayView: View {
         } else {
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 0) {
-                    ForEach(store.transcripts) { transcript in
+                    ForEach(Array(store.transcripts.enumerated()), id: \.element.id) { index, transcript in
+                        // Date group separator when calendar day changes
+                        if index == 0 || !Calendar.current.isDate(transcript.date, inSameDayAs: store.transcripts[index - 1].date) {
+                            dateGroupHeader(for: transcript.date)
+                        }
+
                         TranscriptRowView(
                             transcript: transcript,
                             isCopied: copiedId == transcript.id,
@@ -174,6 +179,29 @@ struct TranscriptTrayView: View {
             }
             .frame(maxHeight: 280)
         }
+    }
+
+    private func dateGroupHeader(for date: Date) -> some View {
+        let cal = Calendar.current
+        let label: String
+        if cal.isDateInToday(date) {
+            label = "Today"
+        } else if cal.isDateInYesterday(date) {
+            label = "Yesterday"
+        } else {
+            let df = DateFormatter()
+            df.dateFormat = "MMM d"
+            label = df.string(from: date)
+        }
+        return Text(label)
+            .font(.system(size: 9, weight: .medium))
+            .foregroundColor(.panelTextMuted)
+            .textCase(.uppercase)
+            .tracking(0.8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Spacing.ms)
+            .padding(.top, Spacing.sm)
+            .padding(.bottom, Spacing.xs)
     }
 
     // MARK: - Footer
@@ -487,8 +515,14 @@ struct TranscriptRowView: View {
 
     @State private var isHovered = false
 
-    /// Smart display title: prefer speaker names over generic "Meeting"
-    private var displayTitle: String {
+    /// Whether the transcript has a meaningful Qwen-generated title (not just "Meeting")
+    private var hasSmartTitle: Bool {
+        transcript.title != "Meeting"
+    }
+
+    /// Primary title: prefer smart title, fall back to speaker names, then generic
+    private var primaryTitle: String {
+        if hasSmartTitle { return transcript.title }
         let names = transcript.speakerNames
         if names.isEmpty {
             if transcript.speakerCount > 0 {
@@ -499,10 +533,25 @@ struct TranscriptRowView: View {
         if names.count <= 2 {
             return names.joined(separator: ", ")
         }
-        // 3+ speakers: first names only + overflow
         let firstNames = names.prefix(2).map { firstName($0) }
         let overflow = names.count - 2
         return "\(firstNames.joined(separator: ", ")), +\(overflow) more"
+    }
+
+    /// Speaker subtitle shown below smart titles (e.g. "Dwarkesh Patel, Terence Tao")
+    private var speakerSubtitle: String? {
+        guard hasSmartTitle else { return nil }
+        let names = transcript.speakerNames
+        if !names.isEmpty {
+            if names.count <= 2 {
+                return names.joined(separator: ", ")
+            }
+            return "\(names.count) speakers"
+        }
+        if transcript.speakerCount > 0 {
+            return "\(transcript.speakerCount) speaker\(transcript.speakerCount == 1 ? "" : "s")"
+        }
+        return nil
     }
 
     private func firstName(_ fullName: String) -> String {
@@ -512,13 +561,21 @@ struct TranscriptRowView: View {
 
     var body: some View {
         HStack(spacing: Spacing.sm) {
-            // Left: title + metadata
+            // Left: title + optional speaker subtitle + metadata
             VStack(alignment: .leading, spacing: 2) {
-                Text(displayTitle)
-                    .font(.system(size: 12, weight: .medium))
+                Text(primaryTitle)
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.panelTextPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
+
+                if let subtitle = speakerSubtitle {
+                    Text(subtitle)
+                        .font(.system(size: 10))
+                        .foregroundColor(.panelTextSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
 
                 HStack(spacing: 4) {
                     Text(relativeDate)
@@ -535,8 +592,7 @@ struct TranscriptRowView: View {
                             .foregroundColor(.panelTextMuted)
                     }
                 }
-
-}
+            }
 
             Spacer(minLength: Spacing.xs)
 
@@ -545,7 +601,7 @@ struct TranscriptRowView: View {
         }
         .padding(.horizontal, Spacing.ms)
         .padding(.vertical, Spacing.sm)
-        .background(isHovered ? Color.panelCharcoal.opacity(0.5) : Color.clear)
+        .background(isHovered ? Color.panelCharcoalSurface.opacity(0.5) : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture { onSelect?() }
         .onHover { hovering in
@@ -567,23 +623,23 @@ struct TranscriptRowView: View {
                             ? Color.recordingCoral.opacity(0.15)
                             : isCopied
                                 ? Color.statusSuccessMuted.opacity(0.15)
-                                : (isCopyHovered ? Color.panelCharcoalSurface : Color.clear)
+                                : ((isCopyHovered || isHovered) ? Color.panelCharcoalSurface : Color.clear)
                     )
-                    .frame(width: 28, height: 28)
+                    .frame(width: 24, height: 24)
 
                 if copyFailed {
                     Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundColor(.recordingCoral)
                         .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 } else if isCopied {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundColor(.statusSuccessMuted)
                         .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 } else {
                     Image(systemName: "doc.on.doc")
-                        .font(.system(size: 11))
+                        .font(.system(size: 10))
                         .foregroundColor(isCopyHovered ? .panelTextPrimary : .panelTextMuted)
                         .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 }
