@@ -75,6 +75,8 @@
 		FA000016 /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000006 /* CoreAudio.framework */; };
 		Q1000001 /* QwenService.swift in Sources */ = {isa = PBXBuildFile; fileRef = Q1000002 /* QwenService.swift */; };
 		A2000001 /* DiagnosticExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* DiagnosticExporter.swift */; };
+		PC000011 /* PillCalloutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PC000001 /* PillCalloutView.swift */; };
+		PC000012 /* PillCalloutController.swift in Sources */ = {isa = PBXBuildFile; fileRef = PC000002 /* PillCalloutController.swift */; };
 		Q1000011 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = Q1000012 /* MLXLLM */; };
 		SP000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = SP000002 /* Sparkle */; };
 		Q1000021 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = Q1000022 /* MLXLMCommon */; };
@@ -158,6 +160,8 @@
 		A1001021 /* TranscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptStore.swift; sourceTree = "<group>"; };
 		A1001031 /* TranscriptExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptExporter.swift; sourceTree = "<group>"; };
 		A2000002 /* DiagnosticExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticExporter.swift; sourceTree = "<group>"; };
+		PC000001 /* PillCalloutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillCalloutView.swift; sourceTree = "<group>"; };
+		PC000002 /* PillCalloutController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillCalloutController.swift; sourceTree = "<group>"; };
 		A1001023 /* TranscriptTrayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptTrayView.swift; sourceTree = "<group>"; };
 		A1001025 /* TranscriptDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptDetailView.swift; sourceTree = "<group>"; };
 		A1001110 /* SettingsNavigationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsNavigationState.swift; sourceTree = "<group>"; };
@@ -363,6 +367,7 @@
 			isa = PBXGroup;
 			children = (
 				A100090A /* FloatingPanelController.swift */,
+				PC000002 /* PillCalloutController.swift */,
 				A1000901 /* PillStateManager.swift */,
 				A1000909 /* FloatingPanelView.swift */,
 				A1000920 /* Components */,
@@ -386,6 +391,7 @@
 				A100090D /* AuroraProcessingView.swift */,
 				A100090E /* AuroraSuccessView.swift */,
 				A100090F /* SpeakerNamingView.swift */,
+				PC000001 /* PillCalloutView.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -675,6 +681,8 @@
 				Q1000001 /* QwenService.swift in Sources */,
 				4CAF116349811906B83C0406 /* ModelSetupStep.swift in Sources */,
 				A2000001 /* DiagnosticExporter.swift in Sources */,
+				PC000011 /* PillCalloutView.swift in Sources */,
+				PC000012 /* PillCalloutController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
