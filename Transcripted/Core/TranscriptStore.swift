@@ -14,6 +14,7 @@ struct TranscriptSummary: Identifiable {
     let duration: String   // e.g. "47:32"
     let speakerCount: Int
     let speakerNames: [String]  // Parsed from YAML frontmatter
+    let timeOfDay: String?      // e.g. "14:30:21" from YAML, nil for old files
 }
 
 // MARK: - TranscriptLine
@@ -194,6 +195,7 @@ final class TranscriptStore: ObservableObject {
         var duration = ""
         var speakerCount = 0
         var speakerNames: [String] = []
+        var timeOfDay: String?
 
         // Parse YAML frontmatter for structured fields
         if raw.hasPrefix("---"),
@@ -219,6 +221,8 @@ final class TranscriptStore: ObservableObject {
                     } else {
                         AppLogger.pipeline.debug("TranscriptStore: malformed date in frontmatter", ["file": url.lastPathComponent, "value": val])
                     }
+                case "time":
+                    timeOfDay = val
                 case "duration":
                     duration = val
                 case "mic_speakers", "system_speakers":
@@ -247,6 +251,18 @@ final class TranscriptStore: ObservableObject {
                     }
                 }
             }
+
+            // Combine date + time into full datetime for accurate display and sorting
+            if let timeStr = timeOfDay {
+                let isoDF = DateFormatter()
+                isoDF.dateFormat = "yyyy-MM-dd"
+                let dateStr = isoDF.string(from: date)
+                let dtf = DateFormatter()
+                dtf.dateFormat = "yyyy-MM-dd HH:mm:ss"
+                if let fullDate = dtf.date(from: "\(dateStr) \(timeStr)") {
+                    date = fullDate
+                }
+            }
         }
 
         // Prefer a markdown heading title over the filename
@@ -267,7 +283,8 @@ final class TranscriptStore: ObservableObject {
             date: date,
             duration: duration,
             speakerCount: speakerCount,
-            speakerNames: speakerNames
+            speakerNames: speakerNames,
+            timeOfDay: timeOfDay
         )
     }
 
