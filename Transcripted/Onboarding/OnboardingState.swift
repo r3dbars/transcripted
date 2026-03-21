@@ -295,8 +295,19 @@ class OnboardingState {
         UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
     }
 
+    // MARK: - Pill Callout (first-time coach mark)
+
+    static func hasShownPillCallout() -> Bool {
+        UserDefaults.standard.bool(forKey: "hasShownPillCallout")
+    }
+
+    static func markPillCalloutShown() {
+        UserDefaults.standard.set(true, forKey: "hasShownPillCallout")
+    }
+
     // For testing: reset onboarding state
     static func resetOnboarding() {
         UserDefaults.standard.removeObject(forKey: "hasCompletedOnboarding")
+        UserDefaults.standard.removeObject(forKey: "hasShownPillCallout")
     }
 }
