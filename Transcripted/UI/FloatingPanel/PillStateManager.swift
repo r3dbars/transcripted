@@ -58,6 +58,7 @@ enum PillState: Equatable {
 class PillStateManager: ObservableObject {
     @Published var state: PillState = .idle
     @Published var isLocked = false  // Prevents state changes during review
+    @Published var showOnboardingGlow = false  // Pulsing glow during pill callout
 
     /// Flag to prevent rapid state changes during animations
     @Published private(set) var isTransitioning = false

@@ -259,7 +259,8 @@ struct FloatingPanelView: View {
                 onTranscripts: { toggleTranscriptTray() },
                 failedCount: failedTranscriptionManager.failedTranscriptions.count,
                 backgroundTaskCount: taskManager.backgroundTaskCount,
-                forceExpanded: trayState != .none
+                forceExpanded: trayState != .none,
+                showOnboardingGlow: pillStateManager.showOnboardingGlow
             )
         case .recording:
             AuroraRecordingView(audio: audio, onStop: {
