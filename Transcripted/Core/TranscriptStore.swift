@@ -219,6 +219,20 @@ final class TranscriptStore: ObservableObject {
                     } else {
                         AppLogger.pipeline.debug("TranscriptStore: malformed date in frontmatter", ["file": url.lastPathComponent, "value": val])
                     }
+                case "time":
+                    // Combine date + time for accurate timestamp
+                    let tf = DateFormatter(); tf.dateFormat = "HH:mm:ss"
+                    if let time = tf.date(from: val) {
+                        let cal = Calendar.current
+                        let timeComponents = cal.dateComponents([.hour, .minute, .second], from: time)
+                        if let hour = timeComponents.hour, let minute = timeComponents.minute, let second = timeComponents.second {
+                            date = cal.date(bySettingHour: hour, minute: minute, second: second, of: date) ?? date
+                        }
+                    }
+                case "title":
+                    if !val.isEmpty {
+                        title = val
+                    }
                 case "duration":
                     duration = val
                 case "mic_speakers", "system_speakers":

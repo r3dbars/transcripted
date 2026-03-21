@@ -19,6 +19,12 @@ enum QwenModelState: Equatable {
     case failed(String)
 }
 
+/// Combined output from Qwen inference: speaker names + optional meeting title
+struct QwenInferenceOutput {
+    let speakers: [String: String]
+    let meetingTitle: String?
+}
+
 @available(macOS 14.0, *)
 @MainActor
 class QwenService: ObservableObject {
@@ -85,23 +91,22 @@ class QwenService: ObservableObject {
         }
     }
 
-    /// Extract speaker names from transcript text.
-    /// Returns a mapping of diarizer speaker IDs to inferred names.
-    /// Example: ["0": "Jack", "1": "Sarah", "2": "Unknown"]
-    nonisolated func inferSpeakerNames(transcript: String) async throws -> [String: String] {
+    /// Extract speaker names and meeting title from transcript text.
+    /// Returns a QwenInferenceOutput with speaker ID → name mapping and optional title.
+    nonisolated func inferSpeakerNames(transcript: String) async throws -> QwenInferenceOutput {
         guard let container = await MainActor.run(body: { self.modelContainer }) else {
             throw PipelineError.modelNotLoaded(model: "Qwen")
         }
 
         let chatMessages = Self.buildChatMessages(transcript: transcript)
-        AppLogger.transcription.info("Qwen inferring speaker names", ["promptLength": "\(transcript.count)"])
+        AppLogger.transcription.info("Qwen inferring speaker names + title", ["promptLength": "\(transcript.count)"])
 
         var userInput = UserInput(chat: chatMessages)
         userInput.additionalContext = ["enable_thinking": false]
         let lmInput = try await container.prepare(input: userInput)
 
         let parameters = GenerateParameters(
-            maxTokens: 200,
+            maxTokens: 250,
             temperature: 0.1
         )
 
@@ -114,7 +119,7 @@ class QwenService: ObservableObject {
         }
 
         responseText = responseText.trimmingCharacters(in: .whitespacesAndNewlines)
-        AppLogger.transcription.info("Qwen inference complete", ["response": "\(responseText.prefix(200))"])
+        AppLogger.transcription.info("Qwen inference complete", ["response": "\(responseText.prefix(300))"])
 
         return Self.parseResponse(responseText)
     }
@@ -200,8 +205,15 @@ class QwenService: ObservableObject {
         Answer: {"0": "Unknown", "1": "James", "2": "Unknown"}
 
         OUTPUT FORMAT:
-        Return ONLY a JSON object like {"0": "Sarah", "1": "Unknown"}
-        Keys are speaker numbers only: "0", "1", "2" — not "Speaker 0".
+        Return ONLY a JSON object with two keys:
+        1. "speakers": mapping of speaker numbers to names, e.g. {"0": "Sarah", "1": "Unknown"}
+        2. "title": a short meeting title (3-6 words) describing the main topic discussed
+
+        Keys in "speakers" are speaker numbers only: "0", "1", "2" — not "Speaker 0".
+        The title should be specific and descriptive, like "Sprint Planning Review" or "Q1 Budget Discussion".
+        If you cannot determine a topic, use "Meeting" as the title.
+
+        Example output: {"speakers": {"0": "Sarah", "1": "Mike"}, "title": "Product Launch Planning"}
         No explanation. No markdown. Just the JSON object.
         """
 
@@ -219,9 +231,10 @@ class QwenService: ObservableObject {
 
     // MARK: - Response Parsing
 
-    /// Parse Qwen's response into a speaker ID -> name mapping.
-    /// Handles common LLM output quirks: markdown fences, trailing text, etc.
-    nonisolated static func parseResponse(_ response: String) -> [String: String] {
+    /// Parse Qwen's response into speaker names + optional meeting title.
+    /// Handles both new format {"speakers": {...}, "title": "..."} and
+    /// legacy flat format {"0": "Sarah", "1": "Mike"} for robustness.
+    nonisolated static func parseResponse(_ response: String) -> QwenInferenceOutput {
         var jsonString = response.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Strip markdown code fences if present
@@ -239,25 +252,39 @@ class QwenService: ObservableObject {
         guard let openBrace = jsonString.firstIndex(of: "{"),
               let closeBrace = jsonString.lastIndex(of: "}") else {
             AppLogger.transcription.warning("Qwen response has no JSON object", ["response": "\(response.prefix(100))"])
-            return [:]
+            return QwenInferenceOutput(speakers: [:], meetingTitle: nil)
         }
 
         let jsonSubstring = String(jsonString[openBrace...closeBrace])
 
         guard let data = jsonSubstring.data(using: .utf8) else {
             AppLogger.transcription.warning("Qwen response not valid UTF-8", ["json": jsonSubstring])
-            return [:]
+            return QwenInferenceOutput(speakers: [:], meetingTitle: nil)
         }
 
         do {
-            guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: String] else {
-                AppLogger.transcription.warning("Qwen response JSON is not [String: String]", ["json": jsonSubstring])
-                return [:]
+            guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                AppLogger.transcription.warning("Qwen response JSON is not a dictionary", ["json": jsonSubstring])
+                return QwenInferenceOutput(speakers: [:], meetingTitle: nil)
             }
-            return parsed
+
+            // New format: {"speakers": {"0": "Sarah"}, "title": "Sprint Planning"}
+            if let speakersDict = parsed["speakers"] as? [String: String] {
+                let title = parsed["title"] as? String
+                let cleanTitle = (title == nil || title == "Meeting") ? nil : title
+                return QwenInferenceOutput(speakers: speakersDict, meetingTitle: cleanTitle)
+            }
+
+            // Legacy flat format: {"0": "Sarah", "1": "Mike"}
+            if let flatDict = parsed as? [String: String] {
+                return QwenInferenceOutput(speakers: flatDict, meetingTitle: nil)
+            }
+
+            AppLogger.transcription.warning("Qwen response JSON has unexpected structure", ["json": jsonSubstring])
+            return QwenInferenceOutput(speakers: [:], meetingTitle: nil)
         } catch {
             AppLogger.transcription.warning("Qwen response JSON parse failed", ["json": jsonSubstring, "error": error.localizedDescription])
-            return [:]
+            return QwenInferenceOutput(speakers: [:], meetingTitle: nil)
         }
     }
 }
