@@ -94,9 +94,6 @@ open Transcripted.xcodeproj
 
 Transcripted captures audio from your microphone and system output, runs speech-to-text locally on the Neural Engine, identifies who is speaking, and saves structured Markdown transcripts to your filesystem. Speaker fingerprints persist across sessions — the app learns voices over time.
 
-<p align="center">
-  <img src="docs/screenshots/pipeline.png" width="720" alt="Processing pipeline — audio through Parakeet and PyAnnote diarization to Markdown" />
-</p>
 
 | Model | Role | Size |
 |---|---|---|
@@ -118,19 +115,11 @@ All models run locally via [FluidAudio](https://github.com/FluidAudio) — no in
 - **Floating pill UI** — A Dynamic Island-style pill floats above all windows with aurora animations color-coded by audio source (coral for mic, teal for system audio). Minimal, beautiful, out of the way.
 - **Dual audio capture** — Records both your microphone and system audio simultaneously. Hears both sides of every call.
 
-<p align="center">
-  <img src="docs/screenshots/auto-detect.png" width="720" alt="Auto meeting detection — Zoom, Teams, Webex, FaceTime, Loom" />
-</p>
-
 - **Auto meeting detection** — Monitors for meeting apps and automatically starts recording when it detects sustained bidirectional speech. Stops when audio drops or the meeting app quits.
 - **Global hotkey** — `⌘⇧R` toggles recording from any app. No window switching needed.
 - **Recording health monitoring** — Real-time quality tracking with capture quality grades, audio gap detection, and device switch monitoring.
 
 ### Transcription
-
-<p align="center">
-  <img src="docs/screenshots/speaker-learning.png" width="720" alt="Speaker identification improves over time — from generic labels to named speakers" />
-</p>
 
 - **Persistent voice fingerprints** — Voice embeddings stored in a local SQLite database. Returning speakers are recognized across sessions, even weeks apart.
 - **Speaker name inference** — On-device Qwen 3.5-4B LLM analyzes conversation context ("Hey Sarah, can you pull up the report?") to infer and assign speaker names automatically.
