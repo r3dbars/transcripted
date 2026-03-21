@@ -344,7 +344,7 @@ struct TranscriptTrayView: View {
             // Overflow menu: Agent + Open in Finder
             Menu {
                 Button(action: {
-                    let stem = transcript.title
+                    let stem = transcript.url.deletingPathExtension().lastPathComponent
                     copyAgentPrompt(filename: stem)
                 }) {
                     Label("Connect Agent", systemImage: "terminal")
@@ -487,11 +487,34 @@ struct TranscriptRowView: View {
 
     @State private var isHovered = false
 
+    /// Smart display title: prefer speaker names over generic "Meeting"
+    private var displayTitle: String {
+        let names = transcript.speakerNames
+        if names.isEmpty {
+            if transcript.speakerCount > 0 {
+                return "Meeting \u{00B7} \(transcript.speakerCount) speaker\(transcript.speakerCount == 1 ? "" : "s")"
+            }
+            return "Meeting"
+        }
+        if names.count <= 2 {
+            return names.joined(separator: ", ")
+        }
+        // 3+ speakers: first names only + overflow
+        let firstNames = names.prefix(2).map { firstName($0) }
+        let overflow = names.count - 2
+        return "\(firstNames.joined(separator: ", ")), +\(overflow) more"
+    }
+
+    private func firstName(_ fullName: String) -> String {
+        let parts = fullName.split(separator: " ")
+        return parts.first.map(String.init) ?? fullName
+    }
+
     var body: some View {
         HStack(spacing: Spacing.sm) {
             // Left: title + metadata
             VStack(alignment: .leading, spacing: 2) {
-                Text(transcript.title)
+                Text(displayTitle)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.panelTextPrimary)
                     .lineLimit(1)
@@ -503,27 +526,13 @@ struct TranscriptRowView: View {
                         .foregroundColor(.panelTextMuted)
 
                     if !transcript.duration.isEmpty {
-                        Text("·")
+                        Text("\u{00B7}")
                             .font(.system(size: 8))
                             .foregroundColor(.panelTextMuted.opacity(0.6))
 
                         Text(transcript.duration)
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.panelTextMuted)
-                    }
-
-                    if transcript.speakerCount > 0 {
-                        Text("·")
-                            .font(.system(size: 8))
-                            .foregroundColor(.panelTextMuted.opacity(0.6))
-
-                        HStack(spacing: 2) {
-                            Image(systemName: "person.2")
-                                .font(.system(size: 7))
-                            Text("\(transcript.speakerCount)")
-                                .font(.system(size: 10))
-                        }
-                        .foregroundColor(.panelTextMuted)
                     }
                 }
 
@@ -592,11 +601,23 @@ struct TranscriptRowView: View {
 
     private var relativeDate: String {
         let cal = Calendar.current
-        if cal.isDateInToday(transcript.date)     { return "Today" }
-        if cal.isDateInYesterday(transcript.date) { return "Yesterday" }
+        let comps = cal.dateComponents([.hour, .minute], from: transcript.date)
+        let hasTime = !((comps.hour ?? 0) == 0 && (comps.minute ?? 0) == 0)
+
+        let tf = DateFormatter()
+        tf.dateFormat = "h:mm a"
+        let timeStr = tf.string(from: transcript.date)
+
+        if cal.isDateInToday(transcript.date) {
+            return hasTime ? "Today at \(timeStr)" : "Today"
+        }
+        if cal.isDateInYesterday(transcript.date) {
+            return hasTime ? "Yesterday at \(timeStr)" : "Yesterday"
+        }
         let df = DateFormatter()
         df.dateFormat = "MMM d"
-        return df.string(from: transcript.date)
+        let dateStr = df.string(from: transcript.date)
+        return hasTime ? "\(dateStr) at \(timeStr)" : dateStr
     }
 }
 

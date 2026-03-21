@@ -11,6 +11,7 @@ struct AuroraIdleView: View {
     let failedCount: Int
     var backgroundTaskCount: Int = 0
     var forceExpanded: Bool = false
+    var showOnboardingGlow: Bool = false
 
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @State private var isHoverExpanded = false
@@ -100,6 +101,13 @@ struct AuroraIdleView: View {
         )
         .shadow(color: Color.black.opacity(0.3), radius: 8, y: 2)
         .glowPulse(when: backgroundTaskCount > 0 && !isExpanded, color: .recordingCoral)
+        .overlay(
+            Capsule()
+                .strokeBorder(Color.premiumCoral, lineWidth: showOnboardingGlow ? 2 : 0)
+                .shadow(color: showOnboardingGlow ? Color.premiumCoral.opacity(0.6) : .clear, radius: showOnboardingGlow ? 10 : 0)
+                .shadow(color: showOnboardingGlow ? Color.premiumCoral.opacity(0.3) : .clear, radius: showOnboardingGlow ? 20 : 0)
+                .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: showOnboardingGlow)
+        )
     }
 
     // MARK: - Failed Badge

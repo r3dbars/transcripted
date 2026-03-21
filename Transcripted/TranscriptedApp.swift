@@ -37,6 +37,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
 
     // Onboarding
     var onboardingWindowController: OnboardingWindowController?
+    var pillCalloutController: PillCalloutController?
 
     // Auto-updates (Sparkle)
     #if canImport(Sparkle)
@@ -249,6 +250,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
             failedTranscriptionManager: ftm
         )
         floatingPanel?.showWindow(nil)
+
+        // Show pill callout for first-time users
+        if !OnboardingState.hasShownPillCallout() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard let pillWindow = self?.floatingPanel?.window else { return }
+                // Enable glow ring on the pill
+                self?.floatingPanel?.pillStateManager.showOnboardingGlow = true
+                self?.pillCalloutController = PillCalloutController(
+                    pillFrame: pillWindow.frame,
+                    onDismiss: { [weak self] in
+                        OnboardingState.markPillCalloutShown()
+                        self?.floatingPanel?.pillStateManager.showOnboardingGlow = false
+                        self?.pillCalloutController?.window?.orderOut(nil)
+                        self?.pillCalloutController = nil
+                    }
+                )
+                self?.pillCalloutController?.showWindow(nil)
+            }
+        }
 
         // Dynamic menu bar icon: changes when recording starts/stops
         aud.$isRecording

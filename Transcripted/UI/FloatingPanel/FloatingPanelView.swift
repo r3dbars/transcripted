@@ -259,7 +259,8 @@ struct FloatingPanelView: View {
                 onTranscripts: { toggleTranscriptTray() },
                 failedCount: failedTranscriptionManager.failedTranscriptions.count,
                 backgroundTaskCount: taskManager.backgroundTaskCount,
-                forceExpanded: trayState != .none
+                forceExpanded: trayState != .none,
+                showOnboardingGlow: pillStateManager.showOnboardingGlow
             )
         case .recording:
             AuroraRecordingView(audio: audio, onStop: {
@@ -282,7 +283,8 @@ struct FloatingPanelView: View {
                             date: Date(),
                             duration: "",
                             speakerCount: 0,
-                            speakerNames: []
+                            speakerNames: [],
+                            timeOfDay: nil
                         )
                         if let text = transcriptStore.copyableText(for: summary), !text.isEmpty {
                             NSPasteboard.general.clearContents()
