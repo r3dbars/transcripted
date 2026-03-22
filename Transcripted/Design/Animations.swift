@@ -42,8 +42,10 @@ struct PillDimensions {
     static let idleHeight: CGFloat = 20
     static let idleExpandedWidth: CGFloat = 120
     static let idleExpandedHeight: CGFloat = 28
-    static let recordingWidth: CGFloat = 180
-    static let recordingHeight: CGFloat = 40
+    static let recordingWidth: CGFloat = 160
+    static let recordingHeight: CGFloat = 36
+    static let savedWidth: CGFloat = 260
+    static let savedHeight: CGFloat = 56
     static let trayWidth: CGFloat = 280
     static let trayMaxHeight: CGFloat = 300
     static let dockPadding: CGFloat = 8

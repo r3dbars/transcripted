@@ -44,9 +44,10 @@ enum PillSounds {
 
 /// Represents the visual states of the floating pill UI
 enum PillState: Equatable {
-    case idle           // 40x20px - Dormant waveform, capsule shape
-    case recording      // 180x40px - Live visualizer + timer + stop
-    case processing     // 180x40px - Status text + progress
+    case idle           // 52x26px - Mic icon capsule, hover-expands
+    case recording      // 180x40px - Gradient border + timer + stop
+    case processing     // 180x40px - Progress bar + status text
+    case saved          // 260x56px - Transcript title + actions notification card
 }
 
 // MARK: - Pill State Manager
@@ -87,6 +88,8 @@ class PillStateManager: ObservableObject {
             return PillDimensions.idleWidth
         case .recording, .processing:
             return PillDimensions.recordingWidth
+        case .saved:
+            return PillDimensions.savedWidth
         }
     }
 
@@ -96,6 +99,8 @@ class PillStateManager: ObservableObject {
             return PillDimensions.idleHeight
         case .recording, .processing:
             return PillDimensions.recordingHeight
+        case .saved:
+            return PillDimensions.savedHeight
         }
     }
 
@@ -106,6 +111,8 @@ class PillStateManager: ObservableObject {
             return PillDimensions.idleHeight + 20  // Small padding
         case .recording, .processing:
             return PillDimensions.recordingHeight + 20
+        case .saved:
+            return PillDimensions.savedHeight + 20
         }
     }
 
@@ -197,8 +204,8 @@ class PillStateManager: ObservableObject {
         case (.recording, .processing):
             // Stopped recording, starting transcription - subtle tink
             PillSounds.playRecordingStop()
-        case (.processing, .idle):
-            // Transcription complete — glass chime
+        case (_, .saved):
+            // Transcript ready — glass chime
             PillSounds.playComplete()
         default:
             // No sound for other transitions (keeps it unobtrusive)

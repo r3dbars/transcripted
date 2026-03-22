@@ -34,16 +34,12 @@
 		A1000500 /* TranscriptUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000501 /* TranscriptUtils.swift */; };
 		A1000803 /* DateFormattingHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000802 /* DateFormattingHelper.swift */; };
 		A1000911 /* PillStateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000901 /* PillStateManager.swift */; };
-		A1000912 /* WaveformViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000902 /* WaveformViews.swift */; };
 		A1000913 /* LawsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000903 /* LawsComponents.swift */; };
 		A1000914 /* AttentionPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000904 /* AttentionPromptView.swift */; };
 		A1000915 /* ToastNotificationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000905 /* ToastNotificationView.swift */; };
 		A10009E1 /* PillErrorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10009D1 /* PillErrorView.swift */; };
 		A10009E2 /* ContextualErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10009D2 /* ContextualErrorBanner.swift */; };
-		A1000916 /* CelebrationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000906 /* CelebrationViews.swift */; };
-		A1000917 /* PillIdleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000907 /* PillIdleView.swift */; };
-		A10009E3 /* PillRecordingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10009D3 /* PillRecordingView.swift */; };
-		A10009E4 /* PillProcessingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10009D4 /* PillProcessingView.swift */; };
+		A1000940 /* SavedPillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000941 /* SavedPillView.swift */; };
 		A10009E5 /* PillOverlayViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10009D5 /* PillOverlayViews.swift */; };
 		A1000919 /* FloatingPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000909 /* FloatingPanelView.swift */; };
 		A100091A /* FloatingPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100090A /* FloatingPanelController.swift */; };
@@ -225,16 +221,11 @@
 		A1000501 /* TranscriptUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptUtils.swift; sourceTree = "<group>"; };
 		A1000802 /* DateFormattingHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateFormattingHelper.swift; sourceTree = "<group>"; };
 		A1000901 /* PillStateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillStateManager.swift; sourceTree = "<group>"; };
-		A1000902 /* WaveformViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformViews.swift; sourceTree = "<group>"; };
 		A1000903 /* LawsComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LawsComponents.swift; sourceTree = "<group>"; };
 		A1000904 /* AttentionPromptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionPromptView.swift; sourceTree = "<group>"; };
 		A1000905 /* ToastNotificationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastNotificationView.swift; sourceTree = "<group>"; };
 		A10009D1 /* PillErrorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillErrorView.swift; sourceTree = "<group>"; };
 		A10009D2 /* ContextualErrorBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextualErrorBanner.swift; sourceTree = "<group>"; };
-		A1000906 /* CelebrationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CelebrationViews.swift; sourceTree = "<group>"; };
-		A1000907 /* PillIdleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillIdleView.swift; sourceTree = "<group>"; };
-		A10009D3 /* PillRecordingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillRecordingView.swift; sourceTree = "<group>"; };
-		A10009D4 /* PillProcessingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillProcessingView.swift; sourceTree = "<group>"; };
 		A10009D5 /* PillOverlayViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillOverlayViews.swift; sourceTree = "<group>"; };
 		A1000909 /* FloatingPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelView.swift; sourceTree = "<group>"; };
 		A100090A /* FloatingPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelController.swift; sourceTree = "<group>"; };
@@ -242,6 +233,7 @@
 		A100090C /* AuroraIdleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuroraIdleView.swift; sourceTree = "<group>"; };
 		A100090D /* AuroraProcessingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuroraProcessingView.swift; sourceTree = "<group>"; };
 		A100090E /* AuroraSuccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuroraSuccessView.swift; sourceTree = "<group>"; };
+		A1000941 /* SavedPillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedPillView.swift; sourceTree = "<group>"; };
 		A100090F /* SpeakerNamingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerNamingView.swift; sourceTree = "<group>"; };
 		A10009D6 /* SpeakerNamingCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerNamingCard.swift; sourceTree = "<group>"; };
 		A10009D7 /* ClipAudioPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipAudioPlayer.swift; sourceTree = "<group>"; };
@@ -636,15 +628,10 @@
 		A1000920 /* Components */ = {
 			isa = PBXGroup;
 			children = (
-				A1000902 /* WaveformViews.swift */,
 				A1000904 /* AttentionPromptView.swift */,
 				A1000905 /* ToastNotificationView.swift */,
 				A10009D1 /* PillErrorView.swift */,
 				A10009D2 /* ContextualErrorBanner.swift */,
-				A1000906 /* CelebrationViews.swift */,
-				A1000907 /* PillIdleView.swift */,
-				A10009D3 /* PillRecordingView.swift */,
-				A10009D4 /* PillProcessingView.swift */,
 				A10009D5 /* PillOverlayViews.swift */,
 				A1001023 /* TranscriptTrayView.swift */,
 				A10009D8 /* TranscriptRowView.swift */,
@@ -653,6 +640,7 @@
 				A100090C /* AuroraIdleView.swift */,
 				A100090D /* AuroraProcessingView.swift */,
 				A100090E /* AuroraSuccessView.swift */,
+				A1000941 /* SavedPillView.swift */,
 				A100090F /* SpeakerNamingView.swift */,
 				A10009D6 /* SpeakerNamingCard.swift */,
 				A10009D7 /* ClipAudioPlayer.swift */,
@@ -991,16 +979,11 @@
 				A1000301 /* DateParser.swift in Sources */,
 				A1000803 /* DateFormattingHelper.swift in Sources */,
 				A1000911 /* PillStateManager.swift in Sources */,
-				A1000912 /* WaveformViews.swift in Sources */,
 				A1000913 /* LawsComponents.swift in Sources */,
 				A1000914 /* AttentionPromptView.swift in Sources */,
 				A1000915 /* ToastNotificationView.swift in Sources */,
 				A10009E1 /* PillErrorView.swift in Sources */,
 				A10009E2 /* ContextualErrorBanner.swift in Sources */,
-				A1000916 /* CelebrationViews.swift in Sources */,
-				A1000917 /* PillIdleView.swift in Sources */,
-				A10009E3 /* PillRecordingView.swift in Sources */,
-				A10009E4 /* PillProcessingView.swift in Sources */,
 				A10009E5 /* PillOverlayViews.swift in Sources */,
 				A1000919 /* FloatingPanelView.swift in Sources */,
 				A100091A /* FloatingPanelController.swift in Sources */,
@@ -1008,6 +991,7 @@
 				A100091C /* AuroraIdleView.swift in Sources */,
 				A100091D /* AuroraProcessingView.swift in Sources */,
 				A100091E /* AuroraSuccessView.swift in Sources */,
+				A1000940 /* SavedPillView.swift in Sources */,
 				A1001011 /* StatsDatabase.swift in Sources */,
 				A1001012 /* StatsService.swift in Sources */,
 				A1001013 /* TranscriptScanner.swift in Sources */,
