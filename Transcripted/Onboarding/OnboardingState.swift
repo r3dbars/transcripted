@@ -13,12 +13,14 @@ class OnboardingState {
 
     enum OnboardingStep: Int, CaseIterable {
         case welcome = 0
-        case permissions = 1
-        case modelSetup = 2
+        case preview = 1
+        case permissions = 2
+        case modelSetup = 3
 
         var title: String {
             switch self {
             case .welcome: return "Welcome"
+            case .preview: return "Preview"
             case .permissions: return "Permissions"
             case .modelSetup: return "Model Setup"
             }
@@ -69,6 +71,8 @@ class OnboardingState {
     var canProceed: Bool {
         switch currentStep {
         case .welcome:
+            return true
+        case .preview:
             return true
         case .permissions:
             return true

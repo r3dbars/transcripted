@@ -89,6 +89,8 @@ struct OnboardingContainerView: View {
         switch state.currentStep {
         case .welcome:
             WelcomeStep()
+        case .preview:
+            PreviewStep()
         case .permissions:
             PermissionsStep(state: state)
         case .modelSetup:
@@ -160,6 +162,8 @@ struct OnboardingContainerView: View {
         switch state.currentStep {
         case .welcome:
             return "Get Started"
+        case .preview:
+            return "Continue"
         case .permissions:
             return "Continue"
         case .modelSetup:
@@ -170,6 +174,8 @@ struct OnboardingContainerView: View {
     private var continueButtonIcon: String {
         switch state.currentStep {
         case .welcome:
+            return "arrow.right"
+        case .preview:
             return "arrow.right"
         case .permissions:
             return "arrow.right"
