@@ -1,50 +1,86 @@
 # Design System
 
-Shared design tokens and premium components. 2 Swift files, 1161 + 561 lines.
+Shared design tokens and premium components. 23 Swift files across root, Colors/, and Components/.
 
-## Files
-- **DesignTokens.swift** (1161 lines) - 84 colors, 9 spacing values, 13 radius values, 13 typography styles, 22 animations, 16 shadows, gradients, accessibility modifiers
-- **PremiumComponents.swift** (561 lines) - PremiumButton, PremiumCard, BenefitCard, StepProgressIndicator, PermissionCard, QuickTipRow, AnimatedIcon
+## File Index
+
+### Root (10 files)
+
+| File | Purpose |
+|------|---------|
+| `Spacing.swift` | 9 spacing values (xs 4pt through xxxl 64pt) |
+| `Radius.swift` | 13 corner radius values (micro 1pt through full 999pt) + Laws of UX variants |
+| `Typography.swift` | 13 Font extensions (displayLarge through tiny, Fraunces serif with system fallback) |
+| `Animations.swift` | AnimationTiming constants + spring presets (snappy, smooth, bouncy, elegant) + pill timing |
+| `Shadows.swift` | CardStyle shadow tuples, ShadowStyle enum, `.shadowStyle()` modifier |
+| `Gradients.swift` | LinearGradient presets (warmGlow, centerWarmth, buttonHighlight, aiGradient) + RadialGradient.iconGlow |
+| `Dimensions.swift` | SettingsDimensions, PillDimensions layout constants |
+| `CardModifiers.swift` | `.lawsCard()` and `.premiumCard()` view modifiers for card styling |
+| `ViewModifiers.swift` | Microinteraction modifiers: pressEffect, hoverScale, pulse, glowPulse, shake, slideIn, staggeredAppear + `.floatingTooltip()` |
+| `Accessibility.swift` | AccessibilityTokens, accessibleAnimation modifier (respects reduceMotion) |
+
+### Colors/ (6 files) — see Colors/CLAUDE.md
+
+| File | Purpose |
+|------|---------|
+| `ColorHex.swift` | `Color.init(hex:)` supporting 3/6/8-digit RGB/ARGB formats |
+| `BrandColors.swift` | Terracotta, cream, charcoal, semantic colors (success, recording, processing, warning, error) |
+| `PanelColors.swift` | Dark panel theme (panelCharcoal/Elevated/Surface, panelText Primary/Secondary/Muted, recording coral, attention/error colors) |
+| `SurfaceColors.swift` | Warm cream surfaces, dark mode surfaces (blue-tinted), accent blues, text-on-cream colors, status colors |
+| `AuroraColors.swift` | Aurora recording indicator colors (auroraCoral, auroraTeal + light variants, systemAudioIndicator) |
+| `HeatMapColors.swift` | 5-level heat map gradient (heatMapLevel0 through heatMapLevel4) + legacy aliases |
+
+### Components/ (7 files) — see Components/CLAUDE.md
+
+| File | Purpose |
+|------|---------|
+| `PremiumButton.swift` | 3-variant button (primary/secondary/ghost), hover effects, loading state |
+| `PremiumCard.swift` | Warm cream card container with hover lift animation |
+| `BenefitCard.swift` | Icon circle with glow + title/description, hover bounce |
+| `StepProgressIndicator.swift` | Capsule-based onboarding progress (28pt active / 10pt inactive) |
+| `PermissionCard.swift` | 4-state permission status card for onboarding |
+| `QuickTipRow.swift` | Small icon + text row for tips |
+| `AnimatedIcon.swift` | SF Symbol icon with glow/pulse effects |
 
 ## Color Tokens (all `Color.staticVar`, defined as HSB or hex)
 
-**Warm Cream Surfaces (Laws of UX):**
+**Warm Cream Surfaces (Laws of UX) — SurfaceColors.swift:**
 - `surfaceBackground` (hue 0.167, sat 0.10, bright 0.92), `surfaceEggshell` (0.153, 0.62, 0.89), `surfaceCard` (0.167, 0.08, 0.96)
 
-**Dark Mode Surfaces (blue-tinted, not pure black):**
+**Dark Mode Surfaces (blue-tinted, not pure black) — SurfaceColors.swift:**
 - `surfaceDarkBase` (0.556, 0.50, 0.05), `surfaceDarkCard` (0.556, 0.50, 0.15), `surfaceDarkHover` (0.556, 0.50, 0.25)
 
-**Dark Panel Theme (most UI uses these):**
+**Dark Panel Theme (most UI uses these) — PanelColors.swift:**
 - `panelCharcoal` (#1A1A1A), `panelCharcoalElevated` (#242424), `panelCharcoalSurface` (#2E2E2E)
 - `panelTextPrimary` (#FFFFFF), `panelTextSecondary` (#B0B0B0), `panelTextMuted` (#8A8A8A, WCAG AA on #1A1A1A)
 
-**Accents:**
+**Accents — SurfaceColors.swift:**
 - `accentBlue` (0.556, 0.50, 0.40), `accentBlueLight` (0.556, 0.35, 0.55)
 
-**Text on Cream:**
+**Text on Cream — SurfaceColors.swift:**
 - `textOnCream` (0.556, 0.50, 0.10), `textOnCreamSecondary` (0.556, 0.30, 0.35), `textOnCreamMuted` (0.167, 0.10, 0.52)
 
-**Status (muted for Laws of UX):**
+**Status (muted for Laws of UX) — SurfaceColors.swift:**
 - `statusSuccessMuted` (forest green), `statusWarningMuted` (warm amber), `statusErrorMuted` (soft red), `statusProcessingMuted` (blue)
 
-**Brand:**
+**Brand — BrandColors.swift:**
 - `terracotta` (#DA7756), `terracottaLight`/`terracottaHover`/`terracottaPressed`
 - `cream` (#FAF7F2), `warmCream` (#F5F0E8), `charcoal` (#2D2D2D), `softCharcoal` (#5A5A5A)
 
-**Semantic:**
+**Semantic — BrandColors.swift:**
 - `successGreen` (#4A9E6B), `recordingRed` (#D94F4F), `processingPurple` (#7B68A8), `warningAmber` (#D4A03D), `errorCoral` (#E05A5A)
 
-**Aurora (recording visualizations):**
+**Aurora (recording visualizations) — AuroraColors.swift:**
 - `recordingCoral` (#FF6B6B), `recordingCoralDeep` (#E85555)
 - `auroraCoral` (#EC4899), `auroraCoralLight` (#F472B6), `auroraTeal` (#3B82F6), `auroraTealLight` (#60A5FA)
 
-**Attention:**
+**Attention — PanelColors.swift:**
 - `attentionGreen` (#22C55E), `attentionGreenDeep`/`Glow`, `errorRed` (#EF4444), `errorRedGlow`
 
-**Heat Map (5 levels):**
+**Heat Map (5 levels) — HeatMapColors.swift:**
 - `heatMapLevel0` (#2A2A2A) through `heatMapLevel4` (recordingCoral)
 
-## Spacing (`Spacing.` prefix)
+## Spacing (`Spacing.` prefix — Spacing.swift)
 | Token | Value | Token | Value |
 |-------|-------|-------|-------|
 | `xs` | 4pt | `ml` | 20pt |
@@ -53,7 +89,7 @@ Shared design tokens and premium components. 2 Swift files, 1161 + 561 lines.
 | `md` | 16pt | `xxl` | 48pt |
 | | | `xxxl` | 64pt |
 
-## Radius (`Radius.` prefix)
+## Radius (`Radius.` prefix — Radius.swift)
 | Token | Value | Token | Value |
 |-------|-------|-------|-------|
 | `micro` | 1 | `xl` | 20 |
@@ -64,7 +100,7 @@ Shared design tokens and premium components. 2 Swift files, 1161 + 561 lines.
 | `lg` | 16 | `lawsModal` | 20 |
 | `pill` | 12 | `pillIdle` | 10 |
 
-## Typography (`Font.` prefix)
+## Typography (`Font.` prefix — Typography.swift)
 | Token | Spec | Token | Spec |
 |-------|------|-------|------|
 | `displayLarge` | 36pt bold (Fraunces serif, system fallback) | `bodyLarge` | 16pt regular |
@@ -75,14 +111,14 @@ Shared design tokens and premium components. 2 Swift files, 1161 + 561 lines.
 | `headingSmall` | 16pt semibold | `tiny` | 11pt regular |
 | `transcript` | 14pt monospaced | | |
 
-## Animation Presets (`Animation.` prefix)
+## Animation Presets (`Animation.` prefix — Animations.swift)
 **Spring:** `snappy` (0.3, 0.8), `smooth` (0.5, 0.85), `bouncy` (0.5, 0.6), `gentle` (0.7, 0.9), `elegant` (0.5, 0.92), `refined` (0.45, 0.95)
 **Laws of UX:** `lawsBase` (easeInOut 0.3), `lawsTap` (0.15, 0.8), `lawsSuccess` (0.4, 0.5), `lawsStateChange` (0.35, 0.85), `lawsCardHover` (0.3, 0.8), `lawsPanelExpand` (0.25, 0.85), `lawsPanelCollapse` (0.15, 0.9)
 **Pill:** `pillMorph` (0.3, 0.8), `trayExpand` (0.2, 0.85), `pillContentFade` (easeInOut 0.1)
 
-**PillAnimationTiming:** morphDuration 0.175s, cooldownDuration 0.175s, contentFade 0.1s, celebrationDuration 2.0s, trayDuration 0.2s, toastDuration 8.0s, settleDelay 0.2s
+**PillAnimationTiming (Animations.swift):** morphDuration 0.175s, cooldownDuration 0.175s, contentFade 0.1s, celebrationDuration 2.0s, trayDuration 0.2s, toastDuration 8.0s, settleDelay 0.2s
 
-## PremiumButton
+## PremiumButton (Components/PremiumButton.swift)
 ```swift
 PremiumButton(title:, icon:, variant:, isLoading:, isDisabled:, action:)
 ```
@@ -92,7 +128,7 @@ PremiumButton(title:, icon:, variant:, isLoading:, isDisabled:, action:)
 - Press: scale 0.97, .snappy animation
 - Loading: ProgressView replaces icon (0.7x scale)
 
-## Other Premium Components
+## Other Premium Components (Components/)
 - `PremiumCard(accentColor:, enableHover:, content:)` - Warm cream card with hover lift
 - `BenefitCard(icon:, iconColor:, title:, description:)` - Icon circle with glow + text, hover bounce
 - `StepProgressIndicator(currentStep:, totalSteps:)` - Capsule-based (28pt active / 10pt inactive)
@@ -100,23 +136,23 @@ PremiumButton(title:, icon:, variant:, isLoading:, isDisabled:, action:)
 - `QuickTipRow(icon:, text:, iconColor:)` - Small icon + text row
 - `AnimatedIcon(systemName:, size:, color:, showGlow:, isPulsing:)` - Icon with glow/pulse effects
 
-## Accessibility Modifiers (all respect `accessibilityReduceMotion`)
+## Accessibility Modifiers (ViewModifiers.swift — all respect `accessibilityReduceMotion`)
 `.pressEffect()`, `.hoverScale()`, `.pulse()`, `.glowPulse()`, `.successCheck()`, `.shake()`, `.slideIn()`, `.staggeredAppear()`
 
-## View Modifiers
-- `.shadowStyle(_ style: ShadowStyle)` - Apply named shadow
+## View Modifiers (CardModifiers.swift + ViewModifiers.swift)
+- `.shadowStyle(_ style: ShadowStyle)` - Apply named shadow (Shadows.swift)
 - `.lawsCard(isHovered:)` - Dark card styling (panelCharcoalElevated + border)
 - `.premiumCard(isHovered:, glowColor:, cornerRadius:)` - Glass slab effect
 - `.floatingTooltip("text")` - Hover tooltip (1s delay, works with non-activating panels)
 
-## Gradients
+## Gradients (Gradients.swift)
 `LinearGradient.warmGlow`, `.centerWarmth`, `.buttonHighlight`, `.aiGradient`
 `RadialGradient.iconGlow`
 
 ## Gotchas
-- Dark mode is NOT system-integrated - manually select dark colors per view (no @Environment(\.colorScheme) switching)
-- Fraunces serif font may not be bundled - display fonts fall back to system serif
+- Dark mode is NOT system-integrated -- manually select dark colors per view (no @Environment(\.colorScheme) switching)
+- Fraunces serif font may not be bundled -- display fonts fall back to system serif
 - `lawsButton`/`lawsCard`/`lawsModal` radius values are separate from the xs-xxl scale
 - PremiumButton hardcodes 14pt vertical padding (not a Spacing value)
-- PremiumCard (warmCream bg) vs `.lawsCard()` modifier (panelCharcoalElevated bg) - different aesthetics
+- PremiumCard (warmCream bg) vs `.lawsCard()` modifier (panelCharcoalElevated bg) -- different aesthetics
 - Color.init(hex:) supports 3/6/8-digit RGB/ARGB formats

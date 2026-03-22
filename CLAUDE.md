@@ -4,18 +4,20 @@
 Menu bar-only macOS app for real-time system audio transcription. Pipeline: CoreAudio capture -> Parakeet STT -> PyAnnote diarization -> WeSpeaker embeddings -> Qwen name inference. Output: Markdown transcripts with YAML frontmatter.
 
 ## Architecture
-- **App entry**: `TranscriptedApp.swift` (@main) -> `AppDelegate` manages all systems
+- **App entry**: `TranscriptedApp.swift` (@main) -> `AppDelegate` (slim coordinator with extensions)
 - **Activation policy**: `.accessory` (menu bar only, no dock icon)
 - **UI**: Floating pill (Dynamic Island style) + Settings window + Onboarding window
 - **Dependencies**: mlx-swift-lm (Qwen LLM), Sparkle (auto-updates), FluidAudio (static lib at `fluidaudio-libs/libFluidAudioAll.a`)
+- **Protocols**: 7 service protocols in `Services/Protocols/` (SpeechToTextEngine, DiarizationEngine, SpeakerStore, etc.)
+- **DI**: `AppServices` container in `Core/AppServices.swift`
 
-## Folder Map
-- **Core/** (23 files): Audio capture, transcription pipeline, task management, transcript saving, stats DB, failed transcription retry, logging, agent JSON output
-- **Services/** (8 files): ML services (ParakeetService, DiarizationService, QwenService, SpeakerDatabase, EmbeddingClusterer, AudioResampler, SpeakerClipExtractor, MeetingDetector)
-- **UI/FloatingPanel/** (16 files): Morphing pill UI with aurora visualizations, transcript tray, speaker naming dialog
-- **UI/Settings/** (4 files): Single-page settings dashboard with reusable components
+## Folder Map (~140 Swift files, agent-first: max ~300 lines per file, single responsibility)
+- **Core/** (46 files): Audio capture (Audio + 3 extensions), transcription pipeline (TaskManager + 3 extensions), transcript saving (4 files), stats DB (3 files), failed transcription retry, logging, coordinators (Hotkey, MenuBar, Notification, Window, Recording)
+- **Services/** (18 files): ML services (11 files) + Protocols/ subdirectory (7 service protocols)
+- **UI/FloatingPanel/** (26 files): Morphing pill UI, aurora visualizations (4 files), transcript tray (3 files), speaker naming (3 files), Components/ (21 files), Helpers/ (1 file)
+- **UI/Settings/** (18 files): Settings container + Sections/ (7 section views) + Components/ (6 reusable components) + Models/ (1 file)
 - **Onboarding/** (6 files): 3-step first-run flow (Welcome -> Permissions -> Model Setup)
-- **Design/** (2 files): 84 color tokens, 9 spacing values, 13 radius values, 22 animation presets, premium components
+- **Design/** (23 files): Colors/ (6 files), Components/ (7 premium components), root tokens (10 files: Spacing, Radius, Typography, Animations, Shadows, ViewModifiers, Gradients, Dimensions, Accessibility, CardModifiers)
 
 ## Build & Test
 ```bash
@@ -50,10 +52,14 @@ User presses Cmd+Shift+R (global hotkey)
 ```
 
 ## Key Entry Points
-- **TranscriptedApp.swift**: @main struct, AppDelegate manages status bar, hotkey (Cmd+Shift+R), window controllers
-- **Core/TranscriptionTaskManager.swift**: Task queue orchestration, DisplayStatus for UI, Qwen memory management
-- **Core/Audio.swift**: CoreAudio capture, publishes isRecording/audioLevel/recordingDuration
-- **Core/Transcription.swift**: @MainActor pipeline orchestration with nonisolated transcription methods
+- **TranscriptedApp.swift**: @main struct + slim AppDelegate coordinator
+- **AppDelegate extensions**: MenuBarManager, HotkeyManager, NotificationCoordinator, WindowCoordinator, RecordingCoordinator (in Core/)
+- **Core/TranscriptionTaskManager.swift**: Task queue (extensions: QwenLifecycleManager, SpeakerNamingCoordinator, TranscriptionPipelineRunner)
+- **Core/DisplayStatus.swift**: DisplayStatus enum + TranscriptionTask struct
+- **Core/Audio.swift**: CoreAudio capture (extensions: AudioDeviceRecovery, AudioLevelMonitor, AudioFileManager)
+- **Core/Transcription.swift**: @MainActor pipeline (extensions: TranscriptionPipeline, SpeakerMatchingService)
+- **Core/AppServices.swift**: DI container with protocol-typed services
+- **Services/Protocols/**: 7 service protocols (SpeechToTextEngine, DiarizationEngine, SpeakerStore, etc.)
 
 ## Threading Model
 - **Audio thread**: Audio.swift + SystemAudioCapture.swift (NOT @MainActor, sync audio access)
@@ -76,6 +82,33 @@ User presses Cmd+Shift+R (global hotkey)
 - **Parakeet**: Bundled or downloaded from HuggingFace (~600MB), 16kHz target rate
 - **Diarization**: PyAnnote offline + Sortformer streaming, bundled or via FluidAudio
 - **Qwen**: On-demand download (~2.5GB), loads/unloads to manage memory
+
+## CLAUDE.md Navigation (15 files)
+Every folder with ≥2 Swift files has its own CLAUDE.md with file index, reference data, and gotchas.
+
+| Path | Scope |
+|------|-------|
+| `CLAUDE.md` (this file) | Architecture overview, pipeline, entry points |
+| `Transcripted/Core/CLAUDE.md` | Audio, transcription, stats, error handling, coordinators |
+| `Transcripted/Core/Logging/CLAUDE.md` | Logger subsystems, JSON Lines format, rolling behavior |
+| `Transcripted/Services/CLAUDE.md` | ML services, speaker DB, thresholds, pipeline order |
+| `Transcripted/Services/Protocols/CLAUDE.md` | 7 DI protocols with full signatures |
+| `Transcripted/Design/CLAUDE.md` | All token values (colors, spacing, radius, typography, animations) |
+| `Transcripted/Design/Colors/CLAUDE.md` | Complete color reference with hex/HSB values |
+| `Transcripted/Design/Components/CLAUDE.md` | PremiumButton, PremiumCard, PermissionCard specs |
+| `Transcripted/UI/FloatingPanel/CLAUDE.md` | Pill state machine, Combine subscriptions, tray states |
+| `Transcripted/UI/FloatingPanel/Components/CLAUDE.md` | Aurora views, speaker naming, error toast, celebrations |
+| `Transcripted/UI/Settings/CLAUDE.md` | @AppStorage keys, window config, speaker operations |
+| `Transcripted/UI/Settings/Sections/CLAUDE.md` | 7 section views with per-section detail |
+| `Transcripted/UI/Settings/Components/CLAUDE.md` | CoralToggle, button styles, input components |
+| `Transcripted/Onboarding/CLAUDE.md` | 3-step flow, OnboardingState properties, integration |
+| `Transcripted/Onboarding/Steps/CLAUDE.md` | Welcome, Permissions, ModelSetup step implementations |
+
+**Single-file folders** (covered by parent CLAUDE.md):
+- `UI/MenuBar/MenuBarStatRow.swift` — Custom NSView (250x22), used in status bar dropdown
+- `UI/FloatingPanel/Helpers/LawsComponents.swift` — AnimatedDotsView, LawsButton, FloatingTooltipModifier, Triangle
+- `UI/Settings/Models/SettingsNavigationState.swift` — Migration state + vestigial SettingsTab
+- `UI/FailedTranscriptionsView.swift` — Standalone window for failed transcription management (600x400 min)
 
 ## Documentation
 See CONTRIBUTING.md for full development guidelines.
