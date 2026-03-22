@@ -195,6 +195,21 @@ class OnboardingState {
         parakeetPhase = "Downloading..."
         diarizationPhase = "Downloading..."
 
+        // Pre-flight: check network connectivity before starting long downloads
+        let networkAvailable = await ModelDownloadService.checkNetworkReachability()
+        if !networkAvailable {
+            modelError = DownloadErrorKind.networkOffline.title + ": " + DownloadErrorKind.networkOffline.detail
+            isLoadingModels = false
+            return
+        }
+
+        // Pre-flight: check disk space (~700MB needed for Parakeet + Diarization)
+        if let available = ModelDownloadService.availableDiskSpace(), available < 1_000_000_000 {
+            modelError = DownloadErrorKind.diskSpace.title + ": " + DownloadErrorKind.diskSpace.detail
+            isLoadingModels = false
+            return
+        }
+
         // Start monitoring download progress on disk
         let progressTask = Task { @MainActor in
             await monitorDownloadProgress()
@@ -203,7 +218,7 @@ class OnboardingState {
         let parakeet = ParakeetService()
         let diarization = DiarizationService()
 
-        // Initialize both in parallel
+        // Initialize both in parallel (retry logic built into each service)
         async let p: Void = parakeet.initialize()
         async let s: Void = diarization.initialize()
         await p
