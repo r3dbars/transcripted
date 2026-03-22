@@ -47,6 +47,7 @@ struct FloatingPanelView: View {
     // because the panel has canBecomeKey=false, so the app usually isn't frontmost)
     @State private var escapeLocalMonitor: Any?
     @State private var escapeGlobalMonitor: Any?
+    @State private var clickOutsideMonitor: Any?
 
     // Constant frame width — prevents position shift when toggling tray
     private let frameWidth: CGFloat = PillDimensions.trayWidth + 40
@@ -269,32 +270,42 @@ struct FloatingPanelView: View {
                 toggleTranscriptTray()
             })
         case .processing:
-            // Show success view for transcript saved, processing aurora otherwise
-            switch taskManager.displayStatus {
-            case .transcriptSaved:
-                AuroraSuccessView(
-                    successType: .transcriptSaved,
-                    transcriptURL: taskManager.lastSavedTranscriptURL,
-                    onCopyTranscript: {
-                        guard let url = taskManager.lastSavedTranscriptURL else { return }
-                        let summary = TranscriptSummary(
-                            url: url,
-                            title: url.deletingPathExtension().lastPathComponent,
-                            date: Date(),
-                            duration: "",
-                            speakerCount: 0,
-                            speakerNames: [],
-                            timeOfDay: nil
-                        )
-                        if let text = transcriptStore.copyableText(for: summary), !text.isEmpty {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(text, forType: .string)
+            AuroraProcessingView(status: taskManager.displayStatus)
+        case .saved:
+            SavedPillView(
+                title: taskManager.lastSavedTitle,
+                duration: taskManager.lastSavedDuration,
+                speakerCount: taskManager.lastSavedSpeakerCount,
+                transcriptURL: taskManager.lastSavedTranscriptURL,
+                onCopyTranscript: {
+                    guard let url = taskManager.lastSavedTranscriptURL else { return }
+                    let summary = TranscriptSummary(
+                        url: url,
+                        title: url.deletingPathExtension().lastPathComponent,
+                        date: Date(),
+                        duration: "",
+                        speakerCount: 0,
+                        speakerNames: [],
+                        timeOfDay: nil
+                    )
+                    if let text = transcriptStore.copyableText(for: summary), !text.isEmpty {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(text, forType: .string)
+                    }
+                },
+                onOpenTranscript: {
+                    // Dismiss saved card, go to idle, and open transcript tray
+                    pillStateManager.transition(to: .idle)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                            trayState = .transcripts
                         }
                     }
-                )
-            default:
-                AuroraProcessingView(status: taskManager.displayStatus)
-            }
+                },
+                onDismiss: {
+                    pillStateManager.transition(to: .idle)
+                }
+            )
         }
     }
 
@@ -349,6 +360,18 @@ struct FloatingPanelView: View {
                 }
             }
         }
+
+        // Click-outside monitor: dismiss transcript tray when clicking anywhere outside the panel
+        if clickOutsideMonitor == nil && trayState == .transcripts {
+            clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
+                DispatchQueue.main.async {
+                    guard self.trayState == .transcripts else { return }
+                    withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                        self.trayState = .none
+                    }
+                }
+            }
+        }
     }
 
     private func removeEscapeMonitor() {
@@ -359,6 +382,10 @@ struct FloatingPanelView: View {
         if let monitor = escapeGlobalMonitor {
             NSEvent.removeMonitor(monitor)
             escapeGlobalMonitor = nil
+        }
+        if let monitor = clickOutsideMonitor {
+            NSEvent.removeMonitor(monitor)
+            clickOutsideMonitor = nil
         }
     }
 
