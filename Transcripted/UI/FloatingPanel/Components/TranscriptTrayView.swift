@@ -332,55 +332,28 @@ struct TranscriptTrayView: View {
             }
             .buttonStyle(PlainButtonStyle())
 
-            Divider()
-                .frame(height: 12)
-                .background(Color.panelCharcoalElevated)
-
-            // Export menu
-            Menu {
-                Button(action: { exportTranscript(transcript, format: .markdown) }) {
-                    Label("Save as Markdown (.md)", systemImage: "doc.text")
-                }
-                Button(action: { exportTranscript(transcript, format: .plainText) }) {
-                    Label("Save as Plain Text (.txt)", systemImage: "doc.plaintext")
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    if exportedId == transcript.id {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.statusSuccessMuted)
-                        Text("Saved!")
-                            .font(.system(size: 10))
-                            .foregroundColor(.statusSuccessMuted)
-                    } else {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 9))
-                        Text("Export")
-                            .font(.system(size: 10))
-                    }
-                }
-                .foregroundColor(.panelTextMuted)
-                .padding(.horizontal, Spacing.ms)
-                .padding(.vertical, Spacing.xs + 2)
-                .contentShape(Rectangle())
-            }
-            .menuStyle(BorderlessButtonMenuStyle())
-
             Spacer()
 
-            // Overflow menu: Agent + Open in Finder
+            // Overflow menu: Export + Open in Finder + Connect Agent
             Menu {
-                Button(action: {
-                    let stem = transcript.url.deletingPathExtension().lastPathComponent
-                    copyAgentPrompt(filename: stem)
-                }) {
-                    Label("Connect Agent", systemImage: "terminal")
+                Menu("Export") {
+                    Button(action: { exportTranscript(transcript, format: .markdown) }) {
+                        Label("Save as Markdown (.md)", systemImage: "doc.text")
+                    }
+                    Button(action: { exportTranscript(transcript, format: .plainText) }) {
+                        Label("Save as Plain Text (.txt)", systemImage: "doc.plaintext")
+                    }
                 }
                 Button(action: {
                     NSWorkspace.shared.selectFile(transcript.url.path, inFileViewerRootedAtPath: transcript.url.deletingLastPathComponent().path)
                 }) {
                     Label("Open in Finder", systemImage: "folder")
+                }
+                Button(action: {
+                    let stem = transcript.url.deletingPathExtension().lastPathComponent
+                    copyAgentPrompt(filename: stem)
+                }) {
+                    Label("Connect Agent", systemImage: "terminal")
                 }
             } label: {
                 Image(systemName: "ellipsis")
