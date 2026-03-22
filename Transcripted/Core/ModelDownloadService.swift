@@ -249,6 +249,13 @@ enum ModelDownloadService {
         // Download each file with mirror fallback
         var downloadedCount = 0
         for file in fileList {
+            // Security: validate filename from external API before constructing a path with it.
+            // Rejects path traversal sequences (e.g. "../../.ssh") injected by a malicious server.
+            guard isSafeModelFilename(file.name) else {
+                AppLogger.services.error("Rejecting unsafe model filename from API response", ["filename": file.name])
+                throw ModelDownloadError(kind: .unknown("Unsafe filename in model file list: \(file.name)"), underlyingError: nil)
+            }
+
             let destURL = cacheDir.appendingPathComponent(file.name)
 
             // Skip if already downloaded
@@ -277,6 +284,23 @@ enum ModelDownloadService {
         let size: Int?
     }
 
+    /// Validate a filename returned by the HuggingFace API before using it in a file path.
+    /// Security: filenames are attacker-controlled data from an external API response.
+    /// A compromised or impersonated server could inject path traversal sequences (e.g. "../../../.ssh/authorized_keys")
+    /// into rfilename values. We reject any name containing ".." components or absolute paths.
+    private static func isSafeModelFilename(_ name: String) -> Bool {
+        // Reject empty names
+        guard !name.isEmpty else { return false }
+        // Reject absolute paths
+        guard !name.hasPrefix("/") else { return false }
+        // Reject names containing ".." path traversal components
+        let components = name.components(separatedBy: "/")
+        guard !components.contains("..") && !components.contains(".") else { return false }
+        // Reject names with null bytes or control characters
+        guard !name.unicodeScalars.contains(where: { $0.value < 32 }) else { return false }
+        return true
+    }
+
     /// Fetch the list of files in a HuggingFace model repository
     private static func fetchModelFileList(modelId: String) async throws -> [HFModelFile] {
         // Try each mirror for the API call
@@ -297,6 +321,12 @@ enum ModelDownloadService {
 
                 let files = siblings.compactMap { sibling -> HFModelFile? in
                     guard let name = sibling["rfilename"] as? String else { return nil }
+                    // Security: filter out any filenames that would escape the cache directory.
+                    // Malicious or compromised API responses could include path traversal sequences.
+                    guard isSafeModelFilename(name) else {
+                        AppLogger.services.warning("Skipping unsafe filename in model manifest", ["filename": name])
+                        return nil
+                    }
                     let size = sibling["size"] as? Int
                     return HFModelFile(name: name, size: size)
                 }

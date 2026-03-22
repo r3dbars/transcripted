@@ -6,17 +6,32 @@ import UserNotifications
 class TranscriptSaver {
 
     /// Default save location: ~/Documents/Transcripted/
-    /// Reads custom location from UserDefaults if set
+    /// Reads custom location from UserDefaults if set.
+    /// Security: validates the custom path against directory traversal and forbidden system
+    /// directories before use. Falls back to the default location if validation fails, so
+    /// a tampered UserDefaults value cannot redirect transcripts to an arbitrary path.
     static var defaultSaveDirectory: URL {
+        let fallback: URL = {
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            return documentsPath.appendingPathComponent("Transcripted")
+        }()
+
         // Check for custom save location first
         if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
            !customPath.isEmpty {
-            return URL(fileURLWithPath: customPath)
+            let candidateURL = URL(fileURLWithPath: customPath)
+            let validation = RecordingValidator.validateSavePath(candidateURL)
+            guard validation.isValid else {
+                AppLogger.pipeline.warning("Custom save path rejected in defaultSaveDirectory, using default", [
+                    "path": customPath,
+                    "reason": validation.errorMessage ?? "unknown"
+                ])
+                return fallback
+            }
+            return candidateURL
         }
 
-        // Fall back to default location
-        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return documentsPath.appendingPathComponent("Transcripted")
+        return fallback
     }
 
     /// Serial queue for file updates — prevents concurrent reads/writes from corrupting transcripts
