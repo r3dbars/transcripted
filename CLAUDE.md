@@ -11,10 +11,10 @@ Menu bar-only macOS app for real-time system audio transcription. Pipeline: Core
 - **Protocols**: 7 service protocols in `Services/Protocols/` (SpeechToTextEngine, DiarizationEngine, SpeakerStore, etc.)
 - **DI**: `AppServices` container in `Core/AppServices.swift`
 
-## Folder Map (~143 Swift files, agent-first: max ~300 lines per file, single responsibility)
+## Folder Map (~137 Swift files, agent-first: max ~300 lines per file, single responsibility)
 - **Core/** (47 files): Audio capture (Audio + 3 extensions), transcription pipeline (TaskManager + 3 extensions), transcript saving (4 files), stats DB (3 files), model downloads (ModelDownloadService), failed transcription retry, logging, coordinators (Hotkey, MenuBar, Notification, Window, Recording)
 - **Services/** (18 files): ML services (11 files) + Protocols/ subdirectory (7 service protocols)
-- **UI/FloatingPanel/** (26 files): Morphing pill UI, aurora visualizations (4 files), transcript tray (3 files), speaker naming (3 files), Components/ (21 files), Helpers/ (1 file)
+- **UI/FloatingPanel/** (21 files): Morphing pill UI, aurora state views (3 files), SavedPillView, transcript tray (3 files), speaker naming (3 files), Components/ (16 files), Helpers/ (1 file)
 - **UI/Settings/** (18 files): Settings container + Sections/ (7 section views) + Components/ (6 reusable components) + Models/ (1 file)
 - **Onboarding/** (7 files): 4-step first-run flow (Welcome -> Preview -> Permissions -> Model Setup)
 - **Design/** (23 files): Colors/ (6 files), Components/ (7 premium components), root tokens (10 files: Spacing, Radius, Typography, Animations, Shadows, ViewModifiers, Gradients, Dimensions, Accessibility, CardModifiers)
