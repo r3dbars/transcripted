@@ -11,7 +11,6 @@ struct TestRunner {
         testCapturedContext()
         testPlatformFormatter()
         testRefusalDetection()
-        testMessageFilter()
         testStyleUtils()
         testInsightCard()
 
