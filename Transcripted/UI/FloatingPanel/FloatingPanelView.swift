@@ -269,32 +269,43 @@ struct FloatingPanelView: View {
                 toggleTranscriptTray()
             })
         case .processing:
-            // Show success view for transcript saved, processing aurora otherwise
-            switch taskManager.displayStatus {
-            case .transcriptSaved:
-                AuroraSuccessView(
-                    successType: .transcriptSaved,
-                    transcriptURL: taskManager.lastSavedTranscriptURL,
-                    onCopyTranscript: {
-                        guard let url = taskManager.lastSavedTranscriptURL else { return }
-                        let summary = TranscriptSummary(
-                            url: url,
-                            title: url.deletingPathExtension().lastPathComponent,
-                            date: Date(),
-                            duration: "",
-                            speakerCount: 0,
-                            speakerNames: [],
-                            timeOfDay: nil
-                        )
-                        if let text = transcriptStore.copyableText(for: summary), !text.isEmpty {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(text, forType: .string)
+            AuroraProcessingView(status: taskManager.displayStatus)
+        case .saved:
+            SavedPillView(
+                title: taskManager.lastSavedTitle,
+                duration: taskManager.lastSavedDuration,
+                speakerCount: taskManager.lastSavedSpeakerCount,
+                transcriptURL: taskManager.lastSavedTranscriptURL,
+                onCopyTranscript: {
+                    guard let url = taskManager.lastSavedTranscriptURL else { return }
+                    let creationDate = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
+                    let summary = TranscriptSummary(
+                        url: url,
+                        title: taskManager.lastSavedTitle ?? url.deletingPathExtension().lastPathComponent,
+                        date: creationDate,
+                        duration: taskManager.lastSavedDuration ?? "",
+                        speakerCount: taskManager.lastSavedSpeakerCount ?? 0,
+                        speakerNames: [],
+                        timeOfDay: nil
+                    )
+                    if let text = transcriptStore.copyableText(for: summary), !text.isEmpty {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(text, forType: .string)
+                    }
+                },
+                onOpenTranscript: {
+                    // Dismiss saved card, go to idle, and open transcript tray
+                    pillStateManager.transition(to: .idle)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                            trayState = .transcripts
                         }
                     }
-                )
-            default:
-                AuroraProcessingView(status: taskManager.displayStatus)
-            }
+                },
+                onDismiss: {
+                    pillStateManager.transition(to: .idle)
+                }
+            )
         }
     }
 
