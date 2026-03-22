@@ -17,6 +17,23 @@ enum HotkeyPreferences {
     static let defaultDraft = HotkeyBinding(keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(optionKey))
     static let defaultDictation = HotkeyBinding(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey))
 
+    // MARK: - Right Option Tap-to-Dictate
+
+    private static let rightOptionDictationKey = "hotkey-rightOption-dictation-enabled"
+
+    /// Whether tapping the right Option key toggles dictation (default: true)
+    static func rightOptionDictationEnabled() -> Bool {
+        let ud = UserDefaults.standard
+        // Default to true if never set
+        if ud.object(forKey: rightOptionDictationKey) == nil { return true }
+        return ud.bool(forKey: rightOptionDictationKey)
+    }
+
+    static func setRightOptionDictation(enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: rightOptionDictationKey)
+        NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
+    }
+
     // MARK: - UserDefaults Keys
 
     private static let draftKeyCodeKey    = "hotkey-draft-keyCode"
