@@ -70,8 +70,9 @@ class DiarizationService: ObservableObject {
             modelState = .ready
             AppLogger.transcription.info("Diarization models loaded and ready")
         } catch {
-            modelState = .failed(error.localizedDescription)
-            AppLogger.transcription.error("Diarization model initialization failed", ["error": "\(error.localizedDescription)"])
+            let kind = ModelDownloadService.classifyError(error)
+            modelState = .failed(kind.detail)
+            AppLogger.transcription.error("Diarization model initialization failed", ["error": "\(error.localizedDescription)", "kind": kind.title])
         }
     }
 
@@ -86,7 +87,9 @@ class DiarizationService: ObservableObject {
             manager.initialize(models: models)
         } else {
             AppLogger.transcription.info("Sortformer models not bundled, loading from cache or downloading")
-            let models = try await DiarizerModels.download()
+            let models = try await ModelDownloadService.withRetry {
+                try await DiarizerModels.download()
+            }
             manager.initialize(models: models)
         }
 
@@ -108,7 +111,9 @@ class DiarizationService: ObservableObject {
             manager.initialize(models: models)
         } else {
             AppLogger.transcription.info("Offline diarizer models not bundled, loading from cache or downloading")
-            try await manager.prepareModels()
+            try await ModelDownloadService.withRetry {
+                try await manager.prepareModels()
+            }
         }
 
         offlineDiarizerManager = manager

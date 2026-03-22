@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		MDS00001 /* ModelDownloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = MDS00002 /* ModelDownloadService.swift */; };
 		MB000001 /* MenuBarStatRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = MB000002 /* MenuBarStatRow.swift */; };
 		4CAF116349811906B83C0406 /* ModelSetupStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF26FA6ED2054F3DCF8D0B45 /* ModelSetupStep.swift */; };
 		A1000001 /* TranscriptedApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002 /* TranscriptedApp.swift */; };
@@ -162,6 +163,7 @@
 		A1001021 /* TranscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptStore.swift; sourceTree = "<group>"; };
 		A1001031 /* TranscriptExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptExporter.swift; sourceTree = "<group>"; };
 		A2000002 /* DiagnosticExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticExporter.swift; sourceTree = "<group>"; };
+		MDS00002 /* ModelDownloadService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadService.swift; sourceTree = "<group>"; };
 		PC000001 /* PillCalloutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillCalloutView.swift; sourceTree = "<group>"; };
 		PC000002 /* PillCalloutController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillCalloutController.swift; sourceTree = "<group>"; };
 		A1001023 /* TranscriptTrayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptTrayView.swift; sourceTree = "<group>"; };
@@ -298,6 +300,7 @@
 				A1001031 /* TranscriptExporter.swift */,
 				A1002005 /* TranscriptionTypes.swift */,
 				A2000002 /* DiagnosticExporter.swift */,
+				MDS00002 /* ModelDownloadService.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -693,6 +696,7 @@
 				Q1000001 /* QwenService.swift in Sources */,
 				4CAF116349811906B83C0406 /* ModelSetupStep.swift in Sources */,
 				A2000001 /* DiagnosticExporter.swift in Sources */,
+				MDS00001 /* ModelDownloadService.swift in Sources */,
 				PC000011 /* PillCalloutView.swift in Sources */,
 				PC000012 /* PillCalloutController.swift in Sources */,
 			);
