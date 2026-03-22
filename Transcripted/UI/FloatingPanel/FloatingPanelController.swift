@@ -177,17 +177,18 @@ class FloatingPanelController: NSWindowController, NSWindowDelegate {
                 case .transcriptSaved:
                     // Don't interrupt an active recording with success from a background task
                     guard !self.audio.isRecording else { break }
-                    // Don't show success animation if speaker naming is pending —
+                    // Don't show saved card if speaker naming is pending —
                     // the naming tray IS the post-transcription UI
                     guard self.taskManager.speakerNamingRequest == nil else { break }
-                    // Show success briefly in pill, then return to idle
-                    if self.pillStateManager.state != .processing {
-                        self.pillStateManager.transition(to: .processing)
-                    }
-                    // Quick return to idle after success animation
-                    self.scheduleReturnToIdle(delay: 2.5)
+                    // Show saved notification card with transcript info
+                    self.pillStateManager.transition(to: .saved)
+                    // Return to idle after 10 seconds — enough time to read and act
+                    self.scheduleReturnToIdle(delay: 10.0)
                 case .idle:
-                    if !self.audio.isRecording {
+                    // Don't preempt the saved card — scheduleReturnToIdle(10s) handles it.
+                    // Without this guard, scheduleStatusReset(delay:4) in TaskManager would
+                    // fire displayStatus=.idle after 4s, cutting the saved card short.
+                    if !self.audio.isRecording && self.pillStateManager.state != .saved {
                         self.pillStateManager.transition(to: .idle)
                     }
                 case .failed:

@@ -1,9 +1,10 @@
 import SwiftUI
 
 // MARK: - Aurora Recording View
-/// A living aurora visualization that dances with your conversation
-/// Gemini-inspired: Soft, glowing fog that gently pulses with audio
-/// Uses layered radial gradients with heavy blur for diffuse, smoky effect
+/// Audio-reactive neon border for recording state.
+/// Mic audio (coral) glows from the LEFT side, fading toward center.
+/// System audio (teal) glows from the RIGHT side, fading toward center.
+/// Uses masked Capsule strokes layered for bloom effect — strokes always stay on the border.
 
 @available(macOS 26.0, *)
 struct AuroraRecordingView: View {
@@ -13,249 +14,135 @@ struct AuroraRecordingView: View {
 
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @State private var isStopHovered = false
-    @State private var isTranscriptsHovered = false
-
-    // Smoothed audio levels (prevents jitter)
     @State private var smoothedMicLevel: CGFloat = 0
     @State private var smoothedSystemLevel: CGFloat = 0
 
-    // Fixed dimensions — always expanded during recording
-    private let expandedWidth: CGFloat = 200
-    private let expandedHeight: CGFloat = 44
+    private let width: CGFloat = PillDimensions.recordingWidth
+    private let height: CGFloat = PillDimensions.recordingHeight
 
-    // Animation smoothing factor (lower = smoother, slower response)
-    private let smoothingFactor: CGFloat = 0.08
+    private let attackFactor: CGFloat = 0.25
+    private let decayFactor: CGFloat = 0.06
 
     var body: some View {
         ZStack {
-            // Aurora background (always visible)
-            auroraBackground
-                .clipShape(Capsule())
+            // Dark capsule background
+            Capsule()
+                .fill(Color.panelCharcoal)
 
-            // Always-visible content (timer + stop button)
-            expandedContent
+            // Base dim border
+            Capsule()
+                .strokeBorder(Color.panelCharcoalSurface.opacity(0.5), lineWidth: 1)
+
+            if reduceMotion {
+                staticBorder
+            } else {
+                // Neon glow layers — padded outward so bloom doesn't clip at frame edges
+                ZStack {
+                    neonGlow(color: .recordingCoral, level: smoothedMicLevel, fromLeading: true)
+                    neonGlow(color: .auroraTeal, level: smoothedSystemLevel, fromLeading: false)
+                }
+                .padding(-30)
+            }
+
+            // Content: stop button + timer
+            recordingContent
         }
-        .frame(width: expandedWidth, height: expandedHeight)
+        .frame(width: width, height: height)
+        .shadow(color: Color.recordingCoral.opacity(0.12 + Double(smoothedMicLevel) * 0.38),
+                radius: 14 + smoothedMicLevel * 14, x: -3, y: 0)
+        .shadow(color: Color.auroraTeal.opacity(0.10 + Double(smoothedSystemLevel) * 0.32),
+                radius: 12 + smoothedSystemLevel * 12, x: 3, y: 0)
+        .onChange(of: audio.audioLevel) { _, _ in updateLevels() }
+        .onChange(of: audio.systemAudioLevelHistory) { _, _ in updateLevels() }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Recording in progress, \(formatDurationAccessible(audio.recordingDuration))")
         .accessibilityHint("Click stop to end recording")
     }
 
-    // MARK: - Aurora Background (Gemini-style fog layers)
+    // MARK: - Neon Glow Layer
 
-    private var auroraBackground: some View {
-        ZStack {
-            // Base dark background
-            Color.panelCharcoal
+    /// Three layered capsule strokes masked to fade from one side, creating the apex-glow effect.
+    @ViewBuilder
+    private func neonGlow(color: Color, level: CGFloat, fromLeading: Bool) -> some View {
+        let coverage = 0.15 + level * 0.85 // 15% base → 100% at peak
 
-            // MIC FOG: Coral/warm tones, biased LEFT
-            fogLayer(
-                color: Color.auroraCoral,
-                secondaryColor: Color.auroraCoralLight,
-                blurRadius: 8,
-                opacity: 0.75,
-                orbCount: 2,
-                phaseOffset: 0,
-                isMicLevel: true,
-                positionBias: -0.8  // Bias left
-            )
-            .blendMode(.plusLighter)
+        // Pass 1: Outer bloom (wide, blurred)
+        Capsule()
+            .stroke(color.opacity(0.2 + Double(level) * 0.35), lineWidth: 8 + level * 8)
+            .blur(radius: 10 + level * 8)
+            .mask(coverageMask(coverage: coverage, fromLeading: fromLeading))
 
-            // SYSTEM FOG: Teal/cool tones, biased RIGHT
-            fogLayer(
-                color: Color.auroraTeal,
-                secondaryColor: Color.auroraTealLight,
-                blurRadius: 8,
-                opacity: 0.7,
-                orbCount: 2,
-                phaseOffset: .pi / 3,
-                isMicLevel: false,
-                positionBias: 0.8  // Bias right
-            )
-            .blendMode(.plusLighter)
-        }
-        .overlay(
-            // Capsule border glow matches position bias (coral left, teal right)
-            Capsule()
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            Color.auroraCoral.opacity(0.4),
-                            Color.auroraTeal.opacity(0.4)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    ),
-                    lineWidth: 1
-                )
+        // Pass 2: Mid glow
+        Capsule()
+            .stroke(color.opacity(0.4 + Double(level) * 0.35), lineWidth: 4 + level * 4)
+            .blur(radius: 4 + level * 3)
+            .mask(coverageMask(coverage: coverage, fromLeading: fromLeading))
+
+        // Pass 3: Inner core (sharp, bright)
+        Capsule()
+            .stroke(color.opacity(0.7 + Double(level) * 0.3), lineWidth: 2 + level * 1.5)
+            .mask(coverageMask(coverage: coverage, fromLeading: fromLeading))
+    }
+
+    /// Gradient mask that reveals from one side based on coverage (0→1).
+    /// Creates the "crawling from apex" effect without custom paths.
+    private func coverageMask(coverage: CGFloat, fromLeading: Bool) -> some View {
+        LinearGradient(
+            stops: [
+                .init(color: .white, location: 0),
+                .init(color: .white, location: coverage * 0.8),
+                .init(color: .clear, location: coverage),
+            ],
+            startPoint: fromLeading ? .leading : .trailing,
+            endPoint: fromLeading ? .trailing : .leading
         )
-        // Single combined glow shadow (reduced from two radius-20 shadows)
-        .shadow(color: Color.auroraCoral.opacity(0.25), radius: 12, x: -3, y: 0)
     }
 
-    // MARK: - Fog Layer
+    // MARK: - Static Border (reduce motion)
 
-    private func fogLayer(
-        color: Color,
-        secondaryColor: Color,
-        blurRadius: CGFloat,
-        opacity: Double,
-        orbCount: Int,
-        phaseOffset: Double,
-        isMicLevel: Bool,
-        positionBias: CGFloat = 0  // -1 = left, 0 = center, 1 = right
-    ) -> some View {
-        TimelineView(.animation(minimumInterval: 1/30)) { timeline in
-            let time = timeline.date.timeIntervalSinceReferenceDate
-
-            // Compute smoothed levels OUTSIDE Canvas (in View body, safe for @State reads)
-            let targetMic = CGFloat(audio.audioLevelHistory.last ?? 0)
-            let targetSystem = CGFloat(audio.systemAudioLevelHistory.last ?? 0)
-            let effectiveSmoothing = reduceMotion ? 0.02 : smoothingFactor
-            let currentMic = smoothedMicLevel + (targetMic - smoothedMicLevel) * effectiveSmoothing
-            let currentSystem = smoothedSystemLevel + (targetSystem - smoothedSystemLevel) * effectiveSmoothing
-            let audioLevel = isMicLevel ? currentMic : currentSystem
-
-            Canvas { context, size in
-                // Draw fog orbs (Canvas closure is pure rendering, no state mutation)
-                drawFogOrbs(
-                    context: &context,
-                    size: size,
-                    time: time,
-                    audioLevel: audioLevel,
-                    color: color,
-                    secondaryColor: secondaryColor,
-                    orbCount: orbCount,
-                    phaseOffset: phaseOffset,
-                    opacity: opacity,
-                    positionBias: positionBias
-                )
-            }
-            .onChange(of: time) { _, _ in
-                // Update smoothed state on the main run loop, outside Canvas render
-                smoothedMicLevel = currentMic
-                smoothedSystemLevel = currentSystem
-            }
-        }
-        .blur(radius: blurRadius)
-        .drawingGroup()  // Flatten to Metal texture for GPU performance
-    }
-
-    // MARK: - Pseudo-noise Function
-
-    /// Creates organic, non-repeating motion by layering sine waves with prime-ratio frequencies
-    private func pseudoNoise(time: Double, phase: Double, seed: Double) -> Double {
-        let t = time + seed
-        let p = phase
-
-        // Layer multiple sine waves with incommensurate frequencies
-        let wave1 = sin(t * 1.0 + p)
-        let wave2 = sin(t * 1.7 + p * 2.3) * 0.5
-        let wave3 = sin(t * 0.3 + p * 0.7) * 0.3
-        let wave4 = sin(t * 2.3 + p * 1.1) * 0.2
-
-        // Sum and normalize (max amplitude ~2.0)
-        return (wave1 + wave2 + wave3 + wave4) / 2.0
-    }
-
-    // MARK: - Draw Fog Orbs
-
-    private func drawFogOrbs(
-        context: inout GraphicsContext,
-        size: CGSize,
-        time: Double,
-        audioLevel: CGFloat,
-        color: Color,
-        secondaryColor: Color,
-        orbCount: Int,
-        phaseOffset: Double,
-        opacity: Double,
-        positionBias: CGFloat = 0  // -1 = left, 0 = center, 1 = right
-    ) {
-        let width = size.width
-        let height = size.height
-        let centerY = height / 2
-
-        // Slow animation speed (0.15x for calm, organic feel)
-        let slowTime = reduceMotion ? 0 : time * 0.15
-
-        // Audio reactivity affects SIZE and BRIGHTNESS, not speed
-        // Base level of 0.6 ensures visibility even in silence, peaks at 1.8x with audio
-        let audioBoost = 0.6 + Double(audioLevel) * 1.5  // 0.6 to 2.1x
-
-        // Position bias shifts center point left or right
-        let biasOffset = positionBias * width * 0.15
-
-        for i in 0..<orbCount {
-            let orbPhase = Double(i) * (.pi * 2 / Double(orbCount)) + phaseOffset
-
-            // Organic movement using pseudo-noise
-            let xNoise = pseudoNoise(time: slowTime, phase: orbPhase, seed: 0)
-            let yNoise = pseudoNoise(time: slowTime * 0.8, phase: orbPhase * 1.3, seed: 100)
-
-            let xOffset = xNoise * (width * 0.18)
-            let yOffset = yNoise * (height * 0.15)
-
-            let orbCenterX = width / 2 + biasOffset + xOffset
-            let orbCenterY = centerY + yOffset
-
-            // Orb size varies with audio and subtle breathing
-            let breatheNoise = pseudoNoise(time: slowTime * 0.4, phase: orbPhase, seed: 200)
-            let breathe = 1.0 + breatheNoise * 0.12
-            let baseSize = max(width, height) * 0.8  // Larger orbs to fill the capsule
-            let orbSize = baseSize * audioBoost * breathe
-
-            // Draw radial gradient orb
-            let orbRect = CGRect(
-                x: orbCenterX - orbSize / 2,
-                y: orbCenterY - orbSize / 2,
-                width: orbSize,
-                height: orbSize
+    private var staticBorder: some View {
+        Capsule()
+            .strokeBorder(
+                LinearGradient(
+                    colors: [Color.recordingCoral.opacity(0.3), Color.auroraTeal.opacity(0.3)],
+                    startPoint: .leading, endPoint: .trailing
+                ),
+                lineWidth: 2
             )
-
-            // Radial gradient: color center fading to transparent
-            let gradient = Gradient(stops: [
-                .init(color: color.opacity(opacity * audioBoost), location: 0),
-                .init(color: secondaryColor.opacity(opacity * 0.6), location: 0.4),
-                .init(color: color.opacity(opacity * 0.3), location: 0.7),
-                .init(color: Color.clear, location: 1.0)
-            ])
-
-            context.fill(
-                Path(ellipseIn: orbRect),
-                with: .radialGradient(
-                    gradient,
-                    center: CGPoint(x: orbCenterX, y: orbCenterY),
-                    startRadius: 0,
-                    endRadius: orbSize / 2
-                )
-            )
-        }
     }
 
-    // MARK: - Expanded Content
+    // MARK: - Level Smoothing
 
-    private var expandedContent: some View {
+    private func updateLevels() {
+        let targetMic = CGFloat(audio.audioLevel)
+        let targetSystem = CGFloat(audio.systemAudioLevelHistory.last ?? 0)
+
+        let micFactor = targetMic > smoothedMicLevel ? attackFactor : decayFactor
+        smoothedMicLevel += (targetMic - smoothedMicLevel) * micFactor
+
+        let sysFactor = targetSystem > smoothedSystemLevel ? attackFactor : decayFactor
+        smoothedSystemLevel += (targetSystem - smoothedSystemLevel) * sysFactor
+    }
+
+    // MARK: - Content
+
+    private var recordingContent: some View {
         ZStack {
-            // Timer (absolutely centered, independent of button layout)
             Text(formatDuration(audio.recordingDuration))
-                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                .font(.system(size: 16, weight: .semibold, design: .monospaced))
                 .foregroundColor(.panelTextPrimary)
                 .lineLimit(1)
                 .fixedSize()
 
-            // Buttons pinned to edges
             HStack(spacing: 0) {
-                // Stop button (left)
                 Button(action: onStop) {
                     ZStack {
                         Circle()
                             .fill(isStopHovered ? Color.panelCharcoalSurface : Color.panelCharcoalElevated)
-                            .frame(width: 32, height: 32)
-
+                            .frame(width: 28, height: 28)
                         RoundedRectangle(cornerRadius: 3)
                             .fill(Color.panelTextPrimary)
-                            .frame(width: 12, height: 12)
+                            .frame(width: 10, height: 10)
                     }
                     .scaleEffect(isStopHovered ? 1.1 : 1.0)
                 }
@@ -267,40 +154,11 @@ struct AuroraRecordingView: View {
                     }
                 }
                 .accessibilityLabel("Stop recording")
-                .frame(width: 44)
-
+                .frame(width: 40)
                 Spacer()
-
-                // Transcripts button (right)
-                if let onTranscripts {
-                    Button(action: onTranscripts) {
-                        ZStack {
-                            Circle()
-                                .fill(isTranscriptsHovered ? Color.panelCharcoalSurface : Color.panelCharcoalElevated)
-                                .frame(width: 32, height: 32)
-
-                            Image(systemName: "clock.arrow.circlepath")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.panelTextPrimary)
-                        }
-                        .scaleEffect(isTranscriptsHovered ? 1.1 : 1.0)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .floatingTooltip("Transcripts")
-                    .onHover { hovering in
-                        withAnimation(.spring(response: 0.15, dampingFraction: 0.8)) {
-                            isTranscriptsHovered = hovering
-                        }
-                    }
-                    .accessibilityLabel("Browse transcripts")
-                    .frame(width: 44)
-                } else {
-                    Spacer()
-                        .frame(width: 44)
-                }
             }
+            .padding(.horizontal, 8)
         }
-        .padding(.horizontal, 8)
     }
 
     // MARK: - Helpers
@@ -320,37 +178,3 @@ struct AuroraRecordingView: View {
         return "\(seconds) second\(seconds == 1 ? "" : "s")"
     }
 }
-
-// MARK: - Aurora Dimensions
-
-struct AuroraDimensions {
-    /// Collapsed width - pure aurora
-    static let collapsedWidth: CGFloat = 72
-
-    /// Collapsed height
-    static let collapsedHeight: CGFloat = 36
-
-    /// Expanded width - aurora + timer + stop
-    static let expandedWidth: CGFloat = 200
-
-    /// Expanded height
-    static let expandedHeight: CGFloat = 44
-}
-
-// MARK: - Preview
-
-#if DEBUG
-@available(macOS 26.0, *)
-struct AuroraRecordingView_Previews: PreviewProvider {
-    static var previews: some View {
-        ZStack {
-            Color.black
-            // Note: Preview needs actual Audio instance
-            // AuroraRecordingView(audio: Audio(), onStop: {})
-            Text("Preview requires Audio instance")
-                .foregroundColor(.white)
-        }
-        .frame(width: 300, height: 200)
-    }
-}
-#endif
