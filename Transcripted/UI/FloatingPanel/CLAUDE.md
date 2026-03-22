@@ -1,6 +1,6 @@
 # FloatingPanel
 
-Morphing pill UI (Dynamic Island style) with aurora visualizations, transcript tray, and speaker naming dialog. 26 Swift files across root, Components/, and Helpers/.
+Morphing pill UI (Dynamic Island style) with aurora state views, saved notification card, transcript tray, and speaker naming dialog. 21 Swift files across root, Components/, and Helpers/.
 
 ## File Index
 
@@ -8,19 +8,19 @@ Morphing pill UI (Dynamic Island style) with aurora visualizations, transcript t
 
 | File | Purpose |
 |------|---------|
-| `PillStateManager.swift` | State machine: idle -> recording -> processing. Timeout recovery, sound feedback. |
+| `PillStateManager.swift` | State machine: idle -> recording -> processing -> saved. Timeout recovery, sound feedback. |
 | `FloatingPanelView.swift` | Root SwiftUI view. Tray mux (none/transcripts/speakerNaming), toast layer, pill content switch. |
 | `FloatingPanelController.swift` | NSWindowController. Position persistence, Combine subscriptions to Audio/TaskManager, window setup. |
 | `PillCalloutController.swift` | NSWindowController for onboarding callout positioned above the pill. |
 
-### Components/ (21 files) — see Components/CLAUDE.md
+### Components/ (16 files) — see Components/CLAUDE.md
 
 | File | Purpose |
 |------|---------|
-| `AuroraIdleView.swift` | Collapsed pill (40x20px). Hover-expands to 200x44px with Record + Transcripts buttons. |
-| `AuroraRecordingView.swift` | Recording state (180x40px). Live aurora fog: coral (mic) + teal (system). Timer + stop. |
-| `AuroraProcessingView.swift` | Processing state (180x40px). Progress-based aurora intensity. Warning at 90s+. |
-| `AuroraSuccessView.swift` | Success feedback (200x44px). Animated checkmark + "Saved" + Copy/Open buttons. |
+| `AuroraIdleView.swift` | Collapsed pill (52x26px). Hover-expands to 160x36px with Record + Transcripts buttons. |
+| `AuroraRecordingView.swift` | Recording state (160x36px). LED dots: coral (mic) + teal (system). Timer + stop. |
+| `AuroraProcessingView.swift` | Processing state (160x36px). Progress bar + status text. Warning at 90s+. |
+| `SavedPillView.swift` | Saved notification card (260x56px). Title, duration, speakers, Copy/Open buttons. Green accent. |
 | `TranscriptTrayView.swift` | Recent transcript list (280x300px max). Frosted glass. Date separators. |
 | `TranscriptRowView.swift` | Single row in transcript tray: title, relative date, duration, copy button. |
 | `TranscriptDetailView.swift` | Single transcript viewer. Groups lines by speaker with colored left borders. |
@@ -31,13 +31,8 @@ Morphing pill UI (Dynamic Island style) with aurora visualizations, transcript t
 | `ContextualErrorBanner.swift` | ContextualError enum: classifies errors by keyword into typed categories with recovery hints. |
 | `PillErrorView.swift` | Coral-tinted pill with shake animation for errors. |
 | `PillCalloutView.swift` | Coach mark callout SwiftUI view with arrow and glassmorphism background. |
-| `PillOverlayViews.swift` | FailedBadgeOverlay (red circle count) and processing pulse dot. |
-| `PillIdleView.swift` | Legacy idle pill view (mostly replaced by AuroraIdleView). |
-| `PillRecordingView.swift` | Legacy recording pill view (mostly replaced by AuroraRecordingView). |
-| `PillProcessingView.swift` | Legacy processing pill view (mostly replaced by AuroraProcessingView). |
+| `PillOverlayViews.swift` | FailedBadgeOverlay (red circle count), RecordingDotView, SystemAudioWarningIndicator. |
 | `AttentionPromptView.swift` | Silence warning + still-recording detection prompt. |
-| `CelebrationViews.swift` | CelebrationOverlay with ring/checkmark animations. |
-| `WaveformViews.swift` | EdgePeekView, WaveformMiniView, DormantWaveformView, MinimalWaveformIcon. |
 
 ### Helpers/ (1 file)
 
@@ -48,9 +43,10 @@ Morphing pill UI (Dynamic Island style) with aurora visualizations, transcript t
 ## Pill State Machine (PillStateManager.swift)
 ```
 States:
-  idle       -> 40x20px capsule (hover-expands to 200x44px)
-  recording  -> 180x40px with live aurora + timer + stop button
-  processing -> 180x40px with progress aurora + status text
+  idle       -> 52x26px capsule (hover-expands to 160x36px)
+  recording  -> 160x36px with LED dots + timer + stop button
+  processing -> 160x36px with progress bar + status text
+  saved      -> 260x56px notification card with title, duration, speakers
 
 Timing:
   morphDuration: 0.175s    cooldownDuration: 0.175s
@@ -58,7 +54,7 @@ Timing:
 
 Sounds:
   -> recording:  "Pop"     recording -> processing: "Tink"
-  processing -> idle: "Glass"    -> failed: "Basso"
+  any -> saved: "Glass"    -> failed: "Basso"
 
 Lock mechanism:
   lock()   -> prevents state changes (during review tray)
@@ -79,10 +75,11 @@ FloatingPanelView (320pt wide)
   |-- Spacer (pushes content to bottom)
   |-- SpeakerNamingView OR TranscriptTrayView (conditional)
   |-- Toast layer (ToastNotificationView, floats 60pt above pill when no tray)
-  +-- Pill content (morphs between aurora states)
+  +-- Pill content (morphs between states)
       |-- idle -> AuroraIdleView (failed badge, processing pulse dot)
-      |-- recording -> AuroraRecordingView (audio-reactive fog)
-      +-- processing -> AuroraSuccessView OR AuroraProcessingView
+      |-- recording -> AuroraRecordingView (LED dots, audio-reactive)
+      |-- processing -> AuroraProcessingView (progress bar)
+      +-- saved -> SavedPillView (title, duration, speakers, Copy/Open)
 ```
 
 ## FloatingPanelController - Window Setup
@@ -101,7 +98,7 @@ audio.$isRecording (.debounce 50ms):
 
 taskManager.$displayStatus:
   .gettingReady      -> show processing 1.5s, return to idle
-  .transcriptSaved   -> show success 2.5s (guard: !isRecording, !speakerNaming)
+  .transcriptSaved   -> transition to .saved 10s (guard: !isRecording, !speakerNaming)
   .failed            -> play error sound, show processing 4.0s
 
 taskManager.$speakerNamingRequest:
@@ -109,13 +106,11 @@ taskManager.$speakerNamingRequest:
   == nil -> panel.resignKey()
 ```
 
-## Aurora Recording Visualization (Components/AuroraRecordingView.swift)
-- **Mic fog** (coral, biased LEFT): 2 orbs, audio-reactive (audioBoost: 0.6-2.1x)
-- **System fog** (teal, biased RIGHT): 2 orbs, breathing only (not audio-reactive)
-- Smoothing factor: 0.08 at 30fps (prevents jitter)
-- Pseudo-noise: 4-wave sum for organic non-repeating motion
-- `drawingGroup()` for GPU rendering, 8px blur
-- Respects `accessibilityReduceMotion`
+## Recording Visualization (Components/AuroraRecordingView.swift)
+- **LED dots** — point light source style, coral (mic, left) + teal (system, right)
+- Core: 3-4.5px, opacity 40-100%. Halo: 8-22px diameter, opacity 8-33%, radial gradient
+- Audio level smoothing: attack 0.55 (snappy rise), decay 0.15 (quick fade)
+- Layout: stop button, mic LED, timer (14pt monospaced), system LED, transcripts button
 
 ## Speaker Naming Flow (Components/SpeakerNamingView.swift + SpeakerNamingCard.swift)
 ```
@@ -150,7 +145,6 @@ Auto-dismiss: 8 seconds. Hidden when tray is open.
 
 ## Key Splits from Original Files
 - `ErrorViews.swift` split into: ToastNotificationView, ContextualErrorBanner, PillErrorView
-- `PillViews.swift` split into: PillIdleView, PillRecordingView, PillProcessingView
 - `SpeakerNamingView.swift` split out: SpeakerNamingCard, ClipAudioPlayer
 - `TranscriptTrayView.swift` split out: TranscriptRowView
 - `PillCalloutController.swift` + `PillCalloutView.swift` are new (onboarding callout)
@@ -158,7 +152,7 @@ Auto-dismiss: 8 seconds. Hidden when tray is open.
 
 ## Design Tokens Used
 Colors: panelCharcoal, panelCharcoalElevated, panelCharcoalSurface, panelTextPrimary/Secondary/Muted, recordingCoral, auroraCoral/CoralLight, auroraTeal/TealLight, accentBlue, statusSuccessMuted, statusErrorMuted, statusWarningMuted, systemAudioIndicator
-Dimensions: PillDimensions (idleWidth:40, recordingWidth:180, trayWidth:280, trayMaxHeight:300)
+Dimensions: PillDimensions (idleWidth:40, recordingWidth:160, recordingHeight:36, savedWidth:260, savedHeight:56, trayWidth:280, trayMaxHeight:300)
 Animations: .pillMorph, .trayExpand, .pillContentFade
 
 ## All files are @MainActor (SwiftUI views + NSWindowControllers)
@@ -166,9 +160,10 @@ Animations: .pillMorph, .trayExpand, .pillContentFade
 ## Gotchas
 - Naming tray is STICKY (persists across pill states), transcript tray is NOT (auto-closes on processing)
 - Toast notification space collapses to 0pt when tray is open
-- AuroraSuccessView auto-dismiss (2.5s) is controlled by FloatingPanelController, not the view itself
+- SavedPillView auto-dismiss (10s) is controlled by FloatingPanelController, not the view itself
+- `.idle` status handler guards against collapsing pill when in `.saved` state (prevents 4s reset preempting 10s saved card)
 - Speaker colors are hash-based (name % 5 palette), user always gets .accentBlue
-- `hasSettled` in AuroraIdleView: starts false after success view to allow smooth size transition
 - Silence prompt triggers at 120s of silence (not recording duration)
-- Copy button in success view shows checkmark 1.5s then reverts
+- Copy button in SavedPillView shows checkmark 1.5s then reverts
 - PillCalloutController positions itself relative to the pill's NSWindow frame
+- Click-outside monitor (global NSEvent) dismisses transcript tray when clicking outside the panel

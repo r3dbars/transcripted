@@ -46,7 +46,6 @@
 		A100091B /* AuroraRecordingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100090B /* AuroraRecordingView.swift */; };
 		A100091C /* AuroraIdleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100090C /* AuroraIdleView.swift */; };
 		A100091D /* AuroraProcessingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100090D /* AuroraProcessingView.swift */; };
-		A100091E /* AuroraSuccessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100090E /* AuroraSuccessView.swift */; };
 		A100091F /* SpeakerNamingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100090F /* SpeakerNamingView.swift */; };
 		A10009E6 /* SpeakerNamingCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10009D6 /* SpeakerNamingCard.swift */; };
 		A10009E7 /* ClipAudioPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10009D7 /* ClipAudioPlayer.swift */; };
@@ -232,7 +231,6 @@
 		A100090B /* AuroraRecordingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuroraRecordingView.swift; sourceTree = "<group>"; };
 		A100090C /* AuroraIdleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuroraIdleView.swift; sourceTree = "<group>"; };
 		A100090D /* AuroraProcessingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuroraProcessingView.swift; sourceTree = "<group>"; };
-		A100090E /* AuroraSuccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuroraSuccessView.swift; sourceTree = "<group>"; };
 		A1000941 /* SavedPillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedPillView.swift; sourceTree = "<group>"; };
 		A100090F /* SpeakerNamingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerNamingView.swift; sourceTree = "<group>"; };
 		A10009D6 /* SpeakerNamingCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerNamingCard.swift; sourceTree = "<group>"; };
@@ -639,7 +637,6 @@
 				A100090B /* AuroraRecordingView.swift */,
 				A100090C /* AuroraIdleView.swift */,
 				A100090D /* AuroraProcessingView.swift */,
-				A100090E /* AuroraSuccessView.swift */,
 				A1000941 /* SavedPillView.swift */,
 				A100090F /* SpeakerNamingView.swift */,
 				A10009D6 /* SpeakerNamingCard.swift */,
@@ -990,7 +987,6 @@
 				A100091B /* AuroraRecordingView.swift in Sources */,
 				A100091C /* AuroraIdleView.swift in Sources */,
 				A100091D /* AuroraProcessingView.swift in Sources */,
-				A100091E /* AuroraSuccessView.swift in Sources */,
 				A1000940 /* SavedPillView.swift in Sources */,
 				A1001011 /* StatsDatabase.swift in Sources */,
 				A1001012 /* StatsService.swift in Sources */,
