@@ -331,17 +331,55 @@ struct MenuBarPanelView: View {
     private var styleSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Writing Style")
+                Text("Your Style")
                     .font(.headline)
                 Spacer()
-                Text("\(appState.styleEngine.exampleCount) ex.")
+                Text(appState.styleEngine.trainingPhaseDescription)
                     .font(.caption)
                     .foregroundColor(MenuTokens.textSecondary)
+            }
+
+            // Style Match Score card (only when there are examples)
+            if appState.styleEngine.exampleCount > 0 {
+                styleMatchCard
             }
 
             styleCard
         }
         .padding(.vertical, MenuTokens.sectionSpacing / 2)
+    }
+
+    private var styleMatchCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Style Match")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Spacer()
+                Text("\(appState.styleEngine.styleMatchScore)%")
+                    .font(.subheadline)
+                    .fontWeight(.bold)
+                    .foregroundColor(appState.styleEngine.styleMatchScore >= 75
+                        ? MenuTokens.statusGreen
+                        : MenuTokens.statusOrange)
+            }
+
+            ProgressView(value: Double(appState.styleEngine.styleMatchScore), total: 100)
+                .tint(appState.styleEngine.styleMatchScore >= 75
+                    ? MenuTokens.statusGreen
+                    : MenuTokens.statusOrange)
+
+            Text("Based on your last \(min(appState.styleEngine.exampleCount, DraftConstants.refinementDistanceWindow)) edits")
+                .font(.caption2)
+                .foregroundColor(MenuTokens.textMuted)
+        }
+        .padding(MenuTokens.cardPadding)
+        .background(MenuTokens.cardBackground)
+        .cornerRadius(MenuTokens.cardCornerRadius)
+        .overlay(
+            RoundedRectangle(cornerRadius: MenuTokens.cardCornerRadius)
+                .stroke(MenuTokens.cardBorder, lineWidth: 1)
+        )
     }
 
     @ViewBuilder

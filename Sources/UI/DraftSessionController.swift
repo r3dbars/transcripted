@@ -258,7 +258,7 @@ class DraftSessionController: ObservableObject {
             appState.drafter.lastRawText = voiceText
 
             overlayController.onConfirm = { [weak self] in
-                self?.confirmAndInject(platform: platform)
+                self?.handleReviewConfirm(platform: platform)
             }
             overlayController.onCancel = { [weak self] in
                 self?.cancelSession()
@@ -464,7 +464,45 @@ class DraftSessionController: ObservableObject {
         DraftUtils.looksLikeRefusal(text)
     }
 
-    /// Called by Enter key in review — injects the (possibly edited) text
+    /// First Enter in review: if user edited, show diff flash. If no edits, go straight to paste.
+    private func handleReviewConfirm(platform: PlatformFormatter) {
+        guard let overlayController = overlayController else { return }
+        guard isInSession else { return }
+
+        let editedText = overlayController.reviewText
+        let originalDraft = overlayController.originalDraftForComparison
+
+        if DiffSummary.hasSubstantiveEdits(original: originalDraft, edited: editedText) {
+            // User made edits — show diff flash for review
+            let description = DiffSummary.describeEdit(
+                original: originalDraft,
+                edited: editedText,
+                platform: platform.rawValue
+            )
+            overlayController.showDiffFlash(editDescription: "Draft learned: \(description)")
+
+            // Wire second Enter (from diff flash) to actually confirm
+            overlayController.onConfirm = { [weak self] in
+                self?.confirmAndInject(platform: platform)
+            }
+            // Escape from diff flash goes back to review with re-wired closures
+            overlayController.onCancel = { [weak self] in
+                guard let self = self, let oc = self.overlayController else { return }
+                oc.state = .review
+                oc.onConfirm = { [weak self] in
+                    self?.handleReviewConfirm(platform: platform)
+                }
+                oc.onCancel = { [weak self] in
+                    self?.cancelSession()
+                }
+            }
+        } else {
+            // No edits — skip diff flash, go straight to paste
+            confirmAndInject(platform: platform)
+        }
+    }
+
+    /// Called by Enter key in review (no edits) or Enter in diff flash (after edits) — injects text
     private func confirmAndInject(platform: PlatformFormatter) {
         guard let appState = appState, let overlayController = overlayController else { return }
         guard isInSession else { return }
@@ -532,6 +570,24 @@ class DraftSessionController: ObservableObject {
             Task {
                 await appState.styleEngine.regenerateStyleSummary(draftEngine: appState.localInference.draftEngine)
                 appState.logger.log("STYLE | summary updated")
+            }
+        }
+
+        // Show training toast for edited drafts and milestones
+        let wasEdited = editedText != originalDraft
+        let milestone = DiffSummary.milestoneMessage(exampleCount: appState.styleEngine.exampleCount)
+        if wasEdited && !looksLikeRefusal(originalDraft) {
+            let toastMessage = milestone ?? overlayController.editDescription
+            if !toastMessage.isEmpty {
+                Task { @MainActor [weak overlayController] in
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    overlayController?.showTrainingToast(toastMessage)
+                }
+            }
+        } else if let milestone = milestone {
+            Task { @MainActor [weak overlayController] in
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                overlayController?.showTrainingToast(milestone)
             }
         }
 

@@ -115,6 +115,17 @@ enum DraftConstants {
     /// Duration to show error messages in overlay before auto-dismiss (nanoseconds)
     static let errorDismissDelay: UInt64 = 2_500_000_000  // 2.5 seconds
 
+    // MARK: - Training Toast
+
+    /// Duration to show training toast after accepting an edited draft (nanoseconds)
+    static let trainingToastDuration: UInt64 = 2_500_000_000  // 2.5 seconds
+
+    /// Fade-out animation duration for the training toast (seconds)
+    static let trainingToastFadeDuration: Double = 0.3
+
+    /// Vertical gap between the overlay panel and the training toast (points)
+    static let trainingToastOffset: CGFloat = 8
+
     // MARK: - Local Inference
 
     /// Max tokens for local style refinement

@@ -1,5 +1,5 @@
 // OverlayContentView.swift
-// SwiftUI views for all 6 overlay states: idle, loading, listening, drafting, streaming, review
+// SwiftUI views for all 7 overlay states: idle, loading, listening, drafting, streaming, review, diffFlash
 
 import SwiftUI
 
@@ -80,6 +80,10 @@ struct OverlayContentView: View {
                     Text("Draft")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(OverlayTokens.textSecondary)
+                case (.diffFlash, _):
+                    Text("Review Edits")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(OverlayTokens.accentGreen)
                 default:
                     Text("Draft")
                         .font(.system(size: 11, weight: .semibold))
@@ -126,7 +130,7 @@ struct OverlayContentView: View {
                     Text("Esc to cancel")
                         .font(.system(size: 10))
                         .foregroundColor(OverlayTokens.textMuted)
-                case (.review, _):
+                case (.review, _), (.diffFlash, _):
                     EmptyView()
                 default:
                     EmptyView()
@@ -152,6 +156,8 @@ struct OverlayContentView: View {
             streamingContent
         case .review:
             reviewContent
+        case .diffFlash:
+            diffFlashContent
         case .idle:
             idleContent
         }
@@ -299,6 +305,25 @@ struct OverlayContentView: View {
     }
 
     @ViewBuilder
+    private var diffFlashContent: some View {
+        DiffFlashView(
+            diffOps: DiffSummary.computeWordDiff(
+                original: controller.originalDraftForComparison,
+                edited: controller.reviewText
+            ),
+            editDescription: controller.editDescription
+        )
+        .onKeyPress(keys: [.return], phases: .down) { _ in
+            controller.onConfirm?()
+            return .handled
+        }
+        .onKeyPress(keys: [.escape], phases: .down) { _ in
+            controller.onCancel?()
+            return .handled
+        }
+    }
+
+    @ViewBuilder
     private var idleContent: some View {
         Text("Press \(controller.dictationShortcutHint) or \(controller.draftShortcutHint) to start")
             .font(.system(size: 12))
@@ -310,17 +335,44 @@ struct OverlayContentView: View {
 
     @ViewBuilder
     private var bottomToolbar: some View {
-        // Only show bottom toolbar in review mode — listening/drafting/streaming
-        // status is already communicated by the header bar (waveform, spinner, etc.)
         if controller.state == .review {
             HStack {
-                if !controller.hasContext {
+                // Show "edited · teaching Draft" when user has modified the AI output
+                if !controller.originalDraftForComparison.isEmpty,
+                   controller.reviewText != controller.originalDraftForComparison {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(OverlayTokens.accentGreen)
+                            .frame(width: 5, height: 5)
+                        Text("edited \u{00B7} teaching Draft")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(OverlayTokens.accentGreen)
+                    }
+                } else if !controller.hasContext {
                     Text("voice only")
                         .font(.system(size: 10))
                         .foregroundColor(OverlayTokens.textMuted)
                 }
                 Spacer()
                 Text("\u{21A9} send \u{00B7} Esc cancel")
+                    .font(.system(size: 10))
+                    .foregroundColor(OverlayTokens.textMuted)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, OverlayTokens.contentPadding)
+            .padding(.vertical, 8)
+        } else if controller.state == .diffFlash {
+            HStack {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(OverlayTokens.accentGreen)
+                        .frame(width: 5, height: 5)
+                    Text("learning from your edits")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(OverlayTokens.accentGreen)
+                }
+                Spacer()
+                Text("\u{21A9} confirm \u{00B7} Esc go back")
                     .font(.system(size: 10))
                     .foregroundColor(OverlayTokens.textMuted)
             }

@@ -15,6 +15,7 @@ swiftc \
     Tests/MessageFilterTests.swift \
     Tests/StyleUtilsTests.swift \
     Tests/InsightCardTests.swift \
+    Tests/DiffSummaryTests.swift \
     Sources/Capture/CapturedContext.swift \
     Sources/Draft/PlatformFormatter.swift \
     Sources/Draft/DraftUtils.swift \
@@ -22,6 +23,7 @@ swiftc \
     Sources/Style/StyleUtils.swift \
     Sources/DraftConstants.swift \
     Sources/Analysis/InsightCard.swift \
+    Sources/Draft/DiffSummary.swift \
     -framework AppKit \
     -parse-as-library \
     -o build/tests \
