@@ -1,6 +1,6 @@
 # Design Components
 
-7 reusable premium UI components used across Onboarding, Settings, and FloatingPanel. All SwiftUI views.
+4 reusable premium UI components used across Settings and FloatingPanel. All SwiftUI views.
 
 ## File Index
 
@@ -8,9 +8,6 @@
 |------|---------|
 | `PremiumButton.swift` | 3-variant button (primary/secondary/ghost) with hover, press, loading states |
 | `PremiumCard.swift` | Warm cream card container with hover lift animation |
-| `BenefitCard.swift` | Icon circle with glow + title/description, used in onboarding welcome |
-| `StepProgressIndicator.swift` | Capsule-based step progress (28pt active / 10pt inactive) |
-| `PermissionCard.swift` | 4-state permission status card for onboarding permissions step |
 | `QuickTipRow.swift` | Small icon + text row for inline tips |
 | `AnimatedIcon.swift` | SF Symbol icon with configurable glow and pulse effects |
 
@@ -44,40 +41,6 @@ PremiumCard(accentColor:, enableHover:, content:)
 - Shadow: black 0.05-0.1 opacity, radius 12-20, y offset 4-8
 - Scale on hover: 1.02 (if enableHover), animation: .smooth
 
-### BenefitCard
-```swift
-BenefitCard(icon:, iconColor:, title:, description:)
-```
-- Icon: SF Symbol in colored circle with glow effect
-- Text: title (headingSmall) + description (bodySmall)
-- Hover: subtle bounce animation
-- Used in: WelcomeStep.swift (3 cascading cards)
-
-### StepProgressIndicator
-```swift
-StepProgressIndicator(currentStep:, totalSteps:)
-```
-- Active step: 28pt wide capsule, terracotta fill
-- Inactive step: 10pt wide capsule, panelCharcoalSurface fill
-- Spacing: 6pt between capsules
-- Height: 4pt
-- Used in: OnboardingContainerView.swift
-
-### PermissionCard
-```swift
-PermissionCard(icon:, title:, description:, status:, onGrant:, onOpenSettings:)
-```
-**Status states:**
-| State | Icon | Action |
-|-------|------|--------|
-| notRequested | same icon | "Grant" button |
-| pending | hourglass | spinner |
-| granted | checkmark.circle.fill (green) | none |
-| denied | xmark.circle.fill (red) | "Open Settings" button |
-
-- Icon glow: 64x64 circle, 12pt blur, statusColor.opacity(0.2)
-- Used in: PermissionsStep.swift
-
 ### QuickTipRow
 ```swift
 QuickTipRow(icon:, text:, iconColor:)
@@ -91,14 +54,12 @@ AnimatedIcon(systemName:, size:, color:, showGlow:, isPulsing:)
 ```
 - Glow: circle behind icon, blur, color.opacity(0.15)
 - Pulse: easeInOut repeating scale animation
-- Used in: WelcomeStep.swift (main hero icon)
 
 ## Relationships
-- Used by: Onboarding/Steps/ (WelcomeStep, PermissionsStep), Settings/ (various sections)
+- Used by: Settings/ (various sections), FloatingPanel/
 - Design tokens from: Spacing.swift, Radius.swift, Typography.swift, Animations.swift
 - Colors from: Colors/BrandColors.swift, Colors/PanelColors.swift
 
 ## Gotchas
 - PremiumButton hardcodes 14pt vertical padding (not from Spacing enum)
 - PremiumCard uses warmCream bg (Laws of UX light theme) — different from `.lawsCard()` modifier which uses panelCharcoalElevated (dark theme)
-- PermissionCard status transitions are driven by parent view, not internal state

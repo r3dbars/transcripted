@@ -1,38 +1,34 @@
 # Onboarding
 
-4-step first-run flow that gates access to the main app until permissions and models are ready. 7 Swift files.
+2-step first-run flow that gates access to the main app until permissions and models are ready. 5 Swift files. Dark theme matching the product.
 
 ## File Index
 
 | File | Purpose |
 |------|---------|
 | `OnboardingState.swift` | Central state manager (`@Observable`). Step progression, permission status, model readiness. |
-| `OnboardingContainerView.swift` | View orchestrator. Step switching with transitions, navigation buttons, skip confirmation. |
-| `OnboardingWindow.swift` | NSWindowController. Frosted glass background, fade-in animation, close = skip. |
-| `Steps/WelcomeStep.swift` | Welcome screen. Animated icon + 3 cascading BenefitCards. See Steps/CLAUDE.md |
-| `Steps/PreviewStep.swift` | Sample transcript preview. Animated lines showing "aha moment" before permissions. See Steps/CLAUDE.md |
-| `Steps/PermissionsStep.swift` | Permission request. Mic (required) + Screen Recording (optional). See Steps/CLAUDE.md |
+| `OnboardingContainerView.swift` | View orchestrator. Step switching with transitions, navigation buttons, skip confirmation, auto-advance. |
+| `OnboardingWindow.swift` | NSWindowController. Dark opaque background, fade-in animation, close persists completion. |
+| `Steps/PermissionsStep.swift` | Permission request. Mic + Screen Recording. See Steps/CLAUDE.md |
 | `Steps/ModelSetupStep.swift` | Model downloads. Progress bars, download speed/ETA, structured errors. See Steps/CLAUDE.md |
 
 ## Step Order
 ```
-1. Welcome     -> always canProceed
-2. Preview     -> always canProceed (sample transcript "aha moment")
-3. Permissions  -> always canProceed (mic optional but recommended)
-4. Model Setup  -> canProceed only when parakeetReady AND diarizationReady
+1. Permissions  -> always canProceed (mic optional but recommended)
+2. Model Setup  -> canProceed only when parakeetReady AND diarizationReady
 ```
 
 ## OnboardingState Key Properties
 ```swift
 // Step navigation
-currentStep: OnboardingStep (.welcome | .preview | .permissions | .modelSetup)
-stepProgress: Double (0.0-1.0), stepNumber: Int (1-4), totalSteps: 4
+currentStep: OnboardingStep (.permissions | .modelSetup)
+stepProgress: Double (0.0-1.0), stepNumber: Int (1-2), totalSteps: 2
 
 // Permissions
 microphoneStatus: AVAuthorizationStatus
 screenRecordingGranted: Bool (via CGWindowListCopyWindowInfo trick)
 microphoneGranted: Bool (computed: microphoneStatus == .authorized)
-allPermissionsGranted: Bool  // GATES APP: requires microphone only
+allPermissionsGranted: Bool  // requires microphone only
 allPermissionsFullyGranted: Bool  // Both mic + screen recording
 
 // Model setup
@@ -64,20 +60,22 @@ setupApp()
 ```
 
 ## Window Behavior
-- Size: 720x680, floating level, transparent background with frosted glass (NSVisualEffectView hudWindow)
-- Close button visible: closing = skip onboarding (calls onComplete)
+- Size: 560x520, floating level, dark opaque background (panelCharcoal, .darkAqua appearance)
+- Close button visible: closing persists `hasCompletedOnboarding` and starts the app
 - Fade-in animation: alpha 0 -> 1 over 0.3s
 - Fade-out: alpha 1 -> 0 over 0.3s, then orders out
 
 ## Step Transitions
-- Asymmetric: `.opacity + .offset(x: +/-30) + .scale(0.98)`
-- Direction tracked for forward/backward offset
+- Simple: `.opacity + .offset(x: +/-20)`
 - Respects `accessibilityReduceMotion` (opacity only)
-- Model setup auto-completes: when modelsReady, 1.5s delay then close onboarding
+
+## Auto-Advance
+- When `modelsReady` becomes true on the model setup step, auto-completes after 1.5s delay
+- Handled via `.onChange(of: state.modelsReady)` in OnboardingContainerView
 
 ## Permission Detection Details
 - **Microphone**: Direct `AVCaptureDevice.authorizationStatus(for: .audio)`
-- **Screen Recording**: Side-effect check via `CGWindowListCopyWindowInfo()` - if returns windows, permission granted. Not officially documented API.
+- **Screen Recording**: Side-effect check via `CGWindowListCopyWindowInfo()` - if returns windows, permission granted
 - Permission cards show 4 states: notRequested (Grant button), pending (spinner), granted (checkmark), denied (Settings button)
 
 ## Model Download Monitoring
@@ -85,12 +83,11 @@ setupApp()
 - Expected sizes: Parakeet ~483MB, Diarization ~36MB
 - Progress capped at 0.99 (avoids showing 100% before CoreML compilation finishes)
 - At >95%: phase changes to "Compiling models..."
-- Tips carousel: 4 tips rotating every 4s while downloading
 
 ## Skip Behavior
-- "Skip for now" link shown on Welcome + Permissions (not Model Setup)
+- "Skip for now" link shown on permissions step (not model setup)
 - Shows confirmation alert before skipping
-- Closing window via close button also triggers skip (prevents invisible app state)
+- Closing window via close button also persists completion and starts the app
 
 ## Gotchas
 - Screen recording detection is not a real API - uses CGWindowListCopyWindowInfo side-effect
@@ -99,3 +96,4 @@ setupApp()
 - Progress monitoring caps at 0.99 to prevent premature "100%" display
 - OnboardingContainerView uses `@Bindable` (not `@ObservedObject`) because state uses `@Observable` macro
 - The app does NOT initialize (no menus, no audio, no floating panel) until onboarding completes
+- Onboarding creates throwaway ParakeetService/DiarizationService for downloads; setupApp() creates fresh instances (fast cache hit)
