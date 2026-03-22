@@ -100,8 +100,6 @@ iOSInjectionProject/
 
 # Internal dev docs
 MEMORY.md
-CLAUDE.md
-**/CLAUDE.md
 
 # Xcode backups
 *.backup

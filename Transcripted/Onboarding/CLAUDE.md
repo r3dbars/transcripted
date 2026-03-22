@@ -9,9 +9,9 @@
 | `OnboardingState.swift` | Central state manager (`@Observable`). Step progression, permission status, model readiness. |
 | `OnboardingContainerView.swift` | View orchestrator. Step switching with transitions, navigation buttons, skip confirmation. |
 | `OnboardingWindow.swift` | NSWindowController. Frosted glass background, fade-in animation, close = skip. |
-| `Steps/WelcomeStep.swift` | Welcome screen. Animated icon + 3 cascading BenefitCards. |
-| `Steps/PermissionsStep.swift` | Permission request. Mic (required) + Screen Recording (optional). Status-aware cards. |
-| `Steps/ModelSetupStep.swift` | Model downloads. Progress bars, tips carousel, auto-starts download on appear. |
+| `Steps/WelcomeStep.swift` | Welcome screen. Animated icon + 3 cascading BenefitCards. See Steps/CLAUDE.md |
+| `Steps/PermissionsStep.swift` | Permission request. Mic (required) + Screen Recording (optional). See Steps/CLAUDE.md |
+| `Steps/ModelSetupStep.swift` | Model downloads. Progress bars, tips carousel. See Steps/CLAUDE.md |
 
 ## Step Order
 ```
