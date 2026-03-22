@@ -1,30 +1,12 @@
 import SwiftUI
-import AppKit
 
 // MARK: - Typography Scale
 
 extension Font {
-    // MARK: - Display Fonts (Fraunces serif)
-    static let displayLarge: Font = {
-        if let _ = NSFont(name: "Fraunces-Bold", size: 36) {
-            return .custom("Fraunces-Bold", size: 36)
-        }
-        return .system(size: 36, weight: .bold, design: .serif)
-    }()
-
-    static let displayMedium: Font = {
-        if let _ = NSFont(name: "Fraunces-SemiBold", size: 28) {
-            return .custom("Fraunces-SemiBold", size: 28)
-        }
-        return .system(size: 28, weight: .semibold, design: .serif)
-    }()
-
-    static let displaySmall: Font = {
-        if let _ = NSFont(name: "Fraunces-Medium", size: 22) {
-            return .custom("Fraunces-Medium", size: 22)
-        }
-        return .system(size: 22, weight: .medium, design: .serif)
-    }()
+    // MARK: - Display Fonts (system sans-serif)
+    static let displayLarge: Font = .system(size: 36, weight: .bold)
+    static let displayMedium: Font = .system(size: 28, weight: .semibold)
+    static let displaySmall: Font = .system(size: 22, weight: .medium)
 
     // MARK: - Heading Fonts
     static let headingLarge = Font.system(size: 20, weight: .semibold)
