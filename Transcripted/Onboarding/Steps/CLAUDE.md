@@ -1,14 +1,15 @@
 # Onboarding Steps
 
-3 SwiftUI views implementing individual onboarding steps. Hosted by OnboardingContainerView.swift (parent). All use `@Bindable var state: OnboardingState` (Observable macro).
+4 SwiftUI views implementing individual onboarding steps. Hosted by OnboardingContainerView.swift (parent). All use `@Bindable var state: OnboardingState` (Observable macro).
 
 ## File Index
 
 | File | Step | canProceed |
 |------|------|------------|
 | `WelcomeStep.swift` | 1. Welcome | Always true |
-| `PermissionsStep.swift` | 2. Permissions | Always true (mic optional but recommended) |
-| `ModelSetupStep.swift` | 3. Model Setup | Only when parakeetReady AND diarizationReady |
+| `PreviewStep.swift` | 2. Preview | Always true |
+| `PermissionsStep.swift` | 3. Permissions | Always true (mic optional but recommended) |
+| `ModelSetupStep.swift` | 4. Model Setup | Only when parakeetReady AND diarizationReady |
 
 ## Step Details
 
@@ -22,7 +23,14 @@
 - Stagger animation: 0.3s base + 0.12s per card (delays: 0.3, 0.42, 0.54s)
 - Content entry: .smooth.delay(0.1)
 
-### PermissionsStep (Step 2)
+### PreviewStep (Step 2)
+- Sample transcript showing a realistic meeting conversation
+- 6 animated transcript lines appear sequentially (0.3s stagger)
+- Two speakers: Sarah (terracotta) and Mike (processingPurple)
+- Delivers "aha moment" — shows what Transcripted produces before asking for permissions
+- No user action required, always canProceed
+
+### PermissionsStep (Step 3)
 - 2 PermissionCards (from Design/Components/):
   - **Microphone** (required): mic.fill icon. Requests via `AVCaptureDevice.requestAccess(for: .audio)`
   - **Screen Recording** (optional): rectangle.inset.filled.and.person.filled icon. Checks via `CGWindowListCopyWindowInfo()` side-effect
@@ -31,7 +39,7 @@
 - Status icons: same icon (not requested) → hourglass (pending) → checkmark.circle.fill (granted) → xmark.circle.fill (denied)
 - Success message: green checkmark 20pt, bouncy.delay(0.1) scale, .smooth.delay(0.2) text
 
-### ModelSetupStep (Step 3)
+### ModelSetupStep (Step 4)
 - Downloads 2 models in parallel (`async let`):
   - **Parakeet**: ~483MB expected (ASR model)
   - **Diarization**: ~36MB expected (speaker separation)

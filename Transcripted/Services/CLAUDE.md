@@ -8,13 +8,13 @@ ML pipeline services, speaker database, audio processing utilities, meeting dete
 
 | File | Actor | Purpose |
 |------|-------|---------|
-| `ParakeetService.swift` | @MainActor | Local ASR via FluidAudio's Parakeet TDT V3 CoreML. Batch only. |
-| `DiarizationService.swift` | @MainActor | Dual-pipeline: Sortformer (streaming) + PyAnnote (offline) |
+| `ParakeetService.swift` | @MainActor | Local ASR via FluidAudio's Parakeet TDT V3 CoreML. Batch only. Downloads via ModelDownloadService with mirror fallback. |
+| `DiarizationService.swift` | @MainActor | Dual-pipeline: Sortformer (streaming) + PyAnnote (offline). Downloads via ModelDownloadService with mirror fallback. |
 | `SpeakerDatabase.swift` | Utility queue | SQLite at ~/Documents/Transcripted/speakers.sqlite, core CRUD + schema |
 | `SpeakerEmbeddingMatcher.swift` | Utility queue | Cosine similarity matching against stored speaker profiles (vDSP-accelerated) |
 | `SpeakerProfile.swift` | -- | SpeakerProfile struct (256-dim embeddings) + SpeakerMatchResult |
 | `SpeakerProfileMerger.swift` | Utility queue | Profile name updates, merging, pruning, and name variant lookup |
-| `QwenService.swift` | @MainActor | On-device Qwen3.5-4B-4bit via mlx-swift-lm, on-demand load/unload |
+| `QwenService.swift` | @MainActor | On-device Qwen3.5-4B-4bit via mlx-swift-lm, on-demand load/unload. Pre-populates cache via ModelDownloadService with mirror fallback and progress tracking. |
 | `EmbeddingClusterer.swift` | Static | 3-stage post-processing: pairwise merge, small cluster absorption, DB-informed split |
 | `AudioResampler.swift` | Static | AVAudioConverter-based resampling to 16kHz, WAV loading, slice extraction |
 | `SpeakerClipExtractor.swift` | Static | Extract per-speaker audio clips for naming UI playback |
@@ -116,6 +116,7 @@ postProcess(segments, existingProfiles, skipPairwiseMerge):
 ## QwenService Details (QwenService.swift)
 - **Model**: `mlx-community/Qwen3.5-4B-4bit` (~2.5GB)
 - **Cache**: `~/Library/Caches/models/mlx-community/Qwen3.5-4B-4bit`
+- **Download**: Pre-populates cache via `ModelDownloadService.prePopulateQwenCache()` with HuggingFace mirror fallback, progress tracking, and disk space validation. Falls back to mlx-swift-lm's built-in download on failure.
 - **Inference**: temperature=0.1 (deterministic), maxTokens=200
 - **Prompt**: Teaches model that "Hey Jack" means speaker is talking TO Jack (listener), not IS Jack
 - **Output**: JSON keys are speaker numbers ("0", "1"), values are names or "Unknown"
@@ -152,6 +153,16 @@ Hardcoded lookup table: mike/michael/mikey, nate/nathan/nathaniel, dave/david, a
 - **SpeakerDatabase, SpeakerEmbeddingMatcher, SpeakerProfileMerger** -- dedicated utility queue (`com.transcripted.speakerdb`), NOT @MainActor
 - **ParakeetService, DiarizationService, QwenService, MeetingDetector** -- @MainActor
 - **EmbeddingClusterer, AudioResampler, SpeakerClipExtractor** -- static methods, called from pipeline threads
+
+## Model Download Resilience (via Core/ModelDownloadService.swift)
+All three ML services (Parakeet, Diarization, Qwen) use `ModelDownloadService` for resilient downloads:
+- **Mirror fallback**: Primary `huggingface.co` -> fallback `hf-mirror.com`
+- **Retry**: Exponential backoff (2s, 5s, 10s), max 3 attempts per mirror
+- **Error classification**: `DownloadErrorKind` (networkOffline, tlsFailure, timeout, diskSpace, serverError, unknown) with user-friendly messages
+- **Network check**: NWPathMonitor reachability probe with 3s timeout
+- **Disk validation**: Requires ~2.5GB free for Qwen
+- Services call `ModelDownloadService.withRetry()` for Parakeet/Diarization, `ModelDownloadService.prePopulateQwenCache()` for Qwen
+- Errors classified via `ModelDownloadService.classifyError()` and surfaced to UI as `OnboardingState.modelErrorKind`
 
 ## Gotchas
 - EMA alpha=0.15 is SLOW: takes 6-7 updates to meaningfully shift a speaker profile
