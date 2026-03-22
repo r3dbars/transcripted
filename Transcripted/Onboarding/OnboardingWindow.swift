@@ -31,6 +31,24 @@ class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     // MARK: - NSWindowDelegate
 
+    /// Intercept close during model download — show confirmation dialog
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if onboardingState.isLoadingModels {
+            let alert = NSAlert()
+            alert.messageText = "Download in Progress"
+            alert.informativeText = "AI models are still downloading. If you close now, you can retry later from the menu bar settings."
+            alert.addButton(withTitle: "Close Anyway")
+            alert.addButton(withTitle: "Keep Downloading")
+            alert.alertStyle = .warning
+
+            let response = alert.runModal()
+            if response == .alertSecondButtonReturn {
+                return false  // User chose to keep downloading
+            }
+        }
+        return true
+    }
+
     /// Handle close button: treat as "skip onboarding" so the app doesn't end up in a dead state.
     /// Without this, closing the window leaves no menu bar, no floating panel — just an invisible process.
     func windowWillClose(_ notification: Notification) {
