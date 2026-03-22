@@ -22,7 +22,10 @@ class FloatingOverlayController: ObservableObject {
 
     /// Human-readable shortcut hints for OverlayContentView (reads live from UserDefaults)
     var draftShortcutHint: String { HotkeyPreferences.displayString(for: HotkeyPreferences.draftBinding()) }
-    var dictationShortcutHint: String { HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding()) }
+    var dictationShortcutHint: String {
+        if HotkeyPreferences.rightOptionDictationEnabled() { return "Right ⌥" }
+        return HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
+    }
 
     @Published var state: OverlayState = .idle
     @Published var activeMode: SessionMode = .draft
