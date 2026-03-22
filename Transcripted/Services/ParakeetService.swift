@@ -44,9 +44,11 @@ class ParakeetService: ObservableObject {
                 models = try await AsrModels.load(from: bundlePath, version: .v3)
                 loadSource = "bundle"
             } else {
-                // Fallback: load from cache or download from HuggingFace (~600MB on first run)
+                // Download from HuggingFace (~600MB) with retry on transient failures
                 AppLogger.transcription.info("Parakeet models not bundled, loading from cache or downloading")
-                models = try await AsrModels.downloadAndLoad(version: .v3)
+                models = try await ModelDownloadService.withRetry {
+                    try await AsrModels.downloadAndLoad(version: .v3)
+                }
                 loadSource = "download"
             }
 
@@ -58,8 +60,9 @@ class ParakeetService: ObservableObject {
             let elapsed = String(format: "%.1fs", Date().timeIntervalSince(loadStart))
             AppLogger.transcription.info("Parakeet models loaded and ready", ["source": loadSource, "elapsed": elapsed])
         } catch {
-            modelState = .failed(error.localizedDescription)
-            AppLogger.transcription.error("Parakeet model initialization failed", ["error": "\(error.localizedDescription)"])
+            let kind = ModelDownloadService.classifyError(error)
+            modelState = .failed(kind.detail)
+            AppLogger.transcription.error("Parakeet model initialization failed", ["error": "\(error.localizedDescription)", "kind": kind.title])
         }
     }
 

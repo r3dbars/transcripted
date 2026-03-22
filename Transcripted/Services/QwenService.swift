@@ -73,6 +73,28 @@ class QwenService: ObservableObject {
         AppLogger.transcription.info("Qwen loading model", ["modelId": Self.modelId])
 
         do {
+            // Pre-populate cache from HuggingFace with mirror fallback before
+            // mlx-swift-lm tries its own download. If files already exist, this is a no-op.
+            if !Self.isModelCached {
+                modelState = .downloading(progress: 0)
+                do {
+                    try await ModelDownloadService.prePopulateQwenCache(
+                        modelId: Self.modelId,
+                        progressHandler: { [weak self] progress in
+                            Task { @MainActor in
+                                self?.modelState = .downloading(progress: progress)
+                            }
+                        }
+                    )
+                } catch {
+                    // Pre-population failed — fall through to mlx-swift-lm's built-in download
+                    // which may still succeed (e.g. if only the mirror API was unreachable)
+                    AppLogger.transcription.warning("Qwen pre-population failed, falling back to mlx-swift-lm download", [
+                        "error": error.localizedDescription
+                    ])
+                }
+            }
+
             let container = try await loadModelContainer(
                 id: Self.modelId,
                 progressHandler: { [weak self] progress in
@@ -86,8 +108,9 @@ class QwenService: ObservableObject {
             modelState = .ready
             AppLogger.transcription.info("Qwen model loaded and ready")
         } catch {
-            modelState = .failed(error.localizedDescription)
-            AppLogger.transcription.error("Qwen model load failed", ["error": error.localizedDescription])
+            let kind = ModelDownloadService.classifyError(error)
+            modelState = .failed(kind.detail)
+            AppLogger.transcription.error("Qwen model load failed", ["error": error.localizedDescription, "kind": kind.title])
         }
     }
 
