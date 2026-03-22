@@ -67,18 +67,59 @@ struct ModelSetupStep: View {
 
             Spacer()
 
+            // Download speed and ETA
+            if state.isLoadingModels && state.downloadSpeed > 1000 {
+                HStack(spacing: Spacing.sm) {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 12))
+                        .foregroundColor(.softCharcoal)
+
+                    Text(formatSpeed(state.downloadSpeed))
+                        .font(.caption)
+                        .foregroundColor(.softCharcoal)
+
+                    if let eta = state.estimatedTimeRemaining, eta > 0, eta < 3600 {
+                        Text("—")
+                            .font(.caption)
+                            .foregroundColor(.softCharcoal.opacity(0.5))
+                        Text("~\(formatETA(eta)) remaining")
+                            .font(.caption)
+                            .foregroundColor(.softCharcoal)
+                    }
+                }
+                .transition(.opacity)
+                .animation(.smooth, value: state.downloadSpeed)
+            }
+
             // Error state with retry
             if let error = state.modelError, !state.isLoadingModels {
                 VStack(spacing: Spacing.sm) {
-                    HStack(spacing: Spacing.xs) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 14))
-                            .foregroundColor(.recordingRed)
+                    // Structured error card
+                    VStack(spacing: Spacing.xs) {
+                        HStack(spacing: Spacing.xs) {
+                            Image(systemName: errorIcon(for: state.modelErrorKind))
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.recordingRed)
+                            Text(state.modelErrorKind?.title ?? "Download Failed")
+                                .font(.bodyMedium)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.charcoal)
+                        }
+
                         Text(error)
                             .font(.bodySmall)
                             .foregroundColor(.softCharcoal)
                             .multilineTextAlignment(.center)
                     }
+                    .padding(Spacing.md)
+                    .background(
+                        RoundedRectangle(cornerRadius: Radius.md)
+                            .fill(Color.recordingRed.opacity(0.06))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.md)
+                            .strokeBorder(Color.recordingRed.opacity(0.15), lineWidth: 1)
+                    )
 
                     PremiumButton(
                         title: "Retry Download",
@@ -142,6 +183,36 @@ struct ModelSetupStep: View {
             if !state.modelsReady && !state.isLoadingModels {
                 Task { await state.loadModels() }
             }
+        }
+    }
+
+    private func formatSpeed(_ bytesPerSecond: Double) -> String {
+        if bytesPerSecond >= 1_000_000 {
+            return String(format: "%.1f MB/s", bytesPerSecond / 1_000_000)
+        } else if bytesPerSecond >= 1_000 {
+            return String(format: "%.0f KB/s", bytesPerSecond / 1_000)
+        }
+        return ""
+    }
+
+    private func formatETA(_ seconds: TimeInterval) -> String {
+        if seconds < 60 {
+            return "\(Int(seconds))s"
+        } else {
+            let minutes = Int(seconds) / 60
+            let secs = Int(seconds) % 60
+            return "\(minutes)m \(secs)s"
+        }
+    }
+
+    private func errorIcon(for kind: DownloadErrorKind?) -> String {
+        switch kind {
+        case .networkOffline: return "wifi.slash"
+        case .tlsFailure: return "lock.slash"
+        case .timeout: return "clock.badge.exclamationmark"
+        case .diskSpace: return "externaldrive.badge.xmark"
+        case .serverError: return "server.rack"
+        default: return "exclamationmark.triangle.fill"
         }
     }
 
