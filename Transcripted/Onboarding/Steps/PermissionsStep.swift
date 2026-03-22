@@ -1,16 +1,11 @@
 import SwiftUI
 import AVFoundation
 
-/// Permissions step - Request microphone access
-/// Features clear explanations and warm aesthetic
+/// Permissions step — request microphone and screen recording access
+/// Dark theme, minimal card design matching the product
 @available(macOS 26.0, *)
 struct PermissionsStep: View {
     @Bindable var state: OnboardingState
-    @State private var titleOpacity: Double = 0
-    @State private var titleOffset: CGFloat = 10
-    @State private var cardAppeared: Bool = false
-    @State private var card2Appeared: Bool = false
-    @State private var successPulse: Bool = false
 
     var body: some View {
         VStack(spacing: Spacing.lg) {
@@ -18,28 +13,24 @@ struct PermissionsStep: View {
             VStack(spacing: Spacing.sm) {
                 Text("Quick Permissions")
                     .font(.displayMedium)
-                    .foregroundColor(.charcoal)
+                    .foregroundColor(.panelTextPrimary)
 
                 Text("We need a couple of permissions to get started")
                     .font(.bodyLarge)
-                    .foregroundColor(.softCharcoal)
+                    .foregroundColor(.panelTextSecondary)
             }
-            .opacity(titleOpacity)
-            .offset(y: titleOffset)
             .padding(.top, Spacing.lg)
 
             // Permission cards
             VStack(spacing: Spacing.md) {
-                // Microphone Permission (required)
-                OnboardingPermissionCard(
+                PermissionCard(
                     icon: "mic.fill",
                     title: "Microphone Access",
-                    description: "To hear your conversations and capture every word",
+                    description: "For recording your conversations",
                     status: mapStatus(
                         avStatus: state.microphoneStatus,
                         isLoading: state.isMicrophoneRequestInProgress
                     ),
-                    isRequired: true,
                     onGrant: {
                         Task {
                             await state.requestMicrophonePermission()
@@ -49,16 +40,12 @@ struct PermissionsStep: View {
                         state.openMicrophoneSettings()
                     }
                 )
-                .offset(x: cardAppeared ? 0 : 40)
-                .opacity(cardAppeared ? 1 : 0)
 
-                // Screen Recording Permission (recommended for system audio)
-                OnboardingPermissionCard(
+                PermissionCard(
                     icon: "rectangle.inset.filled.and.person.filled",
                     title: "Screen Recording",
-                    description: "To capture meeting audio from Zoom, Teams, and other apps",
+                    description: "For capturing meeting audio from Zoom, Teams, and other apps",
                     status: state.screenRecordingGranted ? .granted : .notRequested,
-                    isRequired: false,
                     onGrant: {
                         state.requestScreenRecordingPermission()
                     },
@@ -66,80 +53,18 @@ struct PermissionsStep: View {
                         state.openScreenRecordingSettings()
                     }
                 )
-                .offset(x: card2Appeared ? 0 : 40)
-                .opacity(card2Appeared ? 1 : 0)
             }
             .padding(.horizontal, Spacing.lg)
 
             Spacer()
-
-            // Success message when granted
-            if state.allPermissionsGranted {
-                SuccessMessage()
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.9)).combined(with: .move(edge: .bottom)),
-                        removal: .opacity
-                    ))
-                    .padding(.bottom, Spacing.lg)
-            }
-            
-            // "Continue without mic" link (only shown when mic is not granted)
-            if !state.microphoneGranted {
-                VStack(spacing: Spacing.xs) {
-                    Text("You can grant microphone access anytime from the menu bar")
-                        .font(.bodySmall)
-                        .foregroundColor(.softCharcoal.opacity(0.7))
-                    
-                    Button(action: {
-                        // User can proceed without granting
-                        state.advance()
-                    }) {
-                        Text("Continue without mic")
-                            .font(.bodyMedium)
-                            .foregroundColor(.terracotta.opacity(0.9))
-                            .underline()
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.top, Spacing.md)
-            }
         }
         .onAppear {
             state.checkPermissions()
-            animateIn()
-        }
-        .onChange(of: state.allPermissionsGranted) { _, granted in
-            if granted {
-                // Celebrate success
-                withAnimation(.bouncy) {
-                    successPulse = true
-                }
-            }
         }
     }
 
-    private func animateIn() {
-        // Title animation
-        withAnimation(.smooth.delay(0.1)) {
-            titleOpacity = 1.0
-            titleOffset = 0
-        }
-
-        // Card animations (staggered)
-        withAnimation(.smooth.delay(0.2)) {
-            cardAppeared = true
-        }
-        withAnimation(.smooth.delay(0.35)) {
-            card2Appeared = true
-        }
-    }
-
-    // Map AVAuthorizationStatus to our PermissionStatus
-    private func mapStatus(avStatus: AVAuthorizationStatus, isLoading: Bool) -> OnboardingPermissionStatus {
-        if isLoading {
-            return .pending
-        }
-
+    private func mapStatus(avStatus: AVAuthorizationStatus, isLoading: Bool) -> PermissionStatus {
+        if isLoading { return .pending }
         switch avStatus {
         case .authorized: return .granted
         case .denied, .restricted: return .denied
@@ -149,75 +74,47 @@ struct PermissionsStep: View {
     }
 }
 
-// MARK: - Onboarding Permission Status
+// MARK: - Permission Status
 
 @available(macOS 26.0, *)
-enum OnboardingPermissionStatus {
-    case notRequested
-    case pending
-    case granted
-    case denied
+private enum PermissionStatus {
+    case notRequested, pending, granted, denied
 }
 
-// MARK: - Onboarding Permission Card
+// MARK: - Permission Card
 
 @available(macOS 26.0, *)
-private struct OnboardingPermissionCard: View {
+private struct PermissionCard: View {
     let icon: String
     let title: String
     let description: String
-    let status: OnboardingPermissionStatus
-    var isRequired: Bool = true
+    let status: PermissionStatus
     let onGrant: () -> Void
     let onOpenSettings: () -> Void
 
-    @State private var isHovered = false
-    @State private var iconGlow: Double = 0
-
     var body: some View {
         HStack(spacing: Spacing.lg) {
-            // Status icon with glow
+            // Status icon
             ZStack {
-                // Glow effect
                 Circle()
-                    .fill(statusColor.opacity(0.2))
-                    .frame(width: 64, height: 64)
-                    .blur(radius: 12)
-                    .opacity(iconGlow)
+                    .fill(statusColor.opacity(0.15))
+                    .frame(width: 48, height: 48)
 
-                // Icon background
-                Circle()
-                    .fill(statusColor.opacity(0.12))
-                    .frame(width: 52, height: 52)
-
-                // Icon
                 Image(systemName: statusIcon)
-                    .font(.system(size: 22, weight: .medium))
+                    .font(.system(size: 20, weight: .medium))
                     .foregroundColor(statusColor)
                     .symbolEffect(.pulse, options: .repeating, isActive: status == .pending)
             }
 
             // Text
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                HStack(spacing: Spacing.sm) {
-                    Text(title)
-                        .font(.headingMedium)
-                        .foregroundColor(.charcoal)
-
-                    Text(isRequired ? "Required" : "Recommended")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(isRequired ? .terracotta : .softCharcoal)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule()
-                                .fill(isRequired ? Color.terracotta.opacity(0.12) : Color.softCharcoal.opacity(0.1))
-                        )
-                }
+                Text(title)
+                    .font(.headingMedium)
+                    .foregroundColor(.panelTextPrimary)
 
                 Text(description)
-                    .font(.bodyMedium)
-                    .foregroundColor(.softCharcoal)
+                    .font(.bodySmall)
+                    .foregroundColor(.panelTextSecondary)
                     .lineLimit(2)
             }
 
@@ -228,62 +125,31 @@ private struct OnboardingPermissionCard: View {
         }
         .padding(Spacing.lg)
         .background(
-            ZStack {
-                Color.warmCream
-
-                // Hover gradient
-                LinearGradient(
-                    colors: [statusColor.opacity(isHovered ? 0.06 : 0), Color.clear],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
+            RoundedRectangle(cornerRadius: Radius.lg)
+                .fill(Color.panelCharcoalElevated)
         )
-        .clipShape(RoundedRectangle(cornerRadius: Radius.lg))
         .overlay(
             RoundedRectangle(cornerRadius: Radius.lg)
-                .strokeBorder(statusColor.opacity(isHovered ? 0.25 : 0.12), lineWidth: 1)
+                .strokeBorder(Color.panelCharcoalSurface, lineWidth: 1)
         )
-        .shadow(
-            color: statusColor.opacity(isHovered ? 0.12 : 0.06),
-            radius: isHovered ? 16 : 8,
-            x: 0,
-            y: isHovered ? 6 : 2
-        )
-        .scaleEffect(isHovered ? 1.01 : 1.0)
-        .animation(.smooth, value: isHovered)
         .animation(.smooth, value: status)
-        .onHover { hovering in
-            isHovered = hovering
-            withAnimation(.smooth) {
-                iconGlow = hovering ? 1 : 0
-            }
-        }
     }
 
     private var statusColor: Color {
         switch status {
-        case .notRequested:
-            return .terracotta
-        case .pending:
-            return .processingPurple
-        case .granted:
-            return .successGreen
-        case .denied:
-            return .errorCoral
+        case .notRequested: return .terracotta
+        case .pending: return .processingPurple
+        case .granted: return .successGreen
+        case .denied: return .errorCoral
         }
     }
 
     private var statusIcon: String {
         switch status {
-        case .notRequested:
-            return icon
-        case .pending:
-            return "hourglass"
-        case .granted:
-            return "checkmark.circle.fill"
-        case .denied:
-            return "xmark.circle.fill"
+        case .notRequested: return icon
+        case .pending: return "hourglass"
+        case .granted: return "checkmark.circle.fill"
+        case .denied: return "xmark.circle.fill"
         }
     }
 
@@ -311,53 +177,12 @@ private struct OnboardingPermissionCard: View {
             .foregroundColor(.successGreen)
             .padding(.horizontal, Spacing.md)
             .padding(.vertical, Spacing.sm)
-            .background(Color.successGreen.opacity(0.12))
+            .background(Color.successGreen.opacity(0.15))
             .clipShape(Capsule())
 
         case .denied:
             PremiumButton(title: "Settings", icon: "gear", variant: .secondary) {
                 onOpenSettings()
-            }
-        }
-    }
-}
-
-// MARK: - Success Message
-
-@available(macOS 26.0, *)
-private struct SuccessMessage: View {
-    @State private var checkmarkScale: CGFloat = 0.5
-    @State private var textOpacity: Double = 0
-
-    var body: some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 20))
-                .foregroundColor(.successGreen)
-                .scaleEffect(checkmarkScale)
-
-            Text("All permissions granted!")
-                .font(.headingSmall)
-                .foregroundColor(.successGreen)
-                .opacity(textOpacity)
-
-            Text("Ready to continue.")
-                .font(.bodyMedium)
-                .foregroundColor(.softCharcoal)
-                .opacity(textOpacity)
-        }
-        .padding(.horizontal, Spacing.lg)
-        .padding(.vertical, Spacing.md)
-        .background(
-            Capsule()
-                .fill(Color.successGreen.opacity(0.1))
-        )
-        .onAppear {
-            withAnimation(.bouncy.delay(0.1)) {
-                checkmarkScale = 1.0
-            }
-            withAnimation(.smooth.delay(0.2)) {
-                textOpacity = 1.0
             }
         }
     }
@@ -369,7 +194,7 @@ private struct SuccessMessage: View {
 @available(macOS 26.0, *)
 #Preview {
     PermissionsStep(state: OnboardingState())
-        .frame(width: 720, height: 680)
-        .background(Color.cream)
+        .frame(width: 560, height: 520)
+        .background(Color.panelCharcoal)
 }
 #endif

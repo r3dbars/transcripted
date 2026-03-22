@@ -9,18 +9,14 @@ class OnboardingState {
 
     // MARK: - Step Navigation
 
-    var currentStep: OnboardingStep = .welcome
+    var currentStep: OnboardingStep = .permissions
 
     enum OnboardingStep: Int, CaseIterable {
-        case welcome = 0
-        case preview = 1
-        case permissions = 2
-        case modelSetup = 3
+        case permissions = 0
+        case modelSetup = 1
 
         var title: String {
             switch self {
-            case .welcome: return "Welcome"
-            case .preview: return "Preview"
             case .permissions: return "Permissions"
             case .modelSetup: return "Model Setup"
             }
@@ -73,10 +69,6 @@ class OnboardingState {
 
     var canProceed: Bool {
         switch currentStep {
-        case .welcome:
-            return true
-        case .preview:
-            return true
         case .permissions:
             return true
         case .modelSetup:
@@ -85,7 +77,7 @@ class OnboardingState {
     }
 
     var isFirstStep: Bool {
-        currentStep == .welcome
+        currentStep == .permissions
     }
 
     var isLastStep: Bool {
@@ -223,6 +215,8 @@ class OnboardingState {
             await monitorDownloadProgress()
         }
 
+        // These services are created just for download/validation during onboarding.
+        // setupApp() creates fresh instances afterward; the second init is a fast cache hit.
         let parakeet = ParakeetService()
         let diarization = DiarizationService()
 

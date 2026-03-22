@@ -1,6 +1,6 @@
 # Design System
 
-Shared design tokens and premium components. 23 Swift files across root, Colors/, and Components/.
+Shared design tokens and premium components. 20 Swift files across root, Colors/, and Components/.
 
 ## File Index
 
@@ -30,15 +30,12 @@ Shared design tokens and premium components. 23 Swift files across root, Colors/
 | `AuroraColors.swift` | Aurora recording indicator colors (auroraCoral, auroraTeal + light variants, systemAudioIndicator) |
 | `HeatMapColors.swift` | 5-level heat map gradient (heatMapLevel0 through heatMapLevel4) + legacy aliases |
 
-### Components/ (7 files) — see Components/CLAUDE.md
+### Components/ (4 files) — see Components/CLAUDE.md
 
 | File | Purpose |
 |------|---------|
 | `PremiumButton.swift` | 3-variant button (primary/secondary/ghost), hover effects, loading state |
 | `PremiumCard.swift` | Warm cream card container with hover lift animation |
-| `BenefitCard.swift` | Icon circle with glow + title/description, hover bounce |
-| `StepProgressIndicator.swift` | Capsule-based onboarding progress (28pt active / 10pt inactive) |
-| `PermissionCard.swift` | 4-state permission status card for onboarding |
 | `QuickTipRow.swift` | Small icon + text row for tips |
 | `AnimatedIcon.swift` | SF Symbol icon with glow/pulse effects |
 
@@ -103,9 +100,9 @@ Shared design tokens and premium components. 23 Swift files across root, Colors/
 ## Typography (`Font.` prefix — Typography.swift)
 | Token | Spec | Token | Spec |
 |-------|------|-------|------|
-| `displayLarge` | 36pt bold (Fraunces serif, system fallback) | `bodyLarge` | 16pt regular |
-| `displayMedium` | 28pt semibold (Fraunces) | `bodyMedium` | 14pt regular |
-| `displaySmall` | 22pt medium (Fraunces) | `bodySmall` | 13pt regular |
+| `displayLarge` | 36pt bold (system sans-serif) | `bodyLarge` | 16pt regular |
+| `displayMedium` | 28pt semibold (system sans-serif) | `bodyMedium` | 14pt regular |
+| `displaySmall` | 22pt medium (system sans-serif) | `bodySmall` | 13pt regular |
 | `headingLarge` | 20pt semibold | `buttonText` | 15pt semibold (tracking 0.3) |
 | `headingMedium` | 18pt semibold | `caption` | 12pt medium |
 | `headingSmall` | 16pt semibold | `tiny` | 11pt regular |
@@ -130,9 +127,6 @@ PremiumButton(title:, icon:, variant:, isLoading:, isDisabled:, action:)
 
 ## Other Premium Components (Components/)
 - `PremiumCard(accentColor:, enableHover:, content:)` - Warm cream card with hover lift
-- `BenefitCard(icon:, iconColor:, title:, description:)` - Icon circle with glow + text, hover bounce
-- `StepProgressIndicator(currentStep:, totalSteps:)` - Capsule-based (28pt active / 10pt inactive)
-- `PermissionCard(icon:, title:, description:, status:, onGrant:, onOpenSettings:)` - 4-state status card
 - `QuickTipRow(icon:, text:, iconColor:)` - Small icon + text row
 - `AnimatedIcon(systemName:, size:, color:, showGlow:, isPulsing:)` - Icon with glow/pulse effects
 
@@ -151,7 +145,7 @@ PremiumButton(title:, icon:, variant:, isLoading:, isDisabled:, action:)
 
 ## Gotchas
 - Dark mode is NOT system-integrated -- manually select dark colors per view (no @Environment(\.colorScheme) switching)
-- Fraunces serif font may not be bundled -- display fonts fall back to system serif
+- Display fonts use system sans-serif (no external font dependencies)
 - `lawsButton`/`lawsCard`/`lawsModal` radius values are separate from the xs-xxl scale
 - PremiumButton hardcodes 14pt vertical padding (not a Spacing value)
 - PremiumCard (warmCream bg) vs `.lawsCard()` modifier (panelCharcoalElevated bg) -- different aesthetics

@@ -1,17 +1,14 @@
 import SwiftUI
 
 /// Main container view for the onboarding flow
-/// Features warm cream aesthetic, smooth transitions, and premium navigation
-/// Aesthetic: Recording Studio Library - professional yet welcoming
+/// Dark theme matching the product aesthetic, 2-step flow
 @available(macOS 26.0, *)
 struct OnboardingContainerView: View {
     @Bindable var state: OnboardingState
     let onComplete: () -> Void
 
-    @State private var isTransitioning = false
     @State private var direction: TransitionDirection = .forward
 
-    // Accessibility: Respect reduce motion preference
     @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     enum TransitionDirection {
@@ -20,32 +17,11 @@ struct OnboardingContainerView: View {
 
     var body: some View {
         ZStack {
-            // Warm cream background
-            Color.cream
+            Color.panelCharcoal
                 .ignoresSafeArea()
 
-            // Subtle gradient overlay at top
-            VStack {
-                LinearGradient(
-                    colors: [Color.terracotta.opacity(0.03), Color.clear],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 200)
-                Spacer()
-            }
-            .ignoresSafeArea()
-
             VStack(spacing: 0) {
-                // Premium step indicator at top
-                StepProgressIndicator(
-                    currentStep: state.currentStep.rawValue,
-                    totalSteps: state.totalSteps
-                )
-                .padding(.top, Spacing.lg)
-                .padding(.horizontal, Spacing.xxl)
-
-                // Main content area with transitions
+                // Main content area
                 contentView
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .transition(reduceMotion ? .opacity : pageTransition)
@@ -57,15 +33,23 @@ struct OnboardingContainerView: View {
                     .padding(.horizontal, Spacing.xl)
                     .padding(.bottom, Spacing.sm)
 
-                // Skip for now link (UX: Zeigarnik Effect - don't trap users)
+                // Skip for now link
                 skipForNowLink
                     .padding(.bottom, Spacing.lg)
             }
         }
-        .frame(width: 720, height: 680)
-        .shadow(color: .black.opacity(0.15), radius: 30, y: 10)
+        .frame(width: 560, height: 520)
         .onAppear {
             state.checkPermissions()
+        }
+        .onChange(of: state.modelsReady) { _, ready in
+            if ready && state.currentStep == .modelSetup {
+                Task {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    state.completeOnboarding()
+                    onComplete()
+                }
+            }
         }
     }
 
@@ -73,12 +57,8 @@ struct OnboardingContainerView: View {
 
     private var pageTransition: AnyTransition {
         .asymmetric(
-            insertion: .opacity
-                .combined(with: .offset(x: direction == .forward ? 30 : -30))
-                .combined(with: .scale(scale: 0.98)),
-            removal: .opacity
-                .combined(with: .offset(x: direction == .forward ? -30 : 30))
-                .combined(with: .scale(scale: 0.98))
+            insertion: .opacity.combined(with: .offset(x: direction == .forward ? 20 : -20)),
+            removal: .opacity.combined(with: .offset(x: direction == .forward ? -20 : 20))
         )
     }
 
@@ -87,10 +67,6 @@ struct OnboardingContainerView: View {
     @ViewBuilder
     private var contentView: some View {
         switch state.currentStep {
-        case .welcome:
-            WelcomeStep()
-        case .preview:
-            PreviewStep()
         case .permissions:
             PermissionsStep(state: state)
         case .modelSetup:
@@ -116,10 +92,10 @@ struct OnboardingContainerView: View {
                         Text("Back")
                             .font(.bodyMedium)
                     }
-                    .foregroundColor(.softCharcoal)
+                    .foregroundColor(.panelTextSecondary)
                     .padding(.horizontal, Spacing.md)
                     .padding(.vertical, Spacing.sm)
-                    .background(Color.charcoal.opacity(0.05))
+                    .background(Color.panelCharcoalSurface)
                     .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -143,8 +119,8 @@ struct OnboardingContainerView: View {
                 .keyboardShortcut(.return, modifiers: [])
             } else {
                 PremiumButton(
-                    title: continueButtonText,
-                    icon: continueButtonIcon,
+                    title: "Continue",
+                    icon: "arrow.right",
                     variant: .primary,
                     isDisabled: !state.canProceed
                 ) {
@@ -155,32 +131,6 @@ struct OnboardingContainerView: View {
                 }
                 .keyboardShortcut(.return, modifiers: [])
             }
-        }
-    }
-
-    private var continueButtonText: String {
-        switch state.currentStep {
-        case .welcome:
-            return "Get Started"
-        case .preview:
-            return "Continue"
-        case .permissions:
-            return "Continue"
-        case .modelSetup:
-            return state.modelsReady ? "Start Using Transcripted" : "Setting Up..."
-        }
-    }
-
-    private var continueButtonIcon: String {
-        switch state.currentStep {
-        case .welcome:
-            return "arrow.right"
-        case .preview:
-            return "arrow.right"
-        case .permissions:
-            return "arrow.right"
-        case .modelSetup:
-            return state.modelsReady ? "arrow.right" : "arrow.down.circle"
         }
     }
 
@@ -196,7 +146,7 @@ struct OnboardingContainerView: View {
                 }) {
                     Text("Skip for now")
                         .font(.caption)
-                        .foregroundColor(.softCharcoal.opacity(0.6))
+                        .foregroundColor(.panelTextMuted)
                         .underline()
                 }
                 .buttonStyle(.plain)
@@ -223,5 +173,6 @@ struct OnboardingContainerView: View {
         state: OnboardingState(),
         onComplete: {}
     )
+    .background(Color.panelCharcoal)
 }
 #endif
