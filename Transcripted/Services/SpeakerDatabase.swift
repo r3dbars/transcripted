@@ -91,8 +91,17 @@ final class SpeakerDatabase {
         }
     }
 
-    /// Query SQLite for existing column names in a table
+    /// Query SQLite for existing column names in a table.
+    /// Security: PRAGMA table_info does not support parameter binding, so the table name is
+    /// validated against a compile-time allowlist before interpolation to prevent SQL injection.
     private func getColumnNames(table: String) -> Set<String> {
+        // Allowlist of known table names — reject anything not in this set
+        let allowedTables: Set<String> = ["speakers"]
+        guard allowedTables.contains(table) else {
+            AppLogger.speakers.error("getColumnNames called with unexpected table name — rejecting", ["table": table])
+            return []
+        }
+
         var columns: Set<String> = []
         var statement: OpaquePointer?
         let sql = "PRAGMA table_info(\(table));"

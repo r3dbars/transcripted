@@ -204,6 +204,9 @@ enum SpeakerClipExtractor {
         }
 
         let outputFile = try AVAudioFile(forWriting: clipURL, settings: outputFormat.settings)
+        // Security: restrict temp clip file permissions to owner-only (600) immediately after
+        // creation — speaker voice clips contain biometric data and should not be world-readable.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: clipURL.path)
         let inputFormat = audioFile.processingFormat
         let maxClipFrames = AVAudioFrameCount(8.0 * sampleRate)
         var totalFramesWritten: AVAudioFrameCount = 0
