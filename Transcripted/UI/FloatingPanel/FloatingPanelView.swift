@@ -47,6 +47,7 @@ struct FloatingPanelView: View {
     // because the panel has canBecomeKey=false, so the app usually isn't frontmost)
     @State private var escapeLocalMonitor: Any?
     @State private var escapeGlobalMonitor: Any?
+    @State private var clickOutsideMonitor: Any?
 
     // Constant frame width — prevents position shift when toggling tray
     private let frameWidth: CGFloat = PillDimensions.trayWidth + 40
@@ -359,6 +360,18 @@ struct FloatingPanelView: View {
                 }
             }
         }
+
+        // Click-outside monitor: dismiss transcript tray when clicking anywhere outside the panel
+        if clickOutsideMonitor == nil && trayState == .transcripts {
+            clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
+                DispatchQueue.main.async {
+                    guard self.trayState == .transcripts else { return }
+                    withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                        self.trayState = .none
+                    }
+                }
+            }
+        }
     }
 
     private func removeEscapeMonitor() {
@@ -369,6 +382,10 @@ struct FloatingPanelView: View {
         if let monitor = escapeGlobalMonitor {
             NSEvent.removeMonitor(monitor)
             escapeGlobalMonitor = nil
+        }
+        if let monitor = clickOutsideMonitor {
+            NSEvent.removeMonitor(monitor)
+            clickOutsideMonitor = nil
         }
     }
 
