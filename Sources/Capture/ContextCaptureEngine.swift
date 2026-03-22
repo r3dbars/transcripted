@@ -14,7 +14,7 @@ private func hotkeyHandler(
     event: EventRef?,
     userData: UnsafeMutableRawPointer?
 )-> OSStatus {
-    // Extract which hotkey fired (id: 1 = ⌥D draft, id: 2 = ⌥Space dictation)
+    // Extract which hotkey fired (id: 1 = ⌥D draft)
     guard let event = event else { return noErr }
     var hotkeyID = EventHotKeyID()
     let status = GetEventParameter(
@@ -49,23 +49,8 @@ private func hotkeyHandler(
                 session.startSession(imageData: imageData, sourceApp: frontApp)
             }
         }
-    } else if hotkeyID.id == 2 {
-        // ⌥Space — Dictation mode: NO screenshot needed (pure voice-to-text)
-        let frontApp = NSWorkspace.shared.frontmostApplication
-
-        Task { @MainActor in
-            guard let session = _sharedSessionController else { return }
-            if session.isDictating {
-                session.stopDictationAndPaste()
-            } else if session.isInSession {
-                // Cross-mode switch: cancel draft, start dictation
-                session.cancelSession()
-                session.startDictation(sourceApp: frontApp)
-            } else {
-                session.startDictation(sourceApp: frontApp)
-            }
-        }
     }
+    // Dictation (hotkey ID 2) is no longer Carbon — handled by right-Option tap monitors
     return noErr
 }
 
@@ -155,7 +140,6 @@ private final class RightOptionTapDetector {
 @MainActor
 class ContextCaptureEngine: ObservableObject {
     private var hotkeyRef: EventHotKeyRef?
-    private var dictationHotkeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
     private var hotkeyChangeObserver: NSObjectProtocol?
     private let rightOptionDetector = RightOptionTapDetector()
@@ -181,7 +165,7 @@ class ContextCaptureEngine: ObservableObject {
             return
         }
 
-        // Register for kEventHotKeyPressed
+        // Register for kEventHotKeyPressed (draft mode only — dictation uses right-Option tap)
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(
             GetApplicationEventTarget(),
@@ -192,7 +176,7 @@ class ContextCaptureEngine: ObservableObject {
             &eventHandlerRef
         )
 
-        // Register hotkeys from saved preferences (or defaults)
+        // Register draft hotkey from saved preferences (or defaults)
         registerHotkeysFromPreferences()
 
         // Install right Option tap detector for dictation toggle
@@ -217,16 +201,13 @@ class ContextCaptureEngine: ObservableObject {
         }
     }
 
-    /// Unregisters current hotkeys and re-registers with latest preferences.
-    /// Preserves the event handler — only the key+modifier bindings change.
+    /// Unregisters current draft hotkey and re-registers with latest preferences.
+    /// Preserves the event handler — only the key+modifier binding changes.
+    /// Dictation (right-Option tap) doesn't use Carbon and needs no re-registration.
     private func reRegisterHotkeys() {
         if let ref = hotkeyRef {
             UnregisterEventHotKey(ref)
             hotkeyRef = nil
-        }
-        if let ref = dictationHotkeyRef {
-            UnregisterEventHotKey(ref)
-            dictationHotkeyRef = nil
         }
         registerHotkeysFromPreferences()
 
@@ -244,10 +225,9 @@ class ContextCaptureEngine: ObservableObject {
 
     private func registerHotkeysFromPreferences() {
         let draftBinding = HotkeyPreferences.draftBinding()
-        let dictationBinding = HotkeyPreferences.dictationBinding()
         var errors: [String] = []
 
-        // Draft mode — hotkey ID 1
+        // Draft mode — hotkey ID 1 (Carbon hotkey: modifier + key)
         let draftHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 1)  // 'DRFT'
         let draftStatus = RegisterEventHotKey(
             draftBinding.keyCode,
@@ -263,21 +243,7 @@ class ContextCaptureEngine: ObservableObject {
                 message: "Draft hotkey registration failed", context: ["os_status": "\(draftStatus)"])
         }
 
-        // Dictation mode — hotkey ID 2
-        let dictationHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 2)  // 'DRFT'
-        let dictationStatus = RegisterEventHotKey(
-            dictationBinding.keyCode,
-            dictationBinding.modifiers,
-            dictationHotkeyID,
-            GetApplicationEventTarget(),
-            0,
-            &dictationHotkeyRef
-        )
-        if dictationStatus != noErr {
-            errors.append("Dictation shortcut")
-            EventReporter.shared.capture(level: .error, engine: "capture", event: "hotkey_register_failed",
-                message: "Dictation hotkey registration failed", context: ["os_status": "\(dictationStatus)"])
-        }
+        // Dictation uses right-Option tap (NSEvent monitors, not Carbon) — no registration needed here
 
         // Surface registration failures to the user via MenuBarPanel
         hotkeyError = errors.isEmpty ? nil : "\(errors.joined(separator: " and ")) failed to register"
@@ -286,7 +252,7 @@ class ContextCaptureEngine: ObservableObject {
         draftShortcutDisplay = HotkeyPreferences.displayString(for: draftBinding)
         dictationShortcutDisplay = HotkeyPreferences.rightOptionDictationEnabled()
             ? "Right ⌥"
-            : HotkeyPreferences.displayString(for: dictationBinding)
+            : HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
     }
 
     /// Handles a right Option key tap — same routing as ⌥Space (dictation toggle)
@@ -306,7 +272,6 @@ class ContextCaptureEngine: ObservableObject {
 
     deinit {
         if let ref = hotkeyRef { UnregisterEventHotKey(ref) }
-        if let ref = dictationHotkeyRef { UnregisterEventHotKey(ref) }
         if let ref = eventHandlerRef { RemoveEventHandler(ref) }
         if let observer = hotkeyChangeObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -318,10 +283,6 @@ class ContextCaptureEngine: ObservableObject {
         if let ref = hotkeyRef {
             UnregisterEventHotKey(ref)
             hotkeyRef = nil
-        }
-        if let ref = dictationHotkeyRef {
-            UnregisterEventHotKey(ref)
-            dictationHotkeyRef = nil
         }
         if let ref = eventHandlerRef {
             RemoveEventHandler(ref)

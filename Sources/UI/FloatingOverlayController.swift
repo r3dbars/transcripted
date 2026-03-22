@@ -18,6 +18,7 @@ class FloatingOverlayController: ObservableObject {
         case drafting     // Processing (vision+draft for draft mode, polish for dictation)
         case streaming    // Tokens arriving (draft mode only)
         case review       // Editable draft (draft mode only)
+        case diffFlash    // Read-only word diff of user's edits before confirming
     }
 
     /// Human-readable shortcut hints for OverlayContentView (reads live from UserDefaults)
@@ -36,6 +37,13 @@ class FloatingOverlayController: ObservableObject {
     @Published var loadingElapsedSeconds: Int = 0
     @Published var transcriptExpanded = false
     @Published var hasContext: Bool = true
+
+    /// The AI's original draft text, stored when streaming finishes.
+    /// Used for diff computation and "edited · teaching Draft" indicator.
+    @Published var originalDraftForComparison: String = ""
+
+    /// Human-readable description of what the user changed (set before entering diffFlash state)
+    @Published var editDescription: String = ""
 
     private var streamingNewlineCount = 0
 
@@ -58,6 +66,7 @@ class FloatingOverlayController: ObservableObject {
         }
         errorDismissTask?.cancel()
         loadingTimerTask?.cancel()
+        toastDismissTask?.cancel()
     }
 
     var sttRouter: STTRouter?
@@ -241,6 +250,10 @@ class FloatingOverlayController: ObservableObject {
 
     func showReview(text: String) {
         reviewText = text
+        // Store original draft for diff comparison (only set once per session)
+        if originalDraftForComparison.isEmpty {
+            originalDraftForComparison = text
+        }
         state = .review
         EventTracker.track("draft.shown", with: ["word_count": "\(text.split(whereSeparator: \.isWhitespace).count)"])
 
@@ -312,6 +325,86 @@ class FloatingOverlayController: ObservableObject {
         // Transfer to editable review
         showReview(text: streamingText)
         streamingText = ""
+    }
+
+    /// Transition from review to diff flash — shows read-only word diff before confirming.
+    func showDiffFlash(editDescription: String) {
+        self.editDescription = editDescription
+        state = .diffFlash
+        // Panel stays key-capable (user needs Enter/Escape)
+    }
+
+    // MARK: - Training Toast
+
+    private var toastPanel: FloatingOverlayPanel?
+    private var toastDismissTask: Task<Void, Never>?
+
+    /// Show a brief training toast below the main overlay.
+    /// Non-activating, mouse-through, auto-fades after 2.5s.
+    func showTrainingToast(_ message: String) {
+        guard let mainPanel = panel else { return }
+
+        if toastPanel == nil {
+            let toast = FloatingOverlayPanel(
+                contentRect: NSRect(x: 0, y: 0, width: OverlayTokens.panelWidth, height: 44),
+                styleMask: [],
+                backing: .buffered,
+                defer: true
+            )
+            toast.ignoresMouseEvents = true
+            toast.allowKeyStatus = false
+            toast.contentView?.wantsLayer = true
+            toast.contentView?.layer?.cornerRadius = 10
+            toast.contentView?.layer?.masksToBounds = true
+            toastPanel = toast
+        }
+
+        guard let toast = toastPanel else { return }
+
+        let mainFrame = mainPanel.frame
+        let toastOrigin = NSPoint(
+            x: mainFrame.origin.x,
+            y: mainFrame.origin.y - 44 - DraftConstants.trainingToastOffset
+        )
+        toast.setFrameOrigin(toastOrigin)
+        toast.setContentSize(NSSize(width: OverlayTokens.panelWidth, height: 44))
+
+        let toastView = TrainingToastView(message: message)
+        let hosting = NSHostingView(rootView: AnyView(toastView))
+        hosting.frame = toast.contentView?.bounds ?? .zero
+        hosting.autoresizingMask = [.width, .height]
+        toast.contentView?.subviews.forEach { $0.removeFromSuperview() }
+        toast.contentView?.addSubview(hosting)
+
+        toast.alphaValue = 0
+        toast.orderFrontRegardless()
+
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.2
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            toast.animator().alphaValue = 1.0
+        })
+
+        toastDismissTask?.cancel()
+        toastDismissTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: DraftConstants.trainingToastDuration)
+            } catch { return }
+            self?.dismissToast()
+        }
+    }
+
+    private func dismissToast() {
+        guard let toast = toastPanel else { return }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = DraftConstants.trainingToastFadeDuration
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            toast.animator().alphaValue = 0
+        }, completionHandler: { [weak toast] in
+            Task { @MainActor in
+                toast?.orderOut(nil)
+            }
+        })
     }
 
     /// Confirm animation: scale down + fade (content "sends" toward target app)
@@ -438,6 +531,14 @@ class FloatingOverlayController: ObservableObject {
         panel?.orderOut(nil)
         panel?.alphaValue = 1.0  // Reset for next show
         panel?.contentView?.layer?.removeAllAnimations()
+
+        // Tear down SwiftUI view tree immediately on hide. A stale NSHostingView left
+        // in the panel's hierarchy continues observing @Published property changes
+        // between sessions, accumulating corrupted AttributeGraph pointers over hours
+        // of operation. The next showPanel() → recreateHostingView() creates a fresh one.
+        hostingView?.removeFromSuperview()
+        hostingView = nil
+
         isVisible = false
         errorDismissTask?.cancel()
         errorDismissTask = nil
@@ -448,6 +549,8 @@ class FloatingOverlayController: ObservableObject {
         streamingText = ""
         errorMessage = ""
         transcriptExpanded = false  // Each new session starts collapsed
+        originalDraftForComparison = ""
+        editDescription = ""
         onConfirm = nil
         onCancel = nil
     }

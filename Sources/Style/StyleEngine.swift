@@ -272,6 +272,33 @@ class StyleEngine: ObservableObject {
         StyleUtils.shouldRefineNow(exampleCount: exampleCount, styleFileContents: styleFileContents)
     }
 
+    /// Style match score: how well Draft matches the user's style (0-100).
+    /// Higher = AI drafts need fewer edits. Based on average edit distance of recent examples.
+    var styleMatchScore: Int {
+        guard exampleCount > 0 else { return 0 }
+        let avg = StyleUtils.averageRecentEditDistance(
+            last: DraftConstants.refinementDistanceWindow,
+            styleFileContents: styleFileContents
+        )
+        return max(0, min(100, Int((1.0 - avg) * 100)))
+    }
+
+    /// Human-readable training phase description
+    var trainingPhaseDescription: String {
+        switch exampleCount {
+        case 0:
+            return "No examples yet"
+        case 1...4:
+            return "Getting started (\(exampleCount))"
+        case 5...19:
+            return "Learning (\(exampleCount))"
+        case 20...49:
+            return "Refining (\(exampleCount))"
+        default:
+            return "Mature (\(exampleCount))"
+        }
+    }
+
     // MARK: - Incremental Style Refinement
 
     /// Regenerate the Style Summary using local LLM — incremental refinement based on recent training pairs

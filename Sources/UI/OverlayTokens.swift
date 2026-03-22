@@ -11,6 +11,15 @@ enum OverlayTokens {
     static let textSecondary = Color(white: 0.55)                          // gray labels
     static let textMuted     = Color(white: 0.35)                          // placeholder
 
+    // Diff Flash colors
+    static let diffDeleteText    = Color(red: 1.0, green: 0.4, blue: 0.4)
+    static let diffDeleteBg      = Color(red: 1.0, green: 0.3, blue: 0.3, opacity: 0.15)
+    static let diffDeleteBorder  = Color(red: 1.0, green: 0.4, blue: 0.4, opacity: 0.5)
+    static let diffInsertText    = Color(red: 0.3, green: 0.9, blue: 0.5)
+    static let diffInsertBg      = Color(red: 0.3, green: 0.9, blue: 0.5, opacity: 0.15)
+    static let diffReplaceText   = Color(red: 0.4, green: 0.7, blue: 1.0)
+    static let diffReplaceBorder = Color(red: 0.4, green: 0.7, blue: 1.0, opacity: 0.5)
+
     // Layout
     static let panelWidth: CGFloat         = 480
     static let panelCompactHeight: CGFloat = 52   // header bar only, no content area
