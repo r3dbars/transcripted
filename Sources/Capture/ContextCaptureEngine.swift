@@ -69,6 +69,87 @@ private func hotkeyHandler(
     return noErr
 }
 
+// MARK: - Right Option Tap Detection
+
+/// Detects taps (press + release < 300ms, no other key pressed) on the right Option key.
+/// Uses flagsChanged monitors (global + local) to track right Option state, and a keyDown
+/// monitor to detect if the user is using right Option as a modifier (hold + press another key).
+/// Thread-safe: all state accessed only on MainActor via the ContextCaptureEngine owner.
+private final class RightOptionTapDetector {
+    private var globalFlagsMonitor: Any?
+    private var localFlagsMonitor: Any?
+    private var globalKeyDownMonitor: Any?
+    private var localKeyDownMonitor: Any?
+
+    private var rightOptionDownTime: Date?
+    private var otherKeyPressed = false
+
+    /// Right Option keyCode (kVK_RightOption = 0x3D = 61)
+    private let kRightOptionKeyCode: UInt16 = 61
+
+    /// Maximum hold duration to count as a "tap" (not a hold)
+    private let maxTapDuration: TimeInterval = 0.35
+
+    /// Called on MainActor when a valid right Option tap is detected
+    var onTap: (() -> Void)?
+
+    func install() {
+        // --- flagsChanged monitors (detect right Option press/release) ---
+        globalFlagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.handleFlagsChanged(event)
+        }
+        localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.handleFlagsChanged(event)
+            return event
+        }
+
+        // --- keyDown monitors (detect other keys pressed while right Option held) ---
+        globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] _ in
+            if self?.rightOptionDownTime != nil {
+                self?.otherKeyPressed = true
+            }
+        }
+        localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if self?.rightOptionDownTime != nil {
+                self?.otherKeyPressed = true
+            }
+            return event
+        }
+    }
+
+    private func handleFlagsChanged(_ event: NSEvent) {
+        guard event.keyCode == kRightOptionKeyCode else { return }
+
+        let optionDown = event.modifierFlags.contains(.option)
+
+        if optionDown && rightOptionDownTime == nil {
+            // Right Option just pressed
+            rightOptionDownTime = Date()
+            otherKeyPressed = false
+        } else if !optionDown, let downTime = rightOptionDownTime {
+            // Right Option just released — check if it was a tap
+            let elapsed = Date().timeIntervalSince(downTime)
+            rightOptionDownTime = nil
+
+            if elapsed <= maxTapDuration && !otherKeyPressed {
+                onTap?()
+            }
+        }
+    }
+
+    func remove() {
+        if let m = globalFlagsMonitor { NSEvent.removeMonitor(m) }
+        if let m = localFlagsMonitor { NSEvent.removeMonitor(m) }
+        if let m = globalKeyDownMonitor { NSEvent.removeMonitor(m) }
+        if let m = localKeyDownMonitor { NSEvent.removeMonitor(m) }
+        globalFlagsMonitor = nil
+        localFlagsMonitor = nil
+        globalKeyDownMonitor = nil
+        localKeyDownMonitor = nil
+        rightOptionDownTime = nil
+    }
+}
+
 // MARK: - Context Capture Engine
 
 @MainActor
@@ -77,10 +158,11 @@ class ContextCaptureEngine: ObservableObject {
     private var dictationHotkeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
     private var hotkeyChangeObserver: NSObjectProtocol?
+    private let rightOptionDetector = RightOptionTapDetector()
 
     /// Human-readable display strings for current shortcuts (drives MenuBarPanel pills + overlay hints)
     @Published var draftShortcutDisplay: String = HotkeyPreferences.displayString(for: HotkeyPreferences.draftBinding())
-    @Published var dictationShortcutDisplay: String = HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
+    @Published var dictationShortcutDisplay: String = HotkeyPreferences.rightOptionDictationEnabled() ? "Right ⌥" : HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
 
     /// Non-nil when hotkey registration failed — shown as a dismissible banner in MenuBarPanel
     @Published var hotkeyError: String?
@@ -113,6 +195,16 @@ class ContextCaptureEngine: ObservableObject {
         // Register hotkeys from saved preferences (or defaults)
         registerHotkeysFromPreferences()
 
+        // Install right Option tap detector for dictation toggle
+        if HotkeyPreferences.rightOptionDictationEnabled() {
+            rightOptionDetector.onTap = { [weak self] in
+                Task { @MainActor [weak self] in
+                    self?.handleRightOptionTap()
+                }
+            }
+            rightOptionDetector.install()
+        }
+
         // Listen for preference changes (from HotkeyRecorderView)
         hotkeyChangeObserver = NotificationCenter.default.addObserver(
             forName: .hotkeysDidChange,
@@ -137,6 +229,17 @@ class ContextCaptureEngine: ObservableObject {
             dictationHotkeyRef = nil
         }
         registerHotkeysFromPreferences()
+
+        // Re-evaluate right Option tap detector
+        rightOptionDetector.remove()
+        if HotkeyPreferences.rightOptionDictationEnabled() {
+            rightOptionDetector.onTap = { [weak self] in
+                Task { @MainActor [weak self] in
+                    self?.handleRightOptionTap()
+                }
+            }
+            rightOptionDetector.install()
+        }
     }
 
     private func registerHotkeysFromPreferences() {
@@ -181,7 +284,24 @@ class ContextCaptureEngine: ObservableObject {
 
         // Update display strings
         draftShortcutDisplay = HotkeyPreferences.displayString(for: draftBinding)
-        dictationShortcutDisplay = HotkeyPreferences.displayString(for: dictationBinding)
+        dictationShortcutDisplay = HotkeyPreferences.rightOptionDictationEnabled()
+            ? "Right ⌥"
+            : HotkeyPreferences.displayString(for: dictationBinding)
+    }
+
+    /// Handles a right Option key tap — same routing as ⌥Space (dictation toggle)
+    private func handleRightOptionTap() {
+        let frontApp = NSWorkspace.shared.frontmostApplication
+
+        guard let session = sessionController else { return }
+        if session.isDictating {
+            session.stopDictationAndPaste()
+        } else if session.isInSession {
+            session.cancelSession()
+            session.startDictation(sourceApp: frontApp)
+        } else {
+            session.startDictation(sourceApp: frontApp)
+        }
     }
 
     deinit {
@@ -191,6 +311,7 @@ class ContextCaptureEngine: ObservableObject {
         if let observer = hotkeyChangeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        rightOptionDetector.remove()
     }
 
     func unregisterHotkey() {
@@ -210,6 +331,7 @@ class ContextCaptureEngine: ObservableObject {
             NotificationCenter.default.removeObserver(observer)
             hotkeyChangeObserver = nil
         }
+        rightOptionDetector.remove()
         _sharedSessionController = nil
     }
 }
