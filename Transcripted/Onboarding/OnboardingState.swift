@@ -58,7 +58,10 @@ class OnboardingState {
     var parakeetPhase: String = ""
     var diarizationPhase: String = ""
     var modelError: String?
+    var modelErrorKind: DownloadErrorKind?
     var isLoadingModels = false
+    var downloadSpeed: Double = 0  // bytes per second (smoothed)
+    var estimatedTimeRemaining: TimeInterval?  // seconds, nil when unknown
 
     var modelsReady: Bool {
         parakeetReady && diarizationReady
@@ -186,22 +189,27 @@ class OnboardingState {
         guard !isLoadingModels else { return }
         isLoadingModels = true
         modelError = nil
+        modelErrorKind = nil
         parakeetProgress = 0
         diarizationProgress = 0
+        downloadSpeed = 0
+        estimatedTimeRemaining = nil
         parakeetPhase = "Downloading..."
         diarizationPhase = "Downloading..."
 
         // Pre-flight: check network connectivity before starting long downloads
         let networkAvailable = await ModelDownloadService.checkNetworkReachability()
         if !networkAvailable {
-            modelError = DownloadErrorKind.networkOffline.title + ": " + DownloadErrorKind.networkOffline.detail
+            modelErrorKind = .networkOffline
+            modelError = DownloadErrorKind.networkOffline.detail
             isLoadingModels = false
             return
         }
 
         // Pre-flight: check disk space (~700MB needed for Parakeet + Diarization)
         if let available = ModelDownloadService.availableDiskSpace(), available < 1_000_000_000 {
-            modelError = DownloadErrorKind.diskSpace.title + ": " + DownloadErrorKind.diskSpace.detail
+            modelErrorKind = .diskSpace
+            modelError = DownloadErrorKind.diskSpace.detail
             isLoadingModels = false
             return
         }
@@ -246,7 +254,7 @@ class OnboardingState {
     private static let expectedParakeetSize: Double = 483_000_000  // ~461 MB on disk
     private static let expectedDiarizationSize: Double = 36_000_000 // ~34 MB on disk
 
-    /// Poll the FluidAudio Models directory to estimate download progress
+    /// Poll the FluidAudio Models directory to estimate download progress, speed, and ETA
     @MainActor
     private func monitorDownloadProgress() async {
         let modelsDir = FileManager.default.homeDirectoryForCurrentUser
@@ -254,12 +262,44 @@ class OnboardingState {
         let parakeetDir = modelsDir.appendingPathComponent("parakeet-tdt-0.6b-v3-coreml")
         let diarizationDir = modelsDir.appendingPathComponent("speaker-diarization-coreml")
 
+        // Speed tracking state
+        var previousTotalBytes: Double = 0
+        var previousTimestamp: Date = Date()
+        var smoothedSpeed: Double = 0
+        let smoothingFactor = 0.3  // EMA: 30% new, 70% old
+
         while !Task.isCancelled {
             let parakeetBytes = Self.directorySize(parakeetDir)
             let diarizationBytes = Self.directorySize(diarizationDir)
+            let totalBytes = parakeetBytes + diarizationBytes
 
             let pProgress = min(parakeetBytes / Self.expectedParakeetSize, 0.99)
             let sProgress = min(diarizationBytes / Self.expectedDiarizationSize, 0.99)
+
+            // Compute download speed
+            let now = Date()
+            let elapsed = now.timeIntervalSince(previousTimestamp)
+            if elapsed > 0.1 {  // Avoid division by near-zero
+                let bytesPerSecond = (totalBytes - previousTotalBytes) / elapsed
+                if bytesPerSecond > 0 {
+                    smoothedSpeed = smoothedSpeed == 0
+                        ? bytesPerSecond
+                        : smoothedSpeed * (1 - smoothingFactor) + bytesPerSecond * smoothingFactor
+                }
+                previousTotalBytes = totalBytes
+                previousTimestamp = now
+            }
+
+            downloadSpeed = smoothedSpeed
+
+            // Compute ETA from remaining bytes and smoothed speed
+            let totalExpected = Self.expectedParakeetSize + Self.expectedDiarizationSize
+            let remainingBytes = max(0, totalExpected - totalBytes)
+            if smoothedSpeed > 1000 {  // Only show ETA when speed is meaningful
+                estimatedTimeRemaining = remainingBytes / smoothedSpeed
+            } else {
+                estimatedTimeRemaining = nil
+            }
 
             if !parakeetReady {
                 parakeetProgress = pProgress
