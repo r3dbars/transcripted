@@ -83,5 +83,32 @@ User presses Cmd+Shift+R (global hotkey)
 - **Diarization**: PyAnnote offline + Sortformer streaming, bundled or via FluidAudio
 - **Qwen**: On-demand download (~2.5GB), loads/unloads to manage memory
 
+## CLAUDE.md Navigation (15 files)
+Every folder with ≥2 Swift files has its own CLAUDE.md with file index, reference data, and gotchas.
+
+| Path | Scope |
+|------|-------|
+| `CLAUDE.md` (this file) | Architecture overview, pipeline, entry points |
+| `Transcripted/Core/CLAUDE.md` | Audio, transcription, stats, error handling, coordinators |
+| `Transcripted/Core/Logging/CLAUDE.md` | Logger subsystems, JSON Lines format, rolling behavior |
+| `Transcripted/Services/CLAUDE.md` | ML services, speaker DB, thresholds, pipeline order |
+| `Transcripted/Services/Protocols/CLAUDE.md` | 7 DI protocols with full signatures |
+| `Transcripted/Design/CLAUDE.md` | All token values (colors, spacing, radius, typography, animations) |
+| `Transcripted/Design/Colors/CLAUDE.md` | Complete color reference with hex/HSB values |
+| `Transcripted/Design/Components/CLAUDE.md` | PremiumButton, PremiumCard, PermissionCard specs |
+| `Transcripted/UI/FloatingPanel/CLAUDE.md` | Pill state machine, Combine subscriptions, tray states |
+| `Transcripted/UI/FloatingPanel/Components/CLAUDE.md` | Aurora views, speaker naming, error toast, celebrations |
+| `Transcripted/UI/Settings/CLAUDE.md` | @AppStorage keys, window config, speaker operations |
+| `Transcripted/UI/Settings/Sections/CLAUDE.md` | 7 section views with per-section detail |
+| `Transcripted/UI/Settings/Components/CLAUDE.md` | CoralToggle, button styles, input components |
+| `Transcripted/Onboarding/CLAUDE.md` | 3-step flow, OnboardingState properties, integration |
+| `Transcripted/Onboarding/Steps/CLAUDE.md` | Welcome, Permissions, ModelSetup step implementations |
+
+**Single-file folders** (covered by parent CLAUDE.md):
+- `UI/MenuBar/MenuBarStatRow.swift` — Custom NSView (250x22), used in status bar dropdown
+- `UI/FloatingPanel/Helpers/LawsComponents.swift` — AnimatedDotsView, LawsButton, FloatingTooltipModifier, Triangle
+- `UI/Settings/Models/SettingsNavigationState.swift` — Migration state + vestigial SettingsTab
+- `UI/FailedTranscriptionsView.swift` — Standalone window for failed transcription management (600x400 min)
+
 ## Documentation
 See CONTRIBUTING.md for full development guidelines.

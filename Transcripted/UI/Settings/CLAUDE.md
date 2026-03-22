@@ -13,7 +13,7 @@ Single-page scrolling settings dashboard. 18 Swift files across root, Components
 | `SettingsWindowController.swift` | NSWindow management, triggers migration check on show |
 | `MigrationOverlayView.swift` | Progress overlay for transcript migration (dark scrim + progress bar) |
 
-### Sections/ (7 files)
+### Sections/ (7 files) — see Sections/CLAUDE.md
 
 | File | Purpose |
 |------|---------|
@@ -25,7 +25,7 @@ Single-page scrolling settings dashboard. 18 Swift files across root, Components
 | `SpeakerIntelligenceSection.swift` | Qwen toggle, model status/download, progress bar |
 | `AIServicesSection.swift` | Parakeet + Sortformer status badges, "100% local" info |
 
-### Components/ (6 files)
+### Components/ (6 files) — see Components/CLAUDE.md
 
 | File | Purpose |
 |------|---------|
@@ -40,13 +40,55 @@ Single-page scrolling settings dashboard. 18 Swift files across root, Components
 
 | File | Purpose |
 |------|---------|
-| `SettingsNavigationState.swift` | Migration state tracking + unused SettingsTab enum (vestigial) |
+| `SettingsNavigationState.swift` | Migration state tracking + unused SettingsTab enum (vestigial tabbed design) |
+
+## @AppStorage Keys
+| Key | Type | Default | UI Element |
+|-----|------|---------|------------|
+| `transcriptSaveLocation` | String | "" (-> ~/Documents/Transcripted/) | Path picker (ProfileSection) |
+| `userName` | String | "" | Text field (ProfileSection) |
+| `enableQwenSpeakerInference` | Bool | true | Toggle (SpeakerIntelligenceSection) |
+| `enableObsidianFormat` | Bool | false | (used by TranscriptSaver, no UI toggle here) |
+| `autoRecordMeetings` | Bool | false | Toggle (MeetingDetectionSection) |
+| `enableUISounds` | Bool | true | Read via UserDefaults (not @AppStorage) |
+
+## Speaker Management Operations (SpeakersSection.swift)
+```
+Edit: tap name -> inline TextField -> commit on Return
+  -> SpeakerDatabase.shared.setDisplayName(id:, name:, source: "user_manual")
+  -> TranscriptSaver.retroactivelyUpdateSpeaker(dbId:, newName:)
+
+Delete: click delete -> "Delete?" confirm -> "Yes"
+  -> SpeakerClipExtractor.deletePersistedClip(for:)
+  -> SpeakerDatabase.shared.deleteSpeaker(id:)
+
+Play: toggle clip playback via ClipAudioPlayer (requires persistent clip)
+```
+Delayed reload pattern: `DispatchQueue.main.asyncAfter(deadline: .now() + 0.1)` after DB writes.
+
+## Migration System (MigrationOverlayView.swift + SettingsWindowController.swift)
+- Trigger: `SettingsWindowController.showWindow()` calls `checkMigrationNeeded()`
+- Flow: `TranscriptScanner.migrateExistingTranscripts { progress, status in ... }`
+- UI: `MigrationOverlayView` with progress bar + percentage, dark overlay
+- Completion: Alert with "Successfully imported X transcripts"
+
+## Window Configuration (SettingsWindowController.swift)
+- Size: 500x400 (min) to 800x900 (max), centered
+- Appearance: `.darkAqua`, titlebar transparent, title hidden
+- Background: `NSColor(Color.panelCharcoal)`
+- Not released when closed (`isReleasedWhenClosed = false`)
 
 ## Key Splits from Original Files
-
 - `SettingsContainerView.swift` had 8 inline sections -- each extracted to its own file in Sections/
 - `SettingsSectionCard.swift` had 4 helper components + 4 button styles -- components split into separate files in Components/
 - `SettingsTopBar.swift` was extracted from the top of SettingsContainerView
+- `MigrationOverlayView.swift` was extracted from SettingsContainerView
+
+## Design Tokens Used
+Colors: panelCharcoal/Elevated/Surface, panelText Primary/Secondary/Muted, recordingCoral, accentBlue, attentionGreen, warningAmber, errorRed
+Spacing: xs, sm, ms, md, lg, xl
+Radius: lawsCard, lawsButton
+Typography: .headingLarge, .headingMedium, .bodyMedium, .bodySmall, .caption
 
 ## All files are @MainActor (SwiftUI views)
 
@@ -55,4 +97,5 @@ Single-page scrolling settings dashboard. 18 Swift files across root, Components
 - Single `editingId: UUID?` means only one speaker can be edited at a time
 - `enableObsidianFormat` is stored in AppStorage but has no UI toggle in settings
 - SettingsNavigationState has an unused `SettingsTab` enum + `selectTab()` method (vestigial tabbed design)
+- Avatar: first letter of displayName in circle, "?" fallback if no name
 - Qwen download in settings caches the model then immediately calls `unload()` to free memory
