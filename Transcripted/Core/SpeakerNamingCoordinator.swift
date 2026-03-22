@@ -63,8 +63,8 @@ extension TranscriptionTaskManager {
         // Clear the naming request
         self.speakerNamingRequest = nil
 
-        // Re-show success view after naming so user can Copy/Open the transcript
-        self.lastSavedTranscriptURL = transcriptURL
+        // Re-show saved pill after naming so user can Copy/Open the transcript
+        self.populateSavedMetadata(from: transcriptURL)
         self.displayStatus = .transcriptSaved
         self.scheduleStatusReset(delay: 8)
 

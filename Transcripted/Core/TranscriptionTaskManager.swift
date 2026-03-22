@@ -16,6 +16,9 @@ class TranscriptionTaskManager: ObservableObject {
     @Published var backgroundTaskCount: Int = 0
     @Published var speakerNamingRequest: SpeakerNamingRequest? = nil
     @Published var lastSavedTranscriptURL: URL? = nil
+    @Published var lastSavedTitle: String? = nil
+    @Published var lastSavedDuration: String? = nil
+    @Published var lastSavedSpeakerCount: Int? = nil
 
     var activeTasks: [UUID: Task<Void, Never>] = [:]
     let transcription = Transcription()
@@ -80,7 +83,7 @@ class TranscriptionTaskManager: ObservableObject {
                 )
 
                 await MainActor.run {
-                    self.lastSavedTranscriptURL = transcriptURL
+                    self.populateSavedMetadata(from: transcriptURL)
                     self.displayStatus = .transcriptSaved
                     self.scheduleStatusReset(delay: 4)
                 }
@@ -161,7 +164,7 @@ class TranscriptionTaskManager: ObservableObject {
                 failedTranscriptionManager.removeFailedTranscription(id: failedId)
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
-                self.lastSavedTranscriptURL = transcriptURL
+                self.populateSavedMetadata(from: transcriptURL)
                 self.displayStatus = .transcriptSaved
                 self.scheduleStatusReset(delay: 4)
             }
@@ -207,6 +210,29 @@ class TranscriptionTaskManager: ObservableObject {
         activeCount = 0
         backgroundTaskCount = 0
         displayStatus = .idle
+    }
+
+    /// Populate saved transcript metadata from the file's YAML frontmatter
+    func populateSavedMetadata(from url: URL) {
+        lastSavedTranscriptURL = url
+        let name = url.deletingPathExtension().lastPathComponent
+        lastSavedTitle = name.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
+        guard let raw = try? String(contentsOf: url, encoding: .utf8),
+              raw.hasPrefix("---"),
+              let endRange = raw.range(of: "\n---\n", range: raw.index(raw.startIndex, offsetBy: 3)..<raw.endIndex)
+        else { return }
+        let yaml = String(raw[raw.index(raw.startIndex, offsetBy: 4)..<endRange.lowerBound])
+        var speakers = 0
+        for line in yaml.components(separatedBy: "\n") {
+            let parts = line.split(separator: ":", maxSplits: 1).map { String($0).trimmingCharacters(in: .whitespaces) }
+            guard parts.count == 2 else { continue }
+            switch parts[0] {
+            case "duration": lastSavedDuration = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            case "mic_speakers", "system_speakers": speakers += Int(parts[1]) ?? 0
+            default: break
+            }
+        }
+        lastSavedSpeakerCount = speakers
     }
 
     func scheduleStatusReset(delay: TimeInterval = 3) {
