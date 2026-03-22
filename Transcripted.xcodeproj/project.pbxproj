@@ -27,9 +27,7 @@
 		A1000100 /* OnboardingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000101 /* OnboardingState.swift */; };
 		A1000102 /* OnboardingWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000103 /* OnboardingWindow.swift */; };
 		A1000104 /* OnboardingContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000105 /* OnboardingContainerView.swift */; };
-		A1000106 /* WelcomeStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000107 /* WelcomeStep.swift */; };
 		A1000112 /* PermissionsStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000113 /* PermissionsStep.swift */; };
-		A1000114 /* PreviewStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000115 /* PreviewStep.swift */; };
 		A1000301 /* DateParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000311 /* DateParser.swift */; };
 		A1000500 /* TranscriptUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000501 /* TranscriptUtils.swift */; };
 		A1000803 /* DateFormattingHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000802 /* DateFormattingHelper.swift */; };
@@ -130,7 +128,6 @@
 		NF9008569A01 /* AppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF9008569A00 /* AppServices.swift */; };
 		NFFEFD8D0101 /* AudioCaptureEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFFEFD8D0100 /* AudioCaptureEngine.swift */; };
 		NFD627BDC701 /* AuroraColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFD627BDC700 /* AuroraColors.swift */; };
-		NF8144D59501 /* BenefitCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF8144D59500 /* BenefitCard.swift */; };
 		NFAF5A4F9501 /* BrandColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFAF5A4F9500 /* BrandColors.swift */; };
 		NF41955C0101 /* CardModifiers.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF41955C0100 /* CardModifiers.swift */; };
 		NF5158DACB01 /* ColorHex.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF5158DACB00 /* ColorHex.swift */; };
@@ -143,7 +140,6 @@
 		NF61402F6901 /* MenuBarManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF61402F6900 /* MenuBarManager.swift */; };
 		NF47F85CA501 /* NotificationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF47F85CA500 /* NotificationCoordinator.swift */; };
 		NFB580BBD701 /* PanelColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFB580BBD700 /* PanelColors.swift */; };
-		NFDDE18C5901 /* PermissionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFDDE18C5900 /* PermissionCard.swift */; };
 		NFE418BA5101 /* PremiumButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFE418BA5100 /* PremiumButton.swift */; };
 		NF9515C01901 /* PremiumCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF9515C01900 /* PremiumCard.swift */; };
 		NF5C44D9E301 /* QuickTipRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF5C44D9E300 /* QuickTipRow.swift */; };
@@ -164,7 +160,6 @@
 		NF9441096401 /* StatsDatabaseModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF9441096400 /* StatsDatabaseModels.swift */; };
 		NF5C99141501 /* StatsDatabaseQueries.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF5C99141500 /* StatsDatabaseQueries.swift */; };
 		NFF4CABC3601 /* StatsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFF4CABC3600 /* StatsStore.swift */; };
-		NF7D0658F701 /* StepProgressIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF7D0658F700 /* StepProgressIndicator.swift */; };
 		NF642BF65101 /* SurfaceColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF642BF65100 /* SurfaceColors.swift */; };
 		NF2BB74F9301 /* TranscriptFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF2BB74F9300 /* TranscriptFormatter.swift */; };
 		NF1665D66701 /* TranscriptMetadataBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF1665D66700 /* TranscriptMetadataBuilder.swift */; };
@@ -213,9 +208,7 @@
 		A1000101 /* OnboardingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingState.swift; sourceTree = "<group>"; };
 		A1000103 /* OnboardingWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingWindow.swift; sourceTree = "<group>"; };
 		A1000105 /* OnboardingContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingContainerView.swift; sourceTree = "<group>"; };
-		A1000107 /* WelcomeStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeStep.swift; sourceTree = "<group>"; };
 		A1000113 /* PermissionsStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsStep.swift; sourceTree = "<group>"; };
-		A1000115 /* PreviewStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewStep.swift; sourceTree = "<group>"; };
 		A1000311 /* DateParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParser.swift; sourceTree = "<group>"; };
 		A1000501 /* TranscriptUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptUtils.swift; sourceTree = "<group>"; };
 		A1000802 /* DateFormattingHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateFormattingHelper.swift; sourceTree = "<group>"; };
@@ -311,7 +304,6 @@
 		NF9008569A00 /* AppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppServices.swift; sourceTree = "<group>"; };
 		NFFEFD8D0100 /* AudioCaptureEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCaptureEngine.swift; sourceTree = "<group>"; };
 		NFD627BDC700 /* AuroraColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuroraColors.swift; sourceTree = "<group>"; };
-		NF8144D59500 /* BenefitCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BenefitCard.swift; sourceTree = "<group>"; };
 		NFAF5A4F9500 /* BrandColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandColors.swift; sourceTree = "<group>"; };
 		NF41955C0100 /* CardModifiers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardModifiers.swift; sourceTree = "<group>"; };
 		NF5158DACB00 /* ColorHex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorHex.swift; sourceTree = "<group>"; };
@@ -324,7 +316,6 @@
 		NF61402F6900 /* MenuBarManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarManager.swift; sourceTree = "<group>"; };
 		NF47F85CA500 /* NotificationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationCoordinator.swift; sourceTree = "<group>"; };
 		NFB580BBD700 /* PanelColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelColors.swift; sourceTree = "<group>"; };
-		NFDDE18C5900 /* PermissionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionCard.swift; sourceTree = "<group>"; };
 		NFE418BA5100 /* PremiumButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumButton.swift; sourceTree = "<group>"; };
 		NF9515C01900 /* PremiumCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumCard.swift; sourceTree = "<group>"; };
 		NF5C44D9E300 /* QuickTipRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickTipRow.swift; sourceTree = "<group>"; };
@@ -345,7 +336,6 @@
 		NF9441096400 /* StatsDatabaseModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsDatabaseModels.swift; sourceTree = "<group>"; };
 		NF5C99141500 /* StatsDatabaseQueries.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsDatabaseQueries.swift; sourceTree = "<group>"; };
 		NFF4CABC3600 /* StatsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsStore.swift; sourceTree = "<group>"; };
-		NF7D0658F700 /* StepProgressIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepProgressIndicator.swift; sourceTree = "<group>"; };
 		NF642BF65100 /* SurfaceColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceColors.swift; sourceTree = "<group>"; };
 		NF2BB74F9300 /* TranscriptFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptFormatter.swift; sourceTree = "<group>"; };
 		NF1665D66700 /* TranscriptMetadataBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptMetadataBuilder.swift; sourceTree = "<group>"; };
@@ -379,7 +369,6 @@
 				NF9008569A01 /* AppServices.swift in Sources */,
 				NFFEFD8D0101 /* AudioCaptureEngine.swift in Sources */,
 				NFD627BDC701 /* AuroraColors.swift in Sources */,
-				NF8144D59501 /* BenefitCard.swift in Sources */,
 				NFAF5A4F9501 /* BrandColors.swift in Sources */,
 				NF41955C0101 /* CardModifiers.swift in Sources */,
 				NF5158DACB01 /* ColorHex.swift in Sources */,
@@ -392,7 +381,6 @@
 				NF61402F6901 /* MenuBarManager.swift in Sources */,
 				NF47F85CA501 /* NotificationCoordinator.swift in Sources */,
 				NFB580BBD701 /* PanelColors.swift in Sources */,
-				NFDDE18C5901 /* PermissionCard.swift in Sources */,
 				NFE418BA5101 /* PremiumButton.swift in Sources */,
 				NF9515C01901 /* PremiumCard.swift in Sources */,
 				NF5C44D9E301 /* QuickTipRow.swift in Sources */,
@@ -413,7 +401,6 @@
 				NF9441096401 /* StatsDatabaseModels.swift in Sources */,
 				NF5C99141501 /* StatsDatabaseQueries.swift in Sources */,
 				NFF4CABC3601 /* StatsStore.swift in Sources */,
-				NF7D0658F701 /* StepProgressIndicator.swift in Sources */,
 				NF642BF65101 /* SurfaceColors.swift in Sources */,
 				NF2BB74F9301 /* TranscriptFormatter.swift in Sources */,
 				NF1665D66701 /* TranscriptMetadataBuilder.swift in Sources */,
@@ -564,8 +551,6 @@
 		A1000121 /* Steps */ = {
 			isa = PBXGroup;
 			children = (
-				A1000107 /* WelcomeStep.swift */,
-				A1000115 /* PreviewStep.swift */,
 				A1000113 /* PermissionsStep.swift */,
 				BF26FA6ED2054F3DCF8D0B45 /* ModelSetupStep.swift */,
 			);
@@ -810,9 +795,6 @@
 			children = (
 				NFE418BA5100 /* PremiumButton.swift */,
 				NF9515C01900 /* PremiumCard.swift */,
-				NF8144D59500 /* BenefitCard.swift */,
-				NF7D0658F700 /* StepProgressIndicator.swift */,
-				NFDDE18C5900 /* PermissionCard.swift */,
 				NF5C44D9E300 /* QuickTipRow.swift */,
 				NF0EF2C81600 /* AnimatedIcon.swift */,
 			);
@@ -970,9 +952,7 @@
 				A1000100 /* OnboardingState.swift in Sources */,
 				A1000102 /* OnboardingWindow.swift in Sources */,
 				A1000104 /* OnboardingContainerView.swift in Sources */,
-				A1000106 /* WelcomeStep.swift in Sources */,
 				A1000112 /* PermissionsStep.swift in Sources */,
-				A1000114 /* PreviewStep.swift in Sources */,
 				A1000301 /* DateParser.swift in Sources */,
 				A1000803 /* DateFormattingHelper.swift in Sources */,
 				A1000911 /* PillStateManager.swift in Sources */,
@@ -1052,9 +1032,6 @@
 				NF36F2651501 /* Dimensions.swift in Sources */,
 				NFE418BA5101 /* PremiumButton.swift in Sources */,
 				NF9515C01901 /* PremiumCard.swift in Sources */,
-				NF8144D59501 /* BenefitCard.swift in Sources */,
-				NF7D0658F701 /* StepProgressIndicator.swift in Sources */,
-				NFDDE18C5901 /* PermissionCard.swift in Sources */,
 				NF5C44D9E301 /* QuickTipRow.swift in Sources */,
 				NF0EF2C81601 /* AnimatedIcon.swift in Sources */,
 				NFC1C920E301 /* DisplayStatus.swift in Sources */,
