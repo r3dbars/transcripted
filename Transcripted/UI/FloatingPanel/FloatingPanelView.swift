@@ -220,7 +220,7 @@ struct FloatingPanelView: View {
         }
         .onDisappear { removeEscapeMonitor() }
         // Trigger error toasts based on displayStatus changes
-        // (Success is now shown in-pill via AuroraSuccessView, not as overlay)
+        // (Success is now shown in-pill via SavedPillView, not as overlay)
         // Note: Use Task to debounce rapid status changes and prevent
         // "action tried to update multiple times per frame" warning
         .onChange(of: taskManager.displayStatus) { _, newStatus in
