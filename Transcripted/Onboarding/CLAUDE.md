@@ -1,6 +1,6 @@
 # Onboarding
 
-3-step first-run flow that gates access to the main app until permissions and models are ready. 6 Swift files.
+4-step first-run flow that gates access to the main app until permissions and models are ready. 7 Swift files.
 
 ## File Index
 
@@ -10,21 +10,23 @@
 | `OnboardingContainerView.swift` | View orchestrator. Step switching with transitions, navigation buttons, skip confirmation. |
 | `OnboardingWindow.swift` | NSWindowController. Frosted glass background, fade-in animation, close = skip. |
 | `Steps/WelcomeStep.swift` | Welcome screen. Animated icon + 3 cascading BenefitCards. See Steps/CLAUDE.md |
+| `Steps/PreviewStep.swift` | Sample transcript preview. Animated lines showing "aha moment" before permissions. See Steps/CLAUDE.md |
 | `Steps/PermissionsStep.swift` | Permission request. Mic (required) + Screen Recording (optional). See Steps/CLAUDE.md |
-| `Steps/ModelSetupStep.swift` | Model downloads. Progress bars, tips carousel. See Steps/CLAUDE.md |
+| `Steps/ModelSetupStep.swift` | Model downloads. Progress bars, download speed/ETA, structured errors. See Steps/CLAUDE.md |
 
 ## Step Order
 ```
 1. Welcome     -> always canProceed
-2. Permissions  -> always canProceed (mic optional but recommended)
-3. Model Setup  -> canProceed only when parakeetReady AND diarizationReady
+2. Preview     -> always canProceed (sample transcript "aha moment")
+3. Permissions  -> always canProceed (mic optional but recommended)
+4. Model Setup  -> canProceed only when parakeetReady AND diarizationReady
 ```
 
 ## OnboardingState Key Properties
 ```swift
 // Step navigation
-currentStep: OnboardingStep (.welcome | .permissions | .modelSetup)
-stepProgress: Double (0.0-1.0), stepNumber: Int (1-3), totalSteps: 3
+currentStep: OnboardingStep (.welcome | .preview | .permissions | .modelSetup)
+stepProgress: Double (0.0-1.0), stepNumber: Int (1-4), totalSteps: 4
 
 // Permissions
 microphoneStatus: AVAuthorizationStatus
@@ -38,6 +40,8 @@ parakeetReady: Bool, diarizationReady: Bool, modelsReady: Bool (computed: both t
 parakeetProgress: Double, diarizationProgress: Double (0.0-1.0)
 parakeetPhase: String, diarizationPhase: String ("Downloading...", "Compiling models...", "Ready")
 isLoadingModels: Bool, modelError: String? (concatenated errors with \n)
+modelErrorKind: DownloadErrorKind? (structured error classification from ModelDownloadService)
+downloadSpeed: Double (bytes/sec, smoothed), estimatedTimeRemaining: TimeInterval? (nil when unknown)
 ```
 
 ## OnboardingState Key Methods

@@ -11,12 +11,12 @@ Menu bar-only macOS app for real-time system audio transcription. Pipeline: Core
 - **Protocols**: 7 service protocols in `Services/Protocols/` (SpeechToTextEngine, DiarizationEngine, SpeakerStore, etc.)
 - **DI**: `AppServices` container in `Core/AppServices.swift`
 
-## Folder Map (~140 Swift files, agent-first: max ~300 lines per file, single responsibility)
-- **Core/** (46 files): Audio capture (Audio + 3 extensions), transcription pipeline (TaskManager + 3 extensions), transcript saving (4 files), stats DB (3 files), failed transcription retry, logging, coordinators (Hotkey, MenuBar, Notification, Window, Recording)
+## Folder Map (~143 Swift files, agent-first: max ~300 lines per file, single responsibility)
+- **Core/** (47 files): Audio capture (Audio + 3 extensions), transcription pipeline (TaskManager + 3 extensions), transcript saving (4 files), stats DB (3 files), model downloads (ModelDownloadService), failed transcription retry, logging, coordinators (Hotkey, MenuBar, Notification, Window, Recording)
 - **Services/** (18 files): ML services (11 files) + Protocols/ subdirectory (7 service protocols)
 - **UI/FloatingPanel/** (26 files): Morphing pill UI, aurora visualizations (4 files), transcript tray (3 files), speaker naming (3 files), Components/ (21 files), Helpers/ (1 file)
 - **UI/Settings/** (18 files): Settings container + Sections/ (7 section views) + Components/ (6 reusable components) + Models/ (1 file)
-- **Onboarding/** (6 files): 3-step first-run flow (Welcome -> Permissions -> Model Setup)
+- **Onboarding/** (7 files): 4-step first-run flow (Welcome -> Preview -> Permissions -> Model Setup)
 - **Design/** (23 files): Colors/ (6 files), Components/ (7 premium components), root tokens (10 files: Spacing, Radius, Typography, Animations, Shadows, ViewModifiers, Gradients, Dimensions, Accessibility, CardModifiers)
 
 ## Build & Test
@@ -82,6 +82,7 @@ User presses Cmd+Shift+R (global hotkey)
 - **Parakeet**: Bundled or downloaded from HuggingFace (~600MB), 16kHz target rate
 - **Diarization**: PyAnnote offline + Sortformer streaming, bundled or via FluidAudio
 - **Qwen**: On-demand download (~2.5GB), loads/unloads to manage memory
+- **Download resilience**: All downloads use `ModelDownloadService` with HuggingFace mirror fallback (`hf-mirror.com`), retry with exponential backoff, and structured error classification
 
 ## CLAUDE.md Navigation (15 files)
 Every folder with ≥2 Swift files has its own CLAUDE.md with file index, reference data, and gotchas.
@@ -101,8 +102,8 @@ Every folder with ≥2 Swift files has its own CLAUDE.md with file index, refere
 | `Transcripted/UI/Settings/CLAUDE.md` | @AppStorage keys, window config, speaker operations |
 | `Transcripted/UI/Settings/Sections/CLAUDE.md` | 7 section views with per-section detail |
 | `Transcripted/UI/Settings/Components/CLAUDE.md` | CoralToggle, button styles, input components |
-| `Transcripted/Onboarding/CLAUDE.md` | 3-step flow, OnboardingState properties, integration |
-| `Transcripted/Onboarding/Steps/CLAUDE.md` | Welcome, Permissions, ModelSetup step implementations |
+| `Transcripted/Onboarding/CLAUDE.md` | 4-step flow, OnboardingState properties, integration |
+| `Transcripted/Onboarding/Steps/CLAUDE.md` | Welcome, Preview, Permissions, ModelSetup step implementations |
 
 **Single-file folders** (covered by parent CLAUDE.md):
 - `UI/MenuBar/MenuBarStatRow.swift` — Custom NSView (250x22), used in status bar dropdown
