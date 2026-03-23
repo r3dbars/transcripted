@@ -65,7 +65,7 @@ setupApp()
 
 ## Window Behavior
 - Size: 640x560, floating level, dark opaque background (panelCharcoal, .darkAqua appearance)
-- Close button visible: closing persists `hasCompletedOnboarding` and starts the app
+- Close button visible: closing persists `hasCompletedOnboarding` and starts the app. During model download, shows confirmation dialog ("Download in Progress") before allowing close
 - Fade-in animation: alpha 0 -> 1 over 0.3s
 - Fade-out: alpha 1 -> 0 over 0.3s, then orders out
 
