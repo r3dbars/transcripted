@@ -21,9 +21,9 @@ Audio capture pipeline, transcription orchestration, file saving, stats tracking
 | `TranscriptionTypes.swift` | -- | TranscriptionUtterance, TranscriptionResult, PipelineError, SpeakerNamingEntry |
 | `DisplayStatus.swift` | -- | Enum for UI progress phases (idle/gettingReady/transcribing/finishing/saved/failed) |
 | `SpeakerMatchingService.swift` | nonisolated | In-memory speaker embedding matching, mean embedding computation |
-| `SpeakerNamingCoordinator.swift` | @MainActor | Speaker naming flow completion, applies names to DB and transcript |
+| `SpeakerNamingCoordinator.swift` | @MainActor | Speaker naming flow completion, applies names to DB and transcript, merges profiles by name |
 | `QwenLifecycleManager.swift` | @MainActor | Qwen model pre-load on recording start, timeout, memory checks |
-| `TranscriptSaver.swift` | Static | Markdown + YAML output, serial queue for file writes |
+| `TranscriptSaver.swift` | Static | Markdown + YAML output, serial queue for file writes, path validation, 0o600 permissions on temp clips |
 | `TranscriptFormatter.swift` | Static | YAML escaping, source label formatting, markdown generation |
 | `TranscriptMetadataBuilder.swift` | -- | RecordingHealthInfo struct, YAML frontmatter metadata construction |
 | `RetroactiveSpeakerUpdater.swift` | Static | Updates all transcripts when a speaker is renamed in Settings |
@@ -36,7 +36,7 @@ Audio capture pipeline, transcription orchestration, file saving, stats tracking
 | `StatsDatabaseModels.swift` | -- | RecordingMetadata, DailyActivity data models |
 | `StatsDatabaseQueries.swift` | NOT @MainActor | Complex queries and aggregations for StatsDatabase |
 | `StatsService.swift` | @MainActor | Stats aggregation for dashboard UI |
-| `ModelDownloadService.swift` | Static | HuggingFace download with mirror fallback (hf-mirror.com), retry with exponential backoff, Qwen cache pre-population, structured error classification (DownloadErrorKind) |
+| `ModelDownloadService.swift` | Static | HuggingFace download with mirror fallback (hf-mirror.com), retry with exponential backoff, Qwen cache pre-population, structured error classification (DownloadErrorKind), isSafeModelFilename() path traversal validation |
 | `RecordingValidator.swift` | Static | Pre-recording checks (disk space, permissions, save path) |
 | `FailedTranscription.swift` | -- | Model for retryable failed transcriptions |
 | `FailedTranscriptionManager.swift` | @MainActor | Retry queue, persists to JSON, auto-cleans permanent failures |
