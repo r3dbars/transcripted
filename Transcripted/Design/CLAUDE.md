@@ -1,6 +1,6 @@
 # Design System
 
-Shared design tokens and premium components. 20 Swift files across root, Colors/, and Components/.
+Shared design tokens and premium components. 21 Swift files across root, Colors/, and Components/.
 
 ## File Index
 
@@ -30,12 +30,13 @@ Shared design tokens and premium components. 20 Swift files across root, Colors/
 | `AuroraColors.swift` | Aurora recording indicator colors (auroraCoral, auroraTeal + light variants, systemAudioIndicator) |
 | `HeatMapColors.swift` | 5-level heat map gradient (heatMapLevel0 through heatMapLevel4) + legacy aliases |
 
-### Components/ (4 files) — see Components/CLAUDE.md
+### Components/ (5 files) — see Components/CLAUDE.md
 
 | File | Purpose |
 |------|---------|
 | `PremiumButton.swift` | 3-variant button (primary/secondary/ghost), hover effects, loading state |
 | `PremiumCard.swift` | Warm cream card container with hover lift animation |
+| `BenefitCard.swift` | Icon circle + title/description row, dark card style, used in onboarding welcome |
 | `QuickTipRow.swift` | Small icon + text row for tips |
 | `AnimatedIcon.swift` | SF Symbol icon with glow/pulse effects |
 
@@ -127,6 +128,7 @@ PremiumButton(title:, icon:, variant:, isLoading:, isDisabled:, action:)
 
 ## Other Premium Components (Components/)
 - `PremiumCard(accentColor:, enableHover:, content:)` - Warm cream card with hover lift
+- `BenefitCard(icon:, iconColor:, title:, description:)` - Dark card with icon circle + text row, used in onboarding
 - `QuickTipRow(icon:, text:, iconColor:)` - Small icon + text row
 - `AnimatedIcon(systemName:, size:, color:, showGlow:, isPulsing:)` - Icon with glow/pulse effects
 

@@ -21,7 +21,7 @@ Morphing pill UI (Dynamic Island style) with aurora state views, saved notificat
 | `AuroraRecordingView.swift` | Recording state (160x36px). LED dots: coral (mic) + teal (system). Timer + stop. |
 | `AuroraProcessingView.swift` | Processing state (160x36px). Progress bar + status text. Warning at 90s+. |
 | `SavedPillView.swift` | Saved notification card (260x56px). Title, duration, speakers, Copy/Open buttons. Green accent. |
-| `TranscriptTrayView.swift` | Recent transcript list (280x300px max). Frosted glass. Date separators. |
+| `TranscriptTrayView.swift` | Recent transcript list (280x300px max). Frosted glass. Date separators. Click-outside dismissal. |
 | `TranscriptRowView.swift` | Single row in transcript tray: title, relative date, duration, copy button. |
 | `TranscriptDetailView.swift` | Single transcript viewer. Groups lines by speaker with colored left borders. |
 | `SpeakerNamingView.swift` | Post-recording speaker naming. Play clips, confirm/reject names, merge profiles. |

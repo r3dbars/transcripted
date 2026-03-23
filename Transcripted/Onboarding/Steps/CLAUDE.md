@@ -14,7 +14,7 @@
 ## Step Details
 
 ### WelcomeStep (Step 1)
-- Hero icon: waveform.circle.fill, 56pt, flat terracotta color
+- Hero icon: waveform.circle.fill, 56pt, flat recordingCoral color
 - 3 BenefitCards (from Design/Components/):
   - "Transcribe Meetings" (waveform icon)
   - "Identify Speakers" (person.2.fill icon)
@@ -24,7 +24,7 @@
 ### PreviewStep (Step 2)
 - Sample transcript showing a realistic meeting conversation
 - 6 transcript lines with staggered reveal (0.2s per line)
-- Two speakers: Sarah (terracotta) and Mike (processingPurple)
+- Two speakers: Sarah (recordingCoral) and Mike (processingPurple)
 - Delivers "aha moment" — shows what Transcripted produces before asking for permissions
 - No user action required, always canProceed
 
