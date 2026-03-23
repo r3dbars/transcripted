@@ -12,14 +12,12 @@ swiftc \
     Tests/CapturedContextTests.swift \
     Tests/PlatformFormatterTests.swift \
     Tests/RefusalDetectionTests.swift \
-    Tests/MessageFilterTests.swift \
     Tests/StyleUtilsTests.swift \
     Tests/InsightCardTests.swift \
     Tests/DiffSummaryTests.swift \
     Sources/Capture/CapturedContext.swift \
     Sources/Draft/PlatformFormatter.swift \
     Sources/Draft/DraftUtils.swift \
-    Sources/Messages/MessageFilter.swift \
     Sources/Style/StyleUtils.swift \
     Sources/DraftConstants.swift \
     Sources/Analysis/InsightCard.swift \
