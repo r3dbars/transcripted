@@ -177,10 +177,8 @@ class FloatingPanelController: NSWindowController, NSWindowDelegate {
                 case .transcriptSaved:
                     // Don't interrupt an active recording with success from a background task
                     guard !self.audio.isRecording else { break }
-                    // Don't show saved card if speaker naming is pending —
-                    // the naming tray IS the post-transcription UI
-                    guard self.taskManager.speakerNamingRequest == nil else { break }
                     // Show saved notification card with transcript info
+                    // (naming tray is sticky and overlays the pill, so both can coexist)
                     self.pillStateManager.transition(to: .saved)
                     // Return to idle after 10 seconds — enough time to read and act
                     self.scheduleReturnToIdle(delay: 10.0)

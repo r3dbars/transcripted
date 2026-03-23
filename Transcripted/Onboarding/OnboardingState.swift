@@ -9,14 +9,18 @@ class OnboardingState {
 
     // MARK: - Step Navigation
 
-    var currentStep: OnboardingStep = .permissions
+    var currentStep: OnboardingStep = .welcome
 
     enum OnboardingStep: Int, CaseIterable {
-        case permissions = 0
-        case modelSetup = 1
+        case welcome = 0
+        case preview = 1
+        case permissions = 2
+        case modelSetup = 3
 
         var title: String {
             switch self {
+            case .welcome: return "Welcome"
+            case .preview: return "Preview"
             case .permissions: return "Permissions"
             case .modelSetup: return "Model Setup"
             }
@@ -69,15 +73,19 @@ class OnboardingState {
 
     var canProceed: Bool {
         switch currentStep {
-        case .permissions:
+        case .welcome:
             return true
+        case .preview:
+            return true
+        case .permissions:
+            return microphoneGranted
         case .modelSetup:
             return modelsReady
         }
     }
 
     var isFirstStep: Bool {
-        currentStep == .permissions
+        currentStep == .welcome
     }
 
     var isLastStep: Bool {

@@ -1,28 +1,32 @@
 # Onboarding
 
-2-step first-run flow that gates access to the main app until permissions and models are ready. 5 Swift files. Dark theme matching the product.
+4-step first-run flow that gates access to the main app until permissions and models are ready. 7 Swift files. Dark theme matching the product.
 
 ## File Index
 
 | File | Purpose |
 |------|---------|
 | `OnboardingState.swift` | Central state manager (`@Observable`). Step progression, permission status, model readiness. |
-| `OnboardingContainerView.swift` | View orchestrator. Step switching with transitions, navigation buttons, skip confirmation, auto-advance. |
-| `OnboardingWindow.swift` | NSWindowController. Dark opaque background, fade-in animation, close persists completion. |
-| `Steps/PermissionsStep.swift` | Permission request. Mic + Screen Recording. See Steps/CLAUDE.md |
+| `OnboardingContainerView.swift` | View orchestrator. Opacity transitions, circle progress dots, standard nav buttons, auto-advance. |
+| `OnboardingWindow.swift` | NSWindowController. 640x560 window, dark opaque background, fade-in animation, close = skip. |
+| `Steps/WelcomeStep.swift` | Welcome screen. Icon + 3 BenefitCards with simple fade-in. See Steps/CLAUDE.md |
+| `Steps/PreviewStep.swift` | Sample transcript preview. Staggered line reveal showing "aha moment". See Steps/CLAUDE.md |
+| `Steps/PermissionsStep.swift` | Permission request. Mic (REQUIRED to proceed) + Screen Recording (optional). See Steps/CLAUDE.md |
 | `Steps/ModelSetupStep.swift` | Model downloads. Progress bars, download speed/ETA, structured errors. See Steps/CLAUDE.md |
 
 ## Step Order
 ```
-1. Permissions  -> always canProceed (mic optional but recommended)
-2. Model Setup  -> canProceed only when parakeetReady AND diarizationReady
+1. Welcome     -> always canProceed
+2. Preview     -> always canProceed (sample transcript "aha moment")
+3. Permissions  -> canProceed only when microphoneGranted (mic REQUIRED)
+4. Model Setup  -> canProceed only when parakeetReady AND diarizationReady
 ```
 
 ## OnboardingState Key Properties
 ```swift
 // Step navigation
-currentStep: OnboardingStep (.permissions | .modelSetup)
-stepProgress: Double (0.0-1.0), stepNumber: Int (1-2), totalSteps: 2
+currentStep: OnboardingStep (.welcome | .preview | .permissions | .modelSetup)
+stepProgress: Double (0.0-1.0), stepNumber: Int (1-4), totalSteps: 4
 
 // Permissions
 microphoneStatus: AVAuthorizationStatus
@@ -60,23 +64,26 @@ setupApp()
 ```
 
 ## Window Behavior
-- Size: 560x520, floating level, dark opaque background (panelCharcoal, .darkAqua appearance)
+- Size: 640x560, floating level, dark opaque background (panelCharcoal, .darkAqua appearance)
 - Close button visible: closing persists `hasCompletedOnboarding` and starts the app
 - Fade-in animation: alpha 0 -> 1 over 0.3s
 - Fade-out: alpha 1 -> 0 over 0.3s, then orders out
 
 ## Step Transitions
-- Simple: `.opacity + .offset(x: +/-20)`
-- Respects `accessibilityReduceMotion` (opacity only)
+- Opacity-only transitions with `.easeInOut(duration: 0.3)`
+- No directional offset or scale — simple fade between steps
 
 ## Auto-Advance
 - When `modelsReady` becomes true on the model setup step, auto-completes after 1.5s delay
 - Handled via `.onChange(of: state.modelsReady)` in OnboardingContainerView
 
 ## Permission Detection Details
-- **Microphone**: Direct `AVCaptureDevice.authorizationStatus(for: .audio)`
-- **Screen Recording**: Side-effect check via `CGWindowListCopyWindowInfo()` - if returns windows, permission granted
-- Permission cards show 4 states: notRequested (Grant button), pending (spinner), granted (checkmark), denied (Settings button)
+- **Microphone**: Direct `AVCaptureDevice.authorizationStatus(for: .audio)` — REQUIRED to proceed past step 3
+- **Screen Recording**: Side-effect check via `CGWindowListCopyWindowInfo()` - if returns windows, permission granted. Not officially documented API.
+- Permission rows show 4 states: notRequested (Grant button), pending (spinner), granted (checkmark), denied (Settings button)
+- Denied state shows guidance text: "Enable it in System Settings to continue"
+- Continue button DISABLED until mic permission granted (canProceed = microphoneGranted)
+- No "Continue without mic" bypass
 
 ## Model Download Monitoring
 - Watches FluidAudio model directories for file size growth
@@ -84,10 +91,11 @@ setupApp()
 - Progress capped at 0.99 (avoids showing 100% before CoreML compilation finishes)
 - At >95%: phase changes to "Compiling models..."
 
-## Skip Behavior
-- "Skip for now" link shown on permissions step (not model setup)
-- Shows confirmation alert before skipping
-- Closing window via close button also persists completion and starts the app
+## Navigation
+- Progress indicator: 4 circle dots (8pt), recordingCoral filled for completed/active, panelCharcoalSurface for upcoming
+- Nav buttons: standard SwiftUI `.borderedProminent` / `.bordered` tinted recordingCoral
+- No "Skip for now" link — user must complete onboarding properly
+- Close button still calls completeOnboarding + onComplete as safety valve (prevents invisible app state)
 
 ## Gotchas
 - Screen recording detection is not a real API - uses CGWindowListCopyWindowInfo side-effect
@@ -96,4 +104,5 @@ setupApp()
 - Progress monitoring caps at 0.99 to prevent premature "100%" display
 - OnboardingContainerView uses `@Bindable` (not `@ObservedObject`) because state uses `@Observable` macro
 - The app does NOT initialize (no menus, no audio, no floating panel) until onboarding completes
+- Microphone permission is REQUIRED — canProceed returns false on permissions step until mic is granted
 - Onboarding creates throwaway ParakeetService/DiarizationService for downloads; setupApp() creates fresh instances (fast cache hit)
