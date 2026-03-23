@@ -222,8 +222,4 @@ struct SavedPillView: View {
         }
         return label
     }
-
-    // MARK: - Hover State
-
-    var isPillHovered: Bool { isHovered }
 }
