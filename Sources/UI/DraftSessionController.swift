@@ -258,7 +258,7 @@ class DraftSessionController: ObservableObject {
             appState.drafter.lastRawText = voiceText
 
             overlayController.onConfirm = { [weak self] in
-                self?.handleReviewConfirm(platform: platform)
+                self?.confirmAndInject(platform: platform)
             }
             overlayController.onCancel = { [weak self] in
                 self?.cancelSession()
@@ -574,15 +574,14 @@ class DraftSessionController: ObservableObject {
         }
 
         // Show training toast for edited drafts and milestones
-        let wasEdited = editedText != originalDraft
+        let wasEdited = DiffSummary.hasSubstantiveEdits(original: originalDraft, edited: editedText)
         let milestone = DiffSummary.milestoneMessage(exampleCount: appState.styleEngine.exampleCount)
         if wasEdited && !looksLikeRefusal(originalDraft) {
-            let toastMessage = milestone ?? overlayController.editDescription
-            if !toastMessage.isEmpty {
-                Task { @MainActor [weak overlayController] in
-                    try? await Task.sleep(nanoseconds: 200_000_000)
-                    overlayController?.showTrainingToast(toastMessage)
-                }
+            let description = DiffSummary.describeEdit(original: originalDraft, edited: editedText, platform: platform.rawValue)
+            let toastMessage = milestone ?? "Draft learned: \(description)"
+            Task { @MainActor [weak overlayController] in
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                overlayController?.showTrainingToast(toastMessage)
             }
         } else if let milestone = milestone {
             Task { @MainActor [weak overlayController] in
