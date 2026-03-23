@@ -222,6 +222,7 @@ class TranscriptionTaskManager: ObservableObject {
             let parts = line.split(separator: ":", maxSplits: 1).map { String($0).trimmingCharacters(in: .whitespaces) }
             guard parts.count == 2 else { continue }
             switch parts[0] {
+            case "title": lastSavedTitle = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\""))
             case "duration": lastSavedDuration = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\""))
             case "mic_speakers", "system_speakers": speakers += Int(parts[1]) ?? 0
             default: break
