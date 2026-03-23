@@ -331,7 +331,11 @@ class FloatingOverlayController: ObservableObject {
     func showDiffFlash(editDescription: String) {
         self.editDescription = editDescription
         state = .diffFlash
-        // Panel stays key-capable (user needs Enter/Escape)
+        // Panel must be key-capable for Enter/Escape handlers in diffFlashContent
+        if let panel = panel {
+            panel.allowKeyStatus = true
+            panel.makeKeyAndOrderFront(nil)
+        }
     }
 
     // MARK: - Training Toast
@@ -411,6 +415,12 @@ class FloatingOverlayController: ObservableObject {
     func hideWithConfirmAnimation(completion: (() -> Void)? = nil) {
         guard let panel = panel else { completion?(); _performHide(); return }
         panel.ignoresMouseEvents = true  // Prevent gesture dispatch during teardown
+
+        // Demote panel from key BEFORE animation — the completion callback fires a ⌘V
+        // paste event, and if the panel is still key its TextEditor intercepts it
+        panel.allowKeyStatus = false
+        panel.resignKey()
+        panel.orderOut(nil)
 
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.14

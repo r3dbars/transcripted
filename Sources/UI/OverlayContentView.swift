@@ -7,6 +7,7 @@ struct OverlayContentView: View {
     @ObservedObject var sttRouter: STTRouter
     @ObservedObject var controller: FloatingOverlayController
     @FocusState private var isReviewFocused: Bool
+    @FocusState private var isDiffFlashFocused: Bool
     /// Content area and dividers are hidden when listening + collapsed (compact header-only bar)
     private var showContentArea: Bool {
         if controller.state == .idle { return false }
@@ -157,7 +158,7 @@ struct OverlayContentView: View {
         case .review:
             reviewContent
         case .diffFlash:
-            diffFlashContent
+            reviewContent  // diffFlash now shows live in review — fall through to same view
         case .idle:
             idleContent
         }
@@ -273,53 +274,134 @@ struct OverlayContentView: View {
         .padding(.vertical, 12)
     }
 
-    @ViewBuilder
-    private var reviewContent: some View {
-        TextEditor(text: $controller.reviewText)
-            .focused($isReviewFocused)
-            .font(.system(size: 13))
-            .foregroundColor(OverlayTokens.textPrimary)
-            .scrollContentBackground(.hidden)
-            .padding(.horizontal, OverlayTokens.contentPadding - 4)
-            .padding(.vertical, 8)
-            .onKeyPress(keys: [.return], phases: .down) { keyPress in
-                if keyPress.modifiers.contains(.shift) {
-                    return .ignored  // Shift+Enter inserts newline
-                }
-                guard !controller.reviewText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                    return .handled  // Swallow Enter on empty text — don't paste nothing
-                }
-                controller.onConfirm?()
-                return .handled
-            }
-            .onKeyPress(keys: [.escape], phases: .down) { _ in
-                controller.onCancel?()
-                return .handled
-            }
-            .onAppear {
-                // Small delay lets the panel finish becoming key before we claim focus
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    isReviewFocused = true
-                }
-            }
+    /// Whether the user has made substantive edits to the AI draft
+    private var hasEdits: Bool {
+        !controller.originalDraftForComparison.isEmpty &&
+        DiffSummary.hasSubstantiveEdits(
+            original: controller.originalDraftForComparison,
+            edited: controller.reviewText
+        )
     }
 
     @ViewBuilder
-    private var diffFlashContent: some View {
-        DiffFlashView(
-            diffOps: DiffSummary.computeWordDiff(
-                original: controller.originalDraftForComparison,
-                edited: controller.reviewText
-            ),
-            editDescription: controller.editDescription
-        )
-        .onKeyPress(keys: [.return], phases: .down) { _ in
-            controller.onConfirm?()
-            return .handled
+    private var reviewContent: some View {
+        VStack(spacing: 0) {
+            TextEditor(text: $controller.reviewText)
+                .focused($isReviewFocused)
+                .font(.system(size: 13))
+                .foregroundColor(OverlayTokens.textPrimary)
+                .scrollContentBackground(.hidden)
+                .padding(.horizontal, OverlayTokens.contentPadding - 4)
+                .padding(.vertical, 8)
+                .onKeyPress(keys: [.return], phases: .down) { keyPress in
+                    if keyPress.modifiers.contains(.shift) {
+                        return .ignored
+                    }
+                    guard !controller.reviewText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        return .handled
+                    }
+                    controller.onConfirm?()
+                    return .handled
+                }
+                .onKeyPress(keys: [.escape], phases: .down) { _ in
+                    controller.onCancel?()
+                    return .handled
+                }
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        isReviewFocused = true
+                    }
+                }
+
+            // Live diff — appears below TextEditor when user has edited the draft
+            if hasEdits {
+                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+                liveDiffSection
+            }
         }
-        .onKeyPress(keys: [.escape], phases: .down) { _ in
-            controller.onCancel?()
-            return .handled
+    }
+
+    /// Compact changes-only strip — shows only deleted/inserted/replaced words, skipping unchanged text.
+    @ViewBuilder
+    private var liveDiffSection: some View {
+        let ops = DiffSummary.computeWordDiff(
+            original: controller.originalDraftForComparison,
+            edited: controller.reviewText
+        )
+        let changeGroups = buildChangeGroups(ops)
+        let wordDelta = controller.reviewText.split(whereSeparator: \.isWhitespace).count
+            - controller.originalDraftForComparison.split(whereSeparator: \.isWhitespace).count
+
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(Array(changeGroups.enumerated()), id: \.offset) { i, group in
+                        if i > 0 {
+                            Text("\u{00B7}")
+                                .font(.system(size: 10))
+                                .foregroundColor(OverlayTokens.textMuted)
+                        }
+                        ForEach(Array(group.enumerated()), id: \.offset) { _, op in
+                            changeBadge(op)
+                        }
+                    }
+                }
+            }
+
+            if wordDelta != 0 {
+                Text(wordDelta > 0 ? "+\(wordDelta)" : "\(wordDelta)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(wordDelta < 0 ? OverlayTokens.diffDeleteText : OverlayTokens.diffInsertText)
+                    .padding(.leading, 6)
+            }
+        }
+        .padding(.horizontal, OverlayTokens.contentPadding)
+        .padding(.vertical, 5)
+        .frame(maxHeight: 28)
+    }
+
+    /// Group consecutive non-equal ops, separated by runs of equal ops.
+    private func buildChangeGroups(_ ops: [DiffOp]) -> [[DiffOp]] {
+        var groups: [[DiffOp]] = []
+        var current: [DiffOp] = []
+        for op in ops {
+            if case .equal = op {
+                if !current.isEmpty {
+                    groups.append(current)
+                    current = []
+                }
+            } else {
+                current.append(op)
+            }
+        }
+        if !current.isEmpty { groups.append(current) }
+        return groups
+    }
+
+    @ViewBuilder
+    private func changeBadge(_ op: DiffOp) -> some View {
+        switch op {
+        case .equal:
+            EmptyView()
+        case .delete(let word):
+            Text(word)
+                .font(.system(size: 10))
+                .foregroundColor(OverlayTokens.diffDeleteText)
+                .strikethrough(true, color: OverlayTokens.diffDeleteText)
+        case .insert(let word):
+            Text(word)
+                .font(.system(size: 10))
+                .foregroundColor(OverlayTokens.diffInsertText)
+        case .replace(let old, let new):
+            HStack(spacing: 1) {
+                Text(old)
+                    .font(.system(size: 10))
+                    .foregroundColor(OverlayTokens.diffDeleteText)
+                    .strikethrough(true, color: OverlayTokens.diffDeleteText)
+                Text(new)
+                    .font(.system(size: 10))
+                    .foregroundColor(OverlayTokens.diffReplaceText)
+            }
         }
     }
 
