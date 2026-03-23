@@ -1,6 +1,6 @@
 # Onboarding Steps
 
-4 SwiftUI views implementing individual onboarding steps. Hosted by OnboardingContainerView.swift (parent). All use `@Bindable var state: OnboardingState` (Observable macro).
+4 SwiftUI views implementing individual onboarding steps. Hosted by OnboardingContainerView.swift (parent). WelcomeStep and PreviewStep are stateless; PermissionsStep and ModelSetupStep use `@Bindable var state: OnboardingState`.
 
 ## File Index
 
@@ -8,36 +8,34 @@
 |------|------|------------|
 | `WelcomeStep.swift` | 1. Welcome | Always true |
 | `PreviewStep.swift` | 2. Preview | Always true |
-| `PermissionsStep.swift` | 3. Permissions | Always true (mic optional but recommended) |
+| `PermissionsStep.swift` | 3. Permissions | Only when microphoneGranted (mic REQUIRED) |
 | `ModelSetupStep.swift` | 4. Model Setup | Only when parakeetReady AND diarizationReady |
 
 ## Step Details
 
 ### WelcomeStep (Step 1)
-- Hero icon: waveform.circle.fill, 56pt, terracotta linear gradient
-- Icon glow: 100x100 circle, 20pt blur, terracotta.opacity(0.15)
+- Hero icon: waveform.circle.fill, 56pt, flat terracotta color
 - 3 BenefitCards (from Design/Components/):
-  - "Transcribe Everything" (waveform icon)
+  - "Transcribe Meetings" (waveform icon)
   - "Identify Speakers" (person.2.fill icon)
-  - "100% Private" (lock.shield.fill icon)
-- Stagger animation: 0.3s base + 0.12s per card (delays: 0.3, 0.42, 0.54s)
-- Content entry: .smooth.delay(0.1)
+  - "Completely Private" (lock.shield.fill icon)
+- Simple opacity fade-in (0.3s easeInOut), no stagger
 
 ### PreviewStep (Step 2)
 - Sample transcript showing a realistic meeting conversation
-- 6 animated transcript lines appear sequentially (0.3s stagger)
+- 6 transcript lines with staggered reveal (0.2s per line)
 - Two speakers: Sarah (terracotta) and Mike (processingPurple)
 - Delivers "aha moment" — shows what Transcripted produces before asking for permissions
 - No user action required, always canProceed
 
 ### PermissionsStep (Step 3)
-- 2 PermissionCards (from Design/Components/):
+- 2 simple PermissionRow components (Draft-style HStack layout):
   - **Microphone** (required): mic.fill icon. Requests via `AVCaptureDevice.requestAccess(for: .audio)`
-  - **Screen Recording** (optional): rectangle.inset.filled.and.person.filled icon. Checks via `CGWindowListCopyWindowInfo()` side-effect
-- Card animations: offset(x: 40→0), opacity 0→1, .smooth.delay(0.2 / 0.35)
-- 4 status states per card: notRequested → pending → granted/denied
-- Status icons: same icon (not requested) → hourglass (pending) → checkmark.circle.fill (granted) → xmark.circle.fill (denied)
-- Success message: green checkmark 20pt, bouncy.delay(0.1) scale, .smooth.delay(0.2) text
+  - **Screen Recording** (recommended): rectangle.inset.filled.and.person.filled icon. Opens System Settings
+- 4 status states per row: notRequested (Grant button), pending (spinner), granted (checkmark), denied (Settings button)
+- Denied state shows guidance text: "Enable it in System Settings to continue"
+- Continue button DISABLED until mic permission granted (canProceed = microphoneGranted)
+- No "Continue without mic" bypass
 
 ### ModelSetupStep (Step 4)
 - Downloads 2 models in parallel (`async let`):
@@ -45,22 +43,20 @@
   - **Diarization**: ~36MB expected (speaker separation)
 - Auto-starts download on `.onAppear` (no manual trigger)
 - Progress monitoring: polls model directories every 500ms, caps at 0.99 until CoreML compilation finishes
-- At >95%: phase changes to "Compiling models..."
-- Tips carousel: 4 tips, rotates every 4 seconds
-- Auto-complete: when modelsReady, 1.5s delay then closes onboarding
-- Error handling: red exclamationmark icon, "Retry Download" PremiumButton (secondary variant)
-- Card animations: offset(x: 40→0), opacity 0→1, .smooth.delay(0.2 / 0.35)
+- Download speed + ETA display when speed > 1KB/s
+- Error handling: structured error card with retry button
+- Success message when both models ready
 
 ## Shared Dependencies
 - `@Bindable var state: OnboardingState` — NOT `@ObservedObject` (because `@Observable` macro)
-- Design components: PremiumButton, BenefitCard, PermissionCard (from Design/Components/)
-- Colors: terracotta, panelTextPrimary/Secondary, attentionGreen, recordingCoral
-- Typography: .displayMedium (title), .bodyLarge (subtitle)
+- Design components: BenefitCard (from Design/Components/)
+- Colors: terracotta, charcoal, softCharcoal, warmCream, successGreen, processingPurple, errorCoral
+- Typography: .displayMedium/.displayLarge (titles), .bodyLarge (subtitles)
 
 ## Relationships
-- Parent: `OnboardingContainerView.swift` (handles step switching, navigation buttons, skip confirmation)
+- Parent: `OnboardingContainerView.swift` (handles step switching, navigation buttons)
 - State: `OnboardingState.swift` (step progression, permission status, model readiness)
-- Window: `OnboardingWindow.swift` (NSWindowController, frosted glass, 720x680)
+- Window: `OnboardingWindow.swift` (NSWindowController, 640x560)
 
 ## Gotchas
 - `@Bindable` not `@ObservedObject` — OnboardingState uses `@Observable` macro, not ObservableObject
@@ -69,3 +65,4 @@
 - Progress capped at 0.99 to prevent premature "100%" display before CoreML compilation
 - Model errors are concatenated with "\n" (both errors show if both models fail)
 - The app does NOT initialize (no menus, no audio, no floating panel) until onboarding completes
+- Microphone permission is REQUIRED — users cannot proceed without granting it

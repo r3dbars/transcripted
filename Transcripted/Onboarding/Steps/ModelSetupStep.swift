@@ -1,43 +1,25 @@
-import Combine
 import SwiftUI
 
 /// Model Setup step - Downloads and initializes AI models
-/// Shows progress for Parakeet (STT) and PyAnnote (diarization)
-/// Aesthetic: Warm, reassuring progress indicators matching onboarding style
+/// Dark theme with progress bars matching pill aesthetic
 @available(macOS 26.0, *)
 struct ModelSetupStep: View {
     @Bindable var state: OnboardingState
-
-    @State private var titleOpacity: Double = 0
-    @State private var titleOffset: CGFloat = 10
-    @State private var card1Appeared: Bool = false
-    @State private var card2Appeared: Bool = false
-    @State private var currentTipIndex: Int = 0
-
-    private let tips = [
-        "Your transcripts never leave your Mac",
-        "Use \u{2318}\u{21E7}R to start recording instantly",
-        "Transcripted identifies unlimited speakers",
-        "Works with Zoom, Teams, Meet, and any audio",
-    ]
+    @State private var appeared = false
 
     var body: some View {
         VStack(spacing: Spacing.lg) {
-            // Header
             VStack(spacing: Spacing.sm) {
                 Text("Setting Up AI Models")
                     .font(.displayMedium)
-                    .foregroundColor(.charcoal)
+                    .foregroundColor(.panelTextPrimary)
 
                 Text("Downloading speech recognition models for local use")
                     .font(.bodyLarge)
-                    .foregroundColor(.softCharcoal)
+                    .foregroundColor(.panelTextSecondary)
             }
-            .opacity(titleOpacity)
-            .offset(y: titleOffset)
             .padding(.top, Spacing.lg)
 
-            // Model download cards
             VStack(spacing: Spacing.md) {
                 ModelDownloadCard(
                     icon: "waveform",
@@ -48,8 +30,6 @@ struct ModelSetupStep: View {
                     progress: state.parakeetProgress,
                     phaseText: state.parakeetPhase
                 )
-                .offset(x: card1Appeared ? 0 : 40)
-                .opacity(card1Appeared ? 1 : 0)
 
                 ModelDownloadCard(
                     icon: "person.2.fill",
@@ -60,126 +40,99 @@ struct ModelSetupStep: View {
                     progress: state.diarizationProgress,
                     phaseText: state.diarizationPhase
                 )
-                .offset(x: card2Appeared ? 0 : 40)
-                .opacity(card2Appeared ? 1 : 0)
             }
             .padding(.horizontal, Spacing.lg)
 
             Spacer()
 
-            // Download speed and ETA
             if state.isLoadingModels && state.downloadSpeed > 1000 {
                 HStack(spacing: Spacing.sm) {
                     Image(systemName: "arrow.down.circle")
                         .font(.system(size: 12))
-                        .foregroundColor(.softCharcoal)
+                        .foregroundColor(.panelTextMuted)
 
                     Text(formatSpeed(state.downloadSpeed))
                         .font(.caption)
-                        .foregroundColor(.softCharcoal)
+                        .foregroundColor(.panelTextMuted)
 
                     if let eta = state.estimatedTimeRemaining, eta > 0, eta < 3600 {
                         Text("—")
                             .font(.caption)
-                            .foregroundColor(.softCharcoal.opacity(0.5))
+                            .foregroundColor(.panelTextMuted.opacity(0.5))
                         Text("~\(formatETA(eta)) remaining")
                             .font(.caption)
-                            .foregroundColor(.softCharcoal)
+                            .foregroundColor(.panelTextMuted)
                     }
                 }
                 .transition(.opacity)
-                .animation(.smooth, value: state.downloadSpeed)
             }
 
-            // Error state with retry
             if let error = state.modelError, !state.isLoadingModels {
                 VStack(spacing: Spacing.sm) {
-                    // Structured error card
                     VStack(spacing: Spacing.xs) {
                         HStack(spacing: Spacing.xs) {
                             Image(systemName: errorIcon(for: state.modelErrorKind))
                                 .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.recordingRed)
+                                .foregroundColor(.errorRed)
                             Text(state.modelErrorKind?.title ?? "Download Failed")
                                 .font(.bodyMedium)
                                 .fontWeight(.semibold)
-                                .foregroundColor(.charcoal)
+                                .foregroundColor(.panelTextPrimary)
                         }
 
                         Text(error)
                             .font(.bodySmall)
-                            .foregroundColor(.softCharcoal)
+                            .foregroundColor(.panelTextSecondary)
                             .multilineTextAlignment(.center)
                     }
                     .padding(Spacing.md)
                     .background(
                         RoundedRectangle(cornerRadius: Radius.md)
-                            .fill(Color.recordingRed.opacity(0.06))
+                            .fill(Color.errorRed.opacity(0.1))
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: Radius.md)
-                            .strokeBorder(Color.recordingRed.opacity(0.15), lineWidth: 1)
+                            .strokeBorder(Color.errorRed.opacity(0.2), lineWidth: 1)
                     )
 
-                    PremiumButton(
-                        title: "Retry Download",
-                        icon: "arrow.clockwise",
-                        variant: .secondary
-                    ) {
+                    Button("Retry Download") {
                         Task { await state.loadModels() }
                     }
+                    .buttonStyle(.bordered)
+                    .tint(.recordingCoral)
                 }
                 .padding(.horizontal, Spacing.xxl)
                 .transition(.opacity)
             }
 
-            // Rotating tips
-            if !state.modelsReady && state.modelError == nil {
-                Text(tips[currentTipIndex])
-                    .font(.bodySmall)
-                    .foregroundColor(.softCharcoal)
-                    .contentTransition(.opacity)
-                    .animation(.easeInOut(duration: 0.4), value: currentTipIndex)
-                    .padding(.bottom, Spacing.lg)
-                    .onReceive(
-                        Timer.publish(every: 4, on: .main, in: .common).autoconnect()
-                    ) { _ in
-                        withAnimation {
-                            currentTipIndex = (currentTipIndex + 1) % tips.count
-                        }
-                    }
-            }
-
-            // Success message
             if state.modelsReady {
                 HStack(spacing: Spacing.sm) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 16))
-                        .foregroundColor(.successGreen)
+                        .foregroundColor(.attentionGreen)
                     Text("Models ready — everything runs locally on your Mac")
                         .font(.bodyMedium)
-                        .foregroundColor(.charcoal)
+                        .foregroundColor(.panelTextPrimary)
                 }
                 .padding(Spacing.md)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.lg)
-                        .fill(Color.successGreen.opacity(0.08))
+                        .fill(Color.attentionGreen.opacity(0.08))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: Radius.lg)
-                        .strokeBorder(Color.successGreen.opacity(0.2), lineWidth: 1)
+                        .strokeBorder(Color.attentionGreen.opacity(0.3), lineWidth: 1)
                 )
                 .padding(.horizontal, Spacing.xxl)
                 .padding(.bottom, Spacing.lg)
-                .transition(.asymmetric(
-                    insertion: .opacity.combined(with: .scale(scale: 0.95)),
-                    removal: .opacity
-                ))
+                .transition(.opacity)
             }
         }
+        .opacity(appeared ? 1 : 0)
         .onAppear {
-            animateIn()
-            // Start loading models if not already done
+            withAnimation(.easeInOut(duration: 0.3)) {
+                appeared = true
+            }
             if !state.modelsReady && !state.isLoadingModels {
                 Task { await state.loadModels() }
             }
@@ -215,19 +168,6 @@ struct ModelSetupStep: View {
         default: return "exclamationmark.triangle.fill"
         }
     }
-
-    private func animateIn() {
-        withAnimation(.smooth.delay(0.1)) {
-            titleOpacity = 1.0
-            titleOffset = 0
-        }
-        withAnimation(.smooth.delay(0.25)) {
-            card1Appeared = true
-        }
-        withAnimation(.smooth.delay(0.4)) {
-            card2Appeared = true
-        }
-    }
 }
 
 // MARK: - Model Download Card
@@ -242,12 +182,9 @@ private struct ModelDownloadCard: View {
     let progress: Double
     let phaseText: String
 
-    @State private var isHovered = false
-
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.md) {
-                // Status icon
                 ZStack {
                     Circle()
                         .fill(statusColor.opacity(0.12))
@@ -256,57 +193,54 @@ private struct ModelDownloadCard: View {
                     if isReady {
                         Image(systemName: "checkmark")
                             .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(.successGreen)
+                            .foregroundColor(.attentionGreen)
                     } else if isLoading {
-                        // Show percentage inside circle
                         Text("\(Int(progress * 100))%")
                             .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(.terracotta)
+                            .foregroundColor(.recordingCoral)
                     } else {
                         Image(systemName: icon)
                             .font(.system(size: 18, weight: .medium))
-                            .foregroundColor(.softCharcoal)
+                            .foregroundColor(.panelTextMuted)
                     }
                 }
 
-                // Text
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.bodyMedium)
                         .fontWeight(.semibold)
-                        .foregroundColor(.charcoal)
+                        .foregroundColor(.panelTextPrimary)
 
                     Text(description)
                         .font(.bodySmall)
-                        .foregroundColor(.softCharcoal)
+                        .foregroundColor(.panelTextSecondary)
 
                     if isLoading {
                         Text(phaseText)
                             .font(.caption)
-                            .foregroundColor(.terracotta)
+                            .foregroundColor(.recordingCoral)
                             .lineLimit(1)
                     } else if isReady {
                         Text("Ready")
                             .font(.caption)
-                            .foregroundColor(.successGreen)
+                            .foregroundColor(.attentionGreen)
                     }
                 }
 
                 Spacer()
             }
 
-            // Progress bar
             if isLoading {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.terracotta.opacity(0.12))
+                            .fill(Color.panelCharcoalSurface)
                             .frame(height: 6)
 
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.terracotta)
+                            .fill(Color.recordingCoral)
                             .frame(width: max(0, geo.size.width * progress), height: 6)
-                            .animation(.smooth, value: progress)
+                            .animation(.easeInOut, value: progress)
                     }
                 }
                 .frame(height: 6)
@@ -315,27 +249,23 @@ private struct ModelDownloadCard: View {
         .padding(Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: Radius.lg)
-                .fill(isReady ? Color.successGreen.opacity(0.04) : Color.warmCream)
+                .fill(isReady ? Color.attentionGreen.opacity(0.08) : Color.panelCharcoalElevated)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.lg)
                 .strokeBorder(
-                    isReady ? Color.successGreen.opacity(0.2) :
-                    isLoading ? Color.terracotta.opacity(0.2) :
-                    Color.terracotta.opacity(0.1),
+                    isReady ? Color.attentionGreen.opacity(0.3) :
+                    isLoading ? Color.recordingCoral.opacity(0.3) :
+                    Color.panelCharcoalSurface,
                     lineWidth: 1
                 )
         )
-        .scaleEffect(isHovered ? 1.01 : 1.0)
-        .animation(.smooth, value: isHovered)
-        .animation(.smooth, value: isReady)
-        .onHover { isHovered = $0 }
     }
 
     private var statusColor: Color {
-        if isReady { return .successGreen }
-        if isLoading { return .terracotta }
-        return .softCharcoal.opacity(0.5)
+        if isReady { return .attentionGreen }
+        if isLoading { return .recordingCoral }
+        return .panelTextMuted
     }
 }
 
@@ -347,8 +277,8 @@ private struct ModelDownloadCard: View {
     let state = OnboardingState()
     state.isLoadingModels = true
     return ModelSetupStep(state: state)
-        .frame(width: 720, height: 680)
-        .background(Color.cream)
+        .frame(width: 640, height: 560)
+        .background(Color.panelCharcoal)
 }
 
 @available(macOS 26.0, *)
@@ -357,8 +287,8 @@ private struct ModelDownloadCard: View {
     state.parakeetReady = true
     state.diarizationReady = true
     return ModelSetupStep(state: state)
-        .frame(width: 720, height: 680)
-        .background(Color.cream)
+        .frame(width: 640, height: 560)
+        .background(Color.panelCharcoal)
 }
 
 @available(macOS 26.0, *)
@@ -366,7 +296,7 @@ private struct ModelDownloadCard: View {
     let state = OnboardingState()
     state.modelError = "Network connection failed"
     return ModelSetupStep(state: state)
-        .frame(width: 720, height: 680)
-        .background(Color.cream)
+        .frame(width: 640, height: 560)
+        .background(Color.panelCharcoal)
 }
 #endif
