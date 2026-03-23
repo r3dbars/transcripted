@@ -98,7 +98,6 @@ swiftc \
     -framework Vision \
     -framework MetalPerformanceShaders \
     -framework MetalPerformanceShadersGraph \
-    -lsqlite3 \
     -lc++ \
     $DEPS_FLAGS \
     $(find Sources -name '*.swift') \

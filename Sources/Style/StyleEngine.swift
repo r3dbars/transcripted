@@ -632,6 +632,24 @@ class StyleEngine: ObservableObject {
         return analysis
     }
 
+    /// Import a style profile from pasted agent output (onboarding clipboard flow).
+    /// Wraps the profile in the standard style.md structure and exports for agent sync.
+    func importProfile(_ profileText: String) {
+        let trimmed = profileText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        styleFileContents = """
+            # Writing Style Profile
+
+            ## Style Summary
+            \(trimmed)
+
+            ## Examples
+            """
+
+        saveStyleFile()
+    }
+
     /// Save a pre-generated style profile (from external paste-back).
     /// Wraps the profile in the standard style.md structure without running any analysis.
     func saveImportedProfile(_ profile: String) {
@@ -668,6 +686,21 @@ class StyleEngine: ObservableObject {
             try styleFileContents.write(to: styleFileURL, atomically: true, encoding: .utf8)
         } catch {
             EventReporter.shared.capture(level: .error, engine: "style", event: "style_file_write_failed",
+                message: error.localizedDescription)
+        }
+        exportStyleProfile()
+    }
+
+    /// Export the style summary as a plain text file for agent consumption.
+    /// Any AI agent can read ~/Library/Application Support/Draft/style-profile.md to know how the user writes.
+    private func exportStyleProfile() {
+        let summary = extractStyleSummary()
+        guard !summary.isEmpty else { return }
+        let exportURL = storageDir.appendingPathComponent("style-profile.md")
+        do {
+            try summary.write(to: exportURL, atomically: true, encoding: .utf8)
+        } catch {
+            EventReporter.shared.capture(level: .error, engine: "style", event: "style_profile_export_failed",
                 message: error.localizedDescription)
         }
     }

@@ -87,12 +87,6 @@ enum DraftConstants {
 
     // MARK: - Data Limits
 
-    /// Default max messages to read from iMessage database
-    static let imessageDefaultLimit = 2000
-
-    /// Max messages to format for analysis during onboarding
-    static let imessageAnalysisLimit = 500
-
     /// Recent feedback lines for analysis engine
     static let analysisFeedbackLines = 50
 
