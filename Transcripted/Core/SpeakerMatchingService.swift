@@ -71,6 +71,36 @@ extension Transcription {
         return nil
     }
 
+    /// Compute L2-normalized weighted mean of multiple embeddings.
+    /// Higher-weight embeddings contribute more to the mean. Segments recorded while
+    /// the local mic was active have lower weight (system audio contaminated by local voice).
+    nonisolated static func computeWeightedMeanEmbedding(_ embeddings: [[Float]], weights: [Float]) -> [Float] {
+        guard let first = embeddings.first else { return [] }
+        let dim = first.count
+        guard dim > 0, embeddings.count == weights.count else { return computeMeanEmbedding(embeddings) }
+
+        let totalWeight = weights.reduce(0, +)
+        guard totalWeight > 0 else { return computeMeanEmbedding(embeddings) }
+
+        var sum = [Float](repeating: 0, count: dim)
+        for (emb, w) in zip(embeddings, weights) {
+            for i in 0..<min(dim, emb.count) {
+                sum[i] += emb[i] * w
+            }
+        }
+
+        var mean = sum.map { $0 / totalWeight }
+
+        // L2 normalize
+        var norm: Float = 0
+        vDSP_dotpr(mean, 1, mean, 1, &norm, vDSP_Length(mean.count))
+        norm = sqrt(norm)
+        if norm > 0 {
+            vDSP_vsdiv(mean, 1, &norm, &mean, 1, vDSP_Length(mean.count))
+        }
+        return mean
+    }
+
     /// Static cosine similarity (no instance needed — used in nonisolated static context)
     nonisolated static func cosineSimilarityStatic(_ a: [Float], _ b: [Float]) -> Double {
         guard a.count == b.count, !a.isEmpty else { return 0 }

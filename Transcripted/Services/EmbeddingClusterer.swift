@@ -130,19 +130,22 @@ enum EmbeddingClusterer {
     /// relaxed similarity threshold to merge these back.
     ///
     /// Two-tier thresholds:
-    /// - Micro-clusters (< `microClusterDuration`): Forced absorption with a
-    ///   very low floor (0.15). These are almost certainly noise/interjections
-    ///   rather than distinct speakers. The floor only rejects near-zero or
-    ///   negative similarity (silence, corruption).
+    /// - Micro-clusters (< `microClusterDuration`): Moderate threshold (0.50).
+    ///   Absorbs noise fragments with similar voice characteristics, but preserves
+    ///   distinct speakers (codec-compressed voices typically have 0.3-0.5 similarity).
     /// - Small clusters (< `minClusterDuration`): Standard relaxed threshold
     ///   (0.72). Safety: genuinely different speakers rarely exceed 0.6 cosine
     ///   similarity, so this won't incorrectly merge distinct people.
+    ///
+    /// Additional safeguards:
+    /// - Clusters with 3+ segments are never absorbed (multiple speaking turns = real person)
+    /// - Absorption is aborted if it would reduce the total speaker count below 2
     static func absorbSmallClusters(
         segments: [SpeakerSegment],
         minClusterDuration: Double = 30.0,
         absorptionThreshold: Float = 0.72,
         microClusterDuration: Double = 10.0,
-        microAbsorptionThreshold: Float = 0.15
+        microAbsorptionThreshold: Float = 0.50
     ) -> [SpeakerSegment] {
         // Compute total speaking duration per speaker
         var durationPerSpeaker: [Int: Double] = [:]
@@ -173,6 +176,18 @@ enum EmbeddingClusterer {
         // Try to absorb each small cluster into the best-matching large one
         var mergeMap: [Int: Int] = [:]
         for smallId in smallIds {
+            // Protect multi-utterance speakers: 3+ separate speaking turns means
+            // a real participant, not noise — regardless of total duration.
+            let segmentCount = segments.filter { $0.speakerId == smallId }.count
+            if segmentCount >= 3 {
+                AppLogger.transcription.info("Small cluster protected by segment count", [
+                    "smallSpk": "spk\(smallId)",
+                    "segments": "\(segmentCount)",
+                    "duration": String(format: "%.1fs", durationPerSpeaker[smallId] ?? 0)
+                ])
+                continue
+            }
+
             guard let smallEmb = embeddings[smallId] else { continue }
 
             var bestId: Int?
@@ -214,6 +229,18 @@ enum EmbeddingClusterer {
         }
 
         guard !mergeMap.isEmpty else { return segments }
+
+        // Safety: never absorb all small clusters if it would leave only 1 speaker.
+        // A single system speaker is almost always a diarization failure on multi-party calls.
+        let allSpeakerIds = Set(durationPerSpeaker.keys)
+        let survivingIds = allSpeakerIds.subtracting(mergeMap.keys)
+        if survivingIds.count < 2 {
+            AppLogger.transcription.info("Safety: aborting absorptions to prevent single-speaker collapse", [
+                "wouldAbsorb": "\(mergeMap.count) clusters",
+                "totalSpeakers": "\(allSpeakerIds.count)"
+            ])
+            return segments
+        }
 
         return segments.map { segment in
             guard let newId = mergeMap[segment.speakerId] else { return segment }
