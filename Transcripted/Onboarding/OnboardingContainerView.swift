@@ -34,6 +34,15 @@ struct OnboardingContainerView: View {
         .onAppear {
             state.checkPermissions()
         }
+        .onChange(of: state.modelsReady) { _, ready in
+            if ready && state.currentStep == .modelSetup {
+                Task {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    state.completeOnboarding()
+                    onComplete()
+                }
+            }
+        }
     }
 
     // MARK: - Progress Dots
@@ -145,5 +154,6 @@ struct OnboardingContainerView: View {
         state: OnboardingState(),
         onComplete: {}
     )
+    .background(Color.panelCharcoal)
 }
 #endif

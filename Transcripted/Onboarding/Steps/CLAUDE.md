@@ -44,17 +44,18 @@
 - Auto-starts download on `.onAppear` (no manual trigger)
 - Progress monitoring: polls model directories every 500ms, caps at 0.99 until CoreML compilation finishes
 - Download speed + ETA display when speed > 1KB/s
+- Auto-advance: when modelsReady, container auto-completes after 1.5s
 - Error handling: structured error card with retry button
 - Success message when both models ready
 
 ## Shared Dependencies
 - `@Bindable var state: OnboardingState` — NOT `@ObservedObject` (because `@Observable` macro)
 - Design components: BenefitCard (from Design/Components/)
-- Colors: terracotta, charcoal, softCharcoal, warmCream, successGreen, processingPurple, errorCoral
+- Colors: panelCharcoal, panelCharcoalElevated, panelCharcoalSurface, panelTextPrimary/Secondary/Muted, recordingCoral, attentionGreen, errorRed
 - Typography: .displayMedium/.displayLarge (titles), .bodyLarge (subtitles)
 
 ## Relationships
-- Parent: `OnboardingContainerView.swift` (handles step switching, navigation buttons)
+- Parent: `OnboardingContainerView.swift` (handles step switching, navigation buttons, auto-advance)
 - State: `OnboardingState.swift` (step progression, permission status, model readiness)
 - Window: `OnboardingWindow.swift` (NSWindowController, 640x560)
 

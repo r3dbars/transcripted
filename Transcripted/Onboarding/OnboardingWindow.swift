@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Window controller for the onboarding experience
-/// Creates a centered, borderless window with the onboarding flow
+/// Creates a centered, dark-themed window matching the product aesthetic
 @available(macOS 26.0, *)
 class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
@@ -47,8 +47,9 @@ class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         return true
     }
 
-    /// Handle close button: treat as "skip onboarding" so the app doesn't end up in a dead state.
+    /// Handle close button: persist completion and start the app so it doesn't end up in a dead state.
     func windowWillClose(_ notification: Notification) {
+        onboardingState.completeOnboarding()
         onComplete?()
         onComplete = nil
     }
@@ -63,12 +64,17 @@ class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
+
+        // Dark theme matching the product
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = NSColor(Color.panelCharcoal)
+        window.isOpaque = true
+
         window.standardWindowButton(.closeButton)?.isHidden = false
         window.level = .floating
+
+        // Fade in on appear
         window.alphaValue = 0
-        // Dark chrome to match pill aesthetic
-        window.backgroundColor = NSColor(red: 0.102, green: 0.102, blue: 0.102, alpha: 1) // #1A1A1A
-        window.appearance = NSAppearance(named: .darkAqua)
     }
 
     private func setupContentView() {
@@ -125,6 +131,7 @@ struct OnboardingWindow_Previews: PreviewProvider {
             onComplete: {}
         )
         .frame(width: 640, height: 560)
+        .background(Color.panelCharcoal)
     }
 }
 #endif

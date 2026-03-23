@@ -223,6 +223,8 @@ class OnboardingState {
             await monitorDownloadProgress()
         }
 
+        // These services are created just for download/validation during onboarding.
+        // setupApp() creates fresh instances afterward; the second init is a fast cache hit.
         let parakeet = ParakeetService()
         let diarization = DiarizationService()
 
