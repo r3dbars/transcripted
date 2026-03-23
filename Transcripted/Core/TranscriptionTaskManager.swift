@@ -140,20 +140,11 @@ class TranscriptionTaskManager: ObservableObject {
             self.displayStatus = .gettingReady
         }
 
-        let transcriptedFolder: URL
-        if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
-           !customPath.isEmpty {
-            transcriptedFolder = URL(fileURLWithPath: customPath)
-        } else {
-            let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            transcriptedFolder = documentsURL.appendingPathComponent("Transcripted")
-        }
-
         do {
             let transcriptURL = try await transcribeWithSpeakerIdentification(
                 micURL: failed.micAudioURL,
                 systemURL: failed.systemAudioURL,
-                outputFolder: transcriptedFolder,
+                outputFolder: TranscriptSaver.defaultSaveDirectory,
                 taskId: failedId,
                 healthInfo: nil
             )
@@ -212,12 +203,16 @@ class TranscriptionTaskManager: ObservableObject {
         displayStatus = .idle
     }
 
-    /// Populate saved transcript metadata from the file's YAML frontmatter
+    /// Populate saved transcript metadata from the file's YAML frontmatter.
+    /// Reads only the first 2 KB to avoid blocking the main thread on large transcript files.
     func populateSavedMetadata(from url: URL) {
         lastSavedTranscriptURL = url
         let name = url.deletingPathExtension().lastPathComponent
         lastSavedTitle = name.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
-        guard let raw = try? String(contentsOf: url, encoding: .utf8),
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
+        let headerData = handle.readData(ofLength: 2048)
+        try? handle.close()
+        guard let raw = String(data: headerData, encoding: .utf8),
               raw.hasPrefix("---"),
               let endRange = raw.range(of: "\n---\n", range: raw.index(raw.startIndex, offsetBy: 3)..<raw.endIndex)
         else { return }
