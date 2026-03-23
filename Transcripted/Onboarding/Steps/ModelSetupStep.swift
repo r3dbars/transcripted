@@ -187,7 +187,7 @@ private struct ModelDownloadCard: View {
             HStack(spacing: Spacing.md) {
                 ZStack {
                     Circle()
-                        .fill(statusColor.opacity(0.12))
+                        .fill(statusColor.opacity(0.15))
                         .frame(width: 44, height: 44)
 
                     if isReady {

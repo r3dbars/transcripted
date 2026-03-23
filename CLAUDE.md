@@ -16,8 +16,8 @@ Menu bar-only macOS app for real-time system audio transcription. Pipeline: Core
 - **Services/** (18 files): ML services (11 files) + Protocols/ subdirectory (7 service protocols)
 - **UI/FloatingPanel/** (21 files): Morphing pill UI, aurora state views (3 files), SavedPillView, transcript tray (3 files), speaker naming (3 files), Components/ (16 files), Helpers/ (1 file)
 - **UI/Settings/** (18 files): Settings container + Sections/ (7 section views) + Components/ (6 reusable components) + Models/ (1 file)
-- **Onboarding/** (7 files): 4-step first-run flow (Welcome -> Preview -> Permissions -> Model Setup)
-- **Design/** (23 files): Colors/ (6 files), Components/ (7 premium components), root tokens (10 files: Spacing, Radius, Typography, Animations, Shadows, ViewModifiers, Gradients, Dimensions, Accessibility, CardModifiers)
+- **Onboarding/** (5 files): 2-step first-run flow (Permissions -> Model Setup), dark theme
+- **Design/** (20 files): Colors/ (6 files), Components/ (4 premium components), root tokens (10 files: Spacing, Radius, Typography, Animations, Shadows, ViewModifiers, Gradients, Dimensions, Accessibility, CardModifiers)
 
 ## Build & Test
 ```bash
@@ -96,14 +96,14 @@ Every folder with ≥2 Swift files has its own CLAUDE.md with file index, refere
 | `Transcripted/Services/Protocols/CLAUDE.md` | 7 DI protocols with full signatures |
 | `Transcripted/Design/CLAUDE.md` | All token values (colors, spacing, radius, typography, animations) |
 | `Transcripted/Design/Colors/CLAUDE.md` | Complete color reference with hex/HSB values |
-| `Transcripted/Design/Components/CLAUDE.md` | PremiumButton, PremiumCard, PermissionCard specs |
+| `Transcripted/Design/Components/CLAUDE.md` | PremiumButton, PremiumCard, QuickTipRow, AnimatedIcon specs |
 | `Transcripted/UI/FloatingPanel/CLAUDE.md` | Pill state machine, Combine subscriptions, tray states |
 | `Transcripted/UI/FloatingPanel/Components/CLAUDE.md` | Aurora views, speaker naming, error toast, celebrations |
 | `Transcripted/UI/Settings/CLAUDE.md` | @AppStorage keys, window config, speaker operations |
 | `Transcripted/UI/Settings/Sections/CLAUDE.md` | 7 section views with per-section detail |
 | `Transcripted/UI/Settings/Components/CLAUDE.md` | CoralToggle, button styles, input components |
-| `Transcripted/Onboarding/CLAUDE.md` | 4-step flow, OnboardingState properties, integration |
-| `Transcripted/Onboarding/Steps/CLAUDE.md` | Welcome, Preview, Permissions, ModelSetup step implementations |
+| `Transcripted/Onboarding/CLAUDE.md` | 2-step flow, OnboardingState properties, integration |
+| `Transcripted/Onboarding/Steps/CLAUDE.md` | Permissions, ModelSetup step implementations |
 
 **Single-file folders** (covered by parent CLAUDE.md):
 - `UI/MenuBar/MenuBarStatRow.swift` — Custom NSView (250x22), used in status bar dropdown
