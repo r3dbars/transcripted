@@ -1,15 +1,14 @@
 import SwiftUI
 
-/// Model Setup step — downloads and initializes AI models
-/// Shows progress for Parakeet (STT) and PyAnnote (diarization)
-/// Dark theme matching the product aesthetic
+/// Model Setup step - Downloads and initializes AI models
+/// Dark theme with progress bars matching pill aesthetic
 @available(macOS 26.0, *)
 struct ModelSetupStep: View {
     @Bindable var state: OnboardingState
+    @State private var appeared = false
 
     var body: some View {
         VStack(spacing: Spacing.lg) {
-            // Header
             VStack(spacing: Spacing.sm) {
                 Text("Setting Up AI Models")
                     .font(.displayMedium)
@@ -21,7 +20,6 @@ struct ModelSetupStep: View {
             }
             .padding(.top, Spacing.lg)
 
-            // Model download cards
             VStack(spacing: Spacing.md) {
                 ModelDownloadCard(
                     icon: "waveform",
@@ -47,7 +45,6 @@ struct ModelSetupStep: View {
 
             Spacer()
 
-            // Download speed and ETA
             if state.isLoadingModels && state.downloadSpeed > 1000 {
                 HStack(spacing: Spacing.sm) {
                     Image(systemName: "arrow.down.circle")
@@ -56,22 +53,20 @@ struct ModelSetupStep: View {
 
                     Text(formatSpeed(state.downloadSpeed))
                         .font(.caption)
-                        .foregroundColor(.panelTextSecondary)
+                        .foregroundColor(.panelTextMuted)
 
                     if let eta = state.estimatedTimeRemaining, eta > 0, eta < 3600 {
                         Text("—")
                             .font(.caption)
-                            .foregroundColor(.panelTextMuted)
+                            .foregroundColor(.panelTextMuted.opacity(0.5))
                         Text("~\(formatETA(eta)) remaining")
                             .font(.caption)
-                            .foregroundColor(.panelTextSecondary)
+                            .foregroundColor(.panelTextMuted)
                     }
                 }
                 .transition(.opacity)
-                .animation(.smooth, value: state.downloadSpeed)
             }
 
-            // Error state with retry
             if let error = state.modelError, !state.isLoadingModels {
                 VStack(spacing: Spacing.sm) {
                     VStack(spacing: Spacing.xs) {
@@ -100,24 +95,21 @@ struct ModelSetupStep: View {
                             .strokeBorder(Color.errorRed.opacity(0.2), lineWidth: 1)
                     )
 
-                    PremiumButton(
-                        title: "Retry Download",
-                        icon: "arrow.clockwise",
-                        variant: .secondary
-                    ) {
+                    Button("Retry Download") {
                         Task { await state.loadModels() }
                     }
+                    .buttonStyle(.bordered)
+                    .tint(.recordingCoral)
                 }
                 .padding(.horizontal, Spacing.xxl)
                 .transition(.opacity)
             }
 
-            // Success message
             if state.modelsReady {
                 HStack(spacing: Spacing.sm) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 16))
-                        .foregroundColor(.successGreen)
+                        .foregroundColor(.attentionGreen)
                     Text("Models ready — everything runs locally on your Mac")
                         .font(.bodyMedium)
                         .foregroundColor(.panelTextPrimary)
@@ -125,18 +117,22 @@ struct ModelSetupStep: View {
                 .padding(Spacing.md)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.lg)
-                        .fill(Color.successGreen.opacity(0.1))
+                        .fill(Color.attentionGreen.opacity(0.08))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: Radius.lg)
-                        .strokeBorder(Color.successGreen.opacity(0.2), lineWidth: 1)
+                        .strokeBorder(Color.attentionGreen.opacity(0.3), lineWidth: 1)
                 )
                 .padding(.horizontal, Spacing.xxl)
                 .padding(.bottom, Spacing.lg)
-                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                .transition(.opacity)
             }
         }
+        .opacity(appeared ? 1 : 0)
         .onAppear {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                appeared = true
+            }
             if !state.modelsReady && !state.isLoadingModels {
                 Task { await state.loadModels() }
             }
@@ -189,7 +185,6 @@ private struct ModelDownloadCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.md) {
-                // Status icon
                 ZStack {
                     Circle()
                         .fill(statusColor.opacity(0.15))
@@ -198,11 +193,11 @@ private struct ModelDownloadCard: View {
                     if isReady {
                         Image(systemName: "checkmark")
                             .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(.successGreen)
+                            .foregroundColor(.attentionGreen)
                     } else if isLoading {
                         Text("\(Int(progress * 100))%")
                             .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(.terracotta)
+                            .foregroundColor(.recordingCoral)
                     } else {
                         Image(systemName: icon)
                             .font(.system(size: 18, weight: .medium))
@@ -210,7 +205,6 @@ private struct ModelDownloadCard: View {
                     }
                 }
 
-                // Text
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.bodyMedium)
@@ -224,30 +218,29 @@ private struct ModelDownloadCard: View {
                     if isLoading {
                         Text(phaseText)
                             .font(.caption)
-                            .foregroundColor(.terracotta)
+                            .foregroundColor(.recordingCoral)
                             .lineLimit(1)
                     } else if isReady {
                         Text("Ready")
                             .font(.caption)
-                            .foregroundColor(.successGreen)
+                            .foregroundColor(.attentionGreen)
                     }
                 }
 
                 Spacer()
             }
 
-            // Progress bar
             if isLoading {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.terracotta.opacity(0.15))
+                            .fill(Color.panelCharcoalSurface)
                             .frame(height: 6)
 
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.terracotta)
+                            .fill(Color.recordingCoral)
                             .frame(width: max(0, geo.size.width * progress), height: 6)
-                            .animation(.smooth, value: progress)
+                            .animation(.easeInOut, value: progress)
                     }
                 }
                 .frame(height: 6)
@@ -256,23 +249,22 @@ private struct ModelDownloadCard: View {
         .padding(Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: Radius.lg)
-                .fill(isReady ? Color.successGreen.opacity(0.06) : Color.panelCharcoalElevated)
+                .fill(isReady ? Color.attentionGreen.opacity(0.08) : Color.panelCharcoalElevated)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Radius.lg)
                 .strokeBorder(
-                    isReady ? Color.successGreen.opacity(0.2) :
-                    isLoading ? Color.terracotta.opacity(0.2) :
+                    isReady ? Color.attentionGreen.opacity(0.3) :
+                    isLoading ? Color.recordingCoral.opacity(0.3) :
                     Color.panelCharcoalSurface,
                     lineWidth: 1
                 )
         )
-        .animation(.smooth, value: isReady)
     }
 
     private var statusColor: Color {
-        if isReady { return .successGreen }
-        if isLoading { return .terracotta }
+        if isReady { return .attentionGreen }
+        if isLoading { return .recordingCoral }
         return .panelTextMuted
     }
 }
@@ -285,7 +277,7 @@ private struct ModelDownloadCard: View {
     let state = OnboardingState()
     state.isLoadingModels = true
     return ModelSetupStep(state: state)
-        .frame(width: 560, height: 520)
+        .frame(width: 640, height: 560)
         .background(Color.panelCharcoal)
 }
 
@@ -295,7 +287,7 @@ private struct ModelDownloadCard: View {
     state.parakeetReady = true
     state.diarizationReady = true
     return ModelSetupStep(state: state)
-        .frame(width: 560, height: 520)
+        .frame(width: 640, height: 560)
         .background(Color.panelCharcoal)
 }
 
@@ -304,7 +296,7 @@ private struct ModelDownloadCard: View {
     let state = OnboardingState()
     state.modelError = "Network connection failed"
     return ModelSetupStep(state: state)
-        .frame(width: 560, height: 520)
+        .frame(width: 640, height: 560)
         .background(Color.panelCharcoal)
 }
 #endif

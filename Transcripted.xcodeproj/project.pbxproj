@@ -28,6 +28,9 @@
 		A1000102 /* OnboardingWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000103 /* OnboardingWindow.swift */; };
 		A1000104 /* OnboardingContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000105 /* OnboardingContainerView.swift */; };
 		A1000112 /* PermissionsStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000113 /* PermissionsStep.swift */; };
+		DK000001 /* WelcomeStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = DK000002 /* WelcomeStep.swift */; };
+		DK000003 /* PreviewStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = DK000004 /* PreviewStep.swift */; };
+		DK000005 /* BenefitCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DK000006 /* BenefitCard.swift */; };
 		A1000301 /* DateParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000311 /* DateParser.swift */; };
 		A1000500 /* TranscriptUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000501 /* TranscriptUtils.swift */; };
 		A1000803 /* DateFormattingHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000802 /* DateFormattingHelper.swift */; };
@@ -209,6 +212,9 @@
 		A1000103 /* OnboardingWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingWindow.swift; sourceTree = "<group>"; };
 		A1000105 /* OnboardingContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingContainerView.swift; sourceTree = "<group>"; };
 		A1000113 /* PermissionsStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsStep.swift; sourceTree = "<group>"; };
+		DK000002 /* WelcomeStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeStep.swift; sourceTree = "<group>"; };
+		DK000004 /* PreviewStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewStep.swift; sourceTree = "<group>"; };
+		DK000006 /* BenefitCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BenefitCard.swift; sourceTree = "<group>"; };
 		A1000311 /* DateParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParser.swift; sourceTree = "<group>"; };
 		A1000501 /* TranscriptUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptUtils.swift; sourceTree = "<group>"; };
 		A1000802 /* DateFormattingHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateFormattingHelper.swift; sourceTree = "<group>"; };
@@ -551,6 +557,8 @@
 		A1000121 /* Steps */ = {
 			isa = PBXGroup;
 			children = (
+				DK000002 /* WelcomeStep.swift */,
+				DK000004 /* PreviewStep.swift */,
 				A1000113 /* PermissionsStep.swift */,
 				BF26FA6ED2054F3DCF8D0B45 /* ModelSetupStep.swift */,
 			);
@@ -795,6 +803,7 @@
 			children = (
 				NFE418BA5100 /* PremiumButton.swift */,
 				NF9515C01900 /* PremiumCard.swift */,
+				DK000006 /* BenefitCard.swift */,
 				NF5C44D9E300 /* QuickTipRow.swift */,
 				NF0EF2C81600 /* AnimatedIcon.swift */,
 			);
@@ -953,6 +962,9 @@
 				A1000102 /* OnboardingWindow.swift in Sources */,
 				A1000104 /* OnboardingContainerView.swift in Sources */,
 				A1000112 /* PermissionsStep.swift in Sources */,
+				DK000001 /* WelcomeStep.swift in Sources */,
+				DK000003 /* PreviewStep.swift in Sources */,
+				DK000005 /* BenefitCard.swift in Sources */,
 				A1000301 /* DateParser.swift in Sources */,
 				A1000803 /* DateFormattingHelper.swift in Sources */,
 				A1000911 /* PillStateManager.swift in Sources */,

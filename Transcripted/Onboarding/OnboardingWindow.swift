@@ -14,7 +14,7 @@ class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         self.onComplete = onComplete
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -47,7 +47,7 @@ class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         return true
     }
 
-    /// Handle close button: persist completion and start the app.
+    /// Handle close button: persist completion and start the app so it doesn't end up in a dead state.
     func windowWillClose(_ notification: Notification) {
         onboardingState.completeOnboarding()
         onComplete?()
@@ -130,7 +130,7 @@ struct OnboardingWindow_Previews: PreviewProvider {
             state: OnboardingState(),
             onComplete: {}
         )
-        .frame(width: 560, height: 520)
+        .frame(width: 640, height: 560)
         .background(Color.panelCharcoal)
     }
 }

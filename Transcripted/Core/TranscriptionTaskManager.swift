@@ -239,6 +239,9 @@ class TranscriptionTaskManager: ObservableObject {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard let self else { return }
+            // Don't reset if speaker naming is in progress —
+            // SpeakerNamingCoordinator will re-publish .transcriptSaved when done
+            guard self.speakerNamingRequest == nil else { return }
             switch self.displayStatus {
             case .transcriptSaved, .failed:
                 self.displayStatus = .idle
