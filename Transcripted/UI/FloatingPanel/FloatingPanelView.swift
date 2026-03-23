@@ -210,6 +210,19 @@ struct FloatingPanelView: View {
             case .transcripts:
                 transcriptStore.refresh()
                 installEscapeMonitor()
+                // Install click-outside monitor separately: installEscapeMonitor() may return early
+                // if escape monitors are already set (e.g., after speakerNaming -> transcripts
+                // transition), leaving the click-outside monitor uninstalled.
+                if clickOutsideMonitor == nil {
+                    clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
+                        DispatchQueue.main.async {
+                            guard self.trayState == .transcripts else { return }
+                            withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                                self.trayState = .none
+                            }
+                        }
+                    }
+                }
             case .speakerNaming:
                 speakerNamingAppearDate = Date()
                 installEscapeMonitor()
@@ -361,17 +374,6 @@ struct FloatingPanelView: View {
             }
         }
 
-        // Click-outside monitor: dismiss transcript tray when clicking anywhere outside the panel
-        if clickOutsideMonitor == nil && trayState == .transcripts {
-            clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
-                DispatchQueue.main.async {
-                    guard self.trayState == .transcripts else { return }
-                    withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
-                        self.trayState = .none
-                    }
-                }
-            }
-        }
     }
 
     private func removeEscapeMonitor() {
@@ -392,14 +394,7 @@ struct FloatingPanelView: View {
     // MARK: - Helper Functions
 
     private func openTranscriptsFolder() {
-        let transcriptsFolder: URL
-        if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
-           !customPath.isEmpty {
-            transcriptsFolder = URL(fileURLWithPath: customPath)
-        } else {
-            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            transcriptsFolder = documentsPath.appendingPathComponent("Transcripted")
-        }
+        let transcriptsFolder = TranscriptSaver.defaultSaveDirectory
         try? FileManager.default.createDirectory(at: transcriptsFolder, withIntermediateDirectories: true)
         NSWorkspace.shared.open(transcriptsFolder)
     }
