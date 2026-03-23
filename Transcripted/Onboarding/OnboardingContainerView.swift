@@ -1,85 +1,60 @@
 import SwiftUI
 
 /// Main container view for the onboarding flow
-/// Features warm cream aesthetic, smooth transitions, and premium navigation
-/// Aesthetic: Recording Studio Library - professional yet welcoming
+/// Dark theme matching the floating pill aesthetic
 @available(macOS 26.0, *)
 struct OnboardingContainerView: View {
     @Bindable var state: OnboardingState
     let onComplete: () -> Void
 
-    @State private var isTransitioning = false
-    @State private var direction: TransitionDirection = .forward
-
-    // Accessibility: Respect reduce motion preference
-    @Environment(\.accessibilityReduceMotion) var reduceMotion
-
-    enum TransitionDirection {
-        case forward, backward
-    }
-
     var body: some View {
         ZStack {
-            // Warm cream background
-            Color.cream
+            Color.panelCharcoal
                 .ignoresSafeArea()
 
-            // Subtle gradient overlay at top
-            VStack {
-                LinearGradient(
-                    colors: [Color.terracotta.opacity(0.03), Color.clear],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 200)
-                Spacer()
-            }
-            .ignoresSafeArea()
-
             VStack(spacing: 0) {
-                // Premium step indicator at top
-                StepProgressIndicator(
-                    currentStep: state.currentStep.rawValue,
-                    totalSteps: state.totalSteps
-                )
-                .padding(.top, Spacing.lg)
-                .padding(.horizontal, Spacing.xxl)
+                // Progress dots
+                progressDots
+                    .padding(.top, Spacing.lg)
 
-                // Main content area with transitions
+                // Main content area
                 contentView
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .transition(reduceMotion ? .opacity : pageTransition)
+                    .transition(.opacity)
                     .id(state.currentStep)
-                    .animation(reduceMotion ? .none : .smooth, value: state.currentStep)
+                    .animation(.easeInOut(duration: 0.3), value: state.currentStep)
 
                 // Navigation buttons
                 navigationButtons
                     .padding(.horizontal, Spacing.xl)
-                    .padding(.bottom, Spacing.sm)
-
-                // Skip for now link (UX: Zeigarnik Effect - don't trap users)
-                skipForNowLink
                     .padding(.bottom, Spacing.lg)
             }
         }
-        .frame(width: 720, height: 680)
-        .shadow(color: .black.opacity(0.15), radius: 30, y: 10)
+        .frame(width: 640, height: 560)
         .onAppear {
             state.checkPermissions()
         }
     }
 
-    // MARK: - Page Transition
+    // MARK: - Progress Dots
 
-    private var pageTransition: AnyTransition {
-        .asymmetric(
-            insertion: .opacity
-                .combined(with: .offset(x: direction == .forward ? 30 : -30))
-                .combined(with: .scale(scale: 0.98)),
-            removal: .opacity
-                .combined(with: .offset(x: direction == .forward ? -30 : 30))
-                .combined(with: .scale(scale: 0.98))
-        )
+    private var progressDots: some View {
+        HStack(spacing: 10) {
+            ForEach(OnboardingState.OnboardingStep.allCases, id: \.rawValue) { step in
+                Circle()
+                    .fill(dotColor(for: step))
+                    .frame(width: 8, height: 8)
+                    .animation(.easeInOut(duration: 0.2), value: state.currentStep)
+            }
+        }
+    }
+
+    private func dotColor(for step: OnboardingState.OnboardingStep) -> Color {
+        if step.rawValue <= state.currentStep.rawValue {
+            return .recordingCoral
+        } else {
+            return .panelCharcoalSurface
+        }
     }
 
     // MARK: - Content View
@@ -102,57 +77,50 @@ struct OnboardingContainerView: View {
 
     private var navigationButtons: some View {
         HStack {
-            // Back button
             if !state.isFirstStep {
-                Button(action: {
-                    direction = .backward
-                    withAnimation(reduceMotion ? .none : .smooth) {
-                        state.goBack()
-                    }
-                }) {
+                Button(action: { state.goBack() }) {
                     HStack(spacing: Spacing.xs) {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 12, weight: .semibold))
                         Text("Back")
-                            .font(.bodyMedium)
                     }
-                    .foregroundColor(.softCharcoal)
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.vertical, Spacing.sm)
-                    .background(Color.charcoal.opacity(0.05))
-                    .clipShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
+                .tint(.panelTextSecondary)
+                .controlSize(.regular)
                 .keyboardShortcut(.leftArrow, modifiers: [])
-                .transition(.opacity)
             }
 
             Spacer()
 
-            // Continue/Finish button
             if state.isLastStep {
-                PremiumButton(
-                    title: "Start Using Transcripted",
-                    icon: "arrow.right",
-                    variant: .primary,
-                    isDisabled: !state.modelsReady
-                ) {
+                Button(action: {
                     state.completeOnboarding()
                     onComplete()
-                }
-                .keyboardShortcut(.return, modifiers: [])
-            } else {
-                PremiumButton(
-                    title: continueButtonText,
-                    icon: continueButtonIcon,
-                    variant: .primary,
-                    isDisabled: !state.canProceed
-                ) {
-                    direction = .forward
-                    withAnimation(reduceMotion ? .none : .smooth) {
-                        state.advance()
+                }) {
+                    HStack(spacing: Spacing.xs) {
+                        Text("Start Using Transcripted")
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 12, weight: .semibold))
                     }
                 }
+                .buttonStyle(.borderedProminent)
+                .tint(.recordingCoral)
+                .controlSize(.large)
+                .disabled(!state.modelsReady)
+                .keyboardShortcut(.return, modifiers: [])
+            } else {
+                Button(action: { state.advance() }) {
+                    HStack(spacing: Spacing.xs) {
+                        Text(continueButtonText)
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.recordingCoral)
+                .controlSize(.large)
+                .disabled(!state.canProceed)
                 .keyboardShortcut(.return, modifiers: [])
             }
         }
@@ -160,56 +128,10 @@ struct OnboardingContainerView: View {
 
     private var continueButtonText: String {
         switch state.currentStep {
-        case .welcome:
-            return "Get Started"
-        case .preview:
-            return "Continue"
-        case .permissions:
-            return "Continue"
-        case .modelSetup:
-            return state.modelsReady ? "Start Using Transcripted" : "Setting Up..."
-        }
-    }
-
-    private var continueButtonIcon: String {
-        switch state.currentStep {
-        case .welcome:
-            return "arrow.right"
-        case .preview:
-            return "arrow.right"
-        case .permissions:
-            return "arrow.right"
-        case .modelSetup:
-            return state.modelsReady ? "arrow.right" : "arrow.down.circle"
-        }
-    }
-
-    // MARK: - Skip For Now Link
-
-    @State private var showSkipConfirmation = false
-
-    private var skipForNowLink: some View {
-        Group {
-            if !state.isLastStep {
-                Button(action: {
-                    showSkipConfirmation = true
-                }) {
-                    Text("Skip for now")
-                        .font(.caption)
-                        .foregroundColor(.softCharcoal.opacity(0.6))
-                        .underline()
-                }
-                .buttonStyle(.plain)
-                .alert("Skip Onboarding?", isPresented: $showSkipConfirmation) {
-                    Button("Continue Setup", role: .cancel) { }
-                    Button("Skip") {
-                        state.completeOnboarding()
-                        onComplete()
-                    }
-                } message: {
-                    Text("You can access settings later from the menu bar icon.")
-                }
-            }
+        case .welcome: return "Get Started"
+        case .preview: return "Continue"
+        case .permissions: return "Continue"
+        case .modelSetup: return state.modelsReady ? "Start Using Transcripted" : "Setting Up..."
         }
     }
 }

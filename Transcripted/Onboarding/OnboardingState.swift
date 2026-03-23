@@ -78,7 +78,7 @@ class OnboardingState {
         case .preview:
             return true
         case .permissions:
-            return true
+            return microphoneGranted
         case .modelSetup:
             return modelsReady
         }

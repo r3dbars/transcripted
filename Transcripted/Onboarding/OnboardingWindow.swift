@@ -13,10 +13,8 @@ class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         self.onboardingState = OnboardingState()
         self.onComplete = onComplete
 
-        // Create the window
-        // Size: 720x680 to comfortably fit all onboarding content
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 680),
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -43,17 +41,16 @@ class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
             let response = alert.runModal()
             if response == .alertSecondButtonReturn {
-                return false  // User chose to keep downloading
+                return false
             }
         }
         return true
     }
 
     /// Handle close button: treat as "skip onboarding" so the app doesn't end up in a dead state.
-    /// Without this, closing the window leaves no menu bar, no floating panel — just an invisible process.
     func windowWillClose(_ notification: Notification) {
         onComplete?()
-        onComplete = nil  // Prevent double-fire from handleOnboardingComplete
+        onComplete = nil
     }
 
     required init?(coder: NSCoder) {
@@ -61,48 +58,17 @@ class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func configureWindow(_ window: NSWindow) {
-        // Window appearance
         window.center()
         window.title = ""
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
-
-        // Frosted glass background (matching pill aesthetic)
-        window.isOpaque = false
-        window.backgroundColor = .clear
-
-        // Allow closing onboarding (UX: Zeigarnik Effect - don't trap users)
-        // Users can access settings later from the menu bar
         window.standardWindowButton(.closeButton)?.isHidden = false
-
-        // Window level - appears above other windows
         window.level = .floating
-
-        // Animation on appear
         window.alphaValue = 0
-    }
-
-    private func addFrostedGlassBackground(to window: NSWindow) {
-        guard let contentView = window.contentView else { return }
-
-        // Create visual effect view for frosted glass
-        let visualEffect = NSVisualEffectView()
-        visualEffect.material = .hudWindow
-        visualEffect.blendingMode = .behindWindow
-        visualEffect.state = .active
-        visualEffect.translatesAutoresizingMaskIntoConstraints = false
-
-        // Insert behind content
-        contentView.addSubview(visualEffect, positioned: .below, relativeTo: nil)
-
-        // Fill the content view
-        NSLayoutConstraint.activate([
-            visualEffect.topAnchor.constraint(equalTo: contentView.topAnchor),
-            visualEffect.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            visualEffect.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            visualEffect.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
-        ])
+        // Dark chrome to match pill aesthetic
+        window.backgroundColor = NSColor(red: 0.102, green: 0.102, blue: 0.102, alpha: 1) // #1A1A1A
+        window.appearance = NSAppearance(named: .darkAqua)
     }
 
     private func setupContentView() {
@@ -117,9 +83,6 @@ class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
         let hostingView = NSHostingView(rootView: containerView)
         window.contentView = hostingView
-
-        // Add frosted glass background behind SwiftUI content
-        addFrostedGlassBackground(to: window)
     }
 
     func showWithAnimation() {
@@ -128,7 +91,6 @@ class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
 
-        // Fade in animation
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.3
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -138,9 +100,8 @@ class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     private func handleOnboardingComplete() {
         guard let window = self.window else { return }
-        guard onComplete != nil else { return }  // Already handled (e.g., via windowWillClose)
+        guard onComplete != nil else { return }
 
-        // Fade out animation
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.3
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -163,7 +124,7 @@ struct OnboardingWindow_Previews: PreviewProvider {
             state: OnboardingState(),
             onComplete: {}
         )
-        .frame(width: 720, height: 680)
+        .frame(width: 640, height: 560)
     }
 }
 #endif

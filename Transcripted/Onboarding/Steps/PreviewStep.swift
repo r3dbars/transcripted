@@ -1,18 +1,18 @@
 import SwiftUI
 
 /// Preview step - Shows a realistic sample transcript to deliver the "aha moment"
-/// before asking for permissions. Animated lines appear one by one.
+/// Dark theme with staggered line reveal
 @available(macOS 26.0, *)
 struct PreviewStep: View {
-    @State private var showHeader = false
+    @State private var showContent = false
     @State private var visibleLines: Int = 0
 
     private let transcriptLines: [(timestamp: String, speaker: String, color: Color, text: String)] = [
-        ("0:00", "Sarah", .terracotta, "Alright, let's kick off the standup. What did everyone work on yesterday?"),
+        ("0:00", "Sarah", .recordingCoral, "Alright, let's kick off the standup. What did everyone work on yesterday?"),
         ("0:05", "Mike", .processingPurple, "I finished the API integration — all tests passing now."),
-        ("0:12", "Sarah", .terracotta, "Nice. Any blockers on the frontend side?"),
+        ("0:12", "Sarah", .recordingCoral, "Nice. Any blockers on the frontend side?"),
         ("0:16", "Mike", .processingPurple, "Just waiting on the design specs for the settings page."),
-        ("0:22", "Sarah", .terracotta, "I'll ping design after this. Let's move on to sprint goals."),
+        ("0:22", "Sarah", .recordingCoral, "I'll ping design after this. Let's move on to sprint goals."),
         ("0:28", "Mike", .processingPurple, "Sounds good. I can pick up the notification work today."),
     ]
 
@@ -20,26 +20,23 @@ struct PreviewStep: View {
         VStack(spacing: Spacing.md) {
             Spacer()
 
-            // Header
             VStack(spacing: Spacing.xs) {
                 Image(systemName: "text.quote")
                     .font(.system(size: 36))
-                    .foregroundStyle(Color.terracotta)
+                    .foregroundStyle(Color.recordingCoral)
                     .symbolRenderingMode(.hierarchical)
 
                 Text("Here's what your meetings will look like")
                     .font(.displayLarge)
-                    .foregroundColor(.charcoal)
+                    .foregroundColor(.panelTextPrimary)
                     .multilineTextAlignment(.center)
 
                 Text("Transcripted turns conversations into searchable text")
                     .font(.bodyLarge)
-                    .foregroundColor(.softCharcoal)
+                    .foregroundColor(.panelTextSecondary)
             }
-            .opacity(showHeader ? 1 : 0)
-            .offset(y: showHeader ? 0 : 10)
+            .opacity(showContent ? 1 : 0)
 
-            // Sample transcript
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 ForEach(0..<transcriptLines.count, id: \.self) { index in
                     if index < visibleLines {
@@ -56,8 +53,11 @@ struct PreviewStep: View {
             .padding(Spacing.md)
             .background(
                 RoundedRectangle(cornerRadius: Radius.lg)
-                    .fill(Color.warmCream)
-                    .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+                    .fill(Color.panelCharcoalElevated)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Radius.lg)
+                    .strokeBorder(Color.panelCharcoalSurface, lineWidth: 1)
             )
             .padding(.horizontal, Spacing.md)
 
@@ -65,12 +65,11 @@ struct PreviewStep: View {
         }
         .padding(.horizontal, Spacing.xl)
         .onAppear {
-            withAnimation(.smooth.delay(0.1)) {
-                showHeader = true
+            withAnimation(.easeInOut(duration: 0.3)) {
+                showContent = true
             }
-            // Staggered line animations
             for i in 0..<transcriptLines.count {
-                withAnimation(.smooth.delay(0.4 + Double(i) * 0.3)) {
+                withAnimation(.easeInOut.delay(0.3 + Double(i) * 0.2)) {
                     visibleLines = i + 1
                 }
             }
@@ -91,7 +90,7 @@ private struct TranscriptLineView: View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             Text(timestamp)
                 .font(.caption)
-                .foregroundColor(.softCharcoal.opacity(0.5))
+                .foregroundColor(.panelTextMuted)
                 .frame(width: 32, alignment: .trailing)
                 .monospacedDigit()
 
@@ -108,7 +107,7 @@ private struct TranscriptLineView: View {
 
                 Text(text)
                     .font(.body)
-                    .foregroundColor(.charcoal)
+                    .foregroundColor(.panelTextPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -121,7 +120,7 @@ private struct TranscriptLineView: View {
 @available(macOS 26.0, *)
 #Preview {
     PreviewStep()
-        .frame(width: 720, height: 680)
-        .background(Color.cream)
+        .frame(width: 640, height: 560)
+        .background(Color.panelCharcoal)
 }
 #endif
