@@ -56,7 +56,7 @@ struct PermissionsStep: View {
             Spacer()
 
             if state.microphoneStatus == .denied || state.microphoneStatus == .restricted {
-                Text("Microphone access was denied. Enable it in System Settings to continue.")
+                Text("Microphone access wasn't granted. Tap \"Try Again\" to see the permission prompt, or open Settings to enable it manually.")
                     .font(.bodySmall)
                     .foregroundColor(.panelTextSecondary)
                     .multilineTextAlignment(.center)
@@ -181,9 +181,15 @@ private struct PermissionRow: View {
                 .foregroundColor(.attentionGreen)
 
         case .denied:
-            Button("Settings") { onOpenSettings() }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            HStack(spacing: 6) {
+                Button("Try Again") { onGrant() }
+                    .buttonStyle(.bordered)
+                    .tint(.recordingCoral)
+                    .controlSize(.small)
+                Button("Settings") { onOpenSettings() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
         }
     }
 

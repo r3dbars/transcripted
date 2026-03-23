@@ -156,6 +156,9 @@ class OnboardingState {
     func requestMicrophonePermission() async {
         await MainActor.run {
             isMicrophoneRequestInProgress = true
+            // Ensure the app is frontmost so the system permission dialog
+            // appears above the onboarding window (app uses .accessory policy)
+            NSApp.activate()
         }
 
         let granted = await AVCaptureDevice.requestAccess(for: .audio)
