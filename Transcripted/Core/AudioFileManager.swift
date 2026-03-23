@@ -80,6 +80,9 @@ extension Audio {
                         commonFormat: .pcmFormatFloat32,
                         interleaved: tapFormat.isInterleaved
                     )
+                    // Security: restrict to owner-only (600) — system audio file contains biometric
+                    // voice data and should not be world-readable while recording is in progress.
+                    try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
                     strongSelf.systemAudioFileQueue.sync { strongSelf.systemAudioFile = file }
                     AppLogger.audioSystem.info("System audio file created before I/O proc", ["sampleRate": "\(Int(sampleRate))", "channels": "\(tapFormat.channelCount)"])
 
@@ -175,6 +178,9 @@ extension Audio {
                 commonFormat: monoFormat.commonFormat,
                 interleaved: monoFormat.isInterleaved
             )
+            // Security: restrict to owner-only (600) — mic audio file contains biometric voice
+            // data and should not be world-readable while recording is in progress.
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
             AppLogger.audioMic.info("Saving as mono", ["sampleRate": "\(recordingFormat.sampleRate)"])
         } catch {
             throw NSError(domain: "Audio", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create mic audio file: \(error.localizedDescription)"])

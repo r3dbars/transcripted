@@ -305,7 +305,12 @@ enum ModelDownloadService {
     private static func fetchModelFileList(modelId: String) async throws -> [HFModelFile] {
         // Try each mirror for the API call
         for mirror in mirrors {
-            let apiURL = URL(string: "\(mirror)/api/models/\(modelId)")!
+            // Security: use safe URL construction — force-unwrap would crash if modelId or mirror
+            // contained URL-unsafe characters. Guard lets us skip the mirror and try the next.
+            guard let apiURL = URL(string: "\(mirror)/api/models/\(modelId)") else {
+                AppLogger.services.warning("Skipping mirror — could not construct API URL", ["mirror": mirror, "modelId": modelId])
+                continue
+            }
 
             do {
                 let (data, response) = try await URLSession.shared.data(from: apiURL)
@@ -360,7 +365,13 @@ enum ModelDownloadService {
         destination: URL
     ) async throws {
         for mirror in mirrors {
-            let fileURL = URL(string: "\(mirror)/\(modelId)/resolve/main/\(filename)")!
+            // Security: use safe URL construction — force-unwrap would crash if filename contained
+            // URL-unsafe characters (e.g., spaces) not caught by isSafeModelFilename. Skip
+            // this mirror and try the next rather than crashing.
+            guard let fileURL = URL(string: "\(mirror)/\(modelId)/resolve/main/\(filename)") else {
+                AppLogger.services.warning("Skipping mirror — could not construct file URL", ["mirror": mirror, "file": filename])
+                continue
+            }
 
             do {
                 try await withRetry(maxAttempts: 2) {
