@@ -1,6 +1,6 @@
 # Design Components
 
-4 reusable premium UI components used across Settings and FloatingPanel. All SwiftUI views.
+5 reusable premium UI components used across Onboarding, Settings, and FloatingPanel. All SwiftUI views.
 
 ## File Index
 
@@ -8,6 +8,7 @@
 |------|---------|
 | `PremiumButton.swift` | 3-variant button (primary/secondary/ghost) with hover, press, loading states |
 | `PremiumCard.swift` | Warm cream card container with hover lift animation |
+| `BenefitCard.swift` | Dark card with icon circle + title/description row, used in onboarding welcome |
 | `QuickTipRow.swift` | Small icon + text row for inline tips |
 | `AnimatedIcon.swift` | SF Symbol icon with configurable glow and pulse effects |
 
@@ -41,6 +42,14 @@ PremiumCard(accentColor:, enableHover:, content:)
 - Shadow: black 0.05-0.1 opacity, radius 12-20, y offset 4-8
 - Scale on hover: 1.02 (if enableHover), animation: .smooth
 
+### BenefitCard
+```swift
+BenefitCard(icon:, iconColor:, title:, description:)
+```
+- Layout: 48x48 icon circle (iconColor 0.12 fill) + title (headingSmall) / description (bodySmall)
+- Background: panelCharcoalElevated, radius Radius.md, panelCharcoalSurface border
+- Used in: WelcomeStep.swift (3 cards)
+
 ### QuickTipRow
 ```swift
 QuickTipRow(icon:, text:, iconColor:)
@@ -56,7 +65,7 @@ AnimatedIcon(systemName:, size:, color:, showGlow:, isPulsing:)
 - Pulse: easeInOut repeating scale animation
 
 ## Relationships
-- Used by: Settings/ (various sections), FloatingPanel/
+- Used by: Onboarding/Steps/ (WelcomeStep), Settings/ (various sections), FloatingPanel/
 - Design tokens from: Spacing.swift, Radius.swift, Typography.swift, Animations.swift
 - Colors from: Colors/BrandColors.swift, Colors/PanelColors.swift
 

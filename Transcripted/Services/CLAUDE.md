@@ -17,7 +17,7 @@ ML pipeline services, speaker database, audio processing utilities, meeting dete
 | `QwenService.swift` | @MainActor | On-device Qwen3.5-4B-4bit via mlx-swift-lm, on-demand load/unload. Pre-populates cache via ModelDownloadService with mirror fallback and progress tracking. |
 | `EmbeddingClusterer.swift` | Static | 3-stage post-processing: pairwise merge, small cluster absorption, DB-informed split |
 | `AudioResampler.swift` | Static | AVAudioConverter-based resampling to 16kHz, WAV loading, slice extraction |
-| `SpeakerClipExtractor.swift` | Static | Extract per-speaker audio clips for naming UI playback |
+| `SpeakerClipExtractor.swift` | Static | Extract per-speaker audio clips for naming UI playback, 0o600 permissions on temp clips |
 | `MeetingDetector.swift` | @MainActor | Monitors Zoom/Teams/Webex/FaceTime, auto-triggers recording |
 
 ### Protocols/ (7 files) — see Protocols/CLAUDE.md
@@ -86,6 +86,8 @@ WAL mode, busy_timeout 5000ms, 0o600 permissions. All writes via dedicated utili
 - `findProfilesByName(_:)` (fuzzy, with name variants) — SpeakerProfileMerger
 - `mergeProfiles(sourceId:, into:)` -> blend by callCount weight, atomic transaction — SpeakerProfileMerger
 - `pruneWeakProfiles()` -> deletes unnamed AND callCount<=1 AND confidence<=0.5 AND age>1hr — SpeakerProfileMerger
+- `mergeProfilesByName()` -> merges profiles that ended up with the same name (e.g., "Jenny Wen") — SpeakerDatabase
+- `getColumnNames(tableName:)` -> PRAGMA table_info with compile-time allowlist validation for SQL injection prevention — SpeakerDatabase
 
 ## Cosine Similarity Thresholds (vary by context)
 | Context | Threshold | Purpose |
