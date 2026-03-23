@@ -106,7 +106,10 @@ find "${APP_PATH}/Contents/Frameworks" -name "*.framework" | while read -r frame
 done
 
 # Re-sign the main app (picks up everything)
-codesign --force --deep --options runtime --timestamp --sign "${SIGN_IDENTITY}" "${APP_PATH}"
+# IMPORTANT: must pass --entitlements so hardened runtime doesn't strip audio-input permission
+codesign --force --deep --options runtime --timestamp \
+    --entitlements "${PROJECT_DIR}/Transcripted/Transcripted.entitlements" \
+    --sign "${SIGN_IDENTITY}" "${APP_PATH}"
 echo "    Signing verified: $(codesign -dv "${APP_PATH}" 2>&1 | grep 'Authority='| head -1)"
 
 # --- Create output directory ---

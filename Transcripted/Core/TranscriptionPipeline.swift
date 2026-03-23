@@ -59,6 +59,36 @@ extension Transcription {
             AppLogger.transcription.debug("System: \(systemSamples.count) samples (\(String(format: "%.1f", Double(systemSamples.count) / 16000))s)")
             AppLogger.transcription.debug("Mic: \(micSamples.count) samples (\(String(format: "%.1f", Double(micSamples.count) / 16000))s)")
 
+            // Pre-compute mic energy per 100ms frame for embedding quality gating.
+            // When the local user is speaking, system audio embeddings are contaminated
+            // with their voice echo, producing unreliable remote speaker voiceprints.
+            let micEnergyFrameDuration = 0.1  // 100ms frames
+            let micFrameSize = Int(16000.0 * micEnergyFrameDuration)  // 1600 samples
+            let micFrameCount = micSamples.count / micFrameSize
+            var micEnergyPerFrame = [Float](repeating: 0, count: micFrameCount)
+
+            micSamples.withUnsafeBufferPointer { ptr in
+                for i in 0..<micFrameCount {
+                    let start = i * micFrameSize
+                    var sumSquares: Float = 0
+                    vDSP_dotpr(ptr.baseAddress! + start, 1,
+                               ptr.baseAddress! + start, 1,
+                               &sumSquares,
+                               vDSP_Length(micFrameSize))
+                    micEnergyPerFrame[i] = sqrt(sumSquares / Float(micFrameSize))
+                }
+            }
+            let micActiveThreshold: Float = 0.02  // matches isSilent threshold
+
+            /// Returns the fraction of a time range where the local mic was active (0.0-1.0).
+            func micActiveFraction(startTime: Double, endTime: Double) -> Double {
+                let startFrame = max(0, Int(startTime / micEnergyFrameDuration))
+                let endFrame = min(micFrameCount, Int(endTime / micEnergyFrameDuration))
+                guard endFrame > startFrame else { return 0 }
+                let activeCount = (startFrame..<endFrame).filter { micEnergyPerFrame[$0] >= micActiveThreshold }.count
+                return Double(activeCount) / Double(endFrame - startFrame)
+            }
+
             onProgress?(0.10)
 
             // Step 2: Run offline diarization on system audio -> speaker segments
@@ -104,7 +134,9 @@ extension Transcription {
             // Quality gate: skip low-quality segments to prevent noisy embeddings
             // from polluting the speaker database.
             var embeddingsPerSpeaker: [Int: [[Float]]] = [:]
+            var embeddingWeights: [Int: [Float]] = [:]  // 1.0 = clean, 0.3 = mic-contaminated
             var filteredSegmentCount = 0
+            var micContaminatedCount = 0
             for segment in speakerSegments {
                 if let embedding = segment.embedding, !embedding.isEmpty {
                     // Skip segments with very low quality scores — they produce noisy embeddings
@@ -117,11 +149,30 @@ extension Transcription {
                         filteredSegmentCount += 1
                         continue
                     }
+
+                    // Mic energy gating: when the local user was speaking, system audio
+                    // embeddings are contaminated with their voice (Zoom echo residual).
+                    let micFraction = micActiveFraction(startTime: segment.startTime, endTime: segment.endTime)
+
+                    if micFraction > 0.8 {
+                        // >80% overlap with local mic: skip entirely
+                        micContaminatedCount += 1
+                        continue
+                    }
+
+                    let weight: Float = micFraction > 0.3 ? 0.3 : 1.0
                     embeddingsPerSpeaker[segment.speakerId, default: []].append(embedding)
+                    embeddingWeights[segment.speakerId, default: []].append(weight)
                 }
             }
             if filteredSegmentCount > 0 {
                 AppLogger.transcription.info("Filtered low-quality segments from embedding aggregation", ["filtered": "\(filteredSegmentCount)", "total": "\(speakerSegments.count)"])
+            }
+            if micContaminatedCount > 0 {
+                AppLogger.transcription.info("Mic-contaminated segments excluded from embedding aggregation", [
+                    "excluded": "\(micContaminatedCount)",
+                    "total": "\(speakerSegments.count)"
+                ])
             }
 
             // Ghost speaker fix: speakers whose segments were ALL filtered out have no
@@ -151,7 +202,8 @@ extension Transcription {
             var speakerIdRemap: [Int: Int] = [:]
 
             for (speakerId, embeddings) in embeddingsPerSpeaker {
-                let meanEmbedding = Self.computeMeanEmbedding(embeddings)
+                let weights = embeddingWeights[speakerId] ?? Array(repeating: Float(1.0), count: embeddings.count)
+                let meanEmbedding = Self.computeWeightedMeanEmbedding(embeddings, weights: weights)
 
                 let isGhost = ghostSpeakerIdSet.contains(speakerId)
 

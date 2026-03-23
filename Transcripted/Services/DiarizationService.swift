@@ -103,7 +103,13 @@ class DiarizationService: ObservableObject {
         offlineModelState = .loading
         let loadStart = Date()
 
-        let manager = OfflineDiarizerManager(config: .default)
+        // Configure speaker bounds for multi-party calls and cleaner embeddings.
+        // min: 2 forces VBx to look for multiple speakers (only system audio uses this path).
+        // max: 8 prevents hallucinated splits from codec artifacts.
+        // excludeOverlap: skip frames where 2+ speakers overlap, producing cleaner voiceprints.
+        var offlineConfig = OfflineDiarizerConfig.default.withSpeakers(min: 2, max: 8)
+        offlineConfig.embeddingExcludeOverlap = true
+        let manager = OfflineDiarizerManager(config: offlineConfig)
 
         if let bundlePath = bundledModelsPath(directory: "offline-diarizer-models") {
             AppLogger.transcription.info("Offline diarizer loading from bundle", ["path": "\(bundlePath)"])
