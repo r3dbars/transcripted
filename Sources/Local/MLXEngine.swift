@@ -11,6 +11,7 @@ actor MLXEngine {
     private var container: ModelContainer?
     private var isLoaded = false
     private var isGenerating = false
+    private var generationTask: Task<Void, Never>?
 
     static let modelId = "mlx-community/Qwen3.5-4B-4bit"
 
@@ -49,6 +50,15 @@ actor MLXEngine {
 
     /// Whether a generation is currently in progress (prevents concurrent model access).
     var isBusy: Bool { isGenerating }
+
+    /// Cancel any in-progress generation and immediately clear the busy flag.
+    /// Call before starting a new user-initiated generation to preempt background work
+    /// (e.g., style refinement) that would otherwise cause "Model busy" errors.
+    func cancelGeneration() {
+        generationTask?.cancel()
+        generationTask = nil
+        isGenerating = false
+    }
 
     // MARK: - Shared Input Preparation
 
@@ -112,7 +122,7 @@ actor MLXEngine {
                 continuation.finish(throwing: LocalLLMError.generationFailed("Engine deallocated"))
                 return
             }
-            Task {
+            let task = Task {
                 // Always clear isGenerating when this task exits, regardless of success/failure/cancellation
                 defer { Task { await self.clearGenerating() } }
                 do {
@@ -133,10 +143,17 @@ actor MLXEngine {
                     continuation.finish(throwing: error)
                 }
             }
+            // Schedule actor-isolated assignment — runs on the actor's serial executor
+            Task { await self.storeGenerationTask(task) }
         }
     }
 
     private func clearGenerating() {
         isGenerating = false
+        generationTask = nil
+    }
+
+    private func storeGenerationTask(_ task: Task<Void, Never>) {
+        generationTask = task
     }
 }
