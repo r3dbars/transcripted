@@ -86,9 +86,6 @@ class TranscriptionTaskManager: ObservableObject {
                     self.populateSavedMetadata(from: transcriptURL)
                     self.displayStatus = .transcriptSaved
                     self.scheduleStatusReset(delay: 4)
-                }
-
-                await MainActor.run {
                     self.handleTaskCompletion(taskId: task.id)
                 }
 
