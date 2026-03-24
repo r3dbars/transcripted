@@ -95,7 +95,7 @@ WAL mode, busy_timeout 5000ms, 0o600 permissions. All writes via dedicated utili
 | `matchSpeaker()` default | 0.60 | New segment matching |
 | Pairwise merge (EmbeddingClusterer) | 0.85 | Very conservative cluster merge |
 | Small cluster absorption | 0.72 | Merge short interjections |
-| Micro-cluster absorption (<10s) | 0.15 | Force-absorb noise fragments |
+| Micro-cluster absorption (<10s) | 0.62 | Absorb noise fragments (above codec similarity range) |
 | DB-informed split per-segment | 0.62 | Re-separate mixed clusters |
 | Adaptive threshold (1 segment) | 0.85 | High certainty for single segment |
 | Adaptive threshold (2-3 segments) | 0.78 | Moderate caution |
@@ -107,7 +107,8 @@ postProcess(segments, existingProfiles, skipPairwiseMerge):
   Stage 1 - Pairwise Merge (skip for PyAnnote, VBx already handles):
     Union-find graph, merge clusters with mean similarity >= 0.85
   Stage 2 - Small Cluster Absorption:
-    Micro-clusters (<10s): absorb at 0.15 floor (catches "Mm-hmm" fragments)
+    Micro-clusters (<10s): absorb at 0.62 threshold (above codec similarity range)
+    Clusters with 3+ segments protected from absorption (real speaker)
     Small clusters (10-30s): absorb at 0.72 threshold
   Stage 3 - DB-Informed Split:
     Per-segment matching against known profiles (threshold 0.62)
