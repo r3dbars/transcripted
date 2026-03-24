@@ -156,6 +156,8 @@ extension TranscriptSaver {
 
     /// Update speaker names in an already-saved transcript file.
     /// Replaces "Speaker X" labels in both YAML frontmatter and transcript body.
+    /// Thread-safe: serialized via fileUpdateQueue to prevent concurrent file corruption
+    /// with retroactivelyUpdateSpeaker (called from Settings).
     ///
     /// - Parameters:
     ///   - transcriptURL: Path to the saved markdown transcript
@@ -165,58 +167,60 @@ extension TranscriptSaver {
     static func updateSpeakerNames(transcriptURL: URL, updates: [SpeakerNameUpdate]) -> Bool {
         guard !updates.isEmpty else { return true }
 
-        guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
-            AppLogger.pipeline.error("Failed to read transcript for name update", ["path": transcriptURL.path])
-            return false
-        }
+        return fileUpdateQueue.sync {
+            guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
+                AppLogger.pipeline.error("Failed to read transcript for name update", ["path": transcriptURL.path])
+                return false
+            }
 
-        for update in updates {
-            let speakerId = update.sortformerSpeakerId
-            let oldLabel = "Speaker \(speakerId)"
-            let newName = update.newName
+            for update in updates {
+                let speakerId = update.sortformerSpeakerId
+                let oldLabel = "Speaker \(speakerId)"
+                let newName = update.newName
 
-            // YAML frontmatter: name: "Speaker X" → name: "NewName"
-            content = content.replacingOccurrences(
-                of: "name: \"\(oldLabel)\"",
-                with: "name: \"\(newName)\""
-            )
+                // YAML frontmatter: name: "Speaker X" → name: "NewName"
+                content = content.replacingOccurrences(
+                    of: "name: \"\(oldLabel)\"",
+                    with: "name: \"\(newName)\""
+                )
 
-            // Transcript body: [System/Speaker X] → [System/NewName]
-            content = content.replacingOccurrences(
-                of: "[System/\(oldLabel)]",
-                with: "[System/\(newName)]"
-            )
+                // Transcript body: [System/Speaker X] → [System/NewName]
+                content = content.replacingOccurrences(
+                    of: "[System/\(oldLabel)]",
+                    with: "[System/\(newName)]"
+                )
 
-            // Obsidian wiki links: [[Speaker X]] → [[NewName]]
-            content = content.replacingOccurrences(
-                of: "[[\(oldLabel)]]",
-                with: "[[\(newName)]]"
-            )
+                // Obsidian wiki links: [[Speaker X]] → [[NewName]]
+                content = content.replacingOccurrences(
+                    of: "[[\(oldLabel)]]",
+                    with: "[[\(newName)]]"
+                )
 
-            // Speaker breakdown: **Speaker X:** → **NewName:**
-            content = content.replacingOccurrences(
-                of: "**\(oldLabel):**",
-                with: "**\(newName):**"
-            )
-        }
+                // Speaker breakdown: **Speaker X:** → **NewName:**
+                content = content.replacingOccurrences(
+                    of: "**\(oldLabel):**",
+                    with: "**\(newName):**"
+                )
+            }
 
-        // Consolidate speaker breakdown when multiple diarizer IDs got the same name.
-        // PyAnnote can over-segment one person into 2 clusters; after naming, both become
-        // e.g. "Timothy", producing duplicate lines in the breakdown.
-        content = consolidateSpeakerBreakdown(content)
+            // Consolidate speaker breakdown when multiple diarizer IDs got the same name.
+            // PyAnnote can over-segment one person into 2 clusters; after naming, both become
+            // e.g. "Timothy", producing duplicate lines in the breakdown.
+            content = consolidateSpeakerBreakdown(content)
 
-        // Atomic write back
-        do {
-            try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
-            AppLogger.pipeline.info("Updated speaker names in transcript", ["path": transcriptURL.lastPathComponent, "updates": "\(updates.count)"])
+            // Atomic write back
+            do {
+                try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
+                AppLogger.pipeline.info("Updated speaker names in transcript", ["path": transcriptURL.lastPathComponent, "updates": "\(updates.count)"])
 
-            // Update JSON sidecar
-            updateAgentJSON(transcriptURL: transcriptURL, updates: updates)
+                // Update JSON sidecar
+                updateAgentJSON(transcriptURL: transcriptURL, updates: updates)
 
-            return true
-        } catch {
-            AppLogger.pipeline.error("Failed to write updated transcript", ["error": error.localizedDescription])
-            return false
+                return true
+            } catch {
+                AppLogger.pipeline.error("Failed to write updated transcript", ["error": error.localizedDescription])
+                return false
+            }
         }
     }
 
