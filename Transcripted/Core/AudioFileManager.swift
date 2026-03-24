@@ -138,6 +138,7 @@ extension Audio {
                     AppLogger.audioSystem.warning("System audio failed", ["error": error.localizedDescription])
                     DispatchQueue.main.async {
                         strongSelf.error = "System audio unavailable - recording mic only"
+                        strongSelf.systemAudioFailed = true
                     }
                 }
             }
@@ -194,7 +195,7 @@ extension Audio {
             guard let strongSelf = self else { return }
 
             // Update watchdog timestamp
-            strongSelf.lastBufferTime = Date()
+            strongSelf.lastBufferTime = CACurrentMediaTime()
 
             // Calculate audio level for visualizer (use original buffer)
             strongSelf.calculateLevel(buffer: buffer)

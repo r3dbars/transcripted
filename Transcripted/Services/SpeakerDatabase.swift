@@ -56,8 +56,49 @@ final class SpeakerDatabase {
                     sqlite3_free(errorMessage)
                 }
             }
-            AppLogger.speakers.info("Opened database", ["path": dbPath.path])
+
+            // Corruption detection: run quick_check to verify database integrity
+            if !verifyDatabaseIntegrity() {
+                AppLogger.speakers.error("CRITICAL: Speaker database corrupt — backing up and recreating", ["path": dbPath.path])
+                sqlite3_close(db)
+                db = nil
+                // Backup corrupt file with timestamp
+                let backupName = "speakers_corrupt_\(DateFormattingHelper.formatFilename(Date())).sqlite"
+                let backupPath = dbPath.deletingLastPathComponent().appendingPathComponent(backupName)
+                try? FileManager.default.moveItem(at: dbPath, to: backupPath)
+                // Recreate fresh database
+                if sqlite3_open(dbPath.path, &db) == SQLITE_OK {
+                    isDatabaseOpen = true
+                    try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dbPath.path)
+                    for (pragma, _) in pragmas {
+                        sqlite3_exec(db, "PRAGMA \(pragma);", nil, nil, nil)
+                    }
+                    AppLogger.speakers.info("Recreated fresh database after corruption recovery")
+                } else {
+                    isDatabaseOpen = false
+                    AppLogger.speakers.error("Failed to recreate database after corruption recovery")
+                }
+            } else {
+                AppLogger.speakers.info("Opened database", ["path": dbPath.path])
+            }
         }
+    }
+
+    /// Verify database integrity using PRAGMA quick_check.
+    /// Returns true if the database is healthy.
+    private func verifyDatabaseIntegrity() -> Bool {
+        guard let db = db else { return false }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA quick_check;", -1, &stmt, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_finalize(stmt) }
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            if let text = sqlite3_column_text(stmt, 0) {
+                return String(cString: text) == "ok"
+            }
+        }
+        return false
     }
 
     private func createTables() {

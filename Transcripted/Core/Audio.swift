@@ -3,6 +3,7 @@ import Foundation
 import AppKit
 import CoreAudio
 import Combine
+import QuartzCore
 
 /// Status of system audio capture for UI feedback
 /// Used to show warnings when device switching or audio loss occurs
@@ -103,9 +104,11 @@ class Audio: ObservableObject {
     var timer: Timer?
 
     // Device change watchdog - thread-safe access via lock
-    private var _lastBufferTime: Date = Date()
+    // Uses CACurrentMediaTime() (monotonic clock) to avoid false triggers after sleep/wake.
+    // Matches SystemAudioCapture.swift which also uses CACurrentMediaTime().
+    private var _lastBufferTime: CFTimeInterval = CACurrentMediaTime()
     private let lastBufferTimeLock = NSLock()
-    var lastBufferTime: Date {
+    var lastBufferTime: CFTimeInterval {
         get {
             lastBufferTimeLock.lock()
             defer { lastBufferTimeLock.unlock() }
@@ -140,9 +143,22 @@ class Audio: ObservableObject {
     let recoveryCooldown: TimeInterval = 5.0  // Min seconds between recovery attempts
 
     // Write error tracking — stop writing after repeated failures
-    var consecutiveMicWriteErrors: Int = 0
-    var consecutiveSystemWriteErrors: Int = 0
+    // Thread-safe: accessed from audio file queues (background) and reset from start() (main thread)
+    private var _consecutiveMicWriteErrors: Int = 0
+    private var _consecutiveSystemWriteErrors: Int = 0
+    private let writeErrorLock = NSLock()
+    var consecutiveMicWriteErrors: Int {
+        get { writeErrorLock.lock(); defer { writeErrorLock.unlock() }; return _consecutiveMicWriteErrors }
+        set { writeErrorLock.lock(); defer { writeErrorLock.unlock() }; _consecutiveMicWriteErrors = newValue }
+    }
+    var consecutiveSystemWriteErrors: Int {
+        get { writeErrorLock.lock(); defer { writeErrorLock.unlock() }; return _consecutiveSystemWriteErrors }
+        set { writeErrorLock.lock(); defer { writeErrorLock.unlock() }; _consecutiveSystemWriteErrors = newValue }
+    }
     let maxConsecutiveWriteErrors = 10
+
+    // Persistent flag: system audio capture failed, recording mic only
+    @Published var systemAudioFailed: Bool = false
 
     // System audio capture
     var systemAudioCapture: Any? // SystemAudioCapture (macOS 14.2+)
@@ -349,6 +365,7 @@ class Audio: ObservableObject {
         lastRecoveryTime = nil
         consecutiveMicWriteErrors = 0
         consecutiveSystemWriteErrors = 0
+        systemAudioFailed = false
 
         AppLogger.audio.info("Starting audio capture")
 
@@ -390,6 +407,7 @@ class Audio: ObservableObject {
         lastRecoveryTime = nil
         consecutiveMicWriteErrors = 0
         consecutiveSystemWriteErrors = 0
+        systemAudioFailed = false
 
         AppLogger.audio.info("Starting audio capture")
 

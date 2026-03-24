@@ -13,12 +13,12 @@ extension Audio {
     // MARK: - Watchdog Timer
 
     func startWatchdog() {
-        lastBufferTime = Date()
+        lastBufferTime = CACurrentMediaTime()
         watchdogTimer?.invalidate()
         watchdogTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             guard let self = self, self.isRecording else { return }
 
-            let timeSinceLastBuffer = Date().timeIntervalSince(self.lastBufferTime)
+            let timeSinceLastBuffer = CACurrentMediaTime() - self.lastBufferTime
 
             if timeSinceLastBuffer > 3.0 {
                 // Enforce cooldown — don't attempt recovery more often than every 5s
@@ -32,9 +32,11 @@ extension Audio {
                     AppLogger.audioMic.error("Max recovery attempts reached, stopping recording", [
                         "attempts": "\(self.deviceSwitchCount)"
                     ])
+                    let savedError = "Audio device unavailable — recording stopped after \(self.deviceSwitchCount) attempts"
                     DispatchQueue.main.async {
-                        self.error = "Audio device unavailable — recording stopped"
                         self.stop()
+                        // Re-apply error after stop() clears it
+                        self.error = savedError
                     }
                     return
                 }
@@ -160,7 +162,7 @@ extension Audio {
             guard let self = self else { return }
 
             // Update watchdog timestamp
-            self.lastBufferTime = Date()
+            self.lastBufferTime = CACurrentMediaTime()
 
             // Calculate audio level for visualizer
             self.calculateLevel(buffer: buffer)
@@ -201,7 +203,7 @@ extension Audio {
         // Restart engine
         do {
             try engine.start()
-            lastBufferTime = Date() // Reset watchdog
+            lastBufferTime = CACurrentMediaTime() // Reset watchdog
 
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }

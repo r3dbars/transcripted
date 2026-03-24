@@ -56,7 +56,16 @@ extension AppDelegate {
         }
 
         // Start transcription in background using task manager
-        taskManager?.startTranscription(
+        guard let taskManager = taskManager else {
+            AppLogger.app.error("Task manager unavailable — queueing as failed transcription")
+            failedTranscriptionManager?.addFailedTranscription(
+                micAudioURL: micURL,
+                systemAudioURL: systemURL,
+                errorMessage: "Task manager unavailable at recording completion"
+            )
+            return
+        }
+        taskManager.startTranscription(
             micURL: micURL,
             systemURL: systemURL,
             outputFolder: outputFolder,

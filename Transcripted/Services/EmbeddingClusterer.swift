@@ -130,9 +130,9 @@ enum EmbeddingClusterer {
     /// relaxed similarity threshold to merge these back.
     ///
     /// Two-tier thresholds:
-    /// - Micro-clusters (< `microClusterDuration`): Moderate threshold (0.50).
-    ///   Absorbs noise fragments with similar voice characteristics, but preserves
-    ///   distinct speakers (codec-compressed voices typically have 0.3-0.5 similarity).
+    /// - Micro-clusters (< `microClusterDuration`): Threshold 0.62 — safely above the
+    ///   codec-compressed voice similarity range (0.3-0.5), absorbs noise fragments
+    ///   while preserving genuinely distinct speakers.
     /// - Small clusters (< `minClusterDuration`): Standard relaxed threshold
     ///   (0.72). Safety: genuinely different speakers rarely exceed 0.6 cosine
     ///   similarity, so this won't incorrectly merge distinct people.
@@ -145,7 +145,7 @@ enum EmbeddingClusterer {
         minClusterDuration: Double = 30.0,
         absorptionThreshold: Float = 0.72,
         microClusterDuration: Double = 10.0,
-        microAbsorptionThreshold: Float = 0.50
+        microAbsorptionThreshold: Float = 0.62
     ) -> [SpeakerSegment] {
         // Compute total speaking duration per speaker
         var durationPerSpeaker: [Int: Double] = [:]
