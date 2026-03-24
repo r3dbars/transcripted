@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A macOS utility that captures rough spoken (or typed) thoughts and uses a local LLM (Qwen 3.5-4B via MLX) to polish them into well-crafted messages matching the user's personal writing style. Features a floating overlay UI (non-activating NSPanel), global hotkey screen capture for full conversation context extraction, token-by-token streaming, and platform-aware formatting. Built with SwiftUI, Apple Speech Framework, and on-device MLX inference — fully local, no external APIs.
+A macOS utility that captures rough spoken (or typed) thoughts and uses a local LLM (Qwen 3.5-4B via MLX) to polish them into well-crafted messages matching the user's personal writing style. Features a floating overlay UI (non-activating NSPanel), global hotkey screen capture for full conversation context extraction, token-by-token streaming, and platform-aware formatting. Built with pure AppKit (no SwiftUI in the main UI), Apple Speech Framework, and on-device MLX inference — fully local, no external APIs.
 
 ## Architecture
 
@@ -26,7 +26,7 @@ Sources/
 ├── Analysis/                ← AnalysisEngine + InsightCard — native Swift feedback analyzer
 ├── Accessibility/           ← AccessibilityBridge — AXUIElement queries for text field position + value
 ├── Observability/           ← EventReporter + AppLogger + JSONLWriter — centralized error/warning/info tracking (events.jsonl)
-└── UI/                      ← UI layer (15 files): floating overlay, MenuBarPanel, onboarding, AgentSection
+└── UI/                      ← UI layer (~25 files): pure AppKit floating overlay + menubar panel, SwiftUI onboarding (Phase 3)
 Tests/                       ← Pure-function test suite (147 tests, no XCTest, 2s compile+run)
 run-tests.sh                 ← Compiles and runs the test suite
 ```
@@ -166,7 +166,7 @@ After identifying the error, either:
    ├─→ StyleEngine.buildSystemPrompt() + PlatformFormatter.formattingInstructions
    └─→ MLXEngine.generate() → tokens stream into overlay in real-time
        └─→ Overlay transitions: listening → drafting → streaming → review
-       └─→ Auto-focus: TextEditor receives keyboard focus via @FocusState
+       └─→ Auto-focus: DraftTextView receives keyboard focus via makeFirstResponder()
 
 3. User reviews draft in overlay (editable TextEditor)
    │
@@ -220,7 +220,7 @@ If vision times out (> 8s) or fails, the fallback prompt asks the model to "clea
 
 ### To modify the overlay UI:
 
-1. **`Sources/UI/OverlayContentView.swift`** — SwiftUI views for all 5 overlay states
+1. **`Sources/UI/OverlayRootView.swift`** — Pure AppKit root view for all 7 overlay states (replaces SwiftUI OverlayContentView)
 2. **`Sources/UI/FloatingOverlayController.swift`** — State machine, animations, panel lifecycle
 3. **`Sources/UI/DraftSessionController.swift`** — Session orchestration (draft + dictation flows)
 4. **`Sources/UI/CLAUDE.md`** — Document any new states, views, or behaviors
@@ -264,10 +264,10 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - **Single-pane menubar panel** — Replaced the TabView (Style + Agent tabs) with a single ScrollView containing sections: header (status dot), usage stats, shortcut pills, writing style (compact/expandable), and agent (insight cards + chat). `StyleProfileView` is deprecated — style display is inlined in `MenuBarPanel.swift`.
 - **Guarded optionals over IUOs** — `DraftSessionController.appState` and `overlayController` are `Optional`, not `!`. Every public method starts with `guard let` to handle pre-wiring hotkey races. Never use implicitly unwrapped optionals for properties set after init.
 - **Task cancellation before replacement** — Always `task?.cancel()` before `task = Task { ... }`. Orphaned tasks keep running and writing to shared state.
-- **Global Escape monitor** — `NSEvent.addGlobalMonitorForEvents` intercepts Escape during non-key panel states (listening/drafting). Installed when overlay shows, removed on hide. The panel can't receive keyboard events when `allowKeyStatus = false`, so SwiftUI `.onKeyPress` won't fire — the global monitor bridges that gap.
+- **Global Escape monitor** — `NSEvent.addGlobalMonitorForEvents` intercepts Escape during non-key panel states (listening/drafting). Installed when overlay shows, removed on hide. The panel can't receive keyboard events when `allowKeyStatus = false`, so the global monitor bridges that gap. In review mode, `DraftTextView.keyDown()` handles Escape directly via the responder chain.
 - **NSLock for audio thread ↔ MainActor** — Audio render thread has strict ~10ms deadlines; actor isolation has unpredictable scheduling latency. NSLock provides deterministic ~1μs overhead for the shared sample buffer.
 - **All engines have deinits** — `ContextCaptureEngine` (Carbon hotkeys), `AnalysisEngine` (DispatchSource + debounce task), `ParakeetEngine` (audio engine stop + AsrManager cleanup). Missing deinits leak OS-level resources.
-- **Fresh NSHostingController per popover open** — Recreating the hosting controller on each menubar popover toggle prevents stale SwiftUI observation state from accumulating across show/hide cycles. A long-lived `NSHostingController` eventually crashes in `body` evaluation after hours of use.
+- **Pure AppKit UI (no SwiftUI in overlay or menubar)** — The floating overlay and menubar panel use pure AppKit views (NSView subclasses). This eliminates SwiftUI's AttributeGraph, which accumulated dangling pointers from NSHostingView lifecycle debris and caused EXC_BAD_ACCESS crashes after ~10 hours of use. Controllers hold Combine subscriptions to engine `@Published` properties and push data to views via explicit `update()` methods. Views are dumb renderers with no subscriptions.
 - **Intent-first drafting** — System prompt prioritizes accomplishing the user's communicative intent over style mimicry. `<primary_goal>` appears before `<style_profile>`, and style is framed as a "finishing layer" via `<how_to_use_style>`. The user message prompt reinforces this with "accomplish this goal above all else" and an anti-opener rule. See `Sources/Style/CLAUDE.md` § "Application — Ghostwriting System Prompt (Intent-First)".
 - **Clipboard restore via changeCount polling** — `pasteWithClipboardRestore()` polls `NSPasteboard.changeCount` every 50ms with a 2-second timeout (some apps write back to clipboard on paste, which triggers early restore). Replaces the old fixed 500ms delay.
 - **Debug log rotation** — `AppLogFileWriter` preserves logs across sessions (no wipe on launch). Files over 500KB are rotated to the last 1000 lines. Session separators mark boundaries.
@@ -285,11 +285,12 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - **Pro audio interfaces break SFSpeechRecognizer** — USB interfaces like BEACN Mic (96kHz/4ch) cause error 1110. Fix: force mono tap format. → See `Sources/Speech/CLAUDE.md` § "Critical Gotchas"
 - **Microphone permission can be revoked at runtime** — Check `AVCaptureDevice.authorizationStatus` before `installTap()`. → See `Sources/Speech/CLAUDE.md` § "Critical Gotchas"
 
-### SwiftUI & AppKit
+### AppKit UI (Post-Rewrite)
 
-- **`.onKeyPress` needs the `keys:phases:` variant** — the single-key form `onKeyPress(.return)` doesn't expose modifiers, so you can't distinguish Enter from Shift+Enter. Use `onKeyPress(keys: [.return], phases: .down)` which passes the full `KeyPress` object
-- **SwiftUI type-checker has limits** — complex `body` with inline closures can exceed Swift's type-check timeout. Fix: extract views into separate `@ViewBuilder` computed properties
-- **`@FocusState` only works in View structs** — cannot be added to `ObservableObject` classes. Must bind with `.focused($isReviewFocused)` on the TextEditor and set `true` in `.onAppear` with a 50ms delay (lets the panel finish becoming key first)
+- **Pure AppKit overlay and menubar** — No `NSHostingView`, no `AttributeGraph`, no `@Published` observation from views. Controllers hold Combine subscriptions and push data to views via `update()` methods
+- **`DraftTextView.keyDown()` for keyboard handling** — NSTextView subclass handles Enter (confirm), Shift+Enter (newline), Escape (cancel) via the responder chain. No `@FocusState`, no `.onKeyPress`
+- **`makeFirstResponder()` is synchronous** — No 50ms delay needed for focus transfer. AppKit's responder chain is deterministic
+- **Lazy child views, never destroyed** — Content views (listening, drafting, streaming, review) are created on first use and reused across state transitions. No view lifecycle churn
 - **Non-activating panels need dynamic key status** — `FloatingOverlayPanel.canBecomeKey` returns a mutable `allowKeyStatus` flag. During listening/drafting it's `false`, during review it's `true`. Without this, either keyboard input or paste-back breaks
 - **CoreFoundation `as?` casts always succeed** — Conditional downcasts to CF bridged types (`AXUIElement`, `AXValue`) always succeed at the compiler level. Use `as!` for CF types — it's compiler-guaranteed safe
 - **Global event monitors are observe-only** — `NSEvent.addGlobalMonitorForEvents` can see but not consume events. For events that need to be consumed, use Carbon `RegisterEventHotKey` instead
@@ -326,7 +327,7 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 
 ## Frameworks Linked
 
-- `SwiftUI` — UI
+- `SwiftUI` — Minimal: app entry point (`@main struct DraftApp: App`) + onboarding views only
 - `AVFoundation` — Audio engine / microphone
 - `Speech` — Apple Speech recognition (used by ParakeetEngine for live display)
 - `Vision` — Apple Vision framework (VNRecognizeTextRequest for OCR context extraction)
@@ -336,7 +337,7 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - `CoreGraphics` — Window capture (CGWindowListCreateImage)
 - `CoreML` — FluidAudio Parakeet model inference
 - `CoreAudio` — Audio device queries (input device name via AudioObjectGetPropertyData)
-- `Combine` — Required by SwiftUI internally
+- `Combine` — Engine @Published properties + controller subscriptions for AppKit view updates
 - `SQLite3` (via `-lsqlite3`) — iMessage database reading for style onboarding
 - `Metal` / `MetalKit` / `Accelerate` — MLX inference backend + FluidAudio (CoreML Parakeet inference)
 - `libc++` (via `-lc++`) — Required by FluidAudio's C++ components
