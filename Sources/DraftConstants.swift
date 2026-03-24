@@ -71,8 +71,8 @@ enum DraftConstants {
     /// Edit distance threshold — below this, profile is "working well" (refine less often)
     static let editDistanceStabilizedThreshold: Double = 0.25
 
-    /// Number of recent examples to send for style refinement
-    static let refinementExampleWindow = 20
+    /// Number of recent examples to send for style refinement (8 keeps within 4B model's effective attention)
+    static let refinementExampleWindow = 8
 
     /// Number of recent edit distances to check for stabilization
     static let refinementDistanceWindow = 10

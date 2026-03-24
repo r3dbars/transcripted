@@ -66,11 +66,26 @@ enum StyleUtils {
 
     // MARK: - Text Extraction
 
-    /// Extract only the last N examples as text for recency-weighted refinement.
+    /// Minimum USER_SENT length for an example to be included in refinement.
+    /// Short examples (< 20 chars) are likely testing/keyboard mashing and poison the style profile.
+    private static let minimumUserSentLength = 20
+
+    /// Extract only the last N quality examples as text for recency-weighted refinement.
+    /// Filters out examples where USER_SENT is too short (testing/garbage data).
     static func extractRecentExamplesText(last n: Int, styleFileContents: String) -> String {
         let blocks = styleFileContents.components(separatedBy: "### Example")
         // First element is everything before examples — skip it
-        let recentBlocks = blocks.dropFirst().suffix(n)
+        let allBlocks = Array(blocks.dropFirst())
+
+        // Filter out low-quality examples (short USER_SENT = likely testing)
+        let qualityBlocks = allBlocks.filter { block in
+            guard let userSentRange = block.range(of: "USER_SENT:\n") else { return false }
+            let afterUserSent = String(block[userSentRange.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return afterUserSent.count >= minimumUserSentLength
+        }
+
+        let recentBlocks = qualityBlocks.suffix(n)
         guard !recentBlocks.isEmpty else { return "" }
         return recentBlocks.map { "### Example" + $0 }.joined().trimmingCharacters(in: .whitespacesAndNewlines)
     }
