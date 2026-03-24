@@ -7,8 +7,8 @@ Audio capture pipeline, transcription orchestration, file saving, stats tracking
 | File | Actor | Purpose |
 |------|-------|---------|
 | `Audio.swift` | NOT @MainActor | AVAudioEngine setup, recording start/stop, publishes audio levels/state |
-| `AudioDeviceRecovery.swift` | NOT @MainActor | Mic watchdog timer, device disconnect recovery, sleep/wake resilience |
-| `AudioFileManager.swift` | NOT @MainActor | Audio file creation, WAV writing, buffer copying, format conversion |
+| `AudioDeviceRecovery.swift` | NOT @MainActor | Mic watchdog timer, device disconnect recovery, sleep/wake resilience, 0o600 permissions on recovery segments |
+| `AudioFileManager.swift` | NOT @MainActor | Audio file creation, WAV writing, buffer copying, format conversion, 0o600 permissions on mic/system files |
 | `AudioLevelMonitor.swift` | NOT @MainActor | Audio level metering, silence detection, rolling buffer management |
 | `SystemAudioCapture.swift` | NOT @MainActor | CoreAudio process taps (macOS 14.2+), device switching, format negotiation |
 | `SystemAudioProcessTap.swift` | NOT @MainActor | CoreAudio process tap creation, aggregate device setup |
@@ -76,6 +76,12 @@ Audio capture pipeline, transcription orchestration, file saving, stats tracking
 - **System audio loss**: 10s silence -> `.silent` status, 10+ min -> `.failed`
 - **Write errors**: Stops recording after 10 consecutive write errors
 - **originalMicAudioFileURL vs micAudioFileURL**: During recovery, new WAV segment created. Pipeline MUST use `originalMicAudioFileURL` for transcription.
+- **Security**: Recovery segments written with 0o600 permissions (owner-only) to protect biometric voice data
+
+## Audio File Security (AudioFileManager.swift + AudioDeviceRecovery.swift)
+- **Issue**: Raw meeting WAV files created with default umask permissions (644), making biometric voice recordings world-readable
+- **Fix**: Applied 0o600 permissions immediately after file creation in `AudioFileManager.swift` (mic and system files) and `AudioDeviceRecovery.swift` (recovery segments)
+- **Pattern**: Matches existing pattern used by `SpeakerClipExtractor` for speaker clips
 
 ## DisplayStatus (DisplayStatus.swift)
 ```
