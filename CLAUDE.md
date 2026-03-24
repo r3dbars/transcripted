@@ -98,7 +98,7 @@ Every folder with ≥2 Swift files has its own CLAUDE.md with file index, refere
 | `Transcripted/Design/Colors/CLAUDE.md` | Complete color reference with hex/HSB values |
 | `Transcripted/Design/Components/CLAUDE.md` | PremiumButton, PremiumCard, BenefitCard, QuickTipRow, AnimatedIcon specs |
 | `Transcripted/UI/FloatingPanel/CLAUDE.md` | Pill state machine, Combine subscriptions, tray states |
-| `Transcripted/UI/FloatingPanel/Components/CLAUDE.md` | Aurora views, speaker naming, error toast, celebrations |
+| `Transcripted/UI/FloatingPanel/Components/CLAUDE.md` | Aurora views, speaker naming, error toast, pill overlays |
 | `Transcripted/UI/Settings/CLAUDE.md` | @AppStorage keys, window config, speaker operations |
 | `Transcripted/UI/Settings/Sections/CLAUDE.md` | 7 section views with per-section detail |
 | `Transcripted/UI/Settings/Components/CLAUDE.md` | CoralToggle, button styles, input components |

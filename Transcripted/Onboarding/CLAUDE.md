@@ -44,6 +44,12 @@ modelErrorKind: DownloadErrorKind? (structured error classification from ModelDo
 downloadSpeed: Double (bytes/sec, smoothed), estimatedTimeRemaining: TimeInterval? (nil when unknown)
 ```
 
+## Microphone Permission Fix (OnboardingState.swift + PermissionsStep.swift)
+- **Issue**: macOS microphone permission dialog appeared behind the onboarding window because the app uses `.accessory` activation policy (no dock icon)
+- **Fix**: Added `NSApp.activate()` before `AVCaptureDevice.requestAccess` to ensure the system dialog appears in front
+- **UI change**: Added "Try Again" button in `.denied` state so users can re-trigger the permission prompt instead of being stuck
+- **Error message**: Changed from "Microphone access was denied" to "Microphone access wasn't granted. Tap 'Try Again' to see the permission prompt, or open Settings to enable it manually."
+
 ## OnboardingState Key Methods
 - `checkPermissions()` - Polls current status (call on appear)
 - `requestMicrophonePermission() async` - `AVCaptureDevice.requestAccess(for: .audio)`
