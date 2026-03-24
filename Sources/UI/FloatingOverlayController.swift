@@ -1,11 +1,12 @@
 // FloatingOverlayController.swift
 // State machine, animations, panel lifecycle, and global Escape monitor for the floating overlay
+// Pure AppKit — no SwiftUI, no NSHostingView, no AttributeGraph
 
-import SwiftUI
 import AppKit
+import Combine
 
 @MainActor
-class FloatingOverlayController: ObservableObject {
+class FloatingOverlayController {
     enum SessionMode {
         case draft      // Option+D: screenshot + voice + AI rewrite + review
         case dictation  // Option+Space: voice + light polish + auto-paste
@@ -21,54 +22,63 @@ class FloatingOverlayController: ObservableObject {
         case diffFlash    // Read-only word diff of user's edits before confirming
     }
 
-    /// Human-readable shortcut hints for OverlayContentView (reads live from UserDefaults)
+    /// Human-readable shortcut hints (reads live from UserDefaults)
     var draftShortcutHint: String { HotkeyPreferences.displayString(for: HotkeyPreferences.draftBinding()) }
     var dictationShortcutHint: String {
         if HotkeyPreferences.rightOptionDictationEnabled() { return "Right ⌥" }
         return HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
     }
 
-    @Published var state: OverlayState = .idle
-    @Published var activeMode: SessionMode = .draft
-    @Published var isVisible = false
-    @Published var reviewText: String = ""
-    @Published var streamingText: String = ""
-    @Published var errorMessage: String = ""
-    @Published var loadingElapsedSeconds: Int = 0
-    @Published var transcriptExpanded = false
-    @Published var hasContext: Bool = true
+    // MARK: - State (plain vars with didSet — no @Published, no ObservableObject)
+
+    var state: OverlayState = .idle {
+        didSet {
+            guard state != oldValue else { return }
+            pushStateToViews()
+        }
+    }
+    var activeMode: SessionMode = .draft {
+        didSet { pushStateToViews() }
+    }
+    var isVisible = false
+    var reviewText: String = ""
+    var streamingText: String = ""
+    var errorMessage: String = ""
+    var loadingElapsedSeconds: Int = 0 {
+        didSet { pushStateToViews() }
+    }
+    var transcriptExpanded = false {
+        didSet { pushStateToViews() }
+    }
+    var hasContext: Bool = true
 
     /// The AI's original draft text, stored when streaming finishes.
-    /// Used for diff computation and "edited · teaching Draft" indicator.
-    @Published var originalDraftForComparison: String = ""
+    var originalDraftForComparison: String = ""
 
     /// Human-readable description of what the user changed (set before entering diffFlash state)
-    @Published var editDescription: String = ""
+    var editDescription: String = ""
 
     private var streamingNewlineCount = 0
-
-    /// Session counter — tracks how many show/hide cycles the hosting view has survived.
-    /// After sessionsSinceHostingRecreation reaches the threshold, recreate the hosting
-    /// view on the next idle hide to prevent AG stale state accumulation.
-    private var sessionsSinceHostingRecreation: Int = 0
-    private static let hostingRecreationThreshold = 50
 
     /// Closures for Enter/Escape in review mode — set by DraftSessionController
     var onConfirm: (() -> Void)?
     var onCancel: (() -> Void)?
-    /// Closure for Escape during non-review states (listening/drafting/streaming) — set by DraftSessionController
+    /// Closure for Escape during non-review states (listening/drafting/streaming)
     var onEscapeDuringSession: (() -> Void)?
 
-    private var panel: FloatingOverlayPanel?
-    private var hostingView: NSHostingView<AnyView>?
-    private var blurView: NSVisualEffectView?
+    // MARK: - Panel & Views
 
+    private var panel: FloatingOverlayPanel?
+    private var rootView: OverlayRootView?
+    private var blurView: NSVisualEffectView?
     private var dragHandleView: PanelDragView?
     private var escapeMonitor: Any?
 
     /// Generation counter — incremented on every showPanel(), checked in async _performHide()
-    /// calls to prevent stale hide operations from tearing down a new session's state.
     private var hideGeneration: UInt64 = 0
+
+    /// Combine subscriptions for engine state → view updates
+    private var subscriptions = Set<AnyCancellable>()
 
     deinit {
         if let monitor = escapeMonitor {
@@ -80,6 +90,8 @@ class FloatingOverlayController: ObservableObject {
     }
 
     var sttRouter: STTRouter?
+
+    // MARK: - Setup
 
     func setup(sttRouter: STTRouter) {
         guard panel == nil else {
@@ -95,7 +107,7 @@ class FloatingOverlayController: ObservableObject {
             defer: true
         )
 
-        // Glassmorphism: NSVisualEffectView behind SwiftUI content
+        // Glassmorphism: NSVisualEffectView behind content
         let blurView = NSVisualEffectView()
         blurView.appearance = NSAppearance(named: .darkAqua)
         blurView.material = .underWindowBackground
@@ -108,16 +120,24 @@ class FloatingOverlayController: ObservableObject {
         panel.contentView?.addSubview(blurView)
         self.blurView = blurView
 
-        let content = OverlayContentView(sttRouter: sttRouter, controller: self)
-        let hosting = NSHostingView(rootView: AnyView(content))
-        hosting.frame = panel.contentView?.bounds ?? .zero
-        hosting.autoresizingMask = [.width, .height]
-        panel.contentView?.addSubview(hosting, positioned: .above, relativeTo: blurView)
+        // Pure AppKit root view (replaces NSHostingView — no AttributeGraph, no AG corruption)
+        let rootView = OverlayRootView(frame: panel.contentView?.bounds ?? .zero)
+        rootView.autoresizingMask = [.width, .height]
+        panel.contentView?.addSubview(rootView, positioned: .above, relativeTo: blurView)
+        self.rootView = rootView
 
-        // Add drag handle at the top of the panel — pure AppKit, outside SwiftUI hierarchy.
-        // This avoids NSViewRepresentable bridging which can crash during nested run loops
-        // (DesignLibrary + swift_task_isCurrentExecutorWithFlagsImpl during layout passes).
-        let headerHeight: CGFloat = 40
+        // Wire keyboard callbacks from DraftTextView → controller closures
+        rootView.reviewView.draftTextView.onConfirm = { [weak self] in self?.onConfirm?() }
+        rootView.reviewView.draftTextView.onCancel = { [weak self] in self?.onCancel?() }
+        rootView.reviewView.draftTextView.onTextChange = { [weak self] text in
+            self?.reviewText = text
+        }
+        rootView.headerView.onToggleTranscript = { [weak self] in
+            self?.toggleTranscript()
+        }
+
+        // Drag handle at the top — pure AppKit, above the root view
+        let headerHeight: CGFloat = OverlayTokens.headerHeight
         let contentBounds = panel.contentView?.bounds ?? .zero
         let dragView = PanelDragView()
         dragView.panel = panel
@@ -127,8 +147,8 @@ class FloatingOverlayController: ObservableObject {
             width: contentBounds.width,
             height: headerHeight
         )
-        dragView.autoresizingMask = [.width, .minYMargin]  // Stay at top, stretch width
-        panel.contentView?.addSubview(dragView, positioned: .above, relativeTo: hosting)
+        dragView.autoresizingMask = [.width, .minYMargin]
+        panel.contentView?.addSubview(dragView, positioned: .above, relativeTo: rootView)
         self.dragHandleView = dragView
 
         // Round corners on the panel's content view
@@ -137,72 +157,75 @@ class FloatingOverlayController: ObservableObject {
         panel.contentView?.layer?.masksToBounds = true
 
         self.panel = panel
-        self.hostingView = hosting
+
+        // Combine subscriptions: push live engine data to views
+        sttRouter.$audioLevel
+            .receive(on: RunLoop.main)
+            .sink { [weak self] level in
+                self?.rootView?.headerView.updateWaveformLevel(level)
+            }
+            .store(in: &subscriptions)
+
+        sttRouter.$liveTranscript
+            .receive(on: RunLoop.main)
+            .sink { [weak self] text in
+                guard let self = self else { return }
+                if self.state == .listening {
+                    self.rootView?.listeningView.updateTranscript(text)
+                }
+            }
+            .store(in: &subscriptions)
+
+        sttRouter.$isTranscribing
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.pushStateToViews()
+            }
+            .store(in: &subscriptions)
     }
 
-    /// Recreate NSHostingView to clear any AttributeGraph corruption from system sleep/wake cycles.
-    /// Called from handleSystemWake() — NOT from per-session showPanel().
-    /// Keeping the hosting view alive across sessions (instead of recreating per session) dramatically
-    /// reduces AG churn. Each create/destroy cycle leaves residue in AG's global shared table; over
-    /// hours of operation (dozens of sessions), this accumulates until a gesture dispatch dereferences
-    /// a dangling pointer → EXC_BAD_ACCESS in _ButtonGesture via MainActor.assumeIsolated.
-    func recreateHostingView() {
-        guard let panel = panel, let sttRouter = sttRouter else { return }
+    // MARK: - State → View Push
 
-        hostingView?.removeFromSuperview()
-
-        let content = OverlayContentView(sttRouter: sttRouter, controller: self)
-        let hosting = NSHostingView(rootView: AnyView(content))
-        hosting.frame = panel.contentView?.bounds ?? .zero
-        hosting.autoresizingMask = [.width, .height]
-
-        if let blur = blurView {
-            panel.contentView?.addSubview(hosting, positioned: .above, relativeTo: blur)
-        } else {
-            panel.contentView?.addSubview(hosting)
-        }
-
-        // Re-add drag handle on top of new hosting view
-        if let dragView = dragHandleView {
-            panel.contentView?.addSubview(dragView, positioned: .above, relativeTo: hosting)
-        }
-
-        self.hostingView = hosting
+    /// Push current state to the AppKit view hierarchy. Called on state changes.
+    private func pushStateToViews() {
+        rootView?.updateForState(
+            state,
+            mode: activeMode,
+            transcriptExpanded: transcriptExpanded,
+            hasContext: hasContext,
+            draftShortcutHint: draftShortcutHint,
+            dictationShortcutHint: dictationShortcutHint,
+            errorMessage: errorMessage,
+            loadingElapsedSeconds: loadingElapsedSeconds,
+            isTranscribing: sttRouter?.isTranscribing ?? false,
+            liveTranscript: sttRouter?.liveTranscript ?? "",
+            originalDraft: originalDraftForComparison,
+            reviewText: reviewText
+        )
     }
 
-    /// Unified show method — positions the panel near the user's cursor/text field
+    // MARK: - Panel Show/Hide
+
     func showPanel(near sourceApp: NSRunningApplication?) {
         guard let panel = panel else { return }
 
-        // Invalidate any pending async _performHide() from a previous session's animation.
-        // Without this, a stale hide can tear down the new session's state.
+        // Invalidate any pending async _performHide() from a previous session's animation
         hideGeneration &+= 1
 
-        // Cancel stale timers from a previous session (error dismiss, loading timer).
-        // These can fire after a new session starts and interfere with the new session.
+        // Cancel stale timers from a previous session
         errorDismissTask?.cancel()
         errorDismissTask = nil
         loadingTimerTask?.cancel()
         loadingTimerTask = nil
         errorMessage = ""
 
-        // NOTE: We deliberately do NOT recreate the NSHostingView here. Keeping a single
-        // long-lived hosting view avoids AG (AttributeGraph) churn — each create/destroy
-        // cycle leaves residue in AG's global shared table that accumulates over hours of
-        // operation, eventually causing EXC_BAD_ACCESS in _ButtonGesture dispatches.
-        // The hosting view is only recreated on system wake (handleSystemWake) where
-        // sleep/wake can genuinely corrupt AG state.
-
         let rawTargetRect = sourceApp.flatMap { AccessibilityBridge.focusedTextFieldRect(for: $0) }
-        // Start compact (header-only) for listening; full height for other states
         let initialHeight = (state == .listening || state == .idle)
             ? OverlayTokens.panelCompactHeight
             : OverlayTokens.panelMinHeight
         let panelSize = NSSize(width: OverlayTokens.panelWidth, height: initialHeight)
 
-        // Validate the accessibility rect — terminal emulators (iTerm2) report their entire
-        // scrollback buffer as the text area rect (e.g., 4032px tall on a 982px screen).
-        // Reject any rect taller/wider than the current screen — it's not a real visible field.
+        // Validate the accessibility rect — terminal emulators report oversized text areas
         let mousePos = NSEvent.mouseLocation
         let currentScreen = NSScreen.screens.first { NSMouseInRect(mousePos, $0.frame, false) }
             ?? NSScreen.main
@@ -213,12 +236,11 @@ class FloatingOverlayController: ObservableObject {
            raw.width > 0, raw.width <= screenSize.width {
             targetRect = raw
         } else {
-            targetRect = nil  // Fall through to mouse-cursor positioning
+            targetRect = nil
         }
 
         var origin: NSPoint
         if let rect = targetRect, let screen = NSScreen.main {
-            // Primary path: position above the focused text field
             let screenHeight = screen.frame.height
             let flippedY = screenHeight - rect.origin.y
             origin = NSPoint(
@@ -226,22 +248,20 @@ class FloatingOverlayController: ObservableObject {
                 y: flippedY + 12
             )
         } else {
-            // Fallback: position near mouse cursor (terminal apps, oversized text areas)
             origin = NSPoint(
                 x: mousePos.x - panelSize.width / 2,
                 y: mousePos.y + 20
             )
         }
 
-        // Clamp to the screen the mouse is on — prevents off-screen positioning
-        // on multi-monitor setups or when cursor is near the top/edge of a display
+        // Clamp to current screen
         if let visibleFrame = currentScreen?.visibleFrame {
             origin.x = max(visibleFrame.minX + 10,
                            min(origin.x, visibleFrame.maxX - panelSize.width - 10))
             if origin.y + panelSize.height > visibleFrame.maxY {
                 origin.y = (targetRect != nil)
-                    ? origin.y - panelSize.height - 24  // Below text field
-                    : mousePos.y - panelSize.height - 10  // Below cursor
+                    ? origin.y - panelSize.height - 24
+                    : mousePos.y - panelSize.height - 10
             }
             origin.y = max(visibleFrame.minY + 10, origin.y)
         }
@@ -249,14 +269,13 @@ class FloatingOverlayController: ObservableObject {
         panel.setFrameOrigin(origin)
         panel.setContentSize(panelSize)
         panel.allowKeyStatus = false
-        panel.ignoresMouseEvents = false  // Re-enable after hide animations
+        panel.ignoresMouseEvents = false
 
-        // Spring entrance: start transparent + slightly scaled down
+        // Spring entrance
         panel.alphaValue = 0
         panel.orderFrontRegardless()
 
         if let contentLayer = panel.contentView?.layer {
-            // Scale from 0.88 → 1.0 with spring physics
             let spring = CASpringAnimation(keyPath: "transform.scale")
             spring.fromValue = 0.88
             spring.toValue = 1.0
@@ -267,7 +286,6 @@ class FloatingOverlayController: ObservableObject {
             contentLayer.add(spring, forKey: "entranceScale")
         }
 
-        // Fade in over 200ms
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.2
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -275,40 +293,42 @@ class FloatingOverlayController: ObservableObject {
         })
 
         isVisible = true
+        pushStateToViews()
         installEscapeMonitor()
     }
 
     func showReview(text: String) {
         reviewText = text
-        // Store original draft for diff comparison (only set once per session)
         if originalDraftForComparison.isEmpty {
             originalDraftForComparison = text
         }
         state = .review
         EventTracker.track("draft.shown", with: ["word_count": "\(text.split(whereSeparator: \.isWhitespace).count)"])
 
-        // Resize: grow upward from bottom edge to fit text
+        // Resize to fit text
         let lineCount = max(1, text.components(separatedBy: "\n").count)
-        let charEstimate = CGFloat(text.count) / 50.0  // ~50 chars per line at 480pt width
+        let charEstimate = CGFloat(text.count) / 50.0
         let lines = max(CGFloat(lineCount), charEstimate)
         let estimatedHeight = max(OverlayTokens.panelMinHeight, min(OverlayTokens.panelMaxHeight, lines * 20 + 120))
         resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: estimatedHeight))
 
-        // Make key-capable so TextEditor receives input
+        // Update review view with text
+        rootView?.reviewView.update(text: text, originalDraft: originalDraftForComparison)
+
+        // Make key-capable and focus the text view — AppKit responder chain is synchronous
         if let panel = panel {
             panel.allowKeyStatus = true
             panel.makeKeyAndOrderFront(nil)
+            panel.makeFirstResponder(rootView?.reviewView.draftTextView)
         }
     }
 
-    /// Transition from listening to drafting — expands panel to full height for spinner/content
     func enterDraftingState() {
         transcriptExpanded = false
         state = .drafting
         resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
     }
 
-    /// Snap the panel to compact (header-only) height without animation.
     func resizePanelToCompact() {
         resizePanelInstant(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelCompactHeight))
     }
@@ -323,23 +343,24 @@ class FloatingOverlayController: ObservableObject {
         guard state == .drafting || state == .listening else { return }
         streamingText = ""
         streamingNewlineCount = 0
-        transcriptExpanded = false  // Reset for next session
+        transcriptExpanded = false
         state = .streaming
-        // Show panel if not visible
+        rootView?.streamingView.clear()
         if !isVisible {
             showPanel(near: sourceApp)
         }
-        // Expand to full height for streaming content
         resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
-        // Not key-capable yet (still receiving tokens)
         panel?.allowKeyStatus = false
     }
 
     func appendStreamToken(_ token: String) {
         guard state == .streaming else { return }
         streamingText += token
-        // Count newlines in incoming token only (O(token_length) instead of O(total_length))
         for c in token where c == "\n" { streamingNewlineCount += 1 }
+
+        // Push token to the streaming view
+        rootView?.streamingView.appendToken(token)
+
         // Dynamically resize as text grows
         let lineCount = max(1, streamingNewlineCount + 1)
         let charEstimate = CGFloat(streamingText.count) / 50.0
@@ -352,33 +373,36 @@ class FloatingOverlayController: ObservableObject {
 
     func finishStreaming() {
         guard state == .streaming else { return }
-        // Transfer to editable review
         showReview(text: streamingText)
         streamingText = ""
     }
 
-    /// Transition from review to diff flash — shows read-only word diff before confirming.
     func showDiffFlash(editDescription: String) {
         self.editDescription = editDescription
         state = .diffFlash
-        // Panel must be key-capable for Enter/Escape handlers in diffFlashContent
+
+        // Update diff strip in full mode
+        rootView?.reviewView.diffStrip.isFullDiffMode = true
+        rootView?.reviewView.diffStrip.update(
+            original: originalDraftForComparison,
+            edited: reviewText,
+            description: editDescription
+        )
+        rootView?.reviewView.setEditable(false)
+
         if let panel = panel {
             panel.allowKeyStatus = true
             panel.makeKeyAndOrderFront(nil)
+            panel.makeFirstResponder(rootView?.reviewView.draftTextView)
         }
     }
 
     // MARK: - Training Toast
 
     private var toastPanel: FloatingOverlayPanel?
-    private var toastHostingView: NSHostingView<AnyView>?
+    private var toastHostView: OverlayToastView?
     private var toastDismissTask: Task<Void, Never>?
 
-    /// Show a brief training toast below the main overlay.
-    /// Non-activating, mouse-through, auto-fades after 2.5s.
-    /// Reuses a single NSHostingView to avoid AttributeGraph churn — each create/destroy
-    /// cycle leaves AG residue that accumulates over hours and can contribute to the
-    /// _ButtonGesture EXC_BAD_ACCESS crash.
     func showTrainingToast(_ message: String) {
         guard let mainPanel = panel else { return }
 
@@ -407,17 +431,17 @@ class FloatingOverlayController: ObservableObject {
         toast.setFrameOrigin(toastOrigin)
         toast.setContentSize(NSSize(width: OverlayTokens.panelWidth, height: 44))
 
-        // Reuse the hosting view — just update its rootView instead of destroying and
-        // recreating the entire SwiftUI view tree. This avoids AG residue accumulation.
-        let toastView = TrainingToastView(message: message)
-        if let existing = toastHostingView {
-            existing.rootView = AnyView(toastView)
-        } else {
-            let hosting = NSHostingView(rootView: AnyView(toastView))
-            hosting.frame = toast.contentView?.bounds ?? .zero
-            hosting.autoresizingMask = [.width, .height]
-            toast.contentView?.addSubview(hosting)
-            toastHostingView = hosting
+        // Reuse or create AppKit toast view (no NSHostingView)
+        if toastHostView == nil {
+            let tv = OverlayToastView(frame: toast.contentView?.bounds ?? .zero)
+            tv.autoresizingMask = [.width, .height]
+            toastHostView = tv
+        }
+        if let tv = toastHostView {
+            tv.update(message: message)
+            tv.frame = toast.contentView?.bounds ?? .zero
+            toast.contentView?.subviews.forEach { $0.removeFromSuperview() }
+            toast.contentView?.addSubview(tv)
         }
 
         toast.alphaValue = 0
@@ -451,14 +475,14 @@ class FloatingOverlayController: ObservableObject {
         })
     }
 
-    /// Confirm animation: scale down + fade (content "sends" toward target app)
+    // MARK: - Hide Animations
+
     func hideWithConfirmAnimation(completion: (() -> Void)? = nil) {
         guard let panel = panel else { completion?(); _performHide(); return }
-        let gen = hideGeneration  // Capture to prevent stale hide after new session starts
-        panel.ignoresMouseEvents = true  // Prevent gesture dispatch during teardown
+        let gen = hideGeneration
+        panel.ignoresMouseEvents = true
 
-        // Demote panel from key BEFORE animation — the completion callback fires a ⌘V
-        // paste event, and if the panel is still key its TextEditor intercepts it
+        // Demote panel from key BEFORE animation — prevents intercepting ⌘V paste
         panel.allowKeyStatus = false
         panel.resignKey()
         panel.orderOut(nil)
@@ -469,9 +493,6 @@ class FloatingOverlayController: ObservableObject {
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             completion?()
-            // completionHandler runs on an arbitrary thread — dispatch to MainActor
-            // to avoid calling @MainActor-isolated _performHide() from a non-isolated context.
-            // Generation guard: if a new session started during animation, skip the hide.
             Task { @MainActor [weak self] in
                 guard let self = self, self.hideGeneration == gen else { return }
                 self._performHide()
@@ -488,16 +509,14 @@ class FloatingOverlayController: ObservableObject {
         }
     }
 
-    /// Cancel animation: horizontal shake + fade (signals "nothing happened")
     func hideWithCancelAnimation() {
         guard let panel = panel else { _performHide(); return }
-        let gen = hideGeneration  // Capture to prevent stale hide after new session starts
-        panel.ignoresMouseEvents = true  // Prevent gesture dispatch during teardown
+        let gen = hideGeneration
+        panel.ignoresMouseEvents = true
 
-        // Horizontal shake using the window frame (not layer — layers don't move windows)
         let baseX = panel.frame.origin.x
         let offsets: [CGFloat] = [7, -5, 3, -1, 0]
-        let stepDuration = 0.068  // ~340ms total for 5 steps
+        let stepDuration = 0.068
 
         for (i, offset) in offsets.enumerated() {
             DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(i)) { [weak panel] in
@@ -508,7 +527,6 @@ class FloatingOverlayController: ObservableObject {
             }
         }
 
-        // Fade out after shake completes
         DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(offsets.count)) { [weak self, weak panel] in
             guard let panel = panel else {
                 Task { @MainActor [weak self] in
@@ -522,8 +540,6 @@ class FloatingOverlayController: ObservableObject {
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
                 panel.animator().alphaValue = 0
             }, completionHandler: { [weak self] in
-                // completionHandler runs on an arbitrary thread — dispatch to MainActor.
-                // Generation guard: if a new session started during animation, skip the hide.
                 Task { @MainActor [weak self] in
                     guard let self = self, self.hideGeneration == gen else { return }
                     self._performHide()
@@ -532,11 +548,11 @@ class FloatingOverlayController: ObservableObject {
         }
     }
 
-    private var errorDismissTask: Task<Void, Never>?
+    // MARK: - Error & Loading
 
+    private var errorDismissTask: Task<Void, Never>?
     private var loadingTimerTask: Task<Void, Never>?
 
-    /// Show a persistent loading state (stays visible until state changes or session ends).
     func showLoadingState() {
         errorDismissTask?.cancel()
         errorMessage = ""
@@ -545,10 +561,7 @@ class FloatingOverlayController: ObservableObject {
         if !isVisible {
             showPanel(near: nil)
         }
-        // Ensure full height for loading content (spinner + text) — the panel may have
-        // been shown at compact height if it started in .listening before model was ready.
         resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
-        // Tick elapsed seconds so the user knows it's alive
         loadingTimerTask?.cancel()
         loadingTimerTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -559,49 +572,36 @@ class FloatingOverlayController: ObservableObject {
         }
     }
 
-    /// Show a brief error message in the overlay, then auto-hide after ~1.5s (plus cancel animation).
     func showError(_ message: String) {
         errorDismissTask?.cancel()
         errorMessage = message
         transcriptExpanded = false
-        state = .drafting  // Reuse drafting state for error display
-        // Ensure panel is full-height for error content (may have been compact during listening)
+        state = .drafting
         resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
         if !isVisible {
             showPanel(near: nil)
         }
+        pushStateToViews()  // Force update for error message
         errorDismissTask = Task { @MainActor [weak self] in
             do {
                 try await Task.sleep(nanoseconds: DraftConstants.errorDismissDelay)
-            } catch {
-                return  // Cancelled — bail
-            }
+            } catch { return }
             guard let self = self, !self.errorMessage.isEmpty else { return }
             self.errorMessage = ""
             self.hideWithCancelAnimation()
         }
     }
 
+    // MARK: - Internal Hide
+
     private func _performHide() {
-        guard isVisible else { return }  // Prevent double-hide during animation overlap
+        guard isVisible else { return }
         removeEscapeMonitor()
-        panel?.ignoresMouseEvents = true  // Block gesture dispatch immediately
+        panel?.ignoresMouseEvents = true
         panel?.allowKeyStatus = false
         panel?.orderOut(nil)
-        panel?.alphaValue = 1.0  // Reset for next show
+        panel?.alphaValue = 1.0
         panel?.contentView?.layer?.removeAllAnimations()
-
-        // Periodically recreate the hosting view to prevent AG stale state accumulation.
-        // The hosting view stays alive across sessions to avoid AG churn from frequent
-        // create/destroy cycles. But over very long uptime (hours), even a single
-        // long-lived view can accumulate stale internal state. Recreation every N sessions
-        // balances both risks — infrequent enough to avoid churn, frequent enough to
-        // clear any stale gesture state before it can cause EXC_BAD_ACCESS.
-        sessionsSinceHostingRecreation += 1
-        if sessionsSinceHostingRecreation >= Self.hostingRecreationThreshold {
-            recreateHostingView()
-            sessionsSinceHostingRecreation = 0
-        }
 
         isVisible = false
         errorDismissTask?.cancel()
@@ -612,34 +612,33 @@ class FloatingOverlayController: ObservableObject {
         reviewText = ""
         streamingText = ""
         errorMessage = ""
-        transcriptExpanded = false  // Each new session starts collapsed
+        transcriptExpanded = false
         originalDraftForComparison = ""
         editDescription = ""
         onConfirm = nil
         onCancel = nil
+
+        // Reset diff strip mode for next session
+        rootView?.reviewView.diffStrip.isFullDiffMode = false
     }
 
     // MARK: - System Wake Recovery & Periodic AG Refresh
 
-    /// Recreate the hosting view after system wake to clear AG corruption from sleep/wake cycles.
-    /// Only acts when the overlay is hidden — never interrupts a live session.
     func handleSystemWake() {
+        // No NSHostingView to recreate. AppKit views survive sleep/wake without corruption.
+        // Reset state to idle as a safety measure.
         guard !isVisible else { return }
-        recreateHostingView()
-        sessionsSinceHostingRecreation = 0
+        state = .idle
     }
 
     // MARK: - Global Escape Monitor
 
-    /// Installs a global key monitor that intercepts Escape while the overlay is visible.
-    /// Needed because the panel is non-key during listening/drafting, so SwiftUI .onKeyPress won't fire.
     private func installEscapeMonitor() {
         guard escapeMonitor == nil else { return }
         escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard event.keyCode == 53 else { return }  // 53 = Escape
+            guard event.keyCode == 53 else { return }
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
-                // Handle during loading/listening/drafting/streaming — review has its own SwiftUI handler
                 guard self.state == .loading || self.state == .listening || self.state == .drafting || self.state == .streaming else { return }
                 self.onEscapeDuringSession?()
             }
@@ -653,12 +652,14 @@ class FloatingOverlayController: ObservableObject {
         }
     }
 
+    // MARK: - Panel Resize
+
     private func resizePanelInstant(to size: NSSize) {
         guard let panel = panel else { return }
         var frame = panel.frame
         let heightDelta = size.height - frame.size.height
         frame.size = size
-        frame.origin.y -= heightDelta  // Keep top edge fixed
+        frame.origin.y -= heightDelta
         panel.setFrame(frame, display: true, animate: false)
     }
 
@@ -667,7 +668,7 @@ class FloatingOverlayController: ObservableObject {
         var frame = panel.frame
         let heightDelta = size.height - frame.size.height
         frame.size = size
-        frame.origin.y -= heightDelta  // Grow upward, bottom edge anchored
+        frame.origin.y -= heightDelta
         panel.setFrame(frame, display: true, animate: true)
     }
 }
