@@ -113,7 +113,7 @@ fi
 
 # Sign
 echo "Signing..."
-codesign --force --deep --sign "7AC6EF5E8D58DD881DF96F173B2CD3DC41273A44" \
+codesign --force --deep --sign "4A552DF04BA66B397D5E2871C6983FC1302FBFCD" \
     --entitlements "$BUILD_DIR/Draft.entitlements" \
     "$APP_BUNDLE" 2>&1
 
