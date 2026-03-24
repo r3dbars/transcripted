@@ -197,20 +197,23 @@ func testStyleUtils() {
 
         ### Example 1
         PLATFORM: slack
-        data1
+        USER_SENT:
+        hey yeah that sounds good to me
 
         ### Example 2
         PLATFORM: email
-        data2
+        USER_SENT:
+        let me check on that and get back to you tomorrow
 
         ### Example 3
         PLATFORM: imessage
-        data3
+        USER_SENT:
+        sounds good see you there at seven
         """
         let last2 = StyleUtils.extractRecentExamplesText(last: 2, styleFileContents: content)
-        assertFalse(last2.contains("data1"), "should not contain example 1")
-        assertTrue(last2.contains("data2"), "should contain example 2")
-        assertTrue(last2.contains("data3"), "should contain example 3")
+        assertFalse(last2.contains("hey yeah that sounds good"), "should not contain example 1")
+        assertTrue(last2.contains("let me check on that"), "should contain example 2")
+        assertTrue(last2.contains("sounds good see you"), "should contain example 3")
     }
 
     runSuite("extractRecentExamplesText — empty content") {
@@ -224,8 +227,53 @@ func testStyleUtils() {
 
         ### Example 1
         EDIT_DISTANCE: 0.50
+        USER_SENT:
+        this is a message that is long enough to pass the quality filter
         """
         let result = StyleUtils.extractRecentExamplesText(last: 5, styleFileContents: content)
         assertTrue(result.contains("### Example"), "should preserve ### Example header")
+    }
+
+    runSuite("extractRecentExamplesText — filters out short USER_SENT") {
+        let content = """
+        ## Examples
+
+        ### Example 1
+        PLATFORM: slack
+        USER_SENT:
+        hey yeah that sounds good to me lets do it
+
+        ### Example 2
+        PLATFORM: slack
+        USER_SENT:
+        ok
+
+        ### Example 3
+        PLATFORM: email
+        USER_SENT:
+        let me check on that and get back to you
+        """
+        let result = StyleUtils.extractRecentExamplesText(last: 5, styleFileContents: content)
+        assertTrue(result.contains("hey yeah that sounds good"), "should include quality example 1")
+        assertFalse(result.contains("\nok\n"), "should filter out short example 2")
+        assertTrue(result.contains("let me check on that"), "should include quality example 3")
+    }
+
+    runSuite("extractRecentExamplesText — returns empty when all examples are low quality") {
+        let content = """
+        ## Examples
+
+        ### Example 1
+        PLATFORM: slack
+        USER_SENT:
+        ok
+
+        ### Example 2
+        PLATFORM: slack
+        USER_SENT:
+        hi there
+        """
+        let result = StyleUtils.extractRecentExamplesText(last: 5, styleFileContents: content)
+        assertEqual(result, "", "all low-quality examples should result in empty string")
     }
 }
