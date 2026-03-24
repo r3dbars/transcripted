@@ -1,24 +1,24 @@
 // OverlayTokens.swift
-// Design tokens for the floating overlay UI
+// Design tokens for the floating overlay UI — pure AppKit, no SwiftUI
 
-import SwiftUI
+import AppKit
 
 enum OverlayTokens {
     // Colors (semi-transparent for glassmorphism blur)
-    static let panelBg       = Color.black.opacity(0.70)                   // translucent for blur
-    static let accentGreen   = Color(red: 0.07, green: 0.94, blue: 0.58)  // #13EF95  mint green
-    static let textPrimary   = Color.white
-    static let textSecondary = Color(white: 0.55)                          // gray labels
-    static let textMuted     = Color(white: 0.35)                          // placeholder
+    static let panelBg       = NSColor.black.withAlphaComponent(0.70)
+    static let accentGreen   = NSColor(red: 0.07, green: 0.94, blue: 0.58, alpha: 1.0) // #13EF95 mint green
+    static let textPrimary   = NSColor.white
+    static let textSecondary = NSColor(white: 0.55, alpha: 1.0)
+    static let textMuted     = NSColor(white: 0.35, alpha: 1.0)
 
-    // Diff Flash colors
-    static let diffDeleteText    = Color(red: 1.0, green: 0.4, blue: 0.4)
-    static let diffDeleteBg      = Color(red: 1.0, green: 0.3, blue: 0.3, opacity: 0.15)
-    static let diffDeleteBorder  = Color(red: 1.0, green: 0.4, blue: 0.4, opacity: 0.5)
-    static let diffInsertText    = Color(red: 0.3, green: 0.9, blue: 0.5)
-    static let diffInsertBg      = Color(red: 0.3, green: 0.9, blue: 0.5, opacity: 0.15)
-    static let diffReplaceText   = Color(red: 0.4, green: 0.7, blue: 1.0)
-    static let diffReplaceBorder = Color(red: 0.4, green: 0.7, blue: 1.0, opacity: 0.5)
+    // Diff colors
+    static let diffDeleteText    = NSColor(red: 1.0, green: 0.4, blue: 0.4, alpha: 1.0)
+    static let diffDeleteBg      = NSColor(red: 1.0, green: 0.3, blue: 0.3, alpha: 0.15)
+    static let diffDeleteBorder  = NSColor(red: 1.0, green: 0.4, blue: 0.4, alpha: 0.5)
+    static let diffInsertText    = NSColor(red: 0.3, green: 0.9, blue: 0.5, alpha: 1.0)
+    static let diffInsertBg      = NSColor(red: 0.3, green: 0.9, blue: 0.5, alpha: 0.15)
+    static let diffReplaceText   = NSColor(red: 0.4, green: 0.7, blue: 1.0, alpha: 1.0)
+    static let diffReplaceBorder = NSColor(red: 0.4, green: 0.7, blue: 1.0, alpha: 0.5)
 
     // Layout
     static let panelWidth: CGFloat         = 480
@@ -27,32 +27,9 @@ enum OverlayTokens {
     static let panelMaxHeight: CGFloat     = 340
     static let cornerRadius: CGFloat   = 16
     static let contentPadding: CGFloat = 16
-}
 
-// Design tokens for the menubar panel (SuperWhisper-inspired minimal aesthetic)
-enum MenuTokens {
-    // Colors — system-adaptive, no hardcoded purple
-    static let statusGreen       = Color.green
-    static let statusOrange      = Color.orange
-    static let textSecondary     = Color.secondary
-    static let textMuted         = Color(.tertiaryLabelColor)
-    static let cardBackground    = Color(.controlBackgroundColor)
-    static let cardBorder        = Color.gray.opacity(0.15)
-    static let userBubbleBg      = Color.primary.opacity(0.06)
-    static let assistantBubbleBg = Color(.controlBackgroundColor)
-    static let pillBackground    = Color(.controlBackgroundColor)
-    static let pillBorder        = Color.gray.opacity(0.15)
-    static let sendButton        = Color.primary.opacity(0.7)
-
-    // Layout
-    static let panelWidth: CGFloat       = 440
-    static let panelHeight: CGFloat      = 520
-    static let sectionSpacing: CGFloat   = 20
-    static let innerPadding: CGFloat     = 20
-    static let cardCornerRadius: CGFloat = 8
-    static let cardPadding: CGFloat      = 12
-    static let bubbleCornerRadius: CGFloat = 10
-    static let pillCornerRadius: CGFloat = 6
-    static let statusDotSize: CGFloat    = 7
-    static let compactStyleLines         = 4
+    // Header
+    static let headerHeight: CGFloat = 40
+    static let toolbarHeight: CGFloat = 28
+    static let dividerHeight: CGFloat = 1
 }

@@ -7,7 +7,7 @@ import ApplicationServices
 
 struct OnboardingView: View {
     @ObservedObject var sessionController: DraftSessionController
-    @ObservedObject var overlayController: FloatingOverlayController
+    var overlayController: FloatingOverlayController
     @ObservedObject var appState: DraftAppState
     var onComplete: () -> Void
     /// Callback to raise/lower the onboarding window. `true` = floating (above other apps),
