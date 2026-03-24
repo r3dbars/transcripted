@@ -46,6 +46,10 @@ extension Transcription {
     /// Match an embedding against a frozen snapshot of speaker profiles.
     /// Same logic as SpeakerDatabase.matchSpeaker but operates on an in-memory array,
     /// preventing the matching loop from seeing profiles created during the same recording.
+    ///
+    /// Includes two safeguards against false positives:
+    /// - **Maturity bonus**: Immature profiles (callCount ≤ 2) require +0.08 higher similarity
+    /// - **Separation check**: Rejects match if two profiles are within 0.05 (ambiguous)
     nonisolated static func matchAgainstProfiles(
         _ embedding: [Float],
         profiles: [SpeakerProfile],
@@ -53,22 +57,55 @@ extension Transcription {
     ) -> SnapshotMatchResult? {
         guard !profiles.isEmpty, !embedding.isEmpty else { return nil }
 
-        var bestId: UUID?
+        var bestProfile: SpeakerProfile?
         var bestSimilarity: Double = -1
+        var secondBestSimilarity: Double = -1
 
         for profile in profiles {
             guard profile.embedding.count == embedding.count else { continue }
             let similarity = cosineSimilarityStatic(embedding, profile.embedding)
-            if similarity > bestSimilarity && similarity >= threshold {
-                bestSimilarity = similarity
-                bestId = profile.id
+            if similarity >= threshold {
+                if similarity > bestSimilarity {
+                    secondBestSimilarity = bestSimilarity
+                    bestSimilarity = similarity
+                    bestProfile = profile
+                } else if similarity > secondBestSimilarity {
+                    secondBestSimilarity = similarity
+                }
             }
         }
 
-        if let id = bestId {
-            return SnapshotMatchResult(profileId: id, similarity: bestSimilarity)
+        guard let matched = bestProfile else { return nil }
+
+        // Maturity bonus: immature profiles need higher similarity to match.
+        let maturityBonus: Double = switch matched.callCount {
+            case ...2: 0.08
+            case 3...4: 0.04
+            default: 0.0
         }
-        return nil
+        let effectiveThreshold = threshold + maturityBonus
+
+        if bestSimilarity < effectiveThreshold {
+            AppLogger.transcription.info("Match rejected: immature profile", [
+                "profile": matched.displayName ?? matched.id.uuidString.prefix(8).description,
+                "callCount": "\(matched.callCount)",
+                "similarity": String(format: "%.3f", bestSimilarity),
+                "effectiveThreshold": String(format: "%.3f", effectiveThreshold)
+            ])
+            return nil
+        }
+
+        // Separation check: reject if two profiles are too close (ambiguous).
+        if secondBestSimilarity >= threshold && (bestSimilarity - secondBestSimilarity) < 0.05 {
+            AppLogger.transcription.info("Match rejected: ambiguous (two profiles too close)", [
+                "bestProfile": matched.displayName ?? matched.id.uuidString.prefix(8).description,
+                "bestSimilarity": String(format: "%.3f", bestSimilarity),
+                "secondBestSimilarity": String(format: "%.3f", secondBestSimilarity)
+            ])
+            return nil
+        }
+
+        return SnapshotMatchResult(profileId: matched.id, similarity: bestSimilarity)
     }
 
     /// Compute L2-normalized weighted mean of multiple embeddings.

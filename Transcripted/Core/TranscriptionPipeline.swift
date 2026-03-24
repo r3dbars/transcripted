@@ -110,13 +110,16 @@ extension Transcription {
             let rawSegments = try await diarization.diarizeOffline(samples: systemSamples, sampleRate: 16000)
 
             // Post-process diarization segments:
-            // PyAnnote's VBx already handles speaker merging, so skip pairwise merge.
-            // DB-informed split still valuable — VBx has no knowledge of stored profiles.
+            // PyAnnote's VBx does initial clustering but fragments dominant speakers
+            // on codec-compressed audio (e.g., one person split into 3 IDs during a
+            // long monologue). Pairwise merge at 0.78 catches same-person fragments
+            // (typically 0.75-0.85 similarity) without merging different speakers
+            // (typically 0.50-0.65 on Zoom audio).
             let existingProfiles = speakerDB.allSpeakers()
             let speakerSegments = EmbeddingClusterer.postProcess(
                 segments: rawSegments,
                 existingProfiles: existingProfiles,
-                skipPairwiseMerge: true
+                pairwiseMergeThreshold: 0.78
             )
 
             let rawSpeakerCount = Set(rawSegments.map { $0.speakerId }).count
@@ -251,11 +254,14 @@ extension Transcription {
                 if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold) {
                     speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity)
                     _ = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: matchResult.profileId)
+                    let matchedProfile = existingProfiles.first(where: { $0.id == matchResult.profileId })
                     AppLogger.transcription.info("Speaker matched DB profile", [
                         "speakerId": "\(speakerId)",
                         "similarity": String(format: "%.3f", matchResult.similarity),
                         "threshold": String(format: "%.2f", adaptiveThreshold),
-                        "segmentsAveraged": "\(embeddings.count)"
+                        "segmentsAveraged": "\(embeddings.count)",
+                        "profileName": matchedProfile?.displayName ?? "unnamed",
+                        "profileCallCount": "\(matchedProfile?.callCount ?? 0)"
                     ])
                 } else {
                     let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding)

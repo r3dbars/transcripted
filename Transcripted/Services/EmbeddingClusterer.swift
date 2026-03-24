@@ -23,16 +23,22 @@ enum EmbeddingClusterer {
     /// absorb tiny orphan clusters, then split clusters that contain
     /// multiple known DB voices.
     ///
-    /// - Parameter skipPairwiseMerge: Set `true` for PyAnnote offline output,
-    ///   where VBx clustering already handles speaker merging. Default `false`
-    ///   for Sortformer streaming output.
+    /// - Parameter pairwiseMergeThreshold: Cosine similarity threshold for merging
+    ///   fragmented speaker clusters. Pass `nil` to skip pairwise merge entirely.
+    ///   Sortformer default: 0.85 (conservative). PyAnnote: 0.78 (VBx already does
+    ///   initial clustering, but fragments dominant speakers on codec-compressed audio).
     static func postProcess(
         segments: [SpeakerSegment],
         existingProfiles: [SpeakerProfile],
-        skipPairwiseMerge: Bool = false
+        pairwiseMergeThreshold: Float? = 0.85
     ) -> [SpeakerSegment] {
         guard segments.count >= 2 else { return segments }
-        var result = skipPairwiseMerge ? segments : pairwiseMerge(segments: segments)
+        var result: [SpeakerSegment]
+        if let threshold = pairwiseMergeThreshold {
+            result = pairwiseMerge(segments: segments, threshold: threshold)
+        } else {
+            result = segments
+        }
         result = absorbSmallClusters(segments: result)
         result = dbInformedSplit(segments: result, profiles: existingProfiles)
         return result
