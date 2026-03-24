@@ -218,16 +218,19 @@ struct SpeakerNamingCard: View {
             return
         }
         let entryId = entry.id
+        // Stagger debounce per card (hash-based 0-50ms offset) to prevent
+        // all 7 cards from firing DB queries simultaneously.
+        let stagger = abs(entryId.hashValue % 50)
         profileSearchTask = Task {
-            // Debounce: wait 150ms to avoid blocking on every keystroke
-            try? await Task.sleep(for: .milliseconds(150))
+            try? await Task.sleep(for: .milliseconds(150 + stagger))
             guard !Task.isCancelled else { return }
-            if #available(macOS 14.0, *) {
-                let results = SpeakerDatabase.shared.findProfilesByName(query)
+            // Run DB query off the main actor to avoid queue.sync blocking the UI
+            let results = await Task.detached {
+                SpeakerDatabase.shared.findProfilesByName(query)
                     .filter { $0.id != entryId }
-                guard !Task.isCancelled else { return }
-                cachedMatchingProfiles = results
-            }
+            }.value
+            guard !Task.isCancelled else { return }
+            cachedMatchingProfiles = results
         }
     }
 
