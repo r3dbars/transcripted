@@ -1,6 +1,7 @@
 import Foundation
 @preconcurrency import AVFoundation
 import AppKit
+import QuartzCore
 
 // MARK: - Audio File Creation & Buffer Management
 
@@ -192,43 +193,7 @@ extension Audio {
 
         // Install tap on microphone
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-            guard let strongSelf = self else { return }
-
-            // Update watchdog timestamp
-            strongSelf.lastBufferTime = CACurrentMediaTime()
-
-            // Calculate audio level for visualizer (use original buffer)
-            strongSelf.calculateLevel(buffer: buffer)
-
-            // Convert to mono if needed, then write to file
-            strongSelf.micAudioFileQueue.async {
-                guard strongSelf.consecutiveMicWriteErrors < strongSelf.maxConsecutiveWriteErrors,
-                      let audioFile = strongSelf.micAudioFile,
-                      let monoFormat = strongSelf.monoOutputFormat else { return }
-
-                do {
-                    if strongSelf.inputChannelCount > 1 {
-                        // Manual downmix: average all channels to mono
-                        guard let monoBuffer = strongSelf.manualDownmix(buffer: buffer, to: monoFormat) else {
-                            AppLogger.audioMic.error("Failed to downmix buffer")
-                            return
-                        }
-                        try audioFile.write(from: monoBuffer)
-                    } else {
-                        // Already mono, write directly
-                        try audioFile.write(from: buffer)
-                    }
-                    strongSelf.consecutiveMicWriteErrors = 0
-                } catch {
-                    strongSelf.consecutiveMicWriteErrors += 1
-                    if strongSelf.consecutiveMicWriteErrors <= 3 || strongSelf.consecutiveMicWriteErrors == strongSelf.maxConsecutiveWriteErrors {
-                        AppLogger.audioMic.error("Write failed", ["error": error.localizedDescription, "consecutive": "\(strongSelf.consecutiveMicWriteErrors)"])
-                    }
-                    if strongSelf.consecutiveMicWriteErrors >= strongSelf.maxConsecutiveWriteErrors {
-                        AppLogger.audioMic.error("Too many consecutive write errors, stopping mic writes")
-                    }
-                }
-            }
+            self?.handleMicBuffer(buffer)
         }
 
         try engine.start()
@@ -240,6 +205,43 @@ extension Audio {
             self.startTimer()
             self.startWatchdog()
             NSSound(named: "Tink")?.play()
+        }
+    }
+
+    // MARK: - Mic Buffer Write
+
+    /// Shared mic buffer handler used by both initial tap (startAudioCapture) and recovery tap (recoverFromDeviceChange).
+    /// Dispatches mono downmix + file write to micAudioFileQueue.
+    func handleMicBuffer(_ buffer: AVAudioPCMBuffer) {
+        lastBufferTime = CACurrentMediaTime()
+        calculateLevel(buffer: buffer)
+
+        micAudioFileQueue.async { [weak self] in
+            guard let self = self,
+                  self.consecutiveMicWriteErrors < self.maxConsecutiveWriteErrors,
+                  let audioFile = self.micAudioFile,
+                  let monoFormat = self.monoOutputFormat else { return }
+
+            do {
+                if self.inputChannelCount > 1 {
+                    guard let monoBuffer = self.manualDownmix(buffer: buffer, to: monoFormat) else {
+                        AppLogger.audioMic.error("Failed to downmix buffer")
+                        return
+                    }
+                    try audioFile.write(from: monoBuffer)
+                } else {
+                    try audioFile.write(from: buffer)
+                }
+                self.consecutiveMicWriteErrors = 0
+            } catch {
+                self.consecutiveMicWriteErrors += 1
+                if self.consecutiveMicWriteErrors <= 3 || self.consecutiveMicWriteErrors == self.maxConsecutiveWriteErrors {
+                    AppLogger.audioMic.error("Write failed", ["error": error.localizedDescription, "consecutive": "\(self.consecutiveMicWriteErrors)"])
+                }
+                if self.consecutiveMicWriteErrors >= self.maxConsecutiveWriteErrors {
+                    AppLogger.audioMic.error("Too many consecutive write errors, stopping mic writes")
+                }
+            }
         }
     }
 
