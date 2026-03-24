@@ -352,7 +352,8 @@ extension TranscriptionTaskManager {
         guard !sorted.isEmpty else { return "" }
 
         let maxChars = 8000
-        let totalDuration = sorted.last!.start
+        guard let lastUtterance = sorted.last else { return "" }
+        let totalDuration = lastUtterance.start
 
         // Strategy: first 5 min + last 5 min + ~20 samples from middle
         let firstWindow = sorted.filter { $0.start < 300 }

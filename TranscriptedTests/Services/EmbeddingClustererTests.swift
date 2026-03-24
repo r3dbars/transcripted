@@ -132,26 +132,29 @@ final class EmbeddingClustererTests: XCTestCase {
     // MARK: - Small Cluster Absorption
 
     func testAbsorbSmallClusterAboveThreshold() {
-        // Large cluster: speaker 0 with 40s total (above 30s threshold)
-        // Small cluster: speaker 1 with 6s total (below 30s threshold)
-        // Embeddings are similar enough (cos ≈ 0.75) to exceed the 0.72 standard threshold
+        // Large cluster: speaker 0 with 40s, large cluster: speaker 2 with 40s (distinct)
+        // Small cluster: speaker 1 with 6s (similar to speaker 0, cos ≈ 0.75)
+        // Third speaker prevents single-speaker safety abort
         let embA: [Float] = [1.0, 0.0, 0.0, 0.0]
         let embB: [Float] = [0.75, 0.66, 0.0, 0.0] // cos(A,B) ≈ 0.75
+        let embC: [Float] = [0.0, 0.0, 1.0, 0.0]   // distinct speaker
 
-        // 20 segments × 2s each = 40s for speaker 0
-        let largeSeg = (0..<20).map { i in
+        let largeSeg0 = (0..<20).map { i in
             SpeakerSegment(speakerId: 0, startTime: Double(i) * 2.0, endTime: Double(i) * 2.0 + 2.0,
                            embedding: embA, qualityScore: 0.8)
         }
-        // 2 segments × 3s each = 6s for speaker 1
+        let largeSeg2 = (0..<20).map { i in
+            SpeakerSegment(speakerId: 2, startTime: 100.0 + Double(i) * 2.0, endTime: 100.0 + Double(i) * 2.0 + 2.0,
+                           embedding: embC, qualityScore: 0.8)
+        }
         let smallSeg = [
             SpeakerSegment(speakerId: 1, startTime: 50.0, endTime: 53.0, embedding: embB, qualityScore: 0.8),
             SpeakerSegment(speakerId: 1, startTime: 55.0, endTime: 58.0, embedding: embB, qualityScore: 0.8)
         ]
 
-        let result = EmbeddingClusterer.absorbSmallClusters(segments: largeSeg + smallSeg)
+        let result = EmbeddingClusterer.absorbSmallClusters(segments: largeSeg0 + smallSeg + largeSeg2)
         let uniqueIds = Set(result.map { $0.speakerId })
-        XCTAssertEqual(uniqueIds.count, 1, "Small cluster with sim 0.75 should be absorbed (threshold 0.72)")
+        XCTAssertEqual(uniqueIds.count, 2, "Small cluster with sim 0.75 should be absorbed (threshold 0.72)")
     }
 
     func testAbsorbSmallClusterBelowThresholdNotAbsorbed() {
@@ -177,12 +180,39 @@ final class EmbeddingClustererTests: XCTestCase {
         XCTAssertEqual(uniqueIds.count, 2, "Small (non-micro) cluster with 0 similarity should NOT be absorbed")
     }
 
-    func testAbsorbMicroClusterModeratelySimilar() {
+    func testAbsorbMicroClusterAboveThresholdAbsorbed() {
         // Large cluster: speaker 0 with 40s
+        // Large cluster: speaker 2 with 40s (distinct, prevents single-speaker safety)
         // Micro cluster: speaker 1 with 6s (below 10s micro threshold)
-        // Moderate similarity (0.60) — passes micro threshold (0.50)
+        // High similarity to speaker 0 (0.70) — passes micro threshold (0.62)
         let embA: [Float] = [1.0, 0.0, 0.0, 0.0]
-        let embB: [Float] = [0.60, 0.80, 0.0, 0.0] // cos(A,B) ≈ 0.60
+        let embB: [Float] = [0.70, 0.71, 0.0, 0.0] // cos(A,B) ≈ 0.70
+        let embC: [Float] = [0.0, 0.0, 1.0, 0.0]   // distinct speaker
+
+        let largeSeg0 = (0..<20).map { i in
+            SpeakerSegment(speakerId: 0, startTime: Double(i) * 2.0, endTime: Double(i) * 2.0 + 2.0,
+                           embedding: embA, qualityScore: 0.8)
+        }
+        let largeSeg2 = (0..<20).map { i in
+            SpeakerSegment(speakerId: 2, startTime: 100.0 + Double(i) * 2.0, endTime: 100.0 + Double(i) * 2.0 + 2.0,
+                           embedding: embC, qualityScore: 0.8)
+        }
+        let microSeg = [
+            SpeakerSegment(speakerId: 1, startTime: 50.0, endTime: 53.0, embedding: embB, qualityScore: 0.8),
+            SpeakerSegment(speakerId: 1, startTime: 55.0, endTime: 58.3, embedding: embB, qualityScore: 0.8)
+        ]
+
+        let result = EmbeddingClusterer.absorbSmallClusters(segments: largeSeg0 + microSeg + largeSeg2)
+        let uniqueIds = Set(result.map { $0.speakerId })
+        XCTAssertEqual(uniqueIds.count, 2, "Micro cluster (6.3s) with sim 0.70 should be absorbed (micro threshold 0.62)")
+    }
+
+    func testAbsorbMicroClusterBelowThresholdPreserved() {
+        // Large cluster: speaker 0 with 40s
+        // Micro cluster: speaker 1 with 6s — similarity 0.55 (below 0.62 threshold)
+        // Should NOT be absorbed
+        let embA: [Float] = [1.0, 0.0, 0.0, 0.0]
+        let embB: [Float] = [0.55, 0.84, 0.0, 0.0] // cos(A,B) ≈ 0.55
 
         let largeSeg = (0..<20).map { i in
             SpeakerSegment(speakerId: 0, startTime: Double(i) * 2.0, endTime: Double(i) * 2.0 + 2.0,
@@ -195,13 +225,13 @@ final class EmbeddingClustererTests: XCTestCase {
 
         let result = EmbeddingClusterer.absorbSmallClusters(segments: largeSeg + microSeg)
         let uniqueIds = Set(result.map { $0.speakerId })
-        XCTAssertEqual(uniqueIds.count, 1, "Micro cluster (6.3s) with sim 0.60 should be absorbed (micro threshold 0.50)")
+        XCTAssertEqual(uniqueIds.count, 2, "Micro cluster with sim 0.55 should NOT be absorbed (threshold 0.62)")
     }
 
     func testAbsorbMicroClusterDistinctVoicePreserved() {
         // Large cluster: speaker 0 with 40s
         // Micro cluster: speaker 1 with 6s — different voice (sim 0.35)
-        // Should NOT be absorbed at the new 0.50 threshold
+        // Should NOT be absorbed at the 0.62 threshold
         let embA: [Float] = [1.0, 0.0, 0.0, 0.0]
         let embB: [Float] = [0.35, 0.94, 0.0, 0.0] // cos(A,B) ≈ 0.35
 
@@ -216,7 +246,7 @@ final class EmbeddingClustererTests: XCTestCase {
 
         let result = EmbeddingClusterer.absorbSmallClusters(segments: largeSeg + microSeg)
         let uniqueIds = Set(result.map { $0.speakerId })
-        XCTAssertEqual(uniqueIds.count, 2, "Micro cluster with distinct voice (sim 0.35) should NOT be absorbed (threshold 0.50)")
+        XCTAssertEqual(uniqueIds.count, 2, "Micro cluster with distinct voice (sim 0.35) should NOT be absorbed (threshold 0.62)")
     }
 
     func testAbsorbProtectsMultiSegmentClusters() {

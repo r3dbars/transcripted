@@ -123,43 +123,51 @@ class TranscriptSaver {
 
         let markdown = formatTranscriptMarkdown(result: result, speakerMappings: speakerMappings, speakerSources: speakerSources, speakerDbIds: speakerDbIds, date: Date(), meetingTitle: meetingTitle, healthInfo: healthInfo)
 
-        do {
-            try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
-            AppLogger.pipeline.info("Transcript saved", ["path": fileURL.path])
-            showSaveNotification(fileURL: fileURL)
+        // Serialize file writes to prevent concurrent corruption with retroactive speaker updates
+        let savedURL: URL? = fileUpdateQueue.sync {
+            do {
+                try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
+                AppLogger.pipeline.info("Transcript saved", ["path": fileURL.path])
 
-            // Record to stats database
+                // Agent output: write JSON sidecar + index + CLAUDE.md
+                let stem = fileURL.deletingPathExtension().lastPathComponent
+                do {
+                    try AgentOutput.writeTranscriptJSON(
+                        from: result,
+                        speakerMappings: speakerMappings,
+                        speakerDbIds: speakerDbIds,
+                        to: saveDir,
+                        stem: stem
+                    )
+                    try AgentOutput.writeIndex(to: saveDir, speakerDB: SpeakerDatabase.shared)
+                    AgentOutput.writeAgentReadme(to: saveDir)
+                } catch {
+                    AppLogger.pipeline.error("Agent output failed", ["error": error.localizedDescription])
+                    // Non-fatal — Markdown already saved successfully
+                }
+
+                return fileURL
+            } catch {
+                AppLogger.pipeline.error("Failed to save transcript", ["error": error.localizedDescription])
+                return nil
+            }
+        }
+
+        if let savedURL {
+            showSaveNotification(fileURL: savedURL)
+
+            // Record to stats database (outside queue — dispatches to MainActor)
             Task { @MainActor in
                 let metadata = StatsService.createMetadata(
                     from: result,
-                    transcriptPath: fileURL.path,
+                    transcriptPath: savedURL.path,
                     title: meetingTitle
                 )
                 await StatsService.shared.recordSession(metadata)
             }
-
-            // Agent output: write JSON sidecar + index + CLAUDE.md
-            let stem = fileURL.deletingPathExtension().lastPathComponent
-            do {
-                try AgentOutput.writeTranscriptJSON(
-                    from: result,
-                    speakerMappings: speakerMappings,
-                    speakerDbIds: speakerDbIds,
-                    to: saveDir,
-                    stem: stem
-                )
-                try AgentOutput.writeIndex(to: saveDir, speakerDB: SpeakerDatabase.shared)
-                AgentOutput.writeAgentReadme(to: saveDir)
-            } catch {
-                AppLogger.pipeline.error("Agent output failed", ["error": error.localizedDescription])
-                // Non-fatal — Markdown already saved successfully
-            }
-
-            return fileURL
-        } catch {
-            AppLogger.pipeline.error("Failed to save transcript", ["error": error.localizedDescription])
-            return nil
         }
+
+        return savedURL
     }
 
     // MARK: - Notifications
