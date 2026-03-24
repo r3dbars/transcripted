@@ -43,11 +43,20 @@ class DraftSessionController: ObservableObject {
     private var streamingTask: Task<Void, Never>?
     private var visionTask: Task<Void, Never>?
     private var clipboardRestoreTask: Task<Void, Never>?
+    private var styleRefinementTask: Task<Void, Never>?
+    private var sessionTimeoutTask: Task<Void, Never>?
     private var sessionStartTime: CFAbsoluteTime = 0
+
+    /// Max duration for a listening session before auto-cancel (5 minutes).
+    /// Prevents stuck sessions when the user walks away from the computer.
+    private static let sessionTimeoutNanos: UInt64 = 5 * 60 * 1_000_000_000
 
     deinit {
         streamingTask?.cancel()
         visionTask?.cancel()
+        clipboardRestoreTask?.cancel()
+        styleRefinementTask?.cancel()
+        sessionTimeoutTask?.cancel()
     }
 
     /// When set, processVision() uses this context directly instead of calling the vision API.
@@ -147,6 +156,9 @@ class DraftSessionController: ObservableObject {
 
         appState.logger.log("SESSION | started (parakeet, \(appState.sttRouter.inputDeviceName)), voice recording + vision in parallel")
 
+        // Start session timeout — auto-cancel after 5 minutes to prevent stuck sessions
+        installSessionTimeout()
+
         // Start vision processing in parallel (stored so we can await it before drafting)
         visionTask?.cancel()
         visionTask = Task {
@@ -160,8 +172,17 @@ class DraftSessionController: ObservableObject {
         guard isInSession else { return }
         overlayController.enterDraftingState()
 
+        // Cancel any in-progress background generation (e.g., style refinement)
+        // to prevent "Model busy" errors when starting the user's draft.
+        styleRefinementTask?.cancel()
+        styleRefinementTask = nil
+        sessionTimeoutTask?.cancel()
+        sessionTimeoutTask = nil
+
         streamingTask?.cancel()
         streamingTask = Task {
+            // Preempt any lingering generation on the MLX actor
+            await appState.localInference.draftEngine.cancelGeneration()
             // Stop recording and batch-transcribe
             appState.sttRouter.stopRecording()
             let voiceText = (await appState.sttRouter.transcribe() ?? "")
@@ -273,6 +294,10 @@ class DraftSessionController: ObservableObject {
         visionTask = nil
         streamingTask?.cancel()
         streamingTask = nil
+        clipboardRestoreTask?.cancel()
+        clipboardRestoreTask = nil
+        sessionTimeoutTask?.cancel()
+        sessionTimeoutTask = nil
         if appState.sttRouter.isRecording {
             appState.sttRouter.cancel()
         }
@@ -350,12 +375,17 @@ class DraftSessionController: ObservableObject {
             return
         }
         appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
+
+        // Start session timeout — auto-cancel after 5 minutes to prevent stuck sessions
+        installSessionTimeout()
     }
 
     /// Stop dictation and paste — Parakeet batch transcription
     func stopDictationAndPaste() {
         guard let (appState, overlayController) = readyState() else { return }
         guard isDictating, overlayController.state == .listening else { return }
+        sessionTimeoutTask?.cancel()
+        sessionTimeoutTask = nil
         // Stay compact during transcription — don't expand to full drafting height.
         // Just update the state for the spinner, keeping the compact panel size.
         overlayController.transcriptExpanded = false
@@ -404,6 +434,10 @@ class DraftSessionController: ObservableObject {
         guard let (appState, overlayController) = readyState() else { return }
         streamingTask?.cancel()
         streamingTask = nil
+        clipboardRestoreTask?.cancel()
+        clipboardRestoreTask = nil
+        sessionTimeoutTask?.cancel()
+        sessionTimeoutTask = nil
         if appState.sttRouter.isRecording {
             appState.sttRouter.cancel()
         }
@@ -426,6 +460,27 @@ class DraftSessionController: ObservableObject {
     /// Called after loading → listening transition to undo showLoadingState()'s expansion.
     private func resizePanelToCompact() {
         overlayController?.resizePanelToCompact()
+    }
+
+    /// Install a timeout that auto-cancels the session after 5 minutes.
+    /// Prevents stuck sessions if the user walks away from the computer.
+    private func installSessionTimeout() {
+        sessionTimeoutTask?.cancel()
+        sessionTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.sessionTimeoutNanos)
+            guard !Task.isCancelled, let self = self else { return }
+            if self.isInSession {
+                self.appState?.logger.log("SESSION | auto-cancelled after timeout")
+                EventReporter.shared.capture(level: .warning, engine: "overlay", event: "session_timeout",
+                    message: "Session auto-cancelled after 5 minutes")
+                self.cancelSession()
+            } else if self.isDictating {
+                self.appState?.logger.log("DICTATION | auto-cancelled after timeout")
+                EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_timeout",
+                    message: "Dictation auto-cancelled after 5 minutes")
+                self.cancelDictation()
+            }
+        }
     }
 
     private func processVision(imageData: Data?, sourceApp: NSRunningApplication?) async {
@@ -505,6 +560,8 @@ class DraftSessionController: ObservableObject {
     private func confirmAndInject(platform: PlatformFormatter) {
         guard let appState = appState, let overlayController = overlayController else { return }
         guard isInSession else { return }
+        sessionTimeoutTask?.cancel()
+        sessionTimeoutTask = nil
         let editedText = overlayController.reviewText
         let originalDraft = appState.drafter.originalDraft
 
@@ -564,9 +621,15 @@ class DraftSessionController: ObservableObject {
                 context: ["draft_length": "\(originalDraft.count)"])
         }
 
-        // Check if style refinement is needed
+        // Check if style refinement is needed — deferred by 5 seconds so the model
+        // is free if the user immediately starts another draft session. The task is
+        // cancellable via styleRefinementTask (cancelled in stopSessionAndDraft).
         if appState.styleEngine.shouldRefineNow(), appState.localInference.isReady {
-            Task {
+            styleRefinementTask?.cancel()
+            styleRefinementTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 5_000_000_000)  // 5 second delay
+                guard !Task.isCancelled else { return }
+                guard let self = self, let appState = self.appState else { return }
                 await appState.styleEngine.regenerateStyleSummary(draftEngine: appState.localInference.draftEngine)
                 appState.logger.log("STYLE | summary updated")
             }

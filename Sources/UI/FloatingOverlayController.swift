@@ -622,7 +622,7 @@ class FloatingOverlayController {
         rootView?.reviewView.diffStrip.isFullDiffMode = false
     }
 
-    // MARK: - System Wake Recovery
+    // MARK: - System Wake Recovery & Periodic AG Refresh
 
     func handleSystemWake() {
         // No NSHostingView to recreate. AppKit views survive sleep/wake without corruption.
