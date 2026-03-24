@@ -41,17 +41,26 @@ class StyleEngine: ObservableObject {
 
     // MARK: - Public Interface
 
-    /// Build system prompt — condensed style profile + compact rules (optimized for small local models)
+    /// Build system prompt — condensed style profile + reference samples + compact rules (optimized for small local models)
     func buildSystemPrompt() -> String {
         let condensed = extractCondensedProfile()
         guard !condensed.isEmpty else {
             return promptStore?.config.draftingSystem ?? DefaultPrompts.draftingSystem
         }
 
+        // Include 3 diverse USER_SENT samples — concrete examples ground the 4B model
+        // much better than abstract style descriptions alone
+        let samples = extractReferenceSamples(count: 3)
+        var referencePart = ""
+        if !samples.isEmpty {
+            let formatted = samples.map { "[\($0.platform)] \($0.text)" }.joined(separator: "\n\n")
+            referencePart = "\n\nExamples of how the user actually writes:\n\(formatted)"
+        }
+
         return """
             You ghostwrite messages for the user. Deliver their intent first, then apply their style.
 
-            \(condensed)
+            \(condensed)\(referencePart)
 
             Rules:
             - Output ONLY the message text. No labels, explanations, or alternatives.
@@ -90,6 +99,13 @@ class StyleEngine: ObservableObject {
         let full = extractStyleSummary()
         guard !full.isEmpty else { return "" }
 
+        // New compact format (TONE/ALWAYS/NEVER/PHRASES) — already condensed, return as-is
+        let trimmed = full.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("TONE:") {
+            return trimmed
+        }
+
+        // Legacy verbose format — extract key sections
         var parts: [String] = []
 
         // Extract a one-line tone summary from **Tone & Voice** section
@@ -304,17 +320,19 @@ class StyleEngine: ObservableObject {
     /// Regenerate the Style Summary using local LLM — incremental refinement based on recent training pairs
     func regenerateStyleSummary(draftEngine: MLXEngine) async {
         let currentProfile = extractStyleSummary()
-        let examples = extractRecentExamplesText(last: 20)
+        let examples = extractRecentExamplesText(last: DraftConstants.refinementExampleWindow)
         guard !examples.isEmpty else { return }
 
         let refinementPrompt = Self.buildRefinementPrompt(currentProfile: currentProfile)
 
         do {
+            // Lower temperature (0.3) for analytical tasks — refinement needs deterministic,
+            // grounded output. The 4B model hallucinates patterns at higher temperatures.
             let analysis = try await draftEngine.complete(
                 prompt: examples,
                 systemPrompt: refinementPrompt,
                 maxTokens: DraftConstants.localRefinementMaxTokens,
-                temperature: 0.7
+                temperature: 0.3
             )
 
             // Replace the Style Summary section
@@ -332,276 +350,117 @@ class StyleEngine: ObservableObject {
         }
     }
 
-    /// Build the incremental refinement prompt — tells the model to fix what's wrong, not rebuild from scratch
+    /// Build the incremental refinement prompt — compact 4-section format optimized for Qwen 3.5-4B.
+    /// The original 9-section, ~2400-word prompt was designed for Sonnet. The 4B model gets confused
+    /// by nested conditionals, 9 required sections, and long preambles — it confuses content with style
+    /// and treats one-off phrases as "signature patterns." This compact version cuts to 4 sections
+    /// (TONE, ALWAYS, NEVER, PHRASES) with ~400 words of instructions.
     private static func buildRefinementPrompt(currentProfile: String) -> String {
         if currentProfile.isEmpty {
-            // No existing profile — build from training pairs alone
             return """
-                You are building a writing style profile from training data. This profile will be used \
-                by a ghostwriter AI to write messages indistinguishable from this person.
+                Build a writing style profile from the training pairs below.
 
-                Each example shows two versions of the same message:
-                - AI_DRAFT: what an AI assistant generated
-                - USER_SENT: what the user actually sent (after editing the AI's draft)
+                Each pair shows:
+                - AI_DRAFT: what an AI wrote
+                - USER_SENT: what the user actually sent after editing
                 - EDIT_DISTANCE: how much they changed it (0 = kept as-is, 1 = completely rewritten)
 
-                Some examples may also include:
-                - USER_INSTRUCTIONS: what the user TOLD the AI to do (their spoken voice instructions)
-                - FORMALITY: the detected communication register (casual/professional/formal)
-                Not all examples have these fields — older examples may only have PLATFORM, EDIT_DISTANCE, \
-                AI_DRAFT, and USER_SENT. Use the additional fields when available.
+                RULES:
+                1. USER_SENT is the ONLY source of truth. Every pattern must come from USER_SENT text.
+                2. Do NOT treat AI_DRAFT phrases as the user's style — those are the AI's habits.
+                3. If a phrase appears in AI_DRAFT but was removed in USER_SENT, add it to NEVER.
+                4. Only list a phrase in PHRASES if it appears in USER_SENT across multiple examples.
+                5. High EDIT_DISTANCE (0.3+) examples are the strongest style signals.
 
-                ⚠️ INSTRUCTION vs. STYLE SEPARATION (when USER_INSTRUCTIONS is present):
-                1. Read USER_INSTRUCTIONS to understand what the user asked for
-                2. Compare AI_DRAFT to USER_INSTRUCTIONS — did the AI follow the instructions?
-                3. Compare USER_SENT to AI_DRAFT — what did the user change?
-                4. If the user's changes ALIGN with instructions the AI missed → this is an INSTRUCTION \
-                error, NOT a style signal. Do not derive style patterns from these changes.
-                5. If the user's changes go BEYOND what their instructions specified → these reveal TRUE \
-                style preferences. The gap between "what they asked for" and "what they actually wrote" \
-                is the purest style signal.
+                Output EXACTLY this format — no other sections or headings:
 
-                Use FORMALITY to build context-aware patterns. NEVER rules should be context-specific \
-                when formality data is available: "NEVER X in professional Slack" not just "NEVER X."
+                TONE: [1-2 sentences describing their writing voice — direct/casual/formal, warmth, how they express ideas. Write in second person.]
 
-                ⚠️ CRITICAL SOURCE RULES — read these before analyzing ANY example:
-                1. USER_SENT is the SOLE source of truth for this person's writing style. \
-                EVERY positive pattern (signature phrases, tone, metrics) must come from USER_SENT text ONLY.
-                2. AI_DRAFT shows what the AI wrote — NOT what the user writes. Do NOT attribute \
-                AI_DRAFT phrases, patterns, or metrics to the user.
-                3. If a phrase/pattern appears in AI_DRAFT but is REMOVED or CHANGED in USER_SENT, \
-                that is a NEVER signal — the user actively rejected it. Add it to the NEVER list.
-                4. If the user kept an AI_DRAFT phrase unchanged, that is WEAK evidence at best — \
-                it means they tolerated it, not that it's their natural voice. Do not list it as a \
-                signature phrase unless it also appears in other USER_SENT messages independently.
-                5. ALL quantitative metrics (message length, sentence count, emoji frequency, \
-                connector usage) must be measured from USER_SENT messages ONLY.
+                ALWAYS:
+                - [rule 1 — quote a phrase from USER_SENT as evidence]
+                - [rule 2 — quote evidence]
+                - [5-8 specific, actionable rules total]
 
-                High edit distance examples (0.3+) are the STRONGEST signals — they show where the AI \
-                got it most wrong. Low edit distance (< 0.1) means the AI was close.
+                NEVER:
+                - Never [thing to avoid] — instead [what they do]. [Quote AI_DRAFT phrase they removed]
+                - [5-8 rules total, each as "Never X — instead Y" with evidence]
 
-                OPENER ANALYSIS: Pay special attention to cases where the user removes AI-generated \
-                openers like "Yeah exactly..", "Yeah that tracks..", "This is interesting!", or similar \
-                agreement phrases from the beginning of AI_DRAFT. If the user frequently removes these \
-                openers, the profile should note that openers are CONDITIONAL — only appropriate when \
-                genuinely agreeing with a specific point someone made — rather than DEFAULT. The ALWAYS \
-                section should reflect actual opener frequency from USER_SENT, not aspirational use.
+                PHRASES: "[phrase1]", "[phrase2]", "[phrase3]" [3-8 phrases from USER_SENT that appear across multiple examples]
 
-                Build a profile with ALL of these sections (use these exact headings):
-
-                **Tone & Voice** — their default register, warmth, directness
-
-                **Sentence Patterns** — average length (estimate in words FROM USER_SENT), fragments vs. \
-                complete sentences, how they chain ideas
-
-                **Platform-Specific Patterns** — how their style shifts by platform (check PLATFORM tags). \
-                Dedicate a sub-section to each platform with evidence.
-
-                **Openings & Closings** — how they start and end messages (by platform if different)
-
-                **Punctuation & Formatting** — their punctuation fingerprint, emoji usage, capitalization
-
-                **Signature Phrases** — list 5-15 characteristic phrases/expressions as bullets with quotes. \
-                For each, include the phrase, a usage note, and 1-2 direct quotes from USER_SENT proving it. \
-                ONLY count phrases that appear in USER_SENT. If a phrase only appears in AI_DRAFT, it is \
-                the AI's habit, NOT the user's.
-
-                **Quantitative Fingerprint** — estimate FROM USER_SENT ONLY: avg sentence length, typical \
-                message length by platform, contraction usage, active voice ratio. \
-                Count words in USER_SENT messages to get real averages — do NOT use AI_DRAFT lengths.
-
-                **ALWAYS** — 5-10 rules a ghostwriter must follow (specific, actionable). \
-                For each rule, include a direct quote from USER_SENT proving the pattern.
-
-                **NEVER** — 5-10 things this person would never write, using contrast pairs: \
-                "Never X — instead Y." Build this list from TWO sources: \
-                (a) Things the AI wrote in AI_DRAFT that the user removed or replaced in USER_SENT — \
-                quote the AI's version AND the user's replacement. These are the strongest NEVER signals. \
-                (b) Generic AI patterns this person would avoid (corporate pleasantries, hedging, etc.)
-
-                EVIDENCE RULE: For EVERY pattern you claim, include 1-2 direct quotes from USER_SENT \
-                as proof. For NEVER rules, quote what the AI wrote AND what the user changed it to. \
-                If you can't quote evidence from USER_SENT, do NOT include the pattern.
-
-                Write in second person ("You..."). \
-                IMPORTANT: Do NOT include a title or top-level heading. Start directly with **Tone & Voice**.
+                Start directly with TONE:. Do not add any title, heading, or extra sections.
                 """
         }
 
         return """
-            You are refining a writing style profile based on new evidence. This profile is used by \
-            a ghostwriter AI to write messages indistinguishable from this person.
+            Refine this writing style profile based on new training pairs.
 
             CURRENT PROFILE:
             \(currentProfile)
 
-            ⚠️ CRITICAL SOURCE RULES — read these before analyzing ANY training pair:
-            1. USER_SENT is the SOLE source of truth for this person's writing style. \
-            EVERY positive pattern (signature phrases, tone, metrics) must come from USER_SENT text ONLY.
-            2. AI_DRAFT shows what the AI wrote — NOT what the user writes. Do NOT attribute \
-            AI_DRAFT phrases, patterns, or metrics to the user.
-            3. If a phrase/pattern appears in AI_DRAFT but is REMOVED or CHANGED in USER_SENT, \
-            that is a NEVER signal — the user actively rejected it. Add it to the NEVER list.
-            4. If the user kept an AI_DRAFT phrase unchanged, that is WEAK evidence at best — \
-            it means they tolerated it, not that it's their natural voice. Do not list it as a \
-            signature phrase unless it also appears in other USER_SENT messages independently.
-            5. ALL quantitative metrics (message length, sentence count, emoji frequency, \
-            connector usage) must be measured from USER_SENT messages ONLY.
-            6. AUDIT THE CURRENT PROFILE for contamination: if the current profile lists phrases \
-            or metrics that don't appear in any USER_SENT message, REMOVE them. The previous \
-            profile may have incorrectly attributed AI patterns to the user.
+            Each training pair shows AI_DRAFT (what AI wrote) vs USER_SENT (what user actually sent).
+            EDIT_DISTANCE shows how much the user changed it (0 = kept, 1 = rewrote).
 
-            The training data below shows pairs: what an AI drafted (AI_DRAFT) vs. what the user actually \
-            sent (USER_SENT). The EDIT_DISTANCE shows how much they changed it (0 = kept, 1 = rewrote). \
-            High edit distance examples (0.3+) are the STRONGEST signals — pay extra attention to these.
+            RULES:
+            1. USER_SENT is the ONLY source of truth. Do NOT attribute AI_DRAFT phrases to the user.
+            2. PRESERVE rules from the current profile that have evidence in USER_SENT.
+            3. REMOVE any rules or phrases that came from AI_DRAFT text (contamination).
+            4. ADD new patterns you see repeated across multiple USER_SENT messages.
+            5. PHRASES must appear in USER_SENT across multiple examples — not just once.
+            6. High EDIT_DISTANCE (0.3+) = strongest signals. Pay extra attention to these.
 
-            Some examples may also include:
-            - USER_INSTRUCTIONS: what the user TOLD the AI to do (their spoken voice instructions)
-            - FORMALITY: the detected communication register (casual/professional/formal)
-            Not all examples have these — older ones only have PLATFORM/EDIT_DISTANCE/AI_DRAFT/USER_SENT.
+            Output EXACTLY this format — no other sections or headings:
 
-            ⚠️ INSTRUCTION vs. STYLE SEPARATION (when USER_INSTRUCTIONS is present):
-            1. Read USER_INSTRUCTIONS to understand what the user asked for
-            2. Compare AI_DRAFT to USER_INSTRUCTIONS — did the AI follow the instructions?
-            3. Compare USER_SENT to AI_DRAFT — what did the user change?
-            4. If the user's changes ALIGN with instructions the AI missed → INSTRUCTION error, NOT style
-            5. If the user's changes go BEYOND what instructions specified → TRUE style preferences
+            TONE: [1-2 sentences — update based on new evidence. Write in second person.]
 
-            If USER_INSTRUCTIONS shows users repeatedly give an instruction the AI ignores \
-            (e.g., "keep it brief" but AI writes long), add to ALWAYS: "Default to brevity \
-            unless user explicitly asks for detail."
+            ALWAYS:
+            - [rule — quote USER_SENT evidence]
+            - [5-8 specific, actionable rules total]
 
-            Use FORMALITY to make NEVER rules context-aware: "NEVER X in professional Slack" \
-            not just "NEVER X."
+            NEVER:
+            - Never [thing to avoid] — instead [what they do]. [Quote evidence]
+            - [5-8 rules total, each as "Never X — instead Y"]
 
-            Analyze the patterns in what the user changes:
-            - Consistent length changes (compare AI_DRAFT word count vs. USER_SENT word count)
-            - Tone shifts (AI too formal/casual for specific platforms)
-            - Word substitutions (AI uses words this person avoids → add to NEVER list with contrast pair)
-            - Structural changes (AI uses bullets, user prefers paragraphs — or vice versa)
-            - Opening/closing pattern corrections
-            - Platform-specific patterns (check PLATFORM tags — they may write very differently on Slack vs. email)
-            - Punctuation corrections (AI adds/removes exclamation marks, dashes, emoji)
-            - Things the AI adds that the user consistently removes → these are NEVER rules
-            - Phrases the AI uses that the user replaces with different phrasing → the user's version \
-            is the signature phrase, the AI's version is a NEVER
+            PHRASES: "[phrase1]", "[phrase2]", "[phrase3]" [3-8 recurring USER_SENT phrases]
 
-            OPENER ANALYSIS: Pay special attention to cases where the user removes AI-generated \
-            openers like "Yeah exactly..", "Yeah that tracks..", "This is interesting!", or similar \
-            agreement phrases from the beginning of AI_DRAFT. If the user frequently removes these \
-            openers, the profile should note that openers are CONDITIONAL — only appropriate when \
-            genuinely agreeing with a specific point someone made — rather than DEFAULT. The ALWAYS \
-            section should reflect actual opener frequency from USER_SENT, not aspirational use.
-
-            Rewrite the COMPLETE style profile with ALL of these sections:
-            **Tone & Voice**, **Sentence Patterns**, **Platform-Specific Patterns**, \
-            **Openings & Closings**, **Punctuation & Formatting**, **Signature Phrases**, \
-            **Quantitative Fingerprint**, **ALWAYS**, **NEVER**
-
-            Rules for the rewrite:
-            - PRESERVE patterns from the current profile ONLY if they have evidence in USER_SENT messages
-            - REMOVE patterns from the current profile that were based on AI_DRAFT text (contamination)
-            - FIX dimensions where the training pairs show clear, repeated patterns
-            - ADD new NEVER rules as contrast pairs ("Never X — instead Y") for things the AI \
-            consistently does wrong. Quote the AI's version AND the user's replacement.
-            - Signature Phrases must ONLY contain phrases from USER_SENT. If a phrase only ever \
-            appears in AI_DRAFT columns, it is the AI's habit and must NOT be listed.
-            - UPDATE Quantitative Fingerprint by counting words in USER_SENT messages ONLY. \
-            Do NOT average in AI_DRAFT lengths — they reflect the AI's verbosity, not the user's.
-            - ADD platform-specific sub-sections for any new platforms seen
-
-            EVIDENCE RULE: For EVERY pattern you claim, include 1-2 direct quotes from USER_SENT \
-            as proof. For NEVER rules, quote what the AI wrote AND what the user changed it to. \
-            If you can't quote evidence from USER_SENT, REMOVE the pattern — do not keep it.
-
-            Write in second person ("You..."). Target 500-800 words. \
-            IMPORTANT: Do NOT include a title or top-level heading. Start directly with **Tone & Voice**.
+            Start directly with TONE:. Do not add any title, heading, or extra sections.
             """
     }
 
     // MARK: - Bulk Import (Onboarding)
 
     /// Prompt for analyzing raw, messy writing samples from onboarding
+    /// Prompt for analyzing raw writing samples from onboarding — compact 4-section format for 4B model
     private static func bulkAnalysisPrompt(userName: String?) -> String {
         let nameClause = userName.flatMap { $0.isEmpty ? nil : $0 }
             .map { "The user's name is \($0). Focus ONLY on messages written by them." }
             ?? "Focus on identifying a single author's writing patterns across the samples."
 
         return """
-            You are analyzing real writing samples to build a comprehensive writing style profile \
-            that a ghostwriter AI will use to write messages indistinguishable from this person.
+            Analyze these writing samples to build a style profile for a ghostwriter AI.
 
-            These samples were copied directly from the user's messages — Slack, iMessage, email, \
-            and other platforms. They may include:
-            - Timestamps, sender names, channel names (ignore these)
-            - Emoji reactions, thread indicators, quoted replies (ignore metadata)
-            - Messages from OTHER people mixed in (focus only on the user's writing)
+            The samples are from Slack, iMessage, email, etc. They may include timestamps, \
+            sender names, and messages from other people — ignore those.
 
             \(nameClause)
 
-            Build a profile with ALL of the following sections (use these exact headings):
+            Output EXACTLY this format — no other sections or headings:
 
-            **Tone & Voice**
-            Their default register, warmth, directness. How do they balance authority with \
-            approachability? How does tone shift by platform or audience?
+            TONE: [1-2 sentences about their voice — direct/casual/formal, warmth, how they express ideas. Write in second person.]
 
-            **Sentence Patterns**
-            Average sentence length (estimate in words). Use of fragments vs. complete sentences. \
-            How they chain ideas (dashes, commas, periods, conjunctions). Rhythm variation.
+            ALWAYS:
+            - [rule — quote a phrase from the samples as evidence]
+            - [5-8 specific, actionable rules total]
 
-            **Platform-Specific Patterns**
-            How their style shifts across platforms. Dedicate a sub-section to each platform you \
-            see evidence for (Slack, iMessage, email, etc.). Cover: formality level, message length, \
-            greeting/closing patterns, formatting choices.
+            NEVER:
+            - Never [thing to avoid] — instead [what they do]. [Quote evidence]
+            - [5-8 rules total, each as "Never X — instead Y"]
 
-            **Openings & Closings**
-            How they start messages (by platform if different). How they end messages. \
-            Greeting formulas, sign-off patterns, forward-looking hooks.
+            PHRASES: "[phrase1]", "[phrase2]", "[phrase3]" [3-8 characteristic phrases from the samples]
 
-            **Punctuation & Formatting**
-            Their punctuation fingerprint: dashes, ellipses, exclamation points (single vs. double), \
-            emoji usage, capitalization habits, markdown/formatting preferences.
+            For every rule, include a direct quote from the samples as proof. \
+            If you can't find a quote, do not include the rule.
 
-            **Signature Phrases**
-            List 5-15 of their most characteristic phrases, expressions, and verbal tics. \
-            Format as a bullet list with the phrase in quotes, a usage note, and 1-2 direct quotes \
-            from the samples proving the pattern. Example format:
-            - "but honestly" (pivot to their real point) — "but honestly what got me even more is..."
-            - "let me know" (forward-looking closer) — "let me know after you check it out", \
-            "Let me know your thoughts on that"
-
-            **Quantitative Fingerprint**
-            Estimate these metrics from the samples:
-            - Average sentence length (words)
-            - Typical message length by platform (sentences)
-            - Approximate active voice ratio
-            - Contraction usage (always/sometimes/never)
-            - Questions per message (average)
-
-            **ALWAYS**
-            List 5-10 patterns that appear in virtually everything they write. \
-            These are rules a ghostwriter must follow. Be specific and actionable. \
-            For each rule, include a direct quote proving the pattern.
-
-            **NEVER**
-            List 5-10 things this person would NEVER write, using contrast pairs: \
-            "Never X — instead Y." This format shows the ghostwriter what to do INSTEAD. \
-            Include generic AI patterns they'd avoid. Examples of the format:
-            - Never uses corporate sign-offs like "Best regards" — instead ends with action \
-            items or casual "Let me know!"
-            - Never hedges with "I think maybe" or "It might be worth considering" — instead \
-            states opinions directly
-            This section is CRITICAL — it prevents the AI from reverting to its default voice.
-
-            EVIDENCE RULE: For EVERY pattern you identify in every section, include 1-2 direct \
-            quotes from the samples that prove it. Not "you write casually" but "you open messages \
-            with 'yo' or 'hey man' and chain thoughts with dashes: 'that's wild - I'll check it out'." \
-            If you can't find a direct quote, note the pattern but flag it as needing more evidence.
-
-            Target 500-800 words. Depth over breadth — if you have strong evidence for some dimensions \
-            and weak evidence for others, go deep on what you can prove and note what needs more data.
-
-            IMPORTANT: Do NOT include a title or top-level heading. Start directly with **Tone & Voice**.
+            Start directly with TONE:. Do not add any title, heading, or extra sections.
             """
     }
 
@@ -610,12 +469,12 @@ class StyleEngine: ObservableObject {
     func importBulkSamples(rawText: String, draftEngine: MLXEngine) async throws -> String {
         let userName = UserDefaults.standard.string(forKey: "user-display-name")
 
-        // Send to local LLM for analysis
+        // Send to local LLM for analysis — lower temperature for deterministic analytical output
         let analysis = try await draftEngine.complete(
             prompt: rawText,
             systemPrompt: Self.bulkAnalysisPrompt(userName: userName),
             maxTokens: DraftConstants.localBulkAnalysisMaxTokens,
-            temperature: 0.7
+            temperature: 0.3
         )
 
         // Build style.md with ONLY the generated summary — raw samples are discarded
