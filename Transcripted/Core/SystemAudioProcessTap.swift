@@ -69,9 +69,13 @@ extension SystemAudioCapture {
         // device actually operates at. Read the device's nominal rate and correct the format.
         // Without this, the WAV file header has the wrong rate and audio plays back at the wrong speed.
         let deviceNominalRate = try aggregateDeviceID.readNominalSampleRate()
-        if deviceNominalRate > 0 && deviceNominalRate != tapStreamDescription!.mSampleRate {
-            AppLogger.audioSystem.warning("Tap format rate (\(Int(tapStreamDescription!.mSampleRate))Hz) differs from device nominal rate (\(Int(deviceNominalRate))Hz) — correcting")
-            tapStreamDescription!.mSampleRate = deviceNominalRate
+        // Security: avoid force-unwrap — a nil crash here is a denial-of-service.
+        // tapStreamDescription was assigned via `try` above, but guard defensively in case
+        // code flow ever changes and nil reaches this point.
+        if var currentDesc = tapStreamDescription, deviceNominalRate > 0, deviceNominalRate != currentDesc.mSampleRate {
+            AppLogger.audioSystem.warning("Tap format rate (\(Int(currentDesc.mSampleRate))Hz) differs from device nominal rate (\(Int(deviceNominalRate))Hz) — correcting")
+            currentDesc.mSampleRate = deviceNominalRate
+            tapStreamDescription = currentDesc
         }
         AppLogger.audioSystem.info("Aggregate device nominal sample rate", ["rate": "\(Int(deviceNominalRate))"])
     }
