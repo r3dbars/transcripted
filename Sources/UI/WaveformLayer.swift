@@ -179,9 +179,7 @@ final class WaveformHostView: NSView {
     private func startTimer() {
         guard renderTimer == nil else { return }
         renderTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.drawingLayer.setNeedsDisplay()
-            }
+            self?.drawingLayer.setNeedsDisplay()
         }
     }
 
