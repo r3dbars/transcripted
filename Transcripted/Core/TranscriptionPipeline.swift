@@ -59,6 +59,16 @@ extension Transcription {
             AppLogger.transcription.debug("System: \(systemSamples.count) samples (\(String(format: "%.1f", Double(systemSamples.count) / 16000))s)")
             AppLogger.transcription.debug("Mic: \(micSamples.count) samples (\(String(format: "%.1f", Double(micSamples.count) / 16000))s)")
 
+            // Validate system audio has meaningful content (at least 1 second at 16kHz).
+            // Without this, a failed system audio capture produces an empty transcript.
+            guard systemSamples.count >= 16000 else {
+                AppLogger.transcription.error("System audio too short or empty", [
+                    "samples": "\(systemSamples.count)",
+                    "expectedMinimum": "16000"
+                ])
+                throw PipelineError.missingSystemAudio
+            }
+
             // Pre-compute mic energy per 100ms frame for embedding quality gating.
             // When the local user is speaking, system audio embeddings are contaminated
             // with their voice echo, producing unreliable remote speaker voiceprints.
@@ -154,13 +164,11 @@ extension Transcription {
                     // embeddings are contaminated with their voice (Zoom echo residual).
                     let micFraction = micActiveFraction(startTime: segment.startTime, endTime: segment.endTime)
 
-                    if micFraction > 0.8 {
+                    guard let weight = Self.embeddingWeight(forMicFraction: micFraction) else {
                         // >80% overlap with local mic: skip entirely
                         micContaminatedCount += 1
                         continue
                     }
-
-                    let weight: Float = micFraction > 0.3 ? 0.3 : 1.0
                     embeddingsPerSpeaker[segment.speakerId, default: []].append(embedding)
                     embeddingWeights[segment.speakerId, default: []].append(weight)
                 }
@@ -264,8 +272,8 @@ extension Transcription {
             // Fixes cross-cluster fragmentation: if Sortformer split one person
             // into spk1 and spk3, and DB matching identified both as the same
             // profile, unify them under the speaker ID with the most segments.
-            let profileToSpeakers = Dictionary(grouping: speakerMatchResults.keys) { speakerMatchResults[$0]!.persistentId }
-            for (_, matchedSpeakerIds) in profileToSpeakers where matchedSpeakerIds.count >= 2 {
+            let profileToSpeakers = Dictionary(grouping: speakerMatchResults.keys) { speakerMatchResults[$0]?.persistentId }
+            for (profileId, matchedSpeakerIds) in profileToSpeakers where profileId != nil && matchedSpeakerIds.count >= 2 {
                 let sorted = matchedSpeakerIds.sorted { a, b in
                     embeddingsPerSpeaker[a]?.count ?? 0 > embeddingsPerSpeaker[b]?.count ?? 0
                 }
@@ -424,6 +432,22 @@ extension Transcription {
 
     /// Merge consecutive utterances from the same speaker when the time gap between them
     /// is smaller than `maxGap` seconds. This produces cleaner transcripts by joining
+    /// Calculate embedding weight based on mic activity fraction during a system audio segment.
+    /// Returns nil if the segment should be excluded entirely (>80% mic overlap).
+    /// Uses a 4-tier gradient to avoid sharp threshold cliffs:
+    ///   - >80%: excluded (mic voice dominates system audio)
+    ///   - 50-80%: weight 0.2 (heavily contaminated)
+    ///   - 30-50%: weight 0.5 (moderately contaminated)
+    ///   - <30%: weight 1.0 (clean)
+    nonisolated static func embeddingWeight(forMicFraction micFraction: Double) -> Float? {
+        if micFraction > 0.8 { return nil }
+        switch micFraction {
+        case 0.5...: return 0.2
+        case 0.3...: return 0.5
+        default: return 1.0
+        }
+    }
+
     /// fragments that the diarizer split mid-sentence.
     ///
     /// A `maxDuration` cap prevents runaway merges — even if the speaker and gap criteria

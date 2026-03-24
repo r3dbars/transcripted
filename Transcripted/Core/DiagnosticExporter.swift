@@ -151,7 +151,9 @@ class DiagnosticExporter {
 
     /// Generate a pre-filled GitHub issue URL with system info
     static func gitHubIssueURL(title: String = "", body: String = "") -> URL {
-        var components = URLComponents(string: "https://github.com/r3dbars/transcripted/issues/new")!
+        guard var components = URLComponents(string: "https://github.com/r3dbars/transcripted/issues/new") else {
+            return URL(string: "https://github.com/r3dbars/transcripted/issues/new")!
+        }
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "template", value: "bug_report.md"),
         ]
@@ -170,6 +172,6 @@ class DiagnosticExporter {
         """
         queryItems.append(URLQueryItem(name: "body", value: fullBody))
         components.queryItems = queryItems
-        return components.url!
+        return components.url ?? URL(string: "https://github.com/r3dbars/transcripted/issues/new")!
     }
 }

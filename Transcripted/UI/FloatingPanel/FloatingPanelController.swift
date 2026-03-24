@@ -27,10 +27,10 @@ class FloatingPanelController: NSWindowController, NSWindowDelegate {
         self.audio = audio
         self.failedTranscriptionManager = failedTranscriptionManager
 
-        let screen = NSScreen.main ?? NSScreen.screens.first!
+        let screen = NSScreen.main ?? NSScreen.screens.first
 
         // Calculate position: use saved position if valid, otherwise center above dock
-        let dockHeight = Self.detectDockHeight(for: screen)
+        let dockHeight = screen.map { Self.detectDockHeight(for: $0) } ?? 0
         let x: CGFloat
         let y: CGFloat
 
@@ -40,7 +40,8 @@ class FloatingPanelController: NSWindowController, NSWindowDelegate {
             x = savedX
             y = savedY
         } else {
-            x = (screen.frame.width - maxWindowWidth) / 2
+            let screenWidth = screen?.frame.width ?? 1440
+            x = (screenWidth - maxWindowWidth) / 2
             y = dockHeight + PillDimensions.dockPadding
         }
 
