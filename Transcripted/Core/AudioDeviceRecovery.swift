@@ -2,6 +2,7 @@ import Foundation
 @preconcurrency import AVFoundation
 import AppKit
 import CoreAudio
+import QuartzCore
 
 // MARK: - Device Recovery & Watchdog
 
@@ -157,47 +158,9 @@ extension Audio {
             }
         }
 
-        // Reinstall tap
+        // Reinstall tap using shared buffer handler
         newInputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-            guard let self = self else { return }
-
-            // Update watchdog timestamp
-            self.lastBufferTime = CACurrentMediaTime()
-
-            // Calculate audio level for visualizer
-            self.calculateLevel(buffer: buffer)
-
-            // Convert to mono if needed, then write to file
-            // Note: Use weak self in nested async to prevent retain cycle
-            self.micAudioFileQueue.async { [weak self] in
-                guard let self = self,
-                      self.consecutiveMicWriteErrors < self.maxConsecutiveWriteErrors,
-                      let audioFile = self.micAudioFile,
-                      let monoFormat = self.monoOutputFormat else { return }
-
-                do {
-                    if self.inputChannelCount > 1 {
-                        // Manual downmix: average all channels to mono
-                        guard let monoBuffer = self.manualDownmix(buffer: buffer, to: monoFormat) else {
-                            AppLogger.audioMic.error("Failed to downmix buffer")
-                            return
-                        }
-                        try audioFile.write(from: monoBuffer)
-                    } else {
-                        // Already mono, write directly
-                        try audioFile.write(from: buffer)
-                    }
-                    self.consecutiveMicWriteErrors = 0
-                } catch {
-                    self.consecutiveMicWriteErrors += 1
-                    if self.consecutiveMicWriteErrors <= 3 || self.consecutiveMicWriteErrors == self.maxConsecutiveWriteErrors {
-                        AppLogger.audioMic.error("Write failed", ["error": error.localizedDescription, "consecutive": "\(self.consecutiveMicWriteErrors)"])
-                    }
-                    if self.consecutiveMicWriteErrors >= self.maxConsecutiveWriteErrors {
-                        AppLogger.audioMic.error("Too many consecutive write errors, stopping mic writes")
-                    }
-                }
-            }
+            self?.handleMicBuffer(buffer)
         }
 
         // Restart engine
