@@ -47,6 +47,12 @@ class FloatingOverlayController: ObservableObject {
 
     private var streamingNewlineCount = 0
 
+    /// Session counter — tracks how many show/hide cycles the hosting view has survived.
+    /// After sessionsSinceHostingRecreation reaches the threshold, recreate the hosting
+    /// view on the next idle hide to prevent AG stale state accumulation.
+    private var sessionsSinceHostingRecreation: Int = 0
+    private static let hostingRecreationThreshold = 50
+
     /// Closures for Enter/Escape in review mode — set by DraftSessionController
     var onConfirm: (() -> Void)?
     var onCancel: (() -> Void)?
@@ -365,10 +371,14 @@ class FloatingOverlayController: ObservableObject {
     // MARK: - Training Toast
 
     private var toastPanel: FloatingOverlayPanel?
+    private var toastHostingView: NSHostingView<AnyView>?
     private var toastDismissTask: Task<Void, Never>?
 
     /// Show a brief training toast below the main overlay.
     /// Non-activating, mouse-through, auto-fades after 2.5s.
+    /// Reuses a single NSHostingView to avoid AttributeGraph churn — each create/destroy
+    /// cycle leaves AG residue that accumulates over hours and can contribute to the
+    /// _ButtonGesture EXC_BAD_ACCESS crash.
     func showTrainingToast(_ message: String) {
         guard let mainPanel = panel else { return }
 
@@ -397,12 +407,18 @@ class FloatingOverlayController: ObservableObject {
         toast.setFrameOrigin(toastOrigin)
         toast.setContentSize(NSSize(width: OverlayTokens.panelWidth, height: 44))
 
+        // Reuse the hosting view — just update its rootView instead of destroying and
+        // recreating the entire SwiftUI view tree. This avoids AG residue accumulation.
         let toastView = TrainingToastView(message: message)
-        let hosting = NSHostingView(rootView: AnyView(toastView))
-        hosting.frame = toast.contentView?.bounds ?? .zero
-        hosting.autoresizingMask = [.width, .height]
-        toast.contentView?.subviews.forEach { $0.removeFromSuperview() }
-        toast.contentView?.addSubview(hosting)
+        if let existing = toastHostingView {
+            existing.rootView = AnyView(toastView)
+        } else {
+            let hosting = NSHostingView(rootView: AnyView(toastView))
+            hosting.frame = toast.contentView?.bounds ?? .zero
+            hosting.autoresizingMask = [.width, .height]
+            toast.contentView?.addSubview(hosting)
+            toastHostingView = hosting
+        }
 
         toast.alphaValue = 0
         toast.orderFrontRegardless()
@@ -575,14 +591,17 @@ class FloatingOverlayController: ObservableObject {
         panel?.alphaValue = 1.0  // Reset for next show
         panel?.contentView?.layer?.removeAllAnimations()
 
-        // NOTE: We deliberately do NOT tear down the NSHostingView here. Keeping the
-        // hosting view alive avoids AttributeGraph churn — each create/destroy cycle
-        // leaves residue in AG's global shared table. Over many sessions (10+ hours),
-        // this debris accumulates and eventually causes EXC_BAD_ACCESS in _ButtonGesture
-        // dispatches (null isa pointer in AG::data::_shared_table_bytes).
-        // The hosting view stays in the panel and reactively updates to idle state via
-        // the @Published property resets below. Cost: negligible invisible re-render.
-        // The hosting view is only recreated on system wake (handleSystemWake).
+        // Periodically recreate the hosting view to prevent AG stale state accumulation.
+        // The hosting view stays alive across sessions to avoid AG churn from frequent
+        // create/destroy cycles. But over very long uptime (hours), even a single
+        // long-lived view can accumulate stale internal state. Recreation every N sessions
+        // balances both risks — infrequent enough to avoid churn, frequent enough to
+        // clear any stale gesture state before it can cause EXC_BAD_ACCESS.
+        sessionsSinceHostingRecreation += 1
+        if sessionsSinceHostingRecreation >= Self.hostingRecreationThreshold {
+            recreateHostingView()
+            sessionsSinceHostingRecreation = 0
+        }
 
         isVisible = false
         errorDismissTask?.cancel()
@@ -600,13 +619,14 @@ class FloatingOverlayController: ObservableObject {
         onCancel = nil
     }
 
-    // MARK: - System Wake Recovery
+    // MARK: - System Wake Recovery & Periodic AG Refresh
 
     /// Recreate the hosting view after system wake to clear AG corruption from sleep/wake cycles.
     /// Only acts when the overlay is hidden — never interrupts a live session.
     func handleSystemWake() {
         guard !isVisible else { return }
         recreateHostingView()
+        sessionsSinceHostingRecreation = 0
     }
 
     // MARK: - Global Escape Monitor

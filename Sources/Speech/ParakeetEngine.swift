@@ -670,7 +670,7 @@ class ParakeetEngine: ObservableObject {
             if trimmed.isEmpty {
                 EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "transcription_empty",
                     message: "Parakeet returned no text after \(String(format: "%.1f", elapsed))s inference",
-                    context: ["samples": "\(samples.count)"])
+                    context: ["samples": "\(nativeCount)"])
                 return nil
             }
 
@@ -681,7 +681,7 @@ class ParakeetEngine: ObservableObject {
                     "audio_duration_s": String(format: "%.1f", audioDuration),
                     "rtf": String(format: "%.3f", rtf),
                     "chars": "\(trimmed.count)",
-                    "input_samples": "\(samples.count)",
+                    "input_samples": "\(nativeCount)",
                 ])
             return trimmed
         } catch {
@@ -689,7 +689,7 @@ class ParakeetEngine: ObservableObject {
             print("❌ PARAKEET | transcription failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "transcription_failed",
                 message: error.localizedDescription,
-                context: ["samples": "\(samples.count)", "elapsed": String(format: "%.2f", elapsed)])
+                context: ["samples": "\(nativeCount)", "elapsed": String(format: "%.2f", elapsed)])
             isTranscribing = false
             sampleBuffer.removeAll(keepingCapacity: true)
             return nil
