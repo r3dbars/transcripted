@@ -44,7 +44,8 @@ class ParakeetEngine: ObservableObject {
     // Protected by streamingSamplesLock — accessed from both the audio render thread and MainActor.
     private let streamingSamplesLock = NSLock()
     private var streamingSampleBuffer: [Float] = []
-    // ~320ms of audio at 16kHz — matches EOU chunkSize for efficient processing
+    // Feed EOU in ~320ms chunks (shift size). The manager buffers internally and processes
+    // when it has a full chunk (10240 samples = 64 mel frames at hop=160).
     private let eouChunkSamples: Int = 5120
     // Cached format for makePCMBuffer — always 16kHz mono, no need to recreate per chunk
     private let eouPCMFormat = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)
