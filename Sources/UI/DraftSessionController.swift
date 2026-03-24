@@ -1,7 +1,6 @@
 // DraftSessionController.swift
 // Session orchestration for draft mode (Option+D) and dictation mode (Option+Space)
 
-import SwiftUI
 import AppKit
 import Combine
 
