@@ -98,7 +98,8 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             workspaceObservers.append(observer)
         }
 
-        // Engine recovery on wake — hotkeys, file watchers, MLX model health check
+        // Engine recovery on wake — hotkeys, file watchers, MLX model health check,
+        // and overlay hosting view recreation to clear AG corruption from sleep/wake.
         let wakeRecoveryObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
@@ -106,6 +107,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.appState.handleSystemWake()
+                self?.overlayController.handleSystemWake()
             }
         }
         workspaceObservers.append(wakeRecoveryObserver)

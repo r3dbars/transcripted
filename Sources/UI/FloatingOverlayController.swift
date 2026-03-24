@@ -60,6 +60,10 @@ class FloatingOverlayController: ObservableObject {
     private var dragHandleView: PanelDragView?
     private var escapeMonitor: Any?
 
+    /// Generation counter — incremented on every showPanel(), checked in async _performHide()
+    /// calls to prevent stale hide operations from tearing down a new session's state.
+    private var hideGeneration: UInt64 = 0
+
     deinit {
         if let monitor = escapeMonitor {
             NSEvent.removeMonitor(monitor)
@@ -130,9 +134,13 @@ class FloatingOverlayController: ObservableObject {
         self.hostingView = hosting
     }
 
-    /// Recreate NSHostingView to prevent stale SwiftUI AttributeGraph accumulation across sessions.
-    /// Same principle as the menubar popover's per-open NSHostingController recreation.
-    private func recreateHostingView() {
+    /// Recreate NSHostingView to clear any AttributeGraph corruption from system sleep/wake cycles.
+    /// Called from handleSystemWake() — NOT from per-session showPanel().
+    /// Keeping the hosting view alive across sessions (instead of recreating per session) dramatically
+    /// reduces AG churn. Each create/destroy cycle leaves residue in AG's global shared table; over
+    /// hours of operation (dozens of sessions), this accumulates until a gesture dispatch dereferences
+    /// a dangling pointer → EXC_BAD_ACCESS in _ButtonGesture via MainActor.assumeIsolated.
+    func recreateHostingView() {
         guard let panel = panel, let sttRouter = sttRouter else { return }
 
         hostingView?.removeFromSuperview()
@@ -160,8 +168,24 @@ class FloatingOverlayController: ObservableObject {
     func showPanel(near sourceApp: NSRunningApplication?) {
         guard let panel = panel else { return }
 
-        // Recreate SwiftUI view tree each session to prevent stale state accumulation
-        recreateHostingView()
+        // Invalidate any pending async _performHide() from a previous session's animation.
+        // Without this, a stale hide can tear down the new session's state.
+        hideGeneration &+= 1
+
+        // Cancel stale timers from a previous session (error dismiss, loading timer).
+        // These can fire after a new session starts and interfere with the new session.
+        errorDismissTask?.cancel()
+        errorDismissTask = nil
+        loadingTimerTask?.cancel()
+        loadingTimerTask = nil
+        errorMessage = ""
+
+        // NOTE: We deliberately do NOT recreate the NSHostingView here. Keeping a single
+        // long-lived hosting view avoids AG (AttributeGraph) churn — each create/destroy
+        // cycle leaves residue in AG's global shared table that accumulates over hours of
+        // operation, eventually causing EXC_BAD_ACCESS in _ButtonGesture dispatches.
+        // The hosting view is only recreated on system wake (handleSystemWake) where
+        // sleep/wake can genuinely corrupt AG state.
 
         let rawTargetRect = sourceApp.flatMap { AccessibilityBridge.focusedTextFieldRect(for: $0) }
         // Start compact (header-only) for listening; full height for other states
@@ -414,6 +438,7 @@ class FloatingOverlayController: ObservableObject {
     /// Confirm animation: scale down + fade (content "sends" toward target app)
     func hideWithConfirmAnimation(completion: (() -> Void)? = nil) {
         guard let panel = panel else { completion?(); _performHide(); return }
+        let gen = hideGeneration  // Capture to prevent stale hide after new session starts
         panel.ignoresMouseEvents = true  // Prevent gesture dispatch during teardown
 
         // Demote panel from key BEFORE animation — the completion callback fires a ⌘V
@@ -429,9 +454,11 @@ class FloatingOverlayController: ObservableObject {
         }, completionHandler: { [weak self] in
             completion?()
             // completionHandler runs on an arbitrary thread — dispatch to MainActor
-            // to avoid calling @MainActor-isolated _performHide() from a non-isolated context
+            // to avoid calling @MainActor-isolated _performHide() from a non-isolated context.
+            // Generation guard: if a new session started during animation, skip the hide.
             Task { @MainActor [weak self] in
-                self?._performHide()
+                guard let self = self, self.hideGeneration == gen else { return }
+                self._performHide()
             }
         })
 
@@ -448,6 +475,7 @@ class FloatingOverlayController: ObservableObject {
     /// Cancel animation: horizontal shake + fade (signals "nothing happened")
     func hideWithCancelAnimation() {
         guard let panel = panel else { _performHide(); return }
+        let gen = hideGeneration  // Capture to prevent stale hide after new session starts
         panel.ignoresMouseEvents = true  // Prevent gesture dispatch during teardown
 
         // Horizontal shake using the window frame (not layer — layers don't move windows)
@@ -467,7 +495,10 @@ class FloatingOverlayController: ObservableObject {
         // Fade out after shake completes
         DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(offsets.count)) { [weak self, weak panel] in
             guard let panel = panel else {
-                Task { @MainActor [weak self] in self?._performHide() }
+                Task { @MainActor [weak self] in
+                    guard let self = self, self.hideGeneration == gen else { return }
+                    self._performHide()
+                }
                 return
             }
             NSAnimationContext.runAnimationGroup({ ctx in
@@ -475,9 +506,11 @@ class FloatingOverlayController: ObservableObject {
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
                 panel.animator().alphaValue = 0
             }, completionHandler: { [weak self] in
-                // completionHandler runs on an arbitrary thread — dispatch to MainActor
+                // completionHandler runs on an arbitrary thread — dispatch to MainActor.
+                // Generation guard: if a new session started during animation, skip the hide.
                 Task { @MainActor [weak self] in
-                    self?._performHide()
+                    guard let self = self, self.hideGeneration == gen else { return }
+                    self._performHide()
                 }
             })
         }
@@ -542,12 +575,14 @@ class FloatingOverlayController: ObservableObject {
         panel?.alphaValue = 1.0  // Reset for next show
         panel?.contentView?.layer?.removeAllAnimations()
 
-        // Tear down SwiftUI view tree immediately on hide. A stale NSHostingView left
-        // in the panel's hierarchy continues observing @Published property changes
-        // between sessions, accumulating corrupted AttributeGraph pointers over hours
-        // of operation. The next showPanel() → recreateHostingView() creates a fresh one.
-        hostingView?.removeFromSuperview()
-        hostingView = nil
+        // NOTE: We deliberately do NOT tear down the NSHostingView here. Keeping the
+        // hosting view alive avoids AttributeGraph churn — each create/destroy cycle
+        // leaves residue in AG's global shared table. Over many sessions (10+ hours),
+        // this debris accumulates and eventually causes EXC_BAD_ACCESS in _ButtonGesture
+        // dispatches (null isa pointer in AG::data::_shared_table_bytes).
+        // The hosting view stays in the panel and reactively updates to idle state via
+        // the @Published property resets below. Cost: negligible invisible re-render.
+        // The hosting view is only recreated on system wake (handleSystemWake).
 
         isVisible = false
         errorDismissTask?.cancel()
@@ -563,6 +598,15 @@ class FloatingOverlayController: ObservableObject {
         editDescription = ""
         onConfirm = nil
         onCancel = nil
+    }
+
+    // MARK: - System Wake Recovery
+
+    /// Recreate the hosting view after system wake to clear AG corruption from sleep/wake cycles.
+    /// Only acts when the overlay is hidden — never interrupts a live session.
+    func handleSystemWake() {
+        guard !isVisible else { return }
+        recreateHostingView()
     }
 
     // MARK: - Global Escape Monitor
