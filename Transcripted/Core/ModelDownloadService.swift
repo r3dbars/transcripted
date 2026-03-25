@@ -193,9 +193,13 @@ enum ModelDownloadService {
             }
         }
 
-        // All retries exhausted
-        let kind = classifyError(lastError!)
-        throw ModelDownloadError(kind: kind, underlyingError: lastError)
+        // All retries exhausted — guard handles the edge case where maxAttempts is 0
+        // (loop never runs, lastError stays nil); force-unwrap here would be a DoS vector
+        guard let exhaustedError = lastError else {
+            throw ModelDownloadError(kind: .unknown("No download was attempted (maxAttempts was 0)"), underlyingError: nil)
+        }
+        let kind = classifyError(exhaustedError)
+        throw ModelDownloadError(kind: kind, underlyingError: exhaustedError)
     }
 
     // MARK: - Qwen Pre-Population
