@@ -11,7 +11,7 @@ Audio capture pipeline, transcription orchestration, file saving, stats tracking
 | `AudioFileManager.swift` | NOT @MainActor | Audio file creation, WAV writing, buffer copying, format conversion, 0o600 permissions on mic/system files |
 | `AudioLevelMonitor.swift` | NOT @MainActor | Audio level metering, silence detection, rolling buffer management |
 | `SystemAudioCapture.swift` | NOT @MainActor | CoreAudio process taps (macOS 14.2+), device switching, format negotiation |
-| `SystemAudioProcessTap.swift` | NOT @MainActor | CoreAudio process tap creation, aggregate device setup |
+| `SystemAudioProcessTap.swift` | NOT @MainActor | CoreAudio process tap creation, aggregate device setup, format negotiation; replaced three force-unwraps of `tapStreamDescription` with safe optional binding to prevent DoS crashes |
 | `SystemAudioBufferWriter.swift` | NOT @MainActor | Buffer statistics tracking, device change listener, recovery logic |
 | `CoreAudioUtils.swift` | -- | CoreAudio device enumeration helpers |
 | `Transcription.swift` | @MainActor | Pipeline orchestration: resample, diarize, transcribe, match speakers |
