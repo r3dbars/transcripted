@@ -39,23 +39,7 @@ final class SpeakerDatabase {
             AppLogger.speakers.error("Failed to open speaker database — all speaker operations will be skipped", ["path": dbPath.path, "sqlite_error": sqliteError])
             isDatabaseOpen = false
         } else {
-            isDatabaseOpen = true
-            // Restrict file permissions to owner-only (600) — speakers.sqlite contains voice fingerprints
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dbPath.path)
-            // WAL mode for crash safety, busy timeout to avoid SQLITE_BUSY, NORMAL sync for performance
-            let pragmas = [
-                ("journal_mode=WAL", "WAL"),
-                ("busy_timeout=5000", "busy_timeout"),
-                ("synchronous=NORMAL", "synchronous")
-            ]
-            for (pragma, name) in pragmas {
-                var errorMessage: UnsafeMutablePointer<CChar>?
-                if sqlite3_exec(db, "PRAGMA \(pragma);", nil, nil, &errorMessage) != SQLITE_OK {
-                    let detail = errorMessage.map { String(cString: $0) } ?? "unknown"
-                    AppLogger.speakers.error("PRAGMA failed", ["pragma": name, "detail": detail])
-                    sqlite3_free(errorMessage)
-                }
-            }
+            configureOpenDatabase()
 
             // Corruption detection: run quick_check to verify database integrity
             if !verifyDatabaseIntegrity() {
@@ -68,11 +52,7 @@ final class SpeakerDatabase {
                 try? FileManager.default.moveItem(at: dbPath, to: backupPath)
                 // Recreate fresh database
                 if sqlite3_open(dbPath.path, &db) == SQLITE_OK {
-                    isDatabaseOpen = true
-                    try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dbPath.path)
-                    for (pragma, _) in pragmas {
-                        sqlite3_exec(db, "PRAGMA \(pragma);", nil, nil, nil)
-                    }
+                    configureOpenDatabase()
                     AppLogger.speakers.info("Recreated fresh database after corruption recovery")
                 } else {
                     isDatabaseOpen = false
@@ -80,6 +60,28 @@ final class SpeakerDatabase {
                 }
             } else {
                 AppLogger.speakers.info("Opened database", ["path": dbPath.path])
+            }
+        }
+    }
+
+    /// Apply permissions and WAL pragmas to an already-opened database handle.
+    /// Called on both initial open and corruption-recovery re-open.
+    private func configureOpenDatabase() {
+        isDatabaseOpen = true
+        // Restrict file permissions to owner-only (600) — speakers.sqlite contains voice fingerprints
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dbPath.path)
+        // WAL mode for crash safety, busy timeout to avoid SQLITE_BUSY, NORMAL sync for performance
+        let pragmas = [
+            ("journal_mode=WAL", "WAL"),
+            ("busy_timeout=5000", "busy_timeout"),
+            ("synchronous=NORMAL", "synchronous")
+        ]
+        for (pragma, name) in pragmas {
+            var errorMessage: UnsafeMutablePointer<CChar>?
+            if sqlite3_exec(db, "PRAGMA \(pragma);", nil, nil, &errorMessage) != SQLITE_OK {
+                let detail = errorMessage.map { String(cString: $0) } ?? "unknown"
+                AppLogger.speakers.error("PRAGMA failed", ["pragma": name, "detail": detail])
+                sqlite3_free(errorMessage)
             }
         }
     }
