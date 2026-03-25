@@ -8,7 +8,7 @@
 |------|---------|
 | `PremiumButton.swift` | 3-variant button (primary/secondary/ghost) with hover, press, loading states |
 | `PremiumCard.swift` | Warm cream card container with hover lift animation |
-| `BenefitCard.swift` | Dark card with icon circle + title/description row, used in onboarding welcome |
+| `BenefitCard.swift` | Dark card with icon circle + title/description row, used in onboarding welcome (macOS 26.0+) |
 | `QuickTipRow.swift` | Small icon + text row for inline tips |
 | `AnimatedIcon.swift` | SF Symbol icon with configurable glow and pulse effects |
 
