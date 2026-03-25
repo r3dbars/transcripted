@@ -10,7 +10,7 @@ Shared design tokens and premium components. 21 Swift files across root, Colors/
 |------|---------|
 | `Spacing.swift` | 9 spacing values (xs 4pt through xxxl 64pt) |
 | `Radius.swift` | 13 corner radius values (micro 1pt through full 999pt) + Laws of UX variants |
-| `Typography.swift` | 13 Font extensions (displayLarge through tiny, Fraunces serif with system fallback) |
+| `Typography.swift` | 13 Font extensions (displayLarge through tiny, system sans-serif throughout) |
 | `Animations.swift` | AnimationTiming constants + spring presets (snappy, smooth, bouncy, elegant) + pill timing |
 | `Shadows.swift` | CardStyle shadow tuples, ShadowStyle enum, `.shadowStyle()` modifier |
 | `Gradients.swift` | LinearGradient presets (warmGlow, centerWarmth, buttonHighlight, aiGradient) + RadialGradient.iconGlow |
@@ -36,7 +36,7 @@ Shared design tokens and premium components. 21 Swift files across root, Colors/
 |------|---------|
 | `PremiumButton.swift` | 3-variant button (primary/secondary/ghost), hover effects, loading state |
 | `PremiumCard.swift` | Warm cream card container with hover lift animation |
-| `BenefitCard.swift` | Icon circle + title/description row, dark card style, used in onboarding welcome |
+| `BenefitCard.swift` | Icon circle + title/description row, dark card style, used in onboarding welcome (macOS 26.0+) |
 | `QuickTipRow.swift` | Small icon + text row for tips |
 | `AnimatedIcon.swift` | SF Symbol icon with glow/pulse effects |
 
@@ -114,7 +114,7 @@ Shared design tokens and premium components. 21 Swift files across root, Colors/
 **Laws of UX:** `lawsBase` (easeInOut 0.3), `lawsTap` (0.15, 0.8), `lawsSuccess` (0.4, 0.5), `lawsStateChange` (0.35, 0.85), `lawsCardHover` (0.3, 0.8), `lawsPanelExpand` (0.25, 0.85), `lawsPanelCollapse` (0.15, 0.9)
 **Pill:** `pillMorph` (0.3, 0.8), `trayExpand` (0.2, 0.85), `pillContentFade` (easeInOut 0.1)
 
-**PillAnimationTiming (Animations.swift):** morphDuration 0.175s, cooldownDuration 0.175s, contentFade 0.1s, celebrationDuration 2.0s, trayDuration 0.2s, toastDuration 8.0s, settleDelay 0.2s
+**PillAnimationTiming (Animations.swift):** morphDuration 0.175s, cooldownDuration 0.175s, contentFade 0.1s, celebrationDuration 2.0s, trayDuration 0.2s, toastDuration 8.0s, stateTransitionDuration 0.2s, settleDelay 0.2s
 
 ## PremiumButton (Components/PremiumButton.swift)
 ```swift
@@ -128,7 +128,7 @@ PremiumButton(title:, icon:, variant:, isLoading:, isDisabled:, action:)
 
 ## Other Premium Components (Components/)
 - `PremiumCard(accentColor:, enableHover:, content:)` - Warm cream card with hover lift
-- `BenefitCard(icon:, iconColor:, title:, description:)` - Dark card with icon circle + text row, used in onboarding
+- `BenefitCard(icon:, iconColor:, title:, description:)` - Dark card with icon circle + text row, used in onboarding (macOS 26.0+)
 - `QuickTipRow(icon:, text:, iconColor:)` - Small icon + text row
 - `AnimatedIcon(systemName:, size:, color:, showGlow:, isPulsing:)` - Icon with glow/pulse effects
 

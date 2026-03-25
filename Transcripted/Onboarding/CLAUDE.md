@@ -31,6 +31,7 @@ stepProgress: Double (0.0-1.0), stepNumber: Int (1-4), totalSteps: 4
 // Permissions
 microphoneStatus: AVAuthorizationStatus
 screenRecordingGranted: Bool (via CGWindowListCopyWindowInfo trick)
+isMicrophoneRequestInProgress: Bool (guards concurrent permission requests)
 microphoneGranted: Bool (computed: microphoneStatus == .authorized)
 allPermissionsGranted: Bool  // requires microphone only
 allPermissionsFullyGranted: Bool  // Both mic + screen recording
@@ -87,7 +88,7 @@ setupApp()
 - **Microphone**: Direct `AVCaptureDevice.authorizationStatus(for: .audio)` — REQUIRED to proceed past step 3
 - **Screen Recording**: Side-effect check via `CGWindowListCopyWindowInfo()` - if returns windows, permission granted. Not officially documented API.
 - Permission rows show 4 states: notRequested (Grant button), pending (spinner), granted (checkmark), denied (Settings button)
-- Denied state shows guidance text: "Enable it in System Settings to continue"
+- Denied state shows guidance text: "Microphone access wasn't granted. Tap 'Try Again' to see the permission prompt, or open Settings to enable it manually."
 - Continue button DISABLED until mic permission granted (canProceed = microphoneGranted)
 - No "Continue without mic" bypass
 
