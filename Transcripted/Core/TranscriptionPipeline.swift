@@ -428,10 +428,8 @@ extension Transcription {
         }
     }
 
-    // MARK: - Utterance Merging
+    // MARK: - Embedding Quality
 
-    /// Merge consecutive utterances from the same speaker when the time gap between them
-    /// is smaller than `maxGap` seconds. This produces cleaner transcripts by joining
     /// Calculate embedding weight based on mic activity fraction during a system audio segment.
     /// Returns nil if the segment should be excluded entirely (>80% mic overlap).
     /// Uses a 4-tier gradient to avoid sharp threshold cliffs:
@@ -448,6 +446,10 @@ extension Transcription {
         }
     }
 
+    // MARK: - Utterance Merging
+
+    /// Merge consecutive utterances from the same speaker when the time gap between them
+    /// is smaller than `maxGap` seconds. This produces cleaner transcripts by joining
     /// fragments that the diarizer split mid-sentence.
     ///
     /// A `maxDuration` cap prevents runaway merges — even if the speaker and gap criteria
