@@ -60,6 +60,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
     // MARK: - App Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // XCTest injects a test bundle into the host app. If full app initialization
+        // runs (Audio, CoreAudio, ScreenCaptureKit, FloatingPanel, etc.) it can block
+        // the main thread long enough for the test runner to time out before connecting.
+        // Early-returning here lets XCTest establish its connection; tests use
+        // @testable import so they access types directly without needing app state.
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else {
+            return
+        }
+
         _ = AppLogger.shared
 
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
