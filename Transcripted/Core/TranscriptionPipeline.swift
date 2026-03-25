@@ -95,7 +95,8 @@ extension Transcription {
                 let startFrame = max(0, Int(startTime / micEnergyFrameDuration))
                 let endFrame = min(micFrameCount, Int(endTime / micEnergyFrameDuration))
                 guard endFrame > startFrame else { return 0 }
-                let activeCount = (startFrame..<endFrame).filter { micEnergyPerFrame[$0] >= micActiveThreshold }.count
+                var activeCount = 0
+                for i in startFrame..<endFrame where micEnergyPerFrame[i] >= micActiveThreshold { activeCount += 1 }
                 return Double(activeCount) / Double(endFrame - startFrame)
             }
 
