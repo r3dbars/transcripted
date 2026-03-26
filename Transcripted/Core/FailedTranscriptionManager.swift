@@ -12,7 +12,12 @@ class FailedTranscriptionManager: ObservableObject {
 
     init() {
         // Store failed transcriptions JSON in Documents/Transcripted folder
-        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        // Guard against force unwrap: FileManager.urls() is empty in restricted sandboxes
+        guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            AppLogger.pipeline.error("Documents directory unavailable — failed transcription queue disabled")
+            self.storageURL = FileManager.default.temporaryDirectory.appendingPathComponent("failed_transcriptions.json")
+            return
+        }
         let transcriptedFolder = documentsURL.appendingPathComponent("Transcripted")
 
         // Create Transcripted folder if it doesn't exist
@@ -169,7 +174,8 @@ class FailedTranscriptionManager: ObservableObject {
 
     /// Cleans up failed transcriptions older than the specified number of days
     func cleanupOldFailedTranscriptions(olderThanDays days: Int) {
-        let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
+        // Nil-coalesce: date arithmetic rarely returns nil, but force unwrap would crash on edge cases
+        let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
 
         let oldFailures = failedTranscriptions.filter { $0.timestamp < cutoffDate }
 
