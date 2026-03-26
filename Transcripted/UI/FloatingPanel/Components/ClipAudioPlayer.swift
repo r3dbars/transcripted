@@ -13,18 +13,20 @@ class ClipAudioPlayer: NSObject, ObservableObject {
     @Published var currentClipURL: URL?
 
     private var player: AVAudioPlayer?
+    private var loadTask: Task<Void, Never>?
 
     func play(url: URL) {
-        stop()  // stop any current playback
+        stop()  // cancels any in-flight load task and stops current playback
 
         // Load audio file on a background thread to avoid blocking the main thread
         // with file I/O — especially with 7 speaker clips being played rapidly.
         let capturedURL = url
-        Task.detached { [weak self] in
+        loadTask = Task.detached { [weak self] in
             do {
                 let audioPlayer = try AVAudioPlayer(contentsOf: capturedURL)
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
-                    guard let self else { return }
+                    guard let self, !Task.isCancelled else { return }
                     self.player = audioPlayer
                     self.player?.delegate = self
                     self.player?.play()
@@ -38,6 +40,8 @@ class ClipAudioPlayer: NSObject, ObservableObject {
     }
 
     func stop() {
+        loadTask?.cancel()
+        loadTask = nil
         player?.stop()
         player = nil
         isPlaying = false
