@@ -198,7 +198,7 @@ struct SpeakersSettingsSection: View {
             editingId = nil
             return
         }
-        SpeakerDatabase.shared.setDisplayName(id: id, name: trimmed, source: "user_manual")
+        SpeakerDatabase.shared.setDisplayName(id: id, name: trimmed, source: NameSource.userManual)
         editingId = nil
         // Retroactively update all transcripts referencing this speaker
         Task.detached {
