@@ -21,13 +21,13 @@ extension AppDelegate {
         let mkbhdEmbedding = (0..<256).map { _ in Float.random(in: -1...1) }
         let travisEmbedding = (0..<256).map { _ in Float.random(in: -1...1) }
         let mkbhdProfile = speakerDB.addOrUpdateSpeaker(embedding: mkbhdEmbedding)
-        speakerDB.setDisplayName(id: mkbhdProfile.id, name: "MKBHD", source: "user_manual")
+        speakerDB.setDisplayName(id: mkbhdProfile.id, name: "MKBHD", source: NameSource.userManual)
         // Bump call count by adding a few more times
         for _ in 0..<6 {
             _ = speakerDB.addOrUpdateSpeaker(embedding: mkbhdEmbedding, existingId: mkbhdProfile.id)
         }
         let travisProfile = speakerDB.addOrUpdateSpeaker(embedding: travisEmbedding)
-        speakerDB.setDisplayName(id: travisProfile.id, name: "Travis", source: "user_manual")
+        speakerDB.setDisplayName(id: travisProfile.id, name: "Travis", source: NameSource.userManual)
         for _ in 0..<2 {
             _ = speakerDB.addOrUpdateSpeaker(embedding: travisEmbedding, existingId: travisProfile.id)
         }

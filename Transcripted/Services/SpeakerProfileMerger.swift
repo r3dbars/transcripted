@@ -10,8 +10,8 @@ extension SpeakerDatabase {
     /// - Parameters:
     ///   - id: Speaker profile UUID
     ///   - name: Display name to set
-    ///   - source: Where the name came from ("user_manual", "qwen_inferred")
-    func setDisplayName(id: UUID, name: String, source: String = "qwen_inferred") {
+    ///   - source: Where the name came from (NameSource.userManual or NameSource.qwenInferred)
+    func setDisplayName(id: UUID, name: String, source: String = NameSource.qwenInferred) {
         queue.sync {
             setDisplayNameImpl(id: id, name: name, source: source)
         }
@@ -133,7 +133,7 @@ extension SpeakerDatabase {
 
         // Transfer name from source if target has none
         if target.displayName == nil, let name = source.displayName {
-            setDisplayNameImpl(id: targetId, name: name, source: source.nameSource ?? "user_manual")
+            setDisplayNameImpl(id: targetId, name: name, source: source.nameSource ?? NameSource.userManual)
         }
 
         // Update target: blended embedding, summed call count, bumped confidence

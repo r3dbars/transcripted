@@ -36,14 +36,14 @@ extension TranscriptionTaskManager {
                     speakerDB.setDisplayName(
                         id: update.persistentSpeakerId,
                         name: update.newName,
-                        source: "user_manual"
+                        source: NameSource.userManual
                     )
 
                 case .confirmed:
                     speakerDB.setDisplayName(
                         id: update.persistentSpeakerId,
                         name: update.newName,
-                        source: "user_manual"
+                        source: NameSource.userManual
                     )
                     speakerDB.resetDisputeCount(id: update.persistentSpeakerId)
                 }

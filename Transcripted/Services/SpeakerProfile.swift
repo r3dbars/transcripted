@@ -1,10 +1,16 @@
 import Foundation
 
+/// Source values for SpeakerProfile.nameSource
+enum NameSource {
+    static let userManual = "user_manual"
+    static let qwenInferred = "qwen_inferred"
+}
+
 /// A persistent speaker profile with voice fingerprint
 struct SpeakerProfile: Identifiable {
     let id: UUID
     var displayName: String?        // "Nate", "Travis", or nil if unnamed
-    var nameSource: String?         // "user_manual", "qwen_inferred", nil
+    var nameSource: String?         // NameSource.userManual, NameSource.qwenInferred, or nil
     var embedding: [Float]          // 256-dim average voice vector
     var firstSeen: Date
     var lastSeen: Date

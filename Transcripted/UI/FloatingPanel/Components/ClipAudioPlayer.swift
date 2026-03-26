@@ -20,10 +20,9 @@ class ClipAudioPlayer: NSObject, ObservableObject {
 
         // Load audio file on a background thread to avoid blocking the main thread
         // with file I/O — especially with 7 speaker clips being played rapidly.
-        let capturedURL = url
         loadTask = Task.detached { [weak self] in
             do {
-                let audioPlayer = try AVAudioPlayer(contentsOf: capturedURL)
+                let audioPlayer = try AVAudioPlayer(contentsOf: url)
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     guard let self, !Task.isCancelled else { return }
@@ -31,7 +30,7 @@ class ClipAudioPlayer: NSObject, ObservableObject {
                     self.player?.delegate = self
                     self.player?.play()
                     self.isPlaying = true
-                    self.currentClipURL = capturedURL
+                    self.currentClipURL = url
                 }
             } catch {
                 AppLogger.ui.warning("Failed to play speaker clip", ["error": error.localizedDescription])
