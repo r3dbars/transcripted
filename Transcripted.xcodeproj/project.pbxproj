@@ -119,6 +119,18 @@
 		T1000039 /* RecordingValidatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000029 /* RecordingValidatorTests.swift */; };
 		T1000040 /* TranscriptStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000030 /* TranscriptStoreTests.swift */; };
 		T1000051 /* StatsDatabaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000050 /* StatsDatabaseTests.swift */; };
+		T2000011 /* MockServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000001 /* MockServices.swift */; };
+		T2000012 /* ContextualErrorBannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000002 /* ContextualErrorBannerTests.swift */; };
+		T2000013 /* TranscriptFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000003 /* TranscriptFormatterTests.swift */; };
+		T2000014 /* ModelDownloadServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000004 /* ModelDownloadServiceTests.swift */; };
+		T2000015 /* SpeakerEmbeddingMatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000005 /* SpeakerEmbeddingMatcherTests.swift */; };
+		T2000016 /* SpeakerProfileMergerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000006 /* SpeakerProfileMergerTests.swift */; };
+		T2000017 /* MeetingDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000007 /* MeetingDetectorTests.swift */; };
+		T2000018 /* PillDimensionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000008 /* PillDimensionsTests.swift */; };
+		T2000019 /* PillSoundsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000009 /* PillSoundsTests.swift */; };
+		T2000020 /* TranscriptExporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000010 /* TranscriptExporterTests.swift */; };
+		T2000021 /* DiagnosticExporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000011A /* DiagnosticExporterTests.swift */; };
+		T2000022 /* TranscriptMetadataBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000012A /* TranscriptMetadataBuilderTests.swift */; };
 		AX000001 /* AudioDeviceRecovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = AX000002 /* AudioDeviceRecovery.swift */; };
 		AX000003 /* AudioLevelMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AX000004 /* AudioLevelMonitor.swift */; };
 		AX000005 /* AudioFileManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AX000006 /* AudioFileManager.swift */; };
@@ -300,6 +312,18 @@
 		T1000029 /* RecordingValidatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingValidatorTests.swift; sourceTree = "<group>"; };
 		T1000030 /* TranscriptStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptStoreTests.swift; sourceTree = "<group>"; };
 		T1000050 /* StatsDatabaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsDatabaseTests.swift; sourceTree = "<group>"; };
+		T2000001 /* MockServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockServices.swift; sourceTree = "<group>"; };
+		T2000002 /* ContextualErrorBannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextualErrorBannerTests.swift; sourceTree = "<group>"; };
+		T2000003 /* TranscriptFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptFormatterTests.swift; sourceTree = "<group>"; };
+		T2000004 /* ModelDownloadServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadServiceTests.swift; sourceTree = "<group>"; };
+		T2000005 /* SpeakerEmbeddingMatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerEmbeddingMatcherTests.swift; sourceTree = "<group>"; };
+		T2000006 /* SpeakerProfileMergerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerProfileMergerTests.swift; sourceTree = "<group>"; };
+		T2000007 /* MeetingDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDetectorTests.swift; sourceTree = "<group>"; };
+		T2000008 /* PillDimensionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillDimensionsTests.swift; sourceTree = "<group>"; };
+		T2000009 /* PillSoundsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillSoundsTests.swift; sourceTree = "<group>"; };
+		T2000010 /* TranscriptExporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptExporterTests.swift; sourceTree = "<group>"; };
+		T2000011A /* DiagnosticExporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticExporterTests.swift; sourceTree = "<group>"; };
+		T2000012A /* TranscriptMetadataBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptMetadataBuilderTests.swift; sourceTree = "<group>"; };
 		T1000008 /* PillStateManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillStateManagerTests.swift; sourceTree = "<group>"; };
 		T1000009 /* SpeakerDatabaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDatabaseTests.swift; sourceTree = "<group>"; };
 		T1000200 /* TranscriptedTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TranscriptedTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -754,6 +778,11 @@
 				T1000029 /* RecordingValidatorTests.swift */,
 				T1000030 /* TranscriptStoreTests.swift */,
 				T1000050 /* StatsDatabaseTests.swift */,
+				T2000003 /* TranscriptFormatterTests.swift */,
+				T2000004 /* ModelDownloadServiceTests.swift */,
+				T2000010 /* TranscriptExporterTests.swift */,
+				T2000011A /* DiagnosticExporterTests.swift */,
+				T2000012A /* TranscriptMetadataBuilderTests.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -765,6 +794,9 @@
 				T1000021 /* QwenServiceTests.swift */,
 				T1000022 /* AudioResamplerTests.swift */,
 				T1000027 /* EmbeddingClustererTests.swift */,
+				T2000005 /* SpeakerEmbeddingMatcherTests.swift */,
+				T2000006 /* SpeakerProfileMergerTests.swift */,
+				T2000007 /* MeetingDetectorTests.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -773,6 +805,9 @@
 			isa = PBXGroup;
 			children = (
 				T1000008 /* PillStateManagerTests.swift */,
+				T2000002 /* ContextualErrorBannerTests.swift */,
+				T2000008 /* PillDimensionsTests.swift */,
+				T2000009 /* PillSoundsTests.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -781,6 +816,7 @@
 			isa = PBXGroup;
 			children = (
 				T1000001 /* TestFixtures.swift */,
+				T2000001 /* MockServices.swift */,
 			);
 			path = Helpers;
 			sourceTree = "<group>";
@@ -1101,6 +1137,18 @@
 				T1000040 /* TranscriptStoreTests.swift in Sources */,
 				T1000051 /* StatsDatabaseTests.swift in Sources */,
 				AG000010 /* AgentOutputTests.swift in Sources */,
+				T2000011 /* MockServices.swift in Sources */,
+				T2000012 /* ContextualErrorBannerTests.swift in Sources */,
+				T2000013 /* TranscriptFormatterTests.swift in Sources */,
+				T2000014 /* ModelDownloadServiceTests.swift in Sources */,
+				T2000015 /* SpeakerEmbeddingMatcherTests.swift in Sources */,
+				T2000016 /* SpeakerProfileMergerTests.swift in Sources */,
+				T2000017 /* MeetingDetectorTests.swift in Sources */,
+				T2000018 /* PillDimensionsTests.swift in Sources */,
+				T2000019 /* PillSoundsTests.swift in Sources */,
+				T2000020 /* TranscriptExporterTests.swift in Sources */,
+				T2000021 /* DiagnosticExporterTests.swift in Sources */,
+				T2000022 /* TranscriptMetadataBuilderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
