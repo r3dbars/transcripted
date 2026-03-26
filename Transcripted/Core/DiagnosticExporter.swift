@@ -122,7 +122,9 @@ class DiagnosticExporter {
     /// and reveals the zip so the user can drag it into the issue.
     @MainActor
     static func reportIssue() {
-        let desktopURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
+        // Use .first instead of [0] to avoid a crash if the Desktop directory is unavailable
+        let desktopURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
         let filename = "Transcripted-Diagnostics-\(DateFormattingHelper.formatFilename(Date())).zip"
         let zipURL = desktopURL.appendingPathComponent(filename)
 
