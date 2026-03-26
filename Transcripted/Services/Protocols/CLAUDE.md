@@ -99,10 +99,18 @@ protocol StatsStore {
 ### TranscriptStorage
 ```swift
 protocol TranscriptStorage {
-    static func saveTranscript(...) -> URL?
-    static func updateSpeakerNames(transcriptURL: URL, updates: [SpeakerNameUpdate])
+    static func saveTranscript(_ result: TranscriptionResult,
+                               speakerMappings: [String: SpeakerMapping],
+                               speakerSources: [String: String],
+                               speakerDbIds: [String: UUID],
+                               directory: URL?,
+                               meetingTitle: String?,
+                               healthInfo: RecordingHealthInfo?) -> URL?
+    @discardableResult
+    static func updateSpeakerNames(transcriptURL: URL, updates: [SpeakerNameUpdate]) -> Bool
     static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String)
-    static func retroactivelyUpdateTitle(transcriptURL: URL, title: String)
+    @discardableResult
+    static func retroactivelyUpdateTitle(transcriptURL: URL, title: String) -> Bool
     static var defaultSaveDirectory: URL { get }
 }
 ```
