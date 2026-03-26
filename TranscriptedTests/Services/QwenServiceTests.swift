@@ -115,4 +115,88 @@ final class QwenServiceTests: XCTestCase {
         XCTAssertEqual(result.speakers.count, 1)
         XCTAssertEqual(result.speakers["0"], "Jenny")
     }
+
+    // MARK: - parseResponse: Generic title filtering
+
+    func testParseResponseFiltersGenericTitleDiscussion() {
+        let response = """
+        {"speakers": {"0": "Sarah"}, "title": "Discussion"}
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertEqual(result.speakers["0"], "Sarah")
+        XCTAssertNil(result.meetingTitle, "Generic 'Discussion' title should be filtered out")
+    }
+
+    func testParseResponseFiltersGenericTitleCall() {
+        let response = """
+        {"speakers": {"0": "Sarah"}, "title": "Call"}
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertNil(result.meetingTitle, "Generic 'Call' title should be filtered out")
+    }
+
+    func testParseResponseFiltersGenericTitleChat() {
+        let response = """
+        {"speakers": {"0": "Sarah"}, "title": "Chat"}
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertNil(result.meetingTitle, "Generic 'Chat' title should be filtered out")
+    }
+
+    func testParseResponseFiltersGenericTitleSession() {
+        let response = """
+        {"speakers": {"0": "Sarah"}, "title": "Session"}
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertNil(result.meetingTitle, "Generic 'Session' title should be filtered out")
+    }
+
+    func testParseResponseFiltersGenericTitleConversation() {
+        let response = """
+        {"speakers": {"0": "Sarah"}, "title": "Conversation"}
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertNil(result.meetingTitle, "Generic 'Conversation' title should be filtered out")
+    }
+
+    func testParseResponseKeepsSpecificTitle() {
+        let response = """
+        {"speakers": {"0": "Sarah"}, "title": "Q4 Budget Review"}
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertEqual(result.meetingTitle, "Q4 Budget Review")
+    }
+
+    func testParseResponseAllSpeakersUnknown() {
+        let response = """
+        {"speakers": {"0": "Unknown", "1": "Unknown"}, "title": "Meeting"}
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertEqual(result.speakers.count, 2)
+        XCTAssertEqual(result.speakers["0"], "Unknown")
+        XCTAssertEqual(result.speakers["1"], "Unknown")
+    }
+
+    func testParseResponseNewFormatNoTitle() {
+        let response = """
+        {"speakers": {"0": "Alice", "1": "Bob"}}
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertEqual(result.speakers["0"], "Alice")
+        XCTAssertEqual(result.speakers["1"], "Bob")
+        XCTAssertNil(result.meetingTitle)
+    }
+
+    func testParseResponseVeryLongResponse() {
+        // Model sometimes generates verbose output — parser should handle it
+        let longText = String(repeating: "This is some verbose explanation. ", count: 100)
+        let response = """
+        \(longText)
+        {"0": "Sarah", "1": "Mike"}
+        \(longText)
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertEqual(result.speakers["0"], "Sarah")
+        XCTAssertEqual(result.speakers["1"], "Mike")
+    }
 }
