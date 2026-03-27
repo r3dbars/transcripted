@@ -193,7 +193,8 @@ final class TranscriptStore: ObservableObject {
         if let custom = UserDefaults.standard.string(forKey: "transcriptSaveLocation"), !custom.isEmpty {
             return URL(fileURLWithPath: custom)
         }
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents")
         return docs.appendingPathComponent("Transcripted")
     }
 
@@ -213,6 +214,7 @@ final class TranscriptStore: ObservableObject {
         var speakerCount = 0
         var speakerNames: [String] = []
         var timeOfDay: String?
+        var speakerInfos: [SpeakerInfo] = []
 
         // Parse YAML frontmatter for structured fields
         if raw.hasPrefix("---"),
@@ -258,7 +260,6 @@ final class TranscriptStore: ObservableObject {
             var currentSpeakerId: String?
             var currentDbId: UUID?
             var currentName: String?
-            var speakerInfos: [SpeakerInfo] = []
 
             func flushCurrentSpeaker() {
                 if let id = currentSpeakerId {
