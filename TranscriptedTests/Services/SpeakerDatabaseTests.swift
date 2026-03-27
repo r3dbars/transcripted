@@ -1,29 +1,30 @@
 import XCTest
+import SQLite3
 @testable import Transcripted
 
 @available(macOS 14.0, *)
 final class SpeakerDatabaseTests: XCTestCase {
 
-    private let db = SpeakerDatabase.shared
+    private var db: SpeakerDatabase!
 
-    // Track profiles we create so we can clean them up
-    private var createdProfileIds: [UUID] = []
+    override func setUp() {
+        super.setUp()
+        let tempDir = FileManager.default.temporaryDirectory
+        let dbPath = tempDir.appendingPathComponent("test_speakers_\(UUID().uuidString).sqlite")
+        db = SpeakerDatabase(path: dbPath.path)
+    }
 
     override func tearDown() {
+        db = nil
         super.tearDown()
-        for id in createdProfileIds {
-            db.deleteSpeaker(id: id)
-        }
-        createdProfileIds.removeAll()
     }
 
     // MARK: - Helpers
 
-    /// Create a test profile with a random embedding and track it for cleanup
+    /// Create a test profile with a random embedding
     private func createTestProfile(name: String? = nil, callCount: Int = 1) -> SpeakerProfile {
         let embedding = (0..<256).map { _ in Float.random(in: -1...1) }
         var profile = db.addOrUpdateSpeaker(embedding: embedding)
-        createdProfileIds.append(profile.id)
 
         // Bump call count
         for _ in 1..<callCount {
@@ -111,9 +112,6 @@ final class SpeakerDatabaseTests: XCTestCase {
         XCTAssertNil(db.getSpeaker(id: source.id), "Source profile should be deleted after merge")
         // Target should still exist
         XCTAssertNotNil(db.getSpeaker(id: target.id), "Target profile should still exist after merge")
-
-        // Remove source from cleanup list since it's already deleted
-        createdProfileIds.removeAll { $0 == source.id }
     }
 
     func testMergeProfilesSumsCallCount() {
@@ -125,8 +123,6 @@ final class SpeakerDatabaseTests: XCTestCase {
 
         let merged = db.getSpeaker(id: target.id)
         XCTAssertEqual(merged?.callCount, expectedCalls, "Merged profile should have summed call count")
-
-        createdProfileIds.removeAll { $0 == source.id }
     }
 
     func testMergeProfilesTransfersNameToUnnamed() {
@@ -138,8 +134,6 @@ final class SpeakerDatabaseTests: XCTestCase {
 
         let merged = db.getSpeaker(id: target.id)
         XCTAssertEqual(merged?.displayName, sourceName, "Target should inherit name from source when unnamed")
-
-        createdProfileIds.removeAll { $0 == source.id }
     }
 
     func testMergeProfilesKeepsTargetName() {
@@ -151,8 +145,6 @@ final class SpeakerDatabaseTests: XCTestCase {
 
         let merged = db.getSpeaker(id: target.id)
         XCTAssertEqual(merged?.displayName, targetName, "Target should keep its own name when already named")
-
-        createdProfileIds.removeAll { $0 == source.id }
     }
 
     func testMergeProfilesNonexistentSource() {
@@ -224,7 +216,6 @@ final class SpeakerDatabaseTests: XCTestCase {
     func testAddNewSpeakerReturnsProfileWithDefaults() {
         let embedding: [Float] = (0..<256).map { _ in Float.random(in: -1...1) }
         let profile = db.addOrUpdateSpeaker(embedding: embedding, existingId: nil)
-        createdProfileIds.append(profile.id)
 
         XCTAssertEqual(profile.callCount, 1, "New speaker should have callCount=1")
         XCTAssertEqual(profile.confidence, 0.5, accuracy: 0.01, "New speaker should have confidence=0.5")
@@ -236,7 +227,6 @@ final class SpeakerDatabaseTests: XCTestCase {
     func testUpdateExistingSpeakerIncrementsCallCount() {
         let embedding: [Float] = (0..<256).map { _ in Float.random(in: -1...1) }
         let initial = db.addOrUpdateSpeaker(embedding: embedding, existingId: nil)
-        createdProfileIds.append(initial.id)
 
         let updated = db.addOrUpdateSpeaker(embedding: embedding, existingId: initial.id)
         XCTAssertEqual(updated.callCount, 2, "Call count should increment by 1")
@@ -245,7 +235,6 @@ final class SpeakerDatabaseTests: XCTestCase {
     func testUpdateExistingSpeakerIncreasesConfidence() {
         let embedding: [Float] = (0..<256).map { _ in Float.random(in: -1...1) }
         let initial = db.addOrUpdateSpeaker(embedding: embedding, existingId: nil)
-        createdProfileIds.append(initial.id)
 
         let updated = db.addOrUpdateSpeaker(embedding: embedding, existingId: initial.id)
         XCTAssertEqual(updated.confidence, 0.6, accuracy: 0.01, "Confidence should increase by 0.1")
@@ -254,7 +243,6 @@ final class SpeakerDatabaseTests: XCTestCase {
     func testUpdateExistingSpeakerConfidenceCappedAt1() {
         let embedding: [Float] = (0..<256).map { _ in Float.random(in: -1...1) }
         var profile = db.addOrUpdateSpeaker(embedding: embedding, existingId: nil)
-        createdProfileIds.append(profile.id)
 
         // Update 10 times to push confidence past 1.0
         for _ in 0..<10 {
@@ -266,11 +254,23 @@ final class SpeakerDatabaseTests: XCTestCase {
     // MARK: - WAL mode verification
 
     func testDatabaseUsesWALMode() {
-        // The shared DB should be in WAL mode
-        let speakers = db.allSpeakers()
-        // If we can read, the DB is open — WAL mode is set during init
-        // We trust the implementation sets WAL; this test verifies the DB is functional
-        XCTAssertTrue(true, "Database is operational (WAL mode set during init)")
-        _ = speakers // suppress unused warning
+        guard let dbHandle = db.db else {
+            XCTFail("Database handle should be open")
+            return
+        }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(dbHandle, "PRAGMA journal_mode;", -1, &stmt, nil) == SQLITE_OK else {
+            XCTFail("Failed to prepare PRAGMA journal_mode query")
+            return
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        guard sqlite3_step(stmt) == SQLITE_ROW,
+              let cString = sqlite3_column_text(stmt, 0) else {
+            XCTFail("Failed to read journal_mode result")
+            return
+        }
+        let journalMode = String(cString: cString)
+        XCTAssertEqual(journalMode, "wal", "Database should use WAL journal mode")
     }
 }

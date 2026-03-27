@@ -12,6 +12,6 @@ struct ValidateTranscripts: ParsableCommand {
 
     func run() throws {
         let results = TranscriptValidator(directory: pathOpts.resolvedPath).validate()
-        runValidation(results: results, format: formatOpts.format)
+        try runValidation(results: results, format: formatOpts.format)
     }
 }

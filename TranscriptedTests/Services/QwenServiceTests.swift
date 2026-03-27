@@ -199,4 +199,74 @@ final class QwenServiceTests: XCTestCase {
         XCTAssertEqual(result.speakers["0"], "Sarah")
         XCTAssertEqual(result.speakers["1"], "Mike")
     }
+
+    // MARK: - Regression: case-insensitive generic title filtering
+
+    func testParseResponseFiltersCaseInsensitiveMEETING() {
+        let response = """
+        {"speakers": {"0": "Sarah"}, "title": "MEETING"}
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertNil(result.meetingTitle, "Uppercase 'MEETING' should be filtered as generic")
+    }
+
+    func testParseResponseFiltersCaseInsensitiveCall() {
+        let response = """
+        {"speakers": {"0": "Sarah"}, "title": "call"}
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertNil(result.meetingTitle, "Lowercase 'call' should be filtered as generic")
+    }
+
+    func testParseResponseFiltersCaseInsensitiveChat() {
+        let response = """
+        {"speakers": {"0": "Sarah"}, "title": "Chat"}
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertNil(result.meetingTitle, "Mixed-case 'Chat' should be filtered as generic")
+    }
+
+    func testParseResponseFiltersCaseInsensitiveSESSION() {
+        let response = """
+        {"speakers": {"0": "Sarah"}, "title": "SESSION"}
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertNil(result.meetingTitle, "Uppercase 'SESSION' should be filtered as generic")
+    }
+
+    func testParseResponseFiltersCaseInsensitiveDiscussion() {
+        let response = """
+        {"speakers": {"0": "Sarah"}, "title": "discussion"}
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertNil(result.meetingTitle, "Lowercase 'discussion' should be filtered as generic")
+    }
+
+    func testParseResponseFiltersCaseInsensitiveCONVERSATION() {
+        let response = """
+        {"speakers": {"0": "Sarah"}, "title": "CONVERSATION"}
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertNil(result.meetingTitle, "Uppercase 'CONVERSATION' should be filtered as generic")
+    }
+
+    // MARK: - Regression: non-generic titles preserved
+
+    func testParseResponsePreservesSpecificTitleQ4BudgetReview() {
+        let response = """
+        {"speakers": {"0": "Sarah", "1": "Mike"}, "title": "Q4 Budget Review"}
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertEqual(result.meetingTitle, "Q4 Budget Review",
+                       "Specific title 'Q4 Budget Review' should be preserved")
+    }
+
+    func testParseResponsePreservesSpecificTitleOneOnOne() {
+        let response = """
+        {"speakers": {"0": "Sarah"}, "title": "1-on-1 with Alice"}
+        """
+        let result = QwenService.parseResponse(response)
+        XCTAssertEqual(result.meetingTitle, "1-on-1 with Alice",
+                       "Specific title '1-on-1 with Alice' should be preserved")
+    }
 }

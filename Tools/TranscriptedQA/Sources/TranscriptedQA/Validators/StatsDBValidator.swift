@@ -54,21 +54,35 @@ struct StatsDBValidator {
             } else {
                 results.append(.fail("database/stats-positive-durations", target: target, detail: "\(rows.count) recordings with negative duration"))
             }
+        } else {
+            results.append(.warn("database/stats-positive-durations", target: target, detail: "Query failed — check skipped"))
         }
 
-        // Valid dates (basic check: matches yyyy-MM-dd pattern)
+        // Valid dates (matches yyyy-MM-dd pattern with semantic validation)
         if let rows = try? db.query("SELECT date FROM recordings") {
             let dateRegex = try! NSRegularExpression(pattern: "^\\d{4}-\\d{2}-\\d{2}$")
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(identifier: "UTC")
             let invalidDates = rows.compactMap { row -> String? in
                 guard let date = row["date"] as? String else { return "NULL" }
                 let range = NSRange(date.startIndex..., in: date)
-                return dateRegex.firstMatch(in: date, range: range) == nil ? date : nil
+                guard dateRegex.firstMatch(in: date, range: range) != nil else { return date }
+                // Semantic validation: parse and round-trip
+                guard let parsed = formatter.date(from: date),
+                      formatter.string(from: parsed) == date else {
+                    return date
+                }
+                return nil
             }
             if invalidDates.isEmpty {
                 results.append(.pass("database/stats-valid-dates", target: target))
             } else {
                 results.append(.fail("database/stats-valid-dates", target: target, detail: "Invalid dates: \(invalidDates.prefix(3).joined(separator: ", "))"))
             }
+        } else {
+            results.append(.warn("database/stats-valid-dates", target: target, detail: "Query failed — check skipped"))
         }
 
         // File permissions
