@@ -12,7 +12,7 @@ ML pipeline services, speaker database, audio processing utilities, meeting dete
 | `DiarizationService.swift` | @MainActor | Dual-pipeline: Sortformer (streaming) + PyAnnote (offline). Downloads via ModelDownloadService with mirror fallback. |
 | `SpeakerDatabase.swift` | Utility queue | SQLite at ~/Documents/Transcripted/speakers.sqlite, core CRUD + schema |
 | `SpeakerEmbeddingMatcher.swift` | Utility queue | Cosine similarity matching against stored speaker profiles (vDSP-accelerated) |
-| `SpeakerProfile.swift` | -- | SpeakerProfile struct (256-dim embeddings) + SpeakerMatchResult |
+| `SpeakerProfile.swift` | -- | NameSource constants, SpeakerProfile struct (256-dim embeddings) + SpeakerMatchResult |
 | `SpeakerProfileMerger.swift` | Utility queue | Profile name updates, merging, pruning, and name variant lookup |
 | `QwenService.swift` | @MainActor | On-device Qwen3.5-4B-4bit via mlx-swift-lm, on-demand load/unload. Pre-populates cache via ModelDownloadService with mirror fallback and progress tracking. |
 | `EmbeddingClusterer.swift` | Static | 3-stage post-processing: pairwise merge, small cluster absorption, DB-informed split |
@@ -43,6 +43,11 @@ ML pipeline services, speaker database, audio processing utilities, meeting dete
 
 ## Key Data Types (SpeakerProfile.swift + TranscriptionTypes.swift)
 ```swift
+enum NameSource {
+    static let userManual = "user_manual"
+    static let qwenInferred = "qwen_inferred"
+}
+
 struct SpeakerSegment {
     let speakerId: Int, startTime: Double, endTime: Double
     let embedding: [Float]?    // 256-dim WeSpeaker
@@ -51,7 +56,7 @@ struct SpeakerSegment {
 
 struct SpeakerProfile: Identifiable {
     let id: UUID
-    var displayName: String?, nameSource: String?  // "user_manual" | "qwen_inferred"
+    var displayName: String?, nameSource: String?  // NameSource.userManual | .qwenInferred
     var embedding: [Float]     // 256-dim average
     var firstSeen: Date, lastSeen: Date, callCount: Int
     var confidence: Double     // 0.5-1.0, +0.1 per update, capped at 1.0

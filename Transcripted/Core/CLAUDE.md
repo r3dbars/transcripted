@@ -27,7 +27,7 @@ Audio capture pipeline, transcription orchestration, file saving, stats tracking
 | `TranscriptFormatter.swift` | Static | YAML escaping, source label formatting, markdown generation |
 | `TranscriptMetadataBuilder.swift` | -- | RecordingHealthInfo struct, YAML frontmatter metadata construction |
 | `RetroactiveSpeakerUpdater.swift` | Static | Updates all transcripts when a speaker is renamed in Settings |
-| `TranscriptStore.swift` | @MainActor | Reads saved transcripts for tray UI display |
+| `TranscriptStore.swift` | @MainActor | Reads saved transcripts for tray UI display, SpeakerInfo metadata for rename UI, parseSingle() for re-opening rename |
 | `TranscriptExporter.swift` | -- | Export to .md or .txt via NSSavePanel |
 | `TranscriptScanner.swift` | -- | Finds transcripts in save directory, migration support |
 | `TranscriptUtils.swift` | -- | Formatting utilities |
