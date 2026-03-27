@@ -4,9 +4,16 @@ import os
 
 // MARK: - TranscriptSummary
 
+/// Metadata for a single speaker parsed from a transcript's YAML frontmatter.
+struct SpeakerInfo: Equatable {
+    let yamlId: String   // "1", "2" etc. from YAML id field
+    let dbId: UUID?      // from YAML db_id field — links to SpeakerDatabase
+    let name: String     // current display name ("Speaker 3" or "Jack Trautlein")
+}
+
 /// Lightweight parsed representation of a transcript file.
 /// Loaded once on init; full content is read lazily only when user taps Copy.
-struct TranscriptSummary: Identifiable {
+struct TranscriptSummary: Identifiable, Equatable {
     let id = UUID()
     let url: URL
     let title: String
@@ -15,6 +22,11 @@ struct TranscriptSummary: Identifiable {
     let speakerCount: Int
     let speakerNames: [String]  // Parsed from YAML frontmatter
     let timeOfDay: String?      // e.g. "14:30:21" from YAML, nil for old files
+    let speakers: [SpeakerInfo] // Structured speaker data for rename UI
+
+    static func == (lhs: TranscriptSummary, rhs: TranscriptSummary) -> Bool {
+        lhs.url == rhs.url
+    }
 }
 
 // MARK: - TranscriptLine
@@ -170,6 +182,11 @@ final class TranscriptStore: ObservableObject {
         return lines
     }
 
+    /// Parse a single transcript URL into a summary. Used for re-opening rename UI.
+    nonisolated func parseSingle(url: URL) -> TranscriptSummary? {
+        parseMetadata(url)
+    }
+
     // MARK: - Save Directory
 
     private var saveDirectory: URL {
@@ -236,8 +253,26 @@ final class TranscriptStore: ObservableObject {
                 }
             }
 
-            // Parse speaker names from YAML speakers block
+            // Parse speaker metadata from YAML speakers block
             var inSpeakersBlock = false
+            var currentSpeakerId: String?
+            var currentDbId: UUID?
+            var currentName: String?
+            var speakerInfos: [SpeakerInfo] = []
+
+            func flushCurrentSpeaker() {
+                if let id = currentSpeakerId {
+                    let name = currentName ?? "Speaker \(id)"
+                    speakerInfos.append(SpeakerInfo(yamlId: id, dbId: currentDbId, name: name))
+                    if !name.isEmpty && name != "Unknown" && !name.hasPrefix("Speaker ") {
+                        speakerNames.append(name)
+                    }
+                }
+                currentSpeakerId = nil
+                currentDbId = nil
+                currentName = nil
+            }
+
             for line in yaml.components(separatedBy: "\n") {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 if trimmed.hasPrefix("speakers:") {
@@ -245,16 +280,25 @@ final class TranscriptStore: ObservableObject {
                     continue
                 }
                 if inSpeakersBlock && !line.hasPrefix(" ") && !line.hasPrefix("\t") && !trimmed.isEmpty {
+                    flushCurrentSpeaker()
                     inSpeakersBlock = false
                 }
-                if inSpeakersBlock && trimmed.hasPrefix("name:") {
-                    let name = trimmed.replacingOccurrences(of: "name:", with: "")
+                guard inSpeakersBlock else { continue }
+
+                if trimmed.hasPrefix("- id:") {
+                    flushCurrentSpeaker()
+                    currentSpeakerId = trimmed.replacingOccurrences(of: "- id:", with: "")
                         .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
-                    if !name.isEmpty && name != "Unknown" {
-                        speakerNames.append(name)
-                    }
+                } else if trimmed.hasPrefix("db_id:") {
+                    let raw = trimmed.replacingOccurrences(of: "db_id:", with: "")
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+                    currentDbId = UUID(uuidString: raw)
+                } else if trimmed.hasPrefix("name:") {
+                    currentName = trimmed.replacingOccurrences(of: "name:", with: "")
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
                 }
             }
+            if inSpeakersBlock { flushCurrentSpeaker() }
 
             // Combine date + time into full datetime for accurate display and sorting
             if let timeStr = timeOfDay {
@@ -288,7 +332,8 @@ final class TranscriptStore: ObservableObject {
             duration: duration,
             speakerCount: speakerCount,
             speakerNames: speakerNames,
-            timeOfDay: timeOfDay
+            timeOfDay: timeOfDay,
+            speakers: speakerInfos
         )
     }
 
