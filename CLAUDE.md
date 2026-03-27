@@ -18,6 +18,7 @@ Menu bar-only macOS app for real-time system audio transcription. Pipeline: Core
 - **UI/Settings/** (18 files): Settings container + Sections/ (7 section views) + Components/ (6 reusable components) + Models/ (1 file)
 - **Onboarding/** (8 files): 5-step first-run flow (Preview -> Permissions -> Model Setup -> HowItWorks -> TestRecording), dark theme
 - **Design/** (21 files): Colors/ (6 files), Components/ (5 premium components), root tokens (10 files: Spacing, Radius, Typography, Animations, Shadows, ViewModifiers, Gradients, Dimensions, Accessibility, CardModifiers)
+- **Tools/TranscriptedQA/** (12 files): QA testing CLI tool, health checks, transcript validation, database integrity checks, index validation, log analysis
 
 ## Build & Test
 ```bash
@@ -105,6 +106,7 @@ Every folder with ≥2 Swift files has its own CLAUDE.md with file index, refere
 | `Transcripted/UI/Settings/Components/CLAUDE.md` | CoralToggle, button styles, input components |
 | `Transcripted/Onboarding/CLAUDE.md` | 5-step flow, OnboardingState properties, integration |
 | `Transcripted/Onboarding/Steps/CLAUDE.md` | Preview, Permissions, ModelSetup, HowItWorks, TestRecording step implementations |
+| `Tools/TranscriptedQA/CLAUDE.md` | QA CLI tool, health checks, transcript validation, database/index/log validation |
 | `Tools/TranscriptedMCP/CLAUDE.md` | MCP server tools, SQLite index schema, name variants, file watcher |
 
 **Single-file folders** (covered by parent CLAUDE.md):

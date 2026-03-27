@@ -74,8 +74,17 @@ struct ValidationReport: Codable {
     func printJSON() {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(self), let str = String(data: data, encoding: .utf8) {
-            print(str)
+        do {
+            let data = try encoder.encode(self)
+            if let str = String(data: data, encoding: .utf8) {
+                print(str)
+            } else {
+                FileHandle.standardError.write(Data("Error: Failed to encode JSON report as UTF-8\n".utf8))
+                Foundation.exit(1)
+            }
+        } catch {
+            FileHandle.standardError.write(Data("Error: Failed to encode JSON report: \(error)\n".utf8))
+            Foundation.exit(1)
         }
     }
 }

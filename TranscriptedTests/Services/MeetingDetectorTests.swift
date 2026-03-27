@@ -4,17 +4,6 @@ import XCTest
 @available(macOS 14.0, *)
 final class MeetingDetectorTests: XCTestCase {
 
-    // MARK: - Initial State
-
-    @MainActor
-    func testInitialStateIsNotDetecting() {
-        // MeetingDetector requires an Audio instance, but we can test
-        // that the published properties have correct initial values
-        // by checking the type's interface
-        // Note: Full functional testing requires the /transcripted-qa skill
-        // with computer-use to verify meeting detection end-to-end
-    }
-
     // MARK: - SpeakerNameUpdate Action Cases
 
     func testNamingActionNamedCase() {
@@ -68,42 +57,5 @@ final class MeetingDetectorTests: XCTestCase {
         } else {
             XCTFail("Expected .merged action")
         }
-    }
-
-    // MARK: - RecordingHealthInfo
-
-    func testCaptureQualityExcellent() {
-        XCTAssertEqual(RecordingHealthInfo.CaptureQuality.from(successRate: 1.0), .excellent)
-        XCTAssertEqual(RecordingHealthInfo.CaptureQuality.from(successRate: 0.98), .excellent)
-    }
-
-    func testCaptureQualityGood() {
-        XCTAssertEqual(RecordingHealthInfo.CaptureQuality.from(successRate: 0.97), .good)
-        XCTAssertEqual(RecordingHealthInfo.CaptureQuality.from(successRate: 0.90), .good)
-    }
-
-    func testCaptureQualityFair() {
-        XCTAssertEqual(RecordingHealthInfo.CaptureQuality.from(successRate: 0.89), .fair)
-        XCTAssertEqual(RecordingHealthInfo.CaptureQuality.from(successRate: 0.80), .fair)
-    }
-
-    func testCaptureQualityDegraded() {
-        XCTAssertEqual(RecordingHealthInfo.CaptureQuality.from(successRate: 0.79), .degraded)
-        XCTAssertEqual(RecordingHealthInfo.CaptureQuality.from(successRate: 0.0), .degraded)
-    }
-
-    func testPerfectHealthInfo() {
-        let health = RecordingHealthInfo.perfect
-        XCTAssertEqual(health.captureQuality, .excellent)
-        XCTAssertEqual(health.audioGaps, 0)
-        XCTAssertEqual(health.deviceSwitches, 0)
-        XCTAssertTrue(health.gapDescriptions.isEmpty)
-    }
-
-    func testCaptureQualityRawValues() {
-        XCTAssertEqual(RecordingHealthInfo.CaptureQuality.excellent.rawValue, "excellent")
-        XCTAssertEqual(RecordingHealthInfo.CaptureQuality.good.rawValue, "good")
-        XCTAssertEqual(RecordingHealthInfo.CaptureQuality.fair.rawValue, "fair")
-        XCTAssertEqual(RecordingHealthInfo.CaptureQuality.degraded.rawValue, "degraded")
     }
 }

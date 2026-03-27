@@ -1,6 +1,11 @@
 import Foundation
 
 struct HealthChecker {
+    let dataPath: URL
+
+    init(dataPath: URL? = nil) {
+        self.dataPath = dataPath ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Transcripted")
+    }
 
     func validate() -> [ValidationResult] {
         var results: [ValidationResult] = []
@@ -8,7 +13,7 @@ struct HealthChecker {
         let home = fm.homeDirectoryForCurrentUser
 
         // Transcript directory
-        let transcriptDir = home.appendingPathComponent("Documents/Transcripted")
+        let transcriptDir = dataPath
         if fm.isWritableFile(atPath: transcriptDir.path) {
             results.append(.pass("health/transcript-dir", target: transcriptDir.path))
         } else if fm.fileExists(atPath: transcriptDir.path) {

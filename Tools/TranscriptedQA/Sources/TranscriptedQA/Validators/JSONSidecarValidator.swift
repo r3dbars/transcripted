@@ -47,10 +47,14 @@ struct JSONSidecarValidator {
                     } else {
                         results.append(.fail("artifact/json-engine-diarize", target: name, detail: "Expected pyannote-offline"))
                     }
+                } else {
+                    results.append(.warn("artifact/json-engines", target: name, detail: "engines block missing — engine checks skipped"))
                 }
 
                 // Duration
                 if let duration = recording["duration_seconds"] as? Int, duration >= 0 {
+                    results.append(.pass("artifact/json-duration", target: name))
+                } else if let duration = recording["duration_seconds"] as? Double, duration >= 0 {
                     results.append(.pass("artifact/json-duration", target: name))
                 } else {
                     results.append(.fail("artifact/json-duration", target: name, detail: "Missing or negative duration_seconds"))
@@ -63,11 +67,17 @@ struct JSONSidecarValidator {
             if let utterances = json["utterances"] as? [[String: Any]] {
                 var sorted = true
                 var prevStart: Double = -1
+                var missingStartCount = 0
                 for utt in utterances {
                     if let start = utt["start"] as? Double {
                         if start < prevStart { sorted = false; break }
                         prevStart = start
+                    } else {
+                        missingStartCount += 1
                     }
+                }
+                if missingStartCount > 0 {
+                    results.append(.warn("artifact/json-utterance-start-times", target: name, detail: "\(missingStartCount) utterance(s) missing start time"))
                 }
                 if sorted {
                     results.append(.pass("artifact/json-utterances-sorted", target: name))
@@ -85,6 +95,8 @@ struct JSONSidecarValidator {
                 } else {
                     results.append(.fail("artifact/json-speaker-refs", target: name, detail: "Utterances reference unknown speakers: \(missing)"))
                 }
+            } else {
+                results.append(.warn("artifact/json-utterances", target: name, detail: "utterances block missing — sort and speaker ref checks skipped"))
             }
 
             // Corresponding .md exists

@@ -12,6 +12,6 @@ struct ValidateIndex: ParsableCommand {
 
     func run() throws {
         let results = IndexValidator(directory: pathOpts.resolvedPath).validate()
-        runValidation(results: results, format: formatOpts.format)
+        try runValidation(results: results, format: formatOpts.format)
     }
 }
