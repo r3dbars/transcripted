@@ -299,7 +299,8 @@ struct FloatingPanelView: View {
                         duration: "",
                         speakerCount: 0,
                         speakerNames: [],
-                        timeOfDay: nil
+                        timeOfDay: nil,
+                        speakers: []
                     )
                     if let text = transcriptStore.copyableText(for: summary), !text.isEmpty {
                         NSPasteboard.general.clearContents()

@@ -66,7 +66,7 @@ final class TranscriptStoreTests: XCTestCase {
         let url = try writeTempMarkdown("test_footer.md", content: content)
 
         let store = TranscriptStore()
-        let summary = TranscriptSummary(url: url, title: "Test", date: Date(), duration: "", speakerCount: 1, speakerNames: ["You"], timeOfDay: nil)
+        let summary = TranscriptSummary(url: url, title: "Test", date: Date(), duration: "", speakerCount: 1, speakerNames: ["You"], timeOfDay: nil, speakers: [])
 
         let text = store.copyableText(for: summary)
         XCTAssertNotNil(text)
@@ -86,7 +86,7 @@ final class TranscriptStoreTests: XCTestCase {
 
         let store = TranscriptStore()
         let date = Date()
-        let summary = TranscriptSummary(url: url, title: "Weekly Standup", date: date, duration: "05:30", speakerCount: 2, speakerNames: ["You", "Speaker 1"], timeOfDay: nil)
+        let summary = TranscriptSummary(url: url, title: "Weekly Standup", date: date, duration: "05:30", speakerCount: 2, speakerNames: ["You", "Speaker 1"], timeOfDay: nil, speakers: [])
 
         let text = store.copyableText(for: summary)
         XCTAssertNotNil(text)
@@ -110,7 +110,7 @@ final class TranscriptStoreTests: XCTestCase {
         let url = try writeTempMarkdown("test_lines.md", content: content)
 
         let store = TranscriptStore()
-        let summary = TranscriptSummary(url: url, title: "Test", date: Date(), duration: "", speakerCount: 2, speakerNames: ["You", "Speaker 1"], timeOfDay: nil)
+        let summary = TranscriptSummary(url: url, title: "Test", date: Date(), duration: "", speakerCount: 2, speakerNames: ["You", "Speaker 1"], timeOfDay: nil, speakers: [])
 
         let lines = store.displayLines(for: summary)
         XCTAssertNotNil(lines)
@@ -140,7 +140,7 @@ final class TranscriptStoreTests: XCTestCase {
         let url = try writeTempMarkdown("test_skip.md", content: content)
 
         let store = TranscriptStore()
-        let summary = TranscriptSummary(url: url, title: "Test", date: Date(), duration: "", speakerCount: 1, speakerNames: ["You"], timeOfDay: nil)
+        let summary = TranscriptSummary(url: url, title: "Test", date: Date(), duration: "", speakerCount: 1, speakerNames: ["You"], timeOfDay: nil, speakers: [])
 
         let lines = store.displayLines(for: summary)
         XCTAssertNotNil(lines)
@@ -161,7 +161,7 @@ final class TranscriptStoreTests: XCTestCase {
         let url = try writeTempMarkdown("test_unstructured.md", content: content)
 
         let store = TranscriptStore()
-        let summary = TranscriptSummary(url: url, title: "Test", date: Date(), duration: "", speakerCount: 1, speakerNames: ["You"], timeOfDay: nil)
+        let summary = TranscriptSummary(url: url, title: "Test", date: Date(), duration: "", speakerCount: 1, speakerNames: ["You"], timeOfDay: nil, speakers: [])
 
         let lines = store.displayLines(for: summary)
         XCTAssertNotNil(lines)
