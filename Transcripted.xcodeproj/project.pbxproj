@@ -131,6 +131,18 @@
 		T2000020 /* TranscriptExporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000010 /* TranscriptExporterTests.swift */; };
 		T2000021 /* DiagnosticExporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000011A /* DiagnosticExporterTests.swift */; };
 		T2000022 /* TranscriptMetadataBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000012A /* TranscriptMetadataBuilderTests.swift */; };
+		T2000023 /* ModelDownloadServiceSecurityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000013A /* ModelDownloadServiceSecurityTests.swift */; };
+		T2000024 /* ModelDownloadRetryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000014A /* ModelDownloadRetryTests.swift */; };
+		T2000025 /* RecordingValidatorSecurityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000015A /* RecordingValidatorSecurityTests.swift */; };
+		T2000026 /* SpeakerDatabaseDangerousOpsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000016A /* SpeakerDatabaseDangerousOpsTests.swift */; };
+		T2000027 /* ParakeetServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000017A /* ParakeetServiceTests.swift */; };
+		T2000028 /* ClipAudioPlayerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000018A /* ClipAudioPlayerTests.swift */; };
+		T2000029 /* TranscriptSaveChainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000019A /* TranscriptSaveChainTests.swift */; };
+		T2000030 /* TranscriptFormatterRoundTripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000020A /* TranscriptFormatterRoundTripTests.swift */; };
+		T2000031A /* SpeakerLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000021B /* SpeakerLifecycleTests.swift */; };
+		T2000032 /* AgentOutputRoundTripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000022A /* AgentOutputRoundTripTests.swift */; };
+		T2000033 /* CrossArtifactConsistencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000023A /* CrossArtifactConsistencyTests.swift */; };
+		T2000034 /* EdgeCaseAndFuzzTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000024A /* EdgeCaseAndFuzzTests.swift */; };
 		AX000001 /* AudioDeviceRecovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = AX000002 /* AudioDeviceRecovery.swift */; };
 		AX000003 /* AudioLevelMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AX000004 /* AudioLevelMonitor.swift */; };
 		AX000005 /* AudioFileManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AX000006 /* AudioFileManager.swift */; };
@@ -324,6 +336,18 @@
 		T2000010 /* TranscriptExporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptExporterTests.swift; sourceTree = "<group>"; };
 		T2000011A /* DiagnosticExporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticExporterTests.swift; sourceTree = "<group>"; };
 		T2000012A /* TranscriptMetadataBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptMetadataBuilderTests.swift; sourceTree = "<group>"; };
+		T2000013A /* ModelDownloadServiceSecurityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadServiceSecurityTests.swift; sourceTree = "<group>"; };
+		T2000014A /* ModelDownloadRetryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadRetryTests.swift; sourceTree = "<group>"; };
+		T2000015A /* RecordingValidatorSecurityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingValidatorSecurityTests.swift; sourceTree = "<group>"; };
+		T2000016A /* SpeakerDatabaseDangerousOpsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDatabaseDangerousOpsTests.swift; sourceTree = "<group>"; };
+		T2000017A /* ParakeetServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParakeetServiceTests.swift; sourceTree = "<group>"; };
+		T2000018A /* ClipAudioPlayerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipAudioPlayerTests.swift; sourceTree = "<group>"; };
+		T2000019A /* TranscriptSaveChainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSaveChainTests.swift; sourceTree = "<group>"; };
+		T2000020A /* TranscriptFormatterRoundTripTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptFormatterRoundTripTests.swift; sourceTree = "<group>"; };
+		T2000021B /* SpeakerLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerLifecycleTests.swift; sourceTree = "<group>"; };
+		T2000022A /* AgentOutputRoundTripTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentOutputRoundTripTests.swift; sourceTree = "<group>"; };
+		T2000023A /* CrossArtifactConsistencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossArtifactConsistencyTests.swift; sourceTree = "<group>"; };
+		T2000024A /* EdgeCaseAndFuzzTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeCaseAndFuzzTests.swift; sourceTree = "<group>"; };
 		T1000008 /* PillStateManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillStateManagerTests.swift; sourceTree = "<group>"; };
 		T1000009 /* SpeakerDatabaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDatabaseTests.swift; sourceTree = "<group>"; };
 		T1000200 /* TranscriptedTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TranscriptedTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -756,6 +780,7 @@
 				T1000101 /* Core */,
 				T1000102 /* Services */,
 				T1000103 /* UI */,
+				T2000105 /* Integration */,
 				T1000104 /* Helpers */,
 			);
 			path = TranscriptedTests;
@@ -783,6 +808,9 @@
 				T2000010 /* TranscriptExporterTests.swift */,
 				T2000011A /* DiagnosticExporterTests.swift */,
 				T2000012A /* TranscriptMetadataBuilderTests.swift */,
+				T2000013A /* ModelDownloadServiceSecurityTests.swift */,
+				T2000014A /* ModelDownloadRetryTests.swift */,
+				T2000015A /* RecordingValidatorSecurityTests.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -797,6 +825,8 @@
 				T2000005 /* SpeakerEmbeddingMatcherTests.swift */,
 				T2000006 /* SpeakerProfileMergerTests.swift */,
 				T2000007 /* MeetingDetectorTests.swift */,
+				T2000016A /* SpeakerDatabaseDangerousOpsTests.swift */,
+				T2000017A /* ParakeetServiceTests.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -808,8 +838,22 @@
 				T2000002 /* ContextualErrorBannerTests.swift */,
 				T2000008 /* PillDimensionsTests.swift */,
 				T2000009 /* PillSoundsTests.swift */,
+				T2000018A /* ClipAudioPlayerTests.swift */,
 			);
 			path = UI;
+			sourceTree = "<group>";
+		};
+		T2000105 /* Integration */ = {
+			isa = PBXGroup;
+			children = (
+				T2000019A /* TranscriptSaveChainTests.swift */,
+				T2000020A /* TranscriptFormatterRoundTripTests.swift */,
+				T2000021B /* SpeakerLifecycleTests.swift */,
+				T2000022A /* AgentOutputRoundTripTests.swift */,
+				T2000023A /* CrossArtifactConsistencyTests.swift */,
+				T2000024A /* EdgeCaseAndFuzzTests.swift */,
+			);
+			path = Integration;
 			sourceTree = "<group>";
 		};
 		T1000104 /* Helpers */ = {
@@ -1149,6 +1193,18 @@
 				T2000020 /* TranscriptExporterTests.swift in Sources */,
 				T2000021 /* DiagnosticExporterTests.swift in Sources */,
 				T2000022 /* TranscriptMetadataBuilderTests.swift in Sources */,
+				T2000023 /* ModelDownloadServiceSecurityTests.swift in Sources */,
+				T2000024 /* ModelDownloadRetryTests.swift in Sources */,
+				T2000025 /* RecordingValidatorSecurityTests.swift in Sources */,
+				T2000026 /* SpeakerDatabaseDangerousOpsTests.swift in Sources */,
+				T2000027 /* ParakeetServiceTests.swift in Sources */,
+				T2000028 /* ClipAudioPlayerTests.swift in Sources */,
+				T2000029 /* TranscriptSaveChainTests.swift in Sources */,
+				T2000030 /* TranscriptFormatterRoundTripTests.swift in Sources */,
+				T2000031A /* SpeakerLifecycleTests.swift in Sources */,
+				T2000032 /* AgentOutputRoundTripTests.swift in Sources */,
+				T2000033 /* CrossArtifactConsistencyTests.swift in Sources */,
+				T2000034 /* EdgeCaseAndFuzzTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

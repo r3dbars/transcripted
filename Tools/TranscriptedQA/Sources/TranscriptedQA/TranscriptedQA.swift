@@ -14,6 +14,9 @@ struct TranscriptedQA: ParsableCommand {
             ValidateArtifacts.self,
             ValidateIndex.self,
             CheckHealth.self,
+            GenerateFixtures.self,
+            RoundTrip.self,
+            StressTest.self,
         ],
         defaultSubcommand: ValidateAll.self
     )
@@ -46,13 +49,13 @@ struct FormatOptions: ParsableArguments {
 
 // MARK: - Helper
 
-func runValidation(results: [ValidationResult], format: OutputFormat) {
+func runValidation(results: [ValidationResult], format: OutputFormat) throws {
     let report = ValidationReport(results: results)
     switch format {
     case .text: report.printText()
     case .json: report.printJSON()
     }
     if report.exitCode != 0 {
-        Darwin.exit(report.exitCode)
+        throw ExitCode(report.exitCode)
     }
 }

@@ -292,7 +292,7 @@ enum ModelDownloadService {
     /// Security: filenames are attacker-controlled data from an external API response.
     /// A compromised or impersonated server could inject path traversal sequences (e.g. "../../../.ssh/authorized_keys")
     /// into rfilename values. We reject any name containing ".." components or absolute paths.
-    private static func isSafeModelFilename(_ name: String) -> Bool {
+    static func isSafeModelFilename(_ name: String) -> Bool {
         // Reject empty names
         guard !name.isEmpty else { return false }
         // Reject absolute paths

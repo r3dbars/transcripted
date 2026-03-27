@@ -27,6 +27,13 @@ final class SpeakerDatabase {
         createTables()
     }
 
+    /// Testable initializer for unit tests (accessible via @testable import)
+    init(path: String) {
+        dbPath = URL(fileURLWithPath: path)
+        openDatabase()
+        createTables()
+    }
+
     deinit {
         sqlite3_close(db)
     }

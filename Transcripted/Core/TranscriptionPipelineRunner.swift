@@ -207,8 +207,8 @@ extension TranscriptionTaskManager {
                             let shouldUnloadForQwen = totalMemoryGB < 12
 
                             if shouldUnloadForQwen {
+                                await self.transcription.parakeet.cleanup()
                                 await MainActor.run {
-                                    self.transcription.parakeet.cleanup()
                                     self.transcription.diarization.cleanup()
                                 }
                                 AppLogger.pipeline.info("Unloaded Parakeet + diarization models before Qwen inference (RAM: \(String(format: "%.0f", totalMemoryGB)) GB)")

@@ -391,6 +391,9 @@ extension SpeakerDatabase {
         let a = name1.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let b = name2.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // Empty strings are never valid name variants
+        guard !a.isEmpty, !b.isEmpty else { return false }
+
         // Exact match (case-insensitive)
         if a == b { return true }
 

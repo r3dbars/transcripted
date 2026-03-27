@@ -10,14 +10,15 @@ ML pipeline services, speaker database, audio processing utilities, meeting dete
 |------|-------|---------|
 | `ParakeetService.swift` | @MainActor | Local ASR via FluidAudio's Parakeet TDT V3 CoreML. Batch only. Downloads via ModelDownloadService with mirror fallback. |
 | `DiarizationService.swift` | @MainActor | Dual-pipeline: Sortformer (streaming) + PyAnnote (offline). Downloads via ModelDownloadService with mirror fallback. |
-| `SpeakerDatabase.swift` | Utility queue | SQLite at ~/Documents/Transcripted/speakers.sqlite, core CRUD + schema |
+| `SpeakerDatabase.swift` | Utility queue | SQLite at ~/Documents/Transcripted/speakers.sqlite, core CRUD + schema, corruption detection with backup/recreate pattern, 0o600 permissions |
 | `SpeakerEmbeddingMatcher.swift` | Utility queue | Cosine similarity matching against stored speaker profiles (vDSP-accelerated) |
 | `SpeakerProfile.swift` | -- | SpeakerProfile struct (256-dim embeddings) + SpeakerMatchResult |
 | `SpeakerProfileMerger.swift` | Utility queue | Profile name updates, merging, pruning, and name variant lookup |
 | `QwenService.swift` | @MainActor | On-device Qwen3.5-4B-4bit via mlx-swift-lm, on-demand load/unload. Pre-populates cache via ModelDownloadService with mirror fallback and progress tracking. |
-| `EmbeddingClusterer.swift` | Static | 3-stage post-processing: pairwise merge, small cluster absorption, DB-informed split |
+| `EmbeddingClusterer.swift` | Static | 3-stage post-processing: pairwise merge (0.85 threshold), small cluster absorption (0.72/0.62 thresholds), DB-informed split (0.62 threshold) |
 | `AudioResampler.swift` | Static | AVAudioConverter-based resampling to 16kHz, WAV loading, slice extraction |
 | `SpeakerClipExtractor.swift` | Static | Extract per-speaker audio clips for naming UI playback, 0o600 permissions on temp clips |
+| `ClipAudioPlayer.swift` | @MainActor | AVAudioPlayer wrapper for speaker clip playback (one at a time), background thread loading |
 | `MeetingDetector.swift` | @MainActor | Monitors Zoom/Teams/Webex/FaceTime, auto-triggers recording |
 
 ### Protocols/ (7 files) — see Protocols/CLAUDE.md

@@ -21,8 +21,8 @@ struct ValidateAll: ParsableCommand {
         results += StatsDBValidator(dbPath: dir.appendingPathComponent("stats.sqlite").path).validate()
         results += LogValidator(logPath: home.appendingPathComponent("Library/Logs/Transcripted/app.jsonl").path).validate()
         results += IndexValidator(directory: dir).validate()
-        results += HealthChecker().validate()
+        results += HealthChecker(dataPath: dir).validate()
 
-        runValidation(results: results, format: formatOpts.format)
+        try runValidation(results: results, format: formatOpts.format)
     }
 }
