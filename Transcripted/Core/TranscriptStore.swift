@@ -221,14 +221,16 @@ final class TranscriptStore: ObservableObject {
                range: raw.index(raw.startIndex, offsetBy: 3)..<raw.endIndex
            ) {
             let yaml = String(raw[raw.index(raw.startIndex, offsetBy: 4)..<endRange.lowerBound])
+            let yamlLines = yaml.components(separatedBy: "\n")
+            let yamlQuoteChars = CharacterSet(charactersIn: "\"' ")
 
-            for line in yaml.components(separatedBy: "\n") {
+            for line in yamlLines {
                 let parts = line.split(separator: ":", maxSplits: 1).map {
                     String($0).trimmingCharacters(in: .whitespaces)
                 }
                 guard parts.count == 2 else { continue }
                 let key = parts[0]
-                let val = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+                let val = parts[1].trimmingCharacters(in: yamlQuoteChars)
 
                 switch key {
                 case "date":
@@ -253,7 +255,6 @@ final class TranscriptStore: ObservableObject {
                 }
             }
 
-            // Parse speaker metadata from YAML speakers block
             var inSpeakersBlock = false
             var currentSpeakerId: String?
             var currentDbId: UUID?
@@ -273,7 +274,7 @@ final class TranscriptStore: ObservableObject {
                 currentName = nil
             }
 
-            for line in yaml.components(separatedBy: "\n") {
+            for line in yamlLines {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 if trimmed.hasPrefix("speakers:") {
                     inSpeakersBlock = true
@@ -288,14 +289,14 @@ final class TranscriptStore: ObservableObject {
                 if trimmed.hasPrefix("- id:") {
                     flushCurrentSpeaker()
                     currentSpeakerId = trimmed.replacingOccurrences(of: "- id:", with: "")
-                        .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+                        .trimmingCharacters(in: yamlQuoteChars)
                 } else if trimmed.hasPrefix("db_id:") {
                     let raw = trimmed.replacingOccurrences(of: "db_id:", with: "")
-                        .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+                        .trimmingCharacters(in: yamlQuoteChars)
                     currentDbId = UUID(uuidString: raw)
                 } else if trimmed.hasPrefix("name:") {
                     currentName = trimmed.replacingOccurrences(of: "name:", with: "")
-                        .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+                        .trimmingCharacters(in: yamlQuoteChars)
                 }
             }
             if inSpeakersBlock { flushCurrentSpeaker() }
