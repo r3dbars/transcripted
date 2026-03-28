@@ -41,7 +41,8 @@ final class TranscriptStoreTests: XCTestCase {
             duration: "12:34",
             speakerCount: 2,
             speakerNames: ["You", "Speaker 1"],
-            timeOfDay: nil
+            timeOfDay: nil,
+            speakers: []
         )
 
         let text = store.copyableText(for: summary)

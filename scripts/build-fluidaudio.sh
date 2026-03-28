@@ -5,8 +5,9 @@
 
 set -e
 
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-FA_BUILD="$PROJECT_DIR/.fluidaudio-build"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+FA_BUILD="$SCRIPT_DIR/.fluidaudio-build"
 FA_LIBS="$PROJECT_DIR/fluidaudio-libs"
 FA_MODULES="$PROJECT_DIR/fluidaudio-modules"
 
@@ -67,15 +68,24 @@ echo "Creating static library..."
 cd "$BUILD_RELEASE"
 
 NEEDED_MODULES=(
+    Atomics.build
+    ContainersPreview.build
     Crypto.build
+    DequeModule.build
+    EventSource.build
     FastClusterWrapper.build
     FluidAudio.build
     Hub.build
+    HuggingFace.build
     InternalCollectionsUtilities.build
     Jinja.build
     MachTaskSelfWrapper.build
+    NIOConcurrencyHelpers.build
+    NIOCore.build
     OrderedCollections.build
     Tokenizers.build
+    _NIOBase64.build
+    _NIODataStructures.build
     yyjson.build
 )
 

@@ -213,6 +213,7 @@ final class TranscriptStore: ObservableObject {
         var speakerCount = 0
         var speakerNames: [String] = []
         var timeOfDay: String?
+        var speakerInfos: [SpeakerInfo] = []
 
         // Parse YAML frontmatter for structured fields
         if raw.hasPrefix("---"),
@@ -258,7 +259,6 @@ final class TranscriptStore: ObservableObject {
             var currentSpeakerId: String?
             var currentDbId: UUID?
             var currentName: String?
-            var speakerInfos: [SpeakerInfo] = []
 
             func flushCurrentSpeaker() {
                 if let id = currentSpeakerId {

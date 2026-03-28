@@ -44,9 +44,7 @@ class DiarizationService: ObservableObject {
     private var offlineDiarizerManager: OfflineDiarizerManager?
     private var offlineModelState: DiarizationModelState = .notLoaded
 
-    var isReady: Bool {
-        offlineDiarizerManager != nil || diarizerManager?.isAvailable ?? false
-    }
+    var isReady: Bool { modelState == .ready }
 
     // MARK: - Model Initialization
 
@@ -189,7 +187,7 @@ class DiarizationService: ObservableObject {
     /// Limited to 4 speakers. Samples should be 16kHz mono Float32.
     nonisolated func diarizeStreaming(samples: [Float], sampleRate: Int = 16000) async throws -> [SpeakerSegment] {
         guard let manager = await MainActor.run(body: { self.diarizerManager }),
-              manager.isAvailable else {
+              await manager.isAvailable else {
             throw NSError(domain: "DiarizationService", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "Sortformer model not loaded"
             ])
