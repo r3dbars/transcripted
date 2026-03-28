@@ -19,7 +19,7 @@ class ParakeetService: ObservableObject {
 
     private var asrManager: AsrManager?
 
-    var isReady: Bool { asrManager?.isAvailable ?? false }
+    var isReady: Bool { modelState == .ready }
 
     // MARK: - Model Initialization
 
@@ -82,7 +82,7 @@ class ParakeetService: ObservableObject {
     /// Transcribe a WAV file. Loads, resamples to 16kHz, and runs Parakeet.
     nonisolated func transcribe(audioURL: URL) async throws -> String {
         guard let manager = await MainActor.run(body: { self.asrManager }),
-              manager.isAvailable else {
+              await manager.isAvailable else {
             throw PipelineError.modelNotLoaded(model: "Parakeet")
         }
 
@@ -99,7 +99,7 @@ class ParakeetService: ObservableObject {
     /// Used for per-speaker-segment transcription after Sortformer diarization.
     nonisolated func transcribeSegment(samples: [Float], source: AudioSource = .system) async throws -> String {
         guard let manager = await MainActor.run(body: { self.asrManager }),
-              manager.isAvailable else {
+              await manager.isAvailable else {
             throw PipelineError.modelNotLoaded(model: "Parakeet")
         }
 
@@ -109,8 +109,8 @@ class ParakeetService: ObservableObject {
 
     // MARK: - Cleanup
 
-    func cleanup() {
-        asrManager?.cleanup()
+    func cleanup() async {
+        await asrManager?.cleanup()
         asrManager = nil
         modelState = .notLoaded
     }
