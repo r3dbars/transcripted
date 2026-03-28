@@ -50,19 +50,12 @@ final class DiagnosticExporterTests: XCTestCase {
 
     func testGitHubIssueURLIsValid() {
         let url = DiagnosticExporter.gitHubIssueURL(title: "Test Bug", body: "Description")
-        XCTAssertNotNil(url)
-        if let url = url {
-            XCTAssertTrue(url.absoluteString.contains("github.com"), "URL should point to GitHub")
-            XCTAssertTrue(url.absoluteString.contains("issues"), "URL should be an issues URL")
-        }
+        XCTAssertTrue(url.absoluteString.contains("github.com"), "URL should point to GitHub")
+        XCTAssertTrue(url.absoluteString.contains("issues"), "URL should be an issues URL")
     }
 
     func testGitHubIssueURLEncodesTitle() {
         let url = DiagnosticExporter.gitHubIssueURL(title: "Bug with spaces & symbols", body: "test")
-        XCTAssertNotNil(url)
-        // URL should be valid (spaces encoded)
-        if let url = url {
-            XCTAssertFalse(url.absoluteString.contains(" "), "Spaces should be URL-encoded")
-        }
+        XCTAssertFalse(url.absoluteString.contains(" "), "Spaces should be URL-encoded")
     }
 }
