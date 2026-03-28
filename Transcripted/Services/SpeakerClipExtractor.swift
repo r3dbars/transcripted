@@ -114,6 +114,10 @@ enum SpeakerClipExtractor {
         try? FileManager.default.removeItem(at: dest) // OK if doesn't exist
         do {
             try FileManager.default.copyItem(at: tempClipURL, to: dest)
+            // Security: restrict to owner-only (600) — persistent speaker clips contain biometric
+            // voice data and must not be world-readable on multi-user systems. copyItem inherits
+            // default umask permissions (0o644), so we restrict explicitly after copy.
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dest.path)
         } catch {
             AppLogger.pipeline.error("Failed to persist speaker clip", ["speakerId": speakerId.uuidString, "error": error.localizedDescription])
         }
