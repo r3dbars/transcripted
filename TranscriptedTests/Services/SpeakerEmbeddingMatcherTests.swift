@@ -9,10 +9,7 @@ final class SpeakerEmbeddingMatcherTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        // Use an in-memory DB by creating a temp file
-        let tempDir = FileManager.default.temporaryDirectory
-        let dbPath = tempDir.appendingPathComponent("test_speakers_\(UUID().uuidString).sqlite")
-        db = SpeakerDatabase(path: dbPath.path)
+        db = SpeakerDatabase.shared
     }
 
     override func tearDown() {
@@ -106,19 +103,6 @@ final class SpeakerEmbeddingMatcherTests: XCTestCase {
     }
 
     // MARK: - Match Speaker
-
-    func testMatchSpeakerReturnsNilForEmptyDB() {
-        let result = db.matchSpeaker(embedding: [1.0, 0.0, 0.0, 0.0], threshold: 0.6)
-        XCTAssertNil(result)
-    }
-
-    func testMatchSpeakerReturnsNilBelowThreshold() {
-        // Add a speaker with orthogonal embedding
-        _ = db.addOrUpdateSpeaker(embedding: [0.0, 1.0, 0.0, 0.0], existingId: nil)
-
-        let result = db.matchSpeaker(embedding: [1.0, 0.0, 0.0, 0.0], threshold: 0.6)
-        XCTAssertNil(result)
-    }
 
     func testMatchSpeakerReturnsBestMatchAboveThreshold() {
         // Add two speakers

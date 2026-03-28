@@ -14,7 +14,8 @@ final class TranscriptExporterTests: XCTestCase {
             duration: duration,
             speakerCount: speakerCount,
             speakerNames: ["Alice", "Bob"],
-            timeOfDay: "14:30:00"
+            timeOfDay: "14:30:00",
+            speakers: []
         )
     }
 
