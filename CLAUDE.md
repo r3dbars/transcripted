@@ -111,5 +111,9 @@ Every folder with ≥2 Swift files has its own CLAUDE.md with file index, refere
 - `UI/Settings/Models/SettingsNavigationState.swift` — Migration state + vestigial SettingsTab
 - `UI/FailedTranscriptionsView.swift` — Standalone window for failed transcription management (600x400 min)
 
+## Tools (external CLI utilities)
+- **Tools/TranscriptedQA/** (18 Swift files): Standalone Swift CLI (`transcripted-qa`) for validating on-disk artifacts. Subcommands: `validate-all` (default), `validate-transcripts`, `validate-database`, `validate-logs`, `validate-artifacts`, `validate-index`, `check-health`. Validators: TranscriptValidator, SpeakerDBValidator, StatsDBValidator, JSONSidecarValidator, IndexValidator, LogValidator, HealthChecker. Uses `ArgumentParser`.
+- **Tools/TranscriptedCLI/** (1 file): Legacy CLI wrapper around FluidAudio static lib.
+
 ## Documentation
 See CONTRIBUTING.md for full development guidelines.
