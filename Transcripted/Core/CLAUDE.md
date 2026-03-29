@@ -23,7 +23,7 @@ Audio capture pipeline, transcription orchestration, file saving, stats tracking
 | `SpeakerMatchingService.swift` | nonisolated | In-memory speaker embedding matching, mean embedding computation |
 | `SpeakerNamingCoordinator.swift` | @MainActor | Speaker naming flow completion, applies names to DB and transcript, merges profiles by name |
 | `QwenLifecycleManager.swift` | @MainActor | Qwen model pre-load on recording start, timeout, memory checks |
-| `TranscriptSaver.swift` | Static | Markdown + YAML output, serial queue for file writes, path validation, 0o600 permissions on temp clips |
+| `TranscriptSaver.swift` | Static | Markdown + YAML output, serial queue for file writes, path validation, 0o600 permissions on saved transcript .md files |
 | `TranscriptFormatter.swift` | Static | YAML escaping, source label formatting, markdown generation |
 | `TranscriptMetadataBuilder.swift` | -- | RecordingHealthInfo struct, YAML frontmatter metadata construction |
 | `RetroactiveSpeakerUpdater.swift` | Static | Updates all transcripts when a speaker is renamed in Settings |

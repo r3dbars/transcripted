@@ -17,7 +17,7 @@ ML pipeline services, speaker database, audio processing utilities, meeting dete
 | `QwenService.swift` | @MainActor | On-device Qwen3.5-4B-4bit via mlx-swift-lm, on-demand load/unload. Pre-populates cache via ModelDownloadService with mirror fallback and progress tracking. |
 | `EmbeddingClusterer.swift` | Static | 3-stage post-processing: pairwise merge, small cluster absorption, DB-informed split |
 | `AudioResampler.swift` | Static | AVAudioConverter-based resampling to 16kHz, WAV loading, slice extraction |
-| `SpeakerClipExtractor.swift` | Static | Extract per-speaker audio clips for naming UI playback, 0o600 permissions on temp clips |
+| `SpeakerClipExtractor.swift` | Static | Extract per-speaker audio clips for naming UI playback, 0o600 permissions on temp clips and persistent clips |
 | `MeetingDetector.swift` | @MainActor | Monitors Zoom/Teams/Webex/FaceTime, auto-triggers recording |
 
 ### Protocols/ (7 files) — see Protocols/CLAUDE.md
