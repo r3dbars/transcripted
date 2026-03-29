@@ -114,10 +114,7 @@ enum SpeakerClipExtractor {
         try? FileManager.default.removeItem(at: dest) // OK if doesn't exist
         do {
             try FileManager.default.copyItem(at: tempClipURL, to: dest)
-            // Security: restrict to owner-only (600) — persistent speaker clips contain biometric
-            // voice data and must not be world-readable on multi-user systems. copyItem inherits
-            // default umask permissions (0o644), so we restrict explicitly after copy.
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dest.path)
+            FileManager.default.restrictToOwnerOnly(atPath: dest.path)
         } catch {
             AppLogger.pipeline.error("Failed to persist speaker clip", ["speakerId": speakerId.uuidString, "error": error.localizedDescription])
         }
@@ -208,9 +205,7 @@ enum SpeakerClipExtractor {
         }
 
         let outputFile = try AVAudioFile(forWriting: clipURL, settings: outputFormat.settings)
-        // Security: restrict temp clip file permissions to owner-only (600) immediately after
-        // creation — speaker voice clips contain biometric data and should not be world-readable.
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: clipURL.path)
+        FileManager.default.restrictToOwnerOnly(atPath: clipURL.path)
         let inputFormat = audioFile.processingFormat
         let maxClipFrames = AVAudioFrameCount(8.0 * sampleRate)
         var totalFramesWritten: AVAudioFrameCount = 0
