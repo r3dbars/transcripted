@@ -295,7 +295,7 @@ class QwenService: ObservableObject {
             if let speakersDict = parsed["speakers"] as? [String: String] {
                 let title = parsed["title"] as? String
                 let genericTitles: Set<String> = ["Meeting", "Discussion", "Call", "Chat", "Session", "Conversation"]
-                let cleanTitle = (title == nil || genericTitles.contains(title!)) ? nil : title
+                let cleanTitle = title.flatMap { genericTitles.contains($0) ? nil : $0 }
                 return QwenInferenceOutput(speakers: speakersDict, meetingTitle: cleanTitle)
             }
 
