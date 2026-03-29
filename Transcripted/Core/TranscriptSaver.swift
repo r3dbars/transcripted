@@ -1,5 +1,4 @@
 import Foundation
-import AppKit
 import UserNotifications
 
 /// Handles automatic saving of transcripts to the filesystem
