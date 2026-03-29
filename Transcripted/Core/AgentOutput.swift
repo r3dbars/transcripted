@@ -194,9 +194,7 @@ enum AgentOutput {
         let data = try encoder.encode(transcript)
         let fileURL = folder.appendingPathComponent("\(stem).json")
         try data.write(to: fileURL, options: .atomic)
-        // Security: restrict to owner-only (600) — JSON sidecar contains the full meeting
-        // transcript content, same sensitivity as the .md file and source audio.
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+        FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
 
         AppLogger.pipeline.info("Agent JSON sidecar written", ["file": fileURL.lastPathComponent])
     }
@@ -259,9 +257,7 @@ enum AgentOutput {
         let data = try encoder.encode(index)
         let indexURL = folder.appendingPathComponent("transcripted.json")
         try data.write(to: indexURL, options: .atomic)
-        // Security: restrict to owner-only (600) — index lists speaker names and meeting metadata
-        // that aggregates across all recordings; same sensitivity as individual transcript files.
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: indexURL.path)
+        FileManager.default.restrictToOwnerOnly(atPath: indexURL.path)
 
         AppLogger.pipeline.info("Agent index written", ["transcripts": "\(entries.count)", "speakers": "\(knownSpeakers.count)"])
     }
