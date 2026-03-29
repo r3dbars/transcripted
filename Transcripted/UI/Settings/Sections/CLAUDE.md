@@ -31,7 +31,7 @@
 - Speaker list with avatar (first letter circle, "?" fallback), display name, call count
 - Inline edit: tap name → TextField → commit on Return
   - → SpeakerDatabase.setDisplayName(id:, name:, source: "user_manual")
-  - → RetroactiveSpeakerUpdater.retroactivelyUpdateSpeaker(dbId:, newName:)
+  - → TranscriptSaver.retroactivelyUpdateSpeaker(dbId:, newName:) (defined in RetroactiveSpeakerUpdater.swift)
 - Delete: click → "Delete?" confirm → "Yes"
   - → SpeakerClipExtractor.deletePersistedClip(for:)
   - → SpeakerDatabase.deleteSpeaker(id:)
