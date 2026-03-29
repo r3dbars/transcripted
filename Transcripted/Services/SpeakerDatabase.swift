@@ -68,8 +68,7 @@ final class SpeakerDatabase {
     /// Called on both initial open and corruption-recovery re-open.
     private func configureOpenDatabase() {
         isDatabaseOpen = true
-        // Restrict file permissions to owner-only (600) — speakers.sqlite contains voice fingerprints
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dbPath.path)
+        FileManager.default.restrictToOwnerOnly(atPath: dbPath.path)
         // WAL mode for crash safety, busy timeout to avoid SQLITE_BUSY, NORMAL sync for performance
         let pragmas = [
             ("journal_mode=WAL", "WAL"),

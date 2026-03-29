@@ -70,9 +70,7 @@ class TranscriptSaver {
         // Write to file
         do {
             try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
-            // Security: restrict to owner-only (600) — transcript contains confidential meeting
-            // content and should be treated with the same sensitivity as the source audio files.
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+            FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
             AppLogger.pipeline.info("Transcript saved", ["path": fileURL.path])
 
             // Show system notification
@@ -129,9 +127,7 @@ class TranscriptSaver {
         let savedURL: URL? = fileUpdateQueue.sync {
             do {
                 try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
-                // Security: restrict to owner-only (600) — transcript contains confidential meeting
-                // content and should be treated with the same sensitivity as the source audio files.
-                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+                FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
                 AppLogger.pipeline.info("Transcript saved", ["path": fileURL.path])
 
                 // Agent output: write JSON sidecar + index + CLAUDE.md

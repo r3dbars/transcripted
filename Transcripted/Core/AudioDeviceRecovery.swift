@@ -142,9 +142,7 @@ extension Audio {
                     commonFormat: monoFormat.commonFormat,
                     interleaved: monoFormat.isInterleaved
                 )
-                // Security: restrict to owner-only (600) — recovery segment contains biometric
-                // voice data and should not be world-readable while recording is in progress.
-                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+                FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
                 micAudioFileQueue.sync { micAudioFile = newFile }
                 AppLogger.audioMic.info("Created recovery audio file", ["file": fileURL.lastPathComponent])
 

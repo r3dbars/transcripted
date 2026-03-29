@@ -68,9 +68,7 @@ class FailedTranscriptionManager: ObservableObject {
         do {
             let data = try encoder.encode(failedTranscriptions)
             try data.write(to: storageURL, options: .atomic)
-            // Security: restrict to owner-only (600) — file contains paths to unprocessed
-            // audio recordings; same sensitivity as the audio files it references.
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: storageURL.path)
+            FileManager.default.restrictToOwnerOnly(atPath: storageURL.path)
             AppLogger.pipeline.info("Saved failed transcriptions", ["count": "\(failedTranscriptions.count)"])
         } catch {
             AppLogger.pipeline.error("Error saving failed transcriptions", ["error": "\(error)"])

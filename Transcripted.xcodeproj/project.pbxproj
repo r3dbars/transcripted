@@ -16,6 +16,7 @@
 		A1000013 /* Clipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000014 /* Clipboard.swift */; };
 		A1000015 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000016 /* Assets.xcassets */; };
 		A1000040 /* CoreAudioUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000041 /* CoreAudioUtils.swift */; };
+		FP000001 /* FilePermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = FP000002 /* FilePermissions.swift */; };
 		A1000044 /* SystemAudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000045 /* SystemAudioCapture.swift */; };
 		AG000001 /* AgentOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = AG000002 /* AgentOutput.swift */; };
 		A1000048 /* TranscriptSaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000049 /* TranscriptSaver.swift */; };
@@ -210,6 +211,7 @@
 		A1000018 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1000019 /* Transcripted.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Transcripted.entitlements; sourceTree = "<group>"; };
 		A1000041 /* CoreAudioUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioUtils.swift; sourceTree = "<group>"; };
+		FP000002 /* FilePermissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilePermissions.swift; sourceTree = "<group>"; };
 		A1000045 /* SystemAudioCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemAudioCapture.swift; sourceTree = "<group>"; };
 		SX000002 /* SystemAudioProcessTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemAudioProcessTap.swift; sourceTree = "<group>"; };
 		SX000004 /* SystemAudioBufferWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemAudioBufferWriter.swift; sourceTree = "<group>"; };
@@ -499,6 +501,7 @@
 				AX000006 /* AudioFileManager.swift */,
 				A1000014 /* Clipboard.swift */,
 				A1000041 /* CoreAudioUtils.swift */,
+				FP000002 /* FilePermissions.swift */,
 				A1000045 /* SystemAudioCapture.swift */,
 				SX000002 /* SystemAudioProcessTap.swift */,
 				SX000004 /* SystemAudioBufferWriter.swift */,
@@ -984,6 +987,7 @@
 				AX000005 /* AudioFileManager.swift in Sources */,
 				A1000013 /* Clipboard.swift in Sources */,
 				A1000040 /* CoreAudioUtils.swift in Sources */,
+				FP000001 /* FilePermissions.swift in Sources */,
 				A1000044 /* SystemAudioCapture.swift in Sources */,
 				SX000001 /* SystemAudioProcessTap.swift in Sources */,
 				SX000003 /* SystemAudioBufferWriter.swift in Sources */,
