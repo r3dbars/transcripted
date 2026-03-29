@@ -111,14 +111,19 @@ class RecordingValidator {
     /// - Parameter url: The candidate save directory URL
     /// - Returns: `.success` if the path is safe, `.failure` with reason otherwise
     static func validateSavePath(_ url: URL) -> ValidationResult {
-        let resolved = url.resolvingSymlinksInPath()
-        let resolvedPath = resolved.path
-
-        // Reject paths with ".." components (directory traversal)
-        let components = resolved.pathComponents
-        if components.contains("..") {
+        // Security: check for ".." traversal components on the RAW path before symlink resolution.
+        // After resolvingSymlinksInPath(), ".." components are already normalised away and would
+        // never appear in pathComponents — making a post-resolution check useless dead code.
+        // Checking the raw components first ensures the check is actually exercised.
+        let rawComponents = url.pathComponents
+        if rawComponents.contains("..") {
             return .failure("Save path cannot contain '..' components")
         }
+
+        // Resolve symlinks so that a symlink pointing at e.g. /System cannot bypass
+        // the forbidden-prefix check below.
+        let resolved = url.resolvingSymlinksInPath()
+        let resolvedPath = resolved.path
 
         // Reject system directories
         for prefix in forbiddenPrefixes {
