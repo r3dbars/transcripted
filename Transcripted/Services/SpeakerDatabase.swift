@@ -308,6 +308,63 @@ final class SpeakerDatabase {
         }
     }
 
+    // MARK: - Row Parsing
+
+    /// Parse a SpeakerProfile from the current row of an open prepared statement.
+    /// Column order must match the standard speaker SELECT:
+    ///   0=id, 1=display_name, 2=name_source, 3=embedding,
+    ///   4=first_seen, 5=last_seen, 6=call_count, 7=confidence, 8=dispute_count
+    private func parseSpeakerRow(_ statement: OpaquePointer, isoFormatter: ISO8601DateFormatter) -> SpeakerProfile {
+        let idStr = String(cString: sqlite3_column_text(statement, 0))
+        let displayName: String? = sqlite3_column_text(statement, 1).map { String(cString: $0) }
+        let nameSource: String? = sqlite3_column_text(statement, 2).map { String(cString: $0) }
+
+        // Read embedding BLOB
+        let blobPtr = sqlite3_column_blob(statement, 3)
+        let blobSize = sqlite3_column_bytes(statement, 3)
+        var embedding: [Float] = []
+        if let ptr = blobPtr, blobSize > 0 {
+            let floatCount = Int(blobSize) / MemoryLayout<Float>.size
+            embedding = Array(UnsafeBufferPointer(
+                start: ptr.assumingMemoryBound(to: Float.self),
+                count: floatCount
+            ))
+        }
+
+        let firstSeenStr = String(cString: sqlite3_column_text(statement, 4))
+        let lastSeenStr = String(cString: sqlite3_column_text(statement, 5))
+        let callCount = Int(sqlite3_column_int(statement, 6))
+        let confidence = sqlite3_column_double(statement, 7)
+        let disputeCount = Int(sqlite3_column_int(statement, 8))
+
+        let parsedId = UUID(uuidString: idStr)
+        if parsedId == nil {
+            AppLogger.speakers.warning("Corrupt speaker UUID in database, using random UUID", ["raw_id": idStr])
+        }
+        let firstSeen = isoFormatter.date(from: firstSeenStr)
+        if firstSeen == nil {
+            AppLogger.speakers.warning("Corrupt first_seen date in database, using current date", ["raw_date": firstSeenStr, "id": idStr])
+        }
+        let lastSeen = isoFormatter.date(from: lastSeenStr)
+        if lastSeen == nil {
+            AppLogger.speakers.warning("Corrupt last_seen date in database, using current date", ["raw_date": lastSeenStr, "id": idStr])
+        }
+
+        return SpeakerProfile(
+            id: parsedId ?? UUID(),
+            displayName: displayName,
+            nameSource: nameSource,
+            embedding: embedding,
+            firstSeen: firstSeen ?? Date(),
+            lastSeen: lastSeen ?? Date(),
+            callCount: callCount,
+            confidence: confidence,
+            disputeCount: disputeCount
+        )
+    }
+
+    // MARK: - Speaker Queries
+
     /// Get all stored speakers
     func allSpeakers() -> [SpeakerProfile] {
         return queue.sync { allSpeakersImpl() }
@@ -320,54 +377,8 @@ final class SpeakerDatabase {
 
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
             let isoFormatter = ISO8601DateFormatter()
-
-            while sqlite3_step(statement) == SQLITE_ROW {
-                let idStr = String(cString: sqlite3_column_text(statement, 0))
-                let displayName: String? = sqlite3_column_text(statement, 1).map { String(cString: $0) }
-                let nameSource: String? = sqlite3_column_text(statement, 2).map { String(cString: $0) }
-
-                // Read embedding BLOB
-                let blobPtr = sqlite3_column_blob(statement, 3)
-                let blobSize = sqlite3_column_bytes(statement, 3)
-                var embedding: [Float] = []
-                if let ptr = blobPtr, blobSize > 0 {
-                    let floatCount = Int(blobSize) / MemoryLayout<Float>.size
-                    embedding = Array(UnsafeBufferPointer(
-                        start: ptr.assumingMemoryBound(to: Float.self),
-                        count: floatCount
-                    ))
-                }
-
-                let firstSeenStr = String(cString: sqlite3_column_text(statement, 4))
-                let lastSeenStr = String(cString: sqlite3_column_text(statement, 5))
-                let callCount = Int(sqlite3_column_int(statement, 6))
-                let confidence = sqlite3_column_double(statement, 7)
-                let disputeCount = Int(sqlite3_column_int(statement, 8))
-
-                let parsedId = UUID(uuidString: idStr)
-                if parsedId == nil {
-                    AppLogger.speakers.warning("Corrupt speaker UUID in database, using random UUID", ["raw_id": idStr])
-                }
-                let firstSeen = isoFormatter.date(from: firstSeenStr)
-                if firstSeen == nil {
-                    AppLogger.speakers.warning("Corrupt first_seen date in database, using current date", ["raw_date": firstSeenStr, "id": idStr])
-                }
-                let lastSeen = isoFormatter.date(from: lastSeenStr)
-                if lastSeen == nil {
-                    AppLogger.speakers.warning("Corrupt last_seen date in database, using current date", ["raw_date": lastSeenStr, "id": idStr])
-                }
-
-                speakers.append(SpeakerProfile(
-                    id: parsedId ?? UUID(),
-                    displayName: displayName,
-                    nameSource: nameSource,
-                    embedding: embedding,
-                    firstSeen: firstSeen ?? Date(),
-                    lastSeen: lastSeen ?? Date(),
-                    callCount: callCount,
-                    confidence: confidence,
-                    disputeCount: disputeCount
-                ))
+            while sqlite3_step(statement) == SQLITE_ROW, let stmt = statement {
+                speakers.append(parseSpeakerRow(stmt, isoFormatter: isoFormatter))
             }
         } else {
             AppLogger.speakers.error("Failed to prepare allSpeakers query", ["sqlite_error": dbErrorMessage()])
@@ -390,41 +401,8 @@ final class SpeakerDatabase {
 
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
             sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-
-            if sqlite3_step(statement) == SQLITE_ROW {
-                let isoFormatter = ISO8601DateFormatter()
-                let idStr = String(cString: sqlite3_column_text(statement, 0))
-                let displayName: String? = sqlite3_column_text(statement, 1).map { String(cString: $0) }
-                let nameSource: String? = sqlite3_column_text(statement, 2).map { String(cString: $0) }
-
-                let blobPtr = sqlite3_column_blob(statement, 3)
-                let blobSize = sqlite3_column_bytes(statement, 3)
-                var embedding: [Float] = []
-                if let ptr = blobPtr, blobSize > 0 {
-                    let floatCount = Int(blobSize) / MemoryLayout<Float>.size
-                    embedding = Array(UnsafeBufferPointer(
-                        start: ptr.assumingMemoryBound(to: Float.self),
-                        count: floatCount
-                    ))
-                }
-
-                let firstSeenStr = String(cString: sqlite3_column_text(statement, 4))
-                let lastSeenStr = String(cString: sqlite3_column_text(statement, 5))
-                let callCount = Int(sqlite3_column_int(statement, 6))
-                let confidence = sqlite3_column_double(statement, 7)
-                let disputeCount = Int(sqlite3_column_int(statement, 8))
-
-                profile = SpeakerProfile(
-                    id: UUID(uuidString: idStr) ?? id,
-                    displayName: displayName,
-                    nameSource: nameSource,
-                    embedding: embedding,
-                    firstSeen: isoFormatter.date(from: firstSeenStr) ?? Date(),
-                    lastSeen: isoFormatter.date(from: lastSeenStr) ?? Date(),
-                    callCount: callCount,
-                    confidence: confidence,
-                    disputeCount: disputeCount
-                )
+            if sqlite3_step(statement) == SQLITE_ROW, let stmt = statement {
+                profile = parseSpeakerRow(stmt, isoFormatter: ISO8601DateFormatter())
             }
         } else {
             AppLogger.speakers.error("Failed to prepare getSpeaker query", ["sqlite_error": dbErrorMessage(), "id": id.uuidString])
