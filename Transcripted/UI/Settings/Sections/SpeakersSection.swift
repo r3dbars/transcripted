@@ -198,11 +198,16 @@ struct SpeakersSettingsSection: View {
             editingId = nil
             return
         }
-        SpeakerDatabase.shared.setDisplayName(id: id, name: trimmed, source: NameSource.userManual)
+        // Security: enforce a maximum name length before writing to the database and transcripts.
+        // An unbounded string could cause excessive memory allocation when written repeatedly across
+        // many transcript files or stored in the SQLite database. 100 characters covers all
+        // realistic names while rejecting pathological inputs.
+        let safeName = String(trimmed.prefix(100))
+        SpeakerDatabase.shared.setDisplayName(id: id, name: safeName, source: NameSource.userManual)
         editingId = nil
         // Retroactively update all transcripts referencing this speaker
         Task.detached {
-            TranscriptSaver.retroactivelyUpdateSpeaker(dbId: id, newName: trimmed)
+            TranscriptSaver.retroactivelyUpdateSpeaker(dbId: id, newName: safeName)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             speakers = SpeakerDatabase.shared.allSpeakers()
