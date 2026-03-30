@@ -1,6 +1,6 @@
 # Core Folder
 
-Audio capture pipeline, transcription orchestration, file saving, stats tracking, model downloads, error recovery, and app lifecycle. 47 Swift files (including Logging/).
+Audio capture pipeline, transcription orchestration, file saving, stats tracking, model downloads, error recovery, and app lifecycle. 48 Swift files (including Logging/).
 
 ## File Index
 
@@ -38,6 +38,7 @@ Audio capture pipeline, transcription orchestration, file saving, stats tracking
 | `StatsService.swift` | @MainActor | Stats aggregation for dashboard UI |
 | `ModelDownloadService.swift` | Static | HuggingFace download with mirror fallback (hf-mirror.com), retry with exponential backoff, Qwen cache pre-population, structured error classification (DownloadErrorKind), isSafeModelFilename() path traversal validation |
 | `RecordingValidator.swift` | Static | Pre-recording checks (disk space, permissions, save path) |
+| `FilePermissions.swift` | -- | FileManager extension: `restrictToOwnerOnly(atPath:)` applies 0o600 to all user data files |
 | `FailedTranscription.swift` | -- | Model for retryable failed transcriptions |
 | `FailedTranscriptionManager.swift` | @MainActor | Retry queue, persists to JSON, auto-cleans permanent failures |
 | `AppServices.swift` | @MainActor | Dependency injection container holding protocol-typed service instances |
