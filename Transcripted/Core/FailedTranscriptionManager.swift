@@ -45,12 +45,29 @@ class FailedTranscriptionManager: ObservableObject {
             let data = try Data(contentsOf: storageURL)
             let loaded = try decoder.decode([FailedTranscription].self, from: data)
 
+            // Security: audio file paths are deserialized from a JSON file that the user could
+            // tamper with. Validate each path is sandboxed within the user's home directory before
+            // accepting it — this prevents a crafted JSON from directing removeItem(at:) to an
+            // arbitrary path (e.g. /etc/hosts) when entries are cleaned up.
+            let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
+            let sandboxedEntries = loaded.filter { entry in
+                let micSafe = entry.micAudioURL.path.hasPrefix(homeDir)
+                let systemSafe = entry.systemAudioURL.map { $0.path.hasPrefix(homeDir) } ?? true
+                if !micSafe || !systemSafe {
+                    AppLogger.pipeline.error("Rejected failed transcription entry with out-of-sandbox audio path", [
+                        "micURL": entry.micAudioURL.path,
+                        "systemURL": entry.systemAudioURL?.path ?? "none"
+                    ])
+                }
+                return micSafe && systemSafe
+            }
+
             // Filter out entries where audio files no longer exist
-            failedTranscriptions = loaded.filter { $0.audioFilesExist() }
+            failedTranscriptions = sandboxedEntries.filter { $0.audioFilesExist() }
 
             // Save back if we filtered any out
             if failedTranscriptions.count != loaded.count {
-                AppLogger.pipeline.info("Removed entries with missing audio files", ["count": "\(loaded.count - failedTranscriptions.count)"])
+                AppLogger.pipeline.info("Removed entries with missing audio files or unsafe paths", ["count": "\(loaded.count - failedTranscriptions.count)"])
                 saveFailedTranscriptions()
             }
 
