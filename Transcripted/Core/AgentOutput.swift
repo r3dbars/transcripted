@@ -118,6 +118,12 @@ enum AgentOutput {
         return e
     }()
 
+    private static let isoDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
+        return f
+    }()
+
     /// Write a structured JSON sidecar for a transcript.
     static func writeTranscriptJSON(
         from result: TranscriptionResult,
@@ -126,9 +132,7 @@ enum AgentOutput {
         to folder: URL,
         stem: String
     ) throws {
-        let isoFormatter = DateFormatter()
-        isoFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
-        let dateString = isoFormatter.string(from: Date())
+        let dateString = isoDateFormatter.string(from: Date())
 
         // Build speaker list
         var speakers: [AgentSpeaker] = []
@@ -243,12 +247,9 @@ enum AgentOutput {
             )
         }.sorted { $0.callCount > $1.callCount }
 
-        let isoFormatter = DateFormatter()
-        isoFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
-
         let index = AgentIndex(
             version: "1.0",
-            updatedAt: isoFormatter.string(from: Date()),
+            updatedAt: isoDateFormatter.string(from: Date()),
             transcriptCount: entries.count,
             transcripts: entries,
             knownSpeakers: knownSpeakers
