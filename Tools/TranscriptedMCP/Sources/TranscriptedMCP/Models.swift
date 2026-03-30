@@ -173,9 +173,10 @@ struct MeetingSummary: Codable {
     let speakerCount: Int
     let wordCount: Int
     var speakers: [MeetingSpeaker]
+    var title: String?
 
     enum CodingKeys: String, CodingKey {
-        case filename, date, datetime
+        case filename, date, datetime, title
         case durationSeconds = "duration_seconds"
         case speakerCount = "speaker_count"
         case wordCount = "word_count"

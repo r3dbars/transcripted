@@ -403,6 +403,165 @@ final class TranscriptIndex: @unchecked Sendable {
         }
     }
 
+    // MARK: - List Meetings (with date filter)
+
+    func listMeetings(count: Int, dateFrom: String? = nil, dateTo: String? = nil) throws -> [MeetingSummary] {
+        return try queue.sync {
+            let limit = max(1, min(count, 50))
+
+            var sql = "SELECT filename, date, datetime, duration_seconds, speaker_count, word_count FROM meetings"
+            var bindings: [SQLBinding] = []
+            var conditions: [String] = []
+
+            if let dateFrom = dateFrom {
+                conditions.append("date >= ?")
+                bindings.append(.text(dateFrom))
+            }
+            if let dateTo = dateTo {
+                conditions.append("date <= ?")
+                bindings.append(.text(dateTo))
+            }
+
+            if !conditions.isEmpty {
+                sql += " WHERE " + conditions.joined(separator: " AND ")
+            }
+            sql += " ORDER BY datetime DESC LIMIT ?"
+            bindings.append(.int(limit))
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw MCPIndexError.queryFailed(dbError())
+            }
+            defer { sqlite3_finalize(stmt) }
+
+            for (i, binding) in bindings.enumerated() {
+                bind(stmt: stmt, index: Int32(i + 1), value: binding)
+            }
+
+            var meetings: [MeetingSummary] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                meetings.append(MeetingSummary(
+                    filename: colText(stmt, 0),
+                    date: colText(stmt, 1),
+                    datetime: colText(stmt, 2),
+                    durationSeconds: Int(sqlite3_column_int(stmt, 3)),
+                    speakerCount: Int(sqlite3_column_int(stmt, 4)),
+                    wordCount: Int(sqlite3_column_int(stmt, 5)),
+                    speakers: []
+                ))
+            }
+
+            // Batch-fetch speakers for all returned meetings
+            if !meetings.isEmpty {
+                let filenames = meetings.map(\.filename)
+                let placeholders = filenames.map { _ in "?" }.joined(separator: ", ")
+                let speakerSql = "SELECT filename, speaker_name, persistent_speaker_id, word_count, speaking_seconds FROM meeting_speakers WHERE filename IN (\(placeholders))"
+
+                var spStmt: OpaquePointer?
+                guard sqlite3_prepare_v2(db, speakerSql, -1, &spStmt, nil) == SQLITE_OK else {
+                    return meetings
+                }
+                defer { sqlite3_finalize(spStmt) }
+
+                for (i, f) in filenames.enumerated() {
+                    sqlite3_bind_text(spStmt, Int32(i + 1), (f as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                }
+
+                var speakersByMeeting: [String: [MeetingSpeaker]] = [:]
+                while sqlite3_step(spStmt) == SQLITE_ROW {
+                    let filename = colText(spStmt, 0)
+                    speakersByMeeting[filename, default: []].append(MeetingSpeaker(
+                        name: colText(spStmt, 1),
+                        persistentSpeakerId: colTextOptional(spStmt, 2),
+                        wordCount: Int(sqlite3_column_int(spStmt, 3)),
+                        speakingSeconds: sqlite3_column_double(spStmt, 4)
+                    ))
+                }
+
+                for i in meetings.indices {
+                    meetings[i].speakers = speakersByMeeting[meetings[i].filename] ?? []
+                }
+            }
+
+            return meetings
+        }
+    }
+
+    // MARK: - Person Profile (who_is)
+
+    func getPersonProfile(speaker: String) throws -> PersonProfile {
+        let history = try getSpeakerHistory(speaker: speaker)
+
+        // Collect co-speakers across all meetings
+        var coSpeakerCounts: [String: Int] = [:]
+        for meeting in history.meetings {
+            // Get all speakers in this meeting
+            let meetingSpeakers = try queue.sync {
+                var stmt: OpaquePointer?
+                let sql = "SELECT speaker_name FROM meeting_speakers WHERE filename = ?"
+                guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [String]() }
+                defer { sqlite3_finalize(stmt) }
+                sqlite3_bind_text(stmt, 1, (meeting.filename as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                var names: [String] = []
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    names.append(colText(stmt, 0))
+                }
+                return names
+            }
+            for name in meetingSpeakers where name.lowercased() != history.matchedName.lowercased() && !name.hasPrefix("Speaker ") {
+                coSpeakerCounts[name, default: 0] += 1
+            }
+        }
+
+        let topCoSpeakers = coSpeakerCounts.sorted { $0.value > $1.value }.prefix(5).map(\.key)
+
+        // Get representative quotes
+        var quotes: [String] = []
+        for meeting in history.meetings.prefix(5) {
+            if !meeting.previewSnippet.isEmpty {
+                quotes.append(meeting.previewSnippet)
+            }
+        }
+
+        let recentMeetings = history.meetings.prefix(10).map { meeting in
+            // Get other speakers in the meeting
+            let others: [String] = queue.sync {
+                var stmt: OpaquePointer?
+                let sql = "SELECT speaker_name FROM meeting_speakers WHERE filename = ? AND speaker_name COLLATE NOCASE != ?"
+                guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+                defer { sqlite3_finalize(stmt) }
+                sqlite3_bind_text(stmt, 1, (meeting.filename as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(stmt, 2, (history.matchedName as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                var names: [String] = []
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    names.append(colText(stmt, 0))
+                }
+                return names
+            }
+
+            return PersonMeetingEntry(
+                filename: meeting.filename,
+                date: meeting.meetingDate,
+                wordCount: meeting.wordCount,
+                speakingMinutes: meeting.speakingSeconds / 60.0,
+                otherSpeakers: others
+            )
+        }
+
+        return PersonProfile(
+            name: history.matchedName,
+            persistentSpeakerId: history.persistentSpeakerId,
+            meetingCount: history.meetingCount,
+            totalWordCount: history.totalWordCount,
+            totalSpeakingMinutes: history.totalSpeakingSeconds / 60.0,
+            firstSeen: history.meetings.last?.meetingDate ?? "",
+            lastSeen: history.meetings.first?.meetingDate ?? "",
+            frequentCoSpeakers: Array(topCoSpeakers),
+            recentMeetings: Array(recentMeetings),
+            representativeQuotes: quotes
+        )
+    }
+
     func listRecentMeetings(count: Int) throws -> [MeetingSummary] {
         return try queue.sync {
             let limit = max(1, min(count, 50))
