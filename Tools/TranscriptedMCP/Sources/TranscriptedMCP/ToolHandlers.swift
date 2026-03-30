@@ -5,46 +5,106 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, dataDir: URL) 
     await server.withMethodHandler(ListTools.self) { _ in
         .init(tools: [
             Tool(
-                name: "search_transcripts",
-                description: "Full-text search across all meeting transcripts. Returns matching utterances grouped by meeting, with speaker names, timestamps, and meeting context. Supports natural language queries.",
+                name: "list_meetings",
+                description: "List meetings with participants, duration, and word count. Filter by date or get the N most recent. This is the starting point — use the returned filename with read_meeting to get full content.",
                 inputSchema: .object([
-                    "query": .object([
-                        "type": .string("string"),
-                        "description": .string("Search query (e.g. 'product roadmap discussion')")
-                    ]),
-                    "speaker": .object([
-                        "type": .string("string"),
-                        "description": .string("Filter to utterances by this speaker (supports name variants: Mike matches Michael)")
-                    ]),
-                    "date_from": .object([
-                        "type": .string("string"),
-                        "description": .string("Start date filter (YYYY-MM-DD)")
-                    ]),
-                    "date_to": .object([
-                        "type": .string("string"),
-                        "description": .string("End date filter (YYYY-MM-DD)")
+                    "type": .string("object"),
+                    "properties": .object([
+                        "count": .object([
+                            "type": .string("integer"),
+                            "description": .string("Number of meetings to return (default: 10, max: 50)")
+                        ]),
+                        "date": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter to a specific date (YYYY-MM-DD)")
+                        ]),
+                        "date_from": .object([
+                            "type": .string("string"),
+                            "description": .string("Start date filter (YYYY-MM-DD)")
+                        ]),
+                        "date_to": .object([
+                            "type": .string("string"),
+                            "description": .string("End date filter (YYYY-MM-DD)")
+                        ]),
                     ]),
                 ]),
                 annotations: .init(readOnlyHint: true)
             ),
             Tool(
-                name: "get_speaker_history",
-                description: "Get all meetings a speaker participated in, with per-meeting stats and preview snippets. Supports name variants (Mike finds Michael) and persistent speaker UUIDs.",
+                name: "read_meeting",
+                description: "Read the full transcript of a specific meeting. Returns the complete dialogue with speaker names and timestamps. Use list_meetings first to get the filename.",
                 inputSchema: .object([
-                    "speaker": .object([
-                        "type": .string("string"),
-                        "description": .string("Speaker name or persistent speaker UUID")
+                    "type": .string("object"),
+                    "properties": .object([
+                        "filename": .object([
+                            "type": .string("string"),
+                            "description": .string("Meeting filename from list_meetings (e.g. 'Call_2026-03-26_16-04-11')")
+                        ]),
+                        "section": .object([
+                            "type": .string("string"),
+                            "description": .string("Which section to return: 'full' (default — complete transcript), 'transcript' (dialogue only), or 'speakers' (analytics only)")
+                        ]),
                     ]),
+                    "required": .array([.string("filename")]),
                 ]),
                 annotations: .init(readOnlyHint: true)
             ),
             Tool(
-                name: "list_recent_meetings",
-                description: "List recent meetings with participants, duration, word count, and speaker details.",
+                name: "search",
+                description: "Full-text search across all meeting transcripts. Returns matching utterances with speaker, timestamp, and meeting context. Optionally filter by speaker name (supports variants: Mike finds Michael) or date range.",
                 inputSchema: .object([
-                    "count": .object([
-                        "type": .string("integer"),
-                        "description": .string("Number of meetings to return (default: 10, max: 50)")
+                    "type": .string("object"),
+                    "properties": .object([
+                        "query": .object([
+                            "type": .string("string"),
+                            "description": .string("Search query (e.g. 'product roadmap discussion')")
+                        ]),
+                        "speaker": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter to utterances by this speaker")
+                        ]),
+                        "date_from": .object([
+                            "type": .string("string"),
+                            "description": .string("Start date filter (YYYY-MM-DD)")
+                        ]),
+                        "date_to": .object([
+                            "type": .string("string"),
+                            "description": .string("End date filter (YYYY-MM-DD)")
+                        ]),
+                    ]),
+                    "required": .array([.string("query")]),
+                ]),
+                annotations: .init(readOnlyHint: true)
+            ),
+            Tool(
+                name: "who_is",
+                description: "Get everything known about a person: meeting count, last seen, total speaking time, who they typically appear with, and representative quotes. Great for prepping before a meeting.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "speaker": .object([
+                            "type": .string("string"),
+                            "description": .string("Person's name (supports variants: Mike finds Michael)")
+                        ]),
+                    ]),
+                    "required": .array([.string("speaker")]),
+                ]),
+                annotations: .init(readOnlyHint: true)
+            ),
+            Tool(
+                name: "recap",
+                description: "Get a structured digest of all meetings in a date range. Returns each meeting with title, speakers, duration, and a preview of the first ~200 words. Perfect for 'What did I miss Monday through Wednesday?' or 'Summarize today's meetings'.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "date_from": .object([
+                            "type": .string("string"),
+                            "description": .string("Start date (YYYY-MM-DD). Defaults to today.")
+                        ]),
+                        "date_to": .object([
+                            "type": .string("string"),
+                            "description": .string("End date (YYYY-MM-DD). Defaults to same as date_from.")
+                        ]),
                     ]),
                 ]),
                 annotations: .init(readOnlyHint: true)
@@ -55,72 +115,258 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, dataDir: URL) 
     await server.withMethodHandler(CallTool.self) { params in
         do {
             switch params.name {
-            case "search_transcripts":
+            case "list_meetings":
+                return try handleListMeetings(params: params, index: index, dataDir: dataDir)
+            case "read_meeting":
+                return try handleReadMeeting(params: params, dataDir: dataDir)
+            case "search":
                 return try handleSearch(params: params, index: index)
-            case "get_speaker_history":
-                return try handleSpeakerHistory(params: params, index: index)
-            case "list_recent_meetings":
-                return try handleListMeetings(params: params, index: index)
+            case "who_is":
+                return try handleWhoIs(params: params, index: index)
+            case "recap":
+                return try handleRecap(params: params, index: index, dataDir: dataDir)
             default:
-                return .init(content: [.text(text:"Unknown tool: \(params.name)")], isError: true)
+                return .init(content: [.text(text: "Unknown tool: \(params.name)")], isError: true)
             }
         } catch {
-            return .init(content: [.text(text:"Error: \(error.localizedDescription)")], isError: true)
+            return .init(content: [.text(text: "Error: \(error.localizedDescription)")], isError: true)
         }
     }
 }
 
+// MARK: - list_meetings
+
+private func handleListMeetings(params: CallTool.Parameters, index: TranscriptIndex, dataDir: URL? = nil) throws -> CallTool.Result {
+    let count = params.arguments?["count"]?.intValue ?? 10
+    let date = params.arguments?["date"]?.stringValue
+    let dateFrom = params.arguments?["date_from"]?.stringValue ?? date
+    let dateTo = params.arguments?["date_to"]?.stringValue ?? date
+
+    var results = try index.listMeetings(count: count, dateFrom: dateFrom, dateTo: dateTo)
+
+    // Populate titles from markdown YAML frontmatter
+    if let dir = dataDir {
+        for i in results.indices {
+            let mdURL = dir.appendingPathComponent(results[i].filename + ".md")
+            if let content = try? String(contentsOf: mdURL, encoding: .utf8) {
+                results[i].title = extractTitle(from: content) ?? results[i].filename
+            }
+        }
+    }
+
+    if results.isEmpty {
+        return .init(content: [.text(text: "No meetings found.")])
+    }
+
+    let json = try JSONEncoder.pretty.encode(results)
+    return .init(content: [.text(text: String(data: json, encoding: .utf8) ?? "[]")])
+}
+
+/// Extract title from markdown YAML frontmatter
+private func extractTitle(from content: String) -> String? {
+    guard content.hasPrefix("---"),
+          let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) else { return nil }
+    let yaml = String(content[content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound])
+    for line in yaml.components(separatedBy: "\n") {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("title:") {
+            let title = trimmed.replacingOccurrences(of: "title:", with: "")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+            return title.isEmpty ? nil : title
+        }
+    }
+    return nil
+}
+
+// MARK: - read_meeting
+
+private func handleReadMeeting(params: CallTool.Parameters, dataDir: URL) throws -> CallTool.Result {
+    guard let filename = params.arguments?["filename"]?.stringValue, !filename.isEmpty else {
+        return .init(content: [.text(text: "Missing required parameter: filename")], isError: true)
+    }
+
+    let section = params.arguments?["section"]?.stringValue ?? "full"
+
+    // Try .md file first, then without extension
+    let mdURL = dataDir.appendingPathComponent(filename.hasSuffix(".md") ? filename : filename + ".md")
+
+    guard let content = try? String(contentsOf: mdURL, encoding: .utf8) else {
+        return .init(content: [.text(text: "Meeting not found: \(filename). Use list_meetings to see available meetings.")], isError: true)
+    }
+
+    switch section {
+    case "transcript":
+        // Return only the dialogue section
+        if let transcriptRange = content.range(of: "## Full Transcript\n") {
+            let dialogue = String(content[transcriptRange.upperBound...])
+                .components(separatedBy: "\n")
+                .filter { !$0.hasPrefix("*Generated by") && $0 != "---" }
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return .init(content: [.text(text: dialogue)])
+        }
+        return .init(content: [.text(text: content)])
+
+    case "speakers":
+        // Return YAML frontmatter + speaker analytics section
+        var result = ""
+        if content.hasPrefix("---"),
+           let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) {
+            result += String(content[content.startIndex...endRange.upperBound])
+        }
+        if let analyticsRange = content.range(of: "## Channel & Speaker Analytics") {
+            if let transcriptRange = content.range(of: "## Full Transcript") {
+                result += "\n" + String(content[analyticsRange.lowerBound..<transcriptRange.lowerBound])
+            } else {
+                result += "\n" + String(content[analyticsRange.lowerBound...])
+            }
+        }
+        return .init(content: [.text(text: result.isEmpty ? content : result)])
+
+    default: // "full"
+        return .init(content: [.text(text: content)])
+    }
+}
+
+// MARK: - search
+
 private func handleSearch(params: CallTool.Parameters, index: TranscriptIndex) throws -> CallTool.Result {
     guard let query = params.arguments?["query"]?.stringValue, !query.isEmpty else {
-        return .init(content: [.text(text:"Missing required parameter: query")], isError: true)
+        return .init(content: [.text(text: "Missing required parameter: query")], isError: true)
     }
 
     let speaker = params.arguments?["speaker"]?.stringValue
     let dateFrom = params.arguments?["date_from"]?.stringValue
     let dateTo = params.arguments?["date_to"]?.stringValue
 
-    let results = try index.searchUtterances(
-        query: query, speaker: speaker, dateFrom: dateFrom, dateTo: dateTo
-    )
+    let results = try index.searchUtterances(query: query, speaker: speaker, dateFrom: dateFrom, dateTo: dateTo)
 
     if results.results.isEmpty {
         var msg = "No results found for \"\(query)\""
         if let s = speaker { msg += " by \(s)" }
-        if let d = dateFrom { msg += " from \(d)" }
-        if let d = dateTo { msg += " to \(d)" }
-        return .init(content: [.text(text:msg)])
+        return .init(content: [.text(text: msg)])
     }
 
     let json = try JSONEncoder.pretty.encode(results)
-    return .init(content: [.text(text:String(data: json, encoding: .utf8) ?? "[]")])
+    return .init(content: [.text(text: String(data: json, encoding: .utf8) ?? "[]")])
 }
 
-private func handleSpeakerHistory(params: CallTool.Parameters, index: TranscriptIndex) throws -> CallTool.Result {
+// MARK: - who_is
+
+private func handleWhoIs(params: CallTool.Parameters, index: TranscriptIndex) throws -> CallTool.Result {
     guard let speaker = params.arguments?["speaker"]?.stringValue, !speaker.isEmpty else {
-        return .init(content: [.text(text:"Missing required parameter: speaker")], isError: true)
+        return .init(content: [.text(text: "Missing required parameter: speaker")], isError: true)
     }
 
-    let results = try index.getSpeakerHistory(speaker: speaker)
+    let profile = try index.getPersonProfile(speaker: speaker)
 
-    if results.meetings.isEmpty {
-        return .init(content: [.text(text:"No meetings found for speaker \"\(speaker)\". Use list_recent_meetings to see known speakers.")])
+    if profile.meetingCount == 0 {
+        return .init(content: [.text(text: "No meetings found for \"\(speaker)\". Try a different name or use list_meetings to see known speakers.")])
     }
 
-    let json = try JSONEncoder.pretty.encode(results)
-    return .init(content: [.text(text:String(data: json, encoding: .utf8) ?? "{}")])
+    let json = try JSONEncoder.pretty.encode(profile)
+    return .init(content: [.text(text: String(data: json, encoding: .utf8) ?? "{}")])
 }
 
-private func handleListMeetings(params: CallTool.Parameters, index: TranscriptIndex) throws -> CallTool.Result {
-    let count = params.arguments?["count"]?.intValue ?? 10
+// MARK: - recap
 
-    let results = try index.listRecentMeetings(count: count)
+private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, dataDir: URL) throws -> CallTool.Result {
+    let today = ISO8601DateFormatter().string(from: Date()).prefix(10)
+    let dateFrom = params.arguments?["date_from"]?.stringValue ?? String(today)
+    let dateTo = params.arguments?["date_to"]?.stringValue ?? dateFrom
 
-    if results.isEmpty {
-        return .init(content: [.text(text:"No meetings found. Record a meeting with Transcripted first.")])
+    let meetings = try index.listMeetings(count: 50, dateFrom: dateFrom, dateTo: dateTo)
+
+    if meetings.isEmpty {
+        return .init(content: [.text(text: "No meetings found from \(dateFrom) to \(dateTo).")])
     }
 
-    let json = try JSONEncoder.pretty.encode(results)
-    return .init(content: [.text(text:String(data: json, encoding: .utf8) ?? "[]")])
+    var recapParts: [RecapEntry] = []
+
+    for meeting in meetings {
+        // Read first ~200 words of transcript as preview
+        let mdURL = dataDir.appendingPathComponent(meeting.filename + ".md")
+        var preview = ""
+        var title = meeting.filename
+        if let content = try? String(contentsOf: mdURL, encoding: .utf8) {
+            title = extractTitle(from: content) ?? meeting.filename
+            if let transcriptRange = content.range(of: "## Full Transcript\n") {
+                let dialogue = String(content[transcriptRange.upperBound...])
+                    .components(separatedBy: "\n")
+                    .filter { !$0.isEmpty && !$0.hasPrefix("*Generated by") && $0 != "---" }
+                preview = dialogue.prefix(15).joined(separator: "\n")
+            }
+        }
+
+        recapParts.append(RecapEntry(
+            filename: meeting.filename,
+            title: title,
+            date: meeting.date,
+            datetime: meeting.datetime,
+            durationFormatted: formatDuration(meeting.durationSeconds),
+            speakers: meeting.speakers.map { $0.name },
+            wordCount: meeting.wordCount,
+            preview: preview
+        ))
+    }
+
+    let result = RecapResult(
+        dateRange: dateFrom == dateTo ? dateFrom : "\(dateFrom) to \(dateTo)",
+        meetingCount: recapParts.count,
+        meetings: recapParts
+    )
+
+    let json = try JSONEncoder.pretty.encode(result)
+    return .init(content: [.text(text: String(data: json, encoding: .utf8) ?? "[]")])
+}
+
+// MARK: - Output Types
+
+struct RecapEntry: Codable {
+    let filename: String
+    let title: String
+    let date: String
+    let datetime: String
+    let durationFormatted: String
+    let speakers: [String]
+    let wordCount: Int
+    let preview: String
+}
+
+struct RecapResult: Codable {
+    let dateRange: String
+    let meetingCount: Int
+    let meetings: [RecapEntry]
+}
+
+struct PersonProfile: Codable {
+    let name: String
+    let persistentSpeakerId: String?
+    let meetingCount: Int
+    let totalWordCount: Int
+    let totalSpeakingMinutes: Double
+    let firstSeen: String
+    let lastSeen: String
+    let frequentCoSpeakers: [String]
+    let recentMeetings: [PersonMeetingEntry]
+    let representativeQuotes: [String]
+}
+
+struct PersonMeetingEntry: Codable {
+    let filename: String
+    let date: String
+    let wordCount: Int
+    let speakingMinutes: Double
+    let otherSpeakers: [String]
+}
+
+// MARK: - Helpers
+
+private func formatDuration(_ seconds: Int) -> String {
+    let h = seconds / 3600
+    let m = (seconds % 3600) / 60
+    if h > 0 { return "\(h)h \(m)m" }
+    return "\(m)m"
 }
 
 extension JSONEncoder {
