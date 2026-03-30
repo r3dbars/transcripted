@@ -110,3 +110,4 @@ MEMORY.md
 *.pem
 .paperclip/
 release-*/
+.gstack/
