@@ -101,12 +101,26 @@ class DiarizationService: ObservableObject {
         offlineModelState = .loading
         let loadStart = Date()
 
-        // Configure speaker bounds for multi-party calls and cleaner embeddings.
-        // min: 2 forces VBx to look for multiple speakers (only system audio uses this path).
-        // max: 8 prevents hallucinated splits from codec artifacts.
-        // excludeOverlap: skip frames where 2+ speakers overlap, producing cleaner voiceprints.
-        var offlineConfig = OfflineDiarizerConfig.default.withSpeakers(min: 2, max: 8)
-        offlineConfig.embeddingExcludeOverlap = true
+        // Optimized config from DER grid search (v2, 100 iterations across 16 Zoom meetings).
+        // Key win: Fa 0.07→0.25 (~halves DER by letting VBx reconsider speaker assignments).
+        var offlineConfig = OfflineDiarizerConfig(
+            clusteringThreshold: 0.6,
+            Fa: 0.25,
+            Fb: 0.63,
+            windowDuration: 10.0,
+            segmentationStepRatio: 0.266,
+            embeddingBatchSize: 32,
+            embeddingExcludeOverlap: true,
+            minSegmentDuration: 1.1821,
+            minGapDuration: 0.2874,
+            exclusiveSegments: true,
+            speechOnsetThreshold: 0.4472,
+            speechOffsetThreshold: 0.4472,
+            segmentationMinDurationOn: 0.0,
+            segmentationMinDurationOff: 0.2738,
+            maxVBxIterations: 24,
+            convergenceTolerance: 0.0001
+        ).withSpeakers(min: 3, max: 11)
         let manager = OfflineDiarizerManager(config: offlineConfig)
 
         if let bundlePath = bundledModelsPath(directory: "offline-diarizer-models") {
