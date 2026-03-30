@@ -597,7 +597,9 @@ class DraftSessionController: ObservableObject {
                 acceptedText: editedText,
                 action: .paste,
                 exampleCount: appState.styleEngine.exampleCount,
-                formality: formalityLevel
+                formality: formalityLevel,
+                platform: platform.rawValue,
+                conversationContext: lastCapturedContext?.conversation
             )
             #if BETA_BUILD
             let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
