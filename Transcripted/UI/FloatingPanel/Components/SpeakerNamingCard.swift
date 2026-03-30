@@ -246,11 +246,14 @@ struct SpeakerNamingCard: View {
         let trimmed = nameText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
+        // Security: cap speaker name length before propagating to database and transcript files.
+        // Prevents unbounded strings from being written repeatedly across transcript files.
+        let safeName = String(trimmed.prefix(100))
         let action: SpeakerNameUpdate.NamingAction = isRejected ? .corrected : .named
         onUpdate(SpeakerNameUpdate(
             persistentSpeakerId: entry.id,
             sortformerSpeakerId: entry.sortformerSpeakerId,
-            newName: trimmed,
+            newName: safeName,
             action: action
         ))
     }

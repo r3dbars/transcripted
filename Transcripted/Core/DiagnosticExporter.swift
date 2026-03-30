@@ -56,7 +56,10 @@ class DiagnosticExporter {
     /// Create the diagnostic ZIP at the given URL
     private static func createDiagnosticZip(at outputURL: URL) throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("transcripted-diag-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        // Security: create the staging directory with owner-only permissions (0o700) before writing
+        // any files into it. The default createDirectory mode (0o755) would leave app logs and crash
+        // reports world-listable until the ZIP is written and the directory removed.
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
         // 1. System info
