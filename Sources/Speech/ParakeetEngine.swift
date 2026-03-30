@@ -55,7 +55,7 @@ class ParakeetEngine: ObservableObject {
     private var asrManager: AsrManager?
     private var audioWatchdogTask: Task<Void, Never>?
 
-    var isModelLoaded: Bool { asrManager?.isAvailable ?? false }
+    var isModelLoaded: Bool { asrManager != nil }
 
     var inputDeviceName: String {
         var deviceID = AudioDeviceID(0)
@@ -633,7 +633,7 @@ class ParakeetEngine: ObservableObject {
                 message: "No audio samples in buffer when transcribe() called")
             return nil
         }
-        guard let manager = asrManager, manager.isAvailable else {
+        guard let manager = asrManager else {
             print("❌ PARAKEET | ASR manager not available")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "asr_manager_unavailable",
                 message: "ASR manager not available for transcription")
@@ -726,10 +726,11 @@ class ParakeetEngine: ObservableObject {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
             wakeObserver = nil
         }
-        asrManager?.cleanup()
+        let mgr = asrManager
         asrManager = nil
         eouManager = nil
         modelDownloadState = .notLoaded
+        Task { await mgr?.cleanup() }
     }
 
     deinit {
@@ -741,7 +742,8 @@ class ParakeetEngine: ObservableObject {
         }
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
-        asrManager?.cleanup()
+        let mgr = asrManager
+        Task { await mgr?.cleanup() }
         eouManager = nil
     }
 }

@@ -30,6 +30,8 @@ struct FeedbackEntry: Codable {
     let action: AcceptAction
     let exampleCount: Int        // Style examples at time of accept
     let formality: String?       // Detected register: casual/professional/formal (from vision)
+    let platform: String?        // slack, imessage, email, etc. (from vision detection)
+    let conversationContext: String?  // Full OCR'd conversation text from screenshot
 
     enum CodingKeys: String, CodingKey {
         case timestamp
@@ -39,6 +41,8 @@ struct FeedbackEntry: Codable {
         case action
         case exampleCount = "example_count"
         case formality
+        case platform
+        case conversationContext = "conversation_context"
     }
 }
 
@@ -78,7 +82,9 @@ class FeedbackStore: ObservableObject {
         acceptedText: String,
         action: AcceptAction,
         exampleCount: Int,
-        formality: String? = nil
+        formality: String? = nil,
+        platform: String? = nil,
+        conversationContext: String? = nil
     ) {
         let entry = FeedbackEntry(
             timestamp: isoFormatter.string(from: Date()),
@@ -87,7 +93,9 @@ class FeedbackStore: ObservableObject {
             acceptedText: acceptedText,
             action: action,
             exampleCount: exampleCount,
-            formality: formality
+            formality: formality,
+            platform: platform,
+            conversationContext: conversationContext
         )
 
         guard let data = try? encoder.encode(entry) else {
