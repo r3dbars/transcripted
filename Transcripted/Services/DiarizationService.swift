@@ -177,14 +177,9 @@ class DiarizationService: ObservableObject {
             )
         }
 
-        // Log summary
         let speakerIds = Set(segments.map { $0.speakerId })
         AppLogger.transcription.info("Offline diarization complete", ["segments": "\(segments.count)", "speakers": "\(speakerIds.count)"])
-        for id in speakerIds.sorted() {
-            let speakerSegments = segments.filter { $0.speakerId == id }
-            let totalDuration = speakerSegments.reduce(0.0) { $0 + $1.duration }
-            AppLogger.transcription.debug("Speaker \(id): \(speakerSegments.count) segments, \(String(format: "%.1f", totalDuration))s")
-        }
+        logSpeakerSummaries(segments)
 
         return segments
     }
@@ -223,11 +218,7 @@ class DiarizationService: ObservableObject {
 
         let speakerIds = Set(segments.map { $0.speakerId })
         AppLogger.transcription.info("Sortformer diarization complete", ["segments": "\(segments.count)", "speakers": "\(speakerIds.count)"])
-        for id in speakerIds.sorted() {
-            let speakerSegments = segments.filter { $0.speakerId == id }
-            let totalDuration = speakerSegments.reduce(0.0) { $0 + $1.duration }
-            AppLogger.transcription.debug("Speaker \(id): \(speakerSegments.count) segments, \(String(format: "%.1f", totalDuration))s")
-        }
+        logSpeakerSummaries(segments)
 
         return segments
     }
@@ -236,6 +227,18 @@ class DiarizationService: ObservableObject {
     nonisolated func diarizeStreaming(audioURL: URL) async throws -> [SpeakerSegment] {
         let samples = try AudioResampler.loadAndResample(url: audioURL, targetRate: 16000)
         return try await diarizeStreaming(samples: samples, sampleRate: 16000)
+    }
+
+    // MARK: - Helpers
+
+    /// Log per-speaker segment summaries (shared by offline and streaming pipelines).
+    private nonisolated func logSpeakerSummaries(_ segments: [SpeakerSegment]) {
+        let speakerIds = Set(segments.map { $0.speakerId })
+        for id in speakerIds.sorted() {
+            let speakerSegments = segments.filter { $0.speakerId == id }
+            let totalDuration = speakerSegments.reduce(0.0) { $0 + $1.duration }
+            AppLogger.transcription.debug("Speaker \(id): \(speakerSegments.count) segments, \(String(format: "%.1f", totalDuration))s")
+        }
     }
 
     // MARK: - Cleanup

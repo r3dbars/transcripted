@@ -158,6 +158,16 @@ final class SpeakerDatabase {
         return columns
     }
 
+    /// Read a [Float] embedding from a BLOB column in a prepared SQLite statement.
+    private func readEmbedding(from statement: OpaquePointer?, column: Int32) -> [Float] {
+        guard let statement else { return [] }
+        let blobPtr = sqlite3_column_blob(statement, column)
+        let blobSize = sqlite3_column_bytes(statement, column)
+        guard let ptr = blobPtr, blobSize > 0 else { return [] }
+        let floatCount = Int(blobSize) / MemoryLayout<Float>.size
+        return Array(UnsafeBufferPointer(start: ptr.assumingMemoryBound(to: Float.self), count: floatCount))
+    }
+
     func executeSQL(_ sql: String) {
         var errorMessage: UnsafeMutablePointer<CChar>?
         if sqlite3_exec(db, sql, nil, nil, &errorMessage) != SQLITE_OK {
@@ -325,19 +335,7 @@ final class SpeakerDatabase {
                 let idStr = String(cString: sqlite3_column_text(statement, 0))
                 let displayName: String? = sqlite3_column_text(statement, 1).map { String(cString: $0) }
                 let nameSource: String? = sqlite3_column_text(statement, 2).map { String(cString: $0) }
-
-                // Read embedding BLOB
-                let blobPtr = sqlite3_column_blob(statement, 3)
-                let blobSize = sqlite3_column_bytes(statement, 3)
-                var embedding: [Float] = []
-                if let ptr = blobPtr, blobSize > 0 {
-                    let floatCount = Int(blobSize) / MemoryLayout<Float>.size
-                    embedding = Array(UnsafeBufferPointer(
-                        start: ptr.assumingMemoryBound(to: Float.self),
-                        count: floatCount
-                    ))
-                }
-
+                let embedding = readEmbedding(from: statement, column: 3)
                 let firstSeenStr = String(cString: sqlite3_column_text(statement, 4))
                 let lastSeenStr = String(cString: sqlite3_column_text(statement, 5))
                 let callCount = Int(sqlite3_column_int(statement, 6))
@@ -396,18 +394,7 @@ final class SpeakerDatabase {
                 let idStr = String(cString: sqlite3_column_text(statement, 0))
                 let displayName: String? = sqlite3_column_text(statement, 1).map { String(cString: $0) }
                 let nameSource: String? = sqlite3_column_text(statement, 2).map { String(cString: $0) }
-
-                let blobPtr = sqlite3_column_blob(statement, 3)
-                let blobSize = sqlite3_column_bytes(statement, 3)
-                var embedding: [Float] = []
-                if let ptr = blobPtr, blobSize > 0 {
-                    let floatCount = Int(blobSize) / MemoryLayout<Float>.size
-                    embedding = Array(UnsafeBufferPointer(
-                        start: ptr.assumingMemoryBound(to: Float.self),
-                        count: floatCount
-                    ))
-                }
-
+                let embedding = readEmbedding(from: statement, column: 3)
                 let firstSeenStr = String(cString: sqlite3_column_text(statement, 4))
                 let lastSeenStr = String(cString: sqlite3_column_text(statement, 5))
                 let callCount = Int(sqlite3_column_int(statement, 6))
