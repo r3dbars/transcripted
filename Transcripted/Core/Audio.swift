@@ -4,7 +4,6 @@ import QuartzCore
 import AppKit
 import CoreAudio
 import Combine
-import QuartzCore
 
 /// Status of system audio capture for UI feedback
 /// Used to show warnings when device switching or audio loss occurs

@@ -153,10 +153,7 @@ final class TranscriptIndex: @unchecked Sendable {
     func indexSingleFile(_ url: URL) throws {
         try queue.sync {
             let filename = url.deletingPathExtension().lastPathComponent
-            let modDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey])
-                .contentModificationDate?.timeIntervalSince1970) ?? Date().timeIntervalSince1970
             try reindex(file: url, filename: filename)
-            _ = modDate // used in reindex via file read
         }
     }
 
