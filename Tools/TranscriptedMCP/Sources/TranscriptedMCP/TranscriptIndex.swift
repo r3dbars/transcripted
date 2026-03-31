@@ -563,64 +563,7 @@ final class TranscriptIndex: @unchecked Sendable {
     }
 
     func listRecentMeetings(count: Int) throws -> [MeetingSummary] {
-        return try queue.sync {
-            let limit = max(1, min(count, 50))
-
-            var stmt: OpaquePointer?
-            let sql = "SELECT filename, date, datetime, duration_seconds, speaker_count, word_count FROM meetings ORDER BY datetime DESC LIMIT ?"
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-                throw MCPIndexError.queryFailed(dbError())
-            }
-            defer { sqlite3_finalize(stmt) }
-            sqlite3_bind_int(stmt, 1, Int32(limit))
-
-            var meetings: [MeetingSummary] = []
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                meetings.append(MeetingSummary(
-                    filename: colText(stmt, 0),
-                    date: colText(stmt, 1),
-                    datetime: colText(stmt, 2),
-                    durationSeconds: Int(sqlite3_column_int(stmt, 3)),
-                    speakerCount: Int(sqlite3_column_int(stmt, 4)),
-                    wordCount: Int(sqlite3_column_int(stmt, 5)),
-                    speakers: []
-                ))
-            }
-
-            // Batch-fetch speakers
-            if !meetings.isEmpty {
-                let filenames = meetings.map(\.filename)
-                let placeholders = filenames.map { _ in "?" }.joined(separator: ", ")
-                let speakerSql = "SELECT filename, speaker_name, persistent_speaker_id, word_count, speaking_seconds FROM meeting_speakers WHERE filename IN (\(placeholders))"
-
-                var spStmt: OpaquePointer?
-                guard sqlite3_prepare_v2(db, speakerSql, -1, &spStmt, nil) == SQLITE_OK else {
-                    return meetings
-                }
-                defer { sqlite3_finalize(spStmt) }
-
-                for (i, f) in filenames.enumerated() {
-                    sqlite3_bind_text(spStmt, Int32(i + 1), (f as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                }
-
-                var speakersByMeeting: [String: [MeetingSpeaker]] = [:]
-                while sqlite3_step(spStmt) == SQLITE_ROW {
-                    let filename = colText(spStmt, 0)
-                    speakersByMeeting[filename, default: []].append(MeetingSpeaker(
-                        name: colText(spStmt, 1),
-                        persistentSpeakerId: colTextOptional(spStmt, 2),
-                        wordCount: Int(sqlite3_column_int(spStmt, 3)),
-                        speakingSeconds: sqlite3_column_double(spStmt, 4)
-                    ))
-                }
-
-                for i in meetings.indices {
-                    meetings[i].speakers = speakersByMeeting[meetings[i].filename] ?? []
-                }
-            }
-
-            return meetings
-        }
+        try listMeetings(count: count)
     }
 
     private func getFirstUtterance(filename: String, speaker: String) throws -> String {
