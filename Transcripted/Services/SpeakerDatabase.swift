@@ -371,6 +371,10 @@ final class SpeakerDatabase {
     }
 
     func allSpeakersImpl() -> [SpeakerProfile] {
+        guard isDatabaseOpen else {
+            AppLogger.speakers.error("allSpeakers called while database is not open")
+            return []
+        }
         var speakers: [SpeakerProfile] = []
         let sql = "SELECT id, display_name, name_source, embedding, first_seen, last_seen, call_count, confidence, dispute_count FROM speakers ORDER BY last_seen DESC;"
         var statement: OpaquePointer?
