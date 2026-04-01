@@ -1,32 +1,34 @@
 # Onboarding
 
-4-step first-run flow that gates access to the main app until permissions and models are ready. 7 Swift files. Dark theme matching the product.
+5-step first-run flow that gates access to the main app until permissions and models are ready. 8 Swift files. Dark theme matching the product.
 
 ## File Index
 
 | File | Purpose |
 |------|---------|
-| `OnboardingState.swift` | Central state manager (`@Observable`). Step progression, permission status, model readiness. |
+| `OnboardingState.swift` | Central state manager (`@Observable`). Step progression, permission status, model readiness, test recording. |
 | `OnboardingContainerView.swift` | View orchestrator. Opacity transitions, circle progress dots, standard nav buttons, auto-advance. |
 | `OnboardingWindow.swift` | NSWindowController. 640x560 window, dark opaque background, fade-in animation, close = skip. |
-| `Steps/WelcomeStep.swift` | Welcome screen. Icon + 3 BenefitCards with simple fade-in. See Steps/CLAUDE.md |
 | `Steps/PreviewStep.swift` | Sample transcript preview. Staggered line reveal showing "aha moment". See Steps/CLAUDE.md |
 | `Steps/PermissionsStep.swift` | Permission request. Mic (REQUIRED to proceed) + Screen Recording (optional). See Steps/CLAUDE.md |
 | `Steps/ModelSetupStep.swift` | Model downloads. Progress bars, download speed/ETA, structured errors. See Steps/CLAUDE.md |
+| `Steps/HowItWorksStep.swift` | Explains menu bar pill location, hotkey, and transcript save path. See Steps/CLAUDE.md |
+| `Steps/TestRecordingStep.swift` | 8-screen guided demo: meets pill UI, live test recording, transcription preview. canProceed when testRecordingPhase == .complete. See Steps/CLAUDE.md |
 
 ## Step Order
 ```
-1. Welcome     -> always canProceed
-2. Preview     -> always canProceed (sample transcript "aha moment")
-3. Permissions  -> canProceed only when microphoneGranted (mic REQUIRED)
-4. Model Setup  -> canProceed only when parakeetReady AND diarizationReady
+1. Preview       -> always canProceed (sample transcript "aha moment")
+2. Permissions   -> canProceed only when microphoneGranted (mic REQUIRED)
+3. Model Setup   -> canProceed only when parakeetReady AND diarizationReady
+4. How It Works  -> always canProceed (menu bar location, hotkey, save path)
+5. Test Recording -> canProceed only when testRecordingPhase == .complete
 ```
 
 ## OnboardingState Key Properties
 ```swift
 // Step navigation
-currentStep: OnboardingStep (.welcome | .preview | .permissions | .modelSetup)
-stepProgress: Double (0.0-1.0), stepNumber: Int (1-4), totalSteps: 4
+currentStep: OnboardingStep (.preview | .permissions | .modelSetup | .howItWorks | .testRecording)
+stepProgress: Double (0.0-1.0), stepNumber: Int (1-5), totalSteps: 5
 
 // Permissions
 microphoneStatus: AVAuthorizationStatus
@@ -43,6 +45,11 @@ parakeetPhase: String, diarizationPhase: String ("Downloading...", "Compiling mo
 isLoadingModels: Bool, modelError: String? (concatenated errors with \n)
 modelErrorKind: DownloadErrorKind? (structured error classification from ModelDownloadService)
 downloadSpeed: Double (bytes/sec, smoothed), estimatedTimeRemaining: TimeInterval? (nil when unknown)
+
+// Test recording (step 5)
+testRecordingPhase: TestRecordingPhase (.ready | .recording | .transcribing | .complete | .failed)
+testRecordingError: String? (e.g. "Recording too short", "No speech detected")
+testRecordingDuration: Int (seconds recorded)
 ```
 
 ## Microphone Permission Fix (OnboardingState.swift + PermissionsStep.swift)
