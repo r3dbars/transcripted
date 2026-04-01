@@ -17,7 +17,9 @@ final class SpeakerDatabase {
     let queue = DispatchQueue(label: "com.transcripted.speakerdb", qos: .utility)
 
     private init() {
-        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        guard let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            fatalError("SpeakerDatabase: no documents directory available")
+        }
         let transcriptedFolder = documentsPath.appendingPathComponent("Transcripted")
         try? FileManager.default.createDirectory(at: transcriptedFolder, withIntermediateDirectories: true)
 

@@ -177,7 +177,8 @@ private func handleListMeetings(params: CallTool.Parameters, index: TranscriptIn
 
 /// Extract title from markdown YAML frontmatter
 private func extractTitle(from content: String) -> String? {
-    guard content.hasPrefix("---"),
+    // Minimum valid frontmatter is "---\n...\n---\n" (8+ chars)
+    guard content.count >= 8, content.hasPrefix("---"),
           let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) else { return nil }
     let yaml = String(content[content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound])
     for line in yaml.components(separatedBy: "\n") {
@@ -203,6 +204,11 @@ private func handleReadMeeting(params: CallTool.Parameters, dataDir: URL) throws
     // Try .md file first, then without extension
     let mdURL = dataDir.appendingPathComponent(filename.hasSuffix(".md") ? filename : filename + ".md")
 
+    // Prevent path traversal — resolved path must stay within dataDir
+    guard mdURL.standardizedFileURL.path.hasPrefix(dataDir.standardizedFileURL.path) else {
+        return .init(content: [.text(text: "Invalid filename")], isError: true)
+    }
+
     guard let content = try? String(contentsOf: mdURL, encoding: .utf8) else {
         return .init(content: [.text(text: "Meeting not found: \(filename). Use list_meetings to see available meetings.")], isError: true)
     }
@@ -223,7 +229,7 @@ private func handleReadMeeting(params: CallTool.Parameters, dataDir: URL) throws
     case "speakers":
         // Return YAML frontmatter + speaker analytics section
         var result = ""
-        if content.hasPrefix("---"),
+        if content.count >= 8, content.hasPrefix("---"),
            let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) {
             result += String(content[content.startIndex...endRange.upperBound])
         }
@@ -300,6 +306,8 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, da
     for meeting in meetings {
         // Read first ~200 words of transcript as preview
         let mdURL = dataDir.appendingPathComponent(meeting.filename + ".md")
+        // Skip files that would escape dataDir (path traversal)
+        guard mdURL.standardizedFileURL.path.hasPrefix(dataDir.standardizedFileURL.path) else { continue }
         var preview = ""
         var title = meeting.filename
         if let content = try? String(contentsOf: mdURL, encoding: .utf8) {
