@@ -149,7 +149,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, dataDir: URL) 
 
 // MARK: - list_meetings
 
-private func handleListMeetings(params: CallTool.Parameters, index: TranscriptIndex, dataDir: URL? = nil) throws -> CallTool.Result {
+private func handleListMeetings(params: CallTool.Parameters, index: TranscriptIndex, dataDir: URL) throws -> CallTool.Result {
     let count = params.arguments?["count"]?.intValue ?? 10
     let date = params.arguments?["date"]?.stringValue
     let dateFrom = params.arguments?["date_from"]?.stringValue ?? date
@@ -158,12 +158,10 @@ private func handleListMeetings(params: CallTool.Parameters, index: TranscriptIn
     var results = try index.listMeetings(count: count, dateFrom: dateFrom, dateTo: dateTo)
 
     // Populate titles from markdown YAML frontmatter
-    if let dir = dataDir {
-        for i in results.indices {
-            let mdURL = dir.appendingPathComponent(results[i].filename + ".md")
-            if let content = try? String(contentsOf: mdURL, encoding: .utf8) {
-                results[i].title = extractTitle(from: content) ?? results[i].filename
-            }
+    for i in results.indices {
+        let mdURL = dataDir.appendingPathComponent(results[i].filename + ".md")
+        if let content = try? String(contentsOf: mdURL, encoding: .utf8) {
+            results[i].title = extractTitle(from: content) ?? results[i].filename
         }
     }
 

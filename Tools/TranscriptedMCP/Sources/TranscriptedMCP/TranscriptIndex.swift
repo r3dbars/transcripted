@@ -296,7 +296,7 @@ final class TranscriptIndex: @unchecked Sendable {
                     text: colText(stmt, 3),
                     date: colText(stmt, 4),
                     datetime: colText(stmt, 5),
-                    duration: Int(sqlite3_column_int(stmt, 6))
+                    duration: Int(sqlite3_column_int64(stmt, 6))
                 ))
             }
 
@@ -385,11 +385,11 @@ final class TranscriptIndex: @unchecked Sendable {
                     filename: filename,
                     speakerName: speakerName,
                     persistentSpeakerId: colTextOptional(stmt, 2),
-                    wordCount: Int(sqlite3_column_int(stmt, 3)),
+                    wordCount: Int(sqlite3_column_int64(stmt, 3)),
                     speakingSeconds: sqlite3_column_double(stmt, 4),
                     meetingDate: colText(stmt, 5),
-                    meetingDurationSeconds: Int(sqlite3_column_int(stmt, 6)),
-                    meetingSpeakerCount: Int(sqlite3_column_int(stmt, 7)),
+                    meetingDurationSeconds: Int(sqlite3_column_int64(stmt, 6)),
+                    meetingSpeakerCount: Int(sqlite3_column_int64(stmt, 7)),
                     previewSnippet: String(previewSnippet.prefix(150))
                 ))
             }
@@ -447,9 +447,9 @@ final class TranscriptIndex: @unchecked Sendable {
                     filename: colText(stmt, 0),
                     date: colText(stmt, 1),
                     datetime: colText(stmt, 2),
-                    durationSeconds: Int(sqlite3_column_int(stmt, 3)),
-                    speakerCount: Int(sqlite3_column_int(stmt, 4)),
-                    wordCount: Int(sqlite3_column_int(stmt, 5)),
+                    durationSeconds: Int(sqlite3_column_int64(stmt, 3)),
+                    speakerCount: Int(sqlite3_column_int64(stmt, 4)),
+                    wordCount: Int(sqlite3_column_int64(stmt, 5)),
                     speakers: []
                 ))
             }
@@ -476,7 +476,7 @@ final class TranscriptIndex: @unchecked Sendable {
                     speakersByMeeting[filename, default: []].append(MeetingSpeaker(
                         name: colText(spStmt, 1),
                         persistentSpeakerId: colTextOptional(spStmt, 2),
-                        wordCount: Int(sqlite3_column_int(spStmt, 3)),
+                        wordCount: Int(sqlite3_column_int64(spStmt, 3)),
                         speakingSeconds: sqlite3_column_double(spStmt, 4)
                     ))
                 }
@@ -597,7 +597,7 @@ final class TranscriptIndex: @unchecked Sendable {
         case .text(let s):
             sqlite3_bind_text(stmt, index, (s as NSString).utf8String, -1, SQLITE_TRANSIENT)
         case .int(let i):
-            sqlite3_bind_int(stmt, index, Int32(i))
+            sqlite3_bind_int64(stmt, index, Int64(i))
         case .double(let d):
             sqlite3_bind_double(stmt, index, d)
         case .null:
