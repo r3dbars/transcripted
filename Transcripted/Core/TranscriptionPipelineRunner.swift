@@ -284,8 +284,11 @@ extension TranscriptionTaskManager {
                         let hasQwenSuggestion = qwenName != nil && qwenName != "Unknown"
 
                         let qwenResult: QwenInferenceResult
-                        if hasQwenSuggestion {
-                            qwenResult = .suggested(name: qwenName!)
+                        // Security: guard against force-unwrap; hasQwenSuggestion only becomes true
+                        // when qwenName != nil, but use guard let for defensive nil safety —
+                        // avoids a crash if the predicate logic is ever refactored.
+                        if hasQwenSuggestion, let safeName = qwenName {
+                            qwenResult = .suggested(name: safeName)
                         } else if qwenRan {
                             qwenResult = .noNameFound
                         } else {

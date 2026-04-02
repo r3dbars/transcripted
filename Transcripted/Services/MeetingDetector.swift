@@ -211,7 +211,10 @@ class MeetingDetector: ObservableObject {
                 silenceStartTime = nil
             } else {
                 if silenceStartTime == nil { silenceStartTime = Date() }
-                let silenceDuration = Date().timeIntervalSince(silenceStartTime!)
+                // Security: guard against force-unwrap — silenceStartTime is set on the line above,
+                // but use guard let for defensive safety in case of future async/reentrant refactors.
+                guard let silenceStart = silenceStartTime else { return }
+                let silenceDuration = Date().timeIntervalSince(silenceStart)
                 if silenceDuration >= silenceGracePeriod {
                     AppLogger.app.info("MeetingDetector: silence grace period elapsed — stopping")
                     if UserDefaults.standard.bool(forKey: "autoRecordMeetings") {
@@ -235,7 +238,11 @@ class MeetingDetector: ObservableObject {
                 bidirectionalStartTime = Date()
                 AppLogger.app.debug("MeetingDetector: bidirectional audio started")
             }
-            let duration = Date().timeIntervalSince(bidirectionalStartTime!)
+            // Security: guard against force-unwrap — bidirectionalStartTime is set above,
+            // but guard let protects against a crash if state is mutated concurrently or
+            // the surrounding logic is refactored in the future.
+            guard let bidirectionalStart = bidirectionalStartTime else { return }
+            let duration = Date().timeIntervalSince(bidirectionalStart)
             if duration >= requiredBidirectionalDuration {
                 let appName = activeMeetingApp ?? "Meeting"
                 AppLogger.app.info("MeetingDetector: sustained bidirectional audio — auto-starting", [
