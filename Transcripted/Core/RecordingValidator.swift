@@ -138,7 +138,7 @@ class RecordingValidator {
     /// Checks if audio devices are accessible
     private static func checkAudioDevices() -> ValidationResult? {
         // Check microphone device
-        guard let defaultInputDevice = AVCaptureDevice.default(for: .audio) else {
+        guard AVCaptureDevice.default(for: .audio) != nil else {
             return .failure("No microphone found. Connect a microphone or headset and try again.")
         }
 
