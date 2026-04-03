@@ -1,6 +1,6 @@
 # Onboarding
 
-5-step first-run flow that gates access to the main app until permissions and models are ready. 8 Swift files. Dark theme matching the product.
+6-step first-run flow that gates access to the main app until permissions and models are ready. 9 Swift files. Dark theme matching the product.
 
 ## File Index
 
@@ -9,6 +9,7 @@
 | `OnboardingState.swift` | Central state manager (`@Observable`). Step progression, permission status, model readiness, test recording. |
 | `OnboardingContainerView.swift` | View orchestrator. Opacity transitions, circle progress dots, standard nav buttons, auto-advance. |
 | `OnboardingWindow.swift` | NSWindowController. 640x560 window, dark opaque background, fade-in animation, close = skip. |
+| `Steps/WelcomeStep.swift` | Welcome step — value proposition with benefit cards. Dark theme. See Steps/CLAUDE.md |
 | `Steps/PreviewStep.swift` | Sample transcript preview. Staggered line reveal showing "aha moment". See Steps/CLAUDE.md |
 | `Steps/PermissionsStep.swift` | Permission request. Mic (REQUIRED to proceed) + Screen Recording (optional). See Steps/CLAUDE.md |
 | `Steps/ModelSetupStep.swift` | Model downloads. Progress bars, download speed/ETA, structured errors. See Steps/CLAUDE.md |
@@ -17,18 +18,19 @@
 
 ## Step Order
 ```
-1. Preview       -> always canProceed (sample transcript "aha moment")
-2. Permissions   -> canProceed only when microphoneGranted (mic REQUIRED)
-3. Model Setup   -> canProceed only when parakeetReady AND diarizationReady
-4. How It Works  -> always canProceed (menu bar location, hotkey, save path)
-5. Test Recording -> canProceed only when testRecordingPhase == .complete
+1. Welcome       -> always canProceed (value proposition with benefit cards)
+2. Preview       -> always canProceed (sample transcript "aha moment")
+3. Permissions   -> canProceed only when microphoneGranted (mic REQUIRED)
+4. Model Setup   -> canProceed only when parakeetReady AND diarizationReady
+5. How It Works  -> always canProceed (menu bar location, hotkey, save path)
+6. Test Recording -> canProceed only when testRecordingPhase == .complete
 ```
 
 ## OnboardingState Key Properties
 ```swift
 // Step navigation
-currentStep: OnboardingStep (.preview | .permissions | .modelSetup | .howItWorks | .testRecording)
-stepProgress: Double (0.0-1.0), stepNumber: Int (1-5), totalSteps: 5
+currentStep: OnboardingStep (.welcome | .preview | .permissions | .modelSetup | .howItWorks | .testRecording)
+stepProgress: Double (0.0-1.0), stepNumber: Int (1-6), totalSteps: 6
 
 // Permissions
 microphoneStatus: AVAuthorizationStatus
@@ -46,7 +48,7 @@ isLoadingModels: Bool, modelError: String? (concatenated errors with \n)
 modelErrorKind: DownloadErrorKind? (structured error classification from ModelDownloadService)
 downloadSpeed: Double (bytes/sec, smoothed), estimatedTimeRemaining: TimeInterval? (nil when unknown)
 
-// Test recording (step 5)
+// Test recording (step 6)
 testRecordingPhase: TestRecordingPhase (.ready | .recording | .transcribing | .complete | .failed)
 testRecordingError: String? (e.g. "Recording too short", "No speech detected")
 testRecordingDuration: Int (seconds recorded)
@@ -106,7 +108,7 @@ setupApp()
 - At >95%: phase changes to "Compiling models..."
 
 ## Navigation
-- Progress indicator: 4 circle dots (8pt), recordingCoral filled for completed/active, panelCharcoalSurface for upcoming
+- Progress indicator: 6 circle dots (8pt), recordingCoral filled for completed/active, panelCharcoalSurface for upcoming
 - Nav buttons: standard SwiftUI `.borderedProminent` / `.bordered` tinted recordingCoral
 - No "Skip for now" link — user must complete onboarding properly
 - Close button still calls completeOnboarding + onComplete as safety valve (prevents invisible app state)
