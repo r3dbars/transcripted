@@ -81,6 +81,7 @@ extension AppDelegate {
         let debugItem = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
         let debugMenu = NSMenu()
         debugMenu.addItem(NSMenuItem(title: "Reset Onboarding", action: #selector(resetOnboarding), keyEquivalent: ""))
+        debugMenu.addItem(NSMenuItem(title: "Open Logs Folder", action: #selector(openLogsFolder), keyEquivalent: ""))
         debugMenu.addItem(NSMenuItem(title: "Test Naming Tray", action: #selector(testNamingTray), keyEquivalent: ""))
         debugItem.submenu = debugMenu
         menu.addItem(debugItem)
