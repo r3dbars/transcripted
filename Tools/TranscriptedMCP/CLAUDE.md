@@ -1,63 +1,87 @@
 # TranscriptedMCP
 
-MCP (Model Context Protocol) server that gives Claude Desktop direct read-only access to Transcripted meeting data. 8 Swift files.
+Standalone MCP server (`transcripted-mcp`) for querying Transcripted meeting data from Claude Desktop or any MCP-compatible client. Reads the same `~/Documents/Transcripted/` artifacts produced by the main app — no direct access to the app or its databases.
 
-## File Index
+## File Index (Sources/TranscriptedMCP/)
 
 | File | Purpose |
 |------|---------|
-| `Main.swift` | Entry point. Parses `TRANSCRIPTED_DATA_DIR` env, initialises `TranscriptIndex`, launches `FileWatcher`, starts MCP server over stdio. |
-| `ToolHandlers.swift` | Registers all 5 tools with the MCP server and implements their handler logic. |
-| `Models.swift` | Shared model types decoded from JSON sidecars: `AgentTranscript`, `AgentUtterance`, `AgentSpeaker`, `MeetingRow`, `SearchResults`. |
-| `TranscriptIndex.swift` | SQLite index (`mcp_index.sqlite`) over `~/Documents/Transcripted/`. Thread-safe via serial DispatchQueue. FTS5 full-text search, speaker analytics. |
-| `TranscriptLoader.swift` | Loads and decodes `.json` sidecar files from the data directory. `enumerateSidecars()` enumerates `Call_*.json`. |
-| `FileWatcher.swift` | FSEvents-based directory watcher + 30s reconciliation timer. Calls `onChange` when new/modified sidecars are detected. |
-| `NameVariants.swift` | Name variant expansion (mirrors `SpeakerProfileMerger.swift`). `NameVariants.expand("mike")` → `["michael", "mike", "mikey"]`. |
+| `Main.swift` | `@main` entry point: initialises TranscriptIndex, starts FileWatcher, creates MCP Server with StdioTransport |
+| `ToolHandlers.swift` | Registers all 5 MCP tool handlers with the server; contains per-tool request parsing and JSON serialisation |
+| `TranscriptIndex.swift` | SQLite-backed index rebuilt from JSON sidecars; `reconcile()` full rebuild, `indexSingleFile()` incremental update, query methods for all tools |
 | `TranscriptIndex+Queries.swift` | Complex query methods on `TranscriptIndex`: `listMeetings`, `searchUtterances`, `getPersonProfile`, `indexSidecar`. |
+| `TranscriptLoader.swift` | Loads `.md` transcript files from disk for `read_meeting` |
+| `Models.swift` | All Codable input/output structs (AgentTranscript, MeetingSummary, SearchResult, SpeakerHistoryResult, etc.) and `MCPIndexError` |
+| `NameVariants.swift` | Speaker name fuzzy-matching — `Mike` finds `Michael`, handles nicknames and first-name-only lookups |
+| `FileWatcher.swift` | `DispatchSource`-based directory watcher; calls back with changed URL for incremental index updates |
 
-## Tools Exposed (5)
+## Test Files (Tests/TranscriptedMCPTests/)
 
-| Tool | Required params | Description |
-|------|----------------|-------------|
-| `list_meetings` | — | Lists meetings with speakers, duration, word count. Filters: `count` (default 10), `date`, `date_from`, `date_to`. |
-| `read_meeting` | `filename` | Full transcript markdown for a meeting. `section`: `full` (default), `transcript`, `speakers`. |
-| `search` | `query` | FTS5 full-text search across all utterances. Filters: `speaker`, `date_from`, `date_to`. Name variants applied to speaker filter. |
-| `who_is` | `speaker` | Speaker profile: meeting count, total words, speaking minutes, frequent co-speakers, representative quotes. |
-| `recap` | — | Digest of meetings in a date range. Defaults to today. Returns title, speakers, duration, first ~15 transcript lines per meeting. |
+| File | Purpose |
+|------|---------|
+| `TranscriptIndexTests.swift` | Full index lifecycle: reconcile, query, date filters, speaker search |
+| `TranscriptLoaderTests.swift` | Markdown + YAML frontmatter parsing edge cases |
+| `NameVariantsTests.swift` | Name variant matching accuracy |
+| `TestHelpers.swift` | Shared fixture builders (sample JSON sidecars, temp directories) |
 
-## Data Directory
-- Default: `~/Documents/Transcripted/`
-- Override: `TRANSCRIPTED_DATA_DIR` environment variable
-- Reads: `Call_*.json` JSON sidecars written by `AgentOutput.writeTranscriptJSON()`
-- Index: `mcp_index.sqlite` (auto-built and kept up to date via `FileWatcher`)
-- Index permissions: `0o600` (owner-only)
+## MCP Tools (5 tools, all read-only)
 
-## SQLite Index Schema (TranscriptIndex.swift)
-- **meetings** table: `filename`, `date`, `datetime`, `duration_seconds`, `word_count`, `speakers_json`
-- **utterances** table: `filename`, `speaker`, `start_time`, `end_time`, `text`, `channel`
-- **utterances_fts** virtual FTS5 table: mirrors `utterances.text` for full-text search
+| Tool | Description |
+|------|-------------|
+| `list_meetings` | List meetings with metadata (date, duration, speakers, word count). Optional: `count` (default 10, max 50), `date`, `date_from`, `date_to` |
+| `read_meeting` | Full transcript for a single meeting by filename. Optional `section`: `full` (default), `transcript` (dialogue only), `speakers` (analytics only) |
+| `search` | Full-text search across all transcripts. Required: `query`. Optional: `speaker` (name variant matching), `date_from`, `date_to`. Returns grouped results by meeting |
+| `who_is` | Person profile: meeting count, last seen, total speaking time, co-speakers, representative quotes. Required: `speaker` |
+| `recap` | Structured day/week digest with per-meeting title + speaker list + ~200-word preview. Optional: `date_from`, `date_to` (both default to today) |
 
-## Name Variants (NameVariants.swift)
-Bidirectional mapping sourced from `SpeakerProfileMerger.swift`. Example expansions:
-- `mike` / `michael` / `mikey` → each finds all three
-- `nate` / `nathan` / `nathaniel` → each finds all three
-- `dave` / `david` → each finds both
-Applied automatically in `search` (speaker filter) and `who_is`.
+## Data Flow
+```
+~/Documents/Transcripted/*.json  (AgentOutput JSON sidecars)
+  -> TranscriptIndex.reconcile()  (on startup: full SQLite rebuild)
+  -> FileWatcher callback          (on new file: indexSingleFile())
+  -> SQLite index                  (in-memory + on-disk, :memory: during tests)
 
-## File Watcher (FileWatcher.swift)
-- FSEvents `O_EVTONLY` watch on the data directory + 30s fallback polling timer
-- On change: calls `TranscriptIndex.indexSidecar()` for new/modified files
-- Reconciliation: scans all sidecars on timer tick to catch missed events
-
-## Build
-```bash
-cd Tools/TranscriptedMCP
-swift build -c release
-.build/release/transcripted-mcp
+~/Documents/Transcripted/*.md    (Markdown transcripts)
+  -> TranscriptLoader.load()      (on read_meeting requests only)
 ```
 
-## Claude Desktop Config
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+## Index Database Schema
+```sql
+-- meetings: one row per JSON sidecar
+id TEXT PRIMARY KEY,      -- filename stem (e.g. "Call_2026-03-26_16-04-11")
+date TEXT,                -- YYYY-MM-DD
+datetime TEXT,            -- ISO 8601
+duration_seconds INT,
+speaker_count INT,
+word_count INT,
+speakers_json TEXT,       -- JSON array of MeetingSpeaker
+title TEXT                -- from YAML frontmatter (nullable)
+
+-- utterances: one row per utterance, FTS5-indexed
+meeting_id TEXT,
+speaker TEXT,
+speaker_id TEXT,          -- persistent DB ID (nullable)
+start REAL,
+end REAL,
+text TEXT
+```
+WAL mode, `busy_timeout 5000ms`. Index file: `~/Documents/Transcripted/mcp_index.sqlite` (auto-recreated on corruption).
+
+## Environment / Config
+- `TRANSCRIPTED_DATA_DIR` — override data directory (default: `~/Documents/Transcripted`)
+- No other configuration; no credentials, no network calls
+
+## Build & Test
+```bash
+# From repo root
+cd Tools/TranscriptedMCP
+swift build
+swift test
+
+# Binary lands at: .build/debug/transcripted-mcp
+```
+
+## Claude Desktop Setup (claude_desktop_config.json)
 ```json
 {
   "mcpServers": {
@@ -73,10 +97,17 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 - Name variant logic mirrors `Services/SpeakerProfileMerger.swift`
 - No compile-time dependency on the main Transcripted target — standalone Swift package
 
+## Threading Model
+- All MCP handler callbacks are `async`; SQLite access is synchronous inside each handler (single-process, no shared state across requests)
+- FileWatcher runs on a `DispatchQueue`; `indexSingleFile()` is safe to call from any queue (SQLite journal mode handles concurrent reads)
+
 ## Gotchas
 - Server communicates over stdio (MCP transport) — no HTTP port
 - Index is rebuilt from scratch if `PRAGMA quick_check` fails (corrupt DB auto-recovery)
+- `reconcile()` scans all `.json` files in the data dir on every startup — fast enough for hundreds of files but O(n) on sidecar count
 - `who_is` and `search speaker` filters expand names via NameVariants before querying
-- `read_meeting` reads `.md` files (not JSON sidecars) to return formatted transcript markdown
+- `read_meeting` reads `.md` files directly from disk (not from the index) — always returns current file content
 - `recap` preview is first 15 non-empty transcript lines (not a summary — just raw dialogue)
 - All tools are `readOnlyHint: true` — no writes to the data directory
+- Name variant matching (`NameVariants.swift`) is heuristic; uncommon nicknames may not resolve
+- The MCP server binary is separate from the main Transcripted app; updating the app does not update the server binary
