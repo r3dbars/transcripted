@@ -42,9 +42,7 @@ struct TroubleshootingSettingsSection: View {
                 notGrantedIcon: "xmark.circle.fill",
                 notGrantedColor: .errorRed,
                 fixAction: {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
-                        NSWorkspace.shared.open(url)
-                    }
+                    SystemSettingsHelper.openMicrophoneSettings()
                 }
             )
 
@@ -56,9 +54,7 @@ struct TroubleshootingSettingsSection: View {
                 notGrantedIcon: "exclamationmark.triangle.fill",
                 notGrantedColor: .warningAmber,
                 fixAction: {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-                        NSWorkspace.shared.open(url)
-                    }
+                    SystemSettingsHelper.openScreenRecordingSettings()
                 }
             )
         }
@@ -140,13 +136,8 @@ struct TroubleshootingSettingsSection: View {
 
             Button {
                 let url = URL(fileURLWithPath: path)
-                if FileManager.default.fileExists(atPath: path) {
-                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: url.path)
-                } else {
-                    // Create directory and open if it doesn't exist
-                    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: url.path)
-                }
+                try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: url.path)
             } label: {
                 HStack(spacing: Spacing.xs) {
                     Image(systemName: "folder")
@@ -207,14 +198,7 @@ struct TroubleshootingSettingsSection: View {
     }
 
     private var screenRecordingGranted: Bool {
-        guard let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
-            return false
-        }
-        let myPID = ProcessInfo.processInfo.processIdentifier
-        return windowList.contains { dict in
-            guard let pid = dict[kCGWindowOwnerPID as String] as? Int32 else { return false }
-            return pid != myPID
-        }
+        CGPreflightScreenCaptureAccess()
     }
 
     private var transcriptsPath: String {

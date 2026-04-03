@@ -243,7 +243,6 @@ struct FloatingPanelView: View {
                 }
             }
         }
-        // Surface audio errors (mic denied, disk full, engine crash) as toasts
         .onChange(of: audio.error) { _, newError in
             if let message = newError {
                 triggerErrorToast(message: message)
