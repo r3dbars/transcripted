@@ -244,6 +244,9 @@ class Audio: ObservableObject {
     private var sleepObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
 
+    // Disk space check counter — checked every 150 timer ticks (~30s at 0.2s interval)
+    var diskCheckCounter: Int = 0
+
     // Callback for when recording completes
     var onRecordingComplete: ((URL?, URL?) -> Void)?
 

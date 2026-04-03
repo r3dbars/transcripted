@@ -43,6 +43,8 @@ extension TranscriptionTaskManager {
         healthInfo: RecordingHealthInfo?
     ) async throws -> URL {
 
+        let transcription = await MainActor.run { self.transcription }
+
         AppLogger.pipeline.info("Using local Parakeet + PyAnnote pipeline")
 
         // Phase 1: Transcribe with local models
@@ -63,7 +65,7 @@ extension TranscriptionTaskManager {
         var speakerSources: [String: String] = [:]  // "db" per speaker ID
         // Build DB knowledge snapshot: what do we already know about these speakers?
         let speakerIds = Array(result.systemSpeakerIds).sorted()
-        let speakerDB = await MainActor.run { self.transcription.speakerDB }
+        let speakerDB = await MainActor.run { transcription.speakerDB }
         var dbKnowledge: [(speakerId: String, profile: SpeakerProfile, similarity: Double)] = []
 
         for utterance in result.systemUtterances {
@@ -201,9 +203,9 @@ extension TranscriptionTaskManager {
                             let shouldUnloadForQwen = totalMemoryGB < 12
 
                             if shouldUnloadForQwen {
-                                await self.transcription.parakeet.cleanup()
+                                await transcription.parakeet.cleanup()
                                 await MainActor.run {
-                                    self.transcription.diarization.cleanup()
+                                    transcription.diarization.cleanup()
                                 }
                                 AppLogger.pipeline.info("Unloaded Parakeet + diarization models before Qwen inference (RAM: \(String(format: "%.0f", totalMemoryGB)) GB)")
                             } else {
@@ -241,7 +243,11 @@ extension TranscriptionTaskManager {
                                 await MainActor.run { self.cleanupQwen() }
 
                                 if shouldUnloadForQwen {
-                                    await self.transcription.initializeModels()
+                                    await transcription.initializeModels()
+                                    // Verify models reloaded successfully
+                                    if await MainActor.run(body: { self.transcription.parakeet.modelState }) != .ready {
+                                        AppLogger.pipeline.error("Failed to reload Parakeet after Qwen inference — next recording may fail")
+                                    }
                                     AppLogger.pipeline.info("Reloaded Parakeet + diarization after Qwen cleanup")
                                 }
 
@@ -259,7 +265,11 @@ extension TranscriptionTaskManager {
                                 await MainActor.run { self.cleanupQwen() }
 
                                 if shouldUnloadForQwen {
-                                    await self.transcription.initializeModels()
+                                    await transcription.initializeModels()
+                                    // Verify models reloaded successfully
+                                    if await MainActor.run(body: { self.transcription.parakeet.modelState }) != .ready {
+                                        AppLogger.pipeline.error("Failed to reload Parakeet after Qwen inference — next recording may fail")
+                                    }
                                     AppLogger.pipeline.info("Reloaded Parakeet + diarization after Qwen cleanup")
                                 }
 

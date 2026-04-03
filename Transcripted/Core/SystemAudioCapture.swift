@@ -98,6 +98,22 @@ class SystemAudioCapture: ObservableObject {
         }
     }
 
+    // MARK: - Recovery Retry Limit (prevents infinite recovery loops)
+    let maxRecoveryAttempts = 5
+    private var _recoveryAttempts: Int = 0
+    var recoveryAttempts: Int {
+        get {
+            recoveryLock.lock()
+            defer { recoveryLock.unlock() }
+            return _recoveryAttempts
+        }
+        set {
+            recoveryLock.lock()
+            defer { recoveryLock.unlock() }
+            _recoveryAttempts = newValue
+        }
+    }
+
     // MARK: - Buffer Statistics (thread-safe)
     var _totalBuffers: Int = 0
     var _buffersWithData: Int = 0

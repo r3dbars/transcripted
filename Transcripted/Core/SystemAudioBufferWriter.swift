@@ -165,6 +165,7 @@ extension SystemAudioCapture {
         _buffersDropped = 0
         statsLock.unlock()
         hasReceivedFirstBuffer = false
+        recoveryAttempts = 0
     }
 
     // MARK: - Device Recovery
@@ -177,7 +178,23 @@ extension SystemAudioCapture {
             AppLogger.audioSystem.warning("Recovery already in progress, skipping duplicate request")
             return
         }
+
+        guard recoveryAttempts < maxRecoveryAttempts else {
+            AppLogger.audioSystem.warning("System audio recovery exhausted max attempts, giving up", [
+                "attempts": "\(recoveryAttempts)",
+                "max": "\(maxRecoveryAttempts)"
+            ])
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.errorMessage = "System audio unavailable after \(self.maxRecoveryAttempts) recovery attempts"
+                self.isCapturing = false
+                self.stopWatchdog()
+            }
+            return
+        }
+
         isRecovering = true
+        recoveryAttempts += 1
         defer { isRecovering = false }
 
         AppLogger.audioSystem.info("Recovering from system audio output change")

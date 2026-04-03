@@ -7,7 +7,7 @@ import Foundation
 import SQLite3
 
 @available(macOS 14.0, *)
-final class SpeakerDatabase {
+final class SpeakerDatabase: @unchecked Sendable {
 
     static let shared = SpeakerDatabase()
 
