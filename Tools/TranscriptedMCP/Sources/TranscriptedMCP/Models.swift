@@ -61,26 +61,6 @@ struct AgentUtterance: Codable {
 
 // MARK: - MCP Response Types
 
-struct SearchResult: Codable {
-    let meetingTitle: String
-    let meetingDate: String
-    let speaker: String
-    let speakerId: String?
-    let timestamp: String
-    let text: String
-    let filePath: String
-
-    enum CodingKeys: String, CodingKey {
-        case meetingTitle = "meeting_title"
-        case meetingDate = "meeting_date"
-        case speaker
-        case speakerId = "speaker_id"
-        case timestamp
-        case text
-        case filePath = "file_path"
-    }
-}
-
 struct GroupedSearchResult: Codable {
     let results: [MeetingSearchGroup]
     let totalMeetingsMatched: Int

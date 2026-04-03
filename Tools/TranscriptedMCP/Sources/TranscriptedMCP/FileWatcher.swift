@@ -3,6 +3,7 @@ import Foundation
 final class FileWatcher: @unchecked Sendable {
     private var source: DispatchSourceFileSystemObject?
     private var timer: DispatchSourceTimer?
+    private var pendingScan: DispatchWorkItem?
     private let directory: URL
     private let onChange: (URL) -> Void
     private var knownModTimes: [String: TimeInterval] = [:]
@@ -38,10 +39,13 @@ final class FileWatcher: @unchecked Sendable {
             queue: watchQueue
         )
         source.setEventHandler { [weak self] in
-            // Debounce: wait 500ms for writes to settle
-            self?.watchQueue.asyncAfter(deadline: .now() + 0.5) {
+            // Debounce: cancel previous pending scan, wait 500ms for writes to settle
+            self?.pendingScan?.cancel()
+            let work = DispatchWorkItem { [weak self] in
                 self?.scanForChanges()
             }
+            self?.pendingScan = work
+            self?.watchQueue.asyncAfter(deadline: .now() + 0.5, execute: work)
         }
         source.setCancelHandler {
             close(fd)
