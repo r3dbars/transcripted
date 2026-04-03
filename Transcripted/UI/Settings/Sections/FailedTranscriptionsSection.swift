@@ -107,7 +107,7 @@ struct FailedTranscriptionsSettingsSection: View {
         retryingIds.insert(id)
         Task {
             let _ = await taskManager?.retryFailedTranscription(failedId: id) ?? false
-            await MainActor.run { retryingIds.remove(id) }
+            await MainActor.run { _ = retryingIds.remove(id) }
         }
     }
 }
