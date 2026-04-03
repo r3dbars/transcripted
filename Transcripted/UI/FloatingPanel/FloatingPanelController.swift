@@ -84,6 +84,22 @@ class FloatingPanelController: NSWindowController, NSWindowDelegate {
 
         // Wire up pill state transitions based on app events
         setupStateBindings()
+
+        // Reposition pill when displays change (external monitor connect/disconnect)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersDidChange(_:)),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func screenParametersDidChange(_ notification: Notification) {
+        repositionIfNeeded()
     }
 
     required init?(coder: NSCoder) {

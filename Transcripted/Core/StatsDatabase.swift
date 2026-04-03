@@ -22,7 +22,16 @@ final class StatsDatabase {
 
     private init() {
         // Store database in the Transcripted folder
-        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        // Guard against force unwrap: FileManager.urls() is empty in restricted sandboxes
+        guard let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            AppLogger.stats.error("CRITICAL: Documents directory unavailable — falling back to temp directory for stats database")
+            let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("Transcripted")
+            try? FileManager.default.createDirectory(at: tempFolder, withIntermediateDirectories: true)
+            dbPath = tempFolder.appendingPathComponent("stats.sqlite")
+            openDatabase()
+            createTables()
+            return
+        }
         let transcriptedFolder = documentsPath.appendingPathComponent("Transcripted")
 
         // Create folder if needed
@@ -42,15 +51,59 @@ final class StatsDatabase {
 
     private func openDatabase() {
         if sqlite3_open(dbPath.path, &db) != SQLITE_OK {
-            AppLogger.stats.error("Failed to open database", ["path": dbPath.path])
+            let sqliteError = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+            AppLogger.stats.error("Failed to open stats database", ["path": dbPath.path, "sqlite_error": sqliteError])
             isDatabaseOpen = false
         } else {
-            isDatabaseOpen = true
-            FileManager.default.restrictToOwnerOnly(atPath: dbPath.path)
-            // WAL mode for crash safety, busy timeout to avoid SQLITE_BUSY, NORMAL sync for performance
-            sqlite3_exec(db, "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;", nil, nil, nil)
-            AppLogger.stats.info("Opened database", ["path": dbPath.path])
+            configureOpenDatabase()
+
+            // Corruption detection: run quick_check to verify database integrity
+            if !verifyDatabaseIntegrity() {
+                AppLogger.stats.error("CRITICAL: Stats database corrupt — backing up and recreating", ["path": dbPath.path])
+                sqlite3_close(db)
+                db = nil
+                // Backup corrupt file with timestamp
+                let backupName = "stats_corrupt_\(DateFormattingHelper.formatFilename(Date())).sqlite"
+                let backupPath = dbPath.deletingLastPathComponent().appendingPathComponent(backupName)
+                try? FileManager.default.moveItem(at: dbPath, to: backupPath)
+                // Recreate fresh database
+                if sqlite3_open(dbPath.path, &db) == SQLITE_OK {
+                    configureOpenDatabase()
+                    AppLogger.stats.info("Recreated fresh database after corruption recovery")
+                } else {
+                    isDatabaseOpen = false
+                    AppLogger.stats.error("Failed to recreate database after corruption recovery")
+                }
+            } else {
+                AppLogger.stats.info("Opened database", ["path": dbPath.path])
+            }
         }
+    }
+
+    /// Apply permissions and WAL pragmas to an already-opened database handle.
+    /// Called on both initial open and corruption-recovery re-open.
+    private func configureOpenDatabase() {
+        isDatabaseOpen = true
+        FileManager.default.restrictToOwnerOnly(atPath: dbPath.path)
+        // WAL mode for crash safety, busy timeout to avoid SQLITE_BUSY, NORMAL sync for performance
+        sqlite3_exec(db, "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;", nil, nil, nil)
+    }
+
+    /// Verify database integrity using PRAGMA quick_check.
+    /// Returns true if the database is healthy.
+    private func verifyDatabaseIntegrity() -> Bool {
+        guard let db = db else { return false }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA quick_check;", -1, &stmt, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_finalize(stmt) }
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            if let text = sqlite3_column_text(stmt, 0) {
+                return String(cString: text) == "ok"
+            }
+        }
+        return false
     }
 
     /// Execute multiple writes atomically — if the app crashes mid-block, all changes are rolled back.
@@ -194,9 +247,10 @@ final class StatsDatabase {
 
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
             while sqlite3_step(statement) == SQLITE_ROW {
-                let id = String(cString: sqlite3_column_text(statement, 0))
-                let dateStr = String(cString: sqlite3_column_text(statement, 1))
-                let timeStr = String(cString: sqlite3_column_text(statement, 2))
+                guard let idPtr = sqlite3_column_text(statement, 0) else { continue }
+                let id = String(cString: idPtr)
+                let dateStr = sqlite3_column_text(statement, 1).map(String.init(cString:)) ?? ""
+                let timeStr = sqlite3_column_text(statement, 2).map(String.init(cString:)) ?? ""
                 let duration = Int(sqlite3_column_int(statement, 3))
                 let wordCount = Int(sqlite3_column_int(statement, 4))
                 let speakerCount = Int(sqlite3_column_int(statement, 5))
