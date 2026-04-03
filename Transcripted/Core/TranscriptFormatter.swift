@@ -5,10 +5,17 @@ import Foundation
 extension TranscriptSaver {
 
     /// Format source label for timeline display
-    /// Escape special characters for safe YAML string interpolation
+    /// Escape special characters for safe YAML string interpolation.
+    /// Security: YAML double-quoted scalars prohibit raw newlines/tabs — an unescaped \n
+    /// ends the scalar value, letting subsequent text be parsed as additional YAML keys.
+    /// This is a YAML injection risk when writing Qwen-inferred meeting titles, which are
+    /// LLM-generated strings that may contain embedded newlines or control characters.
     static func escapeYAML(_ s: String) -> String {
         s.replacingOccurrences(of: "\\", with: "\\\\")
          .replacingOccurrences(of: "\"", with: "\\\"")
+         .replacingOccurrences(of: "\n", with: "\\n")
+         .replacingOccurrences(of: "\r", with: "\\r")
+         .replacingOccurrences(of: "\t", with: "\\t")
     }
 
     static func formatSourceLabel(_ source: String) -> String {
