@@ -7,10 +7,11 @@ struct CheckHealth: ParsableCommand {
         abstract: "Check overall system health (directories, models, disk space, macOS version)."
     )
 
+    @OptionGroup var pathOpts: PathOptions
     @OptionGroup var formatOpts: FormatOptions
 
     func run() throws {
-        let results = HealthChecker().validate()
-        runValidation(results: results, format: formatOpts.format)
+        let results = HealthChecker(dataPath: pathOpts.resolvedPath).validate()
+        try runValidation(results: results, format: formatOpts.format)
     }
 }

@@ -6,17 +6,17 @@ Audio capture pipeline, transcription orchestration, file saving, stats tracking
 
 | File | Actor | Purpose |
 |------|-------|---------|
-| `Audio.swift` | NOT @MainActor | AVAudioEngine setup, recording start/stop, publishes audio levels/state |
-| `AudioDeviceRecovery.swift` | NOT @MainActor | Mic watchdog timer, device disconnect recovery, sleep/wake resilience, 0o600 permissions on recovery segments |
-| `AudioFileManager.swift` | NOT @MainActor | Audio file creation, WAV writing, buffer copying, format conversion, 0o600 permissions on mic/system files |
+| `Audio.swift` | NOT @MainActor | AVAudioEngine setup, recording start/stop, publishes audio levels/state, SystemAudioStatus enum (healthy/reconnecting/silent/failed) |
+| `AudioDeviceRecovery.swift` | NOT @MainActor | Mic watchdog timer (3-5s), device disconnect recovery (max 5 attempts, 5s cooldown), sleep/wake resilience, 0o600 permissions on recovery segments |
+| `AudioFileManager.swift` | NOT @MainActor | Audio file creation, WAV writing, buffer copying, format conversion, 0o600 permissions on mic/system files, system audio capture setup |
 | `AudioLevelMonitor.swift` | NOT @MainActor | Audio level metering, silence detection, rolling buffer management |
 | `SystemAudioCapture.swift` | NOT @MainActor | CoreAudio process taps (macOS 14.2+), device switching, format negotiation |
 | `SystemAudioProcessTap.swift` | NOT @MainActor | CoreAudio process tap creation, aggregate device setup, format negotiation; replaced three force-unwraps of `tapStreamDescription` with safe optional binding to prevent DoS crashes |
 | `SystemAudioBufferWriter.swift` | NOT @MainActor | Buffer statistics tracking, device change listener, recovery logic |
 | `CoreAudioUtils.swift` | -- | CoreAudio device enumeration helpers |
 | `Transcription.swift` | @MainActor | Pipeline orchestration: resample, diarize, transcribe, match speakers |
-| `TranscriptionPipeline.swift` | nonisolated | Multichannel transcription pipeline (mic + system audio) |
-| `TranscriptionTaskManager.swift` | @MainActor | Task queue, progress tracking, Qwen memory management |
+| `TranscriptionPipeline.swift` | nonisolated | Multichannel transcription pipeline (mic + system audio), resample to 16kHz mono, sequential loading to reduce memory peak |
+| `TranscriptionTaskManager.swift` | @MainActor | Task queue, progress tracking, Qwen memory management, short recording gate (<2s), speaker naming coordination |
 | `TranscriptionPipelineRunner.swift` | nonisolated | Pipeline execution with speaker identification and notification |
 | `TranscriptionTypes.swift` | -- | TranscriptionUtterance, TranscriptionResult, PipelineError, SpeakerNamingEntry |
 | `DisplayStatus.swift` | -- | Enum for UI progress phases (idle/gettingReady/transcribing/finishing/saved/failed) |

@@ -30,7 +30,7 @@ final class DiagnosticExporterTests: XCTestCase {
 
     func testSystemInfoContainsUptime() {
         let info = DiagnosticExporter.systemInfo
-        XCTAssertTrue(info.contains("Uptime") || info.contains("h"),
+        XCTAssertTrue(info.contains("Uptime"),
                       "systemInfo should contain uptime")
     }
 
