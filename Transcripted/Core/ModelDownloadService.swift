@@ -5,6 +5,7 @@
 
 import Foundation
 import Network
+import CryptoKit
 
 // MARK: - Error Classification
 
@@ -272,7 +273,8 @@ enum ModelDownloadService {
             try await downloadFileWithMirrorFallback(
                 modelId: modelId,
                 filename: file.name,
-                destination: destURL
+                destination: destURL,
+                expectedSHA256: file.sha256
             )
 
             downloadedCount += 1
@@ -286,6 +288,11 @@ enum ModelDownloadService {
     private struct HFModelFile {
         let name: String
         let size: Int?
+        /// SHA-256 hex digest for LFS-tracked files (e.g. model weights).
+        /// Populated from the HuggingFace API response when available.
+        /// Security: used to verify file integrity after download from mirrors,
+        /// so a compromised third-party mirror cannot silently serve malicious weights.
+        let sha256: String?
     }
 
     /// Validate a filename returned by the HuggingFace API before using it in a file path.
@@ -337,7 +344,13 @@ enum ModelDownloadService {
                         return nil
                     }
                     let size = sibling["size"] as? Int
-                    return HFModelFile(name: name, size: size)
+                    // Security: extract SHA-256 from LFS metadata if present.
+                    // The "lfs" dict is only present for large binary files tracked by Git LFS
+                    // (model weights, tokenizer data). We capture the digest here so
+                    // downloadFileWithMirrorFallback() can verify integrity after download,
+                    // preventing a compromised mirror from serving malicious model weights.
+                    let sha256 = (sibling["lfs"] as? [String: Any])?["sha256"] as? String
+                    return HFModelFile(name: name, size: size, sha256: sha256)
                 }
 
                 if !files.isEmpty {
@@ -362,11 +375,20 @@ enum ModelDownloadService {
         )
     }
 
-    /// Download a single file with mirror fallback and retry
+    /// Download a single file with mirror fallback and retry.
+    /// - Parameters:
+    ///   - modelId: HuggingFace model identifier
+    ///   - filename: Filename within the model repository (pre-validated by isSafeModelFilename)
+    ///   - destination: Local destination URL
+    ///   - expectedSHA256: SHA-256 hex digest from the HuggingFace API manifest (optional).
+    ///     Security: when provided, the downloaded file is verified against this digest before being
+    ///     moved to its destination. This prevents a compromised third-party mirror (hf-mirror.com)
+    ///     from silently serving malicious model weights in place of the genuine files.
     private static func downloadFileWithMirrorFallback(
         modelId: String,
         filename: String,
-        destination: URL
+        destination: URL,
+        expectedSHA256: String? = nil
     ) async throws {
         for mirror in mirrors {
             // Security: use safe URL construction — force-unwrap would crash if filename contained
@@ -388,8 +410,35 @@ enum ModelDownloadService {
                         )
                     }
 
+                    // Security: verify SHA-256 digest of downloaded file when the API manifest
+                    // provided one. Rejects files where the digest does not match — a compromised
+                    // mirror cannot substitute malicious model weights without detection.
+                    if let expected = expectedSHA256 {
+                        let computed = try sha256Hex(of: tempURL)
+                        guard computed.lowercased() == expected.lowercased() else {
+                            try? FileManager.default.removeItem(at: tempURL)
+                            AppLogger.services.error("SHA-256 mismatch for downloaded model file — rejecting", [
+                                "file": filename,
+                                "mirror": mirror,
+                                "expected": expected,
+                                "actual": computed
+                            ])
+                            throw ModelDownloadError(
+                                kind: .unknown("Integrity check failed for \(filename) — digest mismatch"),
+                                underlyingError: nil
+                            )
+                        }
+                    }
+
                     // Move to destination
                     try FileManager.default.moveItem(at: tempURL, to: destination)
+
+                    // Security: restrict model files to owner-only read (0o600).
+                    // URLSession.download() creates temp files with default umask permissions
+                    // (0o644 — world-readable). moveItem preserves those permissions, so we
+                    // explicitly tighten them after the move. Model weights should not be
+                    // readable by other users on shared macOS systems.
+                    FileManager.default.restrictToOwnerOnly(atPath: destination.path)
                 }
 
                 AppLogger.services.debug("Downloaded \(filename) from \(mirror)")
@@ -410,5 +459,13 @@ enum ModelDownloadService {
             kind: .unknown("Failed to download \(filename) from all mirrors"),
             underlyingError: nil
         )
+    }
+
+    /// Compute the SHA-256 hex digest of a file.
+    /// Security: used to verify model file integrity after download from mirrors.
+    private static func sha256Hex(of url: URL) throws -> String {
+        let data = try Data(contentsOf: url)
+        let digest = CryptoKit.SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
