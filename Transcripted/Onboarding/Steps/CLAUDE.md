@@ -32,7 +32,8 @@
   - **Microphone** (required): mic.fill icon. Requests via `AVCaptureDevice.requestAccess(for: .audio)`
   - **Screen Recording** (recommended): rectangle.inset.filled.and.person.filled icon. Opens System Settings
 - 4 status states per row: notRequested (Grant button), pending (spinner), granted (checkmark), denied (Settings button)
-- Denied state shows guidance text: "Enable it in System Settings to continue"
+- Denied state shows guidance text: "Microphone access wasn't granted. Tap 'Try Again' to see the permission prompt, or open Settings to enable it manually."
+- Amber warning callout when screen recording not granted: explains system audio won't capture other participants without it
 - Continue button DISABLED until mic permission granted (canProceed = microphoneGranted)
 - No "Continue without mic" bypass
 
@@ -74,7 +75,7 @@
 ## Gotchas
 - `@Bindable` not `@ObservedObject` — OnboardingState uses `@Observable` macro, not ObservableObject
 - ModelSetupStep auto-starts download on `.onAppear` — no user action needed
-- Screen recording detection is NOT a real API — uses `CGWindowListCopyWindowInfo()` side-effect (undocumented)
+- Screen recording detection uses official `CGPreflightScreenCaptureAccess()` API
 - Progress capped at 0.99 to prevent premature "100%" display before CoreML compilation
 - Model errors are concatenated with "\n" (both errors show if both models fail)
 - The app does NOT initialize (no menus, no audio, no floating panel) until onboarding completes
