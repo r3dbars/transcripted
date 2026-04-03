@@ -1,7 +1,6 @@
 // ModelDownloadService.swift
 // Resilient model download with HuggingFace mirror fallback, retry logic,
-// and error classification. Provides pre-population for Qwen cache and
-// retry wrapping for FluidAudio model initialization.
+// and error classification. Provides retry wrapping for FluidAudio model initialization.
 
 import Foundation
 import Network
@@ -203,89 +202,26 @@ enum ModelDownloadService {
         throw ModelDownloadError(kind: kind, underlyingError: exhaustedError)
     }
 
-    // MARK: - Qwen Pre-Population
+    // MARK: - Filename Validation
 
-    /// Pre-populate the Qwen model cache by downloading files directly from HuggingFace
-    /// with mirror fallback. If cache already exists, skips download.
-    ///
-    /// mlx-swift-lm stores models at ~/Library/Caches/models/{org}/{model}/
-    /// If files exist there, loadModelContainer() skips its own download.
-    static func prePopulateQwenCache(
-        modelId: String = "mlx-community/Qwen3.5-4B-4bit",
-        progressHandler: ((Double) -> Void)? = nil
-    ) async throws {
-        let cacheDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Caches/models")
-            .appendingPathComponent(modelId)
-
-        // If cache directory already has files, skip
-        if FileManager.default.fileExists(atPath: cacheDir.path) {
-            let contents = (try? FileManager.default.contentsOfDirectory(atPath: cacheDir.path)) ?? []
-            if !contents.isEmpty {
-                AppLogger.services.info("Qwen cache already populated, skipping pre-download", [
-                    "path": cacheDir.path,
-                    "files": "\(contents.count)"
-                ])
-                return
-            }
-        }
-
-        // Check disk space (~2.5GB needed)
-        if let available = availableDiskSpace(), available < 3_000_000_000 {
-            throw ModelDownloadError(kind: .diskSpace, underlyingError: nil)
-        }
-
-        // Check network first
-        guard await checkNetworkReachability() else {
-            throw ModelDownloadError(kind: .networkOffline, underlyingError: nil)
-        }
-
-        // Fetch file manifest from HuggingFace API
-        let fileList = try await fetchModelFileList(modelId: modelId)
-
-        AppLogger.services.info("Qwen pre-population starting", [
-            "files": "\(fileList.count)",
-            "modelId": modelId
-        ])
-
-        // Create cache directory
-        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-
-        // Download each file with mirror fallback
-        var downloadedCount = 0
-        for file in fileList {
-            // Security: validate filename from external API before constructing a path with it.
-            // Rejects path traversal sequences (e.g. "../../.ssh") injected by a malicious server.
-            guard isSafeModelFilename(file.name) else {
-                AppLogger.services.error("Rejecting unsafe model filename from API response", ["filename": file.name])
-                throw ModelDownloadError(kind: .unknown("Unsafe filename in model file list: \(file.name)"), underlyingError: nil)
-            }
-
-            let destURL = cacheDir.appendingPathComponent(file.name)
-
-            // Skip if already downloaded
-            if FileManager.default.fileExists(atPath: destURL.path) {
-                downloadedCount += 1
-                progressHandler?(Double(downloadedCount) / Double(fileList.count))
-                continue
-            }
-
-            try await downloadFileWithMirrorFallback(
-                modelId: modelId,
-                filename: file.name,
-                destination: destURL,
-                expectedSHA256: file.sha256
-            )
-
-            downloadedCount += 1
-            progressHandler?(Double(downloadedCount) / Double(fileList.count))
-        }
-
-        AppLogger.services.info("Qwen pre-population complete", ["path": cacheDir.path])
+    /// Validate a filename returned by an external API before using it in a file path.
+    /// Security: filenames are attacker-controlled data from an external API response.
+    /// A compromised or impersonated server could inject path traversal sequences (e.g. "../../../.ssh/authorized_keys")
+    /// into rfilename values. We reject any name containing ".." components or absolute paths.
+    static func isSafeModelFilename(_ name: String) -> Bool {
+        guard !name.isEmpty else { return false }
+        guard !name.hasPrefix("/") else { return false }
+        let components = name.components(separatedBy: "/")
+        guard !components.contains("..") && !components.contains(".") else { return false }
+        guard !name.unicodeScalars.contains(where: { $0.value < 32 }) else { return false }
+        return true
     }
 
+
+    // MARK: - HuggingFace Model Download Infrastructure
+
     /// Represents a file in a HuggingFace model repository
-    private struct HFModelFile {
+    struct HFModelFile {
         let name: String
         let size: Int?
         /// SHA-256 hex digest for LFS-tracked files (e.g. model weights).
@@ -295,25 +231,8 @@ enum ModelDownloadService {
         let sha256: String?
     }
 
-    /// Validate a filename returned by the HuggingFace API before using it in a file path.
-    /// Security: filenames are attacker-controlled data from an external API response.
-    /// A compromised or impersonated server could inject path traversal sequences (e.g. "../../../.ssh/authorized_keys")
-    /// into rfilename values. We reject any name containing ".." components or absolute paths.
-    static func isSafeModelFilename(_ name: String) -> Bool {
-        // Reject empty names
-        guard !name.isEmpty else { return false }
-        // Reject absolute paths
-        guard !name.hasPrefix("/") else { return false }
-        // Reject names containing ".." path traversal components
-        let components = name.components(separatedBy: "/")
-        guard !components.contains("..") && !components.contains(".") else { return false }
-        // Reject names with null bytes or control characters
-        guard !name.unicodeScalars.contains(where: { $0.value < 32 }) else { return false }
-        return true
-    }
-
     /// Fetch the list of files in a HuggingFace model repository
-    private static func fetchModelFileList(modelId: String) async throws -> [HFModelFile] {
+    static func fetchModelFileList(modelId: String) async throws -> [HFModelFile] {
         // Try each mirror for the API call
         for mirror in mirrors {
             // Security: use safe URL construction — force-unwrap would crash if modelId or mirror
@@ -345,10 +264,6 @@ enum ModelDownloadService {
                     }
                     let size = sibling["size"] as? Int
                     // Security: extract SHA-256 from LFS metadata if present.
-                    // The "lfs" dict is only present for large binary files tracked by Git LFS
-                    // (model weights, tokenizer data). We capture the digest here so
-                    // downloadFileWithMirrorFallback() can verify integrity after download,
-                    // preventing a compromised mirror from serving malicious model weights.
                     let sha256 = (sibling["lfs"] as? [String: Any])?["sha256"] as? String
                     return HFModelFile(name: name, size: size, sha256: sha256)
                 }
@@ -384,7 +299,7 @@ enum ModelDownloadService {
     ///     Security: when provided, the downloaded file is verified against this digest before being
     ///     moved to its destination. This prevents a compromised third-party mirror (hf-mirror.com)
     ///     from silently serving malicious model weights in place of the genuine files.
-    private static func downloadFileWithMirrorFallback(
+    static func downloadFileWithMirrorFallback(
         modelId: String,
         filename: String,
         destination: URL,
@@ -434,10 +349,6 @@ enum ModelDownloadService {
                     try FileManager.default.moveItem(at: tempURL, to: destination)
 
                     // Security: restrict model files to owner-only read (0o600).
-                    // URLSession.download() creates temp files with default umask permissions
-                    // (0o644 — world-readable). moveItem preserves those permissions, so we
-                    // explicitly tighten them after the move. Model weights should not be
-                    // readable by other users on shared macOS systems.
                     FileManager.default.restrictToOwnerOnly(atPath: destination.path)
                 }
 
@@ -463,7 +374,7 @@ enum ModelDownloadService {
 
     /// Compute the SHA-256 hex digest of a file.
     /// Security: used to verify model file integrity after download from mirrors.
-    private static func sha256Hex(of url: URL) throws -> String {
+    static func sha256Hex(of url: URL) throws -> String {
         let data = try Data(contentsOf: url)
         let digest = CryptoKit.SHA256.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()

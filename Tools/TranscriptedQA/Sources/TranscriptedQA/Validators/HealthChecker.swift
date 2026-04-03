@@ -30,19 +30,6 @@ struct HealthChecker {
             results.append(.warn("health/logs-dir", target: logsDir.path, detail: "Logs directory does not exist"))
         }
 
-        // Qwen model cache
-        let qwenCache = home.appendingPathComponent("Library/Caches/models/mlx-community/Qwen3.5-4B-4bit")
-        if fm.fileExists(atPath: qwenCache.path) {
-            let files = (try? fm.contentsOfDirectory(atPath: qwenCache.path)) ?? []
-            if files.count > 5 {
-                results.append(.pass("health/qwen-model", target: "Qwen3.5-4B-4bit (\(files.count) files)"))
-            } else {
-                results.append(.warn("health/qwen-model", target: qwenCache.path, detail: "Only \(files.count) files — model may be incomplete"))
-            }
-        } else {
-            results.append(.warn("health/qwen-model", target: qwenCache.path, detail: "Model not cached"))
-        }
-
         // Disk space (>= 5GB)
         if let values = try? home.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
            let available = values.volumeAvailableCapacityForImportantUsage {

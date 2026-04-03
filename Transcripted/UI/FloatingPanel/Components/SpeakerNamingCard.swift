@@ -46,9 +46,6 @@ struct SpeakerNamingCard: View {
         .onAppear {
             if let name = entry.currentName, entry.needsConfirmation {
                 nameText = name
-            } else if let suggested = qwenSuggestedName {
-                // Pre-fill from Qwen inference
-                nameText = suggested
             }
         }
     }
@@ -99,29 +96,13 @@ struct SpeakerNamingCard: View {
 
     // MARK: - Source Label
 
-    /// Hint text showing how the name was detected (or that detection was attempted)
+    /// Hint text showing how the name was detected
     private var sourceLabel: some View {
         Group {
             if entry.currentName != nil, let sim = entry.matchSimilarity {
-                // Voice match from DB takes priority — biometric > LLM inference
                 Label("Voice match \u{00B7} \(Int(sim * 100))%", systemImage: "waveform")
                     .font(.system(size: 10))
                     .foregroundColor(.panelTextMuted)
-            } else if isQwenSuggestion {
-                Label("Detected from conversation", systemImage: "sparkles")
-                    .font(.system(size: 10))
-                    .foregroundColor(.orange.opacity(0.7))
-            }
-        }
-    }
-
-    /// Hint for unknown speakers when Qwen tried but found no name
-    private var noNameDetectedHint: some View {
-        Group {
-            if case .noNameFound = entry.qwenResult, entry.currentName == nil {
-                Label("No name detected in conversation", systemImage: "sparkles")
-                    .font(.system(size: 10))
-                    .foregroundColor(.panelTextMuted.opacity(0.7))
             }
         }
     }
@@ -164,9 +145,6 @@ struct SpeakerNamingCard: View {
                 .background(Color.panelCharcoalSurface.opacity(0.6))
                 .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             }
-
-            noNameDetectedHint
-                .padding(.leading, 24)
 
             // Autocomplete suggestions from speaker database
             if !nameText.isEmpty {
@@ -343,24 +321,11 @@ struct SpeakerNamingCard: View {
         }
     }
 
-    // MARK: - Confirmation Row (known speaker or Qwen suggestion)
+    // MARK: - Confirmation Row (known speaker)
 
-    /// Whether this entry has a Qwen-inferred name suggestion
-    private var isQwenSuggestion: Bool {
-        if case .suggested = entry.qwenResult { return true }
-        return false
-    }
-
-    /// Extract Qwen suggested name, if any
-    private var qwenSuggestedName: String? {
-        if case .suggested(let name) = entry.qwenResult { return name }
-        return nil
-    }
-
-    /// Display name for this entry — DB match or Qwen suggestion
+    /// Display name for this entry — DB match
     private var displayName: String {
         if let name = entry.currentName { return name }
-        if let suggested = qwenSuggestedName { return suggested }
         return ""
     }
 

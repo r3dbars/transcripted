@@ -1,6 +1,6 @@
 # Core Folder
 
-Audio capture pipeline, transcription orchestration, file saving, stats tracking, model downloads, error recovery, and app lifecycle. 49 Swift files (including Logging/).
+Audio capture pipeline, transcription orchestration, file saving, stats tracking, model downloads, error recovery, and app lifecycle. 47 Swift files (including Logging/).
 
 ## File Index
 
@@ -16,13 +16,12 @@ Audio capture pipeline, transcription orchestration, file saving, stats tracking
 | `CoreAudioUtils.swift` | -- | CoreAudio device enumeration helpers |
 | `Transcription.swift` | @MainActor | Pipeline orchestration: resample, diarize, transcribe, match speakers |
 | `TranscriptionPipeline.swift` | nonisolated | Multichannel transcription pipeline (mic + system audio), resample to 16kHz mono, sequential loading to reduce memory peak |
-| `TranscriptionTaskManager.swift` | @MainActor | Task queue, progress tracking, Qwen memory management, short recording gate (<2s), speaker naming coordination |
+| `TranscriptionTaskManager.swift` | @MainActor | Task queue, progress tracking, short recording gate (<2s), speaker naming coordination |
 | `TranscriptionPipelineRunner.swift` | nonisolated | Pipeline execution with speaker identification and notification |
 | `TranscriptionTypes.swift` | -- | TranscriptionUtterance, TranscriptionResult, PipelineError, SpeakerNamingEntry |
 | `DisplayStatus.swift` | -- | Enum for UI progress phases (idle/gettingReady/transcribing/finishing/saved/failed) |
 | `SpeakerMatchingService.swift` | nonisolated | In-memory speaker embedding matching, mean embedding computation |
 | `SpeakerNamingCoordinator.swift` | @MainActor | Speaker naming flow completion, applies names to DB and transcript, merges profiles by name |
-| `QwenLifecycleManager.swift` | @MainActor | Qwen model pre-load on recording start, timeout, memory checks |
 | `TranscriptSaver.swift` | Static | Markdown + YAML output, serial queue for file writes, path validation, 0o600 permissions on saved transcript .md files |
 | `TranscriptFormatter.swift` | Static | YAML escaping, source label formatting, markdown generation |
 | `TranscriptMetadataBuilder.swift` | -- | RecordingHealthInfo struct, YAML frontmatter metadata construction |
@@ -36,7 +35,7 @@ Audio capture pipeline, transcription orchestration, file saving, stats tracking
 | `StatsDatabaseModels.swift` | -- | RecordingMetadata, DailyActivity data models |
 | `StatsDatabaseQueries.swift` | NOT @MainActor | Complex queries and aggregations for StatsDatabase |
 | `StatsService.swift` | @MainActor | Stats aggregation for dashboard UI |
-| `ModelDownloadService.swift` | Static | HuggingFace download with mirror fallback (hf-mirror.com), retry with exponential backoff, Qwen cache pre-population, structured error classification (DownloadErrorKind), isSafeModelFilename() path traversal validation |
+| `ModelDownloadService.swift` | Static | HuggingFace download with mirror fallback (hf-mirror.com), retry with exponential backoff, structured error classification (DownloadErrorKind), isSafeModelFilename() path traversal validation |
 | `RecordingValidator.swift` | Static | Pre-recording checks (disk space, permissions, save path) |
 | `FilePermissions.swift` | -- | FileManager extension: `restrictToOwnerOnly(atPath:)` applies 0o600 to all user data files |
 | `FailedTranscription.swift` | -- | Model for retryable failed transcriptions |
@@ -153,9 +152,6 @@ WAL mode, busy_timeout 5000ms, NORMAL sync, 0o600 permissions.
 ## Error Handling (TranscriptionTypes.swift + FailedTranscriptionManager.swift)
 - **PipelineError**: Permanent (emptyAudioFile, recordingTooShort, invalidAudioFormat, missingSystemAudio) vs Transient (modelNotLoaded, modelInferenceFailed, saveFailed). `isRetryable` determines retry eligibility.
 - **FailedTranscriptionManager**: Auto-deletes permanent errors + retryCount >= 3 on init.
-- **Qwen timeout** (QwenLifecycleManager.swift): 5-minute safety timeout if model loaded but not consumed by pipeline.
-- **Memory check** (QwenLifecycleManager.swift): Qwen pre-load requires 2GB free (4GB headroom).
-
 ## Threading Rules
 - **Audio.swift, AudioDeviceRecovery, AudioFileManager, AudioLevelMonitor** -- NOT @MainActor, run on audio threads
 - **SystemAudioCapture, SystemAudioProcessTap, SystemAudioBufferWriter** -- NOT @MainActor, CoreAudio threads
@@ -171,7 +167,7 @@ AppLogger.audio, .audioMic, .audioSystem, .transcription, .pipeline, .speakers, 
 ## Key Extensions (split from original files)
 - `Audio.swift` was split into: Audio, AudioDeviceRecovery, AudioFileManager, AudioLevelMonitor
 - `SystemAudioCapture.swift` was split into: SystemAudioCapture, SystemAudioProcessTap, SystemAudioBufferWriter
-- `TranscriptionTaskManager.swift` was split into: TranscriptionTaskManager, TranscriptionPipelineRunner, QwenLifecycleManager, SpeakerNamingCoordinator
+- `TranscriptionTaskManager.swift` was split into: TranscriptionTaskManager, TranscriptionPipelineRunner, SpeakerNamingCoordinator
 - `Transcription.swift` was split into: Transcription, TranscriptionPipeline, SpeakerMatchingService
 - `TranscriptSaver.swift` was split into: TranscriptSaver, TranscriptFormatter, TranscriptMetadataBuilder, RetroactiveSpeakerUpdater
 - `StatsDatabase.swift` was split into: StatsDatabase, StatsDatabaseModels, StatsDatabaseQueries

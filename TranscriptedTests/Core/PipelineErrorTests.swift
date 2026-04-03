@@ -28,7 +28,7 @@ final class PipelineErrorTests: XCTestCase {
     }
 
     func testModelInferenceFailedIsRetryable() {
-        XCTAssertTrue(PipelineError.modelInferenceFailed(model: "Qwen", underlying: "OOM").isRetryable)
+        XCTAssertTrue(PipelineError.modelInferenceFailed(model: "Parakeet", underlying: "OOM").isRetryable)
     }
 
     func testSaveFailedIsRetryable() {
@@ -48,7 +48,7 @@ final class PipelineErrorTests: XCTestCase {
             .invalidAudioFormat(detail: "test"),
             .missingSystemAudio,
             .modelNotLoaded(model: "Parakeet"),
-            .modelInferenceFailed(model: "Qwen", underlying: "err"),
+            .modelInferenceFailed(model: "Parakeet", underlying: "err"),
             .saveFailed(detail: "test"),
             .unknown(underlying: "test"),
         ]

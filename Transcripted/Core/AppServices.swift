@@ -12,7 +12,6 @@ import Foundation
 struct AppServices {
     let speechToText: ParakeetService
     let diarization: DiarizationService
-    let speakerNaming: QwenService
     let speakerStore: SpeakerDatabase
 
     /// Creates the default production configuration
@@ -20,7 +19,6 @@ struct AppServices {
         return AppServices(
             speechToText: ParakeetService(),
             diarization: DiarizationService(),
-            speakerNaming: QwenService(),
             speakerStore: SpeakerDatabase.shared
         )
     }

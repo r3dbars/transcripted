@@ -60,7 +60,7 @@ extension TranscriptionTaskManager {
 
         AppLogger.pipeline.info("Phase 1 complete: Local transcription done", ["micUtterances": "\(result.micUtteranceCount)", "systemUtterances": "\(result.systemUtteranceCount)"])
 
-        // Phase 1.5: Identify speakers — DB knowledge first, then Qwen if needed
+        // Phase 1.5: Identify speakers from DB knowledge
         var speakerMappings: [String: SpeakerMapping] = [:]
         var speakerSources: [String: String] = [:]  // "db" per speaker ID
         // Build DB knowledge snapshot: what do we already know about these speakers?
@@ -184,121 +184,7 @@ extension TranscriptionTaskManager {
                 }
 
                 if !clips.isEmpty {
-                    // Run Qwen inference for unidentified speakers (if enabled)
-                    var qwenSuggestions: [String: String] = [:]
-                    var qwenMeetingTitle: String? = nil
-                    let unidentifiedClips = clips.filter { $0.currentName == nil }
-
-                    if !unidentifiedClips.isEmpty && QwenService.isEnabled && QwenService.isModelCached {
-                        let inferenceText = self.buildTranscriptTextForInference(
-                            utterances: result.systemUtterances,
-                            speakerMappings: speakerMappings
-                        )
-
-                        if !inferenceText.isEmpty {
-                            // On machines with ≥12 GB RAM, Parakeet (CoreML/ANE ~600 MB) and
-                            // diarization (~80 MB) coexist with Qwen (MLX/GPU ~2.5 GB) without
-                            // memory pressure. Only unload on smaller machines.
-                            let totalMemoryGB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
-                            let shouldUnloadForQwen = totalMemoryGB < 12
-
-                            if shouldUnloadForQwen {
-                                await transcription.parakeet.cleanup()
-                                await MainActor.run {
-                                    transcription.diarization.cleanup()
-                                }
-                                AppLogger.pipeline.info("Unloaded Parakeet + diarization models before Qwen inference (RAM: \(String(format: "%.0f", totalMemoryGB)) GB)")
-                            } else {
-                                AppLogger.pipeline.info("Keeping models resident during Qwen inference (RAM: \(String(format: "%.0f", totalMemoryGB)) GB)")
-                            }
-
-                            do {
-                                // Wait for pre-loaded model (started when recording began)
-                                if let preloadTask = await MainActor.run(body: { self.qwenPreloadTask }) {
-                                    await preloadTask.value
-                                }
-
-                                // Atomically check pre-loaded instance (single MainActor hop prevents TOCTOU)
-                                var qwen: QwenService? = await MainActor.run {
-                                    if let svc = self.qwenService, case .ready = svc.modelState { return svc }
-                                    return nil
-                                }
-
-                                // Fall back to fresh load (retry path)
-                                if qwen == nil {
-                                    if self.hasMemoryForQwen() {
-                                        let fresh = await QwenService()
-                                        await fresh.loadModel()
-                                        qwen = fresh
-                                    } else {
-                                        AppLogger.pipeline.info("Skipping Qwen fresh load — low memory")
-                                    }
-                                }
-
-                                if let qwen, case .ready = await qwen.modelState {
-                                    let output = try await qwen.inferSpeakerNames(transcript: inferenceText)
-                                    qwenSuggestions = output.speakers
-                                    qwenMeetingTitle = output.meetingTitle
-                                }
-                                await MainActor.run { self.cleanupQwen() }
-
-                                if shouldUnloadForQwen {
-                                    await transcription.initializeModels()
-                                    // Verify models reloaded successfully
-                                    if await MainActor.run(body: { self.transcription.parakeet.modelState }) != .ready {
-                                        AppLogger.pipeline.error("Failed to reload Parakeet after Qwen inference — next recording may fail")
-                                    }
-                                    AppLogger.pipeline.info("Reloaded Parakeet + diarization after Qwen cleanup")
-                                }
-
-                                // Retroactively add meeting title to transcript YAML
-                                if let title = qwenMeetingTitle {
-                                    TranscriptSaver.retroactivelyUpdateTitle(transcriptURL: savedURL, title: title)
-                                }
-
-                                AppLogger.pipeline.info("Qwen speaker inference complete", [
-                                    "suggestions": "\(qwenSuggestions.filter { $0.value != "Unknown" }.count)",
-                                    "total": "\(qwenSuggestions.count)",
-                                    "title": qwenMeetingTitle ?? "(none)"
-                                ])
-                            } catch {
-                                await MainActor.run { self.cleanupQwen() }
-
-                                if shouldUnloadForQwen {
-                                    await transcription.initializeModels()
-                                    // Verify models reloaded successfully
-                                    if await MainActor.run(body: { self.transcription.parakeet.modelState }) != .ready {
-                                        AppLogger.pipeline.error("Failed to reload Parakeet after Qwen inference — next recording may fail")
-                                    }
-                                    AppLogger.pipeline.info("Reloaded Parakeet + diarization after Qwen cleanup")
-                                }
-
-                                AppLogger.pipeline.warning("Qwen inference failed, falling back to manual naming", [
-                                    "error": error.localizedDescription
-                                ])
-                            }
-                        }
-                    }
-
-                    // Determine whether Qwen ran at all (drives "No name detected" hint)
-                    let qwenRan = QwenService.isEnabled && QwenService.isModelCached && !unidentifiedClips.isEmpty
-
                     let entries = clips.map { clip in
-                        let qwenName = qwenSuggestions[clip.sortformerSpeakerId]
-                        let hasQwenSuggestion = qwenName != nil && qwenName != "Unknown"
-
-                        let qwenResult: QwenInferenceResult
-                        // Security: guard against force-unwrap; hasQwenSuggestion only becomes true
-                        // when qwenName != nil, but use guard let for defensive nil safety —
-                        // avoids a crash if the predicate logic is ever refactored.
-                        if hasQwenSuggestion, let safeName = qwenName {
-                            qwenResult = .suggested(name: safeName)
-                        } else if qwenRan {
-                            qwenResult = .noNameFound
-                        } else {
-                            qwenResult = .notAttempted
-                        }
-
                         return SpeakerNamingEntry(
                             id: clip.persistentSpeakerId,
                             sortformerSpeakerId: clip.sortformerSpeakerId,
@@ -306,9 +192,8 @@ extension TranscriptionTaskManager {
                             sampleText: clip.sampleText,
                             currentName: clip.currentName,
                             matchSimilarity: clip.matchSimilarity,
-                            needsNaming: clip.currentName == nil && !hasQwenSuggestion,
-                            needsConfirmation: clip.currentName != nil || hasQwenSuggestion,
-                            qwenResult: qwenResult
+                            needsNaming: clip.currentName == nil,
+                            needsConfirmation: clip.currentName != nil
                         )
                     }
 
@@ -340,59 +225,11 @@ extension TranscriptionTaskManager {
             }
         }
 
-        // No naming needed (or clip extraction failed) — clean up Qwen and audio files
-        await MainActor.run { self.cleanupQwen() }
+        // No naming needed (or clip extraction failed) — clean up audio files
         try? FileManager.default.removeItem(at: micURL)
         try? FileManager.default.removeItem(at: systemURL)
 
         return savedURL
     }
 
-    /// Build a text representation of system audio transcript for Qwen speaker name inference.
-    /// Samples strategically: first 5 min + last 5 min + evenly spaced middle samples,
-    /// capped at 8000 characters to stay within Qwen's effective context window.
-    nonisolated func buildTranscriptTextForInference(
-        utterances: [TranscriptionUtterance],
-        speakerMappings: [String: SpeakerMapping]
-    ) -> String {
-        let sorted = utterances.sorted { $0.start < $1.start }
-        guard !sorted.isEmpty else { return "" }
-
-        let maxChars = 8000
-        guard let lastUtterance = sorted.last else { return "" }
-        let totalDuration = lastUtterance.start
-
-        // Strategy: first 5 min + last 5 min + ~20 samples from middle
-        let firstWindow = sorted.filter { $0.start < 300 }
-        let lastWindow = sorted.filter { $0.start > totalDuration - 300 }
-        let middleUtterances = sorted.filter { $0.start >= 300 && $0.start <= totalDuration - 300 }
-
-        var selected = firstWindow
-        if !middleUtterances.isEmpty {
-            let step = max(1, middleUtterances.count / 20)
-            for i in stride(from: 0, to: middleUtterances.count, by: step) {
-                selected.append(middleUtterances[i])
-            }
-        }
-        selected.append(contentsOf: lastWindow)
-
-        // Deduplicate by start time and sort
-        var seenStarts = Set<Double>()
-        selected = selected.filter { seenStarts.insert($0.start).inserted }
-        selected.sort { $0.start < $1.start }
-
-        // Format and truncate to budget
-        var result = ""
-        for utterance in selected {
-            let mins = Int(utterance.start) / 60
-            let secs = Int(utterance.start) % 60
-            let key = "system_\(utterance.speakerId)"
-            let label = speakerMappings[key]?.displayName ?? "Speaker \(utterance.speakerId)"
-            let line = "[\(String(format: "%02d:%02d", mins, secs))] [\(label)] \(utterance.transcript)\n"
-            if result.count + line.count > maxChars { break }
-            result += line
-        }
-
-        return result
-    }
 }
