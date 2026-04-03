@@ -61,8 +61,6 @@ extension TranscriptionTaskManager {
         // Phase 1.5: Identify speakers — DB knowledge first, then Qwen if needed
         var speakerMappings: [String: SpeakerMapping] = [:]
         var speakerSources: [String: String] = [:]  // "db" per speaker ID
-        var speakerResult: SpeakerIdentificationResult? = nil
-
         // Build DB knowledge snapshot: what do we already know about these speakers?
         let speakerIds = Array(result.systemSpeakerIds).sorted()
         let speakerDB = await MainActor.run { self.transcription.speakerDB }
@@ -126,10 +124,6 @@ extension TranscriptionTaskManager {
                     evidence: "Voice fingerprint match (\(String(format: "%.0f", entry.similarity * 100))%, \(entry.profile.callCount) calls)"
                 ))
             }
-        }
-
-        if !autoAcceptedIds.isEmpty {
-            speakerResult = SpeakerIdentificationResult(speakers: identifiedSpeakers, userSpeakerId: nil)
         }
 
         AppLogger.speakers.info("Per-speaker classification", [

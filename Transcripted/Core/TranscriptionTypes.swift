@@ -138,12 +138,6 @@ enum QwenInferenceResult {
     case suggested(name: String)
 }
 
-/// Result of speaker identification from voice fingerprint matching
-struct SpeakerIdentificationResult: Codable {
-    let speakers: [IdentifiedSpeaker]
-    let userSpeakerId: String?
-}
-
 /// Individual speaker identified in the call
 struct IdentifiedSpeaker: Codable {
     let name: String

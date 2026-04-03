@@ -24,13 +24,7 @@ final class TranscriptIndex: @unchecked Sendable {
         if sqlite3_open(indexPath.path, &db) != SQLITE_OK {
             throw MCPIndexError.databaseOpenFailed(dbError())
         }
-
-        // Set permissions to owner-only (0o600)
-        chmod(indexPath.path, 0o600)
-
-        exec("PRAGMA journal_mode=WAL")
-        exec("PRAGMA busy_timeout=5000")
-        exec("PRAGMA synchronous=NORMAL")
+        configureDatabase()
 
         // Integrity check
         var stmt: OpaquePointer?
@@ -46,16 +40,23 @@ final class TranscriptIndex: @unchecked Sendable {
                     if sqlite3_open(indexPath.path, &db) != SQLITE_OK {
                         throw MCPIndexError.databaseOpenFailed(dbError())
                     }
-                    chmod(indexPath.path, 0o600)
-                    exec("PRAGMA journal_mode=WAL")
-                    exec("PRAGMA busy_timeout=5000")
-                    exec("PRAGMA synchronous=NORMAL")
+                    configureDatabase()
                 }
             }
             sqlite3_finalize(stmt)
         }
 
         createTables()
+    }
+
+    /// Apply owner-only file permissions and WAL pragmas to an already-opened database handle.
+    /// Mirrors SpeakerDatabase.configureOpenDatabase() — called on initial open and after
+    /// corruption-recovery re-open so setup logic stays in one place.
+    private func configureDatabase() {
+        chmod(indexPath.path, 0o600)
+        exec("PRAGMA journal_mode=WAL")
+        exec("PRAGMA busy_timeout=5000")
+        exec("PRAGMA synchronous=NORMAL")
     }
 
     private func createTables() {
