@@ -14,6 +14,7 @@ class DraftAppState: ObservableObject {
     let contextCapture = ContextCaptureEngine()
     let analysisEngine = AnalysisEngine()
     let localInference = LocalInferenceManager()
+    let geminiEngine = GeminiEngine()
     let sttRouter = STTRouter()
     #if BETA_BUILD
     let updateManager = UpdateManager()
@@ -82,7 +83,8 @@ class DraftAppState: ObservableObject {
             await localInference.initialize()
         }
 
-        logger.log("APP LAUNCHED | local inference, style: \(styleEngine.exampleCount) examples, model: local")
+        let geminiStatus = GeminiEngine.isAvailable ? "configured" : "not configured"
+        logger.log("APP LAUNCHED | style: \(styleEngine.exampleCount) examples, gemini: \(geminiStatus)")
         EventTracker.track("app.launched", with: [
             "style_examples": "\(styleEngine.exampleCount)",
         ])
@@ -95,6 +97,7 @@ class DraftAppState: ObservableObject {
                 "stt_recording": "\(sttRouter.isRecording)",
                 "style_examples": "\(styleEngine.exampleCount)",
                 "llm_state": localInference.statusLabel,
+                "gemini_available": "\(GeminiEngine.isAvailable)",
             ]
         }
         EventReporter.shared.capture(level: .info, engine: "app", event: "app_launched",

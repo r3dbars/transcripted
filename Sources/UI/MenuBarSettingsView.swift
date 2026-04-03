@@ -1,5 +1,5 @@
 // MenuBarSettingsView.swift
-// Settings popover content: name, transcription engine, shortcuts, feedback, quit
+// Settings popover content: name, transcription engine, Gemini API key, shortcuts, feedback, quit
 
 import AppKit
 
@@ -12,10 +12,15 @@ final class MenuBarSettingsView: NSView {
     private let engineHint = NSTextField(labelWithString: "CoreML Parakeet — local, ~0.2s latency")
     private let hotkeyRecorder = HotkeyRecorderAppKitView(frame: .zero)
     private let llmLabel = NSTextField(labelWithString: "")
-    private let llmHint = NSTextField(labelWithString: "Fully local — no cloud, no API keys")
+    private let llmHint = NSTextField(labelWithString: "")
     private let feedbackButton = NSButton(title: "Send Feedback + Logs", target: nil, action: nil)
     private let copyLogsButton = NSButton(title: "Copy Logs", target: nil, action: nil)
     private let quitButton = NSButton(title: "Quit Draft", target: nil, action: nil)
+
+    // Gemini API key section
+    private let apiKeyField = NSSecureTextField()
+    private let apiKeyStatus = NSTextField(labelWithString: "")
+    private let apiKeyClearButton = NSButton(title: "Clear", target: nil, action: nil)
 
     weak var appState: DraftAppState?
 
@@ -64,6 +69,32 @@ final class MenuBarSettingsView: NSView {
         engineHint.font = NSFont.systemFont(ofSize: 10)
         engineHint.textColor = MenuTokens.textSecondaryNS
         addSubview(engineHint)
+
+        // Gemini API key
+        let geminiCaption = NSTextField(labelWithString: "Drafting Engine")
+        geminiCaption.font = NSFont.systemFont(ofSize: 11)
+        geminiCaption.textColor = MenuTokens.textSecondaryNS
+        geminiCaption.tag = 103
+        addSubview(geminiCaption)
+
+        apiKeyField.placeholderString = "Gemini API Key"
+        apiKeyField.font = NSFont.systemFont(ofSize: 13)
+        apiKeyField.bezelStyle = .roundedBezel
+        apiKeyField.target = self
+        apiKeyField.action = #selector(apiKeyChanged)
+        addSubview(apiKeyField)
+
+        apiKeyStatus.font = NSFont.systemFont(ofSize: 10)
+        addSubview(apiKeyStatus)
+
+        apiKeyClearButton.bezelStyle = .rounded
+        apiKeyClearButton.controlSize = .small
+        apiKeyClearButton.font = NSFont.systemFont(ofSize: 10)
+        apiKeyClearButton.target = self
+        apiKeyClearButton.action = #selector(clearAPIKey)
+        addSubview(apiKeyClearButton)
+
+        updateAPIKeyStatus()
 
         // Keyboard shortcuts
         let shortcutCaption = NSTextField(labelWithString: "Keyboard Shortcuts")
@@ -136,6 +167,19 @@ final class MenuBarSettingsView: NSView {
         // Divider
         y -= 16
 
+        // Gemini API key section
+        y -= 14
+        viewWithTag(103)?.frame = NSRect(x: pad, y: y, width: contentW, height: 14)
+        y -= 24
+        let clearW: CGFloat = 50
+        apiKeyField.frame = NSRect(x: pad, y: y, width: contentW - clearW - 6, height: 22)
+        apiKeyClearButton.frame = NSRect(x: pad + contentW - clearW, y: y, width: clearW, height: 22)
+        y -= 16
+        apiKeyStatus.frame = NSRect(x: pad, y: y, width: contentW, height: 14)
+
+        // Divider
+        y -= 16
+
         // Shortcuts section
         y -= 14
         viewWithTag(102)?.frame = NSRect(x: pad, y: y, width: contentW, height: 14)
@@ -168,7 +212,25 @@ final class MenuBarSettingsView: NSView {
     }
 
     func update(llmStatus: String) {
-        llmLabel.stringValue = "LLM: \(llmStatus)"
+        if GeminiEngine.isAvailable {
+            llmLabel.stringValue = "Drafting: Gemini 3 Flash"
+            llmHint.stringValue = "Cloud drafting — local model used for style learning"
+        } else {
+            llmLabel.stringValue = "LLM: \(llmStatus)"
+            llmHint.stringValue = "Add a Gemini API key above for cloud drafting"
+        }
+    }
+
+    func updateAPIKeyStatus() {
+        if GeminiEngine.hasAPIKey {
+            apiKeyStatus.stringValue = "Gemini API key saved"
+            apiKeyStatus.textColor = NSColor.systemGreen
+            apiKeyClearButton.isHidden = false
+        } else {
+            apiKeyStatus.stringValue = "Free at aistudio.google.com"
+            apiKeyStatus.textColor = MenuTokens.textSecondaryNS
+            apiKeyClearButton.isHidden = true
+        }
     }
 
     @objc private func nameChanged() {
@@ -176,6 +238,20 @@ final class MenuBarSettingsView: NSView {
         if !trimmed.isEmpty {
             UserDefaults.standard.set(trimmed, forKey: "user-display-name")
         }
+    }
+
+    @objc private func apiKeyChanged() {
+        let key = apiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !key.isEmpty {
+            GeminiEngine.saveAPIKey(key)
+            apiKeyField.stringValue = ""
+            updateAPIKeyStatus()
+        }
+    }
+
+    @objc private func clearAPIKey() {
+        GeminiEngine.deleteAPIKey()
+        updateAPIKeyStatus()
     }
 
     @objc private func sendFeedback() {
