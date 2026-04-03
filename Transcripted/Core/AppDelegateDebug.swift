@@ -13,6 +13,13 @@ extension AppDelegate {
         AppLogger.app.info("Onboarding reset — restart app to see onboarding")
     }
 
+    @objc func openLogsFolder() {
+        let logsDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/Transcripted")
+        try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
+        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: logsDir.path)
+    }
+
     @objc func testNamingTray() {
         guard let tm = taskManager else { return }
         let speakerDB = tm.transcription.speakerDB
