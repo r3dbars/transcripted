@@ -211,6 +211,12 @@ class TranscriptionTaskManager: ObservableObject {
         activeCount = 0
         backgroundTaskCount = 0
         displayStatus = .idle
+
+        // Cancel Qwen lifecycle tasks to prevent orphaned model loads
+        qwenPreloadTask?.cancel()
+        qwenPreloadTask = nil
+        qwenTimeoutTask?.cancel()
+        qwenTimeoutTask = nil
     }
 
     /// Populate saved transcript metadata from the file's YAML frontmatter.
