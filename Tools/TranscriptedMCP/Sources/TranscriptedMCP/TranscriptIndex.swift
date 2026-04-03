@@ -180,6 +180,8 @@ final class TranscriptIndex: @unchecked Sendable {
         let wordCount = transcript.speakers.reduce(0) { $0 + $1.wordCount }
 
         exec("BEGIN EXCLUSIVE")
+        var committed = false
+        defer { if !committed { exec("ROLLBACK") } }
 
         bindExec(
             "INSERT OR REPLACE INTO meetings (filename, date, datetime, duration_seconds, speaker_count, word_count, json_modified_at) VALUES (?,?,?,?,?,?,?)",
@@ -213,6 +215,7 @@ final class TranscriptIndex: @unchecked Sendable {
         }
 
         exec("COMMIT")
+        committed = true
         log("Indexed: \(filename) (\(transcript.utterances.count) utterances)")
     }
 
@@ -225,10 +228,13 @@ final class TranscriptIndex: @unchecked Sendable {
 
     private func removeFromIndex(filename: String) throws {
         exec("BEGIN EXCLUSIVE")
+        var committed = false
+        defer { if !committed { exec("ROLLBACK") } }
         bindExec("DELETE FROM utterances WHERE filename = ?", bindings: [.text(filename)])
         bindExec("DELETE FROM meeting_speakers WHERE filename = ?", bindings: [.text(filename)])
         bindExec("DELETE FROM meetings WHERE filename = ?", bindings: [.text(filename)])
         exec("COMMIT")
+        committed = true
     }
 
     // MARK: - Queries
