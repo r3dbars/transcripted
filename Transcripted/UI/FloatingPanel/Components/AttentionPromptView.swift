@@ -12,6 +12,7 @@ struct AttentionPromptView: View {
 
     @State private var isVisible = false
     @State private var dismissProgress: CGFloat = 1.0
+    @State private var dismissTask: Task<Void, Never>?
 
     private let autoDismissSeconds: Double = 10.0
 
@@ -165,13 +166,17 @@ struct AttentionPromptView: View {
     }
 
     private func startDismissCountdown() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + autoDismissSeconds) {
+        // Cancel any existing timer to prevent stacking
+        dismissTask?.cancel()
+        dismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(autoDismissSeconds * 1_000_000_000))
+            guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.3)) {
                 isVisible = false
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                onDismiss()
-            }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            onDismiss()
         }
     }
 }

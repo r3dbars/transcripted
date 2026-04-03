@@ -39,6 +39,19 @@ class TranscriptionTaskManager: ObservableObject {
     /// Start a new transcription task in the background
     func startTranscription(micURL: URL, systemURL: URL?, outputFolder: URL, healthInfo: RecordingHealthInfo? = nil) {
 
+        // Guard: reject concurrent pipelines to prevent model contention
+        if !activeTasks.isEmpty {
+            AppLogger.pipeline.warning("Rejecting transcription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
+            failedTranscriptionManager.addFailedTranscription(
+                micAudioURL: micURL,
+                systemAudioURL: systemURL,
+                errorMessage: "Transcription already in progress"
+            )
+            displayStatus = .failed(message: "Transcription already in progress")
+            scheduleStatusReset(delay: 4)
+            return
+        }
+
         // Cancel the pre-load timeout — the pipeline will handle Qwen cleanup itself
         qwenTimeoutTask?.cancel()
         qwenTimeoutTask = nil

@@ -18,7 +18,13 @@ final class SpeakerDatabase {
 
     private init() {
         guard let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            fatalError("SpeakerDatabase: no documents directory available")
+            AppLogger.speakers.error("CRITICAL: Documents directory unavailable — falling back to temp directory for speaker database")
+            let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("Transcripted")
+            try? FileManager.default.createDirectory(at: tempFolder, withIntermediateDirectories: true)
+            dbPath = tempFolder.appendingPathComponent("speakers.sqlite")
+            openDatabase()
+            createTables()
+            return
         }
         let transcriptedFolder = documentsPath.appendingPathComponent("Transcripted")
         try? FileManager.default.createDirectory(at: transcriptedFolder, withIntermediateDirectories: true)
@@ -324,7 +330,7 @@ final class SpeakerDatabase {
     ///   0=id, 1=display_name, 2=name_source, 3=embedding,
     ///   4=first_seen, 5=last_seen, 6=call_count, 7=confidence, 8=dispute_count
     private func parseSpeakerRow(_ statement: OpaquePointer, isoFormatter: ISO8601DateFormatter) -> SpeakerProfile {
-        let idStr = String(cString: sqlite3_column_text(statement, 0))
+        let idStr = sqlite3_column_text(statement, 0).map(String.init(cString:)) ?? ""
         let displayName: String? = sqlite3_column_text(statement, 1).map { String(cString: $0) }
         let nameSource: String? = sqlite3_column_text(statement, 2).map { String(cString: $0) }
 
@@ -340,8 +346,8 @@ final class SpeakerDatabase {
             ))
         }
 
-        let firstSeenStr = String(cString: sqlite3_column_text(statement, 4))
-        let lastSeenStr = String(cString: sqlite3_column_text(statement, 5))
+        let firstSeenStr = sqlite3_column_text(statement, 4).map(String.init(cString:)) ?? ""
+        let lastSeenStr = sqlite3_column_text(statement, 5).map(String.init(cString:)) ?? ""
         let callCount = Int(sqlite3_column_int(statement, 6))
         let confidence = sqlite3_column_double(statement, 7)
         let disputeCount = Int(sqlite3_column_int(statement, 8))

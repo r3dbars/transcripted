@@ -12,6 +12,7 @@ struct PillErrorView: View {
 
     @State private var shakeOffset: CGFloat = 0
     @State private var contentOpacity: Double = 0
+    @State private var dismissTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -90,14 +91,17 @@ struct PillErrorView: View {
             }
         }
 
-        // Auto-dismiss after 4 seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+        // Auto-dismiss after 4 seconds (cancellable to prevent timer stacking)
+        dismissTask?.cancel()
+        dismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.3)) {
                 contentOpacity = 0
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                isVisible = false
-            }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            isVisible = false
         }
     }
 }
