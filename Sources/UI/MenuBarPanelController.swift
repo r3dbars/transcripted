@@ -80,6 +80,10 @@ final class MenuBarPanelController: NSViewController {
             styleMatchScore: appState.styleEngine.styleMatchScore
         )
 
+        // Settings
+        content.settingsView.update(llmStatus: appState.localInference.statusLabel)
+        content.settingsView.updateAPIKeyStatus()
+
         // Agent
         content.agentView.update(
             insights: appState.analysisEngine.insights,

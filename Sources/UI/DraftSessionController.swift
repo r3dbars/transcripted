@@ -40,6 +40,7 @@ class DraftSessionController: ObservableObject {
 
     private var lastCapturedContext: CapturedContext?
     private var sessionSourceApp: NSRunningApplication?
+    private var sessionImageData: Data?
     private var streamingTask: Task<Void, Never>?
     private var visionTask: Task<Void, Never>?
     private var clipboardRestoreTask: Task<Void, Never>?
@@ -97,6 +98,7 @@ class DraftSessionController: ObservableObject {
         lastCompletedText = nil
 
         lastCapturedContext = nil
+        sessionImageData = imageData
         appState.drafter.clear()
 
         // Show overlay and start recording
@@ -154,16 +156,13 @@ class DraftSessionController: ObservableObject {
             return
         }
 
-        appState.logger.log("SESSION | started (parakeet, \(appState.sttRouter.inputDeviceName)), voice recording + vision in parallel")
+        appState.logger.log("SESSION | started (parakeet, \(appState.sttRouter.inputDeviceName)), voice recording started")
 
         // Start session timeout — auto-cancel after 5 minutes to prevent stuck sessions
         installSessionTimeout()
 
-        // Start vision processing in parallel (stored so we can await it before drafting)
-        visionTask?.cancel()
-        visionTask = Task {
-            await processVision(imageData: imageData, sourceApp: sourceApp)
-        }
+        // No vision task needed — Gemini sees the screenshot image directly.
+        // The sessionImageData stored in startSession() is sent to Gemini at draft time.
     }
 
     /// Stop recording and trigger drafting — called on second hotkey press
@@ -181,8 +180,8 @@ class DraftSessionController: ObservableObject {
 
         streamingTask?.cancel()
         streamingTask = Task {
-            // Preempt any lingering generation on the MLX actor
-            await appState.localInference.draftEngine.cancelGeneration()
+            // Cancel any lingering Gemini generation
+            await appState.geminiEngine.cancelGeneration()
             // Stop recording and batch-transcribe
             appState.sttRouter.stopRecording()
             let voiceText = (await appState.sttRouter.transcribe() ?? "")
@@ -201,39 +200,37 @@ class DraftSessionController: ObservableObject {
 
             let platform = PlatformFormatter.detect(from: sessionSourceApp)
 
-            guard appState.localInference.isReady else {
-                appState.logger.log("SESSION | local model not loaded, cancelling")
-                EventReporter.shared.capture(level: .error, engine: "overlay", event: "model_not_ready",
-                    message: "Local LLM not loaded")
-                visionTask?.cancel()
-                visionTask = nil
-                overlayController.showError(appState.localInference.statusLabel)
+            guard GeminiEngine.isAvailable else {
+                appState.logger.log("SESSION | no Gemini API key configured")
+                EventReporter.shared.capture(level: .error, engine: "overlay", event: "gemini_not_configured",
+                    message: "No Gemini API key — configure in Settings")
+                overlayController.showError("No Gemini API key — check Settings")
                 isInSession = false
                 return
             }
 
-            // Wait for vision to complete (or timeout) before checking context
-            await visionTask?.value
-            visionTask = nil
-
-            appState.logger.log("SESSION | streaming draft [\(platform.rawValue)] — \(voiceText.count) chars, context: \(lastCapturedContext?.hasConversation == true ? "yes" : "no")")
+            appState.logger.log("SESSION | streaming draft via Gemini [\(platform.rawValue)] — \(voiceText.count) chars, image: \(sessionImageData != nil)")
 
             var systemPrompt = appState.styleEngine.buildSystemPrompt()
             if !platform.formattingInstructions.isEmpty {
                 systemPrompt += "\n\n" + platform.formattingInstructions
             }
 
+            // Build user message — Gemini sees the screenshot as an image part,
+            // so the text prompt just provides platform context and voice instructions.
+            let trimmedVoice = voiceText.trimmingCharacters(in: .whitespacesAndNewlines)
             let userMessage: String
-            if let context = lastCapturedContext, context.hasConversation {
-                userMessage = context.draftingPrompt(userInstructions: voiceText)
+            if sessionImageData != nil {
+                userMessage = "Write a reply to the conversation shown in the screenshot.\n\nPLATFORM: \(platform.rawValue)\n\nUSER WANTS TO SAY:\n\(trimmedVoice)\n\nWrite a reply. Match the conversation's length and energy. Output only the message text."
             } else {
-                userMessage = "Clean up this dictation. Fix grammar, keep their tone. Output only the message.\n\n\(voiceText.trimmingCharacters(in: .whitespacesAndNewlines))"
+                userMessage = "Clean up this dictation. Fix grammar, keep their tone. Output only the message.\n\n\(trimmedVoice)"
             }
 
-            let stream = await appState.localInference.draftEngine.generate(
+            let stream = await appState.geminiEngine.generate(
                 prompt: userMessage,
                 systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt,
-                maxTokens: DraftConstants.draftMaxTokens,
+                imageData: sessionImageData,
+                maxTokens: DraftConstants.geminiDraftMaxTokens,
                 temperature: 0.7
             )
 
@@ -290,6 +287,7 @@ class DraftSessionController: ObservableObject {
 
     func cancelSession() {
         guard let (appState, overlayController) = readyState() else { return }
+        sessionImageData = nil
         visionTask?.cancel()
         visionTask = nil
         streamingTask?.cancel()
@@ -655,6 +653,7 @@ class DraftSessionController: ObservableObject {
         }
 
         isInSession = false
+        sessionImageData = nil
         appState.logger.log("SESSION | confirmed and injected (\(editedText.count) chars)")
     }
 
