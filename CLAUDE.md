@@ -11,12 +11,12 @@ Menu bar-only macOS app for real-time system audio transcription. Pipeline: Core
 - **Protocols**: 7 service protocols in `Services/Protocols/` (SpeechToTextEngine, DiarizationEngine, SpeakerStore, etc.)
 - **DI**: `AppServices` container in `Core/AppServices.swift`
 
-## Folder Map (~136 Swift files, agent-first: max ~300 lines per file, single responsibility)
+## Folder Map (~137 Swift files, agent-first: max ~300 lines per file, single responsibility)
 - **Core/** (48 files): Audio capture (Audio + 3 extensions), transcription pipeline (TaskManager + 3 extensions), transcript saving (4 files), stats DB (3 files), model downloads (ModelDownloadService), failed transcription retry, file permissions, logging, coordinators (Hotkey, MenuBar, Notification, Window, Recording)
 - **Services/** (18 files): ML services (11 files) + Protocols/ subdirectory (7 service protocols)
 - **UI/FloatingPanel/** (21 files): Morphing pill UI, aurora state views (3 files), SavedPillView, transcript tray (3 files), speaker naming (3 files), Components/ (16 files), Helpers/ (1 file)
 - **UI/Settings/** (18 files): Settings container + Sections/ (7 section views) + Components/ (6 reusable components) + Models/ (1 file)
-- **Onboarding/** (7 files): 4-step first-run flow (Welcome -> Preview -> Permissions -> Model Setup), dark theme
+- **Onboarding/** (8 files): 5-step first-run flow (Preview -> Permissions -> Model Setup -> HowItWorks -> TestRecording), dark theme
 - **Design/** (21 files): Colors/ (6 files), Components/ (5 premium components), root tokens (10 files: Spacing, Radius, Typography, Animations, Shadows, ViewModifiers, Gradients, Dimensions, Accessibility, CardModifiers)
 
 ## Build & Test
@@ -84,7 +84,7 @@ User presses Cmd+Shift+R (global hotkey)
 - **Qwen**: On-demand download (~2.5GB), loads/unloads to manage memory
 - **Download resilience**: All downloads use `ModelDownloadService` with HuggingFace mirror fallback (`hf-mirror.com`), retry with exponential backoff, and structured error classification
 
-## CLAUDE.md Navigation (15 files)
+## CLAUDE.md Navigation (16 files)
 Every folder with ≥2 Swift files has its own CLAUDE.md with file index, reference data, and gotchas.
 
 | Path | Scope |
@@ -102,8 +102,9 @@ Every folder with ≥2 Swift files has its own CLAUDE.md with file index, refere
 | `Transcripted/UI/Settings/CLAUDE.md` | @AppStorage keys, window config, speaker operations |
 | `Transcripted/UI/Settings/Sections/CLAUDE.md` | 7 section views with per-section detail |
 | `Transcripted/UI/Settings/Components/CLAUDE.md` | CoralToggle, button styles, input components |
-| `Transcripted/Onboarding/CLAUDE.md` | 4-step flow, OnboardingState properties, integration |
-| `Transcripted/Onboarding/Steps/CLAUDE.md` | Welcome, Preview, Permissions, ModelSetup step implementations |
+| `Transcripted/Onboarding/CLAUDE.md` | 5-step flow, OnboardingState properties, integration |
+| `Transcripted/Onboarding/Steps/CLAUDE.md` | Preview, Permissions, ModelSetup, HowItWorks, TestRecording step implementations |
+| `Tools/TranscriptedMCP/CLAUDE.md` | MCP server tools, SQLite index schema, name variants, file watcher |
 
 **Single-file folders** (covered by parent CLAUDE.md):
 - `UI/MenuBar/MenuBarStatRow.swift` — Custom NSView (250x22), used in status bar dropdown
@@ -113,8 +114,8 @@ Every folder with ≥2 Swift files has its own CLAUDE.md with file index, refere
 
 ## Tools (external CLI utilities)
 - **Tools/TranscriptedQA/** (19 Swift files): Standalone Swift CLI (`transcripted-qa`) for validating on-disk artifacts. Subcommands: `validate-all` (default), `validate-transcripts`, `validate-database`, `validate-logs`, `validate-artifacts`, `validate-index`, `check-health`. Validators: TranscriptValidator, SpeakerDBValidator, StatsDBValidator, JSONSidecarValidator, IndexValidator, LogValidator, HealthChecker. Uses `ArgumentParser`.
-- **Tools/TranscriptedCLI/** (1 file): Legacy CLI wrapper around FluidAudio static lib.
-- **Tools/TranscriptedMCP/** (7 Swift source files): MCP server (`transcripted-mcp`) exposing Transcripted transcripts to AI agents via the Model Context Protocol. Built as a Swift Package with `swift-sdk` (MCP 0.12.0). 5 tools: `list_meetings` (list with metadata, date filter), `read_meeting` (full transcript by filename, section param: full/transcript/speakers), `search` (full-text with optional speaker + date filters, supports name variants), `who_is` (speaker profile lookup), `recap` (multi-meeting digest for a date range). Index stored at `~/Documents/Transcripted/mcp_index.sqlite` (0o600). Watches for new transcripts via `FileWatcher`. NameVariants mirrors `SpeakerProfileMerger.swift` lookups. `TRANSCRIPTED_DATA_DIR` env var overrides default data path.
+- **Tools/TranscriptedCLI/** (5 Swift files): Standalone Swift CLI (`transcripted-cli`) for offline diarization via FluidAudio. Entry: `TranscriptedCLI.swift` (ArgumentParser root). Subcommands: `diarize` (single file, `DiarizeCommand.swift`), `batch` (directory, `BatchCommand.swift`). Shared: `ConfigLoader.swift` (JSON config -> OfflineDiarizerConfig), `RTTMWriter.swift` (RTTM + JSON output).
+- **Tools/TranscriptedMCP/** (8 Swift files): MCP server (`transcripted-mcp`) for Claude Desktop integration. Exposes 5 tools: `list_meetings`, `read_meeting`, `search`, `who_is`, `recap`. Uses SQLite index (`mcp_index.sqlite`) via `TranscriptIndex.swift`; file watching via `FileWatcher.swift`; name variant expansion via `NameVariants.swift` (mirrors SpeakerProfileMerger). Data dir: `~/Documents/Transcripted/` (override via `TRANSCRIPTED_DATA_DIR` env). See `Tools/TranscriptedMCP/CLAUDE.md`.
 
 ## Documentation
 See CONTRIBUTING.md for full development guidelines.
