@@ -1,6 +1,6 @@
 # Service Protocols
 
-7 protocol definitions for dependency injection. Each defines the interface for one service. Conformances exist but are **not yet adopted** in AppServices.swift (still uses concrete types).
+6 protocol definitions for dependency injection. Each defines the interface for one service. Conformances exist but are **not yet adopted** in AppServices.swift (still uses concrete types).
 
 ## File Index
 
@@ -8,7 +8,6 @@
 |------|-----------|-------|
 | `SpeechToTextEngine.swift` | ParakeetService | @MainActor, ObservableObject |
 | `DiarizationEngine.swift` | DiarizationService | @MainActor, ObservableObject |
-| `SpeakerNamingEngine.swift` | QwenService | @MainActor, ObservableObject |
 | `SpeakerStore.swift` | SpeakerDatabase | (no actor — utility queue) |
 | `AudioCaptureEngine.swift` | Audio | ObservableObject (NOT @MainActor) |
 | `StatsStore.swift` | StatsDatabase | (no actor — serial queue) |
@@ -34,17 +33,6 @@
     func diarizeOffline(samples: [Float], sampleRate: Int) async throws -> [SpeakerSegment]
     func diarizeOffline(audioURL: URL) async throws -> [SpeakerSegment]
     func cleanup()
-}
-```
-
-### SpeakerNamingEngine
-```swift
-@MainActor protocol SpeakerNamingEngine: ObservableObject {
-    static var isEnabled: Bool { get }
-    static var isModelCached: Bool { get }
-    func loadModel() async
-    func unload()
-    func inferSpeakerNames(transcript: String) async throws -> QwenInferenceOutput
 }
 ```
 
@@ -109,8 +97,6 @@ protocol TranscriptStorage {
     @discardableResult
     static func updateSpeakerNames(transcriptURL: URL, updates: [SpeakerNameUpdate]) -> Bool
     static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String)
-    @discardableResult
-    static func retroactivelyUpdateTitle(transcriptURL: URL, title: String) -> Bool
     static var defaultSaveDirectory: URL { get }
 }
 ```
@@ -122,7 +108,6 @@ protocol TranscriptStorage {
 struct AppServices {
     let speechToText: ParakeetService     // should be: any SpeechToTextEngine
     let diarization: DiarizationService   // should be: any DiarizationEngine
-    let speakerNaming: QwenService        // should be: any SpeakerNamingEngine
     let speakerStore: SpeakerDatabase     // should be: any SpeakerStore
 }
 ```
@@ -130,11 +115,10 @@ Protocol conformances need to be declared on the concrete types, then AppService
 
 ## Relationships
 - Protocols used by: Core/AppServices.swift (DI container)
-- Conformers in: Services/ root (ParakeetService, DiarizationService, QwenService, SpeakerDatabase) and Core/ (Audio, StatsDatabase, TranscriptSaver)
+- Conformers in: Services/ root (ParakeetService, DiarizationService, SpeakerDatabase) and Core/ (Audio, StatsDatabase, TranscriptSaver)
 - Key types referenced: SpeakerSegment, SpeakerProfile, SpeakerMatchResult (Services/SpeakerProfile.swift), AudioSource (FluidAudio framework), RecordingHealthInfo (Core/TranscriptMetadataBuilder.swift)
 
 ## Gotchas
-- `SpeakerNamingEngine` has static properties (`isEnabled`, `isModelCached`) — unusual for a protocol
 - `TranscriptStorage` uses all static methods — conformer (TranscriptSaver) is a utility class, not an instance
 - `AudioCaptureEngine` is NOT @MainActor despite most protocols being @MainActor — Audio runs on audio threads
 - These protocols are aspirational — the codebase still uses concrete types directly in most places

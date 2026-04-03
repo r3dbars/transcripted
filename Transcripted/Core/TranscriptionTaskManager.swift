@@ -3,8 +3,7 @@ import AVFoundation
 import UserNotifications
 
 // MARK: - Transcription Task Queue & Orchestration
-// Extensions in: QwenLifecycleManager.swift, SpeakerNamingCoordinator.swift,
-//                TranscriptionPipelineRunner.swift
+// Extensions in: SpeakerNamingCoordinator.swift, TranscriptionPipelineRunner.swift
 // Types in: DisplayStatus.swift (DisplayStatus enum, TranscriptionTask struct)
 
 @available(macOS 26.0, *)
@@ -23,11 +22,6 @@ class TranscriptionTaskManager: ObservableObject {
     var activeTasks: [UUID: Task<Void, Never>] = [:]
     let transcription = Transcription()
 
-    /// Pre-loaded Qwen service — loaded when recording starts, consumed by pipeline
-    var qwenService: QwenService?
-    var qwenPreloadTask: Task<Void, Never>?
-    var qwenTimeoutTask: Task<Void, Never>?
-
     let failedTranscriptionManager: FailedTranscriptionManager
 
     init(failedTranscriptionManager: FailedTranscriptionManager) {
@@ -39,10 +33,6 @@ class TranscriptionTaskManager: ObservableObject {
     /// Start a new transcription task in the background
     func startTranscription(micURL: URL, systemURL: URL?, outputFolder: URL, healthInfo: RecordingHealthInfo? = nil) {
 
-        // Cancel the pre-load timeout — the pipeline will handle Qwen cleanup itself
-        qwenTimeoutTask?.cancel()
-        qwenTimeoutTask = nil
-
         // Gate: reject recordings shorter than 2 seconds (they'll fail in Parakeet anyway)
         let minDuration: TimeInterval = 2.0
         if let micDuration = audioDuration(url: micURL), micDuration < minDuration {
@@ -50,8 +40,6 @@ class TranscriptionTaskManager: ObservableObject {
 
             try? FileManager.default.removeItem(at: micURL)
             if let systemURL { try? FileManager.default.removeItem(at: systemURL) }
-
-            cleanupQwen()
 
             self.displayStatus = .failed(message: "Recording too short")
             self.scheduleStatusReset(delay: 3)
@@ -65,8 +53,6 @@ class TranscriptionTaskManager: ObservableObject {
         displayStatus = .gettingReady
 
         AppLogger.pipeline.info("Starting transcription task", ["taskId": "\(task.id)", "activeCount": "\(activeCount)"])
-
-        startQwenTimeout()
 
         let asyncTask = Task {
             do {

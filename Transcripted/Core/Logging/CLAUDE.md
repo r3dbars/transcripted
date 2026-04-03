@@ -27,7 +27,7 @@ AppLogger.audio.info("Started capture", ["sampleRate": "16000"])
 | `.audioMic` | audio.mic | Microphone capture, device recovery |
 | `.audioSystem` | audio.system | System audio capture, process taps |
 | `.transcription` | transcription | Pipeline orchestration |
-| `.pipeline` | pipeline | Parakeet/diarization/Qwen steps |
+| `.pipeline` | pipeline | Parakeet/diarization steps |
 | `.speakers` | speaker-db | Speaker matching, DB operations |
 | `.services` | services | Model loading, service lifecycle |
 | `.ui` | ui | UI state changes, window events |

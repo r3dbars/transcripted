@@ -69,7 +69,6 @@
 		SS001005 /* SpeakersSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001006 /* SpeakersSection.swift */; };
 		SS001007 /* ProfileSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001008 /* ProfileSection.swift */; };
 		SS001009 /* MeetingDetectionSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001010 /* MeetingDetectionSection.swift */; };
-		SS001011 /* SpeakerIntelligenceSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001012 /* SpeakerIntelligenceSection.swift */; };
 		SS001013 /* AIServicesSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001014 /* AIServicesSection.swift */; };
 		SS001029 /* TroubleshootingSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001030 /* TroubleshootingSection.swift */; };
 		SS001015 /* SettingsTopBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001016 /* SettingsTopBar.swift */; };
@@ -95,13 +94,12 @@
 		FA000014 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000004 /* Accelerate.framework */; };
 		FA000015 /* CoreML.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000005 /* CoreML.framework */; };
 		FA000016 /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000006 /* CoreAudio.framework */; };
-		Q1000001 /* QwenService.swift in Sources */ = {isa = PBXBuildFile; fileRef = Q1000002 /* QwenService.swift */; };
 		A2000001 /* DiagnosticExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* DiagnosticExporter.swift */; };
 		PC000011 /* PillCalloutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PC000001 /* PillCalloutView.swift */; };
 		PC000012 /* PillCalloutController.swift in Sources */ = {isa = PBXBuildFile; fileRef = PC000002 /* PillCalloutController.swift */; };
-		Q1000011 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = Q1000012 /* MLXLLM */; };
 		SP000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = SP000002 /* Sparkle */; };
-		Q1000021 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = Q1000022 /* MLXLMCommon */; };
+		ST000011 /* Hub in Frameworks */ = {isa = PBXBuildFile; productRef = ST000012 /* Hub */; };
+		ST000021 /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = ST000022 /* Tokenizers */; };
 		T1000011 /* TestFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000001 /* TestFixtures.swift */; };
 		T1000012 /* DateFormattingHelperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000002 /* DateFormattingHelperTests.swift */; };
 		T1000013 /* DateParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000003 /* DateParserTests.swift */; };
@@ -111,7 +109,6 @@
 		T1000018 /* PillStateManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000008 /* PillStateManagerTests.swift */; };
 		T1000019 /* SpeakerDatabaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000009 /* SpeakerDatabaseTests.swift */; };
 		T1000020 /* TranscriptSaverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000010 /* TranscriptSaverTests.swift */; };
-		T1000031 /* QwenServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000021 /* QwenServiceTests.swift */; };
 		T1000032 /* AudioResamplerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000022 /* AudioResamplerTests.swift */; };
 		T1000033 /* PipelineErrorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000023 /* PipelineErrorTests.swift */; };
 		T1000034 /* FailedTranscriptionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000024 /* FailedTranscriptionTests.swift */; };
@@ -173,7 +170,6 @@
 		NFE418BA5101 /* PremiumButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFE418BA5100 /* PremiumButton.swift */; };
 		NF9515C01901 /* PremiumCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF9515C01900 /* PremiumCard.swift */; };
 		NF5C44D9E301 /* QuickTipRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF5C44D9E300 /* QuickTipRow.swift */; };
-		NF0F6788D201 /* QwenLifecycleManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF0F6788D200 /* QwenLifecycleManager.swift */; };
 		NF63CDF92701 /* Radius.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF63CDF92700 /* Radius.swift */; };
 		NF4397517301 /* RecordingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF4397517300 /* RecordingCoordinator.swift */; };
 		NFAB0BEF3E01 /* RetroactiveSpeakerUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFAB0BEF3E00 /* RetroactiveSpeakerUpdater.swift */; };
@@ -182,7 +178,6 @@
 		NFC916743001 /* SpeakerEmbeddingMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFC916743000 /* SpeakerEmbeddingMatcher.swift */; };
 		NF321D21DA01 /* SpeakerMatchingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF321D21DA00 /* SpeakerMatchingService.swift */; };
 		NFD7C7735401 /* SpeakerNamingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFD7C7735400 /* SpeakerNamingCoordinator.swift */; };
-		NF42A9D89201 /* SpeakerNamingEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF42A9D89200 /* SpeakerNamingEngine.swift */; };
 		NF13D8F10401 /* SpeakerProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF13D8F10400 /* SpeakerProfile.swift */; };
 		NFF6BF80D901 /* SpeakerProfileMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFF6BF80D900 /* SpeakerProfileMerger.swift */; };
 		NF7B41DA9E01 /* SpeakerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF7B41DA9E00 /* SpeakerStore.swift */; };
@@ -284,7 +279,6 @@
 		SS001006 /* SpeakersSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakersSection.swift; sourceTree = "<group>"; };
 		SS001008 /* ProfileSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileSection.swift; sourceTree = "<group>"; };
 		SS001010 /* MeetingDetectionSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDetectionSection.swift; sourceTree = "<group>"; };
-		SS001012 /* SpeakerIntelligenceSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerIntelligenceSection.swift; sourceTree = "<group>"; };
 		SS001014 /* AIServicesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIServicesSection.swift; sourceTree = "<group>"; };
 		SS001030 /* TroubleshootingSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TroubleshootingSection.swift; sourceTree = "<group>"; };
 		SS001016 /* SettingsTopBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTopBar.swift; sourceTree = "<group>"; };
@@ -311,7 +305,6 @@
 		FA000004 /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
 		FA000005 /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
 		FA000006 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
-		Q1000002 /* QwenService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QwenService.swift; sourceTree = "<group>"; };
 		T1000001 /* TestFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestFixtures.swift; sourceTree = "<group>"; };
 		T1000002 /* DateFormattingHelperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateFormattingHelperTests.swift; sourceTree = "<group>"; };
 		T1000003 /* DateParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParserTests.swift; sourceTree = "<group>"; };
@@ -319,7 +312,6 @@
 		AG000011 /* AgentOutputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentOutputTests.swift; sourceTree = "<group>"; };
 		T1000005 /* TranscriptionTypesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTypesTests.swift; sourceTree = "<group>"; };
 		T1000010 /* TranscriptSaverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSaverTests.swift; sourceTree = "<group>"; };
-		T1000021 /* QwenServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QwenServiceTests.swift; sourceTree = "<group>"; };
 		T1000022 /* AudioResamplerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioResamplerTests.swift; sourceTree = "<group>"; };
 		T1000023 /* PipelineErrorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineErrorTests.swift; sourceTree = "<group>"; };
 		T1000024 /* FailedTranscriptionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailedTranscriptionTests.swift; sourceTree = "<group>"; };
@@ -379,7 +371,6 @@
 		NFE418BA5100 /* PremiumButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumButton.swift; sourceTree = "<group>"; };
 		NF9515C01900 /* PremiumCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumCard.swift; sourceTree = "<group>"; };
 		NF5C44D9E300 /* QuickTipRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickTipRow.swift; sourceTree = "<group>"; };
-		NF0F6788D200 /* QwenLifecycleManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QwenLifecycleManager.swift; sourceTree = "<group>"; };
 		NF63CDF92700 /* Radius.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Radius.swift; sourceTree = "<group>"; };
 		NF4397517300 /* RecordingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingCoordinator.swift; sourceTree = "<group>"; };
 		NFAB0BEF3E00 /* RetroactiveSpeakerUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetroactiveSpeakerUpdater.swift; sourceTree = "<group>"; };
@@ -388,7 +379,6 @@
 		NFC916743000 /* SpeakerEmbeddingMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerEmbeddingMatcher.swift; sourceTree = "<group>"; };
 		NF321D21DA00 /* SpeakerMatchingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMatchingService.swift; sourceTree = "<group>"; };
 		NFD7C7735400 /* SpeakerNamingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerNamingCoordinator.swift; sourceTree = "<group>"; };
-		NF42A9D89200 /* SpeakerNamingEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerNamingEngine.swift; sourceTree = "<group>"; };
 		NF13D8F10400 /* SpeakerProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerProfile.swift; sourceTree = "<group>"; };
 		NFF6BF80D900 /* SpeakerProfileMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerProfileMerger.swift; sourceTree = "<group>"; };
 		NF7B41DA9E00 /* SpeakerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerStore.swift; sourceTree = "<group>"; };
@@ -418,9 +408,9 @@
 				FA000014 /* Accelerate.framework in Frameworks */,
 				FA000015 /* CoreML.framework in Frameworks */,
 				FA000016 /* CoreAudio.framework in Frameworks */,
-				Q1000011 /* MLXLLM in Frameworks */,
-				Q1000021 /* MLXLMCommon in Frameworks */,
 				SP000001 /* Sparkle in Frameworks */,
+				ST000011 /* Hub in Frameworks */,
+				ST000021 /* Tokenizers in Frameworks */,
 			
 				NF20640F9501 /* Accessibility.swift in Sources */,
 				NF0EF2C81601 /* AnimatedIcon.swift in Sources */,
@@ -444,7 +434,6 @@
 				NFE418BA5101 /* PremiumButton.swift in Sources */,
 				NF9515C01901 /* PremiumCard.swift in Sources */,
 				NF5C44D9E301 /* QuickTipRow.swift in Sources */,
-				NF0F6788D201 /* QwenLifecycleManager.swift in Sources */,
 				NF63CDF92701 /* Radius.swift in Sources */,
 				NF4397517301 /* RecordingCoordinator.swift in Sources */,
 				NFAB0BEF3E01 /* RetroactiveSpeakerUpdater.swift in Sources */,
@@ -453,7 +442,6 @@
 				NFC916743001 /* SpeakerEmbeddingMatcher.swift in Sources */,
 				NF321D21DA01 /* SpeakerMatchingService.swift in Sources */,
 				NFD7C7735401 /* SpeakerNamingCoordinator.swift in Sources */,
-				NF42A9D89201 /* SpeakerNamingEngine.swift in Sources */,
 				NF13D8F10401 /* SpeakerProfile.swift in Sources */,
 				NFF6BF80D901 /* SpeakerProfileMerger.swift in Sources */,
 				NF7B41DA9E01 /* SpeakerStore.swift in Sources */,
@@ -549,7 +537,6 @@
 				A1002005 /* TranscriptionTypes.swift */,
 				A2000002 /* DiagnosticExporter.swift */,
 							NFC1C920E300 /* DisplayStatus.swift */,
-				NF0F6788D200 /* QwenLifecycleManager.swift */,
 				NFD7C7735400 /* SpeakerNamingCoordinator.swift */,
 				NF3119F4D400 /* TranscriptionPipelineRunner.swift */,
 				NFDD34AE1700 /* HotkeyManager.swift */,
@@ -645,7 +632,6 @@
 			children = (
 				A1002001 /* AudioResampler.swift */,
 				A1002002 /* ParakeetService.swift */,
-				Q1000002 /* QwenService.swift */,
 				MD000012 /* MeetingDetector.swift */,
 				A1002003 /* DiarizationService.swift */,
 				A1002004 /* SpeakerDatabase.swift */,
@@ -754,7 +740,6 @@
 				SS001006 /* SpeakersSection.swift */,
 				SS001008 /* ProfileSection.swift */,
 				SS001010 /* MeetingDetectionSection.swift */,
-				SS001012 /* SpeakerIntelligenceSection.swift */,
 				SS001014 /* AIServicesSection.swift */,
 				SS001030 /* TroubleshootingSection.swift */,
 			);
@@ -828,7 +813,6 @@
 			isa = PBXGroup;
 			children = (
 				T1000009 /* SpeakerDatabaseTests.swift */,
-				T1000021 /* QwenServiceTests.swift */,
 				T1000022 /* AudioResamplerTests.swift */,
 				T1000027 /* EmbeddingClustererTests.swift */,
 				T2000005 /* SpeakerEmbeddingMatcherTests.swift */,
@@ -907,7 +891,6 @@
 				SS001006 /* SpeakersSection.swift */,
 				SS001008 /* ProfileSection.swift */,
 				SS001010 /* MeetingDetectionSection.swift */,
-				SS001012 /* SpeakerIntelligenceSection.swift */,
 				SS001014 /* AIServicesSection.swift */,
 				SS001030 /* TroubleshootingSection.swift */,
 			);
@@ -919,7 +902,6 @@
 			children = (
 				NF91BA817F00 /* SpeechToTextEngine.swift */,
 				NFDB43E09000 /* DiarizationEngine.swift */,
-				NF42A9D89200 /* SpeakerNamingEngine.swift */,
 				NF7B41DA9E00 /* SpeakerStore.swift */,
 				NF0C7CFB5600 /* TranscriptStorage.swift */,
 				NFF4CABC3600 /* StatsStore.swift */,
@@ -945,9 +927,9 @@
 			);
 			name = Transcripted;
 			packageProductDependencies = (
-				Q1000012 /* MLXLLM */,
-				Q1000022 /* MLXLMCommon */,
 				SP000002 /* Sparkle */,
+				ST000012 /* Hub */,
+				ST000022 /* Tokenizers */,
 			);
 			productName = Transcripted;
 			productReference = A1000017 /* Transcripted.app */;
@@ -999,8 +981,8 @@
 			);
 			mainGroup = A1000021;
 			packageReferences = (
-				Q1000030 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
 				SP000010 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				ST000010 /* XCRemoteSwiftPackageReference "swift-transformers" */,
 			);
 			productRefGroup = A1000023 /* Products */;
 			projectDirPath = "";
@@ -1088,7 +1070,6 @@
 				SS001005 /* SpeakersSection.swift in Sources */,
 				SS001007 /* ProfileSection.swift in Sources */,
 				SS001009 /* MeetingDetectionSection.swift in Sources */,
-				SS001011 /* SpeakerIntelligenceSection.swift in Sources */,
 				SS001013 /* AIServicesSection.swift in Sources */,
 				SS001029 /* TroubleshootingSection.swift in Sources */,
 				SS001015 /* SettingsTopBar.swift in Sources */,
@@ -1111,7 +1092,6 @@
 				A10009E7 /* ClipAudioPlayer.swift in Sources */,
 				A1003001 /* AppLogger.swift in Sources */,
 				A1003003 /* FileLogger.swift in Sources */,
-				Q1000001 /* QwenService.swift in Sources */,
 				4CAF116349811906B83C0406 /* ModelSetupStep.swift in Sources */,
 				A2000001 /* DiagnosticExporter.swift in Sources */,
 				MDS00001 /* ModelDownloadService.swift in Sources */,
@@ -1140,7 +1120,6 @@
 				NF5C44D9E301 /* QuickTipRow.swift in Sources */,
 				NF0EF2C81601 /* AnimatedIcon.swift in Sources */,
 				NFC1C920E301 /* DisplayStatus.swift in Sources */,
-				NF0F6788D201 /* QwenLifecycleManager.swift in Sources */,
 				NFD7C7735401 /* SpeakerNamingCoordinator.swift in Sources */,
 				NF3119F4D401 /* TranscriptionPipelineRunner.swift in Sources */,
 				NFDD34AE1701 /* HotkeyManager.swift in Sources */,
@@ -1162,7 +1141,6 @@
 				NFF6BF80D901 /* SpeakerProfileMerger.swift in Sources */,
 				NF91BA817F01 /* SpeechToTextEngine.swift in Sources */,
 				NFDB43E09001 /* DiarizationEngine.swift in Sources */,
-				NF42A9D89201 /* SpeakerNamingEngine.swift in Sources */,
 				NF7B41DA9E01 /* SpeakerStore.swift in Sources */,
 				NF0C7CFB5601 /* TranscriptStorage.swift in Sources */,
 				NFF4CABC3601 /* StatsStore.swift in Sources */,
@@ -1182,7 +1160,6 @@
 				T1000018 /* PillStateManagerTests.swift in Sources */,
 				T1000019 /* SpeakerDatabaseTests.swift in Sources */,
 				T1000020 /* TranscriptSaverTests.swift in Sources */,
-				T1000031 /* QwenServiceTests.swift in Sources */,
 				T1000032 /* AudioResamplerTests.swift in Sources */,
 				T1000033 /* PipelineErrorTests.swift in Sources */,
 				T1000034 /* FailedTranscriptionTests.swift in Sources */,
@@ -1504,14 +1481,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		Q1000030 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/ml-explore/mlx-swift-lm";
-			requirement = {
-				branch = main;
-				kind = branch;
-			};
-		};
 		SP000010 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
@@ -1520,23 +1489,31 @@
 				minimumVersion = 2.8.0;
 			};
 		};
+		ST000010 /* XCRemoteSwiftPackageReference "swift-transformers" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/huggingface/swift-transformers";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.1.9;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		Q1000012 /* MLXLLM */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = Q1000030 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
-			productName = MLXLLM;
-		};
-		Q1000022 /* MLXLMCommon */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = Q1000030 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
-			productName = MLXLMCommon;
-		};
 		SP000002 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = SP000010 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		ST000012 /* Hub */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = ST000010 /* XCRemoteSwiftPackageReference "swift-transformers" */;
+			productName = Hub;
+		};
+		ST000022 /* Tokenizers */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = ST000010 /* XCRemoteSwiftPackageReference "swift-transformers" */;
+			productName = Tokenizers;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

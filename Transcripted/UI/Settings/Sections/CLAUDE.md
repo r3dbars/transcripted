@@ -1,6 +1,6 @@
 # Settings Sections
 
-7 section views composing the settings dashboard. Each is a self-contained SwiftUI view rendered inside a SettingsSectionCard. All @MainActor.
+6 section views composing the settings dashboard. Each is a self-contained SwiftUI view rendered inside a SettingsSectionCard. All @MainActor.
 
 ## File Index
 
@@ -11,7 +11,6 @@
 | `SpeakersSection.swift` | "VOICE FINGERPRINTS" | Speaker list: play clip, edit name inline, delete with confirmation |
 | `ProfileSection.swift` | "PROFILE" | User name TextField, save location path picker |
 | `MeetingDetectionSection.swift` | "MEETING DETECTION" | Auto-record toggle, supported apps info |
-| `SpeakerIntelligenceSection.swift` | "SPEAKER INTELLIGENCE" | Qwen toggle, model status/download, progress bar |
 | `AIServicesSection.swift` | "AI SERVICES" | Parakeet + Sortformer status badges, "100% local" info |
 
 ## Section Details
@@ -50,13 +49,6 @@
 - Trigger info: "after 5s of active call audio. Stops 15s after audio drops."
 - Browser note: "Browser meetings (Google Meet, Teams web) require manual start."
 
-### SpeakerIntelligenceSection
-- Toggle: "Auto-Detect Speaker Names" → @AppStorage("enableQwenSpeakerInference")
-- Model display: "Qwen 3.5-4B" with status badge
-- Download progress: 80pt ProgressView + percentage label
-- Info: "Reads first 15 minutes... 100% on-device."
-- Download button: triggers QwenService download, caches model, immediately unloads
-
 ### AIServicesSection
 - Static display (no user interaction beyond info)
 - Models: "Parakeet TDT V3" (ASR) + "Sortformer" (streaming diarization)
@@ -69,7 +61,6 @@
 |-----|---------|------|---------|
 | `userName` | Profile | String | "" |
 | `transcriptSaveLocation` | Profile | String | "" |
-| `enableQwenSpeakerInference` | Speaker Intelligence | Bool | true |
 | `autoRecordMeetings` | Meeting Detection | Bool | false |
 
 ## Relationships
@@ -81,5 +72,4 @@
 ## Gotchas
 - FailedTranscriptionsSection only appears when FailedTranscriptionManager has items
 - Speaker edit uses single `editingId` — can't edit two names simultaneously
-- SpeakerIntelligenceSection download caches Qwen model then immediately calls `unload()` to free memory
 - `enableUISounds` is read via `UserDefaults.standard.object(forKey:)` (not @AppStorage) to distinguish "never set" vs "explicitly disabled"

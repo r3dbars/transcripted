@@ -1,10 +1,10 @@
 # Services Folder
 
-ML pipeline services, speaker database, audio processing utilities, meeting detection, and service protocols. 18 Swift files across root and Protocols/.
+ML pipeline services, speaker database, audio processing utilities, meeting detection, and service protocols. 16 Swift files across root and Protocols/.
 
 ## File Index
 
-### Root (11 files)
+### Root (10 files)
 
 | File | Actor | Purpose |
 |------|-------|---------|
@@ -12,21 +12,19 @@ ML pipeline services, speaker database, audio processing utilities, meeting dete
 | `DiarizationService.swift` | @MainActor | Dual-pipeline: Sortformer (streaming) + PyAnnote (offline). Downloads via ModelDownloadService with mirror fallback. |
 | `SpeakerDatabase.swift` | Utility queue | SQLite at ~/Documents/Transcripted/speakers.sqlite, core CRUD + schema, corruption detection with backup/recreate pattern, 0o600 permissions |
 | `SpeakerEmbeddingMatcher.swift` | Utility queue | Cosine similarity matching against stored speaker profiles (vDSP-accelerated) |
-| `SpeakerProfile.swift` | -- | SpeakerProfile struct (256-dim embeddings) + SpeakerMatchResult + NameSource constants (userManual, qwenInferred) |
+| `SpeakerProfile.swift` | -- | SpeakerProfile struct (256-dim embeddings) + SpeakerMatchResult + NameSource constants (userManual) |
 | `SpeakerProfileMerger.swift` | Utility queue | Profile name updates, merging, pruning, and name variant lookup |
-| `QwenService.swift` | @MainActor | On-device Qwen3.5-4B-4bit via mlx-swift-lm, on-demand load/unload. Pre-populates cache via ModelDownloadService with mirror fallback and progress tracking. |
 | `EmbeddingClusterer.swift` | Static | 3-stage post-processing: pairwise merge (0.85 threshold), small cluster absorption (0.72/0.62 thresholds), DB-informed split (0.62 threshold) |
 | `AudioResampler.swift` | Static | AVAudioConverter-based resampling to 16kHz, WAV loading, slice extraction |
 | `SpeakerClipExtractor.swift` | Static | Extract per-speaker audio clips for naming UI playback, 0o600 permissions on temp clips and persistent clips |
 | `MeetingDetector.swift` | @MainActor | Monitors Zoom/Teams/Webex/FaceTime, auto-triggers recording |
 
-### Protocols/ (7 files) — see Protocols/CLAUDE.md
+### Protocols/ (6 files) — see Protocols/CLAUDE.md
 
 | File | Purpose |
 |------|---------|
 | `SpeechToTextEngine.swift` | Protocol for ASR (conformer: ParakeetService). Defines AudioSource enum. |
 | `DiarizationEngine.swift` | Protocol for speaker diarization (conformer: DiarizationService) |
-| `SpeakerNamingEngine.swift` | Protocol for LLM-based name inference (conformer: QwenService) |
 | `SpeakerStore.swift` | Protocol for speaker database (conformer: SpeakerDatabase) |
 | `AudioCaptureEngine.swift` | Protocol for audio recording (conformer: Audio) |
 | `StatsStore.swift` | Protocol for stats persistence (conformer: StatsDatabase) |
@@ -38,7 +36,6 @@ ML pipeline services, speaker database, audio processing utilities, meeting dete
 2. DiarizationService.diarizeOffline(samples, sampleRate) -> [SpeakerSegment]
 3. EmbeddingClusterer.postProcess(segments, profiles, skipPairwiseMerge) -> [SpeakerSegment]
 4. SpeakerDatabase.matchSpeaker(embedding, threshold) -> SpeakerMatchResult?
-5. QwenService.inferSpeakerNames(transcript) -> [String: String]  // {"0": "Jack", "1": "Sarah"}
 ```
 
 ## Key Data Types (SpeakerProfile.swift + TranscriptionTypes.swift)
@@ -51,7 +48,7 @@ struct SpeakerSegment {
 
 struct SpeakerProfile: Identifiable {
     let id: UUID
-    var displayName: String?, nameSource: String?  // NameSource.userManual | .qwenInferred
+    var displayName: String?, nameSource: String?  // NameSource.userManual
     var embedding: [Float]     // 256-dim average
     var firstSeen: Date, lastSeen: Date, callCount: Int
     var confidence: Double     // 0.5-1.0, +0.1 per update, capped at 1.0
@@ -66,7 +63,7 @@ struct SpeakerMatchResult { let profile: SpeakerProfile, similarity: Double }
 CREATE TABLE speakers (
     id TEXT PRIMARY KEY,          -- UUID string
     display_name TEXT,
-    name_source TEXT DEFAULT NULL, -- "user_manual", "qwen_inferred"
+    name_source TEXT DEFAULT NULL, -- "user_manual"
     embedding BLOB NOT NULL,       -- 256-dim float32 binary
     first_seen TEXT NOT NULL,      -- ISO8601
     last_seen TEXT NOT NULL,
@@ -116,17 +113,6 @@ postProcess(segments, existingProfiles, skipPairwiseMerge):
     Splits mixed clusters where diarizer merged 2+ speakers
 ```
 
-## QwenService Details (QwenService.swift)
-- **Model**: `mlx-community/Qwen3.5-4B-4bit` (~2.5GB)
-- **Cache**: `~/Library/Caches/models/mlx-community/Qwen3.5-4B-4bit`
-- **Download**: Pre-populates cache via `ModelDownloadService.prePopulateQwenCache()` with HuggingFace mirror fallback, progress tracking, and disk space validation. Falls back to mlx-swift-lm's built-in download on failure.
-- **Inference**: temperature=0.1 (deterministic), maxTokens=200
-- **Prompt**: Teaches model that "Hey Jack" means speaker is talking TO Jack (listener), not IS Jack
-- **Output**: JSON keys are speaker numbers ("0", "1"), values are names or "Unknown"
-- **Response parsing**: Strips markdown fences, extracts JSON, returns `[:]` on parse failure
-- **Lifecycle**: Load on-demand -> inference -> unload immediately (frees ~2.5GB)
-- **Double-load guard**: Prevents 2x memory allocation during concurrent async calls
-
 ## MeetingDetector (MeetingDetector.swift)
 - **Known apps**: Zoom (`us.zoom.xos`), Teams (`com.microsoft.teams2`), Webex, FaceTime, Loom
 - **Detection**: NSWorkspace app launch/quit notifications + 1s polling
@@ -154,24 +140,22 @@ Hardcoded lookup table: mike/michael/mikey, nate/nathan/nathaniel, dave/david, a
 
 ## Threading Rules
 - **SpeakerDatabase, SpeakerEmbeddingMatcher, SpeakerProfileMerger** -- dedicated utility queue (`com.transcripted.speakerdb`), NOT @MainActor
-- **ParakeetService, DiarizationService, QwenService, MeetingDetector** -- @MainActor
+- **ParakeetService, DiarizationService, MeetingDetector** -- @MainActor
 - **EmbeddingClusterer, AudioResampler, SpeakerClipExtractor** -- static methods, called from pipeline threads
 
 ## Model Download Resilience (via Core/ModelDownloadService.swift)
-All three ML services (Parakeet, Diarization, Qwen) use `ModelDownloadService` for resilient downloads:
+Both ML services (Parakeet, Diarization) use `ModelDownloadService` for resilient downloads:
 - **Mirror fallback**: Primary `huggingface.co` -> fallback `hf-mirror.com`
 - **Retry**: Exponential backoff (2s, 5s, 10s), max 3 attempts per mirror
 - **Error classification**: `DownloadErrorKind` (networkOffline, tlsFailure, timeout, diskSpace, serverError, unknown) with user-friendly messages
 - **Network check**: NWPathMonitor reachability probe with 3s timeout
-- **Disk validation**: Requires ~2.5GB free for Qwen
-- Services call `ModelDownloadService.withRetry()` for Parakeet/Diarization, `ModelDownloadService.prePopulateQwenCache()` for Qwen
+- Services call `ModelDownloadService.withRetry()` for Parakeet/Diarization
 - Errors classified via `ModelDownloadService.classifyError()` and surfaced to UI as `OnboardingState.modelErrorKind`
 
 ## Gotchas
 - EMA alpha=0.15 is SLOW: takes 6-7 updates to meaningfully shift a speaker profile
 - Embeddings can be both `nil` AND empty `[]` -- check both
 - SpeakerDatabase silently returns in-memory dummy profiles if DB open fails (logs CRITICAL)
-- Qwen has no chunk limits on input -- very long transcripts could exceed context window
 - Quality filter cascades: EmbeddingClusterer hardcodes qualityScore >= 0.3 AND duration >= 1.0s
 - New speaker IDs from EmbeddingClusterer start above max existing ID (can create gaps)
 - Pruning is conservative: only deletes unnamed profiles after 1 hour

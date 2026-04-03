@@ -10,8 +10,8 @@ extension SpeakerDatabase {
     /// - Parameters:
     ///   - id: Speaker profile UUID
     ///   - name: Display name to set
-    ///   - source: Where the name came from (NameSource.userManual or NameSource.qwenInferred)
-    func setDisplayName(id: UUID, name: String, source: String = NameSource.qwenInferred) {
+    ///   - source: Where the name came from (NameSource.userManual)
+    func setDisplayName(id: UUID, name: String, source: String = NameSource.userManual) {
         queue.sync {
             setDisplayNameImpl(id: id, name: name, source: source)
         }

@@ -102,60 +102,6 @@ extension TranscriptSaver {
 
     // MARK: - Retroactive Title Update
 
-    /// Insert or update the title field in a transcript's YAML frontmatter.
-    /// Called after Qwen inference completes (which runs after initial save).
-    /// Thread-safe: serialized via fileUpdateQueue.
-    @discardableResult
-    static func retroactivelyUpdateTitle(transcriptURL: URL, title: String) -> Bool {
-        fileUpdateQueue.sync {
-            guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
-                AppLogger.pipeline.error("Failed to read transcript for title update", ["path": transcriptURL.path])
-                return false
-            }
-
-            // Only update YAML frontmatter
-            guard content.hasPrefix("---"),
-                  let endRange = content.range(
-                      of: "\n---\n",
-                      range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex
-                  ) else {
-                return false
-            }
-
-            let yamlRange = content.startIndex..<endRange.upperBound
-            var yaml = String(content[yamlRange])
-
-            if yaml.contains("\ntitle:") {
-                // Replace existing title
-                let lines = yaml.components(separatedBy: "\n")
-                let updatedLines = lines.map { line -> String in
-                    if line.trimmingCharacters(in: .whitespaces).hasPrefix("title:") {
-                        return "title: \"\(escapeYAML(title))\""
-                    }
-                    return line
-                }
-                yaml = updatedLines.joined(separator: "\n")
-            } else {
-                // Insert title after total_word_count (or before closing ---)
-                yaml = yaml.replacingOccurrences(
-                    of: "\n---\n",
-                    with: "\ntitle: \"\(escapeYAML(title))\"\n---\n"
-                )
-            }
-
-            content.replaceSubrange(yamlRange, with: yaml)
-
-            do {
-                try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
-                AppLogger.pipeline.info("Retroactively updated meeting title", ["file": transcriptURL.lastPathComponent, "title": title])
-                return true
-            } catch {
-                AppLogger.pipeline.warning("Failed to update title retroactively", ["error": error.localizedDescription])
-                return false
-            }
-        }
-    }
-
     // MARK: - Speaker Name Updating (Post-Naming Flow)
 
     /// Update speaker names in an already-saved transcript file.
