@@ -113,6 +113,14 @@ class TranscriptSaver {
             return nil
         }
 
+        // Check disk space before writing (prevent partial save where .md succeeds but .json fails)
+        if let attrs = try? FileManager.default.attributesOfFileSystem(forPath: saveDir.path),
+           let freeSpace = attrs[.systemFreeSize] as? Int64,
+           freeSpace < 50_000_000 { // 50MB minimum
+            AppLogger.pipeline.error("Insufficient disk space for transcript save", ["freeSpace": "\(freeSpace / 1_000_000)MB"])
+            return nil
+        }
+
         let timestamp = DateFormattingHelper.formatFilename(Date())
         var fileURL = saveDir.appendingPathComponent("Call_\(timestamp).md")
         var counter = 1
