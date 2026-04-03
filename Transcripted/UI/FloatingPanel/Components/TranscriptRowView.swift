@@ -15,7 +15,7 @@ struct TranscriptRowView: View {
 
     @State private var isHovered = false
 
-    /// Whether the transcript has a meaningful Qwen-generated title (not just "Meeting")
+    /// Whether the transcript has a meaningful title (not just "Meeting")
     private var hasSmartTitle: Bool {
         transcript.title != "Meeting"
     }

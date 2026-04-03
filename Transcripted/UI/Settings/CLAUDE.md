@@ -1,6 +1,6 @@
 # Settings
 
-Single-page scrolling settings dashboard. 18 Swift files across root, Components/, Sections/, and Models/.
+Single-page scrolling settings dashboard. 17 Swift files across root, Components/, Sections/, and Models/.
 
 ## File Index
 
@@ -13,7 +13,7 @@ Single-page scrolling settings dashboard. 18 Swift files across root, Components
 | `SettingsWindowController.swift` | NSWindow management, triggers migration check on show |
 | `MigrationOverlayView.swift` | Progress overlay for transcript migration (dark scrim + progress bar) |
 
-### Sections/ (7 files) — see Sections/CLAUDE.md
+### Sections/ (6 files) — see Sections/CLAUDE.md
 
 | File | Purpose |
 |------|---------|
@@ -22,7 +22,6 @@ Single-page scrolling settings dashboard. 18 Swift files across root, Components
 | `SpeakersSection.swift` | Voice fingerprints list: play clip, edit name inline, delete with confirmation |
 | `ProfileSection.swift` | User name text field, save location path picker |
 | `MeetingDetectionSection.swift` | Auto-record toggle, supported apps info |
-| `SpeakerIntelligenceSection.swift` | Qwen toggle, model status/download, progress bar |
 | `AIServicesSection.swift` | Parakeet + Sortformer status badges, "100% local" info |
 
 ### Components/ (6 files) — see Components/CLAUDE.md
@@ -47,7 +46,6 @@ Single-page scrolling settings dashboard. 18 Swift files across root, Components
 |-----|------|---------|------------|
 | `transcriptSaveLocation` | String | "" (-> ~/Documents/Transcripted/) | Path picker (ProfileSection) |
 | `userName` | String | "" | Text field (ProfileSection) |
-| `enableQwenSpeakerInference` | Bool | true | Toggle (SpeakerIntelligenceSection) |
 | `enableObsidianFormat` | Bool | false | (used by TranscriptSaver, no UI toggle here) |
 | `autoRecordMeetings` | Bool | false | Toggle (MeetingDetectionSection) |
 | `enableUISounds` | Bool | true | Read via UserDefaults (not @AppStorage) |
@@ -98,4 +96,3 @@ Typography: .headingLarge, .headingMedium, .bodyMedium, .bodySmall, .caption
 - `enableObsidianFormat` is stored in AppStorage but has no UI toggle in settings
 - SettingsNavigationState has an unused `SettingsTab` enum + `selectTab()` method (vestigial tabbed design)
 - Avatar: first letter of displayName in circle, "?" fallback if no name
-- Qwen download in settings caches the model then immediately calls `unload()` to free memory

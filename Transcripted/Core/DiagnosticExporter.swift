@@ -98,7 +98,7 @@ class DiagnosticExporter {
         let defaults = UserDefaults.standard
         let safeKeys = [
             "hasCompletedOnboarding", "enableObsidianFormat", "transcriptSaveLocation",
-            "autoDetectEnabled", "qwenEnabled", "selectedMicDevice"
+            "autoDetectEnabled", "selectedMicDevice"
         ]
         var settings: [String: String] = [:]
         for key in safeKeys {

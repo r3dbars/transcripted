@@ -1,7 +1,6 @@
 // ModelDownloadService.swift
 // Resilient model download with HuggingFace mirror fallback, retry logic,
-// and error classification. Provides pre-population for Qwen cache and
-// retry wrapping for FluidAudio model initialization.
+// and error classification. Provides retry wrapping for FluidAudio model initialization.
 
 import Foundation
 import Network
@@ -202,213 +201,18 @@ enum ModelDownloadService {
         throw ModelDownloadError(kind: kind, underlyingError: exhaustedError)
     }
 
-    // MARK: - Qwen Pre-Population
+    // MARK: - Filename Validation
 
-    /// Pre-populate the Qwen model cache by downloading files directly from HuggingFace
-    /// with mirror fallback. If cache already exists, skips download.
-    ///
-    /// mlx-swift-lm stores models at ~/Library/Caches/models/{org}/{model}/
-    /// If files exist there, loadModelContainer() skips its own download.
-    static func prePopulateQwenCache(
-        modelId: String = "mlx-community/Qwen3.5-4B-4bit",
-        progressHandler: ((Double) -> Void)? = nil
-    ) async throws {
-        let cacheDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Caches/models")
-            .appendingPathComponent(modelId)
-
-        // If cache directory already has files, skip
-        if FileManager.default.fileExists(atPath: cacheDir.path) {
-            let contents = (try? FileManager.default.contentsOfDirectory(atPath: cacheDir.path)) ?? []
-            if !contents.isEmpty {
-                AppLogger.services.info("Qwen cache already populated, skipping pre-download", [
-                    "path": cacheDir.path,
-                    "files": "\(contents.count)"
-                ])
-                return
-            }
-        }
-
-        // Check disk space (~2.5GB needed)
-        if let available = availableDiskSpace(), available < 3_000_000_000 {
-            throw ModelDownloadError(kind: .diskSpace, underlyingError: nil)
-        }
-
-        // Check network first
-        guard await checkNetworkReachability() else {
-            throw ModelDownloadError(kind: .networkOffline, underlyingError: nil)
-        }
-
-        // Fetch file manifest from HuggingFace API
-        let fileList = try await fetchModelFileList(modelId: modelId)
-
-        AppLogger.services.info("Qwen pre-population starting", [
-            "files": "\(fileList.count)",
-            "modelId": modelId
-        ])
-
-        // Create cache directory
-        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-
-        // Download each file with mirror fallback
-        var downloadedCount = 0
-        for file in fileList {
-            // Security: validate filename from external API before constructing a path with it.
-            // Rejects path traversal sequences (e.g. "../../.ssh") injected by a malicious server.
-            guard isSafeModelFilename(file.name) else {
-                AppLogger.services.error("Rejecting unsafe model filename from API response", ["filename": file.name])
-                throw ModelDownloadError(kind: .unknown("Unsafe filename in model file list: \(file.name)"), underlyingError: nil)
-            }
-
-            let destURL = cacheDir.appendingPathComponent(file.name)
-
-            // Skip if already downloaded
-            if FileManager.default.fileExists(atPath: destURL.path) {
-                downloadedCount += 1
-                progressHandler?(Double(downloadedCount) / Double(fileList.count))
-                continue
-            }
-
-            try await downloadFileWithMirrorFallback(
-                modelId: modelId,
-                filename: file.name,
-                destination: destURL
-            )
-
-            downloadedCount += 1
-            progressHandler?(Double(downloadedCount) / Double(fileList.count))
-        }
-
-        AppLogger.services.info("Qwen pre-population complete", ["path": cacheDir.path])
-    }
-
-    /// Represents a file in a HuggingFace model repository
-    private struct HFModelFile {
-        let name: String
-        let size: Int?
-    }
-
-    /// Validate a filename returned by the HuggingFace API before using it in a file path.
+    /// Validate a filename returned by an external API before using it in a file path.
     /// Security: filenames are attacker-controlled data from an external API response.
     /// A compromised or impersonated server could inject path traversal sequences (e.g. "../../../.ssh/authorized_keys")
     /// into rfilename values. We reject any name containing ".." components or absolute paths.
     static func isSafeModelFilename(_ name: String) -> Bool {
-        // Reject empty names
         guard !name.isEmpty else { return false }
-        // Reject absolute paths
         guard !name.hasPrefix("/") else { return false }
-        // Reject names containing ".." path traversal components
         let components = name.components(separatedBy: "/")
         guard !components.contains("..") && !components.contains(".") else { return false }
-        // Reject names with null bytes or control characters
         guard !name.unicodeScalars.contains(where: { $0.value < 32 }) else { return false }
         return true
-    }
-
-    /// Fetch the list of files in a HuggingFace model repository
-    private static func fetchModelFileList(modelId: String) async throws -> [HFModelFile] {
-        // Try each mirror for the API call
-        for mirror in mirrors {
-            // Security: use safe URL construction — force-unwrap would crash if modelId or mirror
-            // contained URL-unsafe characters. Guard lets us skip the mirror and try the next.
-            guard let apiURL = URL(string: "\(mirror)/api/models/\(modelId)") else {
-                AppLogger.services.warning("Skipping mirror — could not construct API URL", ["mirror": mirror, "modelId": modelId])
-                continue
-            }
-
-            do {
-                let (data, response) = try await URLSession.shared.data(from: apiURL)
-
-                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-                    continue
-                }
-
-                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let siblings = json["siblings"] as? [[String: Any]] else {
-                    continue
-                }
-
-                let files = siblings.compactMap { sibling -> HFModelFile? in
-                    guard let name = sibling["rfilename"] as? String else { return nil }
-                    // Security: filter out any filenames that would escape the cache directory.
-                    // Malicious or compromised API responses could include path traversal sequences.
-                    guard isSafeModelFilename(name) else {
-                        AppLogger.services.warning("Skipping unsafe filename in model manifest", ["filename": name])
-                        return nil
-                    }
-                    let size = sibling["size"] as? Int
-                    return HFModelFile(name: name, size: size)
-                }
-
-                if !files.isEmpty {
-                    AppLogger.services.info("Fetched model file list", [
-                        "mirror": mirror,
-                        "files": "\(files.count)"
-                    ])
-                    return files
-                }
-            } catch {
-                AppLogger.services.warning("Failed to fetch file list from mirror", [
-                    "mirror": mirror,
-                    "error": error.localizedDescription
-                ])
-                continue
-            }
-        }
-
-        throw ModelDownloadError(
-            kind: .unknown("Could not fetch model file list from any mirror"),
-            underlyingError: nil
-        )
-    }
-
-    /// Download a single file with mirror fallback and retry
-    private static func downloadFileWithMirrorFallback(
-        modelId: String,
-        filename: String,
-        destination: URL
-    ) async throws {
-        for mirror in mirrors {
-            // Security: use safe URL construction — force-unwrap would crash if filename contained
-            // URL-unsafe characters (e.g., spaces) not caught by isSafeModelFilename. Skip
-            // this mirror and try the next rather than crashing.
-            guard let fileURL = URL(string: "\(mirror)/\(modelId)/resolve/main/\(filename)") else {
-                AppLogger.services.warning("Skipping mirror — could not construct file URL", ["mirror": mirror, "file": filename])
-                continue
-            }
-
-            do {
-                try await withRetry(maxAttempts: 2) {
-                    let (tempURL, response) = try await URLSession.shared.download(from: fileURL)
-
-                    if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-                        throw ModelDownloadError(
-                            kind: .serverError(statusCode: httpResponse.statusCode),
-                            underlyingError: nil
-                        )
-                    }
-
-                    // Move to destination
-                    try FileManager.default.moveItem(at: tempURL, to: destination)
-                }
-
-                AppLogger.services.debug("Downloaded \(filename) from \(mirror)")
-                return
-            } catch {
-                AppLogger.services.warning("Mirror download failed", [
-                    "mirror": mirror,
-                    "file": filename,
-                    "error": error.localizedDescription
-                ])
-                // Clean up partial file
-                try? FileManager.default.removeItem(at: destination)
-                continue
-            }
-        }
-
-        throw ModelDownloadError(
-            kind: .unknown("Failed to download \(filename) from all mirrors"),
-            underlyingError: nil
-        )
     }
 }

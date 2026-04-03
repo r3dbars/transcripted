@@ -124,7 +124,7 @@ struct SpeakerDBValidator {
 
         // Name source values
         if let rows = try? db.query("SELECT id, name_source FROM speakers WHERE name_source IS NOT NULL") {
-            let validSources = ["user_manual", "qwen_inferred", "test"]
+            let validSources = ["user_manual", "qwen_inferred", "test"]  // qwen_inferred kept for backwards-compat with existing DB rows
             let invalid = rows.filter { row in
                 guard let source = row["name_source"] as? String else { return false }
                 return !validSources.contains(source)

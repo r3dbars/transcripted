@@ -122,7 +122,7 @@ final class SpeakerLifecycleTests: XCTestCase {
         let profile3 = db.addOrUpdateSpeaker(embedding: embedding3)
 
         db.setDisplayName(id: profile1.id, name: "Alice", source: "user_manual")
-        db.setDisplayName(id: profile2.id, name: "alice", source: "qwen_inferred")
+        db.setDisplayName(id: profile2.id, name: "alice", source: "user_manual")
         db.setDisplayName(id: profile3.id, name: "Bob", source: "user_manual")
 
         // Verify we have 3 profiles before merge

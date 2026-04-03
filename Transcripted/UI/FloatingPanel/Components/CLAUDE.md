@@ -56,9 +56,8 @@
 **TranscriptTrayView:** 280x300 max, 10 recent transcripts, frosted glass + triangle connector. Frosted glass (hudWindow material). Date separators between groups.
 
 **TranscriptRowView — smart title logic:**
-1. Prefer Qwen-generated title (if not "Meeting")
-2. Fall back to speaker names (first 2 names or "N speakers")
-3. Generic "Meeting" as last resort
+1. Prefer speaker names (first 2 names or "N speakers")
+2. Generic "Meeting" as last resort
 - Copy puts AI-ready dialogue (no YAML) on clipboard
 - Copy states: .isCopied (checkmark 1.5s), .copyFailed (xmark)
 - Relative date: "Today at HH:MM a", "Yesterday at HH:MM a", "MMM d at HH:MM a"
@@ -71,10 +70,10 @@
 
 ## Speaker Naming (SpeakerNamingView + SpeakerNamingCard)
 - 3-second dismiss guard on appear (prevents accidental close)
-- SpeakerNamingEntry: id, clipURL, sampleText, currentName, needsNaming, needsConfirmation, matchSimilarity, qwenResult
+- SpeakerNamingEntry: id, clipURL, sampleText, currentName, needsNaming, needsConfirmation, matchSimilarity
 - Autocomplete: 150ms debounce, max 4 suggestions, filters out self (entry.id)
 - Play button: 32x32 circle, stop.fill (blue) when active / play.fill when idle
-- Source labels: "Voice match · XX%" or "Detected from conversation" (sparkles icon)
+- Source labels: "Voice match · XX%"
 - Merge flow: show candidate → confirm (checkmark) or cancel (xmark)
 - SpeakerNameUpdate.NamingAction: `.named`, `.confirmed`, `.corrected`, `.merged(targetProfileId)`
 

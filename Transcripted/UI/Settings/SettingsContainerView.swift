@@ -16,13 +16,10 @@ struct SettingsContainerView: View {
 
     @AppStorage("transcriptSaveLocation") private var saveLocation: String = ""
     @AppStorage("userName") private var userName: String = ""
-    @AppStorage("enableQwenSpeakerInference") private var enableQwenInference: Bool = true
     @AppStorage("enableObsidianFormat") private var enableObsidianFormat: Bool = false
     @AppStorage("autoRecordMeetings") private var autoRecordMeetings: Bool = false
 
     @State private var enableSounds: Bool = true
-    @State private var qwenModelCached: Bool = false
-    @StateObject private var qwenService = QwenService()
 
     // Speakers
     @State private var speakersExpanded = false
@@ -83,12 +80,6 @@ struct SettingsContainerView: View {
                         autoRecordMeetings: $autoRecordMeetings
                     )
 
-                    SpeakerIntelligenceSettingsSection(
-                        enableQwenInference: $enableQwenInference,
-                        qwenService: qwenService,
-                        qwenModelCached: $qwenModelCached
-                    )
-
                     AIServicesSettingsSection()
 
                     TroubleshootingSettingsSection()
@@ -107,7 +98,6 @@ struct SettingsContainerView: View {
                 enableSounds = true
             }
             speakers = SpeakerDatabase.shared.allSpeakers()
-            qwenModelCached = QwenService.isModelCached
         }
         // Migration overlay
         .overlay {

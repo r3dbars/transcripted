@@ -117,19 +117,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         AppLogger.app.info("Creating model init task")
         Task { @MainActor in
             AppLogger.app.info("Starting model initialization")
-            async let modelsReady: Void = tm.transcription.initializeModels()
-            async let qwenCached: Void = Self.preCacheQwenIfNeeded()
-            await modelsReady
-            await qwenCached
+            await tm.transcription.initializeModels()
             AppLogger.app.info("Model initialization complete")
         }
 
         // Wire up recording callbacks
-        aud.onRecordingStart = { [weak self] in
-            Task { @MainActor in
-                self?.taskManager?.prepareForRecording()
-            }
-        }
         aud.onRecordingComplete = { [weak self] micURL, systemURL in
             self?.handleRecordingComplete(micURL: micURL, systemURL: systemURL)
         }
