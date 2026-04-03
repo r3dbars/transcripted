@@ -153,8 +153,10 @@ struct SpeakersSettingsSection: View {
                         SpeakerClipExtractor.deletePersistedClip(for: speaker.id)
                         SpeakerDatabase.shared.deleteSpeaker(id: speaker.id)
                         deleteConfirmId = nil
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            speakers = SpeakerDatabase.shared.allSpeakers()
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(100))
+                            let loaded = SpeakerDatabase.shared.allSpeakers()
+                            await MainActor.run { speakers = loaded }
                         }
                     }
                     .font(.caption)
@@ -209,8 +211,10 @@ struct SpeakersSettingsSection: View {
         Task.detached {
             TranscriptSaver.retroactivelyUpdateSpeaker(dbId: id, newName: safeName)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            speakers = SpeakerDatabase.shared.allSpeakers()
+        Task {
+            try? await Task.sleep(for: .milliseconds(100))
+            let loaded = SpeakerDatabase.shared.allSpeakers()
+            await MainActor.run { speakers = loaded }
         }
     }
 

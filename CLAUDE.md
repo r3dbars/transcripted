@@ -12,13 +12,13 @@ Menu bar-only macOS app for real-time system audio transcription. Pipeline: Core
 - **DI**: `AppServices` container in `Core/AppServices.swift`
 
 ## Folder Map (~138 Swift files, agent-first: max ~300 lines per file, single responsibility)
-- **Core/** (47 files): Audio capture (Audio + 3 extensions), transcription pipeline (TaskManager + 2 extensions), transcript saving (4 files), stats DB (3 files), model downloads (ModelDownloadService), failed transcription retry, file permissions, logging, coordinators (Hotkey, MenuBar, Notification, Window, Recording)
+- **Core/** (47 files): Audio capture (Audio + 3 extensions), transcription pipeline (TaskManager + 2 extensions), transcript saving (4 files), stats DB (3 files), model downloads (ModelDownloadService), failed transcription retry, file permissions, logging, system settings helper, coordinators (Hotkey, MenuBar, Notification, Window, Recording)
 - **Services/** (16 files): ML services (10 files) + Protocols/ subdirectory (6 service protocols)
 - **UI/FloatingPanel/** (21 files): Morphing pill UI, aurora state views (3 files), SavedPillView, transcript tray (3 files), speaker naming (3 files), Components/ (16 files), Helpers/ (1 file)
-- **UI/Settings/** (17 files): Settings container + Sections/ (6 section views) + Components/ (6 reusable components) + Models/ (1 file)
+- **UI/Settings/** (18 files): Settings container + Sections/ (7 section views) + Components/ (6 reusable components) + Models/ (1 file)
 - **Onboarding/** (9 files): 6-step first-run flow (Welcome -> Preview -> Permissions -> Model Setup -> How It Works -> Test Recording), dark theme
 - **Design/** (21 files): Colors/ (6 files), Components/ (5 premium components), root tokens (10 files: Spacing, Radius, Typography, Animations, Shadows, ViewModifiers, Gradients, Dimensions, Accessibility, CardModifiers)
-- **Tools/TranscriptedQA/** (12 files): QA testing CLI tool, health checks, transcript validation, database integrity checks, index validation, log analysis
+- **Tools/TranscriptedQA/** (23 files): QA testing CLI tool, health checks, transcript/database/index/log validation, fixture generation, round-trip testing, stress testing
 
 ## Build & Test
 ```bash
@@ -100,9 +100,9 @@ Every folder with ≥2 Swift files has its own CLAUDE.md with file index, refere
 | `Transcripted/UI/FloatingPanel/CLAUDE.md` | Pill state machine, Combine subscriptions, tray states |
 | `Transcripted/UI/FloatingPanel/Components/CLAUDE.md` | Aurora views, speaker naming, error toast, pill overlays |
 | `Transcripted/UI/Settings/CLAUDE.md` | @AppStorage keys, window config, speaker operations |
-| `Transcripted/UI/Settings/Sections/CLAUDE.md` | 6 section views with per-section detail |
+| `Transcripted/UI/Settings/Sections/CLAUDE.md` | 7 section views with per-section detail |
 | `Transcripted/UI/Settings/Components/CLAUDE.md` | CoralToggle, button styles, input components |
-| `Transcripted/Onboarding/CLAUDE.md` | 5-step flow, OnboardingState properties, integration |
+| `Transcripted/Onboarding/CLAUDE.md` | 6-step flow, OnboardingState properties, integration |
 | `Transcripted/Onboarding/Steps/CLAUDE.md` | Preview, Permissions, ModelSetup, HowItWorks, TestRecording step implementations |
 | `Tools/TranscriptedQA/CLAUDE.md` | QA CLI tool, health checks, transcript validation, database/index/log validation |
 | `Tools/TranscriptedMCP/CLAUDE.md` | MCP server tools, SQLite index schema, name variants, file watcher |
@@ -114,10 +114,9 @@ Every folder with ≥2 Swift files has its own CLAUDE.md with file index, refere
 - `UI/FailedTranscriptionsView.swift` — Standalone window for failed transcription management (600x400 min)
 
 ## Tools (external CLI utilities)
-- **Tools/TranscriptedMCP/** (7 source + 4 test Swift files): MCP server (`transcripted-mcp`) for querying transcripts from Claude Desktop or any MCP-compatible client. Exposes 5 read-only tools: `list_meetings` (metadata + participants), `read_meeting` (full transcript content), `search` (full-text with optional speaker/date filters), `who_is` (person profile — meeting history, speaking stats, co-speakers, quotes), `recap` (structured day/week digest with previews). Uses a local SQLite index rebuilt from JSON sidecars. File watcher auto-indexes new transcripts. Data dir: `~/Documents/Transcripted` or `$TRANSCRIPTED_DATA_DIR`. Dependencies: `swift-sdk` MCP library (v0.12.0), `libsqlite3`.
-- **Tools/TranscriptedQA/** (19 Swift files): Standalone Swift CLI (`transcripted-qa`) for validating on-disk artifacts. Subcommands: `validate-all` (default), `validate-transcripts`, `validate-database`, `validate-logs`, `validate-artifacts`, `validate-index`, `check-health`. Validators: TranscriptValidator, SpeakerDBValidator, StatsDBValidator, JSONSidecarValidator, IndexValidator, LogValidator, HealthChecker. Uses `ArgumentParser`.
+- **Tools/TranscriptedMCP/** (7 source + 4 test Swift files): MCP server (`transcripted-mcp`) for querying transcripts from Claude Desktop or any MCP-compatible client. Exposes 5 read-only tools: `list_meetings` (metadata + participants), `read_meeting` (full transcript content), `search` (full-text with optional speaker/date filters), `who_is` (person profile — meeting history, speaking stats, co-speakers, quotes), `recap` (structured day/week digest with previews). Uses a local SQLite index rebuilt from JSON sidecars. File watcher auto-indexes new transcripts. Data dir: `~/Documents/Transcripted` or `$TRANSCRIPTED_DATA_DIR`. Dependencies: `swift-sdk` MCP library (v0.12.0), `libsqlite3`. See `Tools/TranscriptedMCP/CLAUDE.md`.
+- **Tools/TranscriptedQA/** (23 Swift files): Standalone Swift CLI (`transcripted-qa`) for validating on-disk artifacts. Subcommands: `validate-all` (default), `validate-transcripts`, `validate-database`, `validate-logs`, `validate-artifacts`, `validate-index`, `check-health`, `generate-fixtures`, `round-trip`, `stress-test`. Validators: TranscriptValidator, SpeakerDBValidator, StatsDBValidator, JSONSidecarValidator, IndexValidator, LogValidator, HealthChecker. Generators: TestDataGenerator. Uses `ArgumentParser`. See `Tools/TranscriptedQA/CLAUDE.md`.
 - **Tools/TranscriptedCLI/** (5 Swift files): Standalone Swift CLI (`transcripted-cli`) for offline diarization via FluidAudio. Entry: `TranscriptedCLI.swift` (ArgumentParser root). Subcommands: `diarize` (single file, `DiarizeCommand.swift`), `batch` (directory, `BatchCommand.swift`). Shared: `ConfigLoader.swift` (JSON config -> OfflineDiarizerConfig), `RTTMWriter.swift` (RTTM + JSON output).
-- **Tools/TranscriptedMCP/** (8 Swift files): MCP server (`transcripted-mcp`) for Claude Desktop integration. Exposes 5 tools: `list_meetings`, `read_meeting`, `search`, `who_is`, `recap`. Uses SQLite index (`mcp_index.sqlite`) via `TranscriptIndex.swift`; file watching via `FileWatcher.swift`; name variant expansion via `NameVariants.swift` (mirrors SpeakerProfileMerger). Data dir: `~/Documents/Transcripted/` (override via `TRANSCRIPTED_DATA_DIR` env). See `Tools/TranscriptedMCP/CLAUDE.md`.
 
 ## Documentation
 See CONTRIBUTING.md for full development guidelines.

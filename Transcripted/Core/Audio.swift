@@ -82,10 +82,26 @@ class Audio: ObservableObject {
     }
 
     /// Gaps detected during recording (sleep/wake, device switches)
-    var recordingGaps: [AudioGap] = []
+    /// Thread-safe: mutated from main thread (wake handler) + background thread (device recovery)
+    private var _recordingGaps: [AudioGap] = []
+    private let recordingGapsLock = NSLock()
+    var recordingGaps: [AudioGap] {
+        get { recordingGapsLock.lock(); defer { recordingGapsLock.unlock() }; return _recordingGaps }
+        set { recordingGapsLock.lock(); defer { recordingGapsLock.unlock() }; _recordingGaps = newValue }
+    }
+    func appendRecordingGap(_ gap: AudioGap) {
+        recordingGapsLock.lock(); defer { recordingGapsLock.unlock() }
+        _recordingGaps.append(gap)
+    }
 
     /// Count of device switches during this recording
-    var deviceSwitchCount: Int = 0
+    /// Thread-safe: reset on main thread, incremented on background recovery thread
+    private var _deviceSwitchCount: Int = 0
+    private let deviceSwitchCountLock = NSLock()
+    var deviceSwitchCount: Int {
+        get { deviceSwitchCountLock.lock(); defer { deviceSwitchCountLock.unlock() }; return _deviceSwitchCount }
+        set { deviceSwitchCountLock.lock(); defer { deviceSwitchCountLock.unlock() }; _deviceSwitchCount = newValue }
+    }
 
     /// Timestamp when system started sleeping (for gap calculation)
     var sleepTimestamp: Date?
@@ -170,8 +186,18 @@ class Audio: ObservableObject {
     let micAudioFileQueue = DispatchQueue(label: "MicAudioFileWrite", qos: .utility)
 
     // Audio format conversion (multi-channel to mono)
-    var monoOutputFormat: AVAudioFormat?
-    var inputChannelCount: AVAudioChannelCount = 1
+    // Thread-safe: written during init + device recovery, read during mic buffer handling
+    private var _monoOutputFormat: AVAudioFormat?
+    private var _inputChannelCount: AVAudioChannelCount = 1
+    private let formatLock = NSLock()
+    var monoOutputFormat: AVAudioFormat? {
+        get { formatLock.lock(); defer { formatLock.unlock() }; return _monoOutputFormat }
+        set { formatLock.lock(); defer { formatLock.unlock() }; _monoOutputFormat = newValue }
+    }
+    var inputChannelCount: AVAudioChannelCount {
+        get { formatLock.lock(); defer { formatLock.unlock() }; return _inputChannelCount }
+        set { formatLock.lock(); defer { formatLock.unlock() }; _inputChannelCount = newValue }
+    }
 
     // Throttle system audio visualizer updates (skip every other callback)
     // Protected by systemLevelLock — accessed from I/O callback thread
@@ -217,6 +243,9 @@ class Audio: ObservableObject {
     // Sleep/wake notification observers (stored for cleanup in deinit)
     private var sleepObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
+
+    // Disk space check counter — checked every 150 timer ticks (~30s at 0.2s interval)
+    var diskCheckCounter: Int = 0
 
     // Callback for when recording completes
     var onRecordingComplete: ((URL?, URL?) -> Void)?
@@ -287,7 +316,7 @@ class Audio: ObservableObject {
                         duration: Date().timeIntervalSince(sleepStart),
                         reason: "Sleep/wake"
                     )
-                    self.recordingGaps.append(gap)
+                    self.appendRecordingGap(gap)
                     AppLogger.audio.info("Recorded sleep/wake gap", ["gap": gap.description])
                 }
                 self.sleepTimestamp = nil

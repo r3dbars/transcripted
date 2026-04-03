@@ -232,6 +232,13 @@ struct FloatingPanelView: View {
             }
         }
         .onDisappear { removeEscapeMonitor() }
+        // Backup cleanup: if the hosting NSWindow is torn down without onDisappear firing,
+        // this catches the close notification and removes leaked monitors.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
+            guard let window = notification.object as? NSPanel,
+                  window.level == .floating else { return }
+            removeEscapeMonitor()
+        }
         // Trigger error toasts based on displayStatus changes
         // (Success is now shown in-pill via SavedPillView, not as overlay)
         // Note: Use Task to debounce rapid status changes and prevent

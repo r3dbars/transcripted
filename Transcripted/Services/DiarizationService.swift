@@ -103,7 +103,7 @@ class DiarizationService: ObservableObject {
 
         // Optimized config from DER grid search (v2, 100 iterations across 16 Zoom meetings).
         // Key win: Fa 0.07→0.25 (~halves DER by letting VBx reconsider speaker assignments).
-        var offlineConfig = OfflineDiarizerConfig(
+        let offlineConfig = OfflineDiarizerConfig(
             clusteringThreshold: 0.6,
             Fa: 0.25,
             Fb: 0.63,

@@ -33,6 +33,20 @@ class TranscriptionTaskManager: ObservableObject {
     /// Start a new transcription task in the background
     func startTranscription(micURL: URL, systemURL: URL?, outputFolder: URL, healthInfo: RecordingHealthInfo? = nil) {
 
+        // Guard: reject concurrent pipelines to prevent model contention
+        if !activeTasks.isEmpty {
+            AppLogger.pipeline.warning("Rejecting transcription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
+            failedTranscriptionManager.addFailedTranscription(
+                micAudioURL: micURL,
+                systemAudioURL: systemURL,
+                errorMessage: "Transcription already in progress"
+            )
+            displayStatus = .failed(message: "Transcription already in progress")
+            scheduleStatusReset(delay: 4)
+            return
+        }
+
+
         // Gate: reject recordings shorter than 2 seconds (they'll fail in Parakeet anyway)
         let minDuration: TimeInterval = 2.0
         if let micDuration = audioDuration(url: micURL), micDuration < minDuration {

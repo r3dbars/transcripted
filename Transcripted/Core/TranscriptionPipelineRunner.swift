@@ -43,6 +43,8 @@ extension TranscriptionTaskManager {
         healthInfo: RecordingHealthInfo?
     ) async throws -> URL {
 
+        let transcription = await MainActor.run { self.transcription }
+
         AppLogger.pipeline.info("Using local Parakeet + PyAnnote pipeline")
 
         // Phase 1: Transcribe with local models
@@ -63,7 +65,7 @@ extension TranscriptionTaskManager {
         var speakerSources: [String: String] = [:]  // "db" per speaker ID
         // Build DB knowledge snapshot: what do we already know about these speakers?
         let speakerIds = Array(result.systemSpeakerIds).sorted()
-        let speakerDB = await MainActor.run { self.transcription.speakerDB }
+        let speakerDB = await MainActor.run { transcription.speakerDB }
         var dbKnowledge: [(speakerId: String, profile: SpeakerProfile, similarity: Double)] = []
 
         for utterance in result.systemUtterances {

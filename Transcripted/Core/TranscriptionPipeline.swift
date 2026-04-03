@@ -24,6 +24,10 @@ extension Transcription {
         onProgress: ((Double) -> Void)? = nil
     ) async throws -> TranscriptionResult {
 
+        let parakeet = await MainActor.run { self.parakeet }
+        let diarization = await MainActor.run { self.diarization }
+        let speakerDB = await MainActor.run { self.speakerDB }
+
         await MainActor.run {
             self.isProcessing = true
             self.error = nil

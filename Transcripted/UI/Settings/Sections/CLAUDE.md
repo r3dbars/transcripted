@@ -1,6 +1,6 @@
 # Settings Sections
 
-6 section views composing the settings dashboard. Each is a self-contained SwiftUI view rendered inside a SettingsSectionCard. All @MainActor.
+7 section views composing the settings dashboard. Each is a self-contained SwiftUI view rendered inside a SettingsSectionCard. All @MainActor.
 
 ## File Index
 
@@ -12,6 +12,7 @@
 | `ProfileSection.swift` | "PROFILE" | User name TextField, save location path picker |
 | `MeetingDetectionSection.swift` | "MEETING DETECTION" | Auto-record toggle, supported apps info |
 | `AIServicesSection.swift` | "AI SERVICES" | Parakeet + Sortformer status badges, "100% local" info |
+| `TroubleshootingSection.swift` | "TROUBLESHOOTING" | Permission status rows (mic + screen recording with Fix buttons), data location rows (Transcripts, Logs, Model Cache with Open in Finder), reset actions (Re-run Onboarding, Reset All Settings with confirmation) |
 
 ## Section Details
 
@@ -56,6 +57,13 @@
 - Info text: "100% local transcription. No cloud API, no internet, no cost."
 - Requirements: "English only · macOS 14.2+ · 16 GB RAM recommended"
 
+### TroubleshootingSection
+- **Permission Status group**: Rows for Microphone (`AVCaptureDevice.authorizationStatus`) and Screen Recording (`CGWindowListCopyWindowInfo` side-effect check). Granted shows green checkmark; denied shows error/warning icon + "Fix" button that opens System Settings deep link via `x-apple.systempreferences:` URL
+- **Data Locations group**: Rows for Transcripts, Logs (`~/Library/Logs/Transcripted`), and Model Cache (`~/Library/Caches/models/mlx-community`). Each has "Open in Finder" button; creates directory if missing
+- **Reset group**: "Re-run Onboarding" (calls `OnboardingState.resetOnboarding()`, shows onboarding window) + "Reset All Settings" (clears all UserDefaults for bundle, restarts onboarding, does NOT delete transcripts) with destructive confirmation alert
+- `@available(macOS 26.0, *)` — macOS 26+ only
+- Paths shortened to `~`-relative via `shortenedPath()` helper
+
 ## @AppStorage Keys Used by Sections
 | Key | Section | Type | Default |
 |-----|---------|------|---------|
@@ -68,6 +76,7 @@
 - Reusable components from: Components/ (SettingsSectionCard, SettingsToggleRow, SettingsTextField, SettingsPathRow)
 - Speaker operations use: SpeakerDatabase, SpeakerClipExtractor, RetroactiveSpeakerUpdater (Core/)
 - Stats from: StatsService → StatsDatabase (Core/)
+- TroubleshootingSection uses: OnboardingState.resetOnboarding() + OnboardingWindowController (Onboarding/), TranscriptSaver.defaultSaveDirectory (Core/)
 
 ## Gotchas
 - FailedTranscriptionsSection only appears when FailedTranscriptionManager has items
