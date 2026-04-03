@@ -496,59 +496,46 @@ final class TranscriptIndex: @unchecked Sendable {
     func getPersonProfile(speaker: String) throws -> PersonProfile {
         let history = try getSpeakerHistory(speaker: speaker)
 
-        // Collect co-speakers across all meetings
+        // Batch-fetch all co-speakers for all meetings in one query
+        let allFilenames = history.meetings.map(\.filename)
+        var coSpeakersByMeeting: [String: [String]] = [:]
+
+        if !allFilenames.isEmpty {
+            queue.sync {
+                let placeholders = allFilenames.map { _ in "?" }.joined(separator: ", ")
+                let sql = "SELECT filename, speaker_name FROM meeting_speakers WHERE filename IN (\(placeholders)) AND speaker_name COLLATE NOCASE != ? AND speaker_name NOT LIKE 'Speaker %'"
+                var stmt: OpaquePointer?
+                guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+                defer { sqlite3_finalize(stmt) }
+                for (i, f) in allFilenames.enumerated() {
+                    sqlite3_bind_text(stmt, Int32(i + 1), (f as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                }
+                sqlite3_bind_text(stmt, Int32(allFilenames.count + 1), (history.matchedName as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    coSpeakersByMeeting[colText(stmt, 0), default: []].append(colText(stmt, 1))
+                }
+            }
+        }
+
+        // Tally co-speaker frequency across all meetings
         var coSpeakerCounts: [String: Int] = [:]
         for meeting in history.meetings {
-            // Get all speakers in this meeting
-            let meetingSpeakers = try queue.sync {
-                var stmt: OpaquePointer?
-                let sql = "SELECT speaker_name FROM meeting_speakers WHERE filename = ?"
-                guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [String]() }
-                defer { sqlite3_finalize(stmt) }
-                sqlite3_bind_text(stmt, 1, (meeting.filename as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                var names: [String] = []
-                while sqlite3_step(stmt) == SQLITE_ROW {
-                    names.append(colText(stmt, 0))
-                }
-                return names
-            }
-            for name in meetingSpeakers where name.lowercased() != history.matchedName.lowercased() && !name.hasPrefix("Speaker ") {
+            for name in coSpeakersByMeeting[meeting.filename] ?? [] {
                 coSpeakerCounts[name, default: 0] += 1
             }
         }
 
         let topCoSpeakers = coSpeakerCounts.sorted { $0.value > $1.value }.prefix(5).map(\.key)
 
-        // Get representative quotes
-        var quotes: [String] = []
-        for meeting in history.meetings.prefix(5) {
-            if !meeting.previewSnippet.isEmpty {
-                quotes.append(meeting.previewSnippet)
-            }
-        }
+        let quotes = history.meetings.prefix(5).compactMap { $0.previewSnippet.isEmpty ? nil : $0.previewSnippet }
 
         let recentMeetings = history.meetings.prefix(10).map { meeting in
-            // Get other speakers in the meeting
-            let others: [String] = queue.sync {
-                var stmt: OpaquePointer?
-                let sql = "SELECT speaker_name FROM meeting_speakers WHERE filename = ? AND speaker_name COLLATE NOCASE != ?"
-                guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-                defer { sqlite3_finalize(stmt) }
-                sqlite3_bind_text(stmt, 1, (meeting.filename as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_text(stmt, 2, (history.matchedName as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                var names: [String] = []
-                while sqlite3_step(stmt) == SQLITE_ROW {
-                    names.append(colText(stmt, 0))
-                }
-                return names
-            }
-
-            return PersonMeetingEntry(
+            PersonMeetingEntry(
                 filename: meeting.filename,
                 date: meeting.meetingDate,
                 wordCount: meeting.wordCount,
                 speakingMinutes: meeting.speakingSeconds / 60.0,
-                otherSpeakers: others
+                otherSpeakers: coSpeakersByMeeting[meeting.filename] ?? []
             )
         }
 
@@ -562,7 +549,7 @@ final class TranscriptIndex: @unchecked Sendable {
             lastSeen: history.meetings.first?.meetingDate ?? "",
             frequentCoSpeakers: Array(topCoSpeakers),
             recentMeetings: Array(recentMeetings),
-            representativeQuotes: quotes
+            representativeQuotes: Array(quotes)
         )
     }
 
