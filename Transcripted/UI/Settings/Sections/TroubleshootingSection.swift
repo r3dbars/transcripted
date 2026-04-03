@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import AppKit
+import CoreGraphics
 
 @available(macOS 26.0, *)
 struct TroubleshootingSettingsSection: View {
@@ -41,11 +42,7 @@ struct TroubleshootingSettingsSection: View {
                 notGrantedLabel: "Denied",
                 notGrantedIcon: "xmark.circle.fill",
                 notGrantedColor: .errorRed,
-                fixAction: {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
+                fixAction: { SystemSettingsHelper.openMicrophoneSettings() }
             )
 
             permissionRow(
@@ -55,11 +52,7 @@ struct TroubleshootingSettingsSection: View {
                 notGrantedLabel: "Not Granted",
                 notGrantedIcon: "exclamationmark.triangle.fill",
                 notGrantedColor: .warningAmber,
-                fixAction: {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
+                fixAction: { SystemSettingsHelper.openScreenRecordingSettings() }
             )
         }
     }
@@ -207,14 +200,9 @@ struct TroubleshootingSettingsSection: View {
     }
 
     private var screenRecordingGranted: Bool {
-        guard let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
-            return false
-        }
-        let myPID = ProcessInfo.processInfo.processIdentifier
-        return windowList.contains { dict in
-            guard let pid = dict[kCGWindowOwnerPID as String] as? Int32 else { return false }
-            return pid != myPID
-        }
+        // Use the same API as OnboardingState for consistency (available macOS 15+,
+        // which is well below our macOS 26 deployment target).
+        CGPreflightScreenCaptureAccess()
     }
 
     private var transcriptsPath: String {
