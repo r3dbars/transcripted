@@ -77,7 +77,12 @@ extension AppDelegate {
     /// referenced by the failed transcription queue. These can persist after crashes when
     /// the app exits between recording and transcription completion.
     func cleanupOrphanedAudioFiles(failedManager: FailedTranscriptionManager) {
-        let saveDir = TranscriptSaver.defaultSaveDirectory
+        // Security: scan ~/Documents/ (the Documents root), NOT ~/Documents/Transcripted/.
+        // AudioFileManager writes temporary audio files to the Documents root while recording.
+        // Using defaultSaveDirectory (Transcripted/) was a mismatch that caused orphaned
+        // crash-time audio files to accumulate in ~/Documents/ and never be cleaned up.
+        let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let saveDir = documentsDir
         guard FileManager.default.fileExists(atPath: saveDir.path) else { return }
 
         // Collect all audio URLs referenced by the failed transcription queue

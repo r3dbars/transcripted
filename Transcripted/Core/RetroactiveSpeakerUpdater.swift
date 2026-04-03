@@ -49,9 +49,13 @@ extension TranscriptSaver {
 
             for oldName in oldNames {
                 // YAML frontmatter: name: "OldName" → name: "NewName"
+                // Security: user-supplied names must be YAML-escaped before interpolation into a
+                // double-quoted YAML scalar. An unescaped " or \ in the name would break out of
+                // the scalar, injecting arbitrary YAML keys into the transcript frontmatter.
+                let yamlSafeName = escapeYAML(newName)
                 content = content.replacingOccurrences(
                     of: "name: \"\(oldName)\"",
-                    with: "name: \"\(newName)\""
+                    with: "name: \"\(yamlSafeName)\""
                 )
 
                 // Transcript body: [System/OldName] → [System/NewName]
@@ -179,9 +183,13 @@ extension TranscriptSaver {
                 let newName = update.newName
 
                 // YAML frontmatter: name: "Speaker X" → name: "NewName"
+                // Security: user-supplied names must be YAML-escaped before interpolation into a
+                // double-quoted YAML scalar. An unescaped " or \ in the name breaks out of the
+                // scalar, injecting arbitrary YAML keys into the transcript frontmatter.
+                let yamlSafeName = escapeYAML(newName)
                 content = content.replacingOccurrences(
                     of: "name: \"\(oldLabel)\"",
-                    with: "name: \"\(newName)\""
+                    with: "name: \"\(yamlSafeName)\""
                 )
 
                 // Transcript body: [System/Speaker X] → [System/NewName]

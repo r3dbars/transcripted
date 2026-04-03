@@ -145,6 +145,16 @@ struct SpeakerNamingCard: View {
                         .textFieldStyle(PlainTextFieldStyle())
                         .font(.system(size: 12))
                         .foregroundColor(.panelTextPrimary)
+                        // Security: cap speaker names at 100 characters to prevent unbounded
+                        // user input from being persisted to the SQLite speaker database.
+                        // SQL injection is prevented by parameterized queries, but without a
+                        // length limit a user (or a malicious pasteboard value) could store
+                        // arbitrarily large strings and cause display/storage anomalies.
+                        .onChange(of: nameText) { _, newValue in
+                            if newValue.count > 100 {
+                                nameText = String(newValue.prefix(100))
+                            }
+                        }
                         .onSubmit {
                             commitName()
                         }
