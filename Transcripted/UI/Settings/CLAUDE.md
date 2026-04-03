@@ -1,6 +1,6 @@
 # Settings
 
-Single-page scrolling settings dashboard. 17 Swift files across root, Components/, Sections/, and Models/.
+Single-page scrolling settings dashboard. 18 Swift files across root, Components/, Sections/, and Models/.
 
 ## File Index
 
@@ -13,7 +13,7 @@ Single-page scrolling settings dashboard. 17 Swift files across root, Components
 | `SettingsWindowController.swift` | NSWindow management, triggers migration check on show |
 | `MigrationOverlayView.swift` | Progress overlay for transcript migration (dark scrim + progress bar) |
 
-### Sections/ (6 files) — see Sections/CLAUDE.md
+### Sections/ (7 files) — see Sections/CLAUDE.md
 
 | File | Purpose |
 |------|---------|
@@ -23,6 +23,7 @@ Single-page scrolling settings dashboard. 17 Swift files across root, Components
 | `ProfileSection.swift` | User name text field, save location path picker |
 | `MeetingDetectionSection.swift` | Auto-record toggle, supported apps info |
 | `AIServicesSection.swift` | Parakeet + Sortformer status badges, "100% local" info |
+| `TroubleshootingSection.swift` | Permission status (mic + screen recording), data locations (Open in Finder), reset (re-run onboarding, reset all settings) |
 
 ### Components/ (6 files) — see Components/CLAUDE.md
 

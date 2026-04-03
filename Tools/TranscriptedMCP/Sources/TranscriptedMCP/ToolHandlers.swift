@@ -173,14 +173,6 @@ private func handleListMeetings(params: CallTool.Parameters, index: TranscriptIn
     return .init(content: [.text(text: String(data: json, encoding: .utf8) ?? "[]")])
 }
 
-/// Returns the YAML frontmatter block (opening `---` through closing `---\n`) as a Substring, or nil.
-private func frontmatterBlock(in content: String) -> Substring? {
-    guard content.hasPrefix("---"),
-          let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex)
-    else { return nil }
-    return content[content.startIndex...endRange.upperBound]
-}
-
 /// Extract title from markdown YAML frontmatter
 private func extractTitle(from content: String) -> String? {
     // Minimum valid frontmatter is "---\n...\n---\n" (8+ chars)
@@ -222,11 +214,6 @@ private func handleReadMeeting(params: CallTool.Parameters, dataDir: URL) throws
     // Reject path traversal (e.g., filename = "../../etc/passwd")
     guard mdURL.path.hasPrefix(dataDir.standardizedFileURL.path + "/") else {
         return .init(content: [.text(text: "Invalid filename: \(filename)")], isError: true)
-    }
-
-    // Prevent path traversal — resolved path must stay within dataDir
-    guard mdURL.standardizedFileURL.path.hasPrefix(dataDir.standardizedFileURL.path) else {
-        return .init(content: [.text(text: "Invalid filename")], isError: true)
     }
 
     guard let content = try? String(contentsOf: mdURL, encoding: .utf8) else {

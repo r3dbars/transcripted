@@ -48,6 +48,7 @@ Audio capture pipeline, transcription orchestration, file saving, stats tracking
 | `WindowCoordinator.swift` | @MainActor | Window lifecycle (settings, onboarding, panel visibility) |
 | `AppDelegateDebug.swift` | @MainActor | DEBUG-only helpers (reset onboarding, test naming tray) |
 | `DiagnosticExporter.swift` | -- | Diagnostic bundle export for bug reports |
+| `SystemSettingsHelper.swift` | -- | Opens System Settings panes for permission fixes (microphone, screen recording) via `x-apple.systempreferences:` URL scheme |
 | `Clipboard.swift` | -- | Clipboard management |
 | `DateFormattingHelper.swift` | -- | Date formatting utilities |
 | `DateParser.swift` | -- | Date parsing utilities |

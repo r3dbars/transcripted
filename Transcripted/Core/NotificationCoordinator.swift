@@ -121,8 +121,7 @@ extension AppDelegate {
             default:
                 break
             }
+            completionHandler()
         }
-
-        completionHandler()
     }
 }

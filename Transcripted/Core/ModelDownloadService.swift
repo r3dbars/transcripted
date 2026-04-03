@@ -4,6 +4,7 @@
 
 import Foundation
 import Network
+import CryptoKit
 
 // MARK: - Error Classification
 
@@ -214,5 +215,168 @@ enum ModelDownloadService {
         guard !components.contains("..") && !components.contains(".") else { return false }
         guard !name.unicodeScalars.contains(where: { $0.value < 32 }) else { return false }
         return true
+    }
+
+
+    // MARK: - HuggingFace Model Download Infrastructure
+
+    /// Represents a file in a HuggingFace model repository
+    struct HFModelFile {
+        let name: String
+        let size: Int?
+        /// SHA-256 hex digest for LFS-tracked files (e.g. model weights).
+        /// Populated from the HuggingFace API response when available.
+        /// Security: used to verify file integrity after download from mirrors,
+        /// so a compromised third-party mirror cannot silently serve malicious weights.
+        let sha256: String?
+    }
+
+    /// Fetch the list of files in a HuggingFace model repository
+    static func fetchModelFileList(modelId: String) async throws -> [HFModelFile] {
+        // Try each mirror for the API call
+        for mirror in mirrors {
+            // Security: use safe URL construction — force-unwrap would crash if modelId or mirror
+            // contained URL-unsafe characters. Guard lets us skip the mirror and try the next.
+            guard let apiURL = URL(string: "\(mirror)/api/models/\(modelId)") else {
+                AppLogger.services.warning("Skipping mirror — could not construct API URL", ["mirror": mirror, "modelId": modelId])
+                continue
+            }
+
+            do {
+                let (data, response) = try await URLSession.shared.data(from: apiURL)
+
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+                    continue
+                }
+
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let siblings = json["siblings"] as? [[String: Any]] else {
+                    continue
+                }
+
+                let files = siblings.compactMap { sibling -> HFModelFile? in
+                    guard let name = sibling["rfilename"] as? String else { return nil }
+                    // Security: filter out any filenames that would escape the cache directory.
+                    // Malicious or compromised API responses could include path traversal sequences.
+                    guard isSafeModelFilename(name) else {
+                        AppLogger.services.warning("Skipping unsafe filename in model manifest", ["filename": name])
+                        return nil
+                    }
+                    let size = sibling["size"] as? Int
+                    // Security: extract SHA-256 from LFS metadata if present.
+                    let sha256 = (sibling["lfs"] as? [String: Any])?["sha256"] as? String
+                    return HFModelFile(name: name, size: size, sha256: sha256)
+                }
+
+                if !files.isEmpty {
+                    AppLogger.services.info("Fetched model file list", [
+                        "mirror": mirror,
+                        "files": "\(files.count)"
+                    ])
+                    return files
+                }
+            } catch {
+                AppLogger.services.warning("Failed to fetch file list from mirror", [
+                    "mirror": mirror,
+                    "error": error.localizedDescription
+                ])
+                continue
+            }
+        }
+
+        throw ModelDownloadError(
+            kind: .unknown("Could not fetch model file list from any mirror"),
+            underlyingError: nil
+        )
+    }
+
+    /// Download a single file with mirror fallback and retry.
+    /// - Parameters:
+    ///   - modelId: HuggingFace model identifier
+    ///   - filename: Filename within the model repository (pre-validated by isSafeModelFilename)
+    ///   - destination: Local destination URL
+    ///   - expectedSHA256: SHA-256 hex digest from the HuggingFace API manifest (optional).
+    ///     Security: when provided, the downloaded file is verified against this digest before being
+    ///     moved to its destination. This prevents a compromised third-party mirror (hf-mirror.com)
+    ///     from silently serving malicious model weights in place of the genuine files.
+    static func downloadFileWithMirrorFallback(
+        modelId: String,
+        filename: String,
+        destination: URL,
+        expectedSHA256: String? = nil
+    ) async throws {
+        for mirror in mirrors {
+            // Security: use safe URL construction — force-unwrap would crash if filename contained
+            // URL-unsafe characters (e.g., spaces) not caught by isSafeModelFilename. Skip
+            // this mirror and try the next rather than crashing.
+            guard let fileURL = URL(string: "\(mirror)/\(modelId)/resolve/main/\(filename)") else {
+                AppLogger.services.warning("Skipping mirror — could not construct file URL", ["mirror": mirror, "file": filename])
+                continue
+            }
+
+            do {
+                try await withRetry(maxAttempts: 2) {
+                    let (tempURL, response) = try await URLSession.shared.download(from: fileURL)
+
+                    if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+                        throw ModelDownloadError(
+                            kind: .serverError(statusCode: httpResponse.statusCode),
+                            underlyingError: nil
+                        )
+                    }
+
+                    // Security: verify SHA-256 digest of downloaded file when the API manifest
+                    // provided one. Rejects files where the digest does not match — a compromised
+                    // mirror cannot substitute malicious model weights without detection.
+                    if let expected = expectedSHA256 {
+                        let computed = try sha256Hex(of: tempURL)
+                        guard computed.lowercased() == expected.lowercased() else {
+                            try? FileManager.default.removeItem(at: tempURL)
+                            AppLogger.services.error("SHA-256 mismatch for downloaded model file — rejecting", [
+                                "file": filename,
+                                "mirror": mirror,
+                                "expected": expected,
+                                "actual": computed
+                            ])
+                            throw ModelDownloadError(
+                                kind: .unknown("Integrity check failed for \(filename) — digest mismatch"),
+                                underlyingError: nil
+                            )
+                        }
+                    }
+
+                    // Move to destination
+                    try FileManager.default.moveItem(at: tempURL, to: destination)
+
+                    // Security: restrict model files to owner-only read (0o600).
+                    FileManager.default.restrictToOwnerOnly(atPath: destination.path)
+                }
+
+                AppLogger.services.debug("Downloaded \(filename) from \(mirror)")
+                return
+            } catch {
+                AppLogger.services.warning("Mirror download failed", [
+                    "mirror": mirror,
+                    "file": filename,
+                    "error": error.localizedDescription
+                ])
+                // Clean up partial file
+                try? FileManager.default.removeItem(at: destination)
+                continue
+            }
+        }
+
+        throw ModelDownloadError(
+            kind: .unknown("Failed to download \(filename) from all mirrors"),
+            underlyingError: nil
+        )
+    }
+
+    /// Compute the SHA-256 hex digest of a file.
+    /// Security: used to verify model file integrity after download from mirrors.
+    static func sha256Hex(of url: URL) throws -> String {
+        let data = try Data(contentsOf: url)
+        let digest = CryptoKit.SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }

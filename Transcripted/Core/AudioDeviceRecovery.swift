@@ -185,7 +185,7 @@ extension Audio {
                 duration: Date().timeIntervalSince(switchStart),
                 reason: "Device switch"
             )
-            recordingGaps.append(gap)
+            appendRecordingGap(gap)
             AppLogger.audioMic.info("Device recovery complete, recording continues", ["gap": gap.description])
         } catch {
             AppLogger.audioMic.error("Failed to restart engine", ["error": error.localizedDescription])
