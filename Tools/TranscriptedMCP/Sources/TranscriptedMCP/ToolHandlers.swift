@@ -1,6 +1,19 @@
 import Foundation
 import MCP
 
+// MARK: - Helpers
+
+private extension DateFormatter {
+    /// YYYY-MM-DD formatter in the local timezone, matching how transcript dates are stored.
+    static let localYYYYMMDD: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        // Intentionally uses the system (local) timezone — transcript dates are stored in local time.
+        return f
+    }()
+}
+
 func registerToolHandlers(server: Server, index: TranscriptIndex, dataDir: URL) async {
     await server.withMethodHandler(ListTools.self) { _ in
         .init(tools: [
@@ -271,7 +284,8 @@ private func handleWhoIs(params: CallTool.Parameters, index: TranscriptIndex) th
 // MARK: - recap
 
 private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, dataDir: URL) throws -> CallTool.Result {
-    let today = ISO8601DateFormatter().string(from: Date()).prefix(10)
+    // Use local calendar so "today" matches transcript dates (which are stored in local time)
+    let today = DateFormatter.localYYYYMMDD.string(from: Date())
     let dateFrom = params.arguments?["date_from"]?.stringValue ?? String(today)
     let dateTo = params.arguments?["date_to"]?.stringValue ?? dateFrom
 
