@@ -16,7 +16,7 @@ Menu bar-only macOS app for real-time system audio transcription. Pipeline: Core
 - **Services/** (18 files): ML services (11 files) + Protocols/ subdirectory (7 service protocols)
 - **UI/FloatingPanel/** (21 files): Morphing pill UI, aurora state views (3 files), SavedPillView, transcript tray (3 files), speaker naming (3 files), Components/ (16 files), Helpers/ (1 file)
 - **UI/Settings/** (18 files): Settings container + Sections/ (7 section views) + Components/ (6 reusable components) + Models/ (1 file)
-- **Onboarding/** (8 files): 5-step first-run flow (Preview -> Permissions -> Model Setup -> HowItWorks -> TestRecording), dark theme
+- **Onboarding/** (9 files): 6-step first-run flow (Welcome -> Preview -> Permissions -> Model Setup -> How It Works -> Test Recording), dark theme
 - **Design/** (21 files): Colors/ (6 files), Components/ (5 premium components), root tokens (10 files: Spacing, Radius, Typography, Animations, Shadows, ViewModifiers, Gradients, Dimensions, Accessibility, CardModifiers)
 - **Tools/TranscriptedQA/** (12 files): QA testing CLI tool, health checks, transcript validation, database integrity checks, index validation, log analysis
 
