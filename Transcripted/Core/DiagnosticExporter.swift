@@ -156,8 +156,12 @@ class DiagnosticExporter {
 
     /// Generate a pre-filled GitHub issue URL with system info
     static func gitHubIssueURL(title: String = "", body: String = "") -> URL {
+        // Security: avoid force-unwrapping URL(string:) — if URLComponents construction fails
+        // (e.g. due to a future URL change), crash in a diagnostics helper is undesirable.
+        // Use a safe fallback instead of a force unwrap.
+        let fallbackURL = URL(fileURLWithPath: "/")  // Unreachable fallback; construction below always succeeds
         guard var components = URLComponents(string: "https://github.com/r3dbars/transcripted/issues/new") else {
-            return URL(string: "https://github.com/r3dbars/transcripted/issues/new")!
+            return URL(string: "https://github.com/r3dbars/transcripted/issues/new") ?? fallbackURL
         }
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "template", value: "bug_report.md"),
@@ -177,6 +181,8 @@ class DiagnosticExporter {
         """
         queryItems.append(URLQueryItem(name: "body", value: fullBody))
         components.queryItems = queryItems
-        return components.url ?? URL(string: "https://github.com/r3dbars/transcripted/issues/new")!
+        // Security: avoid force-unwrap on components.url — fall back to the base URL rather than crashing
+        // if query encoding unexpectedly fails (e.g. extremely long body overflows URL length limits).
+        return components.url ?? URL(string: "https://github.com/r3dbars/transcripted/issues/new") ?? fallbackURL
     }
 }
