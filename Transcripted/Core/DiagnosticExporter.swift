@@ -151,9 +151,13 @@ class DiagnosticExporter {
 
     /// Generate a pre-filled GitHub issue URL with system info
     static func gitHubIssueURL(title: String = "", body: String = "") -> URL {
-        guard var components = URLComponents(string: "https://github.com/r3dbars/transcripted/issues/new") else {
-            return URL(string: "https://github.com/r3dbars/transcripted/issues/new")!
-        }
+        // Security: build URLComponents from struct properties rather than parsing a URL string.
+        // This avoids force-unwrapping the result of URL(string:), which would crash if the
+        // string were ever malformed. components.url is non-nil when scheme, host, and path are set.
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "github.com"
+        components.path = "/r3dbars/transcripted/issues/new"
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "template", value: "bug_report.md"),
         ]
@@ -172,6 +176,7 @@ class DiagnosticExporter {
         """
         queryItems.append(URLQueryItem(name: "body", value: fullBody))
         components.queryItems = queryItems
-        return components.url ?? URL(string: "https://github.com/r3dbars/transcripted/issues/new")!
+        // Safe: scheme, host, and path are set directly above — components.url is always non-nil here
+        return components.url ?? URL(fileURLWithPath: "/")
     }
 }

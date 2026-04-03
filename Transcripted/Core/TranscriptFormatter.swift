@@ -7,8 +7,12 @@ extension TranscriptSaver {
     /// Format source label for timeline display
     /// Escape special characters for safe YAML string interpolation
     static func escapeYAML(_ s: String) -> String {
+        // Security: escape backslash and quote first, then escape newlines/CR.
+        // A literal newline in a YAML tag (unquoted sequence item) injects a new YAML key.
         s.replacingOccurrences(of: "\\", with: "\\\\")
          .replacingOccurrences(of: "\"", with: "\\\"")
+         .replacingOccurrences(of: "\n", with: "\\n")
+         .replacingOccurrences(of: "\r", with: "\\r")
     }
 
     static func formatSourceLabel(_ source: String) -> String {
@@ -144,7 +148,12 @@ extension TranscriptSaver {
                 guard let mapping = speakerMappings[key],
                       let name = mapping.identifiedName,
                       !name.isEmpty else { continue }
-                let sanitized = name.replacingOccurrences(of: " ", with: "-").lowercased()
+                // Security: strip control characters and YAML-unsafe chars before embedding in
+                // an unquoted YAML tag sequence item. A literal newline would inject a new YAML key.
+                let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-' "))
+                let sanitized = String(name.unicodeScalars.filter { allowed.contains($0) })
+                    .replacingOccurrences(of: " ", with: "-")
+                    .lowercased()
                 yaml += "\n  - speaker/\(sanitized)"
             }
             yaml += "\naliases:"
