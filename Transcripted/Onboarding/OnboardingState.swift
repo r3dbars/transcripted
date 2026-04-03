@@ -47,6 +47,12 @@ class OnboardingState {
         microphoneGranted && screenRecordingGranted
     }
 
+    /// True when onboarding completed but screen recording was not granted.
+    /// Useful for showing post-onboarding nudges about missing system audio capture.
+    var screenRecordingSkipped: Bool {
+        Self.hasCompletedOnboarding() && !screenRecordingGranted
+    }
+
     // MARK: - Loading States
 
     var isMicrophoneRequestInProgress = false
@@ -139,18 +145,11 @@ class OnboardingState {
         screenRecordingGranted = checkScreenRecordingPermission()
     }
 
-    /// Check if screen recording permission is granted by testing CGWindow list access.
-    /// This is the standard macOS technique — if we can list windows for other apps, we have permission.
+    /// Check if screen recording permission is granted.
+    /// Uses the official `CGPreflightScreenCaptureAccess()` API (available since macOS 15,
+    /// and this class requires macOS 26.0+).
     private func checkScreenRecordingPermission() -> Bool {
-        guard let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
-            return false
-        }
-        // If we can see windows from other apps (not just our own), permission is granted
-        let myPID = ProcessInfo.processInfo.processIdentifier
-        return windowList.contains { dict in
-            guard let pid = dict[kCGWindowOwnerPID as String] as? Int32 else { return false }
-            return pid != myPID
-        }
+        CGPreflightScreenCaptureAccess()
     }
 
     func requestMicrophonePermission() async {

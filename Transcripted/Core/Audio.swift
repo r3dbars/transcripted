@@ -31,7 +31,7 @@ enum SystemAudioStatus: Equatable {
         case .healthy: return ""
         case .reconnecting: return "Reconnecting..."
         case .silent: return "System audio silent"
-        case .failed: return "System audio unavailable"
+        case .failed: return "System audio unavailable \u{2014} enable Screen Recording for Transcripted in System Settings"
         }
     }
 }
@@ -238,7 +238,7 @@ class Audio: ObservableObject {
         AVCaptureDevice.requestAccess(for: .audio) { granted in
             if !granted {
                 DispatchQueue.main.async {
-                    self.error = "Microphone permission denied"
+                    self.error = "Microphone permission denied. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted."
                 }
             }
         }
@@ -334,7 +334,7 @@ class Audio: ObservableObject {
                     } else {
                         // Permission denied
                         DispatchQueue.main.async {
-                            self.error = "Microphone access is required to record. Please grant permission in System Settings."
+                            self.error = "Microphone permission required. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted, then try again."
                             self.isStarting = false
                         }
                     }
@@ -344,7 +344,7 @@ class Audio: ObservableObject {
         } else if microphoneStatus == .denied {
             // Permission explicitly denied
             DispatchQueue.main.async {
-                self.error = "Microphone access denied. Please grant permission in System Settings."
+                self.error = "Microphone access denied. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted."
                 self.isStarting = false
             }
             return
@@ -380,7 +380,7 @@ class Audio: ObservableObject {
                 }
             } catch {
                 await MainActor.run {
-                    self.error = "Failed to start recording: \(error.localizedDescription)"
+                    self.error = "Recording failed to start: \(error.localizedDescription). Try quitting and reopening Transcripted."
                     self.isRecording = false
                     self.isStarting = false
                     self.stop()
@@ -422,7 +422,7 @@ class Audio: ObservableObject {
                 }
             } catch {
                 await MainActor.run {
-                    self.error = "Failed to start recording: \(error.localizedDescription)"
+                    self.error = "Recording failed to start: \(error.localizedDescription). Try quitting and reopening Transcripted."
                     self.isRecording = false
                     self.isStarting = false
                     self.stop()

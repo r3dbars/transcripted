@@ -33,7 +33,7 @@ extension Audio {
                     AppLogger.audioMic.error("Max recovery attempts reached, stopping recording", [
                         "attempts": "\(self.deviceSwitchCount)"
                     ])
-                    let savedError = "Audio device unavailable — recording stopped after \(self.deviceSwitchCount) attempts"
+                    let savedError = "Audio device unavailable \u{2014} recording stopped after \(self.deviceSwitchCount) recovery attempts. Reconnect your microphone and try again."
                     DispatchQueue.main.async {
                         self.stop()
                         // Re-apply error after stop() clears it
@@ -191,7 +191,7 @@ extension Audio {
             AppLogger.audioMic.error("Failed to restart engine", ["error": error.localizedDescription])
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                self.error = "Failed to recover from device change"
+                self.error = "Microphone recovery failed. Reconnect your audio device or try quitting and reopening Transcripted."
                 self.stop()
             }
         }

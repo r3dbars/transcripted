@@ -90,6 +90,8 @@ struct SettingsContainerView: View {
                     )
 
                     AIServicesSettingsSection()
+
+                    TroubleshootingSettingsSection()
                 }
                 .padding(Spacing.lg)
                 .padding(.bottom, Spacing.xl)
