@@ -8,8 +8,7 @@ Standalone MCP server (`transcripted-mcp`) for querying Transcripted meeting dat
 |------|---------|
 | `Main.swift` | `@main` entry point: initialises TranscriptIndex, starts FileWatcher, creates MCP Server with StdioTransport |
 | `ToolHandlers.swift` | Registers all 5 MCP tool handlers with the server; contains per-tool request parsing and JSON serialisation |
-| `TranscriptIndex.swift` | SQLite-backed index rebuilt from JSON sidecars; `reconcile()` full rebuild, `indexSingleFile()` incremental update, query methods for all tools |
-| `TranscriptIndex+Queries.swift` | Complex query methods on `TranscriptIndex`: `listMeetings`, `searchUtterances`, `getPersonProfile`, `indexSidecar`. |
+| `TranscriptIndex.swift` | SQLite-backed index rebuilt from JSON sidecars; `reconcile()` full rebuild, `indexSingleFile()` incremental update, all query methods (`listMeetings`, `searchUtterances`, `getPersonProfile`, `indexSidecar`) |
 | `TranscriptLoader.swift` | Loads `.md` transcript files from disk for `read_meeting` |
 | `Models.swift` | All Codable input/output structs (AgentTranscript, MeetingSummary, SearchResult, SpeakerHistoryResult, etc.) and `MCPIndexError` |
 | `NameVariants.swift` | Speaker name fuzzy-matching — `Mike` finds `Michael`, handles nicknames and first-name-only lookups |
