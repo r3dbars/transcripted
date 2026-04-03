@@ -24,11 +24,6 @@ protocol TranscriptStorage {
     /// Retroactively update a speaker name across existing transcripts
     static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String)
 
-    /// Retroactively update the meeting title in transcript YAML
-    /// - Returns: true if the file was updated successfully
-    @discardableResult
-    static func retroactivelyUpdateTitle(transcriptURL: URL, title: String) -> Bool
-
     /// Default save directory
     static var defaultSaveDirectory: URL { get }
 }

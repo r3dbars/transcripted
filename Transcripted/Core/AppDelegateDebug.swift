@@ -58,7 +58,6 @@ extension AppDelegate {
                 matchSimilarity: nil,
                 needsNaming: true,
                 needsConfirmation: false,
-                qwenResult: .notAttempted
             ),
             SpeakerNamingEntry(
                 id: knownProfile.id,
@@ -69,7 +68,6 @@ extension AppDelegate {
                 matchSimilarity: 0.72,
                 needsNaming: false,
                 needsConfirmation: true,
-                qwenResult: .notAttempted
             )
         ]
 

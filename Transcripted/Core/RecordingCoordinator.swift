@@ -120,21 +120,4 @@ extension AppDelegate {
         }
     }
 
-    /// Pre-cache Qwen model so it's ready for first recording.
-    /// Downloads model files if enabled but not yet cached, then frees memory.
-    static func preCacheQwenIfNeeded() async {
-        guard QwenService.isEnabled, !QwenService.isModelCached else { return }
-        AppLogger.app.info("Pre-caching Qwen model in background")
-        let qwen = QwenService()
-        await qwen.loadModel()
-        switch qwen.modelState {
-        case .ready:
-            qwen.unload()  // Free memory — just wanted to cache the files
-            AppLogger.app.info("Qwen model pre-cached successfully")
-        case .failed(let error):
-            AppLogger.app.error("Qwen model pre-cache failed", ["error": error])
-        default:
-            AppLogger.app.warning("Qwen model pre-cache ended in unexpected state")
-        }
-    }
 }

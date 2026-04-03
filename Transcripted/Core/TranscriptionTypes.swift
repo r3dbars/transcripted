@@ -131,13 +131,6 @@ enum SpeakerConfidence: String, Codable {
     case medium
 }
 
-/// Result of Qwen speaker name inference on transcript text
-enum QwenInferenceResult {
-    case notAttempted
-    case noNameFound
-    case suggested(name: String)
-}
-
 /// Individual speaker identified in the call
 struct IdentifiedSpeaker: Codable {
     let name: String
@@ -178,7 +171,6 @@ struct SpeakerNamingEntry: Identifiable {
     let matchSimilarity: Double?     // cosine similarity score
     let needsNaming: Bool            // true = unknown speaker (show text field)
     let needsConfirmation: Bool      // true = known but low confidence (show confirm/deny)
-    let qwenResult: QwenInferenceResult  // result of Qwen name inference
 }
 
 /// Result of user naming/confirming a speaker
