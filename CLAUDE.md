@@ -114,6 +114,7 @@ Every folder with ≥2 Swift files has its own CLAUDE.md with file index, refere
 ## Tools (external CLI utilities)
 - **Tools/TranscriptedQA/** (19 Swift files): Standalone Swift CLI (`transcripted-qa`) for validating on-disk artifacts. Subcommands: `validate-all` (default), `validate-transcripts`, `validate-database`, `validate-logs`, `validate-artifacts`, `validate-index`, `check-health`. Validators: TranscriptValidator, SpeakerDBValidator, StatsDBValidator, JSONSidecarValidator, IndexValidator, LogValidator, HealthChecker. Uses `ArgumentParser`.
 - **Tools/TranscriptedCLI/** (1 file): Legacy CLI wrapper around FluidAudio static lib.
+- **Tools/TranscriptedMCP/** (7 Swift source files): MCP server (`transcripted-mcp`) exposing Transcripted transcripts to AI agents via the Model Context Protocol. Built as a Swift Package with `swift-sdk` (MCP 0.12.0). 5 tools: `list_meetings` (list with metadata, date filter), `read_meeting` (full transcript by filename, section param: full/transcript/speakers), `search` (full-text with optional speaker + date filters, supports name variants), `who_is` (speaker profile lookup), `recap` (multi-meeting digest for a date range). Index stored at `~/Documents/Transcripted/mcp_index.sqlite` (0o600). Watches for new transcripts via `FileWatcher`. NameVariants mirrors `SpeakerProfileMerger.swift` lookups. `TRANSCRIPTED_DATA_DIR` env var overrides default data path.
 
 ## Documentation
 See CONTRIBUTING.md for full development guidelines.
