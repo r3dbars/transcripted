@@ -139,6 +139,9 @@ extension SystemAudioCapture {
                 if !self.hasReceivedFirstBuffer {
                     self.hasReceivedFirstBuffer = true
                 }
+                if self.recoveryAttempts > 0 {
+                    self.recoveryAttempts = 0
+                }
                 self.markBufferHasData()
 
                 // Send buffer to callback
