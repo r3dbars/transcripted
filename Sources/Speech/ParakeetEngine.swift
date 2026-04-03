@@ -54,8 +54,9 @@ class ParakeetEngine: ObservableObject {
     // FluidAudio ASR
     private var asrManager: AsrManager?
     private var audioWatchdogTask: Task<Void, Never>?
+    private var asrManagerReady = false
 
-    var isModelLoaded: Bool { asrManager?.isAvailable ?? false }
+    var isModelLoaded: Bool { asrManagerReady }
 
     var inputDeviceName: String {
         var deviceID = AudioDeviceID(0)
@@ -139,6 +140,7 @@ class ParakeetEngine: ObservableObject {
             try await manager.initialize(models: models)
 
             asrManager = manager
+            asrManagerReady = true
             modelDownloadState = .ready
             print("✅ PARAKEET | TDT V3 models loaded (source: \(loadSource))")
             EventReporter.shared.capture(level: .info, engine: "parakeet", event: "models_loaded",
@@ -633,7 +635,7 @@ class ParakeetEngine: ObservableObject {
                 message: "No audio samples in buffer when transcribe() called")
             return nil
         }
-        guard let manager = asrManager, manager.isAvailable else {
+        guard let manager = asrManager, asrManagerReady else {
             print("❌ PARAKEET | ASR manager not available")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "asr_manager_unavailable",
                 message: "ASR manager not available for transcription")
@@ -726,10 +728,12 @@ class ParakeetEngine: ObservableObject {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
             wakeObserver = nil
         }
-        asrManager?.cleanup()
+        let manager = asrManager
         asrManager = nil
+        asrManagerReady = false
         eouManager = nil
         modelDownloadState = .notLoaded
+        Task { await manager?.cleanup() }
     }
 
     deinit {
@@ -741,7 +745,8 @@ class ParakeetEngine: ObservableObject {
         }
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
-        asrManager?.cleanup()
+        let manager = asrManager
+        Task { await manager?.cleanup() }
         eouManager = nil
     }
 }

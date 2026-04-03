@@ -137,6 +137,20 @@ enum DraftConstants {
     /// OCR recent suffix to keep (latest messages)
     static let ocrRecentCharacters = 2500
 
+    // MARK: - Gemini API
+
+    /// Gemini API base URL
+    static let geminiBaseURL = "https://generativelanguage.googleapis.com/v1beta"
+
+    /// Gemini model identifier
+    static let geminiModel = "gemini-3-flash"
+
+    /// Timeout for Gemini API requests (seconds)
+    static let geminiRequestTimeout: TimeInterval = 30.0
+
+    /// Max tokens for Gemini draft responses
+    static let geminiDraftMaxTokens = 1024
+
     // MARK: - Async Utilities
 
     /// Run an async operation with a deadline. Throws CancellationError on timeout.
