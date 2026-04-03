@@ -39,6 +39,7 @@ isMicrophoneRequestInProgress: Bool (guards concurrent permission requests)
 microphoneGranted: Bool (computed: microphoneStatus == .authorized)
 allPermissionsGranted: Bool  // requires microphone only
 allPermissionsFullyGranted: Bool  // Both mic + screen recording
+screenRecordingSkipped: Bool  // Onboarding completed but screen recording not granted (computed)
 
 // Model setup
 parakeetReady: Bool, diarizationReady: Bool, modelsReady: Bool (computed: both true)
@@ -95,7 +96,7 @@ setupApp()
 
 ## Permission Detection Details
 - **Microphone**: Direct `AVCaptureDevice.authorizationStatus(for: .audio)` — REQUIRED to proceed past step 3
-- **Screen Recording**: Side-effect check via `CGWindowListCopyWindowInfo()` - if returns windows, permission granted. Not officially documented API.
+- **Screen Recording**: Official API via `CGPreflightScreenCaptureAccess()` (macOS 15+, class requires macOS 26.0+)
 - Permission rows show 4 states: notRequested (Grant button), pending (spinner), granted (checkmark), denied (Settings button)
 - Denied state shows guidance text: "Microphone access wasn't granted. Tap 'Try Again' to see the permission prompt, or open Settings to enable it manually."
 - Continue button DISABLED until mic permission granted (canProceed = microphoneGranted)
@@ -114,7 +115,7 @@ setupApp()
 - Close button still calls completeOnboarding + onComplete as safety valve (prevents invisible app state)
 
 ## Gotchas
-- Screen recording detection is not a real API - uses CGWindowListCopyWindowInfo side-effect
+- Screen recording detection in OnboardingState uses official `CGPreflightScreenCaptureAccess()` API (TroubleshootingSection still uses older CGWindowListCopyWindowInfo side-effect)
 - Multiple concurrent loadModels() calls blocked by isLoadingModels guard
 - Model error messages concatenated with "\n" (both errors show if both fail)
 - Progress monitoring caps at 0.99 to prevent premature "100%" display
