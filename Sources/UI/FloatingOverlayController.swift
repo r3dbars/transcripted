@@ -592,6 +592,27 @@ class FloatingOverlayController {
         }
     }
 
+    /// Fast dismiss for "no speech detected" — brief flash then clean fade (no shake).
+    func showNoSpeechAndDismiss() {
+        errorDismissTask?.cancel()
+        errorMessage = "No speech detected"
+        transcriptExpanded = false
+        state = .drafting
+        resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
+        if !isVisible {
+            showPanel(near: nil)
+        }
+        pushStateToViews()
+        errorDismissTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: DraftConstants.noSpeechDismissDelay)
+            } catch { return }
+            guard let self = self else { return }
+            self.errorMessage = ""
+            self.hideWithConfirmAnimation()
+        }
+    }
+
     // MARK: - Internal Hide
 
     private func _performHide() {

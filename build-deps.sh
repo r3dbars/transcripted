@@ -36,7 +36,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.9"),
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm", branch: "main"),
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm", revision: "25b00d4"),
     ],
     targets: [
         .target(

@@ -137,7 +137,7 @@ class ParakeetEngine: ObservableObject {
             }
 
             let manager = AsrManager(config: .default)
-            try await manager.initialize(models: models)
+            try await manager.loadModels(models)
 
             asrManager = manager
             asrManagerReady = true
@@ -392,11 +392,6 @@ class ParakeetEngine: ObservableObject {
 
     func startRecording(isRecoveryAttempt: Bool = false) -> Bool {
         guard !isRecording else { return true }
-        guard isModelLoaded else {
-            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "model_not_loaded",
-                message: "Recording attempted without model loaded")
-            return false
-        }
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         guard micStatus == .authorized else {
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "mic_not_authorized",
