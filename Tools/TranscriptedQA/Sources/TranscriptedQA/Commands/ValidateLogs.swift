@@ -16,6 +16,6 @@ struct ValidateLogs: ParsableCommand {
         let logPath = path ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/Transcripted/app.jsonl").path
         let results = LogValidator(logPath: logPath).validate()
-        runValidation(results: results, format: formatOpts.format)
+        try runValidation(results: results, format: formatOpts.format)
     }
 }

@@ -49,16 +49,20 @@ struct SpeakerDBValidator {
 
         // Embedding size (256 float32 = 1024 bytes)
         if let rows = try? db.query("SELECT id, LENGTH(embedding) as emb_len FROM speakers WHERE embedding IS NOT NULL") {
-            var allCorrect = true
-            for row in rows {
-                if let len = row["emb_len"] as? Int64, len != 1024 {
-                    let id = row["id"] as? String ?? "?"
-                    results.append(.fail("database/speakers-embedding-size", target: target, detail: "Speaker \(id) has \(len)-byte embedding (expected 1024)"))
-                    allCorrect = false
+            if rows.isEmpty {
+                results.append(.warn("database/speakers-embedding-size", target: target, detail: "No speakers with embeddings — check skipped"))
+            } else {
+                var allCorrect = true
+                for row in rows {
+                    if let len = row["emb_len"] as? Int64, len != 1024 {
+                        let id = row["id"] as? String ?? "?"
+                        results.append(.fail("database/speakers-embedding-size", target: target, detail: "Speaker \(id) has \(len)-byte embedding (expected 1024)"))
+                        allCorrect = false
+                    }
                 }
-            }
-            if allCorrect && !rows.isEmpty {
-                results.append(.pass("database/speakers-embedding-size", target: target))
+                if allCorrect {
+                    results.append(.pass("database/speakers-embedding-size", target: target))
+                }
             }
         }
 
@@ -88,7 +92,14 @@ struct SpeakerDBValidator {
         // Confidence range [0, 1]
         if let rows = try? db.query("SELECT id, confidence FROM speakers") {
             let outOfRange = rows.filter { row in
-                guard let conf = row["confidence"] as? Double else { return true }
+                let conf: Double
+                if let d = row["confidence"] as? Double {
+                    conf = d
+                } else if let i = row["confidence"] as? Int64 {
+                    conf = Double(i)
+                } else {
+                    return true
+                }
                 return conf < 0.0 || conf > 1.0
             }
             if outOfRange.isEmpty {

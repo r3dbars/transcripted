@@ -14,8 +14,8 @@
 | `TranscriptRowView.swift` | Single row: smart title, relative date, duration, copy button. |
 | `TranscriptDetailView.swift` | Full transcript viewer. Groups lines by speaker with colored left borders. |
 | `SpeakerNamingView.swift` | Post-recording speaker naming container. 3s dismiss guard. |
-| `SpeakerNamingCard.swift` | Per-speaker card: name input, autocomplete, confirm/reject/merge actions. |
-| `ClipAudioPlayer.swift` | AVAudioPlayer wrapper for speaker clip playback (one at a time). |
+| `SpeakerNamingCard.swift` | Per-speaker card: name input, autocomplete, confirm/reject/merge actions, merge candidate display |
+| `ClipAudioPlayer.swift` | AVAudioPlayer wrapper for speaker clip playback (one at a time), background thread loading, stop/cancel methods |
 | `ToastNotificationView.swift` | Error notification toast, slides in, auto-dismisses after 8s. Hover pauses timer. |
 | `ContextualErrorBanner.swift` | ContextualError enum: classifies errors by keyword into typed categories. |
 | `PillErrorView.swift` | Coral-tinted pill with shake animation for errors. |

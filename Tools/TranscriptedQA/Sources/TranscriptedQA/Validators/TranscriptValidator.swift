@@ -57,12 +57,16 @@ struct TranscriptValidator {
 
             // Sources
             if let sources = yaml.value(for: "sources") {
-                let valid = sources.contains("mic") || sources.contains("system_audio")
-                if valid {
+                let sourceList = sources.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                let validValues: Set<String> = ["mic", "system_audio"]
+                let allValid = !sourceList.isEmpty && sourceList.allSatisfy { validValues.contains($0) }
+                if allValid {
                     results.append(.pass("transcript/yaml-sources", target: name))
                 } else {
                     results.append(.fail("transcript/yaml-sources", target: name, detail: "Invalid sources: \(sources)"))
                 }
+            } else {
+                results.append(.warn("transcript/yaml-sources", target: name, detail: "sources key not present — check skipped"))
             }
 
             // Capture quality
@@ -73,6 +77,8 @@ struct TranscriptValidator {
                 } else {
                     results.append(.fail("transcript/yaml-capture-quality", target: name, detail: "Invalid quality: \(quality)"))
                 }
+            } else {
+                results.append(.warn("transcript/yaml-capture-quality", target: name, detail: "capture_quality key not present — check skipped"))
             }
 
             // Non-negative counts
@@ -81,6 +87,8 @@ struct TranscriptValidator {
                     results.append(.pass("transcript/yaml-count-\(key)", target: name))
                 } else if yaml.hasKey(key) {
                     results.append(.fail("transcript/yaml-count-\(key)", target: name, detail: "Invalid or negative value"))
+                } else {
+                    results.append(.warn("transcript/yaml-count-\(key)", target: name, detail: "\(key) not present — check skipped"))
                 }
             }
 

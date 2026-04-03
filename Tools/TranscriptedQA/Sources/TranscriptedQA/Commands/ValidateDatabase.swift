@@ -15,6 +15,6 @@ struct ValidateDatabase: ParsableCommand {
         var results: [ValidationResult] = []
         results += SpeakerDBValidator(dbPath: dir.appendingPathComponent("speakers.sqlite").path).validate()
         results += StatsDBValidator(dbPath: dir.appendingPathComponent("stats.sqlite").path).validate()
-        runValidation(results: results, format: formatOpts.format)
+        try runValidation(results: results, format: formatOpts.format)
     }
 }

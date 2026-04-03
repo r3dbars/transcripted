@@ -1,0 +1,4 @@
+module yyjson {
+    umbrella header "yyjson.h"
+    export *
+}
