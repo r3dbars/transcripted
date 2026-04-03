@@ -728,12 +728,12 @@ class ParakeetEngine: ObservableObject {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
             wakeObserver = nil
         }
-        let manager = asrManager
+        let mgr = asrManager
         asrManager = nil
         asrManagerReady = false
         eouManager = nil
         modelDownloadState = .notLoaded
-        Task { await manager?.cleanup() }
+        Task { await mgr?.cleanup() }
     }
 
     deinit {
@@ -745,8 +745,8 @@ class ParakeetEngine: ObservableObject {
         }
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
-        let manager = asrManager
-        Task { await manager?.cleanup() }
+        let mgr = asrManager
+        Task { await mgr?.cleanup() }
         eouManager = nil
     }
 }
