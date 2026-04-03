@@ -108,6 +108,7 @@ enum DraftConstants {
 
     /// Duration to show error messages in overlay before auto-dismiss (nanoseconds)
     static let errorDismissDelay: UInt64 = 2_500_000_000  // 2.5 seconds
+    static let noSpeechDismissDelay: UInt64 = 800_000_000  // 0.8 seconds — fast dismiss for empty recordings
 
     // MARK: - Training Toast
 

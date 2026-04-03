@@ -30,13 +30,7 @@ class STTRouter: ObservableObject {
     // MARK: - Recording
 
     func startRecording() -> Bool {
-        if parakeetEngine.isModelLoaded {
-            return parakeetEngine.startRecording()
-        } else {
-            EventReporter.shared.capture(level: .warning, engine: "parakeet",
-                event: "model_not_ready", message: "Parakeet model not loaded when startRecording called")
-            return false
-        }
+        return parakeetEngine.startRecording()
     }
 
     func stopRecording() {

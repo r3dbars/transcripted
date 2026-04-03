@@ -107,47 +107,15 @@ class DraftSessionController: ObservableObject {
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
 
-        // If model isn't loaded yet, show loading overlay and wait (up to 120s)
-        if !appState.sttRouter.isModelLoaded {
-            appState.logger.log("SESSION | waiting for model to load…")
-            overlayController.showLoadingState()
-
-            // Wait in background, then start recording once ready
-            let capturedImageData = imageData
-            let capturedSourceApp = sourceApp
-            streamingTask?.cancel()
-            streamingTask = Task { [weak self] in
-                guard let self = self else { return }
-                // Poll for model readiness (200ms intervals, up to 120s)
-                for _ in 0..<DraftConstants.modelLoadMaxIterations {
-                    guard !Task.isCancelled else { return }
-                    if await self.appState?.sttRouter.isModelLoaded == true { break }
-                    try? await Task.sleep(nanoseconds: DraftConstants.modelLoadPollInterval)
-                }
-                guard !Task.isCancelled else { return }
-                guard await self.appState?.sttRouter.isModelLoaded == true else {
-                    await self.appState?.logger.log("SESSION | model load timed out")
-                    await self.overlayController?.showError("Voice model failed to load")
-                    self.isInSession = false
-                    return
-                }
-                // Model is ready — start recording
-                await self.beginRecording(imageData: capturedImageData, sourceApp: capturedSourceApp)
-            }
-            return
-        }
-
         beginRecording(imageData: imageData, sourceApp: sourceApp)
     }
 
-    /// Actually start recording and vision — called directly or after model wait
+    /// Actually start recording — called directly from startSession
     private func beginRecording(imageData: Data?, sourceApp: NSRunningApplication?) {
         guard let appState = appState, let overlayController = overlayController else { return }
         guard isInSession else { return }
 
         overlayController.state = .listening
-        // After loading state, panel may be at full height — shrink to compact for listening
-        resizePanelToCompact()
 
         guard appState.sttRouter.startRecording() else {
             appState.logger.log("SESSION | recording failed to start")
@@ -182,8 +150,22 @@ class DraftSessionController: ObservableObject {
         streamingTask = Task {
             // Cancel any lingering Gemini generation
             await appState.geminiEngine.cancelGeneration()
-            // Stop recording and batch-transcribe
+            // Stop recording and wait for transcription model if still loading
             appState.sttRouter.stopRecording()
+            if !appState.sttRouter.isModelLoaded {
+                appState.logger.log("SESSION | waiting for voice model before transcribe…")
+                for _ in 0..<DraftConstants.modelLoadMaxIterations {
+                    guard !Task.isCancelled else { return }
+                    if appState.sttRouter.isModelLoaded { break }
+                    try? await Task.sleep(nanoseconds: DraftConstants.modelLoadPollInterval)
+                }
+                guard appState.sttRouter.isModelLoaded else {
+                    appState.logger.log("SESSION | voice model failed to load for transcription")
+                    overlayController.showError("Voice model failed to load")
+                    isInSession = false
+                    return
+                }
+            }
             let voiceText = (await appState.sttRouter.transcribe() ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -193,7 +175,7 @@ class DraftSessionController: ObservableObject {
                     message: "Voice text empty after recording")
                 visionTask?.cancel()
                 visionTask = nil
-                overlayController.showError("No speech detected")
+                overlayController.showNoSpeechAndDismiss()
                 isInSession = false
                 return
             }
@@ -328,43 +310,15 @@ class DraftSessionController: ObservableObject {
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
 
-        // If model isn't loaded yet, show loading overlay and wait (up to 120s)
-        if !appState.sttRouter.isModelLoaded {
-            appState.logger.log("DICTATION | waiting for model to load…")
-            overlayController.showLoadingState()
-
-            let capturedSourceApp = sourceApp
-            streamingTask?.cancel()
-            streamingTask = Task { [weak self] in
-                guard let self = self else { return }
-                for _ in 0..<DraftConstants.modelLoadMaxIterations {
-                    guard !Task.isCancelled else { return }
-                    if await self.appState?.sttRouter.isModelLoaded == true { break }
-                    try? await Task.sleep(nanoseconds: DraftConstants.modelLoadPollInterval)
-                }
-                guard !Task.isCancelled else { return }
-                guard await self.appState?.sttRouter.isModelLoaded == true else {
-                    await self.appState?.logger.log("DICTATION | model load timed out")
-                    await self.overlayController?.showError("Voice model failed to load")
-                    self.isDictating = false
-                    return
-                }
-                await self.beginDictationRecording(sourceApp: capturedSourceApp)
-            }
-            return
-        }
-
         beginDictationRecording(sourceApp: sourceApp)
     }
 
-    /// Actually start dictation recording — called directly or after model wait
+    /// Actually start dictation recording — called directly from startDictation
     private func beginDictationRecording(sourceApp: NSRunningApplication?) {
         guard let appState = appState, let overlayController = overlayController else { return }
         guard isDictating else { return }
 
         overlayController.state = .listening
-        // After loading state, panel may be at full height — shrink to compact for listening
-        resizePanelToCompact()
 
         guard appState.sttRouter.startRecording() else {
             appState.logger.log("DICTATION | recording failed to start")
@@ -392,6 +346,21 @@ class DraftSessionController: ObservableObject {
         appState.sttRouter.stopRecording()
         streamingTask?.cancel()
         streamingTask = Task {
+            // Wait for voice model if still loading
+            if !appState.sttRouter.isModelLoaded {
+                appState.logger.log("DICTATION | waiting for voice model before transcribe…")
+                for _ in 0..<DraftConstants.modelLoadMaxIterations {
+                    guard !Task.isCancelled else { return }
+                    if appState.sttRouter.isModelLoaded { break }
+                    try? await Task.sleep(nanoseconds: DraftConstants.modelLoadPollInterval)
+                }
+                guard appState.sttRouter.isModelLoaded else {
+                    appState.logger.log("DICTATION | voice model failed to load for transcription")
+                    overlayController.showError("Voice model failed to load")
+                    isDictating = false
+                    return
+                }
+            }
             let voiceText = await appState.sttRouter.transcribe()
             guard !Task.isCancelled else { return }
 
@@ -399,7 +368,7 @@ class DraftSessionController: ObservableObject {
                 appState.logger.log("DICTATION | no transcription, cancelling")
                 EventReporter.shared.capture(level: .warning, engine: "overlay", event: "no_voice_input",
                     message: "Dictation transcription empty")
-                overlayController.showError("No speech detected")
+                overlayController.showNoSpeechAndDismiss()
                 isDictating = false
                 return
             }

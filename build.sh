@@ -111,11 +111,19 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Sign
-echo "Signing..."
-codesign --force --deep --sign "4A552DF04BA66B397D5E2871C6983FC1302FBFCD" \
-    --entitlements "$BUILD_DIR/Draft.entitlements" \
-    "$APP_BUNDLE" 2>&1
+# Sign — auto-detect the first valid Developer ID on this machine
+SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
+if [ -n "$SIGN_ID" ]; then
+    echo "Signing with: $SIGN_ID"
+    codesign --force --deep --sign "$SIGN_ID" \
+        --entitlements "$BUILD_DIR/Draft.entitlements" \
+        "$APP_BUNDLE" 2>&1
+else
+    echo "No Developer ID found — signing ad-hoc (permissions may not persist)"
+    codesign --force --deep --sign - \
+        --entitlements "$BUILD_DIR/Draft.entitlements" \
+        "$APP_BUNDLE" 2>&1
+fi
 
 echo "Build complete!"
 echo "Launching Draft..."
