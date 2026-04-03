@@ -178,6 +178,29 @@ struct MeetingSpeaker: Codable {
     }
 }
 
+// MARK: - Person Profile
+
+struct PersonProfile: Codable {
+    let name: String
+    let persistentSpeakerId: String?
+    let meetingCount: Int
+    let totalWordCount: Int
+    let totalSpeakingMinutes: Double
+    let firstSeen: String
+    let lastSeen: String
+    let frequentCoSpeakers: [String]
+    let recentMeetings: [PersonMeetingEntry]
+    let representativeQuotes: [String]
+}
+
+struct PersonMeetingEntry: Codable {
+    let filename: String
+    let date: String
+    let wordCount: Int
+    let speakingMinutes: Double
+    let otherSpeakers: [String]
+}
+
 // MARK: - Errors
 
 enum MCPIndexError: Error, LocalizedError {
