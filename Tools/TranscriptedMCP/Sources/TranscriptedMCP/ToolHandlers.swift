@@ -217,6 +217,12 @@ private func handleReadMeeting(params: CallTool.Parameters, dataDir: URL) throws
 
     // Try .md file first, then without extension
     let mdURL = dataDir.appendingPathComponent(filename.hasSuffix(".md") ? filename : filename + ".md")
+        .standardizedFileURL
+
+    // Reject path traversal (e.g., filename = "../../etc/passwd")
+    guard mdURL.path.hasPrefix(dataDir.standardizedFileURL.path + "/") else {
+        return .init(content: [.text(text: "Invalid filename: \(filename)")], isError: true)
+    }
 
     // Prevent path traversal — resolved path must stay within dataDir
     guard mdURL.standardizedFileURL.path.hasPrefix(dataDir.standardizedFileURL.path) else {
