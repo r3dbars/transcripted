@@ -335,8 +335,8 @@ extension TranscriptSaver {
         let stem = transcriptURL.deletingPathExtension().lastPathComponent
         let jsonURL = transcriptURL.deletingLastPathComponent().appendingPathComponent("\(stem).json")
         guard FileManager.default.fileExists(atPath: jsonURL.path),
-              var data = try? Data(contentsOf: jsonURL),
-              var transcript = try? JSONDecoder().decode(AgentTranscript.self, from: data) else { return }
+              let data = try? Data(contentsOf: jsonURL),
+              let transcript = try? JSONDecoder().decode(AgentTranscript.self, from: data) else { return }
 
         // Rebuild speakers with updated names
         var updatedSpeakers = transcript.speakers
