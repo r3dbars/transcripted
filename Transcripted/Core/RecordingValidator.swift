@@ -62,18 +62,18 @@ class RecordingValidator {
         } else if let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             checkPath = documentsPath
         } else {
-            return .failure("Cannot access save folder")
+            return .failure("Cannot access save folder. Check that your save location exists and Transcripted has permission to access it.")
         }
 
         do {
             let values = try checkPath.resourceValues(forKeys: [.volumeAvailableCapacityKey])
             guard let availableCapacity = values.volumeAvailableCapacity else {
-                return .failure("Cannot determine available disk space")
+                return .failure("Cannot determine available disk space. Check that your save location is accessible.")
             }
 
             if Int64(availableCapacity) < minimumDiskSpace {
                 let availableMB = Int64(availableCapacity) / (1024 * 1024)
-                return .failure("Insufficient disk space: Only \(availableMB)MB available. Please free up space and try again.")
+                return .failure("Not enough disk space (\(availableMB)MB free, need 100MB). Free up space and try again.")
             }
 
             return .success
@@ -85,7 +85,7 @@ class RecordingValidator {
     /// Checks if we have write permissions to the Documents folder
     private static func checkFilePermissions() -> ValidationResult? {
         guard let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            return .failure("Cannot access Documents folder")
+            return .failure("Cannot access Documents folder. Check Finder permissions for ~/Documents.")
         }
 
         let testFile = documentsPath.appendingPathComponent(".murmur_permission_test")
@@ -97,7 +97,7 @@ class RecordingValidator {
             try? FileManager.default.removeItem(at: testFile)
             return .success
         } catch {
-            return .failure("No write permission to Documents folder. Please check app permissions.")
+            return .failure("Can't write to Documents folder. Check Finder permissions for ~/Documents/Transcripted.")
         }
     }
 
@@ -139,13 +139,13 @@ class RecordingValidator {
     private static func checkAudioDevices() -> ValidationResult? {
         // Check microphone device
         guard let defaultInputDevice = AVCaptureDevice.default(for: .audio) else {
-            return .failure("No microphone device found. Please connect a microphone and try again.")
+            return .failure("No microphone found. Connect a microphone or headset and try again.")
         }
 
         // Check if microphone is authorized
         let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         if microphoneStatus == .denied {
-            return .failure("Microphone access denied. Please grant microphone permissions in System Settings.")
+            return .failure("Microphone access denied. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted.")
         }
 
         // If not authorized (notDetermined or restricted), allow recording to proceed

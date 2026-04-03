@@ -40,7 +40,7 @@ struct PermissionsStep: View {
                 PermissionRow(
                     icon: "rectangle.inset.filled.and.person.filled",
                     title: "Screen Recording",
-                    description: "To capture meeting audio from Zoom, Teams, and other apps",
+                    description: "Required to capture meeting audio from Zoom, Teams, and other apps. Without this, Transcripted can only hear your microphone.",
                     isRequired: false,
                     status: state.screenRecordingGranted ? .granted : .notRequested,
                     onGrant: {
@@ -50,6 +50,27 @@ struct PermissionsStep: View {
                         state.openScreenRecordingSettings()
                     }
                 )
+
+                if !state.screenRecordingGranted {
+                    HStack(spacing: Spacing.sm) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.warningAmber)
+
+                        Text("Without Screen Recording, Transcripted won't be able to transcribe meeting audio from other participants.")
+                            .font(.bodySmall)
+                            .foregroundColor(.panelTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(Spacing.ms)
+                    .background(Color.warningAmber.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.sm))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.sm)
+                            .strokeBorder(Color.warningAmber.opacity(0.25), lineWidth: 1)
+                    )
+                    .transition(.opacity)
+                }
             }
             .padding(.horizontal, Spacing.lg)
 

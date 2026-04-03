@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		SSH00001 /* SystemSettingsHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = SSH00002 /* SystemSettingsHelper.swift */; };
 		MDS00001 /* ModelDownloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = MDS00002 /* ModelDownloadService.swift */; };
 		MB000001 /* MenuBarStatRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = MB000002 /* MenuBarStatRow.swift */; };
 		4CAF116349811906B83C0406 /* ModelSetupStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF26FA6ED2054F3DCF8D0B45 /* ModelSetupStep.swift */; };
@@ -70,6 +71,7 @@
 		SS001009 /* MeetingDetectionSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001010 /* MeetingDetectionSection.swift */; };
 		SS001011 /* SpeakerIntelligenceSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001012 /* SpeakerIntelligenceSection.swift */; };
 		SS001013 /* AIServicesSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001014 /* AIServicesSection.swift */; };
+		SS001029 /* TroubleshootingSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001030 /* TroubleshootingSection.swift */; };
 		SS001015 /* SettingsTopBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001016 /* SettingsTopBar.swift */; };
 		SS001017 /* MigrationOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001018 /* MigrationOverlayView.swift */; };
 		SS001019 /* SettingsToggleRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001020 /* SettingsToggleRow.swift */; };
@@ -266,6 +268,7 @@
 		A1001021 /* TranscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptStore.swift; sourceTree = "<group>"; };
 		A1001031 /* TranscriptExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptExporter.swift; sourceTree = "<group>"; };
 		A2000002 /* DiagnosticExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticExporter.swift; sourceTree = "<group>"; };
+		SSH00002 /* SystemSettingsHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSettingsHelper.swift; sourceTree = "<group>"; };
 		MDS00002 /* ModelDownloadService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadService.swift; sourceTree = "<group>"; };
 		PC000001 /* PillCalloutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillCalloutView.swift; sourceTree = "<group>"; };
 		PC000002 /* PillCalloutController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillCalloutController.swift; sourceTree = "<group>"; };
@@ -283,6 +286,7 @@
 		SS001010 /* MeetingDetectionSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDetectionSection.swift; sourceTree = "<group>"; };
 		SS001012 /* SpeakerIntelligenceSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerIntelligenceSection.swift; sourceTree = "<group>"; };
 		SS001014 /* AIServicesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIServicesSection.swift; sourceTree = "<group>"; };
+		SS001030 /* TroubleshootingSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TroubleshootingSection.swift; sourceTree = "<group>"; };
 		SS001016 /* SettingsTopBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTopBar.swift; sourceTree = "<group>"; };
 		SS001018 /* MigrationOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MigrationOverlayView.swift; sourceTree = "<group>"; };
 		SS001020 /* SettingsToggleRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsToggleRow.swift; sourceTree = "<group>"; };
@@ -563,6 +567,7 @@
 				NF321D21DA00 /* SpeakerMatchingService.swift */,
 				NF405F06D000 /* TranscriptionPipeline.swift */,
 				MDS00002 /* ModelDownloadService.swift */,
+				SSH00002 /* SystemSettingsHelper.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -751,6 +756,7 @@
 				SS001010 /* MeetingDetectionSection.swift */,
 				SS001012 /* SpeakerIntelligenceSection.swift */,
 				SS001014 /* AIServicesSection.swift */,
+				SS001030 /* TroubleshootingSection.swift */,
 			);
 			path = Sections;
 			sourceTree = "<group>";
@@ -903,6 +909,7 @@
 				SS001010 /* MeetingDetectionSection.swift */,
 				SS001012 /* SpeakerIntelligenceSection.swift */,
 				SS001014 /* AIServicesSection.swift */,
+				SS001030 /* TroubleshootingSection.swift */,
 			);
 			path = Sections;
 			sourceTree = "<group>";
@@ -1083,6 +1090,7 @@
 				SS001009 /* MeetingDetectionSection.swift in Sources */,
 				SS001011 /* SpeakerIntelligenceSection.swift in Sources */,
 				SS001013 /* AIServicesSection.swift in Sources */,
+				SS001029 /* TroubleshootingSection.swift in Sources */,
 				SS001015 /* SettingsTopBar.swift in Sources */,
 				SS001017 /* MigrationOverlayView.swift in Sources */,
 				SS001019 /* SettingsToggleRow.swift in Sources */,
@@ -1107,6 +1115,7 @@
 				4CAF116349811906B83C0406 /* ModelSetupStep.swift in Sources */,
 				A2000001 /* DiagnosticExporter.swift in Sources */,
 				MDS00001 /* ModelDownloadService.swift in Sources */,
+				SSH00001 /* SystemSettingsHelper.swift in Sources */,
 				PC000011 /* PillCalloutView.swift in Sources */,
 				PC000012 /* PillCalloutController.swift in Sources */,
 			
