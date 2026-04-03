@@ -29,9 +29,10 @@ extension StatsDatabase {
             sqlite3_bind_text(statement, 2, (endStr as NSString).utf8String, -1, SQLITE_TRANSIENT)
 
             while sqlite3_step(statement) == SQLITE_ROW {
-                let id = String(cString: sqlite3_column_text(statement, 0))
-                let dateStr = String(cString: sqlite3_column_text(statement, 1))
-                let timeStr = String(cString: sqlite3_column_text(statement, 2))
+                guard let idPtr = sqlite3_column_text(statement, 0) else { continue }
+                let id = String(cString: idPtr)
+                let dateStr = sqlite3_column_text(statement, 1).map(String.init(cString:)) ?? ""
+                let timeStr = sqlite3_column_text(statement, 2).map(String.init(cString:)) ?? ""
                 let duration = Int(sqlite3_column_int(statement, 3))
                 let wordCount = Int(sqlite3_column_int(statement, 4))
                 let speakerCount = Int(sqlite3_column_int(statement, 5))
@@ -96,7 +97,7 @@ extension StatsDatabase {
             sqlite3_bind_text(statement, 2, (endStr as NSString).utf8String, -1, SQLITE_TRANSIENT)
 
             while sqlite3_step(statement) == SQLITE_ROW {
-                let dateStr = String(cString: sqlite3_column_text(statement, 0))
+                let dateStr = sqlite3_column_text(statement, 0).map(String.init(cString:)) ?? ""
                 let recordingCount = Int(sqlite3_column_int(statement, 1))
                 let totalDuration = Int(sqlite3_column_int(statement, 2))
                 let actionItems = Int(sqlite3_column_int(statement, 3))
@@ -131,7 +132,7 @@ extension StatsDatabase {
 
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
             while sqlite3_step(statement) == SQLITE_ROW {
-                let dateStr = String(cString: sqlite3_column_text(statement, 0))
+                let dateStr = sqlite3_column_text(statement, 0).map(String.init(cString:)) ?? ""
                 dates.append(dateStr)
             }
         } else {
