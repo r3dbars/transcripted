@@ -16,6 +16,15 @@ final class StatsDatabase {
     /// All database operations are serialized through this queue
     let queue = DispatchQueue(label: "com.transcripted.statsdb", qos: .utility)
 
+    /// Cached formatter for parsing date+time columns stored as "yyyy-MM-dd HH:mm:ss".
+    /// DateFormatter is expensive to allocate; reuse across all row parses on the serial queue.
+    private static let rowDateFormatter: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        return fmt
+    }()
+
     /// SQLITE_TRANSIENT tells SQLite to copy text immediately, preventing dangling pointer issues
     /// from temporary (NSString).utf8String pointers
     let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -274,9 +283,7 @@ final class StatsDatabase {
         let transcriptPath: String? = sqlite3_column_text(statement, 7).map { String(cString: $0) }
         let title: String? = sqlite3_column_text(statement, 8).map { String(cString: $0) }
 
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        let date = dateFormatter.date(from: "\(dateStr) \(timeStr)") ?? Date()
+        let date = Self.rowDateFormatter.date(from: "\(dateStr) \(timeStr)") ?? Date()
 
         return RecordingMetadata(
             id: id,

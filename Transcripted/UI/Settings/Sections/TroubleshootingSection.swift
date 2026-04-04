@@ -229,8 +229,8 @@ struct TroubleshootingSettingsSection: View {
 
     private func launchOnboarding() {
         if let appDelegate = NSApp.delegate as? AppDelegate {
-            appDelegate.onboardingWindowController = OnboardingWindowController(onComplete: {
-                appDelegate.onboardingWindowController = nil
+            appDelegate.onboardingWindowController = OnboardingWindowController(onComplete: { [weak appDelegate] in
+                appDelegate?.onboardingWindowController = nil
             })
             appDelegate.onboardingWindowController?.showWithAnimation()
         }
