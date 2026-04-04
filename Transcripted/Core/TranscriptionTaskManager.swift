@@ -175,7 +175,7 @@ class TranscriptionTaskManager: ObservableObject {
 
     func handleTaskCompletion(taskId: UUID) {
         activeTasks.removeValue(forKey: taskId)
-        activeCount -= 1
+        activeCount = max(0, activeCount - 1)
         backgroundTaskCount = max(0, backgroundTaskCount - 1)
 
         AppLogger.pipeline.info("Task cleaned up", ["taskId": "\(taskId)", "remaining": "\(activeCount)", "backgroundTasks": "\(backgroundTaskCount)"])
