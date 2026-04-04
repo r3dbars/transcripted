@@ -11,14 +11,14 @@ Menu bar-only macOS app for real-time system audio transcription. Pipeline: Core
 - **Protocols**: 6 service protocols in `Services/Protocols/` (SpeechToTextEngine, DiarizationEngine, SpeakerStore, etc.)
 - **DI**: `AppServices` container in `Core/AppServices.swift`
 
-## Folder Map (~138 Swift files, agent-first: max ~300 lines per file, single responsibility)
-- **Core/** (47 files): Audio capture (Audio + 3 extensions), transcription pipeline (TaskManager + 2 extensions), transcript saving (4 files), stats DB (3 files), model downloads (ModelDownloadService), failed transcription retry, file permissions, logging, system settings helper, coordinators (Hotkey, MenuBar, Notification, Window, Recording)
+## Folder Map (~136 Swift files, agent-first: max ~300 lines per file, single responsibility)
+- **Core/** (48 files): Audio capture (Audio + 3 extensions), transcription pipeline (TaskManager + 2 extensions), transcript saving (4 files), stats DB (3 files), model downloads (ModelDownloadService), failed transcription retry, file permissions, logging, system settings helper, coordinators (Hotkey, MenuBar, Notification, Window, Recording)
 - **Services/** (16 files): ML services (10 files) + Protocols/ subdirectory (6 service protocols)
 - **UI/FloatingPanel/** (21 files): Morphing pill UI, aurora state views (3 files), SavedPillView, transcript tray (3 files), speaker naming (3 files), Components/ (16 files), Helpers/ (1 file)
 - **UI/Settings/** (18 files): Settings container + Sections/ (7 section views) + Components/ (6 reusable components) + Models/ (1 file)
 - **Onboarding/** (9 files): 6-step first-run flow (Welcome -> Preview -> Permissions -> Model Setup -> How It Works -> Test Recording), dark theme
 - **Design/** (21 files): Colors/ (6 files), Components/ (5 premium components), root tokens (10 files: Spacing, Radius, Typography, Animations, Shadows, ViewModifiers, Gradients, Dimensions, Accessibility, CardModifiers)
-- **Tools/TranscriptedQA/** (23 files): QA testing CLI tool, health checks, transcript/database/index/log validation, fixture generation, round-trip testing, stress testing
+- **Tools/TranscriptedQA/** (22 files): QA testing CLI tool, health checks, transcript/database/index/log validation, fixture generation, round-trip testing, stress testing
 
 ## Build & Test
 ```bash
@@ -83,7 +83,7 @@ User presses Cmd+Shift+R (global hotkey)
 - **Diarization**: PyAnnote offline + Sortformer streaming, bundled or via FluidAudio
 - **Download resilience**: All downloads use `ModelDownloadService` with HuggingFace mirror fallback (`hf-mirror.com`), retry with exponential backoff, and structured error classification
 
-## CLAUDE.md Navigation (16 files)
+## CLAUDE.md Navigation (17 files)
 Every folder with ≥2 Swift files has its own CLAUDE.md with file index, reference data, and gotchas.
 
 | Path | Scope |
@@ -105,7 +105,6 @@ Every folder with ≥2 Swift files has its own CLAUDE.md with file index, refere
 | `Transcripted/Onboarding/CLAUDE.md` | 6-step flow, OnboardingState properties, integration |
 | `Transcripted/Onboarding/Steps/CLAUDE.md` | Preview, Permissions, ModelSetup, HowItWorks, TestRecording step implementations |
 | `Tools/TranscriptedQA/CLAUDE.md` | QA CLI tool, health checks, transcript validation, database/index/log validation |
-| `Tools/TranscriptedMCP/CLAUDE.md` | MCP server tools, SQLite index schema, name variants, file watcher |
 
 **Single-file folders** (covered by parent CLAUDE.md):
 - `UI/MenuBar/MenuBarStatRow.swift` — Custom NSView (250x22), used in status bar dropdown
