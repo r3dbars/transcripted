@@ -163,13 +163,7 @@ struct TroubleshootingSettingsSection: View {
             HStack(spacing: Spacing.sm) {
                 Button("Re-run Onboarding") {
                     OnboardingState.resetOnboarding()
-                    // Trigger onboarding window via AppDelegate
-                    if let appDelegate = NSApp.delegate as? AppDelegate {
-                        appDelegate.onboardingWindowController = OnboardingWindowController(onComplete: {
-                            appDelegate.onboardingWindowController = nil
-                        })
-                        appDelegate.onboardingWindowController?.showWithAnimation()
-                    }
+                    launchOnboarding()
                 }
                 .buttonStyle(SettingsSecondaryButtonStyle())
 
@@ -233,6 +227,15 @@ struct TroubleshootingSettingsSection: View {
         return path
     }
 
+    private func launchOnboarding() {
+        if let appDelegate = NSApp.delegate as? AppDelegate {
+            appDelegate.onboardingWindowController = OnboardingWindowController(onComplete: {
+                appDelegate.onboardingWindowController = nil
+            })
+            appDelegate.onboardingWindowController?.showWithAnimation()
+        }
+    }
+
     private func resetAllSettings() {
         // Clear all UserDefaults for this app
         if let bundleId = Bundle.main.bundleIdentifier {
@@ -240,12 +243,6 @@ struct TroubleshootingSettingsSection: View {
             UserDefaults.standard.synchronize()
         }
 
-        // Trigger onboarding
-        if let appDelegate = NSApp.delegate as? AppDelegate {
-            appDelegate.onboardingWindowController = OnboardingWindowController(onComplete: {
-                appDelegate.onboardingWindowController = nil
-            })
-            appDelegate.onboardingWindowController?.showWithAnimation()
-        }
+        launchOnboarding()
     }
 }
