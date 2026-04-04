@@ -1,6 +1,6 @@
 # Core Folder
 
-Audio capture pipeline, transcription orchestration, file saving, stats tracking, model downloads, error recovery, and app lifecycle. 47 Swift files (including Logging/).
+Audio capture pipeline, transcription orchestration, file saving, stats tracking, model downloads, error recovery, and app lifecycle. 48 Swift files (including Logging/).
 
 ## File Index
 
