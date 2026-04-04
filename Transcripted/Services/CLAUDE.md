@@ -136,7 +136,7 @@ Hardcoded lookup table: mike/michael/mikey, nate/nathan/nathaniel, dave/david, a
 
 ## Key Splits from Original Files
 - `SpeakerDatabase.swift` was split into: SpeakerDatabase (core CRUD + schema), SpeakerEmbeddingMatcher (matching), SpeakerProfile (data models), SpeakerProfileMerger (name management, merging, pruning)
-- All 7 Protocols/ files are new -- extracted interfaces for dependency injection via AppServices
+- All 6 Protocols/ files are new -- extracted interfaces for dependency injection via AppServices
 
 ## Threading Rules
 - **SpeakerDatabase, SpeakerEmbeddingMatcher, SpeakerProfileMerger** -- dedicated utility queue (`com.transcripted.speakerdb`), NOT @MainActor
