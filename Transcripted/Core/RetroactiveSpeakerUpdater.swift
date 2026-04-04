@@ -48,38 +48,7 @@ extension TranscriptSaver {
             guard !oldNames.isEmpty else { continue }
 
             for oldName in oldNames {
-                // YAML frontmatter: name: "OldName" → name: "NewName"
-                // Security: user-supplied names must be YAML-escaped before interpolation into a
-                // double-quoted YAML scalar. An unescaped " or \ in the name would break out of
-                // the scalar, injecting arbitrary YAML keys into the transcript frontmatter.
-                let yamlSafeName = escapeYAML(newName)
-                content = content.replacingOccurrences(
-                    of: "name: \"\(oldName)\"",
-                    with: "name: \"\(yamlSafeName)\""
-                )
-
-                // Transcript body: [System/OldName] → [System/NewName]
-                content = content.replacingOccurrences(
-                    of: "[System/\(oldName)]",
-                    with: "[System/\(newName)]"
-                )
-
-                // Obsidian wiki links: [[OldName]] → [[NewName]]
-                content = content.replacingOccurrences(
-                    of: "[[\(oldName)]]",
-                    with: "[[\(newName)]]"
-                )
-
-                // Obsidian speaker tags: speaker/old-name → speaker/new-name
-                let oldTag = "speaker/\(oldName.replacingOccurrences(of: " ", with: "-").lowercased())"
-                let newTag = "speaker/\(newName.replacingOccurrences(of: " ", with: "-").lowercased())"
-                content = content.replacingOccurrences(of: oldTag, with: newTag)
-
-                // Speaker breakdown: **OldName:** → **NewName:**
-                content = content.replacingOccurrences(
-                    of: "**\(oldName):**",
-                    with: "**\(newName):**"
-                )
+                applyNameReplacement(in: &content, oldName: oldName, newName: newName, updateSpeakerTag: true)
             }
 
             // Write back atomically
@@ -124,37 +93,8 @@ extension TranscriptSaver {
             }
 
             for update in updates {
-                let speakerId = update.sortformerSpeakerId
-                let oldLabel = "Speaker \(speakerId)"
-                let newName = update.newName
-
-                // YAML frontmatter: name: "Speaker X" → name: "NewName"
-                // Security: user-supplied names must be YAML-escaped before interpolation into a
-                // double-quoted YAML scalar. An unescaped " or \ in the name breaks out of the
-                // scalar, injecting arbitrary YAML keys into the transcript frontmatter.
-                let yamlSafeName = escapeYAML(newName)
-                content = content.replacingOccurrences(
-                    of: "name: \"\(oldLabel)\"",
-                    with: "name: \"\(yamlSafeName)\""
-                )
-
-                // Transcript body: [System/Speaker X] → [System/NewName]
-                content = content.replacingOccurrences(
-                    of: "[System/\(oldLabel)]",
-                    with: "[System/\(newName)]"
-                )
-
-                // Obsidian wiki links: [[Speaker X]] → [[NewName]]
-                content = content.replacingOccurrences(
-                    of: "[[\(oldLabel)]]",
-                    with: "[[\(newName)]]"
-                )
-
-                // Speaker breakdown: **Speaker X:** → **NewName:**
-                content = content.replacingOccurrences(
-                    of: "**\(oldLabel):**",
-                    with: "**\(newName):**"
-                )
+                let oldLabel = "Speaker \(update.sortformerSpeakerId)"
+                applyNameReplacement(in: &content, oldName: oldLabel, newName: update.newName, updateSpeakerTag: false)
             }
 
             // Consolidate speaker breakdown when multiple diarizer IDs got the same name.
@@ -175,6 +115,24 @@ extension TranscriptSaver {
                 AppLogger.pipeline.error("Failed to write updated transcript", ["error": error.localizedDescription])
                 return false
             }
+        }
+    }
+
+    /// Replace all occurrences of a speaker name throughout a transcript's YAML and body.
+    /// Handles YAML frontmatter, body labels, wiki links, and speaker breakdown.
+    /// Pass `updateSpeakerTag: true` when the old name also has an Obsidian tag to rename.
+    private static func applyNameReplacement(in content: inout String, oldName: String, newName: String, updateSpeakerTag: Bool) {
+        // Security: YAML-escape the new name before interpolating into double-quoted scalars
+        let yamlSafeName = escapeYAML(newName)
+        content = content.replacingOccurrences(of: "name: \"\(oldName)\"", with: "name: \"\(yamlSafeName)\"")
+        content = content.replacingOccurrences(of: "[System/\(oldName)]", with: "[System/\(newName)]")
+        content = content.replacingOccurrences(of: "[[\(oldName)]]", with: "[[\(newName)]]")
+        content = content.replacingOccurrences(of: "**\(oldName):**", with: "**\(newName):**")
+
+        if updateSpeakerTag {
+            let oldTag = "speaker/\(oldName.replacingOccurrences(of: " ", with: "-").lowercased())"
+            let newTag = "speaker/\(newName.replacingOccurrences(of: " ", with: "-").lowercased())"
+            content = content.replacingOccurrences(of: oldTag, with: newTag)
         }
     }
 
