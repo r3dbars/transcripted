@@ -29,33 +29,9 @@ extension StatsDatabase {
             sqlite3_bind_text(statement, 2, (endStr as NSString).utf8String, -1, SQLITE_TRANSIENT)
 
             while sqlite3_step(statement) == SQLITE_ROW {
-                guard let idPtr = sqlite3_column_text(statement, 0) else { continue }
-                let id = String(cString: idPtr)
-                let dateStr = sqlite3_column_text(statement, 1).map(String.init(cString:)) ?? ""
-                let timeStr = sqlite3_column_text(statement, 2).map(String.init(cString:)) ?? ""
-                let duration = Int(sqlite3_column_int(statement, 3))
-                let wordCount = Int(sqlite3_column_int(statement, 4))
-                let speakerCount = Int(sqlite3_column_int(statement, 5))
-                let processingTime = Int(sqlite3_column_int(statement, 6))
-
-                let transcriptPath: String? = sqlite3_column_text(statement, 7).map { String(cString: $0) }
-                let title: String? = sqlite3_column_text(statement, 8).map { String(cString: $0) }
-
-                let dateTimeFormatter = DateFormatter()
-                dateTimeFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-                let date = dateTimeFormatter.date(from: "\(dateStr) \(timeStr)") ?? Date()
-
-                let recording = RecordingMetadata(
-                    id: id,
-                    date: date,
-                    durationSeconds: duration,
-                    wordCount: wordCount,
-                    speakerCount: speakerCount,
-                    processingTimeMs: processingTime,
-                    transcriptPath: transcriptPath,
-                    title: title
-                )
-                recordings.append(recording)
+                if let recording = recordingMetadataFromRow(statement) {
+                    recordings.append(recording)
+                }
             }
         } else {
             AppLogger.stats.error("Failed to prepare getRecordings", ["sqlite_error": dbErrorMessage()])

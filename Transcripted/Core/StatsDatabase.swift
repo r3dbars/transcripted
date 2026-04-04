@@ -247,34 +247,9 @@ final class StatsDatabase {
 
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
             while sqlite3_step(statement) == SQLITE_ROW {
-                guard let idPtr = sqlite3_column_text(statement, 0) else { continue }
-                let id = String(cString: idPtr)
-                let dateStr = sqlite3_column_text(statement, 1).map(String.init(cString:)) ?? ""
-                let timeStr = sqlite3_column_text(statement, 2).map(String.init(cString:)) ?? ""
-                let duration = Int(sqlite3_column_int(statement, 3))
-                let wordCount = Int(sqlite3_column_int(statement, 4))
-                let speakerCount = Int(sqlite3_column_int(statement, 5))
-                let processingTime = Int(sqlite3_column_int(statement, 6))
-
-                let transcriptPath: String? = sqlite3_column_text(statement, 7).map { String(cString: $0) }
-                let title: String? = sqlite3_column_text(statement, 8).map { String(cString: $0) }
-
-                // Parse date and time
-                let dateFormatter = DateFormatter()
-                dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-                let date = dateFormatter.date(from: "\(dateStr) \(timeStr)") ?? Date()
-
-                let recording = RecordingMetadata(
-                    id: id,
-                    date: date,
-                    durationSeconds: duration,
-                    wordCount: wordCount,
-                    speakerCount: speakerCount,
-                    processingTimeMs: processingTime,
-                    transcriptPath: transcriptPath,
-                    title: title
-                )
-                recordings.append(recording)
+                if let recording = recordingMetadataFromRow(statement) {
+                    recordings.append(recording)
+                }
             }
         } else {
             AppLogger.stats.error("Failed to prepare getAllRecordings", ["sqlite_error": dbErrorMessage()])
@@ -282,6 +257,37 @@ final class StatsDatabase {
 
         sqlite3_finalize(statement)
         return recordings
+    }
+
+    /// Parses a RecordingMetadata from the current row of a prepared SELECT statement.
+    /// Expected column order: id(0), date(1), time(2), duration_seconds(3), word_count(4),
+    /// speaker_count(5), processing_time_ms(6), transcript_path(7), title(8)
+    func recordingMetadataFromRow(_ statement: OpaquePointer?) -> RecordingMetadata? {
+        guard let idPtr = sqlite3_column_text(statement, 0) else { return nil }
+        let id = String(cString: idPtr)
+        let dateStr = sqlite3_column_text(statement, 1).map(String.init(cString:)) ?? ""
+        let timeStr = sqlite3_column_text(statement, 2).map(String.init(cString:)) ?? ""
+        let duration = Int(sqlite3_column_int(statement, 3))
+        let wordCount = Int(sqlite3_column_int(statement, 4))
+        let speakerCount = Int(sqlite3_column_int(statement, 5))
+        let processingTime = Int(sqlite3_column_int(statement, 6))
+        let transcriptPath: String? = sqlite3_column_text(statement, 7).map { String(cString: $0) }
+        let title: String? = sqlite3_column_text(statement, 8).map { String(cString: $0) }
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let date = dateFormatter.date(from: "\(dateStr) \(timeStr)") ?? Date()
+
+        return RecordingMetadata(
+            id: id,
+            date: date,
+            durationSeconds: duration,
+            wordCount: wordCount,
+            speakerCount: speakerCount,
+            processingTimeMs: processingTime,
+            transcriptPath: transcriptPath,
+            title: title
+        )
     }
 
     // MARK: - Daily Activity Update
