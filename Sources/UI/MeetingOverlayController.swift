@@ -10,8 +10,6 @@
 
 import AppKit
 import Combine
-
-#if canImport(TranscriptedCore)
 import TranscriptedCore
 
 // MARK: - Panel
@@ -499,5 +497,3 @@ final class MeetingOverlayController {
         )
     }
 }
-
-#endif // canImport(TranscriptedCore)
