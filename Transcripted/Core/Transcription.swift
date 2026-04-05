@@ -25,7 +25,6 @@ struct SpeakerMapping {
 
 // MARK: - Transcription Service (Local Pipeline)
 
-@available(macOS 26.0, *)
 @MainActor
 class Transcription: ObservableObject {
     @Published var isProcessing: Bool = false

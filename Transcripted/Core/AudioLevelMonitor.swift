@@ -5,7 +5,6 @@ import Foundation
 
 /// Extension handling audio level metering, silence detection, and rolling buffer management.
 /// Runs on audio callback threads — NOT @MainActor.
-@available(macOS 26.0, *)
 extension Audio {
 
     // MARK: - Mic Audio Level

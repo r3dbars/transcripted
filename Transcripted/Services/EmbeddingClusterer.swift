@@ -16,7 +16,6 @@
 import Foundation
 import Accelerate
 
-@available(macOS 26.0, *)
 enum EmbeddingClusterer {
 
     /// Post-process diarization segments: merge fragmented speakers,

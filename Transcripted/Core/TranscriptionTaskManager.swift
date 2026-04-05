@@ -6,7 +6,6 @@ import UserNotifications
 // Extensions in: SpeakerNamingCoordinator.swift, TranscriptionPipelineRunner.swift
 // Types in: DisplayStatus.swift (DisplayStatus enum, TranscriptionTask struct)
 
-@available(macOS 26.0, *)
 @MainActor
 class TranscriptionTaskManager: ObservableObject {
     @Published var activeCount: Int = 0
