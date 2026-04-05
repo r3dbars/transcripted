@@ -26,8 +26,9 @@ Sources/
 ├── Analysis/                ← AnalysisEngine + InsightCard — native Swift feedback analyzer
 ├── Accessibility/           ← AccessibilityBridge — AXUIElement queries for text field position + value
 ├── Observability/           ← EventReporter + AppLogger + JSONLWriter — centralized error/warning/info tracking (events.jsonl)
+├── Meeting/                 ← Meeting-mode bridge to TranscriptedCore — MeetingSessionController, MeetingSTTAdapter, MeetingStoragePaths, MeetingCaptureBridge, MeetingModelDownloader (see "Cross-repo dependency" below)
 └── UI/                      ← UI layer (~25 files): pure AppKit floating overlay + menubar panel, SwiftUI onboarding (Phase 3)
-Tests/                       ← Pure-function test suite (147 tests, no XCTest, 2s compile+run)
+Tests/                       ← Pure-function test suite (168 tests, no XCTest, 2s compile+run)
 run-tests.sh                 ← Compiles and runs the test suite
 ```
 
@@ -36,12 +37,57 @@ run-tests.sh                 ← Compiles and runs the test suite
 ## Build & Run
 
 ```bash
-cd /Users/****/Draft
-bash build.sh        # Compile + sign + launch (~5s)
-bash run-tests.sh    # Run 159 unit tests (pure functions only, ~2s)
+cd ~/code/Draft
+bash build-deps.sh           # One-time: build unified FluidAudio + MLX + TranscriptedCore static lib (~5 min)
+bash build.sh                # Compile + sign + launch (~5s)
+bash run-tests.sh            # Run 168 unit tests (pure functions only, ~2s)
+bash run-integration-smoke.sh  # Verify TranscriptedCore reachable from Draft's dep chain
 ```
 
-**After modifying any Swift file, always run both commands.** `build.sh` compiles all Swift files from `Sources/`, signs the app bundle, and launches it. `run-tests.sh` compiles only the pure source files needed by tests (no SwiftUI/Combine/FluidAudio) — fast and CI-friendly.
+**After modifying any Swift file, always run both `build.sh` and `run-tests.sh`.** `build.sh` compiles all Swift files from `Sources/`, signs the app bundle, and launches it. `run-tests.sh` compiles only the pure source files needed by tests (no SwiftUI/Combine/FluidAudio) — fast and CI-friendly.
+
+**After modifying anything in `Sources/Meeting/` or pulling a new TranscriptedCore revision, also run `run-integration-smoke.sh`** to verify the cross-repo library boundary still resolves. If TranscriptedCore's sources changed, run `bash build-deps.sh --force` first to rebuild `libDraftDeps.a`.
+
+## Cross-repo dependency: TranscriptedCore
+
+Meeting-mode features (long-form recording, offline diarization, speaker DB, stats, transcript saving) live in **TranscriptedCore**, a Swift Package library extracted from the [Transcripted](https://github.com/r3dbars/Transcripted) repo at tag `extract/core-v1`. Draft's `Sources/Meeting/` files `import TranscriptedCore` and supply Draft-specific conformers for Core's protocols:
+
+| Draft file | TranscriptedCore protocol | Role |
+|---|---|---|
+| `Sources/Meeting/MeetingSTTAdapter.swift` | `SpeechToTextEngine` | Wraps Draft's `ParakeetEngine` so Core's pipeline can transcribe without depending on FluidAudio directly |
+| `Sources/Meeting/MeetingStoragePaths.swift` | `CoreStoragePaths` customization | Routes meeting transcripts/speakers/stats under `~/Library/Application Support/Draft/meetings/` instead of `~/Documents/Transcripted/` |
+| `Sources/Meeting/MeetingCaptureBridge.swift` | — | Bridges Draft's existing hotkey/capture engines to Core's `Audio` + `TranscriptionTaskManager` |
+| `Sources/Meeting/MeetingSessionController.swift` | — | Top-level orchestrator owning a Core `AppServices` DI container |
+| `Sources/Meeting/MeetingModelDownloader.swift` | — | Parakeet model provisioning using Draft's own on-disk layout |
+
+Because Core is STT-, notification-, and storage-layout-agnostic, Draft can ship a different Parakeet model path and different on-disk conventions from Transcripted without forking Core. Both apps consume the same `TranscriptedCore.swiftmodule` produced by `build-deps.sh`.
+
+### How the build finds TranscriptedCore
+
+`build-deps.sh` discovers a sibling Transcripted checkout at runtime — in order:
+
+1. `$DRAFT_TRANSCRIPTED_ROOT` (explicit override, highest priority)
+2. A matching worktree at `Transcripted/.claude/worktrees/<same-name>` (when both repos use git worktrees under `.claude/worktrees/`)
+3. `Transcripted/.claude/worktrees/core-extract` (canonical merge worktree)
+4. `<parent>/Transcripted` (Transcripted main checkout alongside Draft)
+
+It then symlinks `$TRANSCRIPTED_ROOT/Sources/TranscriptedCore` into `.deps-build/TranscriptedCore` and adds it as an inline SPM target inside `.deps-build/Package.swift`. This approach (inline target, NOT `.package(path:)`) is mandatory because TranscriptedCore's own `Package.swift` uses `unsafeFlags -I .deps-modules -L .deps-libs -lDraftDeps` that assume a prebuilt `libDraftDeps.a` — exactly what `build-deps.sh` is producing, creating a bootstrap cycle if Core were consumed via `.package(path:)`. By inlining as a target, FluidAudio and MLX reach Core through normal SPM dependency edges.
+
+### The unified library: `deps-libs/libDraftDeps.a`
+
+`build-deps.sh` produces a **single 334MB static library** containing everything Draft links against at runtime:
+
+- FluidAudio 0.7.9 (speech recognition, diarization, speaker embeddings)
+- mlx-swift-lm (Qwen inference)
+- mlx-swift (tensor library, MLX Metal kernels)
+- TranscriptedCore (meeting pipeline, audio capture, stats, speaker DB, transcript saver)
+- All shared transitive dependencies: Hub, Tokenizers, Jinja, Crypto, swift-nio, swift-collections, swift-numerics, yyjson, and more
+- Generated C++ modulemap shims: `FastClusterWrapper`, `MachTaskSelfWrapper`, `yyjson`, `Cmlx`
+- Compiled Metal shaders: `deps-libs/mlx.metallib`
+
+**Why unified?** Resolving each dependency independently would create duplicate copies of shared transitive packages (Hub appears in both FluidAudio's and mlx-swift-lm's dep graphs). The linker would then flag duplicate symbols. A single SPM resolution graph produces a single copy of each shared package.
+
+`build.sh` then links Draft's main binary against `libDraftDeps.a` via `-L deps-libs -lDraftDeps -lc++` and imports Swift modules via `-I deps-modules`. Both `deps-libs/` and `deps-modules/` are gitignored — they're regenerated from scratch by `build-deps.sh --force`.
 
 ## Key Features
 
@@ -272,7 +318,7 @@ A `/push` slash command is available (`.claude/commands/push.md`) that handles t
 - **Clipboard restore via changeCount polling** — `pasteWithClipboardRestore()` polls `NSPasteboard.changeCount` every 50ms with a 2-second timeout (some apps write back to clipboard on paste, which triggers early restore). Replaces the old fixed 500ms delay.
 - **Debug log rotation** — `AppLogFileWriter` preserves logs across sessions (no wipe on launch). Files over 500KB are rotated to the last 1000 lines. Session separators mark boundaries.
 - **Centralized constants** — `DraftConstants` enum in `Sources/DraftConstants.swift` holds timeouts, thresholds, retry delays, buffer sizes, and data limits. Use these instead of inline magic numbers when modifying configuration-like values.
-- **Pure-function test suite** — 147 tests in `Tests/` covering CapturedContext, PlatformFormatter, DraftUtils, MessageFilter, StyleUtils, InsightCard, and error types. Compiled with `swiftc` (no Xcode/XCTest dependency), runs in ~2 seconds. **Always run `bash build.sh && bash run-tests.sh` after modifying any Swift file.**
+- **Pure-function test suite** — 168 tests in `Tests/` covering CapturedContext, PlatformFormatter, DraftUtils, MessageFilter, StyleUtils, InsightCard, meeting session state, and error types. Compiled with `swiftc` (no Xcode/XCTest dependency), runs in ~2 seconds. **Always run `bash build.sh && bash run-tests.sh` after modifying any Swift file.** Run `bash run-integration-smoke.sh` after cross-repo dependency changes.
 - **Extracted pure utilities for testability** — `StyleUtils`, `DraftUtils`, `MessageFilter` are stateless enums with static methods, extracted from `@MainActor ObservableObject` classes so they can be tested without SwiftUI.
 
 ## Project-Wide Learnings
