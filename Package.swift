@@ -57,13 +57,39 @@ let package = Package(
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("Network"),
-                .linkedFramework("UserNotifications"),
             ]
         ),
         .testTarget(
             name: "TranscriptedCoreTests",
             dependencies: ["TranscriptedCore"],
-            path: "Tests/TranscriptedCoreTests"
+            path: "Tests/TranscriptedCoreTests",
+            swiftSettings: [
+                // @testable import TranscriptedCore transitively re-exports FluidAudio/MLX
+                // module interfaces, so the test target needs the same -I search paths.
+                .unsafeFlags([
+                    "-I", "\(repoRoot)/.deps-modules",
+                    "-I", "\(repoRoot)/.deps-modules/FastClusterWrapper",
+                    "-I", "\(repoRoot)/.deps-modules/MachTaskSelfWrapper",
+                    "-I", "\(repoRoot)/.deps-modules/yyjson",
+                ]),
+            ],
+            linkerSettings: [
+                // Mirror Core target linker flags so the xctest binary can resolve
+                // FluidAudio symbols pulled in through @testable.
+                .unsafeFlags([
+                    "-L\(repoRoot)/.deps-libs",
+                    "-lDraftDeps",
+                    "-lc++",
+                ]),
+                .linkedFramework("Metal"),
+                .linkedFramework("MetalKit"),
+                .linkedFramework("Accelerate"),
+                .linkedFramework("CoreML"),
+                .linkedFramework("CoreAudio"),
+                .linkedFramework("AVFoundation"),
+                .linkedFramework("AppKit"),
+                .linkedFramework("Network"),
+            ]
         ),
     ]
 )
