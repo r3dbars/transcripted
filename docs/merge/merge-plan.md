@@ -1,9 +1,18 @@
 # Draft + Transcripted Merge Plan (Phase 0 Deliverable)
 
 **Authors:** draft-mapper (owner), transcripted-mapper (contributor)
-**Status:** v2 for human review — end of Phase 0. Phase 2 execution starts only after human sign-off.
+**Status:** v3 for human review — end of Phase 0. Phase 2 execution starts only after human sign-off.
 **Inputs:** [draft-inventory.md](draft-inventory.md), [transcripted-inventory.md](transcripted-inventory.md)
 **Worktree:** `<draft-root>/.claude/worktrees/transcripted-merge` on `feat/transcripted-merge`
+
+**v3 changes (since v2 / commit `f053abf`):**
+
+- **§6.1 macOS 26 RESOLVED — the plan's biggest risk is no longer a risk.** transcripted-mapper confirmed via direct read of `Transcripted.xcodeproj/project.pbxproj` that `MACOSX_DEPLOYMENT_TARGET = 14.0` on both Debug and Release configs (lines 1264 and 1321). **Transcripted's real deployment floor is macOS 14.0 — identical to Draft.** The 81 `@available(macOS 26.0, *)` annotations are decorative class-level brand gates, not compiler-enforced API requirements. Proof: zero `if #available(macOS 26, *)` or `if #available(macOS 15, *)` runtime checks anywhere in Core or Services. The gates are applied to type declarations (`class Audio`, `class Transcription`, `class TranscriptionTaskManager`, etc.) but no methods inside those types call macOS 26-only APIs. **Concrete action:** Phase 2 core-extractor lane does a find-and-delete pass removing `@available(macOS 26.0, *)` from 17 Core files + 2 Services files (19 files total, one line each). The former "Milestone 0 availability audit" is deleted and replaced with a "compile TranscriptedCore with `-target arm64-apple-macos14.0` as first smoke test" verification.
+- **§6.2 FluidAudio — still must rebuild (same as v2), but with an explicit API surface checklist.** Transcripted's committed binary's version cannot be proven without rebuilding. Phase 2.0 now includes a concrete smoke-compile checklist (`AsrManager.default`, `AsrModels.load/downloadAndLoad v3`, `OfflineDiarizerConfig` 11-field champion config, `SpeakerSegment` shape, `AudioSource.system/.mic`) and a DER regression test against Transcripted's champion diarization config. If delta > 0.5 DER, escalate to human.
+- **§3.2 STT seam — v2 direction confirmed, clarification added.** Protocol wiring (formerly §6.4) now lives in Phase 2 Lane A at a precise estimate: ~6 empty `extension ConcreteType: Protocol {}` declarations + 1 `AppServices` rewrite, ~1-2 hours total. transcripted-mapper confirmed protocol signatures were authored against existing concrete types so conformance is mechanical. Draft's `MeetingSTTAdapter` becomes the second `SpeechToTextEngine` conformer and validates the protocol from the consumer side.
+- **§5.4 Lane D rewritten** — Phase 2.0 prerequisite now has the concrete FluidAudio API surface checklist + DER smoke test. Phase 2.3 unchanged.
+- **§6.1 moved from Open Question to RESOLVED** in the open-questions list.
+- **§0 "Single biggest risk" statement deleted** — the plan no longer has a macOS-deployment-target risk. New risk framing: FluidAudio API drift between committed binary and 0.7.9 rebuild, mitigated by the §5.4 smoke-compile checklist.
 
 **v2 changes (since v1 / commit `95b0bde`):**
 
@@ -34,7 +43,9 @@ All paths below are absolute unless otherwise noted. File path format: `<repo-ro
 5. **Transcripted's audio capture stack is the authoritative source** for Draft's new meeting mode. Draft has no dual-stream capture today.
 6. **Four execution lanes** (§5) split the Phase 2 work so two pairs of agents can run in parallel without file-level collisions: `core-extractor`, `draft-integrator`, `meeting-ui`, and `build-plumbing`.
 
-**Single biggest risk:** the macOS deployment-target mismatch. Draft ships `arm64-apple-macos14.0` (per `build.sh:105` and `Info.plist:18`); Transcripted's Core candidate files carry 81 `@available(macOS 26.0, *)` gates across 58 files. Phase 2's first milestone is the macOS-26 audit; §6.1 is the gating Open Question for the human.
+**Single biggest risk (v3):** FluidAudio API drift between Transcripted's committed-but-unversioned `libFluidAudioAll.a` and the SPM `FluidAudio 0.7.9` rebuild. Mitigated by Phase 2.0 — Lane D rebuilds, compiles Transcripted's existing Core/Services code against 0.7.9 with an explicit API surface checklist (§5.4), and runs a DER regression test against Transcripted's champion diarization config before any file moves.
+
+**What v3 killed as a risk:** the macOS deployment-target mismatch. Transcripted's `project.pbxproj` pins `MACOSX_DEPLOYMENT_TARGET = 14.0` — identical to Draft. The 81 `@available(macOS 26.0, *)` annotations are decorative class-level brand gates (no runtime `#available` checks anywhere, no method bodies calling 26-only APIs). Phase 2 deletes them from 19 Core+Services files as a one-line mechanical pass. See §6.1 (now RESOLVED) for the full pbxproj evidence.
 
 ---
 
@@ -187,7 +198,7 @@ Ordered by blast radius; complete detail in transcripted-inventory.md §11.
 
 3. **Hard-coded `~/Documents/Transcripted/` paths.** Define `public struct CoreStoragePaths { let transcripts: URL; let speakerDB: URL; let statsDB: URL; let failedQueue: URL; let speakerClips: URL; let logs: URL; public static let `default`: CoreStoragePaths = ... }`. Every service takes a `CoreStoragePaths` at init. **~15 touch points.** Draft passes a `CoreStoragePaths` rooted at `~/Library/Application Support/Draft/meetings/` instead of `~/Documents/Transcripted/`.
 
-4. **`@available(macOS 26.0, *)` audit — the blocker.** 81 occurrences across 58 files. Draft's deployment target is macOS 14.0. **Phase 2 milestone 0 is: for each Core candidate file, determine which `macOS 26.0` gates are load-bearing (API actually requires 26) vs conservative (chosen for UX reasons).** Expected outcome: the Services tier (ParakeetService, DiarizationService, SpeakerDatabase, most storage) is already gated at `@available(macOS 14.0, *)`, so the load-bearing 26-gates are concentrated in the audio capture stack (Tier C) where CoreAudio process tap APIs are macOS 14.2+ and some concurrency APIs may have been tightened at 26. See Open Question §6.1 — **this is the single most important answer the human needs to give before Phase 2 starts.**
+4. **`@available(macOS 26.0, *)` decorative deletion — not an audit, a find-and-delete pass.** v3 update: transcripted-mapper confirmed via `project.pbxproj` that Transcripted's `MACOSX_DEPLOYMENT_TARGET = 14.0` — identical to Draft. The 81 `@available(macOS 26.0, *)` annotations are decorative class-level brand gates, not compiler-enforced API requirements (zero runtime `#available(macOS 26, *)` or `#available(macOS 15, *)` checks exist anywhere in the repo; no method body calls a 26-only API; counter-example `Core/AppServices.swift` correctly gates at `@available(macOS 14.0, *)` proving the codebase knows how to annotate for the real floor). **Action:** delete `@available(macOS 26.0, *)` from 17 Core files + 2 Services files (19 files total, one line each). Verification: compile TranscriptedCore with `-target arm64-apple-macos14.0` as Phase 2 Lane A's first smoke test — if any Tier A/B/C file references an API the compiler says is 15+/26+ only, that specific file gets left behind or wrapped in a targeted `if #available` at the call site. Expected count of files needing leave-behind: 0, based on transcripted-mapper's grep sweep. Tier C audio capture keeps its genuine `@available(macOS 14.2, *)` gate for `AudioHardwareCreateProcessTap` (introduced in 14.2) — that one is real.
 
 5. **FluidAudio unsafe-flags linking.** Covered in §4 — this is the single biggest build-system decision.
 
@@ -710,27 +721,36 @@ Four ownership lanes. Each lane owns a disjoint set of directories + files. **No
 
 **Directory boundary:** everything inside `<transcripted-root>/` EXCEPT `Transcripted/UI/`, `Transcripted/Design/`, `Transcripted/Onboarding/`, `TranscriptedTests/UI/`, and Tools/ packages (those stay untouched).
 
-**Work items (in order):**
+**Work items (in order, v3):**
 
-1. **Milestone 0 — `@available(macOS 26.0, *)` audit.** For each of the 81 gates across the 44+8 Core candidate files (Tiers A, B, C), determine: load-bearing or conservative? Output: a delta file listing which gates drop to 14.2 and which stay. **Blocks everything else.** Owner consults transcripted-mapper (still the subject-matter expert) if ambiguous.
+1. **Step 1 — decorative `@available(macOS 26.0, *)` deletion.** Run a find-and-delete pass over 17 Core files + 2 Services files (19 total, verified by transcripted-mapper grep). One-line deletion per file, no logic changes. The only gate to KEEP is the genuine `@available(macOS 14.2, *)` on Tier C audio capture files where `AudioHardwareCreateProcessTap` actually requires 14.2. See §1.5.4 for the full rationale. **No multi-day audit needed.** The former "Milestone 0" is deleted.
 2. Create `Package.swift` at Transcripted repo root per §4.2.
 3. Create `Sources/TranscriptedCore/` directory tree with the subdirs from §1.2.
-4. Move 52 files from `Transcripted/Core/` + `Transcripted/Services/` into `Sources/TranscriptedCore/<subdir>/` per §1.2 tables. Update pbxproj references in the same commit.
-5. Apply visibility changes: `internal` → `public` per §1.4. ~44 types + methods.
-6. Apply Tier B surgery per §1.5:
+4. Move 51 files (23 Tier A + 20 Tier B + 8 Tier C; `ParakeetService.swift` was deleted from Tier A per §3.2) from `Transcripted/Core/` + `Transcripted/Services/` into `Sources/TranscriptedCore/<subdir>/` per §1.2 tables. Update pbxproj references in the same commit.
+5. **Smoke-compile checkpoint:** run `swift build -c release --product TranscriptedCore` targeting `arm64-apple-macos14.0`. This is the single verification that step 1 was complete — any surviving unguarded macOS 15/26-only API call surfaces here as a hard compile error, exactly scoped to its file. Expected: zero errors, based on transcripted-mapper's grep evidence that no method body calls 26-only APIs.
+6. Apply visibility changes: `internal` → `public` per §1.4. ~44 types + methods.
+7. Apply Tier B surgery per §1.5:
    - Introduce `CoreStoragePaths` struct.
-   - Introduce `ModelBundleProvider` closure type; rewrite `ParakeetService.bundledModelsPath` and `DiarizationService.bundledModelsPath`.
+   - Introduce `ModelBundleProvider` closure type; rewrite `DiarizationService.bundledModelsPath` (and `ModelDownloadService` if extracted — see §4.5). Note: `ParakeetService.bundledModelsPath` is gone because `ParakeetService.swift` was deleted per §3.2.
    - Introduce `TranscriptNotifier` protocol; rewire `TranscriptionTaskManager` and `TranscriptSaver` notification calls.
-7. Complete the `Services/Protocols/` wiring (the file's own TODO): make concrete types conform, switch `AppServices` stored properties to `any <Protocol>` types. **If transcripted-mapper's answer to Open Question §6.4 is "Transcripted team will do this pre-extraction", skip this step and wait for their delivery.**
-8. Move Core-level tests from `TranscriptedTests/` to `Tests/TranscriptedCoreTests/`. UI tests stay in place.
-9. Update Transcripted's Xcode app target to `import TranscriptedCore` from its own source files that previously had implicit access to Core types. Verify the app still builds and all existing Transcripted features work — **this is the regression surface.**
-10. Tag the extraction commit: `extract: TranscriptedCore v1 — ready for Draft consumption`.
+8. **Services/Protocols/ wiring** (v3 estimate from transcripted-mapper: ~1-2 hours, ~6 empty `extension` declarations + 1 `AppServices` rewrite). Scope:
+   - Add `extension DiarizationService: DiarizationEngine {}` (empty — protocol signatures match existing methods).
+   - Add `extension SpeakerDatabase: SpeakerStore {}`.
+   - Add `extension Audio: AudioCaptureEngine {}`.
+   - Add `extension StatsDatabase: StatsStore {}`.
+   - Add `extension TranscriptSaver: TranscriptStorage {}`.
+   - For `SpeechToTextEngine`: the former `ParakeetService` conformer is gone (deleted per §3.2). The first conformer is now Draft's `MeetingSTTAdapter` in Lane B. Core's `AppServices` takes `any SpeechToTextEngine` at construction, and Transcripted's own Xcode app constructs a local `ParakeetEngineAdapter` (or a thin replacement for the deleted `ParakeetService`) that Lane A defines inside the Transcripted app target (NOT inside Core) to preserve Transcripted's standalone build.
+   - Rewrite `AppServices` struct to hold `any SpeechToTextEngine`, `any DiarizationEngine`, `any SpeakerStore`, etc., instead of concrete types. Update `makeDefault()` and all call sites.
+   - Verification: protocol signatures match existing concrete method signatures exactly per transcripted-mapper's §10 inventory check (4 methods on `SpeechToTextEngine`, similar for others). If any signature mismatches, the empty `extension` block will fail to compile and the lane fixes the protocol to match the concrete type (preferred over the reverse — the concrete types are what's actually tested).
+9. Move Core-level tests from `TranscriptedTests/` to `Tests/TranscriptedCoreTests/`. UI tests stay in place.
+10. Update Transcripted's Xcode app target to `import TranscriptedCore` from its own source files that previously had implicit access to Core types. Add the local `ParakeetEngineAdapter` (or rename the former `ParakeetService` contents into a non-Core file if preferred) so Transcripted's app keeps working without Draft. Verify the app still builds and all existing Transcripted features work — **this is the regression surface.**
+11. Tag the extraction commit: `extract: TranscriptedCore v1 — ready for Draft consumption`.
 
-**Dependencies:** Lane A is the trunk. Lanes B, C, D all depend on Lane A reaching at least step 5 (the minimum viable module).
+**Dependencies:** Lane A is the trunk. Lane D Phase 2.0 (FluidAudio rebuild) blocks Lane A. Lanes B, C depend on Lane A reaching at least step 6 (the minimum viable module for Draft to import).
 
-**Effort order of magnitude:** this is the largest lane. Step 1 (audit) is the biggest unknown. Steps 2–5 are mostly mechanical. Step 6 is the hard thinking. Step 9 is the highest risk for regressing Transcripted's shipping app.
+**Effort order of magnitude (v3):** smaller than v2 estimate. Step 1 (decorative delete) is mechanical and fast. Step 5 smoke-compile is the actual verification. Step 7 is the hard thinking. Step 8 (protocol wiring) is cheap at ~1-2 hours. Step 10 is the highest risk for regressing Transcripted's shipping app.
 
-**Acceptance criteria:** Transcripted's Xcode app target builds and all existing tests pass. `swift build -c release --product TranscriptedCore` succeeds from the Transcripted root. No files reference `Bundle.main` or `~/Documents/Transcripted/` inside `Sources/TranscriptedCore/`.
+**Acceptance criteria:** Transcripted's Xcode app target builds and all existing tests pass. `swift build -c release --product TranscriptedCore` succeeds from the Transcripted root targeting `arm64-apple-macos14.0`. No files reference `Bundle.main` or `~/Documents/Transcripted/` inside `Sources/TranscriptedCore/`. `AppServices` holds only `any <Protocol>` types, no concrete types.
 
 ### 5.2 Lane B — `draft-integrator` (owns Draft Package.swift + build plumbing + `Sources/Meeting/` wiring)
 
@@ -781,10 +801,24 @@ Four ownership lanes. Each lane owns a disjoint set of directories + files. **No
 **Work items — Phase 2.0 (prerequisite, runs FIRST, blocks Lane A):**
 
 1. **Rebuild Transcripted's FluidAudio binary from SPM `FluidAudio 0.7.9`** using Draft's `build-deps.sh` pattern. Produces a known-provenance `libDraftDeps.a` and `.swiftmodule` set. No merge of the two codebases yet — this is a clean rebuild verified against the existing Transcripted Xcode app.
-2. Update Transcripted's `project.pbxproj` to point `LIBRARY_SEARCH_PATHS` at `$(SRCROOT)/../Draft/deps-libs` and `SWIFT_INCLUDE_PATHS` at `$(SRCROOT)/../Draft/deps-modules` (+ subdirs), and change `OTHER_LDFLAGS` from `-lFluidAudioAll` to `-lDraftDeps`.
-3. Build Transcripted's Xcode app against the rebuilt binary. Run Transcripted's existing test suite. Verify meeting recording + transcription + diarization still work end-to-end against the rebuilt FluidAudio. Fix any API drift inside Transcripted's app sources (NOT yet inside Core — that's Lane A).
-4. `git rm -r Transcripted/fluidaudio-libs/ Transcripted/fluidaudio-modules/` and any `-lFluidAudioCLI` artifacts used by `TranscriptedCLI/`. Commit: `build: rebuild FluidAudio from SPM 0.7.9, retire committed binaries`. **This commit deletes ~54 MB from the Transcripted repo.**
-5. Green light Lane A (`core-extractor`) to start.
+
+2. **Smoke-compile checklist — verify 0.7.9 API surface matches what Transcripted's Core/Services uses** (from transcripted-mapper's follow-up). For each item, compile a tiny probe file against the rebuilt binary and fix drift before proceeding:
+   - `AsrManager(config: .default)` — constructor with default config.
+   - `AsrModels.load(from:version:.v3)` and `AsrModels.downloadAndLoad(version:.v3)`.
+   - `OfflineDiarizerConfig` exposes the 11 fields Transcripted's champion config sets: `clusteringThreshold, Fa, Fb, windowDuration, segmentationStepRatio, embeddingBatchSize, minSegmentDuration, minGapDuration, exclusiveSegments, speechOnsetThreshold, maxVBxIterations`.
+   - `SpeakerSegment` struct has the expected `speakerId, startTime, endTime, embedding, qualityScore` shape.
+   - `AudioSource` enum exposes `.system` and `.mic` cases (consumed by Core's dual-stream pipeline).
+   - If any of these drift, file an issue and escalate to human — DO NOT silently patch Transcripted's source to match a regressed API without sign-off.
+
+3. Update Transcripted's `project.pbxproj` to point `LIBRARY_SEARCH_PATHS` at `$(SRCROOT)/../Draft/deps-libs` and `SWIFT_INCLUDE_PATHS` at `$(SRCROOT)/../Draft/deps-modules` (+ subdirs), and change `OTHER_LDFLAGS` from `-lFluidAudioAll` to `-lDraftDeps`. Do the same for `Tools/TranscriptedCLI/Package.swift` (change `-lFluidAudioCLI` to `-lDraftDeps`).
+
+4. Build Transcripted's Xcode app against the rebuilt binary. Run Transcripted's existing test suite. Verify meeting recording + transcription + diarization still work end-to-end against the rebuilt FluidAudio. Fix any API drift inside Transcripted's app sources (NOT yet inside Core — that's Lane A).
+
+5. **DER regression test** (from transcripted-mapper): diarize a reference audio file (Transcripted's existing diarization-test fixture) with the old committed binary AND with the SPM 0.7.9 rebuild. Compare DER (Diarization Error Rate) on Transcripted's champion `OfflineDiarizerConfig`. **Acceptance:** DER delta ≤ 0.5 absolute. **Escalation:** if delta > 0.5, halt Phase 2.0 and escalate to human for either (a) rollback of FluidAudio upgrade, (b) investigate FluidAudio release notes between the unknown-version committed binary and 0.7.9 for a specific regression, or (c) accept and proceed with documented quality change.
+
+6. `git rm -r Transcripted/fluidaudio-libs/ Transcripted/fluidaudio-modules/` and any `Tools/TranscriptedCLI/FluidAudioCLI*` binary artifacts. Commit: `build: rebuild FluidAudio from SPM 0.7.9, retire committed binaries`. **This commit deletes ~54 MB (app) + CLI's separate artifact from the Transcripted repo.**
+
+7. Green light Lane A (`core-extractor`) to start.
 
 **Work items — Phase 2.3 (post-Lane-A consolidation):**
 
@@ -798,46 +832,57 @@ Four ownership lanes. Each lane owns a disjoint set of directories + files. **No
 
 **Acceptance criteria:** Phase 2.0 — Transcripted's Xcode app builds and runs against the rebuilt FluidAudio, full test suite passes, meeting end-to-end smoke passes, `git ls-files Transcripted/ | grep fluidaudio` returns zero files. Phase 2.3 — Draft's `libDraftDeps.a` contains TranscriptedCore symbols, `import TranscriptedCore` resolves in Draft's `Sources/Meeting/` files, both apps build from a fresh checkout.
 
-### 5.5 Lane sequencing diagram (v2 — adds Phase 2.0 prerequisite)
+### 5.5 Lane sequencing diagram (v3 — macOS 26 audit deleted)
 
 ```
-Phase 2.0           Milestone 0       Lane A                  Lane B                  Lane C                  Lane D (cont.)
-prerequisite        (blocks A)        core-extractor          draft-integrator        meeting-ui              build-plumbing
-────────────        ──────────        ──────────────          ────────────────        ──────────              ──────────────
-Lane D Phase 2.0    │                 │                       │                       │                       │
-│                   │                 │                       │                       │                       │
-▼                   ▼                 ▼                       │                       │                       │
-Rebuild FluidAudio  macOS 26         Create TranscriptedCore  │                       │                       │
-from SPM 0.7.9      availability     ┌─ step 1–5 (mod builds) │                       │                       │
-in Transcripted     audit            │                        │                       │                       │
-repo, delete        (1 day?)         ▼ step 5 complete ──────►│                       │                       │
-committed binaries  │                ├─ step 6–7 (surgery)    ▼                       │                       │
-▼                   │                │                        Add TranscriptedCore    │                       │
-Transcripted app    │                │                        to build-deps.sh        │                       │
-still builds +      │                │                        heredoc + Meeting/      │                       │
-tests pass          │                │                        + Adapter + new         │                       │
-▼                   │                │                        transcribeSamples       │                       │
-Green-light         │                │                        └─ step 4 complete ────►│                       │
-Lane A ─────────────┴───────────────►│                        ▼                       ▼                       │
-                                     ▼ step 9 (regression)    Integration smoke       UI additions            │
-                                     Transcripted app         passes                  + hotkey wiring         │
-                                     still builds                                                             │
-                                     (Core now a library)                                                     │
-                                     ▼                        ▼                       ▼                       │
-                                     step 10 tag ─────────────┴───────────────────────┴──────────────────────►│
-                                                                                                               Phase 2.3:
-                                                                                                               TranscriptedCore
-                                                                                                               now consumed by
-                                                                                                               both Draft (via
-                                                                                                               deps-libs) AND
-                                                                                                               Transcripted
-                                                                                                               (via SPM product)
-                                                                                                               ▼
-                                                                                                               Both apps build,
-                                                                                                               end-to-end smoke
+Phase 2.0                              Lane A                  Lane B                  Lane C                  Lane D (cont.)
+prerequisite                           core-extractor          draft-integrator        meeting-ui              build-plumbing
+────────────                           ──────────────          ────────────────        ──────────              ──────────────
+Lane D Phase 2.0                       │                       │                       │                       │
+│                                      │                       │                       │                       │
+▼                                      ▼                       │                       │                       │
+Rebuild FluidAudio                    step 1: delete           │                       │                       │
+from SPM 0.7.9                        decorative macOS 26      │                       │                       │
++ API surface check                   gates (19 files,         │                       │                       │
+(AsrManager, v3 models,               mechanical delete)       │                       │                       │
+OfflineDiarizerConfig,                │                        │                       │                       │
+SpeakerSegment, AudioSource)          ▼                        │                       │                       │
++ DER regression test                 step 2-5: create Package, │                       │                       │
+                                      move 51 files, smoke-    │                       │                       │
+▼                                     compile @ macOS 14.0     │                       │                       │
+Transcripted app still                │                        │                       │                       │
+builds + tests pass                   ▼                        │                       │                       │
++ DER delta ≤ 0.5                     step 6-8: visibility +   │                       │                       │
+▼                                     surgery + protocol       │                       │                       │
+Delete 54 MB committed                wiring (1-2h cheap)      │                       │                       │
+binaries, commit                      │                        │                       │                       │
+▼                                     ▼ step 8 complete ──────►│                       │                       │
+Green-light ─────────────────────────►│                        Add TranscriptedCore    │                       │
+Lane A                                │                        to build-deps.sh        │                       │
+                                      │                        heredoc + Meeting/      │                       │
+                                      │                        + MeetingSTTAdapter +   │                       │
+                                      │                        ParakeetEngine          │                       │
+                                      │                        .transcribeSamples      │                       │
+                                      │                        └─ step 4 complete ────►│                       │
+                                      ▼ step 10 (regression)    ▼                       ▼                       │
+                                      Transcripted app         Integration smoke       UI additions            │
+                                      still builds             passes                  + hotkey wiring         │
+                                      (Core now a library)                                                     │
+                                      ▼                        ▼                       ▼                       │
+                                      step 11 tag ─────────────┴───────────────────────┴──────────────────────►│
+                                                                                                                Phase 2.3:
+                                                                                                                TranscriptedCore
+                                                                                                                now consumed by
+                                                                                                                both Draft (via
+                                                                                                                deps-libs) AND
+                                                                                                                Transcripted
+                                                                                                                (via SPM product)
+                                                                                                                ▼
+                                                                                                                Both apps build,
+                                                                                                                end-to-end smoke
 ```
 
-**Critical v2 change:** Phase 2.0 (FluidAudio rebuild) MUST complete before Lane A starts. This removes the unknown-provenance binary from the Transcripted repo BEFORE any Core file moves, so Lane A is working against a known-version FluidAudio surface area throughout the extraction.
+**Critical v3 change vs v2:** the "Milestone 0 — macOS 26 availability audit" node is DELETED. Phase 2.0 still must complete before Lane A starts (FluidAudio rebuild + API surface check + DER regression), but Lane A's first work item is now a trivial 19-file `@available(macOS 26.0, *)` deletion pass instead of a multi-day audit. The biggest unknown in the plan became the smallest task.
 
 ### 5.6 Cross-lane interface contracts
 
@@ -851,18 +896,29 @@ Lane A ─────────────┴──────────�
 
 Judgment calls the human should confirm or resolve before Phase 2 starts.
 
-### 6.1 macOS deployment target — the single biggest decision **(partial v2 resolution)**
+### 6.1 macOS deployment target **(RESOLVED in v3 — no longer a blocker, no longer an Open Question)**
 
-**The constraint:** Draft ships `LSMinimumSystemVersion 14.0` and `-target arm64-apple-macos14.0`. Transcripted has 81 `@available(macOS 26.0, *)` gates across 58 files.
+**v1/v2 framing:** Draft ships `LSMinimumSystemVersion 14.0` / `-target arm64-apple-macos14.0`. Transcripted had 81 `@available(macOS 26.0, *)` gates across 58 files, which looked like a merge-blocking availability mismatch.
 
-**v2 partial resolution from transcripted-mapper:** the pipeline heavy-lifting code (`TranscriptionPipeline`, `TranscriptionPipelineRunner`, `TranscriptionTaskManager`, `ParakeetService`, `DiarizationService`, `SpeakerDatabase`) is mostly `nonisolated` — the `@MainActor` scatter is surface-level (UI glue, `@Published` properties on top of the nonisolated workers). The 81 `@available(macOS 26.0, *)` gates remain the larger blocker than actor isolation. Many of them are likely conservative defaults applied repo-wide rather than genuine API requirements.
+**v3 evidence (from transcripted-mapper direct read of the Transcripted repo):**
 
-**The question:** Phase 2 Milestone 0 is an availability audit to determine how many of those 26-gates are actually load-bearing vs conservative. Our strong expectation (unchanged from v1) is that most Core candidate files will drop to 14.2 cleanly because:
-- `ParakeetService` / `DiarizationService` / `SpeakerDatabase` already gate at `@available(macOS 14.0, *)` per inventory.
-- Audio capture (Tier C) will need 14.2+ anyway because CoreAudio process taps are 14.2+.
-- UI/Design/Onboarding files (which Draft doesn't consume) can keep their 26-gates — they're Tier 0, not moving.
+1. **`Transcripted.xcodeproj/project.pbxproj` pins `MACOSX_DEPLOYMENT_TARGET = 14.0`** on both Debug (line 1264) and Release (line 1321) configurations. Transcripted's actual deployment floor is identical to Draft's.
 
-**Human: do you accept this plan assuming the audit confirms most Core gates drop to 14.2?** If the audit surfaces a load-bearing 26-only API (e.g., a new AV/CoreAudio API) in a Tier A/B file Draft needs, the merge scope shrinks to "everything except that file" OR Draft's deployment target rises (out of scope in our read).
+2. **Zero `if #available(macOS 26, *)` runtime checks** anywhere in Core or Services. Zero `if #available(macOS 15, *)` checks either. Grep sweep confirms no method body guards a macOS 26-only API call at the call site, which it would have to do if any code genuinely required macOS 26.
+
+3. **The `@available(macOS 26.0, *)` gates are applied to entire type declarations** — `class Audio`, `class Transcription`, `class TranscriptionTaskManager`, `extension AppDelegate` blocks — never to individual method calls inside those types. They are decorative class-level brand gates, not compiler-enforced API requirements.
+
+4. **Counter-example:** `Core/AppServices.swift` is gated at `@available(macOS 14.0, *)`. The codebase knows how to annotate for the real deployment floor. The 26-gates on other files were a stylistic choice.
+
+5. **Most likely explanation** (transcripted-mapper's read): somebody on the Transcripted team added `@available(macOS 26.0, *)` as a "we're a macOS 26 Tahoe app" brand signal, possibly tied to Liquid Glass UI features in the SwiftUI layer that Core/Services don't touch. Aesthetic, not technical.
+
+**v3 resolution:** Phase 2 Lane A step 1 is a trivial mechanical `@available(macOS 26.0, *)` deletion pass across 17 Core files + 2 Services files (19 files total, one line per file). No audit. No decision tree. The verification is Lane A step 5: compile TranscriptedCore with `-target arm64-apple-macos14.0`. If any file has an implicit dependency transcripted-mapper's grep missed (e.g., a SwiftUI view modifier that only exists on macOS 15+), the compiler surfaces it as a hard error scoped to that file, and Lane A either leaves that file behind or wraps the offending call in a targeted `if #available`. Expected count of files needing leave-behind: 0.
+
+**Caveats:**
+- UI / Design / Onboarding files also carry `@available(macOS 26.0, *)` and are NOT in Tier A/B/C. Their gates might be load-bearing on real Tahoe Liquid Glass APIs (`glassEffect`, specific `.containerBackground` styles). Those files are not in the merge scope, so this is not a v3 concern. Flagged as a future item only if Draft later wants to adopt Transcripted's floating pill UI.
+- Tier C audio capture keeps its genuine `@available(macOS 14.2, *)` gate for `AudioHardwareCreateProcessTap` (CoreAudio process tap API genuinely shipped in 14.2). Draft's meeting hotkey is gated on `if #available(macOS 14.2, *)` at runtime — users on 14.0 / 14.1 see Draft run normally but without the meeting hotkey. This matches v2 §2.5.
+
+**Human decision still needed:** NONE on this question. Listed here for cross-reference from v1/v2 open questions.
 
 ### 6.2 FluidAudio version alignment **(RESOLVED in v2 — no longer a blocker)**
 
@@ -878,15 +934,21 @@ Judgment calls the human should confirm or resolve before Phase 2 starts.
 
 **Human: confirm?**
 
-### 6.4 Protocols/ wiring — pre-work or Phase 2 work? **(v2 — Phase 2 Lane A)**
+### 6.4 Protocols/ wiring **(RESOLVED in v3 — Lane A step 8, ~1-2h cheap)**
 
-**The constraint:** Transcripted's `Services/Protocols/` has 6 protocols defined but no concrete type formally conforms. `AppServices.swift` has a TODO to switch. If this wiring happens **before** Phase 2 (owned by the Transcripted team outside this merge effort), Draft can inject alternate implementations cleanly. If it happens **inside** Phase 2's `core-extractor` lane, the lane takes longer and the regression surface on Transcripted's app grows.
+**The constraint:** Transcripted's `Services/Protocols/` has 6 protocols defined. The `AppServices.swift` header comment explicitly notes conformances are not yet added. No in-flight work — confirmed by transcripted-mapper after direct re-read of `AppServices.swift` (26 lines, TODO verbatim in the header, zero concrete conformances, zero `any`-typed properties, no issue tracker references, no feature branch hints, documented as "aspirational" in `Services/Protocols/CLAUDE.md`).
 
-**v2 resolution (from transcripted-mapper + plan author alignment):** the Transcripted team has no pre-Phase-2 plan to complete the `AppServices` TODO, so Lane A (`core-extractor`) owns this work. Estimated size: ~100–150 LOC of mechanical conformance glue across the 6 protocols — each concrete service gets an `extension ParakeetService: SpeechToTextEngine { ... }`-style block, and `AppServices` is rewritten to hold protocol-typed properties instead of concrete types. This is added to Lane A work items between steps 5 (visibility changes) and 6 (Tier B surgery) because (a) it touches the same files Tier B surgery touches, and (b) Draft's adapter (`MeetingSTTAdapter` from §3.2) needs the protocol contracts to be stable before Lane B can write against them.
+**v3 resolution:** Lane A step 8 owns this work. **Scope — much smaller than v2 estimate:**
 
-**Acceptance criterion for the Protocols wiring sub-step:** the 6 `Services/Protocols/` protocols each have at least one concrete conformer inside Core, `AppServices.swift` holds only protocol-typed properties, and Transcripted's existing app still builds and runs. Lane B's `MeetingSTTAdapter` is the second conformer of `SpeechToTextEngine`, validating the protocol shape from the Draft side.
+- ~6 empty `extension ConcreteType: Protocol {}` declarations. Protocol signatures were authored against the existing concrete types, so method shapes already line up — empty extensions are sufficient. Verified via inventory §10 that `SpeechToTextEngine`'s four methods match `ParakeetService` exactly; similar expected for the other five.
+- 1 `AppServices` struct rewrite to hold `any SpeechToTextEngine` / `any DiarizationEngine` / `any SpeakerStore` / etc. instead of concrete types. Update `makeDefault()` and all call sites inside Core.
+- One nuance for `SpeechToTextEngine`: since §3.2 deletes `ParakeetService.swift` from Core, the in-Core conformer for STT is gone. Lane A adds a local `ParakeetEngineAdapter` (or similar) inside the Transcripted app target (NOT Core) so Transcripted's standalone build still has an STT conformer. Draft's `MeetingSTTAdapter` (Lane B) is Core's second consumer from the Draft side. Net: Core is STT-agnostic, and each app target supplies its own adapter.
 
-**Remaining human judgment:** nothing — this is now a plan item, not a decision. Listed here for visibility.
+**Estimated effort:** 1-2 hours. The protocols are already designed correctly, concrete types already implement the right methods, it's a find-and-add-extension pass.
+
+**Acceptance criterion:** the 6 protocols each have at least one concrete conformer visible to the Transcripted app build, `AppServices.swift` holds only protocol-typed properties, Transcripted's app still builds and runs, and `swift build -c release --product TranscriptedCore` succeeds with the `AppServices` rewrite landed.
+
+**Human decision still needed:** NONE on this question. Listed here for cross-reference from v1/v2 open questions.
 
 ### 6.5 Storage path unification — shared with Transcripted or isolated to Draft?
 
