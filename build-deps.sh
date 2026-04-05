@@ -27,6 +27,12 @@ echo "Building FluidAudio + mlx-swift-lm (unified)..."
 rm -rf "$DEPS_BUILD" "$DEPS_LIBS" "$DEPS_MODULES"
 mkdir -p "$DEPS_BUILD/Sources"
 
+# Symlink TranscriptedCore's source tree into $DEPS_BUILD so SPM's target
+# path validation accepts it (SPM forbids target paths that escape the
+# package root). The symlink lets us build Core from Draft's unified
+# package graph with proper FluidAudio/MLX dependency edges.
+ln -sfn "$DRAFT_DIR/Transcripted/Sources/TranscriptedCore" "$DEPS_BUILD/TranscriptedCore"
+
 # Create unified Package.swift — both dependencies resolved together
 cat > "$DEPS_BUILD/Package.swift" << 'PACKAGE_EOF'
 // swift-tools-version:5.9
@@ -39,12 +45,29 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift-lm", revision: "25b00d4"),
     ],
     targets: [
+        // TranscriptedCore is built directly from its source tree rather than
+        // consumed via .package(path:) because Core's own Package.swift uses
+        // relative unsafeFlags (-I ./.deps-modules) that assume a prebuilt
+        // mega-library. Inlining as a target here makes FluidAudio + MLX
+        // available through normal SPM dependency edges, producing a real
+        // TranscriptedCore.swiftmodule that build-deps.sh copies into
+        // deps-modules/ for build.sh to consume.
+        .target(
+            name: "TranscriptedCore",
+            dependencies: [
+                .product(name: "FluidAudio", package: "FluidAudio"),
+                .product(name: "MLXLLM", package: "mlx-swift-lm"),
+                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+            ],
+            path: "TranscriptedCore"
+        ),
         .target(
             name: "Shim",
             dependencies: [
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+                "TranscriptedCore",
             ],
             path: "Sources"
         )
@@ -56,6 +79,7 @@ cat > "$DEPS_BUILD/Sources/Shim.swift" << 'SWIFT_EOF'
 import FluidAudio
 import MLXLLM
 import MLXLMCommon
+import TranscriptedCore
 SWIFT_EOF
 
 # Build in release mode

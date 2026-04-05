@@ -51,6 +51,8 @@ cat > "$BUILD_DIR/Draft.entitlements" << 'EOF'
     <false/>
     <key>com.apple.security.device.audio-input</key>
     <true/>
+    <key>com.apple.security.device.audio-capture</key>
+    <true/>
     <key>com.apple.security.speech.recognition</key>
     <true/>
 </dict>

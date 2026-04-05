@@ -17,10 +17,12 @@
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Draft needs microphone access to transcribe your voice into text.</string>
+    <string>Draft needs microphone access to transcribe your voice into text and to capture meeting audio for transcription.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Draft uses speech recognition to convert your voice to text.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Draft captures your screen to extract conversation context for smarter message drafting.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Draft records system audio (other apps playing sound) so meetings on Zoom, Meet, FaceTime, and similar apps can be transcribed alongside your microphone.</string>
 </dict>
 </plist>
