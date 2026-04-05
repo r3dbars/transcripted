@@ -72,6 +72,10 @@ final class MenuBarPanelController: NSViewController {
             dictationKey: appState.contextCapture.dictationShortcutDisplay
         )
 
+        // Recent Meetings — scans ~/Library/Application Support/Draft/meetings/transcripts
+        // each time the popover opens (no subscription; list is short).
+        content.recentMeetingsView.update(meetings: RecentMeetingsScanner.loadRecent())
+
         // Style
         content.styleView.update(
             styleContents: appState.styleEngine.styleFileContents,
