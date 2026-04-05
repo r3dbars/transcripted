@@ -9,7 +9,7 @@ import CryptoKit
 // MARK: - Error Classification
 
 /// Categorizes download errors for user-friendly messaging
-enum DownloadErrorKind: Equatable {
+public enum DownloadErrorKind: Equatable {
     case networkOffline
     case tlsFailure
     case timeout
@@ -17,7 +17,7 @@ enum DownloadErrorKind: Equatable {
     case serverError(statusCode: Int)
     case unknown(String)
 
-    var title: String {
+    public var title: String {
         switch self {
         case .networkOffline: return "No Internet Connection"
         case .tlsFailure: return "Secure Connection Failed"
@@ -28,7 +28,7 @@ enum DownloadErrorKind: Equatable {
         }
     }
 
-    var detail: String {
+    public var detail: String {
         switch self {
         case .networkOffline:
             return "Connect to the internet and try again."
@@ -47,18 +47,23 @@ enum DownloadErrorKind: Equatable {
 }
 
 /// Structured download error with classification
-struct ModelDownloadError: Error, LocalizedError {
-    let kind: DownloadErrorKind
-    let underlyingError: Error?
+public struct ModelDownloadError: Error, LocalizedError {
+    public let kind: DownloadErrorKind
+    public let underlyingError: Error?
 
-    var errorDescription: String? {
+    public init(kind: DownloadErrorKind, underlyingError: Error?) {
+        self.kind = kind
+        self.underlyingError = underlyingError
+    }
+
+    public var errorDescription: String? {
         kind.detail
     }
 }
 
 // MARK: - Download Service
 
-enum ModelDownloadService {
+public enum ModelDownloadService {
 
     /// HuggingFace mirror URLs, tried in order
     private static let mirrors: [String] = [
@@ -67,14 +72,14 @@ enum ModelDownloadService {
     ]
 
     /// Default retry configuration
-    private static let maxRetries = 3
+    public static let maxRetries = 3
     private static let retryDelays: [UInt64] = [2_000_000_000, 5_000_000_000, 10_000_000_000] // 2s, 5s, 10s
 
     // MARK: - Network Reachability
 
     /// Quick network connectivity check using NWPathMonitor.
     /// Returns true if any network path is available.
-    static func checkNetworkReachability() async -> Bool {
+    public static func checkNetworkReachability() async -> Bool {
         // Box to safely track whether continuation has been resumed.
         // Both the handler and timeout run on the same serial queue, so no lock needed.
         class ResumeGuard { var done = false }
@@ -105,7 +110,7 @@ enum ModelDownloadService {
     // MARK: - Error Classification
 
     /// Classify any Error into a user-friendly DownloadErrorKind
-    static func classifyError(_ error: Error) -> DownloadErrorKind {
+    public static func classifyError(_ error: Error) -> DownloadErrorKind {
         let nsError = error as NSError
 
         // Check for disk space first
@@ -145,7 +150,7 @@ enum ModelDownloadService {
     }
 
     /// Check available disk space in bytes
-    static func availableDiskSpace() -> UInt64? {
+    public static func availableDiskSpace() -> UInt64? {
         let home = FileManager.default.homeDirectoryForCurrentUser
         guard let values = try? home.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
               let available = values.volumeAvailableCapacityForImportantUsage else {
@@ -158,7 +163,7 @@ enum ModelDownloadService {
 
     /// Execute an async operation with retry logic and exponential backoff.
     /// Classifies errors on each attempt and only retries transient failures.
-    static func withRetry<T>(
+    public static func withRetry<T>(
         maxAttempts: Int = maxRetries,
         operation: @escaping () async throws -> T
     ) async throws -> T {

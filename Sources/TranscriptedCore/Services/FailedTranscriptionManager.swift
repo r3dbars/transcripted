@@ -3,14 +3,14 @@ import Combine
 
 /// Manages the queue of failed transcriptions with persistent storage
 @MainActor
-class FailedTranscriptionManager: ObservableObject {
-    @Published var failedTranscriptions: [FailedTranscription] = []
+public class FailedTranscriptionManager: ObservableObject {
+    @Published public var failedTranscriptions: [FailedTranscription] = []
 
     private let storageURL: URL
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    init() {
+    public init() {
         // Store failed transcriptions JSON in Documents/Transcripted folder
         // Guard against force unwrap: FileManager.urls() is empty in restricted sandboxes
         guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
@@ -93,7 +93,7 @@ class FailedTranscriptionManager: ObservableObject {
     }
 
     /// Adds a new failed transcription to the queue
-    func addFailedTranscription(
+    public func addFailedTranscription(
         micAudioURL: URL,
         systemAudioURL: URL?,
         errorMessage: String
@@ -111,7 +111,7 @@ class FailedTranscriptionManager: ObservableObject {
     }
 
     /// Removes a failed transcription from the queue
-    func removeFailedTranscription(id: UUID) {
+    public func removeFailedTranscription(id: UUID) {
         guard let index = failedTranscriptions.firstIndex(where: { $0.id == id }) else {
             return
         }
@@ -123,7 +123,7 @@ class FailedTranscriptionManager: ObservableObject {
     }
 
     /// Removes a failed transcription and deletes its audio files
-    func deleteFailedTranscription(id: UUID) {
+    public func deleteFailedTranscription(id: UUID) {
         guard let failed = failedTranscriptions.first(where: { $0.id == id }) else {
             return
         }
@@ -146,7 +146,7 @@ class FailedTranscriptionManager: ObservableObject {
     }
 
     /// Increments retry count for a failed transcription
-    func incrementRetryCount(id: UUID) {
+    public func incrementRetryCount(id: UUID) {
         guard let index = failedTranscriptions.firstIndex(where: { $0.id == id }) else {
             return
         }
@@ -159,7 +159,7 @@ class FailedTranscriptionManager: ObservableObject {
     }
 
     /// Gets the total number of failed transcriptions
-    var count: Int {
+    public var count: Int {
         return failedTranscriptions.count
     }
 
@@ -191,7 +191,7 @@ class FailedTranscriptionManager: ObservableObject {
     }
 
     /// Cleans up failed transcriptions older than the specified number of days
-    func cleanupOldFailedTranscriptions(olderThanDays days: Int) {
+    public func cleanupOldFailedTranscriptions(olderThanDays days: Int) {
         // Nil-coalesce: date arithmetic rarely returns nil, but force unwrap would crash on edge cases
         let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
 

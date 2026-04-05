@@ -7,25 +7,25 @@ import Combine
 
 /// Status of system audio capture for UI feedback
 /// Used to show warnings when device switching or audio loss occurs
-enum SystemAudioStatus: Equatable {
+public enum SystemAudioStatus: Equatable {
     case unknown        // Not recording
     case healthy        // Receiving audio data normally
     case reconnecting   // Device change detected, recovering (~200ms)
     case silent         // Prolonged silence (>10s) - might indicate capture issue
     case failed         // Recovery failed - system audio unavailable
 
-    var isWarning: Bool {
+    public var isWarning: Bool {
         switch self {
         case .silent, .failed: return true
         default: return false
         }
     }
 
-    var isRecovering: Bool {
+    public var isRecovering: Bool {
         self == .reconnecting
     }
 
-    var displayText: String {
+    public var displayText: String {
         switch self {
         case .unknown: return ""
         case .healthy: return ""
@@ -40,16 +40,16 @@ enum SystemAudioStatus: Equatable {
 /// Note: This class does NOT use @MainActor because it manages AVAudioEngine
 /// which requires synchronous access from audio tap callbacks on audio threads.
 /// UI updates are dispatched to main thread explicitly.
-class Audio: ObservableObject {
-    @Published var isRecording: Bool = false
-    @Published private(set) var isMonitoring: Bool = false  // Lightweight level metering without file recording
+public class Audio: ObservableObject {
+    @Published public var isRecording: Bool = false
+    @Published public private(set) var isMonitoring: Bool = false  // Lightweight level metering without file recording
     private var isStarting: Bool = false  // Prevents double-start during async setup
-    @Published var audioLevel: Float = 0.0
-    @Published var recordingDuration: TimeInterval = 0.0
-    @Published var audioLevelHistory: [Float] = Array(repeating: 0.0, count: 15)
-    @Published var systemAudioLevelHistory: [Float] = Array(repeating: 0.0, count: 15)
-    @Published var error: String?
-    @Published var systemAudioStatus: SystemAudioStatus = .unknown
+    @Published public var audioLevel: Float = 0.0
+    @Published public var recordingDuration: TimeInterval = 0.0
+    @Published public var audioLevelHistory: [Float] = Array(repeating: 0.0, count: 15)
+    @Published public var systemAudioLevelHistory: [Float] = Array(repeating: 0.0, count: 15)
+    @Published public var error: String?
+    @Published public var systemAudioStatus: SystemAudioStatus = .unknown
 
     // Silence detection for "Still Recording?" prompt
     @Published var silenceDuration: TimeInterval = 0.0  // How long we've been in silence
@@ -58,8 +58,8 @@ class Audio: ObservableObject {
     var lastNonSilentTime: Date?
 
     // Audio file URLs - returned when recording stops
-    @Published var micAudioFileURL: URL?
-    @Published var systemAudioFileURL: URL?
+    @Published public var micAudioFileURL: URL?
+    @Published public var systemAudioFileURL: URL?
 
     // Original mic URL set at recording start — never overwritten by device recovery.
     // Device recovery creates a new WAV segment and updates micAudioFileURL (the write target),
@@ -109,7 +109,7 @@ class Audio: ObservableObject {
     /// Call this when stopping recording to capture health metrics.
     /// `systemAudioCapture` stays type-erased here; the `RecordingHealthInfo`
     /// factory downcasts under `#available(macOS 14.2, *)` internally.
-    func createHealthInfo() -> RecordingHealthInfo {
+    public func createHealthInfo() -> RecordingHealthInfo {
         return RecordingHealthInfo.from(audio: self, systemCapture: systemAudioCapture)
     }
 
@@ -247,12 +247,12 @@ class Audio: ObservableObject {
     var diskCheckCounter: Int = 0
 
     // Callback for when recording completes
-    var onRecordingComplete: ((URL?, URL?) -> Void)?
+    public var onRecordingComplete: ((URL?, URL?) -> Void)?
 
     // Callback for when recording starts (used for pre-loading models)
-    var onRecordingStart: (() -> Void)?
+    public var onRecordingStart: (() -> Void)?
 
-    init() {
+    public init() {
         setup()
     }
 
@@ -333,7 +333,7 @@ class Audio: ObservableObject {
 
     // MARK: - Start Recording
 
-    func start() {
+    public func start() {
         guard !isRecording, !isStarting else {
             AppLogger.audio.warning("Already recording or starting, ignoring duplicate start request")
             return
@@ -463,7 +463,7 @@ class Audio: ObservableObject {
 
     // MARK: - Stop Recording
 
-    func stop() {
+    public func stop() {
         guard let engine = engine, let inputNode = inputNode else {
             // Ensure flag reset even on guard failure
             isRecording = false

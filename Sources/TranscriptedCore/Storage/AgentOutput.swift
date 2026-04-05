@@ -110,7 +110,7 @@ struct AgentKnownSpeaker: Codable {
 
 // MARK: - Agent Output Writer
 
-enum AgentOutput {
+public enum AgentOutput {
 
     private static let encoder: JSONEncoder = {
         let e = JSONEncoder()
@@ -125,7 +125,7 @@ enum AgentOutput {
     }()
 
     /// Write a structured JSON sidecar for a transcript.
-    static func writeTranscriptJSON(
+    public static func writeTranscriptJSON(
         from result: TranscriptionResult,
         speakerMappings: [String: SpeakerMapping],
         speakerDbIds: [String: UUID],
@@ -204,7 +204,7 @@ enum AgentOutput {
     }
 
     /// Rebuild the root index file by scanning existing JSON sidecars.
-    static func writeIndex(to folder: URL, speakerDB: SpeakerDatabase) throws {
+    public static func writeIndex(to folder: URL, speakerDB: SpeakerDatabase) throws {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])
             .filter({ $0.pathExtension == "json" && $0.lastPathComponent != "transcripted.json" && $0.lastPathComponent != "failed_transcriptions.json" }) else {
@@ -326,7 +326,7 @@ enum AgentOutput {
     """
 
     /// Write CLAUDE.md and AGENT.md to the save directory (only if missing).
-    static func writeAgentReadme(to folder: URL) {
+    public static func writeAgentReadme(to folder: URL) {
         for filename in ["CLAUDE.md", "AGENT.md"] {
             let fileURL = folder.appendingPathComponent(filename)
             guard !FileManager.default.fileExists(atPath: fileURL.path) else { continue }

@@ -2,15 +2,15 @@ import Foundation
 
 /// Recording health information for transcript metadata (Phase 3)
 /// Captures quality metrics to be embedded in transcript YAML frontmatter
-struct RecordingHealthInfo {
+public struct RecordingHealthInfo {
     /// Capture quality rating based on buffer success rate
-    enum CaptureQuality: String {
+    public enum CaptureQuality: String {
         case excellent = "excellent"  // >= 98%
         case good = "good"            // 90-97%
         case fair = "fair"            // 80-89%
         case degraded = "degraded"    // < 80%
 
-        static func from(successRate: Double) -> CaptureQuality {
+        public static func from(successRate: Double) -> CaptureQuality {
             switch successRate {
             case 0.98...: return .excellent
             case 0.90..<0.98: return .good
@@ -20,17 +20,24 @@ struct RecordingHealthInfo {
         }
     }
 
-    let captureQuality: CaptureQuality
-    let audioGaps: Int
-    let deviceSwitches: Int
-    let gapDescriptions: [String]
+    public let captureQuality: CaptureQuality
+    public let audioGaps: Int
+    public let deviceSwitches: Int
+    public let gapDescriptions: [String]
+
+    public init(captureQuality: CaptureQuality, audioGaps: Int, deviceSwitches: Int, gapDescriptions: [String]) {
+        self.captureQuality = captureQuality
+        self.audioGaps = audioGaps
+        self.deviceSwitches = deviceSwitches
+        self.gapDescriptions = gapDescriptions
+    }
 
     /// Create health info from Audio instance.
     /// `systemCapture` is typed as `Any?` so this file does not leak the
     /// `@available(macOS 14.2, *)` gate from `SystemAudioCapture` across
     /// the whole transcript-metadata surface. The cast is scoped to the
     /// single line below, under an availability check.
-    static func from(audio: Audio, systemCapture: Any?) -> RecordingHealthInfo {
+    public static func from(audio: Audio, systemCapture: Any?) -> RecordingHealthInfo {
         let successRate: Double
         if #available(macOS 14.2, *), let sc = systemCapture as? SystemAudioCapture {
             successRate = sc.bufferSuccessRate
@@ -46,7 +53,7 @@ struct RecordingHealthInfo {
     }
 
     /// Default "no issues" health info
-    static var perfect: RecordingHealthInfo {
+    public static var perfect: RecordingHealthInfo {
         RecordingHealthInfo(
             captureQuality: .excellent,
             audioGaps: 0,

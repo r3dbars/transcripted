@@ -5,7 +5,7 @@ import Foundation
 
 @available(macOS 14.0, *)
 @MainActor
-protocol DiarizationEngine: ObservableObject {
+public protocol DiarizationEngine: ObservableObject {
     /// Whether the diarization model is loaded and ready
     var isReady: Bool { get }
 

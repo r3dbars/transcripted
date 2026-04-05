@@ -7,7 +7,7 @@ import FluidAudio
 
 @available(macOS 14.0, *)
 @MainActor
-protocol SpeechToTextEngine: ObservableObject {
+public protocol SpeechToTextEngine: ObservableObject {
     /// Whether the model is loaded and ready for transcription
     var isReady: Bool { get }
 

@@ -4,9 +4,9 @@ import SQLite3
 /// SQLite database for persistent stats tracking
 /// Stores recording history, action items, and daily activity for the dashboard
 @available(macOS 14.0, *)
-final class StatsDatabase {
+public final class StatsDatabase {
 
-    static let shared = StatsDatabase()
+    public static let shared = StatsDatabase()
 
     var db: OpaquePointer?
     var isDatabaseOpen = false
@@ -181,7 +181,7 @@ final class StatsDatabase {
     // MARK: - Recording Operations
 
     /// Record a new transcription session (thread-safe, async)
-    func recordSession(_ metadata: RecordingMetadata) {
+    public func recordSession(_ metadata: RecordingMetadata) {
         queue.async { [weak self] in
             self?.recordSessionImpl(metadata)
         }
@@ -242,7 +242,7 @@ final class StatsDatabase {
     }
 
     /// Get all recordings (thread-safe, sync)
-    func getAllRecordings() -> [RecordingMetadata] {
+    public func getAllRecordings() -> [RecordingMetadata] {
         return queue.sync {
             getAllRecordingsImpl()
         }

@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Speaker Database Protocol
 // Conformer: SpeakerDatabase
 
-protocol SpeakerStore {
+public protocol SpeakerStore {
     /// Match a voice embedding against known speaker profiles
     func matchSpeaker(embedding: [Float], threshold: Double) -> SpeakerMatchResult?
 

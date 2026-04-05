@@ -2,14 +2,14 @@ import Foundation
 import UserNotifications
 
 /// Handles automatic saving of transcripts to the filesystem
-class TranscriptSaver {
+public class TranscriptSaver {
 
     /// Default save location: ~/Documents/Transcripted/
     /// Reads custom location from UserDefaults if set.
     /// Security: validates the custom path against directory traversal and forbidden system
     /// directories before use. Falls back to the default location if validation fails, so
     /// a tampered UserDefaults value cannot redirect transcripts to an arbitrary path.
-    static var defaultSaveDirectory: URL {
+    public static var defaultSaveDirectory: URL {
         let fallback: URL = {
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             return documentsPath.appendingPathComponent("Transcripted")
@@ -43,7 +43,7 @@ class TranscriptSaver {
     ///   - directory: Optional custom directory (defaults to ~/Documents/Transcripted/)
     /// - Returns: URL of saved file, or nil if save failed
     @discardableResult
-    static func save(text: String, duration: TimeInterval, directory: URL? = nil) -> URL? {
+    public static func save(text: String, duration: TimeInterval, directory: URL? = nil) -> URL? {
         // Use default directory if not specified
         let saveDir = directory ?? defaultSaveDirectory
 
@@ -95,7 +95,7 @@ class TranscriptSaver {
     /// - Returns: URL of saved file, or nil if save failed
     @available(macOS 14.0, *)
     @discardableResult
-    static func saveTranscript(
+    public static func saveTranscript(
         _ result: TranscriptionResult,
         speakerMappings: [String: SpeakerMapping] = [:],
         speakerSources: [String: String] = [:],

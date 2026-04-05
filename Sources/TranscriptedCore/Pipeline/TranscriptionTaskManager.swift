@@ -6,24 +6,25 @@ import UserNotifications
 // Extensions in: SpeakerNamingCoordinator.swift, TranscriptionPipelineRunner.swift
 // Types in: DisplayStatus.swift (DisplayStatus enum, TranscriptionTask struct)
 
+@available(macOS 14.0, *)
 @MainActor
-class TranscriptionTaskManager: ObservableObject {
-    @Published var activeCount: Int = 0
-    @Published var justCompleted: Bool = false
-    @Published var displayStatus: DisplayStatus = .idle
-    @Published var backgroundTaskCount: Int = 0
-    @Published var speakerNamingRequest: SpeakerNamingRequest? = nil
-    @Published var lastSavedTranscriptURL: URL? = nil
-    @Published var lastSavedTitle: String? = nil
-    @Published var lastSavedDuration: String? = nil
-    @Published var lastSavedSpeakerCount: Int? = nil
+public class TranscriptionTaskManager: ObservableObject {
+    @Published public var activeCount: Int = 0
+    @Published public var justCompleted: Bool = false
+    @Published public var displayStatus: DisplayStatus = .idle
+    @Published public var backgroundTaskCount: Int = 0
+    @Published public var speakerNamingRequest: SpeakerNamingRequest? = nil
+    @Published public var lastSavedTranscriptURL: URL? = nil
+    @Published public var lastSavedTitle: String? = nil
+    @Published public var lastSavedDuration: String? = nil
+    @Published public var lastSavedSpeakerCount: Int? = nil
 
     var activeTasks: [UUID: Task<Void, Never>] = [:]
-    let transcription: Transcription
+    public let transcription: Transcription
 
-    let failedTranscriptionManager: FailedTranscriptionManager
+    public let failedTranscriptionManager: FailedTranscriptionManager
 
-    init(
+    public init(
         failedTranscriptionManager: FailedTranscriptionManager,
         speechToText: any SpeechToTextEngine,
         diarization: any DiarizationEngine,
@@ -40,7 +41,7 @@ class TranscriptionTaskManager: ObservableObject {
     // MARK: - Task Lifecycle
 
     /// Start a new transcription task in the background
-    func startTranscription(micURL: URL, systemURL: URL?, outputFolder: URL, healthInfo: RecordingHealthInfo? = nil) {
+    public func startTranscription(micURL: URL, systemURL: URL?, outputFolder: URL, healthInfo: RecordingHealthInfo? = nil) {
 
         // Guard: reject concurrent pipelines to prevent model contention
         if !activeTasks.isEmpty {
@@ -118,7 +119,7 @@ class TranscriptionTaskManager: ObservableObject {
     }
 
     /// Retry a failed transcription by its ID
-    func retryFailedTranscription(failedId: UUID) async -> Bool {
+    public func retryFailedTranscription(failedId: UUID) async -> Bool {
         guard let failed = failedTranscriptionManager.failedTranscriptions.first(where: { $0.id == failedId }) else {
             AppLogger.pipeline.error("Failed transcription not found", ["failedId": "\(failedId)"])
             return false
@@ -198,7 +199,7 @@ class TranscriptionTaskManager: ObservableObject {
         }
     }
 
-    func cancelAll() {
+    public func cancelAll() {
         for (taskId, task) in activeTasks {
             task.cancel()
             AppLogger.pipeline.info("Cancelled task", ["taskId": "\(taskId)"])

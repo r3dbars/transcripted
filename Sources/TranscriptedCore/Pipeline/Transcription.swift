@@ -3,20 +3,20 @@ import Foundation
 import Accelerate
 
 /// Maps speaker labels to identified names from voice fingerprint matching
-struct SpeakerMapping {
-    let speakerId: String           // "0", "1", "2" for speaker IDs
-    var identifiedName: String?     // "John Smith" or nil if unidentified
-    var confidence: SpeakerConfidence?
+public struct SpeakerMapping {
+    public let speakerId: String           // "0", "1", "2" for speaker IDs
+    public var identifiedName: String?     // "John Smith" or nil if unidentified
+    public var confidence: SpeakerConfidence?
 
     /// Display name: uses identified name if available, otherwise "Speaker X"
-    var displayName: String {
+    public var displayName: String {
         if let name = identifiedName {
             return confidence == .medium ? "\(name)?" : name
         }
         return "Speaker \(speakerId)"
     }
 
-    init(speakerId: String, identifiedName: String? = nil, confidence: SpeakerConfidence? = nil) {
+    public init(speakerId: String, identifiedName: String? = nil, confidence: SpeakerConfidence? = nil) {
         self.speakerId = speakerId
         self.identifiedName = identifiedName
         self.confidence = confidence
@@ -25,18 +25,19 @@ struct SpeakerMapping {
 
 // MARK: - Transcription Service (Local Pipeline)
 
+@available(macOS 14.0, *)
 @MainActor
-class Transcription: ObservableObject {
-    @Published var isProcessing: Bool = false
-    @Published var error: String?
-    @Published var processingStatus: String = ""
-    @Published var lastSavedFileURL: URL?
+public class Transcription: ObservableObject {
+    @Published public var isProcessing: Bool = false
+    @Published public var error: String?
+    @Published public var processingStatus: String = ""
+    @Published public var lastSavedFileURL: URL?
 
     let parakeet: any SpeechToTextEngine
     let diarization: any DiarizationEngine
     let speakerDB: any SpeakerStore
 
-    init(
+    public init(
         speechToText: any SpeechToTextEngine,
         diarization: any DiarizationEngine,
         speakerStore: any SpeakerStore
@@ -49,7 +50,7 @@ class Transcription: ObservableObject {
     private var hasInitialized = false
 
     /// Initialize local models. Call once at app startup.
-    func initializeModels() async {
+    public func initializeModels() async {
         guard !hasInitialized else {
             AppLogger.transcription.debug("Models already initialized, skipping")
             return

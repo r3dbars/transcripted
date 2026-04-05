@@ -6,11 +6,11 @@
 import Foundation
 import AVFoundation
 
-enum AudioResampler {
+public enum AudioResampler {
 
     /// Resample mono Float32 audio from `inputRate` to `outputRate`.
     /// Uses linear interpolation — sufficient for speech (bandwidth << Nyquist at 16kHz).
-    static func resample(_ samples: [Float], from inputRate: Double, to outputRate: Double = 16000) -> [Float] {
+    public static func resample(_ samples: [Float], from inputRate: Double, to outputRate: Double = 16000) -> [Float] {
         guard inputRate != outputRate, !samples.isEmpty else { return samples }
 
         let ratio = inputRate / outputRate
@@ -30,7 +30,7 @@ enum AudioResampler {
 
     /// Load a WAV file and return mono Float32 samples at the file's native sample rate.
     /// Converts stereo to mono by averaging channels.
-    static func loadWAV(url: URL) throws -> (samples: [Float], sampleRate: Double) {
+    public static func loadWAV(url: URL) throws -> (samples: [Float], sampleRate: Double) {
         let file = try AVAudioFile(forReading: url)
         let format = file.processingFormat
         let frameCount = AVAudioFrameCount(file.length)
@@ -74,7 +74,7 @@ enum AudioResampler {
 
     /// Load a WAV file and return mono Float32 samples resampled to 16kHz.
     /// Uses AVAudioConverter for hardware-accelerated resampling with anti-aliasing.
-    static func loadAndResample(url: URL, targetRate: Double = 16000) throws -> [Float] {
+    public static func loadAndResample(url: URL, targetRate: Double = 16000) throws -> [Float] {
         return try convertToMono(url: url, targetRate: targetRate)
     }
 
@@ -189,7 +189,7 @@ enum AudioResampler {
 
     /// Extract a time slice from samples array.
     /// Returns samples between startTime and endTime (in seconds) at the given sample rate.
-    static func extractSlice(
+    public static func extractSlice(
         from samples: [Float],
         sampleRate: Double,
         startTime: Double,
