@@ -448,3 +448,10 @@ final class SpeakerDatabase: @unchecked Sendable {
         }
     }
 }
+
+// MARK: - SpeakerStore conformance
+// Empty extension — protocol signatures match SpeakerDatabase's existing methods exactly
+// (including methods supplied by extensions in SpeakerEmbeddingMatcher and SpeakerProfileMerger).
+// Added as part of Step 8 protocol wiring (merge-plan §5.1).
+
+extension SpeakerDatabase: SpeakerStore {}

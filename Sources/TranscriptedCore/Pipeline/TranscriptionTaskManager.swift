@@ -19,12 +19,22 @@ class TranscriptionTaskManager: ObservableObject {
     @Published var lastSavedSpeakerCount: Int? = nil
 
     var activeTasks: [UUID: Task<Void, Never>] = [:]
-    let transcription = Transcription()
+    let transcription: Transcription
 
     let failedTranscriptionManager: FailedTranscriptionManager
 
-    init(failedTranscriptionManager: FailedTranscriptionManager) {
+    init(
+        failedTranscriptionManager: FailedTranscriptionManager,
+        speechToText: any SpeechToTextEngine,
+        diarization: any DiarizationEngine,
+        speakerStore: any SpeakerStore
+    ) {
         self.failedTranscriptionManager = failedTranscriptionManager
+        self.transcription = Transcription(
+            speechToText: speechToText,
+            diarization: diarization,
+            speakerStore: speakerStore
+        )
     }
 
     // MARK: - Task Lifecycle

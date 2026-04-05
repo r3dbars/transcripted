@@ -32,14 +32,18 @@ class Transcription: ObservableObject {
     @Published var processingStatus: String = ""
     @Published var lastSavedFileURL: URL?
 
-    let parakeet: ParakeetService
-    let diarization: DiarizationService
-    let speakerDB: SpeakerDatabase
+    let parakeet: any SpeechToTextEngine
+    let diarization: any DiarizationEngine
+    let speakerDB: any SpeakerStore
 
-    init() {
-        self.parakeet = ParakeetService()
-        self.diarization = DiarizationService()
-        self.speakerDB = SpeakerDatabase.shared
+    init(
+        speechToText: any SpeechToTextEngine,
+        diarization: any DiarizationEngine,
+        speakerStore: any SpeakerStore
+    ) {
+        self.parakeet = speechToText
+        self.diarization = diarization
+        self.speakerDB = speakerStore
     }
 
     private var hasInitialized = false
