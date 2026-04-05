@@ -26,13 +26,12 @@ final class FileLogger: @unchecked Sendable {
         return f
     }()
 
-    init() {
+    init(paths: CoreStoragePaths = .default) {
         // Disable file logging during test runs to avoid polluting production logs
         let isTestRun = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         self.isDisabled = isTestRun
 
-        let logsDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/Transcripted")
+        let logsDir = paths.logs
         try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
 
         logFileURL = logsDir.appendingPathComponent("app.jsonl")

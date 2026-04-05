@@ -95,14 +95,20 @@ enum SpeakerClipExtractor {
 
     // MARK: - Persistent Clips
 
-    /// Persistent clips directory alongside transcripts
-    static var clipsDirectory: URL {
-        TranscriptSaver.defaultSaveDirectory.appendingPathComponent("speaker_clips")
+    /// Default persistent clips directory derived from `CoreStoragePaths.default`.
+    /// Embedders should pass an explicit `clipsDirectory:` to the persistence helpers
+    /// below rather than relying on this default.
+    public static var defaultClipsDirectory: URL {
+        CoreStoragePaths.default.speakerClips
     }
 
     /// Copy a temporary clip to persistent storage, keyed by speaker UUID.
     /// Overwrites any existing clip for this speaker (keeps the latest).
-    static func persistClip(from tempClipURL: URL, speakerId: UUID) {
+    static func persistClip(
+        from tempClipURL: URL,
+        speakerId: UUID,
+        clipsDirectory: URL = defaultClipsDirectory
+    ) {
         let dir = clipsDirectory
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -121,13 +127,19 @@ enum SpeakerClipExtractor {
     }
 
     /// Look up persistent clip URL for a speaker. Returns nil if no clip exists.
-    static func persistentClipURL(for speakerId: UUID) -> URL? {
+    public static func persistentClipURL(
+        for speakerId: UUID,
+        clipsDirectory: URL = defaultClipsDirectory
+    ) -> URL? {
         let url = clipsDirectory.appendingPathComponent("\(speakerId.uuidString).wav")
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
     /// Delete persistent clip when a speaker profile is removed.
-    static func deletePersistedClip(for speakerId: UUID) {
+    public static func deletePersistedClip(
+        for speakerId: UUID,
+        clipsDirectory: URL = defaultClipsDirectory
+    ) {
         let url = clipsDirectory.appendingPathComponent("\(speakerId.uuidString).wav")
         try? FileManager.default.removeItem(at: url)
     }

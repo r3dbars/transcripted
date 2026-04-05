@@ -118,9 +118,10 @@ extension Audio {
             micAudioFileQueue.sync { micAudioFile = nil }
 
             // Create new file segment as mono
-            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let captureDir = self.paths.audioCaptures
+            try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
             let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
-            let fileURL = documentsPath.appendingPathComponent("meeting_\(timestamp)_mic_recovery.wav")
+            let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic_recovery.wav")
 
             do {
                 // Always create mono format at new sample rate

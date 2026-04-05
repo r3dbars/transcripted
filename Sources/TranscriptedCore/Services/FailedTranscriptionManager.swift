@@ -10,20 +10,13 @@ public class FailedTranscriptionManager: ObservableObject {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    public init() {
-        // Store failed transcriptions JSON in Documents/Transcripted folder
-        // Guard against force unwrap: FileManager.urls() is empty in restricted sandboxes
-        guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            AppLogger.pipeline.error("Documents directory unavailable — failed transcription queue disabled")
-            self.storageURL = FileManager.default.temporaryDirectory.appendingPathComponent("failed_transcriptions.json")
-            return
-        }
-        let transcriptedFolder = documentsURL.appendingPathComponent("Transcripted")
-
-        // Create Transcripted folder if it doesn't exist
-        try? FileManager.default.createDirectory(at: transcriptedFolder, withIntermediateDirectories: true)
-
-        self.storageURL = transcriptedFolder.appendingPathComponent("failed_transcriptions.json")
+    public init(paths: CoreStoragePaths = .default) {
+        // Ensure the parent folder exists before first save; the load pass tolerates a missing file.
+        try? FileManager.default.createDirectory(
+            at: paths.failedQueue.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        self.storageURL = paths.failedQueue
 
         // Configure date encoding/decoding
         encoder.dateEncodingStrategy = .iso8601

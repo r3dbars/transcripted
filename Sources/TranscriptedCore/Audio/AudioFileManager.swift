@@ -34,9 +34,10 @@ extension Audio {
         // Creating files in the audio callback causes HALC_ProxyIOContext::IOWorkLoop overload
         if #available(macOS 14.2, *), let capture = systemAudioCapture as? SystemAudioCapture {
             AppLogger.audioSystem.info("System audio capture object exists, setting up")
-            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let captureDir = self.paths.audioCaptures
+            try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
             let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
-            let fileURL = documentsPath.appendingPathComponent("meeting_\(timestamp)_system.wav")
+            let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_system.wav")
             AppLogger.audioSystem.info("System audio file URL", ["file": fileURL.lastPathComponent])
 
             DispatchQueue.main.async {
@@ -144,9 +145,10 @@ extension Audio {
 
         // Create mic audio file - ALWAYS save as mono for Speech framework compatibility
         do {
-            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let captureDir = self.paths.audioCaptures
+            try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
             let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
-            let fileURL = documentsPath.appendingPathComponent("meeting_\(timestamp)_mic.wav")
+            let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic.wav")
 
             self.originalMicAudioFileURL = fileURL
             DispatchQueue.main.async {

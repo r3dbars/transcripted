@@ -17,28 +17,27 @@ public final class SpeakerDatabase: @unchecked Sendable {
     let queue = DispatchQueue(label: "com.transcripted.speakerdb", qos: .utility)
 
     private init() {
-        guard let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            AppLogger.speakers.error("CRITICAL: Documents directory unavailable — falling back to temp directory for speaker database")
-            let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("Transcripted")
-            try? FileManager.default.createDirectory(at: tempFolder, withIntermediateDirectories: true)
-            dbPath = tempFolder.appendingPathComponent("speakers.sqlite")
-            openDatabase()
-            createTables()
-            return
-        }
-        let transcriptedFolder = documentsPath.appendingPathComponent("Transcripted")
-        try? FileManager.default.createDirectory(at: transcriptedFolder, withIntermediateDirectories: true)
-
-        dbPath = transcriptedFolder.appendingPathComponent("speakers.sqlite")
-
+        let paths = CoreStoragePaths.default
+        // Ensure the parent directory exists before sqlite3_open, otherwise the open will fail
+        // silently and every subsequent query will return no-op.
+        try? FileManager.default.createDirectory(
+            at: paths.speakerDB.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        dbPath = paths.speakerDB
         openDatabase()
         createTables()
     }
 
     /// Public initializer that accepts a custom SQLite path.
-    /// Used by tests and by callers that want to store the database outside `~/Documents/Transcripted`.
+    /// Used by tests and by callers that want to store the database outside the default
+    /// `CoreStoragePaths.default` layout (e.g. the Draft app redirecting to its own data dir).
     public init(path: String) {
         dbPath = URL(fileURLWithPath: path)
+        try? FileManager.default.createDirectory(
+            at: dbPath.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         openDatabase()
         createTables()
     }

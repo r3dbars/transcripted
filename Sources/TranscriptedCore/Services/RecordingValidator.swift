@@ -23,8 +23,9 @@ public enum RecordingValidator {
         }
     }
 
-    /// Performs all pre-recording validation checks
-    public static func validateRecordingConditions() -> ValidationResult {
+    /// Performs all pre-recording validation checks.
+    /// - Parameter paths: Filesystem layout to probe. Defaults to `CoreStoragePaths.default`.
+    public static func validateRecordingConditions(paths: CoreStoragePaths = .default) -> ValidationResult {
         // Validate custom save path if set
         if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
            !customPath.isEmpty {
@@ -35,12 +36,12 @@ public enum RecordingValidator {
         }
 
         // Check disk space
-        if let diskSpaceResult = checkDiskSpace(), case .failure(_) = diskSpaceResult {
+        if let diskSpaceResult = checkDiskSpace(paths: paths), case .failure(_) = diskSpaceResult {
             return diskSpaceResult
         }
 
         // Check file permissions
-        if let permissionsResult = checkFilePermissions(), case .failure(_) = permissionsResult {
+        if let permissionsResult = checkFilePermissions(paths: paths), case .failure(_) = permissionsResult {
             return permissionsResult
         }
 
@@ -53,16 +54,14 @@ public enum RecordingValidator {
     }
 
     /// Checks if sufficient disk space is available on the configured save volume
-    private static func checkDiskSpace() -> ValidationResult? {
+    private static func checkDiskSpace(paths: CoreStoragePaths) -> ValidationResult? {
         // Check the actual save location, not just Documents — user may save to an external drive
         let checkPath: URL
         if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
            !customPath.isEmpty {
             checkPath = URL(fileURLWithPath: customPath)
-        } else if let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-            checkPath = documentsPath
         } else {
-            return .failure("Cannot access save folder. Check that your save location exists and Transcripted has permission to access it.")
+            checkPath = paths.transcripts
         }
 
         do {
@@ -82,13 +81,13 @@ public enum RecordingValidator {
         }
     }
 
-    /// Checks if we have write permissions to the Documents folder
-    private static func checkFilePermissions() -> ValidationResult? {
-        guard let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            return .failure("Cannot access Documents folder. Check Finder permissions for ~/Documents.")
-        }
+    /// Checks if we have write permissions to the configured transcripts folder
+    private static func checkFilePermissions(paths: CoreStoragePaths) -> ValidationResult? {
+        let transcriptsDir = paths.transcripts
+        // Ensure the directory exists before probing — first run on a new install starts with nothing
+        try? FileManager.default.createDirectory(at: transcriptsDir, withIntermediateDirectories: true)
 
-        let testFile = documentsPath.appendingPathComponent(".murmur_permission_test")
+        let testFile = transcriptsDir.appendingPathComponent(".murmur_permission_test")
 
         do {
             // Try to write a test file
@@ -97,7 +96,7 @@ public enum RecordingValidator {
             try? FileManager.default.removeItem(at: testFile)
             return .success
         } catch {
-            return .failure("Can't write to Documents folder. Check Finder permissions for ~/Documents/Transcripted.")
+            return .failure("Can't write to save folder. Check Finder permissions for \(transcriptsDir.path).")
         }
     }
 

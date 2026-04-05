@@ -1,6 +1,5 @@
 import Foundation
 import AVFoundation
-import UserNotifications
 
 // MARK: - Transcription Task Queue & Orchestration
 // Extensions in: SpeakerNamingCoordinator.swift, TranscriptionPipelineRunner.swift
@@ -24,13 +23,20 @@ public class TranscriptionTaskManager: ObservableObject {
 
     public let failedTranscriptionManager: FailedTranscriptionManager
 
+    /// Embedder-supplied notifier for transcript-saved and failure events. Optional — when
+    /// `nil`, notification hooks become no-ops, which keeps Core usable from headless contexts
+    /// (tests, CLI tools) and embedders that prefer their own in-app presentation.
+    public let notifier: TranscriptNotifier?
+
     public init(
         failedTranscriptionManager: FailedTranscriptionManager,
         speechToText: any SpeechToTextEngine,
         diarization: any DiarizationEngine,
-        speakerStore: any SpeakerStore
+        speakerStore: any SpeakerStore,
+        notifier: TranscriptNotifier? = nil
     ) {
         self.failedTranscriptionManager = failedTranscriptionManager
+        self.notifier = notifier
         self.transcription = Transcription(
             speechToText: speechToText,
             diarization: diarization,
@@ -256,14 +262,10 @@ public class TranscriptionTaskManager: ObservableObject {
 
     // MARK: - Utilities
 
-    func requestNotificationPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
-            if granted {
-                AppLogger.app.info("Notification permission granted")
-            } else if let error = error {
-                AppLogger.app.warning("Notification permission error", ["error": "\(error.localizedDescription)"])
-            }
-        }
+    /// Ask the embedder to request system notification permission. No-op if no notifier
+    /// was supplied at init.
+    public func requestNotificationPermission() {
+        notifier?.requestNotificationPermission()
     }
 
     func audioDuration(url: URL) -> TimeInterval? {
@@ -275,30 +277,10 @@ public class TranscriptionTaskManager: ObservableObject {
     }
 
     func sendFailureNotification(errorMessage: String) {
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            guard settings.authorizationStatus == .authorized else {
-                AppLogger.pipeline.debug("Skipping failure notification — not authorized")
-                return
-            }
-
-            let content = UNMutableNotificationContent()
-            content.title = "Transcription Failed"
-            content.body = "Recording saved. Tap to retry."
-            content.sound = .default
-            content.categoryIdentifier = "TRANSCRIPTION_FAILURE"
-            content.userInfo = ["errorMessage": errorMessage]
-
-            let request = UNNotificationRequest(
-                identifier: "transcription-failure-\(UUID().uuidString)",
-                content: content,
-                trigger: nil
-            )
-
-            UNUserNotificationCenter.current().add(request) { error in
-                if let error = error {
-                    AppLogger.app.warning("Failed to send notification", ["error": "\(error.localizedDescription)"])
-                }
-            }
+        guard let notifier else {
+            AppLogger.pipeline.debug("Skipping failure notification — no notifier configured")
+            return
         }
+        notifier.notifyTranscriptionFailed(errorMessage: errorMessage)
     }
 }

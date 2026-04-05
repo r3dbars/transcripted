@@ -30,24 +30,25 @@ public final class StatsDatabase {
     let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     private init() {
-        // Store database in the Transcripted folder
-        // Guard against force unwrap: FileManager.urls() is empty in restricted sandboxes
-        guard let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            AppLogger.stats.error("CRITICAL: Documents directory unavailable — falling back to temp directory for stats database")
-            let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("Transcripted")
-            try? FileManager.default.createDirectory(at: tempFolder, withIntermediateDirectories: true)
-            dbPath = tempFolder.appendingPathComponent("stats.sqlite")
-            openDatabase()
-            createTables()
-            return
-        }
-        let transcriptedFolder = documentsPath.appendingPathComponent("Transcripted")
+        let paths = CoreStoragePaths.default
+        try? FileManager.default.createDirectory(
+            at: paths.statsDB.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        dbPath = paths.statsDB
+        openDatabase()
+        createTables()
+    }
 
-        // Create folder if needed
-        try? FileManager.default.createDirectory(at: transcriptedFolder, withIntermediateDirectories: true)
-
-        dbPath = transcriptedFolder.appendingPathComponent("stats.sqlite")
-
+    /// Public initializer that accepts a custom SQLite path.
+    /// Used by tests and by embedders (e.g. the Draft app) that want to store the stats
+    /// database outside the default `CoreStoragePaths.default` layout.
+    public init(path: String) {
+        dbPath = URL(fileURLWithPath: path)
+        try? FileManager.default.createDirectory(
+            at: dbPath.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         openDatabase()
         createTables()
     }

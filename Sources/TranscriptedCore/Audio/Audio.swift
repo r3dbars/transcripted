@@ -252,7 +252,12 @@ public class Audio: ObservableObject {
     // Callback for when recording starts (used for pre-loading models)
     public var onRecordingStart: (() -> Void)?
 
-    public init() {
+    /// Filesystem layout used for writing raw mic/system WAV captures.
+    /// Embedders can redirect captures by passing a custom `CoreStoragePaths` at init.
+    let paths: CoreStoragePaths
+
+    public init(paths: CoreStoragePaths = .default) {
+        self.paths = paths
         setup()
     }
 
