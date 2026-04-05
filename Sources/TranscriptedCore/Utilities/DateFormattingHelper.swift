@@ -2,7 +2,7 @@ import Foundation
 
 /// Centralized date formatting utilities with cached formatters for performance
 /// Eliminates duplicate DateFormatter initialization across the codebase
-enum DateFormattingHelper {
+public enum DateFormattingHelper {
 
     // MARK: - Cached Formatters (thread-safe, reused)
 
@@ -50,37 +50,37 @@ enum DateFormattingHelper {
 
     /// Format for audio filenames with millisecond precision
     /// Example: "2024-01-15_14-30-45-123"
-    static func formatFilenamePrecise(_ date: Date) -> String {
+    public static func formatFilenamePrecise(_ date: Date) -> String {
         filenamePreciseFormatter.string(from: date)
     }
 
     /// Format for transcript filenames without milliseconds
     /// Example: "2024-01-15_14-30-45"
-    static func formatFilename(_ date: Date) -> String {
+    public static func formatFilename(_ date: Date) -> String {
         filenameFormatter.string(from: date)
     }
 
     /// Format for user-facing display (medium date, short time)
     /// Example: "Jan 15, 2024 at 2:30 PM"
-    static func formatDisplay(_ date: Date) -> String {
+    public static func formatDisplay(_ date: Date) -> String {
         displayFormatter.string(from: date)
     }
 
     /// Format time only
     /// Example: "14:30:45"
-    static func formatTimeOnly(_ date: Date) -> String {
+    public static func formatTimeOnly(_ date: Date) -> String {
         timeOnlyFormatter.string(from: date)
     }
 
     /// Format ISO date only
     /// Example: "2024-01-15"
-    static func formatISODate(_ date: Date) -> String {
+    public static func formatISODate(_ date: Date) -> String {
         isoDateFormatter.string(from: date)
     }
 
     /// Format a TimeInterval as MM:SS
     /// Example: 125.0 -> "02:05"
-    static func formatDuration(_ interval: TimeInterval) -> String {
+    public static func formatDuration(_ interval: TimeInterval) -> String {
         let minutes = Int(interval) / 60
         let seconds = Int(interval) % 60
         return String(format: "%02d:%02d", minutes, seconds)
@@ -88,7 +88,7 @@ enum DateFormattingHelper {
 
     /// Format a TimeInterval as M:SS (no leading zero on minutes)
     /// Example: 125.0 -> "2:05"
-    static func formatDurationCompact(_ interval: TimeInterval) -> String {
+    public static func formatDurationCompact(_ interval: TimeInterval) -> String {
         let minutes = Int(interval) / 60
         let seconds = Int(interval) % 60
         return String(format: "%d:%02d", minutes, seconds)

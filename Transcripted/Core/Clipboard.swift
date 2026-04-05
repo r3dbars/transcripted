@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import UserNotifications
+import TranscriptedCore
 
 class Clipboard {
     static func copy(_ text: String) {

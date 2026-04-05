@@ -1,5 +1,6 @@
 // swift-tools-version: 5.9
 import PackageDescription
+import Foundation
 
 // TranscriptedCore — SPM library target extracted from Transcripted.
 //
@@ -17,8 +18,12 @@ import PackageDescription
 // Both .deps-libs and .deps-modules are symlinks pointing at Draft's build artifacts:
 //   .deps-libs    -> ../../../../Draft/deps-libs
 //   .deps-modules -> ../../../../Draft/deps-modules
+//
+// `#filePath` resolves to Package.swift's absolute location on disk, so the -I/-L
+// flags work whether swiftc is invoked from the package root (`swift test`) or from
+// a consumer like Xcode's SPM integration which sets -working-directory elsewhere.
 
-let repoRoot = "."
+let repoRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 
 let package = Package(
     name: "TranscriptedCore",

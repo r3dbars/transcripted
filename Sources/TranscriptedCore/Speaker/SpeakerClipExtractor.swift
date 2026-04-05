@@ -17,7 +17,7 @@ struct ClipResult {
 }
 
 @available(macOS 14.0, *)
-enum SpeakerClipExtractor {
+public enum SpeakerClipExtractor {
 
     /// Extract a 5-8 second audio clip per speaker from the system audio WAV.
     ///

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import TranscriptedCore
 
 // MARK: - Tray State (single source of truth for mutually exclusive overlays)
 
@@ -53,6 +54,48 @@ struct FloatingPanelView: View {
     private let frameWidth: CGFloat = PillDimensions.trayWidth + 40
 
     var body: some View {
+        mainStack
+            .frame(width: frameWidth)
+            .frame(maxHeight: .infinity, alignment: .bottom)
+            .animation(.spring(response: 0.25, dampingFraction: 0.85), value: trayState)
+            .modifier(eventHandlers)
+    }
+
+    // MARK: - Event Handlers (extracted to avoid compiler type-check timeout)
+
+    private var eventHandlers: some ViewModifier {
+        FloatingPanelEventHandlers(
+            audio: audio,
+            taskManager: taskManager,
+            pillStateManager: pillStateManager,
+            silenceThresholdSeconds: silenceThresholdSeconds,
+            showSilencePrompt: $showSilencePrompt,
+            silencePromptDismissed: $silencePromptDismissed,
+            trayState: $trayState,
+            transcriptStore: transcriptStore,
+            speakerNamingAppearDate: $speakerNamingAppearDate,
+            clickOutsideMonitor: $clickOutsideMonitor,
+            installEscapeMonitor: installEscapeMonitor,
+            removeEscapeMonitor: removeEscapeMonitor,
+            triggerErrorToast: triggerErrorToast
+        )
+    }
+
+    // MARK: - Error Toast
+
+    /// Trigger error toast notification - parses message into contextual error
+    private func triggerErrorToast(message: String) {
+        // Parse the error message to determine type and recovery hint
+        currentError = ContextualError.from(message: message)
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            showErrorToast = true
+        }
+    }
+
+    // MARK: - Main Stack (body broken up for type-checker)
+
+    @ViewBuilder
+    private var mainStack: some View {
         VStack(spacing: 0) {
             // MARK: - Top Spacer (pushes content to bottom)
             Spacer(minLength: 0)
@@ -110,164 +153,53 @@ struct FloatingPanelView: View {
             // MARK: - Pill Content (centered, morphs between states)
             pillContent
                 .contextMenu {
-                    if pillStateManager.state == .recording {
-                        Button(action: { audio.stop() }) {
-                            Label("Stop Recording", systemImage: "stop.fill")
-                        }
-                    } else if pillStateManager.state == .idle {
-                        Button(action: { audio.start() }) {
-                            Label("Start Recording", systemImage: "mic.fill")
-                        }
-                    }
-
-                    Button(action: { toggleTranscriptTray() }) {
-                        Label("View Transcripts", systemImage: "clock.arrow.circlepath")
-                    }
-
-                    Button(action: { openTranscriptsFolder() }) {
-                        Label("Open Transcripts Folder", systemImage: "folder")
-                    }
-
-                    if failedTranscriptionManager.failedTranscriptions.count > 0 {
-                        Button(action: { toggleTranscriptTray() }) {
-                            Label("Failed Transcriptions (\(failedTranscriptionManager.failedTranscriptions.count))", systemImage: "exclamationmark.triangle")
-                        }
-                    }
-
-                    Divider()
-
-                    Button(action: {
-                        NSApp.sendAction(Selector(("openSettings")), to: nil, from: nil)
-                    }) {
-                        Label("Settings...", systemImage: "gear")
-                    }
-
-                    Divider()
-
-                    Button(action: {
-                        NSApplication.shared.terminate(nil)
-                    }) {
-                        Label("Quit Transcripted", systemImage: "power")
-                    }
+                    pillContextMenu
                 }
                 .animation(.pillMorph, value: pillStateManager.state)
                 .padding(.bottom, 10)
         }
-        .frame(width: frameWidth)
-        .frame(maxHeight: .infinity, alignment: .bottom)
-        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: trayState)
-        .onChange(of: audio.silenceDuration) { _, duration in
-            // UX: Don't interrupt user flow - show amber ring indicator without forcing panel expansion
-            if audio.isRecording && duration >= silenceThresholdSeconds && !silencePromptDismissed && !showSilencePrompt {
-                showSilencePrompt = true
-            }
-        }
-        .onChange(of: audio.isRecording) { _, isRecording in
-            if !isRecording {
-                showSilencePrompt = false
-                silencePromptDismissed = false
-            }
-        }
-        // Dismiss transcript tray when processing starts (keep available during recording)
-        // Note: naming tray is NOT dismissed — it's sticky across pill state changes
-        .onChange(of: pillStateManager.state) { _, newState in
-            if newState == .processing && trayState == .transcripts {
-                withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
-                    trayState = .none
-                }
-            }
-        }
-        // Auto-show naming tray when a naming request arrives; auto-hide when it clears
-        .onChange(of: taskManager.speakerNamingRequest != nil) { _, hasRequest in
-            if hasRequest {
-                if pillStateManager.state == .idle {
-                    // Background processing just finished — pill has been idle.
-                    // Play completion sound as heads-up, then show naming tray
-                    // after a brief delay so it doesn't appear mid-drag.
-                    PillSounds.playComplete()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                            trayState = .speakerNaming
-                        }
-                    }
-                } else {
-                    // Pill is still in processing — show tray immediately
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                        trayState = .speakerNaming
-                    }
-                }
-            } else {
-                // Request cleared by handleNamingComplete — dismiss tray
-                withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
-                    trayState = .none
-                }
-                removeEscapeMonitor()
-            }
-        }
-        // Refresh transcript list when tray opens; manage escape key monitor
-        .onChange(of: trayState) { _, newState in
-            switch newState {
-            case .transcripts:
-                transcriptStore.refresh()
-                installEscapeMonitor()
-                // Install click-outside monitor separately: installEscapeMonitor() may return early
-                // if escape monitors are already set (e.g., after speakerNaming -> transcripts
-                // transition), leaving the click-outside monitor uninstalled.
-                if clickOutsideMonitor == nil {
-                    clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
-                        DispatchQueue.main.async {
-                            guard self.trayState == .transcripts else { return }
-                            withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
-                                self.trayState = .none
-                            }
-                        }
-                    }
-                }
-            case .speakerNaming:
-                speakerNamingAppearDate = Date()
-                installEscapeMonitor()
-            case .none:
-                speakerNamingAppearDate = nil
-                removeEscapeMonitor()
-            }
-        }
-        .onDisappear { removeEscapeMonitor() }
-        // Backup cleanup: if the hosting NSWindow is torn down without onDisappear firing,
-        // this catches the close notification and removes leaked monitors.
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
-            guard let window = notification.object as? NSPanel,
-                  window.level == .floating else { return }
-            removeEscapeMonitor()
-        }
-        // Trigger error toasts based on displayStatus changes
-        // (Success is now shown in-pill via SavedPillView, not as overlay)
-        // Note: Use Task to debounce rapid status changes and prevent
-        // "action tried to update multiple times per frame" warning
-        .onChange(of: taskManager.displayStatus) { _, newStatus in
-            Task { @MainActor in
-                if case .failed(let message) = newStatus {
-                    triggerErrorToast(message: message)
-                }
-            }
-        }
-        // Surface audio errors (mic denied, disk full, engine crash) as toasts
-        .onChange(of: audio.error) { _, newError in
-            if let message = newError {
-                triggerErrorToast(message: message)
-                // Clear so the same error can fire again on next attempt
-                audio.error = nil
-            }
-        }
     }
 
-    // MARK: - Error Toast
+    @ViewBuilder
+    private var pillContextMenu: some View {
+        if pillStateManager.state == .recording {
+            Button(action: { audio.stop() }) {
+                Label("Stop Recording", systemImage: "stop.fill")
+            }
+        } else if pillStateManager.state == .idle {
+            Button(action: { audio.start() }) {
+                Label("Start Recording", systemImage: "mic.fill")
+            }
+        }
 
-    /// Trigger error toast notification - parses message into contextual error
-    private func triggerErrorToast(message: String) {
-        // Parse the error message to determine type and recovery hint
-        currentError = ContextualError.from(message: message)
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-            showErrorToast = true
+        Button(action: { toggleTranscriptTray() }) {
+            Label("View Transcripts", systemImage: "clock.arrow.circlepath")
+        }
+
+        Button(action: { openTranscriptsFolder() }) {
+            Label("Open Transcripts Folder", systemImage: "folder")
+        }
+
+        if failedTranscriptionManager.failedTranscriptions.count > 0 {
+            Button(action: { toggleTranscriptTray() }) {
+                Label("Failed Transcriptions (\(failedTranscriptionManager.failedTranscriptions.count))", systemImage: "exclamationmark.triangle")
+            }
+        }
+
+        Divider()
+
+        Button(action: {
+            NSApp.sendAction(Selector(("openSettings")), to: nil, from: nil)
+        }) {
+            Label("Settings...", systemImage: "gear")
+        }
+
+        Divider()
+
+        Button(action: {
+            NSApplication.shared.terminate(nil)
+        }) {
+            Label("Quit Transcripted", systemImage: "power")
         }
     }
 
@@ -413,5 +345,182 @@ struct FloatingPanelView: View {
         let transcriptsFolder = TranscriptSaver.defaultSaveDirectory
         try? FileManager.default.createDirectory(at: transcriptsFolder, withIntermediateDirectories: true)
         NSWorkspace.shared.open(transcriptsFolder)
+    }
+}
+
+// MARK: - Event Handlers Modifier
+//
+// Extracted into its own ViewModifier because FloatingPanelView.body accumulated
+// enough chained `.onChange` modifiers that the Swift 5.9 type checker hit its
+// "unable to type-check in reasonable time" limit after the TranscriptedCore
+// extraction (types now cross a module boundary, which inflates inference cost).
+// Splitting the handler chain into a separate modifier gives the type checker a
+// much smaller subproblem to solve and keeps compile times reasonable.
+
+@available(macOS 26.0, *)
+private struct FloatingPanelEventHandlers: ViewModifier {
+    @ObservedObject var audio: Audio
+    @ObservedObject var taskManager: TranscriptionTaskManager
+    @ObservedObject var pillStateManager: PillStateManager
+
+    let silenceThresholdSeconds: TimeInterval
+    @Binding var showSilencePrompt: Bool
+    @Binding var silencePromptDismissed: Bool
+    @Binding var trayState: TrayState
+    @ObservedObject var transcriptStore: TranscriptStore
+    @Binding var speakerNamingAppearDate: Date?
+    @Binding var clickOutsideMonitor: Any?
+
+    let installEscapeMonitor: () -> Void
+    let removeEscapeMonitor: () -> Void
+    let triggerErrorToast: (String) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(FloatingPanelSilenceHandlers(
+                audio: audio,
+                silenceThresholdSeconds: silenceThresholdSeconds,
+                showSilencePrompt: $showSilencePrompt,
+                silencePromptDismissed: $silencePromptDismissed
+            ))
+            .modifier(FloatingPanelTrayHandlers(
+                audio: audio,
+                taskManager: taskManager,
+                pillStateManager: pillStateManager,
+                trayState: $trayState,
+                transcriptStore: transcriptStore,
+                speakerNamingAppearDate: $speakerNamingAppearDate,
+                clickOutsideMonitor: $clickOutsideMonitor,
+                installEscapeMonitor: installEscapeMonitor,
+                removeEscapeMonitor: removeEscapeMonitor
+            ))
+            .modifier(FloatingPanelErrorHandlers(
+                audio: audio,
+                taskManager: taskManager,
+                removeEscapeMonitor: removeEscapeMonitor,
+                triggerErrorToast: triggerErrorToast
+            ))
+    }
+}
+
+@available(macOS 26.0, *)
+private struct FloatingPanelSilenceHandlers: ViewModifier {
+    @ObservedObject var audio: Audio
+    let silenceThresholdSeconds: TimeInterval
+    @Binding var showSilencePrompt: Bool
+    @Binding var silencePromptDismissed: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: audio.silenceDuration) { _, duration in
+                if audio.isRecording && duration >= silenceThresholdSeconds && !silencePromptDismissed && !showSilencePrompt {
+                    showSilencePrompt = true
+                }
+            }
+            .onChange(of: audio.isRecording) { _, isRecording in
+                if !isRecording {
+                    showSilencePrompt = false
+                    silencePromptDismissed = false
+                }
+            }
+    }
+}
+
+@available(macOS 26.0, *)
+private struct FloatingPanelTrayHandlers: ViewModifier {
+    @ObservedObject var audio: Audio
+    @ObservedObject var taskManager: TranscriptionTaskManager
+    @ObservedObject var pillStateManager: PillStateManager
+    @Binding var trayState: TrayState
+    @ObservedObject var transcriptStore: TranscriptStore
+    @Binding var speakerNamingAppearDate: Date?
+    @Binding var clickOutsideMonitor: Any?
+    let installEscapeMonitor: () -> Void
+    let removeEscapeMonitor: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: pillStateManager.state) { _, newState in
+                if newState == .processing && trayState == .transcripts {
+                    withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                        trayState = .none
+                    }
+                }
+            }
+            .onChange(of: taskManager.speakerNamingRequest != nil) { _, hasRequest in
+                if hasRequest {
+                    if pillStateManager.state == .idle {
+                        PillSounds.playComplete()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                                trayState = .speakerNaming
+                            }
+                        }
+                    } else {
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                            trayState = .speakerNaming
+                        }
+                    }
+                } else {
+                    withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                        trayState = .none
+                    }
+                    removeEscapeMonitor()
+                }
+            }
+            .onChange(of: trayState) { _, newState in
+                switch newState {
+                case .transcripts:
+                    transcriptStore.refresh()
+                    installEscapeMonitor()
+                    if clickOutsideMonitor == nil {
+                        clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
+                            DispatchQueue.main.async {
+                                guard trayState == .transcripts else { return }
+                                withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                                    trayState = .none
+                                }
+                            }
+                        }
+                    }
+                case .speakerNaming:
+                    speakerNamingAppearDate = Date()
+                    installEscapeMonitor()
+                case .none:
+                    speakerNamingAppearDate = nil
+                    removeEscapeMonitor()
+                }
+            }
+    }
+}
+
+@available(macOS 26.0, *)
+private struct FloatingPanelErrorHandlers: ViewModifier {
+    @ObservedObject var audio: Audio
+    @ObservedObject var taskManager: TranscriptionTaskManager
+    let removeEscapeMonitor: () -> Void
+    let triggerErrorToast: (String) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onDisappear { removeEscapeMonitor() }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
+                guard let window = notification.object as? NSPanel,
+                      window.level == .floating else { return }
+                removeEscapeMonitor()
+            }
+            .onChange(of: taskManager.displayStatus) { _, newStatus in
+                Task { @MainActor in
+                    if case .failed(let message) = newStatus {
+                        triggerErrorToast(message)
+                    }
+                }
+            }
+            .onChange(of: audio.error) { _, newError in
+                if let message = newError {
+                    triggerErrorToast(message)
+                    audio.error = nil
+                }
+            }
     }
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import TranscriptedCore
 
 /// Step 5: Guided product demo — 8 micro-screens teaching the pill UI + live test recording
 @available(macOS 26.0, *)

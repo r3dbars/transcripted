@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import UniformTypeIdentifiers
+import TranscriptedCore
 
 /// Exports transcripts to Markdown (.md) or plain text (.txt) via NSSavePanel.
 @available(macOS 14.0, *)

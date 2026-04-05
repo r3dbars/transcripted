@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import TranscriptedCore
 
 /// Exports diagnostic bundles for bug reports.
 /// Collects app logs, system info, and crash reports into a ZIP

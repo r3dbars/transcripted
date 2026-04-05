@@ -1,4 +1,5 @@
 import SwiftUI
+import TranscriptedCore
 
 // MARK: - Aurora Processing View
 /// Clean processing view with a progress bar at the bottom of the capsule

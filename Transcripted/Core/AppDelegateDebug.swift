@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import AppKit
+import TranscriptedCore
 
 // MARK: - Debug Helpers (DEBUG builds only)
 
@@ -27,13 +28,13 @@ extension AppDelegate {
         // Seed DB with test profiles so merge suggestions appear
         let mkbhdEmbedding = (0..<256).map { _ in Float.random(in: -1...1) }
         let travisEmbedding = (0..<256).map { _ in Float.random(in: -1...1) }
-        let mkbhdProfile = speakerDB.addOrUpdateSpeaker(embedding: mkbhdEmbedding)
+        let mkbhdProfile = speakerDB.addOrUpdateSpeaker(embedding: mkbhdEmbedding, existingId: nil)
         speakerDB.setDisplayName(id: mkbhdProfile.id, name: "MKBHD", source: NameSource.userManual)
         // Bump call count by adding a few more times
         for _ in 0..<6 {
             _ = speakerDB.addOrUpdateSpeaker(embedding: mkbhdEmbedding, existingId: mkbhdProfile.id)
         }
-        let travisProfile = speakerDB.addOrUpdateSpeaker(embedding: travisEmbedding)
+        let travisProfile = speakerDB.addOrUpdateSpeaker(embedding: travisEmbedding, existingId: nil)
         speakerDB.setDisplayName(id: travisProfile.id, name: "Travis", source: NameSource.userManual)
         for _ in 0..<2 {
             _ = speakerDB.addOrUpdateSpeaker(embedding: travisEmbedding, existingId: travisProfile.id)
@@ -45,8 +46,8 @@ extension AppDelegate {
 
         // Create test naming entries — one unknown, one needing confirmation
         // Insert into DB so merge targets exist
-        let unknownProfile = speakerDB.addOrUpdateSpeaker(embedding: (0..<256).map { _ in Float.random(in: -1...1) })
-        let knownProfile = speakerDB.addOrUpdateSpeaker(embedding: (0..<256).map { _ in Float.random(in: -1...1) })
+        let unknownProfile = speakerDB.addOrUpdateSpeaker(embedding: (0..<256).map { _ in Float.random(in: -1...1) }, existingId: nil)
+        let knownProfile = speakerDB.addOrUpdateSpeaker(embedding: (0..<256).map { _ in Float.random(in: -1...1) }, existingId: nil)
 
         let entries = [
             SpeakerNamingEntry(

@@ -11,7 +11,7 @@ extension TranscriptionTaskManager {
     /// background task to avoid blocking the main thread with cascading queue.sync
     /// calls — each DB method synchronously locks a utility queue, and with 7+
     /// speakers this totals 15-20 blocking calls that freeze the UI.
-    func handleNamingComplete(
+    public func handleNamingComplete(
         updates: [SpeakerNameUpdate],
         transcriptURL: URL,
         micURL: URL,
@@ -85,7 +85,7 @@ extension TranscriptionTaskManager {
 
     /// Clean up any tasks stuck in pendingNaming state.
     /// Called from applicationWillTerminate to prevent orphaned audio files.
-    func cleanupPendingNaming() {
+    public func cleanupPendingNaming() {
         if let request = speakerNamingRequest {
             try? FileManager.default.removeItem(at: request.micAudioURL)
             try? FileManager.default.removeItem(at: request.systemAudioURL)

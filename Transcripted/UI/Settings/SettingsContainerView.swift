@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import AppKit
+import TranscriptedCore
 
 /// Single-page settings view — no sidebar, no tabs
 /// Top bar → Stats → Voice Fingerprints (collapsible) → Preferences
