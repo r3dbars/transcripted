@@ -196,3 +196,11 @@ public class TranscriptSaver {
         return savedURL
     }
 }
+
+// MARK: - TranscriptStorage conformance
+// Empty extension — protocol signatures match TranscriptSaver's static API exactly.
+// updateSpeakerNames and retroactivelyUpdateSpeaker live in RetroactiveSpeakerUpdater.swift
+// as static methods on TranscriptSaver. Added as part of Step 8 protocol wiring (merge-plan §5.1).
+
+@available(macOS 14.0, *)
+extension TranscriptSaver: TranscriptStorage {}

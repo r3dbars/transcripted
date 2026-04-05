@@ -2,29 +2,25 @@ import Foundation
 
 // MARK: - Stats Database Protocol
 // Conformer: StatsDatabase
+//
+// Thin read/write surface for recording history and daily activity. The protocol exposes
+// only the methods embedders need to substitute their own stats backend (e.g. Draft wants
+// to persist to its own store). Bulk aggregation helpers (monthly rollups, streak
+// computation, etc.) live directly on StatsDatabase and are not part of this protocol.
 
+@available(macOS 14.0, *)
 public protocol StatsStore {
-    /// Record a completed transcription
-    func recordTranscription(
-        date: String,
-        time: String,
-        durationSeconds: Int,
-        wordCount: Int,
-        speakerCount: Int,
-        processingTimeMs: Int,
-        transcriptPath: String,
-        title: String?
-    )
+    /// Record a completed transcription session. Writes are asynchronous under the hood,
+    /// so this call is fire-and-forget.
+    func recordSession(_ metadata: RecordingMetadata)
 
-    /// Get total recording count
-    func totalRecordingCount() -> Int
+    /// Get the total number of recordings stored.
+    func getTotalRecordingsCount() -> Int
 
-    /// Get total duration in seconds
-    func totalDurationSeconds() -> Int
+    /// Get recordings that fall within an inclusive date range, newest first.
+    func getRecordings(from startDate: Date, to endDate: Date) -> [RecordingMetadata]
 
-    /// Get recordings for a specific date
-    func recordingsForDate(_ date: String) -> [RecordingMetadata]
-
-    /// Get daily activity for a date range
-    func dailyActivity(from startDate: String, to endDate: String) -> [DailyActivity]
+    /// Check whether a recording has already been indexed at the given transcript path.
+    /// Used by TranscriptScanner to skip already-migrated files on re-run.
+    func recordingExists(transcriptPath: String) -> Bool
 }

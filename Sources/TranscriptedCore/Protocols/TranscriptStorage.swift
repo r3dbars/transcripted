@@ -1,11 +1,14 @@
 import Foundation
 
 // MARK: - Transcript Storage Protocol
-// Conformer: TranscriptSaver (static methods — protocol for future instance-based storage)
+// Conformer: TranscriptSaver (static-only — protocol mirrors the real static API so
+// embedders can substitute their own disk layout without wrapping in an instance type).
 
+@available(macOS 14.0, *)
 public protocol TranscriptStorage {
-    /// Save a transcription result to disk
-    /// - Returns: URL of saved transcript file, or nil on failure
+    /// Save a transcription result to disk.
+    /// - Returns: URL of saved transcript file, or nil on failure.
+    @discardableResult
     static func saveTranscript(
         _ result: TranscriptionResult,
         speakerMappings: [String: SpeakerMapping],
@@ -13,17 +16,19 @@ public protocol TranscriptStorage {
         speakerDbIds: [String: UUID],
         directory: URL?,
         meetingTitle: String?,
-        healthInfo: RecordingHealthInfo?
+        healthInfo: RecordingHealthInfo?,
+        notifier: TranscriptNotifier?
     ) -> URL?
 
-    /// Update speaker names in an existing transcript file
-    /// - Returns: true if the file was updated successfully
+    /// Update speaker names in an existing transcript file.
+    /// - Returns: true if the file was updated successfully.
     @discardableResult
     static func updateSpeakerNames(transcriptURL: URL, updates: [SpeakerNameUpdate]) -> Bool
 
-    /// Retroactively update a speaker name across existing transcripts
+    /// Retroactively update a speaker name across existing transcripts on disk.
     static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String)
 
-    /// Default save directory
+    /// Default save directory (reads UserDefaults override if the standalone app sets one,
+    /// otherwise `CoreStoragePaths.default.transcripts`).
     static var defaultSaveDirectory: URL { get }
 }

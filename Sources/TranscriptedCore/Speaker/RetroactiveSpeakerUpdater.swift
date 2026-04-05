@@ -8,7 +8,7 @@ extension TranscriptSaver {
     /// Finds transcripts by searching YAML for the speaker's db_id, extracts the old name,
     /// and replaces it in both YAML frontmatter and transcript body.
     /// Thread-safe: serialized via fileUpdateQueue to prevent concurrent file corruption.
-    static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String) {
+    public static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String) {
         fileUpdateQueue.sync {
             _retroactivelyUpdateSpeakerImpl(dbId: dbId, newName: newName)
         }
@@ -83,7 +83,7 @@ extension TranscriptSaver {
     ///   - updates: Speaker name updates from the naming flow
     /// - Returns: true if the file was updated successfully
     @discardableResult
-    static func updateSpeakerNames(transcriptURL: URL, updates: [SpeakerNameUpdate]) -> Bool {
+    public static func updateSpeakerNames(transcriptURL: URL, updates: [SpeakerNameUpdate]) -> Bool {
         guard !updates.isEmpty else { return true }
 
         return fileUpdateQueue.sync {
