@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		TC100003 /* TranscriptedCore in Frameworks */ = {isa = PBXBuildFile; productRef = TC100002 /* TranscriptedCore */; };
 		TC100010 /* ParakeetEngineAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = TC100011 /* ParakeetEngineAdapter.swift */; };
+		TC100020 /* TranscriptedNotificationsAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = TC100021 /* TranscriptedNotificationsAdapter.swift */; };
 		SSH00001 /* SystemSettingsHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = SSH00002 /* SystemSettingsHelper.swift */; };
 		MB000001 /* MenuBarStatRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = MB000002 /* MenuBarStatRow.swift */; };
 		4CAF116349811906B83C0406 /* ModelSetupStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF26FA6ED2054F3DCF8D0B45 /* ModelSetupStep.swift */; };
@@ -157,6 +158,7 @@
 
 /* Begin PBXFileReference section */
 		TC100011 /* ParakeetEngineAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParakeetEngineAdapter.swift; sourceTree = "<group>"; };
+		TC100021 /* TranscriptedNotificationsAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptedNotificationsAdapter.swift; sourceTree = "<group>"; };
 		MB000002 /* MenuBarStatRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarStatRow.swift; sourceTree = "<group>"; };
 		A1000002 /* TranscriptedApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptedApp.swift; sourceTree = "<group>"; };
 		A1000014 /* Clipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Clipboard.swift; sourceTree = "<group>"; };
@@ -474,6 +476,7 @@
 			children = (
 				MD000012 /* MeetingDetector.swift */,
 				TC100011 /* ParakeetEngineAdapter.swift */,
+				TC100021 /* TranscriptedNotificationsAdapter.swift */,
 				NG00000004 /* Protocols */,
 			);
 			path = Services;
@@ -886,6 +889,7 @@
 				SS001027 /* SettingsButtonStyles.swift in Sources */,
 				MD000011 /* MeetingDetector.swift in Sources */,
 				TC100010 /* ParakeetEngineAdapter.swift in Sources */,
+				TC100020 /* TranscriptedNotificationsAdapter.swift in Sources */,
 				A100091F /* SpeakerNamingView.swift in Sources */,
 				A10009E6 /* SpeakerNamingCard.swift in Sources */,
 				A10009E7 /* ClipAudioPlayer.swift in Sources */,
