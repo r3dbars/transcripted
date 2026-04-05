@@ -1,9 +1,16 @@
 # Draft + Transcripted Merge Plan (Phase 0 Deliverable)
 
 **Authors:** draft-mapper (owner), transcripted-mapper (contributor)
-**Status:** v5 for human review — end of Phase 0. Phase 2 execution starts only after human sign-off.
+**Status:** v6 for human review — end of Phase 0. Phase 2 execution starts only after human sign-off.
 **Inputs:** [draft-inventory.md](draft-inventory.md), [transcripted-inventory.md](transcripted-inventory.md)
 **Worktree:** `/Users/redbars/redbars/code/Draft/.claude/worktrees/transcripted-merge` on `feat/transcripted-merge`
+
+**v6 changes (since v5 / commit `4b02f3a`):**
+
+- **§5.4 Phase 2.0 step 2b added — champion `OfflineDiarizerConfig` snapshot file.** transcripted-mapper called out that the 11-field champion config values are the load-bearing DER tuning result and are NOT recoverable from code comments if anyone flattens them to `.default` during the rebuild. v6 adds a new Phase 2.0 sub-step: **before** the DER regression test, Lane D extracts Transcripted's existing champion config values (from wherever they live in the current pbxproj / source tree) and commits them to `docs/merge/fluidaudio-champion-config.md` as the canonical snapshot. The DER test then reads from that snapshot, not from ambient Transcripted source code. This makes the 11 values grep-able post-merge and survives the `git rm` of the committed FluidAudio binaries.
+- **§6.4 Option A/B clarification for Transcripted's standalone SpeechToTextEngine conformer.** transcripted-mapper flagged that v3's "Transcripted's standalone app target will need a local adapter" understates a product-level choice. Two options exist: (A) Transcripted standalone keeps shipping by vendoring Draft's TranscriptedCore + ParakeetEngine + MeetingSTTAdapter, in which case the "10-line file" is literally zero lines — Transcripted just imports from Draft. (B) Transcripted standalone stays a separate repo with its own FluidAudio wiring, in which case the 10-line adapter is real and looks exactly like the deleted `ParakeetService.swift`. The likely near-term path per transcripted-mapper's read is Option B (distinct menu-bar app shape, distinct user workflows), but this is a product call for human review. Added as a new sub-bullet inside §6.4 and a new `Human decision needed: which option?` callout inside §6.4.
+- **§5.1 step 8 AppServices rewrite scope verified.** transcripted-mapper asked whether the `AppServices` struct rewrite to `any <Protocol>` types is inside step 8 or a separate unlisted item. Verified: line 809 already lists it as an explicit sub-bullet of step 8 ("Rewrite `AppServices` struct to hold `any SpeechToTextEngine`, `any DiarizationEngine`, `any SpeakerStore`, etc., instead of concrete types. Update `makeDefault()` and all call sites."). No action needed, confirmed in v6 header for closure.
+- **§5.4 + §5.5 sequencing endorsement captured.** transcripted-mapper explicitly endorsed two sequencing choices for human review: (1) Phase 2.0 is a hard gate, not a parallel lane; (2) no Phase 2 work starts without the 11-field champion config snapshot committed to a greppable file. Both are now explicit in §5.4 (not just §0's risk framing).
 
 **v5 changes (since v4 / commit `28018eb`):**
 
@@ -876,6 +883,8 @@ Four ownership lanes. Each lane owns a disjoint set of directories + files. **No
    - `AudioSource` enum exposes `.system` and `.mic` cases (consumed by Core's dual-stream pipeline).
    - If any of these drift, file an issue and escalate to human — DO NOT silently patch Transcripted's source to match a regressed API without sign-off.
 
+2b. **Champion config snapshot — commit the 11 field values to a greppable file before anything else moves** (v6, from transcripted-mapper). The 11-field `OfflineDiarizerConfig` values are the load-bearing DER tuning result of whoever produced Transcripted's champion config. They are NOT recoverable from code comments if a rebuild flattens them to `.default`. Lane D extracts the current values from wherever they live in Transcripted's source (likely hard-coded in a factory method on `DiarizationService.swift` or in the pbxproj as preprocessor defines) and commits them to **`docs/merge/fluidaudio-champion-config.md`** — a new file containing a table of the 11 field names + their current values + a one-line note per field about what that value controls. This snapshot is the source-of-truth that the DER regression test (step 5) reads from. **Hard gate: no other Phase 2.0 work proceeds until this file exists and is committed.** Once committed, the DER test has a grep-able reference that survives the `git rm -r fluidaudio-libs/` step and any future FluidAudio version bump.
+
 3. Update Transcripted's `project.pbxproj` to point `LIBRARY_SEARCH_PATHS` at `$(SRCROOT)/../Draft/deps-libs` and `SWIFT_INCLUDE_PATHS` at `$(SRCROOT)/../Draft/deps-modules` (+ subdirs), and change `OTHER_LDFLAGS` from `-lFluidAudioAll` to `-lDraftDeps`. Do the same for `Tools/TranscriptedCLI/Package.swift` (change `-lFluidAudioCLI` to `-lDraftDeps`).
 
 4. Build Transcripted's Xcode app against the rebuilt binary. Run Transcripted's existing test suite. Verify meeting recording + transcription + diarization still work end-to-end against the rebuilt FluidAudio. Fix any API drift inside Transcripted's app sources (NOT yet inside Core — that's Lane A).
@@ -1022,7 +1031,13 @@ Judgment calls the human should confirm or resolve before Phase 2 starts.
 
 **Acceptance criterion:** the 6 protocols each have at least one concrete conformer visible to the Transcripted app build, `AppServices.swift` holds only protocol-typed properties, Transcripted's app still builds and runs, and `swift build -c release --product TranscriptedCore` succeeds with the `AppServices` rewrite landed.
 
-**Human decision still needed:** NONE on this question. Listed here for cross-reference from v1/v2 open questions.
+**v6 — Option A/B clarification for Transcripted's standalone `SpeechToTextEngine` conformer** (from transcripted-mapper). The "Transcripted's standalone app target needs a local adapter" note above hides a product-level choice:
+
+- **Option A — Transcripted standalone vendors Draft's TranscriptedCore.** Post-merge, Transcripted standalone continues shipping by depending on the merged Draft repo (or a subpath of it) and gets `ParakeetEngine` + `MeetingSTTAdapter` for free. The "10-line file" is literally zero lines — Transcripted just `import TranscriptedCore` and `import Draft` (or whichever module wraps ParakeetEngine) and uses the adapter Lane B already produced. This also means Transcripted standalone inherits any Draft-side improvements to STT automatically.
+
+- **Option B — Transcripted standalone stays a separate repo with its own FluidAudio wiring.** The 10-line adapter is real and looks exactly like the deleted `ParakeetService.swift` — a thin `AsrManager` wrapper that conforms to `SpeechToTextEngine`. Transcripted standalone keeps its current independence; no Draft dependency introduced. This is the path transcripted-mapper's read of the inventory suggests is likely given the distinct menu-bar app shape and distinct user workflows.
+
+**Human decision needed: which option?** Engineering recommendation is deferred to product/user call. If Option A: Lane A step 8's "local ParakeetEngineAdapter in Transcripted app target" sub-bullet is replaced with "add Draft dependency to Transcripted pbxproj." If Option B: the sub-bullet stays as-is and Lane A writes a 10-line `ParakeetEngineAdapter.swift` that lives at `Transcripted/App/ParakeetEngineAdapter.swift` (NOT in Core). Default assumption for the rest of the plan is Option B, per transcripted-mapper's read.
 
 ### 6.5 Storage path unification — shared with Transcripted or isolated to Draft?
 
