@@ -1,162 +1,83 @@
-# Services Folder
+# Services Folder (App Target)
 
-ML pipeline services, speaker database, audio processing utilities, meeting detection, and service protocols. 16 Swift files across root and Protocols/.
+Embedder adapters that conform to TranscriptedCore protocols, plus the meeting auto-detection scanner. 3 Swift files + `Protocols/` subdirectory.
+
+**IMPORTANT**: Prior to merge-plan Phase 2 Lane A extraction, this folder held 16 files including `ParakeetService`, `DiarizationService`, `SpeakerDatabase`, `SpeakerEmbeddingMatcher`, `SpeakerProfile*`, `EmbeddingClusterer`, `AudioResampler`, `SpeakerClipExtractor`. The ML-heavy code moved to `Sources/TranscriptedCore/` as a Swift Package. What remains here is only the glue between Core's protocols and concrete platform APIs (FluidAudio, UserNotifications) plus the NSWorkspace-based meeting detector.
 
 ## File Index
 
-### Root (10 files)
-
 | File | Actor | Purpose |
 |------|-------|---------|
-| `ParakeetService.swift` | @MainActor | Local ASR via FluidAudio's Parakeet TDT V3 CoreML. Batch only. Downloads via ModelDownloadService with mirror fallback. |
-| `DiarizationService.swift` | @MainActor | Dual-pipeline: Sortformer (streaming) + PyAnnote (offline). Downloads via ModelDownloadService with mirror fallback. |
-| `SpeakerDatabase.swift` | Utility queue | SQLite at ~/Documents/Transcripted/speakers.sqlite, core CRUD + schema, corruption detection with backup/recreate pattern, 0o600 permissions |
-| `SpeakerEmbeddingMatcher.swift` | Utility queue | Cosine similarity matching against stored speaker profiles (vDSP-accelerated) |
-| `SpeakerProfile.swift` | -- | SpeakerProfile struct (256-dim embeddings) + SpeakerMatchResult + NameSource constants (userManual) |
-| `SpeakerProfileMerger.swift` | Utility queue | Profile name updates, merging, pruning, and name variant lookup |
-| `EmbeddingClusterer.swift` | Static | 3-stage post-processing: pairwise merge (0.85 threshold), small cluster absorption (0.72/0.62 thresholds), DB-informed split (0.62 threshold) |
-| `AudioResampler.swift` | Static | AVAudioConverter-based resampling to 16kHz, WAV loading, slice extraction |
-| `SpeakerClipExtractor.swift` | Static | Extract per-speaker audio clips for naming UI playback, 0o600 permissions on temp clips and persistent clips |
-| `MeetingDetector.swift` | @MainActor | Monitors Zoom/Teams/Webex/FaceTime, auto-triggers recording |
+| `ParakeetEngineAdapter.swift` | @MainActor | App-target conformer for `TranscriptedCore.SpeechToTextEngine`. Wraps FluidAudio 0.7.9's `AsrManager` actor. Batch transcription only (Transcripted records first, then transcribes — no live streaming). Loads models from `Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/` via bundle. |
+| `TranscriptedNotificationsAdapter.swift` | @MainActor | App-target conformer for `TranscriptedCore.TranscriptNotifier`. Wraps `UNUserNotificationCenter`; sets `content.categoryIdentifier = "TRANSCRIPT_SAVED"` on saved-transcript notifications so `NotificationCoordinator`'s "Show in Finder" action button fires, and stashes the path in `userInfo["fileURL"]`. See `Transcripted/Core/CLAUDE.md` § "TranscriptNotifier wiring". |
+| `MeetingDetector.swift` | @MainActor | Monitors Zoom/Teams/Webex/FaceTime/Loom via NSWorkspace app launch/quit notifications + 1s polling. Auto-triggers recording when both mic + system audio are active for ≥5s; auto-stops after 15s silence. Only auto-stops recordings it auto-triggered. |
 
-### Protocols/ (6 files) — see Protocols/CLAUDE.md
+## Protocols/ subdirectory
 
-| File | Purpose |
-|------|---------|
-| `SpeechToTextEngine.swift` | Protocol for ASR (conformer: ParakeetService). Defines AudioSource enum. |
-| `DiarizationEngine.swift` | Protocol for speaker diarization (conformer: DiarizationService) |
-| `SpeakerStore.swift` | Protocol for speaker database (conformer: SpeakerDatabase) |
-| `AudioCaptureEngine.swift` | Protocol for audio recording (conformer: Audio) |
-| `StatsStore.swift` | Protocol for stats persistence (conformer: StatsDatabase) |
-| `TranscriptStorage.swift` | Protocol for transcript file I/O (conformer: TranscriptSaver) |
+Historical: `Transcripted/Services/Protocols/` used to hold the 6 Core protocols. Those protocol definitions moved to `Sources/TranscriptedCore/Protocols/` as part of the extraction. If a `Protocols/` folder still exists here it contains only app-target-specific shims or is empty.
 
-## Pipeline Order
+## Pipeline Order (reference)
+
 ```
-1. ParakeetService.transcribeSegment(samples, source) -> String
-2. DiarizationService.diarizeOffline(samples, sampleRate) -> [SpeakerSegment]
-3. EmbeddingClusterer.postProcess(segments, profiles, skipPairwiseMerge) -> [SpeakerSegment]
-4. SpeakerDatabase.matchSpeaker(embedding, threshold) -> SpeakerMatchResult?
+1. ParakeetEngineAdapter.transcribeSegment(samples, source) -> String     [this folder]
+2. DiarizationService.diarizeOffline(samples, sampleRate) -> [SpeakerSegment]    [Sources/TranscriptedCore/Services/]
+3. EmbeddingClusterer.postProcess(segments, profiles, skipPairwiseMerge) -> [SpeakerSegment]    [Sources/TranscriptedCore/Speaker/]
+4. SpeakerDatabase.matchSpeaker(embedding, threshold) -> SpeakerMatchResult?    [Sources/TranscriptedCore/Speaker/]
 ```
 
-## Key Data Types (SpeakerProfile.swift + TranscriptionTypes.swift)
+Only step 1 lives in this folder — the rest live in TranscriptedCore.
+
+## ParakeetEngineAdapter model state
+
 ```swift
-struct SpeakerSegment {
-    let speakerId: Int, startTime: Double, endTime: Double
-    let embedding: [Float]?    // 256-dim WeSpeaker
-    let qualityScore: Float    // 0-1
+enum ParakeetModelState: Equatable {
+    case notLoaded
+    case loading
+    case ready
+    case failed(String)
 }
-
-struct SpeakerProfile: Identifiable {
-    let id: UUID
-    var displayName: String?, nameSource: String?  // NameSource.userManual
-    var embedding: [Float]     // 256-dim average
-    var firstSeen: Date, lastSeen: Date, callCount: Int
-    var confidence: Double     // 0.5-1.0, +0.1 per update, capped at 1.0
-    var disputeCount: Int
-}
-
-struct SpeakerMatchResult { let profile: SpeakerProfile, similarity: Double }
 ```
 
-## Speaker DB Schema (SpeakerDatabase.swift)
-```sql
-CREATE TABLE speakers (
-    id TEXT PRIMARY KEY,          -- UUID string
-    display_name TEXT,
-    name_source TEXT DEFAULT NULL, -- "user_manual"
-    embedding BLOB NOT NULL,       -- 256-dim float32 binary
-    first_seen TEXT NOT NULL,      -- ISO8601
-    last_seen TEXT NOT NULL,
-    call_count INTEGER DEFAULT 1,
-    confidence REAL DEFAULT 0.5,
-    dispute_count INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-```
-WAL mode, busy_timeout 5000ms, 0o600 permissions. All writes via dedicated utility queue.
+`@Published modelState` drives the status dot in the floating pill. Bundle layout expected: `Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/` with 6 CoreML model packages (encoder, decoder, joint). If models are missing, `ModelDownloadService` (in `Sources/TranscriptedCore/Services/`) downloads them from HuggingFace with mirror fallback.
 
-## SpeakerDatabase Key Methods (split across SpeakerDatabase + SpeakerEmbeddingMatcher + SpeakerProfileMerger)
-- `matchSpeaker(embedding:, threshold: 0.6)` -> best match above threshold via cosine similarity (vDSP-accelerated) — SpeakerEmbeddingMatcher
-- `addOrUpdateSpeaker(embedding:, existingId:)` -> NEW: confidence=0.5, callCount=1. UPDATE: EMA blend (alpha=0.15), confidence += 0.1, callCount += 1 — SpeakerDatabase
-- `setDisplayName(id:, name:, source:)` -> updates name + source provenance — SpeakerProfileMerger
-- `allSpeakers()`, `getSpeaker(id:)`, `deleteSpeaker(id:)` — SpeakerDatabase
-- `findProfilesByName(_:)` (fuzzy, with name variants) — SpeakerProfileMerger
-- `mergeProfiles(sourceId:, into:)` -> blend by callCount weight, atomic transaction — SpeakerProfileMerger
-- `pruneWeakProfiles()` -> deletes unnamed AND callCount<=1 AND confidence<=0.5 AND age>1hr — SpeakerProfileMerger
-- `mergeProfilesByName()` -> merges profiles that ended up with the same name (e.g., "Jenny Wen") — SpeakerDatabase
-- `getColumnNames(tableName:)` -> PRAGMA table_info with compile-time allowlist validation for SQL injection prevention — SpeakerDatabase
+## TranscriptedNotificationsAdapter details
 
-## Cosine Similarity Thresholds (vary by context)
-| Context | Threshold | Purpose |
-|---------|-----------|---------|
-| `matchSpeaker()` default | 0.60 | New segment matching |
-| Pairwise merge (EmbeddingClusterer) | 0.85 | Very conservative cluster merge |
-| Small cluster absorption | 0.72 | Merge short interjections |
-| Micro-cluster absorption (<10s) | 0.62 | Absorb noise fragments (above codec similarity range) |
-| DB-informed split per-segment | 0.62 | Re-separate mixed clusters |
-| Adaptive threshold (1 segment) | 0.85 | High certainty for single segment |
-| Adaptive threshold (2-3 segments) | 0.78 | Moderate caution |
-| Adaptive threshold (4+ segments) | 0.70 | Reliable mean embedding |
+- Guards on `UNUserNotificationCenter.getNotificationSettings(...).authorizationStatus == .authorized` before delivery to avoid `UNErrorDomain` error 1.
+- Uses unique per-notification identifiers (`transcript-saved-<UUID>`) so multiple saves don't collapse into a single notification.
+- `requestNotificationPermission()` is a no-op because permission is requested during `AppDelegate.registerNotificationCategories()` at launch.
+- `notifyTranscriptionFailed(errorMessage:)` posts a plain "Transcription Failed" notification without any action button (no category tag).
 
-## EmbeddingClusterer 3-Stage Pipeline (EmbeddingClusterer.swift)
-```
-postProcess(segments, existingProfiles, skipPairwiseMerge):
-  Stage 1 - Pairwise Merge (skip for PyAnnote, VBx already handles):
-    Union-find graph, merge clusters with mean similarity >= 0.85
-  Stage 2 - Small Cluster Absorption:
-    Micro-clusters (<10s): absorb at 0.62 threshold (above codec similarity range)
-    Clusters with 3+ segments protected from absorption (real speaker)
-    Small clusters (10-30s): absorb at 0.72 threshold
-  Stage 3 - DB-Informed Split:
-    Per-segment matching against known profiles (threshold 0.62)
-    Minimum 8 segments per profile to claim ownership
-    Splits mixed clusters where diarizer merged 2+ speakers
-```
+## MeetingDetector
 
-## MeetingDetector (MeetingDetector.swift)
-- **Known apps**: Zoom (`us.zoom.xos`), Teams (`com.microsoft.teams2`), Webex, FaceTime, Loom
-- **Detection**: NSWorkspace app launch/quit notifications + 1s polling
-- **Auto-start trigger**: Both mic + system audio > 0.02 for >= 5 seconds
-- **Auto-stop**: 15 seconds of silence grace period
-- **Manual override**: Only auto-stops recordings it auto-triggered, not manual ones
-
-## AudioResampler (AudioResampler.swift)
-- `loadAndResample(url:, targetRate: 16000)` -> hardware-accelerated via AVAudioConverter
-- Streams in 30-second chunks to avoid memory spikes
-- Handles stereo-to-mono + rate conversion in one pass
-- Single `convert()` call to avoid AVAudioConverter terminal state bug
-
-## SpeakerClipExtractor (SpeakerClipExtractor.swift)
-- Extracts per-speaker clips for naming UI: prefers single long utterance >= 3s, else concatenates (cap 8s)
-- Persistent clips at `~/Documents/Transcripted/speaker_clips/{speakerId}.wav`
-- Overwrites on subsequent recordings (keeps latest voice sample)
-
-## Name Variants (SpeakerProfileMerger.swift)
-Hardcoded lookup table: mike/michael/mikey, nate/nathan/nathaniel, dave/david, alex/alexander/alexandra, dan/daniel/danny, matt/matthew, chris/christopher, nick/nicholas, rob/robert/bob, + 15 more. Also substring matching.
-
-## Key Splits from Original Files
-- `SpeakerDatabase.swift` was split into: SpeakerDatabase (core CRUD + schema), SpeakerEmbeddingMatcher (matching), SpeakerProfile (data models), SpeakerProfileMerger (name management, merging, pruning)
-- All 6 Protocols/ files are new -- extracted interfaces for dependency injection via AppServices
+| Field | Value |
+|---|---|
+| Zoom bundle ID | `us.zoom.xos` |
+| Teams bundle ID | `com.microsoft.teams2` |
+| Webex bundle ID | `Cisco-Systems.Spark` |
+| FaceTime bundle ID | `com.apple.FaceTime` |
+| Loom bundle ID | `com.loom.desktop` |
+| Auto-start threshold | mic + system audio level > 0.02 for ≥ 5 seconds |
+| Auto-stop threshold | 15 seconds of combined silence |
+| Manual override | MeetingDetector only auto-stops recordings it auto-started; manual recordings must be stopped manually |
 
 ## Threading Rules
-- **SpeakerDatabase, SpeakerEmbeddingMatcher, SpeakerProfileMerger** -- dedicated utility queue (`com.transcripted.speakerdb`), NOT @MainActor
-- **ParakeetService, DiarizationService, MeetingDetector** -- @MainActor
-- **EmbeddingClusterer, AudioResampler, SpeakerClipExtractor** -- static methods, called from pipeline threads
 
-## Model Download Resilience (via Core/ModelDownloadService.swift)
-Both ML services (Parakeet, Diarization) use `ModelDownloadService` for resilient downloads:
-- **Mirror fallback**: Primary `huggingface.co` -> fallback `hf-mirror.com`
-- **Retry**: Exponential backoff (2s, 5s, 10s), max 3 attempts per mirror
-- **Error classification**: `DownloadErrorKind` (networkOffline, tlsFailure, timeout, diskSpace, serverError, unknown) with user-friendly messages
-- **Network check**: NWPathMonitor reachability probe with 3s timeout
-- Services call `ModelDownloadService.withRetry()` for Parakeet/Diarization
-- Errors classified via `ModelDownloadService.classifyError()` and surfaced to UI as `OnboardingState.modelErrorKind`
+- All three files in this folder are `@MainActor`.
+- The ML code they delegate to (FluidAudio's `AsrManager`, Core's `DiarizationService`) is also `@MainActor`.
+- `SpeakerDatabase` (in `Sources/TranscriptedCore/Speaker/`) is the exception — it uses a dedicated utility queue, NOT `@MainActor`.
 
-## Gotchas
-- EMA alpha=0.15 is SLOW: takes 6-7 updates to meaningfully shift a speaker profile
-- Embeddings can be both `nil` AND empty `[]` -- check both
-- SpeakerDatabase silently returns in-memory dummy profiles if DB open fails (logs CRITICAL)
-- Quality filter cascades: EmbeddingClusterer hardcodes qualityScore >= 0.3 AND duration >= 1.0s
-- New speaker IDs from EmbeddingClusterer start above max existing ID (can create gaps)
-- Pruning is conservative: only deletes unnamed profiles after 1 hour
-- WAL mode leaves .sqlite-wal and .sqlite-shm files alongside DB (expected)
+## Where pre-extraction code lives now
+
+If older CLAUDE.md or comments reference these paths, they've moved:
+
+| Old path (`Transcripted/Services/...`) | New path |
+|---|---|
+| `ParakeetService.swift` | Split: protocol stays in `Sources/TranscriptedCore/Protocols/SpeechToTextEngine.swift`; FluidAudio adapter is now `Transcripted/Services/ParakeetEngineAdapter.swift` (this folder) |
+| `DiarizationService.swift` | `Sources/TranscriptedCore/Services/DiarizationService.swift` |
+| `SpeakerDatabase.swift` + `SpeakerEmbeddingMatcher.swift` + `SpeakerProfile.swift` + `SpeakerProfileMerger.swift` | `Sources/TranscriptedCore/Speaker/` |
+| `EmbeddingClusterer.swift` | `Sources/TranscriptedCore/Speaker/EmbeddingClusterer.swift` |
+| `AudioResampler.swift` | `Sources/TranscriptedCore/Audio/AudioResampler.swift` |
+| `SpeakerClipExtractor.swift` | `Sources/TranscriptedCore/Speaker/SpeakerClipExtractor.swift` |
+| `Protocols/SpeechToTextEngine.swift` + 5 others | `Sources/TranscriptedCore/Protocols/` |
+
+See `Sources/TranscriptedCore/CLAUDE.md` (or the per-subfolder CLAUDE.md files under `Sources/TranscriptedCore/`) for full details on the moved code.
