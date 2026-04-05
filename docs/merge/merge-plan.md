@@ -1,9 +1,21 @@
 # Draft + Transcripted Merge Plan (Phase 0 Deliverable)
 
 **Authors:** draft-mapper (owner), transcripted-mapper (contributor)
-**Status:** v1 for human review — end of Phase 0. Phase 2 execution starts only after human sign-off.
+**Status:** v2 for human review — end of Phase 0. Phase 2 execution starts only after human sign-off.
 **Inputs:** [draft-inventory.md](draft-inventory.md), [transcripted-inventory.md](transcripted-inventory.md)
 **Worktree:** `<draft-root>/.claude/worktrees/transcripted-merge` on `feat/transcripted-merge`
+
+**v2 changes (since v1 / commit `95b0bde`):**
+
+- **§2.2, §2.3 corrected** — Draft's SPM sidecar lives in `build-deps.sh` as a regenerated heredoc (`.deps-build/Package.swift` is recreated on every run). The TranscriptedCore dependency must be added to the heredoc inside `build-deps.sh`, not to a standalone file. v1 described editing the generated file directly; those edits would be wiped on the next `build-deps.sh --force`.
+- **§3.2 STT seam corrected** — v1 implied `STTRouter` already exposes a pure-samples transcription entry point. Fact-check: `STTRouter.swift` (47 lines) forwards 5 `@Published` props from `ParakeetEngine` and exposes `startRecording()/stopRecording()/transcribe()/cancel()` — all tied to the recording lifecycle. There is NO `transcribeSegment(samples:source:)` method today. v2 fix: Phase 2 core-extractor lane adds a new `ParakeetEngine.transcribeSamples(_:source:) async throws -> String` that bypasses recording, and `SpeechToTextEngine` is satisfied by a thin adapter — not by `STTRouter` conformance.
+- **§4.1 + §6.2 FluidAudio version resolved** — Transcripted's committed `libFluidAudioAll.a` is unversioned (no `Package.resolved`, no commit trail). It is not a version mismatch with Draft's 0.7.9 — it is unknown provenance. v2 recommendation: rebuild Transcripted from SPM `FluidAudio 0.7.9` as a Phase 2 prerequisite and delete the committed 54 MB binary + modules. This removes §6.2 as a blocker.
+- **§4.5 model bundling expanded** — Added PyAnnote speaker-diarization CoreML models to the bundling plan alongside Parakeet TDT V3 and EOU. Transcripted downloads these via `ModelDownloadService` on first launch (~700 MB total for all diarization + speaker-embedding models); Draft's `build.sh` needs to either bundle them (like Parakeet today) or reuse `ModelDownloadService`.
+- **§5 lane reordering** — Added a new **Phase 2.0 prerequisite: FluidAudio rebuild** (fold into Lane D build-plumbing, must complete before Lane A core-extractor starts). This removes the unversioned-binary uncertainty before extraction touches any Core file.
+- **§6.1 macOS 26 audit** — Partial resolution noted: transcripted-mapper confirmed the pipeline heavy-lifting code is `nonisolated`, so the `@MainActor` scatter is less load-bearing than the 81 `@available(macOS 26.0, *)` gates. macOS 26 remains the biggest single blocker.
+- **§6.4 Protocols wiring** — Explicitly called out as **unresolved, owned by Phase 2 core-extractor lane**. AppServices has a TODO for wiring the 6 Services/Protocols/ protocols; core-extractor is ~100–150 LOC of mechanical glue and must happen before Lane B draft-integrator can use the Core library.
+- **§0 zero LLM overlap confirmed** — transcripted-mapper confirmed Transcripted has zero LLM calls in the entire codebase. Draft's Gemini 3 Flash REST/SSE and MLX (Qwen 3.5-4B-4bit) paths are therefore purely additive with no drafting overlap to resolve.
+- **§0 side benefit** — Merge also removes a 54 MB unversioned binary from the Transcripted git history (FluidAudio rebuild lane).
 
 All paths below are absolute unless otherwise noted. File path format: `<repo-root>/<relative>` where repo roots are `<draft-root>/` and `<transcripted-root>/`.
 
@@ -201,18 +213,20 @@ Ordered by blast radius; complete detail in transcripted-inventory.md §11.
 
 - **Shape Y — Minimal `Package.swift` at Draft root, `build.sh` stays authoritative.** `Package.swift` declares a single library target that just lists Draft's Sources + a dependency on TranscriptedCore. We never `swift build` Draft's app — `build.sh` keeps doing `swiftc` compilation. BUT `build.sh` gains one new step: before the `swiftc` invocation, it runs `swift build -c release --target TranscriptedCore` (triggered from a sidecar `Package.swift` inside `.deps-build/` — same pattern as `build-deps.sh`), then links the resulting `.a` and `.swiftmodule` into the final `swiftc` command via additional `-I` / `-L` flags. **This is the minimum-viable integration.** We recommend Shape Y.
 
-### 2.2 Recommended: Shape Y — sidecar `Package.swift` pattern
+### 2.2 Recommended: Shape Y — sidecar `Package.swift` pattern (regenerated from `build-deps.sh` heredoc)
 
-Draft's existing `.deps-build/Package.swift` already handles exactly this pattern for mlx-swift-lm and FluidAudio. We extend that pattern with a third dependency.
+**Important v2 correction:** Draft's `.deps-build/Package.swift` is **not a standalone file** — it is regenerated via heredoc by `build-deps.sh` on every run (`rm -rf "$DEPS_BUILD"` on line 27, followed by a `cat > "$DEPS_BUILD/Package.swift" <<'EOF' ... EOF` block). Manual edits to `.deps-build/Package.swift` are wiped on the next `bash build-deps.sh --force`. The correct intervention point is the heredoc **inside `build-deps.sh`**.
 
-**New file: `<draft-root>/.deps-build/Package.swift` (edits to existing)**
+**Edit: `<draft-root>/build-deps.sh` — modify the heredoc that generates `.deps-build/Package.swift`**
+
+Inside the existing `cat > "$DEPS_BUILD/Package.swift" <<'EOF' ... EOF` block, add the TranscriptedCore dependency and product:
 
 ```swift
 // swift-tools-version:5.9
 import PackageDescription
 
 let package = Package(
-    name: "DraftDepsBuild",
+    name: "DraftDeps",
     platforms: [.macOS(.v14)],                       // MUST match Draft's floor
     dependencies: [
         .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.9"),
@@ -240,25 +254,15 @@ let package = Package(
   - **Why not git URL pinned to `feat/extract-core`:** would force every Core tweak through a push-and-resolve cycle. Hurts velocity during Phase 2. Also risks partially-merged work being inaccessible to one side or the other.
 - 🔁 **Promote to git URL later** — once the merge stabilizes (Phase 3+), switch to `.package(url: "https://github.com/r3dbars/Transcripted.git", branch: "main")` so CI builds of Draft can run without a co-checked-out Transcripted repo. That's a 1-line future change.
 
+**Why this matters for Phase 2:** Lane D (`build-plumbing`) must edit `build-deps.sh` itself, NOT touch `.deps-build/Package.swift` directly. Any reviewer who opens `.deps-build/Package.swift` will see the regenerated file and must trace upward to the heredoc in `build-deps.sh`. Document this in the lane brief.
+
 ### 2.3 `build.sh` changes
 
-Add these steps to `<draft-root>/build.sh` before the current `# Compile` section (see `build.sh:84`):
+`build-deps.sh` already builds the unified static library `deps-libs/libDraftDeps.a` by compiling the `Shim` target — after adding TranscriptedCore as a dependency of that target, the single `libDraftDeps.a` will transitively embed TranscriptedCore's compiled code, and `deps-modules/` will contain the TranscriptedCore `.swiftmodule` for `import TranscriptedCore` to resolve via `-I deps-modules`.
 
-```bash
-# Step X: Build TranscriptedCore via sidecar SPM workspace (uses .deps-build/)
-if [ ! -f ".deps-build/.build/release/libTranscriptedCore.a" ] || [ "$1" = "--force" ]; then
-    echo "Building TranscriptedCore..."
-    (cd .deps-build && swift build -c release --product TranscriptedCore)
-fi
+**Net change to `build.sh` (the app build):** **zero code changes** — the existing `$DEPS_FLAGS` that already point at `deps-libs/libDraftDeps.a` and `deps-modules/` will cover TranscriptedCore after `build-deps.sh` regenerates them. The only operational change is: `bash build-deps.sh --force` must be run once after the v2 heredoc edit to rebuild `libDraftDeps.a` with the Core target included.
 
-# Step Y: Expose TranscriptedCore module + archive to the swiftc invocation
-TC_BUILD_DIR="$(pwd)/.deps-build/.build/release"
-CORE_FLAGS="-I $TC_BUILD_DIR -L $TC_BUILD_DIR -lTranscriptedCore"
-```
-
-Then the existing `swiftc` invocation adds `$CORE_FLAGS` to the link line (alongside `$DEPS_FLAGS`).
-
-Draft source files that want Core do `import TranscriptedCore` at the top. The existing Sources/ tree does not use SPM modules today, so this import is a new convention — but mechanically identical to importing any system framework since `swiftc` sees it via `-I`.
+Draft source files that want Core do `import TranscriptedCore` at the top. The existing Sources/ tree does not use SPM modules today, so this import is a new convention — but mechanically identical to importing any system framework since `swiftc` sees it via `-I deps-modules`.
 
 ### 2.4 New targets required in Draft
 
@@ -346,16 +350,60 @@ These are the Draft files that overlap Transcripted in functionality or naming. 
 
 #### `Sources/Speech/ParakeetEngine.swift` vs `TranscriptedCore/Services/ParakeetService.swift`
 
-- **Decision: KEEP BOTH.** These serve different use cases:
-  - Draft's `ParakeetEngine` is tuned for short, live dictation in the overlay — <30s buffers, low latency, live-display streaming via FluidAudio's EOU (end-of-utterance) 120M model. Streaming, interactive. Integrated with Draft's `STTRouter` and Apple Speech fallback.
-  - Transcripted's `ParakeetService` is tuned for long, batch transcription after recording completes — multi-minute meeting audio, full Parakeet TDT v3, no live display.
-  - The two share the underlying FluidAudio library but different managers (`AsrManager` in streaming mode vs batch mode).
-- **Justification:** unifying them would blur two genuinely different use cases. Draft's dictation path should NOT pay the latency cost of batch-mode Parakeet; Transcripted's long-audio path should NOT stream token-by-token.
-- **Owner:** no owner — both files live as-is in their respective locations. The `meeting-ui` lane can optionally create `Sources/Speech/ParakeetLongEngine.swift` as a thin wrapper around `TranscriptedCore.ParakeetService` for meeting-mode use, but that's an internal Draft convenience, not a merge decision.
+**v2 decision: DELETE `ParakeetService.swift` from TranscriptedCore. Add a new method `ParakeetEngine.transcribeSamples(_:source:) async throws -> String` and satisfy Core's `SpeechToTextEngine` protocol with a thin adapter that wraps Draft's `ParakeetEngine`.**
+
+**Why this is different from v1:**
+
+v1 said "keep both" on the assumption that streaming dictation and batch long-audio transcription are two different use cases served by two different `AsrManager` configurations. That's still partly true — but the split goes *inside* one FluidAudio `AsrManager` instance, not across two Swift wrapper types. `ParakeetService.swift` (117 LOC per transcripted-mapper) is a thin, batch-only wrapper around `AsrManager.transcribe(_:source:)`. Draft's `ParakeetEngine` already holds an `AsrManager` instance and can expose the same batch entry point with no duplication.
+
+**Fact-check on the "STTRouter is a strict superset" claim (from transcripted-mapper's reply):**
+
+transcripted-mapper suggested conforming `STTRouter` directly to Core's `SpeechToTextEngine` protocol. I fact-checked by reading `Sources/Speech/STTRouter.swift` (47 lines) and `Sources/Speech/ParakeetEngine.swift` — and **STTRouter does NOT have a pure-samples transcription entry point**. Its public API is:
+
+```swift
+// Sources/Speech/STTRouter.swift
+func startRecording() -> Bool          // gated on isModelLoaded, starts mic + tap
+func stopRecording()                   // stops mic + tap
+func transcribe() async -> String?     // batch-transcribes accumulated audio from STTRouter's own buffer
+func cancel()
+```
+
+All four methods are tied to STTRouter's internal recording lifecycle. There is no `transcribeSegment(samples: [Float], source: AudioSource) async throws -> String` method to match Core's `SpeechToTextEngine.transcribeSegment(samples:source:)` signature (per transcripted-inventory.md §5). STTRouter owns the mic; Core's pipeline owns its own audio capture and only hands Core an already-recorded `[Float]` buffer. Those are incompatible ownership models — conforming STTRouter to the protocol would either re-record audio that Core already captured, or ignore the `samples` parameter and transcribe STTRouter's own buffer instead.
+
+**v2 correct seam:** add a new nonisolated method on `ParakeetEngine` that takes raw samples and bypasses the recording lifecycle:
+
+```swift
+// Sources/Speech/ParakeetEngine.swift — NEW method, added by Phase 2 Lane B
+extension ParakeetEngine {
+    nonisolated func transcribeSamples(_ samples: [Float], source: AudioSource) async throws -> String {
+        guard let manager = asrManager else { throw STTError.modelNotLoaded }
+        // samples assumed 16kHz mono; caller resamples if needed.
+        return try await manager.transcribe(samples, source: source)
+    }
+}
+```
+
+Then a trivial adapter in `Sources/Meeting/MeetingSTTAdapter.swift` (new, Lane B) conforms to `TranscriptedCore.SpeechToTextEngine`:
+
+```swift
+struct MeetingSTTAdapter: SpeechToTextEngine {
+    let engine: ParakeetEngine
+    func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String {
+        try await engine.transcribeSamples(samples, source: source)
+    }
+}
+```
+
+**Effect on the merge:**
+
+- `TranscriptedCore/Services/ParakeetService.swift` is **deleted from Tier A** — one fewer file to extract, one fewer place FluidAudio is touched. Removes from §1.2.1 (Tier A) count (23 files instead of 24). Core's `Services/AppServices.swift` passes a `MeetingSTTAdapter` wherever it previously instantiated `ParakeetService`.
+- Draft's `ParakeetEngine` gains a ~10-line method. No impact on the existing short-dictation path since the new method doesn't touch `sampleBuffer`, `pendingSamples`, or `audioEngine`. EOU live-display logic is untouched.
+- **Owner:** Lane B (`draft-integrator`) owns the new method on `ParakeetEngine` + the adapter; Lane A (`core-extractor`) owns deleting `ParakeetService.swift` and rewiring `AppServices`.
+- **Risk mitigation:** the two callers never run concurrently in Phase 2 — meeting mode and dictation mode share the same `ParakeetEngine` instance but not at the same time (meeting mode is a new hotkey, dictation is existing). FluidAudio `AsrManager` is thread-safe for batch calls per its README; no additional locking needed.
 
 #### `Sources/Speech/STTRouter.swift` vs Transcripted's audio pipeline
 
-- **Decision: KEEP Draft's.** STTRouter is Draft-specific logic (route between Parakeet vs Apple Speech based on microphone type, BEACN workaround, etc.). Transcripted has no equivalent. No overlap.
+- **Decision: KEEP Draft's, and do NOT conform it to `SpeechToTextEngine`.** See the ParakeetEngine entry above for the reasoning — STTRouter owns the recording lifecycle, Core's `SpeechToTextEngine` expects to be given raw samples. The adapter lives in `Sources/Meeting/MeetingSTTAdapter.swift` and wraps `ParakeetEngine` directly, not STTRouter. STTRouter remains Draft-specific (dictation + overlay wiring) and untouched by the merge.
 
 #### `Sources/Capture/ContextCaptureEngine.swift` vs Transcripted audio capture
 
@@ -475,9 +523,9 @@ let profiles = db.allSpeakers().sorted { $0.lastSeen > $1.lastSeen }
 
 ### 4.1 FluidAudio consolidation — the single biggest build decision
 
-**Current state (per inventories):**
-- **Draft** builds FluidAudio from source via `<draft-root>/build-fluidaudio.sh` → `deps-libs/libDraftDeps.a` (unified static lib containing FluidAudio + mlx-swift-lm + deps). FluidAudio version: **0.7.9** (from `.deps-build/Package.swift`). Metallib + .swiftmodules go into `deps-libs/` / `deps-modules/`.
-- **Transcripted** ships a **committed** `fluidaudio-libs/libFluidAudioAll.a` (~54 MB) + `fluidaudio-modules/` with 18 prebuilt `.swiftmodule` bundles. FluidAudio version: **unconfirmed** — Open Question §6.2.
+**Current state (per inventories + transcripted-mapper follow-up):**
+- **Draft** builds FluidAudio from source via `<draft-root>/build-fluidaudio.sh` (legacy) and `build-deps.sh` (current) → `deps-libs/libDraftDeps.a` (unified static lib containing FluidAudio + mlx-swift-lm + deps). FluidAudio version: **0.7.9** (from the heredoc inside `build-deps.sh`). Metallib + .swiftmodules go into `deps-libs/` / `deps-modules/`.
+- **Transcripted** ships a **committed, unversioned** `fluidaudio-libs/libFluidAudioAll.a` (~54 MB) + `fluidaudio-modules/` with 18 prebuilt `.swiftmodule` bundles. **There is no `Package.resolved`, no commit message pinning the upstream revision, and no record of which FluidAudio tag produced the binary.** (Confirmed by transcripted-mapper after reviewing the Transcripted repo directly.) Separately, `TranscriptedCLI/` links against a different artifact (`-lFluidAudioCLI`) which is ALSO unversioned. This is not a version mismatch with Draft — it is unknown provenance.
 
 **Four strategy options** (from transcripted-inventory.md §11.7):
 
@@ -488,13 +536,16 @@ let profiles = db.allSpeakers().sorted { $0.lastSeen > $1.lastSeen }
 
 **Our recommendation: Option 1 (Consolidate on Draft's build).** Justification:
 
-- Draft already has the build pipeline working and documented (`build-fluidaudio.sh` + `build-deps.sh`).
+- Draft already has the build pipeline working and documented (`build-deps.sh`, current — supersedes the legacy `build-fluidaudio.sh`).
 - Draft's deps-libs is a *unified* lib (FluidAudio + mlx-swift-lm) — Transcripted doesn't need MLX, but a superset is fine because the linker only pulls in what's referenced. The ~54 MB overhead is already in Draft.
-- Transcripted's committed binaries are a git-history smell (per its own `0908d05 chore: rebuild FluidAudio binaries for Swift 6.3 toolchain` commit — the team already rebuilds them periodically).
-- One source of truth means version alignment is free.
+- Transcripted's committed binaries are a git-history smell (per its own `0908d05 chore: rebuild FluidAudio binaries for Swift 6.3 toolchain` commit — the team already rebuilds them periodically) AND have unknown upstream provenance.
+- One source of truth means version alignment is free — and "alignment" is moot because Transcripted currently has no version to align to.
+- **Side benefit:** deletes ~54 MB of committed binaries + ~18 `.swiftmodule` bundles from the Transcripted repo. Also removes the `TranscriptedCLI/`-specific `-lFluidAudioCLI` binary, since the CLI will relink against Draft's `deps-libs/libDraftDeps.a`.
 - **Fallback if this doesn't work:** Option 2 (xcframework) — larger effort but still merge-compatible.
 
-**Blocker:** requires that both repos agree on FluidAudio version (0.7.9 is Draft's; Transcripted's needs confirmation — see §6.2).
+**v2 — §6.2 resolution and Phase 2 prerequisite:**
+
+The "FluidAudio version alignment" uncertainty that was Open Question §6.2 in v1 is **resolved**: Transcripted's binary is unversioned, so there is nothing to align to — the correct action is to rebuild from a known upstream. Phase 2 introduces a new **prerequisite step (Phase 2.0)** owned by Lane D (`build-plumbing`): *Rebuild `fluidaudio-libs/` and `fluidaudio-modules/` in the Transcripted repo from `FluidAudio 0.7.9` via `build-deps.sh`, verify the existing Transcripted Xcode app still builds and its test suite still passes against the rebuilt binary, then delete the old committed binaries in the same commit.* This must complete before Lane A (`core-extractor`) starts moving files, because (a) the rebuild may surface API drift between the unknown committed version and 0.7.9 that Lane A would otherwise inherit mid-extraction, and (b) it unblocks the §4.1 Option 1 consolidation before any Draft-side integration touches the new Core module.
 
 ### 4.2 `Package.swift` for TranscriptedCore (to be created inside the Transcripted repo)
 
@@ -588,23 +639,53 @@ Edits to `<draft-root>/build.sh` entitlements heredoc (lines 45–58):
 
 ### 4.5 Resource changes in Draft
 
-Draft's `build.sh` already bundles Parakeet TDT v3 CoreML models into `Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/` (see `build.sh:16–23`) and the EOU streaming model (`build.sh:25–39`). **Those are the same models Transcripted's `ParakeetService` expects** when `bundleProvider` resolves to `Bundle.main.resourcePath`. **Zero new model downloads required.**
+Draft's `build.sh` already bundles Parakeet TDT v3 CoreML models into `Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/` (see `build.sh:16–23`) and the EOU streaming model (`build.sh:25–39`). **Those are the same models Transcripted's former `ParakeetService` (now deleted per §3.2) expects** when `bundleProvider` resolves to `Bundle.main.resourcePath`. Since Draft's `ParakeetEngine` owns the same models, **zero new model downloads required for Parakeet.**
 
-**New model bundle needed for diarization:** Transcripted's `DiarizationService` uses PyAnnote offline models. Draft does not currently ship these. New `build.sh` step:
+**New model bundles needed for meeting mode** (per transcripted-inventory.md §7 + transcripted-mapper follow-up on `ModelDownloadService`):
 
-```bash
-# Bundle PyAnnote diarization models (used by meeting mode)
-PYANNOTE_SRC="$HOME/Library/Application Support/FluidAudio/Models/pyannote-segmentation-3.0"
-if [ -d "$PYANNOTE_SRC" ]; then
-    echo "Bundling PyAnnote diarization model..."
-    mkdir -p "$APP_BUNDLE/Contents/Resources/pyannote-models"
-    cp -R "$PYANNOTE_SRC" "$APP_BUNDLE/Contents/Resources/pyannote-models/"
-else
-    echo "PyAnnote model not found — meeting diarization will attempt runtime download"
-fi
-```
+Transcripted's meeting pipeline depends on three additional CoreML model families that Draft does not currently ship:
 
-**Model size impact:** Parakeet (already bundled): ~600 MB. PyAnnote: ~17 MB. WeSpeaker embedding (for speaker DB): ~100 MB. **New bundle overhead ≈ 120 MB.** Not trivial, but acceptable.
+1. **PyAnnote speaker-diarization-coreml** (`DiarizationService` primary path) — multi-file CoreML bundle: `speaker-diarization-3.1-coreml`, ~17 MB. Used for offline whole-audio diarization after meeting ends.
+2. **Sortformer streaming diarizer** (`StreamingDiarizerManager`) — optional, used if streaming diarization is enabled. ~200 MB. Large enough to defer to runtime download unless explicitly opted in.
+3. **WeSpeaker 256-dim embeddings** (`SpeakerEmbedder` → `SpeakerDatabase`) — CoreML model producing per-segment embeddings for `matchSpeaker()` with adaptive thresholds. ~100 MB.
+
+**Two strategies (decide during Lane D):**
+
+- **Strategy A — Bundle at build time** (mirrors Draft's existing Parakeet approach). New `build.sh` steps:
+  ```bash
+  # Bundle PyAnnote + WeSpeaker + speaker-diarization-coreml for meeting mode
+  DIARIZE_SRC="$HOME/Library/Application Support/FluidAudio/Models"
+  for MODEL in speaker-diarization-3.1-coreml wespeaker-voxceleb-resnet34-LM; do
+      if [ -d "$DIARIZE_SRC/$MODEL" ]; then
+          echo "Bundling $MODEL..."
+          mkdir -p "$APP_BUNDLE/Contents/Resources/diarize-models"
+          cp -R "$DIARIZE_SRC/$MODEL" "$APP_BUNDLE/Contents/Resources/diarize-models/"
+      else
+          echo "$MODEL not found at $DIARIZE_SRC — meeting diarization will attempt runtime download"
+      fi
+  done
+  # Sortformer (streaming diarizer) — optional, ~200 MB. Bundle only if explicitly requested.
+  ```
+  Pros: offline-capable, matches Draft's Parakeet bundling pattern, no first-launch download stall.
+  Cons: pushes app bundle size to ~720 MB+ (from current ~600 MB) and requires every dev machine to have the models pre-downloaded at `$HOME/Library/Application Support/FluidAudio/Models/`.
+
+- **Strategy B — Extract Transcripted's `ModelDownloadService` into TranscriptedCore and use it for all non-Parakeet models at first-launch.** Per transcripted-mapper: Transcripted already has a progress-reporting model downloader that handles resumable HuggingFace downloads. If extracted as part of Tier B (§1.2.2), Draft can wire it behind a one-time "First-time meeting setup" flow in the menubar panel — user clicks "Set up meetings" → downloader shows progress → meeting hotkey unlocks when complete. Draft already uses `ParakeetModelState` (`parakeet/CLAUDE.md:38`) to gate its hotkey on model load; extending that pattern to meeting models is low-risk.
+  Pros: keeps Draft's bundle size small, matches Transcripted's existing UX, no dev machine dependency.
+  Cons: first-meeting-ever on a fresh install requires network access and ~320 MB of downloads.
+
+**Our recommendation:** **Strategy B** for PyAnnote and WeSpeaker (required for meeting mode), **Strategy A** as a future optimization once bundle-size budget allows. Sortformer stays download-only regardless (too large to bundle unconditionally). This keeps Phase 2's scope bounded — Lane D wires `ModelDownloadService` and gates the meeting hotkey on its state; it does not need to solve bundle size.
+
+**Model size summary (no bundling impact under Strategy B):**
+
+| Model | Size | Purpose | Strategy |
+|---|---|---|---|
+| Parakeet TDT v3 | ~600 MB | Transcription (batch) | **Bundled** (existing Draft flow) |
+| Parakeet EOU 120M | ~120 MB | Live-display streaming | **Bundled** (existing Draft flow) |
+| speaker-diarization-3.1-coreml (PyAnnote) | ~17 MB | Offline whole-audio diarization | **Downloaded on first meeting** |
+| WeSpeaker-256 | ~100 MB | Per-segment speaker embeddings | **Downloaded on first meeting** |
+| Sortformer (optional) | ~200 MB | Streaming diarization | **Downloaded on user opt-in only** |
+
+Under Strategy B, Draft's bundle size stays at ~720 MB (unchanged from today), and first-meeting cold start adds a one-time ~117 MB download.
 
 ### 4.6 build.sh final framework link line additions
 
@@ -695,55 +776,68 @@ Four ownership lanes. Each lane owns a disjoint set of directories + files. **No
 
 ### 5.4 Lane D — `build-plumbing` (owns FluidAudio consolidation + Transcripted's build-artifact retirement)
 
-**Directory boundary:** `<draft-root>/build-fluidaudio.sh` (edit if needed), `<transcripted-root>/fluidaudio-libs/` (delete), `<transcripted-root>/fluidaudio-modules/` (delete), `<transcripted-root>/Transcripted.xcodeproj/project.pbxproj` (edit — repoint `LIBRARY_SEARCH_PATHS` + `SWIFT_INCLUDE_PATHS`), any new `build-transcripted.sh` helper at Transcripted root.
+**Directory boundary:** `<draft-root>/build-deps.sh` (edit the heredoc to add TranscriptedCore — see §2.2), `<transcripted-root>/fluidaudio-libs/` (rebuild then delete), `<transcripted-root>/fluidaudio-modules/` (rebuild then delete), `<transcripted-root>/Transcripted.xcodeproj/project.pbxproj` (edit — repoint `LIBRARY_SEARCH_PATHS` + `SWIFT_INCLUDE_PATHS`), any new `build-transcripted.sh` helper at Transcripted root.
 
-**Work items:**
+**Work items — Phase 2.0 (prerequisite, runs FIRST, blocks Lane A):**
 
-1. Verify FluidAudio version alignment (§6.2). If versions differ, align on one before proceeding. If same, continue.
-2. Build Draft's `deps-libs/libDraftDeps.a` via `build-fluidaudio.sh` + `build-deps.sh`.
-3. Update Transcripted's `project.pbxproj` to:
-   - Set `LIBRARY_SEARCH_PATHS` to `$(SRCROOT)/../Draft/deps-libs`.
-   - Set `SWIFT_INCLUDE_PATHS` to include `$(SRCROOT)/../Draft/deps-modules` and its subdirs.
-   - Change `OTHER_LDFLAGS` from `-lFluidAudioAll` to `-lDraftDeps`.
-4. Verify Transcripted's Xcode build still produces a working app.
-5. `git rm -r Transcripted/fluidaudio-libs/ Transcripted/fluidaudio-modules/`. Commit: `build: consolidate FluidAudio on Draft's deps-libs`.
-6. Document the cross-repo dependency in `Transcripted/README.md` and/or `Transcripted/CLAUDE.md`.
+1. **Rebuild Transcripted's FluidAudio binary from SPM `FluidAudio 0.7.9`** using Draft's `build-deps.sh` pattern. Produces a known-provenance `libDraftDeps.a` and `.swiftmodule` set. No merge of the two codebases yet — this is a clean rebuild verified against the existing Transcripted Xcode app.
+2. Update Transcripted's `project.pbxproj` to point `LIBRARY_SEARCH_PATHS` at `$(SRCROOT)/../Draft/deps-libs` and `SWIFT_INCLUDE_PATHS` at `$(SRCROOT)/../Draft/deps-modules` (+ subdirs), and change `OTHER_LDFLAGS` from `-lFluidAudioAll` to `-lDraftDeps`.
+3. Build Transcripted's Xcode app against the rebuilt binary. Run Transcripted's existing test suite. Verify meeting recording + transcription + diarization still work end-to-end against the rebuilt FluidAudio. Fix any API drift inside Transcripted's app sources (NOT yet inside Core — that's Lane A).
+4. `git rm -r Transcripted/fluidaudio-libs/ Transcripted/fluidaudio-modules/` and any `-lFluidAudioCLI` artifacts used by `TranscriptedCLI/`. Commit: `build: rebuild FluidAudio from SPM 0.7.9, retire committed binaries`. **This commit deletes ~54 MB from the Transcripted repo.**
+5. Green light Lane A (`core-extractor`) to start.
 
-**Dependencies:** independent of Lanes A, B, C in terms of file locks. Sequencing: Lane D can start anytime but must merge **after** Lane A (Lane A adds Core which will be built against Draft's deps) to avoid a broken intermediate state in Transcripted.
+**Work items — Phase 2.3 (post-Lane-A consolidation):**
 
-**Effort order of magnitude:** small if version alignment is clean, medium if it isn't. Biggest risk is Xcode caching — `DerivedData` can hold onto stale paths. Mitigation: clean-build verification in the acceptance criteria.
+6. Add TranscriptedCore to Draft's `build-deps.sh` heredoc per §2.2. Run `bash build-deps.sh --force` on Draft. Verify `libDraftDeps.a` now contains TranscriptedCore symbols.
+7. Update Transcripted's `project.pbxproj` to also surface the new `TranscriptedCore` SPM product inside the Xcode app (so the Transcripted app keeps using Core as a library, not via `@testable import`).
+8. Document the cross-repo dependency in `Transcripted/README.md` and/or `Transcripted/CLAUDE.md`.
 
-**Acceptance criteria:** Transcripted's Xcode app still builds and runs. `git ls-files Transcripted/ | grep fluidaudio` returns zero files. The new relative path works from both a fresh clone and inside an existing checkout.
+**Dependencies:** Phase 2.0 blocks Lane A. Phase 2.3 requires Lane A + Lane B complete.
 
-### 5.5 Lane sequencing diagram
+**Effort order of magnitude:** medium — the rebuild itself is small, but validating the Transcripted app still works end-to-end against a potentially-newer FluidAudio surface area (diarization, speaker embeddings, OfflineDiarizerManager) is the real cost. Biggest risk is silent behavior drift between the unknown-version committed binary and 0.7.9 — Mitigation: run the full Transcripted test suite, plus a manual meeting end-to-end smoke, before proceeding to step 4.
+
+**Acceptance criteria:** Phase 2.0 — Transcripted's Xcode app builds and runs against the rebuilt FluidAudio, full test suite passes, meeting end-to-end smoke passes, `git ls-files Transcripted/ | grep fluidaudio` returns zero files. Phase 2.3 — Draft's `libDraftDeps.a` contains TranscriptedCore symbols, `import TranscriptedCore` resolves in Draft's `Sources/Meeting/` files, both apps build from a fresh checkout.
+
+### 5.5 Lane sequencing diagram (v2 — adds Phase 2.0 prerequisite)
 
 ```
-Milestone 0        Lane A                   Lane B                    Lane C                    Lane D
-    │              core-extractor           draft-integrator          meeting-ui                build-plumbing
-    │              │                         │                         │                         │
-    ▼              ▼                         │                         │                         │
- macOS 26         Create TranscriptedCore    │                         │                         │
- availability     ┌─ step 1–5 (mod builds)   │                         │                         │
- audit            │                          │                         │                         │
- (1 day?)         ▼ step 5 complete ────────►│                         │                         │
-                  ├─ step 6–7 (surgery)      ▼                         │                         │
-                  │                          Update Package.swift      │                         │
-                  │                          + build.sh                │                         │
-                  │                          + Sources/Meeting/        │                         │
-                  │                          └─ step 4 complete ──────►│                         │
-                  ▼ step 9 (regression)      ▼                         ▼                         │
-                  Transcripted app           Integration smoke         UI additions              │
-                  still builds               passes                    + hotkey wiring           │
-                  ▼                          ▼                         ▼                         │
-                  step 10 tag ───────────────┼─────────────────────────┼─────────────────────────►│
-                                                                                                  Consolidate
-                                                                                                  FluidAudio,
-                                                                                                  delete Transcripted
-                                                                                                  fluidaudio-libs
-                                                                                                  ▼
-                                                                                                  Both apps build,
-                                                                                                  end-to-end smoke
+Phase 2.0           Milestone 0       Lane A                  Lane B                  Lane C                  Lane D (cont.)
+prerequisite        (blocks A)        core-extractor          draft-integrator        meeting-ui              build-plumbing
+────────────        ──────────        ──────────────          ────────────────        ──────────              ──────────────
+Lane D Phase 2.0    │                 │                       │                       │                       │
+│                   │                 │                       │                       │                       │
+▼                   ▼                 ▼                       │                       │                       │
+Rebuild FluidAudio  macOS 26         Create TranscriptedCore  │                       │                       │
+from SPM 0.7.9      availability     ┌─ step 1–5 (mod builds) │                       │                       │
+in Transcripted     audit            │                        │                       │                       │
+repo, delete        (1 day?)         ▼ step 5 complete ──────►│                       │                       │
+committed binaries  │                ├─ step 6–7 (surgery)    ▼                       │                       │
+▼                   │                │                        Add TranscriptedCore    │                       │
+Transcripted app    │                │                        to build-deps.sh        │                       │
+still builds +      │                │                        heredoc + Meeting/      │                       │
+tests pass          │                │                        + Adapter + new         │                       │
+▼                   │                │                        transcribeSamples       │                       │
+Green-light         │                │                        └─ step 4 complete ────►│                       │
+Lane A ─────────────┴───────────────►│                        ▼                       ▼                       │
+                                     ▼ step 9 (regression)    Integration smoke       UI additions            │
+                                     Transcripted app         passes                  + hotkey wiring         │
+                                     still builds                                                             │
+                                     (Core now a library)                                                     │
+                                     ▼                        ▼                       ▼                       │
+                                     step 10 tag ─────────────┴───────────────────────┴──────────────────────►│
+                                                                                                               Phase 2.3:
+                                                                                                               TranscriptedCore
+                                                                                                               now consumed by
+                                                                                                               both Draft (via
+                                                                                                               deps-libs) AND
+                                                                                                               Transcripted
+                                                                                                               (via SPM product)
+                                                                                                               ▼
+                                                                                                               Both apps build,
+                                                                                                               end-to-end smoke
 ```
+
+**Critical v2 change:** Phase 2.0 (FluidAudio rebuild) MUST complete before Lane A starts. This removes the unknown-provenance binary from the Transcripted repo BEFORE any Core file moves, so Lane A is working against a known-version FluidAudio surface area throughout the extraction.
 
 ### 5.6 Cross-lane interface contracts
 
@@ -757,22 +851,24 @@ Milestone 0        Lane A                   Lane B                    Lane C    
 
 Judgment calls the human should confirm or resolve before Phase 2 starts.
 
-### 6.1 macOS deployment target — the single biggest decision
+### 6.1 macOS deployment target — the single biggest decision **(partial v2 resolution)**
 
 **The constraint:** Draft ships `LSMinimumSystemVersion 14.0` and `-target arm64-apple-macos14.0`. Transcripted has 81 `@available(macOS 26.0, *)` gates across 58 files.
 
-**The question:** Phase 2 Milestone 0 is an availability audit to determine how many of those 26-gates are actually load-bearing (i.e., API genuinely requires 26) vs conservative (chosen for UX/tooling reasons). Our strong expectation is that most Core candidate files will drop to 14.2 cleanly because:
+**v2 partial resolution from transcripted-mapper:** the pipeline heavy-lifting code (`TranscriptionPipeline`, `TranscriptionPipelineRunner`, `TranscriptionTaskManager`, `ParakeetService`, `DiarizationService`, `SpeakerDatabase`) is mostly `nonisolated` — the `@MainActor` scatter is surface-level (UI glue, `@Published` properties on top of the nonisolated workers). The 81 `@available(macOS 26.0, *)` gates remain the larger blocker than actor isolation. Many of them are likely conservative defaults applied repo-wide rather than genuine API requirements.
+
+**The question:** Phase 2 Milestone 0 is an availability audit to determine how many of those 26-gates are actually load-bearing vs conservative. Our strong expectation (unchanged from v1) is that most Core candidate files will drop to 14.2 cleanly because:
 - `ParakeetService` / `DiarizationService` / `SpeakerDatabase` already gate at `@available(macOS 14.0, *)` per inventory.
 - Audio capture (Tier C) will need 14.2+ anyway because CoreAudio process taps are 14.2+.
-- UI/Design/Onboarding files (which Draft doesn't consume) can keep their 26-gates.
+- UI/Design/Onboarding files (which Draft doesn't consume) can keep their 26-gates — they're Tier 0, not moving.
 
-**Human: do you accept this plan assuming the audit confirms most Core gates drop to 14.2?** If the audit surfaces a load-bearing 26-only API (e.g., Swift 6 concurrency strictness change or a new AV/CoreAudio API) in a Tier A/B file Draft needs, the merge scope shrinks to "everything except that file" OR Draft's deployment target rises (out of scope in our read).
+**Human: do you accept this plan assuming the audit confirms most Core gates drop to 14.2?** If the audit surfaces a load-bearing 26-only API (e.g., a new AV/CoreAudio API) in a Tier A/B file Draft needs, the merge scope shrinks to "everything except that file" OR Draft's deployment target rises (out of scope in our read).
 
-### 6.2 FluidAudio version alignment
+### 6.2 FluidAudio version alignment **(RESOLVED in v2 — no longer a blocker)**
 
-**The constraint:** Draft uses FluidAudio **0.7.9** (confirmed in `.deps-build/Package.swift`). Transcripted's committed `libFluidAudioAll.a` has an unknown version — transcripted-mapper is checking.
+**v1 stated:** Transcripted's committed `libFluidAudioAll.a` had an unknown version. v2 confirms there is no version to align to — Transcripted has no `Package.resolved`, no commit-message pinning, and no reproducible build of the committed binary (confirmed by transcripted-mapper after direct repo inspection). `TranscriptedCLI/`'s separate `-lFluidAudioCLI` is also unversioned.
 
-**The question:** if versions differ, which version wins? Our recommendation: align on **whichever version Transcripted's pipeline tests pass against**, since Transcripted has the more complex FluidAudio surface area (batch mode, offline diarization, WeSpeaker embeddings, OfflineDiarizerManager). Draft uses only streaming/EOU, which tends to be more stable across versions.
+**v2 decision:** this is not an alignment problem, it is a provenance problem. Resolution: Phase 2.0 prerequisite (Lane D) rebuilds Transcripted from SPM `FluidAudio 0.7.9` — the same version Draft already builds. This is documented in §4.1 and §5.4 above. **§6.2 is no longer an Open Question**; it is a work item in Phase 2.0. Listed here only for backward reference from the v1 open questions.
 
 ### 6.3 Does Draft reuse Transcripted's audio capture stack (Tier C) or keep its own?
 
@@ -782,11 +878,15 @@ Judgment calls the human should confirm or resolve before Phase 2 starts.
 
 **Human: confirm?**
 
-### 6.4 Protocols/ wiring — pre-work or Phase 2 work?
+### 6.4 Protocols/ wiring — pre-work or Phase 2 work? **(v2 — Phase 2 Lane A)**
 
 **The constraint:** Transcripted's `Services/Protocols/` has 6 protocols defined but no concrete type formally conforms. `AppServices.swift` has a TODO to switch. If this wiring happens **before** Phase 2 (owned by the Transcripted team outside this merge effort), Draft can inject alternate implementations cleanly. If it happens **inside** Phase 2's `core-extractor` lane, the lane takes longer and the regression surface on Transcripted's app grows.
 
-**Human: is the Transcripted team already planning to complete this TODO, or is it Phase 2 work?** Asked of transcripted-mapper via SendMessage while drafting this plan. Answer integrated in v2 if it arrives before commit.
+**v2 resolution (from transcripted-mapper + plan author alignment):** the Transcripted team has no pre-Phase-2 plan to complete the `AppServices` TODO, so Lane A (`core-extractor`) owns this work. Estimated size: ~100–150 LOC of mechanical conformance glue across the 6 protocols — each concrete service gets an `extension ParakeetService: SpeechToTextEngine { ... }`-style block, and `AppServices` is rewritten to hold protocol-typed properties instead of concrete types. This is added to Lane A work items between steps 5 (visibility changes) and 6 (Tier B surgery) because (a) it touches the same files Tier B surgery touches, and (b) Draft's adapter (`MeetingSTTAdapter` from §3.2) needs the protocol contracts to be stable before Lane B can write against them.
+
+**Acceptance criterion for the Protocols wiring sub-step:** the 6 `Services/Protocols/` protocols each have at least one concrete conformer inside Core, `AppServices.swift` holds only protocol-typed properties, and Transcripted's existing app still builds and runs. Lane B's `MeetingSTTAdapter` is the second conformer of `SpeechToTextEngine`, validating the protocol shape from the Draft side.
+
+**Remaining human judgment:** nothing — this is now a plan item, not a decision. Listed here for visibility.
 
 ### 6.5 Storage path unification — shared with Transcripted or isolated to Draft?
 
@@ -827,7 +927,7 @@ Things NOT in Phase 2 that the human should be aware of:
 - **Unifying Draft's `AppLogger` with Transcripted's `AppLogger`.** They keep separate log files (Draft → `~/draft-debug.log`, Core → `CoreStoragePaths.logs` path).
 - **Migration tools for users with existing Transcripted installs.** If we go with Option B (isolated storage, §6.5), a "migrate from Transcripted" feature is a post-merge item.
 - **Draft's `Sources/Capture/` rename** from "Capture" to something that reflects screenshot-only capture (suggested but not required).
-- **Retiring Draft's Gemini-based drafting path in favor of MLX.** Draft currently drafts via Gemini 3 Flash cloud API per draft-inventory — the CLAUDE.md still describes the older MLX-only path. Reconciling the two is Draft-internal work, not merge work.
+- **Reconciling Draft's Gemini 3 Flash REST/SSE path vs the older MLX-only path described in CLAUDE.md.** Draft currently drafts via Gemini 3 Flash (confirmed in draft-inventory); the root CLAUDE.md still describes the MLX-only path. Transcripted has **zero LLM calls anywhere in the codebase** (confirmed by transcripted-mapper), so the Gemini/MLX path is a Draft-internal documentation cleanup, not a merge concern — the merge is purely additive to the drafting layer.
 - **Swift 6 strict-concurrency adoption in Draft.** Draft compiles Swift 5 today; Core is Swift 6. Interop works. Upgrading Draft's source tree is separate.
 
 ---
@@ -836,14 +936,15 @@ Things NOT in Phase 2 that the human should be aware of:
 
 ### 7.1 File count summary
 
-| Bucket | Count | LOC (approx) |
-|---|---:|---:|
-| Tier A (no surgery) | 24 | ~3,500 |
-| Tier B (minor surgery) | 20 | ~7,000 |
-| Tier C (audio capture, conditional) | 8 | ~2,000 |
-| **TranscriptedCore total (A+B+C)** | **52** | **~12,500** |
-| Stays in Transcripted app target | ~90 | ~18,000 |
-| New files in Draft (Sources/Meeting/ + UI/) | ~10 | ~1,000 |
+| Bucket | Count | LOC (approx) | v2 note |
+|---|---:|---:|---|
+| Tier A (no surgery) | 23 | ~3,400 | `ParakeetService.swift` deleted (§3.2) |
+| Tier B (minor surgery) | 20 | ~7,000 | unchanged |
+| Tier C (audio capture, conditional) | 8 | ~2,000 | unchanged |
+| **TranscriptedCore total (A+B+C)** | **51** | **~12,400** | -1 file vs v1 |
+| Stays in Transcripted app target | ~90 | ~18,000 | unchanged |
+| New files in Draft (Sources/Meeting/ + UI/) | ~11 | ~1,050 | +1 for `MeetingSTTAdapter.swift` |
+| Deleted from Transcripted repo (Phase 2.0) | — | — | ~54 MB committed FluidAudio binaries + .swiftmodule bundles |
 
 ### 7.2 Cross-reference map
 
