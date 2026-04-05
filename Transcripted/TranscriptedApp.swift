@@ -114,11 +114,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         let parakeet = ParakeetEngineAdapter()
         let diarization = DiarizationService()
         let speakerDB = SpeakerDatabase.shared
+        let notifier = TranscriptedNotificationsAdapter()
         let tm = TranscriptionTaskManager(
             failedTranscriptionManager: ftm,
             speechToText: parakeet,
             diarization: diarization,
-            speakerStore: speakerDB
+            speakerStore: speakerDB,
+            notifier: notifier
         )
         failedTranscriptionManager = ftm
         audio = aud
