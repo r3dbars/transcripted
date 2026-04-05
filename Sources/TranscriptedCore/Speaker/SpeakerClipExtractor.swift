@@ -33,7 +33,7 @@ enum SpeakerClipExtractor {
     static func extractClips(
         systemAudioURL: URL,
         utterances: [TranscriptionUtterance],
-        speakerDB: SpeakerDatabase
+        speakerDB: any SpeakerStore
     ) throws -> [ClipResult] {
 
         let audioFile = try AVAudioFile(forReading: systemAudioURL)

@@ -1,6 +1,7 @@
 import Foundation
 @preconcurrency import AVFoundation
 import Accelerate
+import FluidAudio
 
 // MARK: - Local Multichannel Transcription
 
@@ -268,7 +269,7 @@ extension Transcription {
                         "profileCallCount": "\(matchedProfile?.callCount ?? 0)"
                     ])
                 } else {
-                    let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding)
+                    let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
                     speakerNewProfiles[speakerId] = newProfile.id
                     AppLogger.transcription.info("Speaker new profile created", [
                         "speakerId": "\(speakerId)",

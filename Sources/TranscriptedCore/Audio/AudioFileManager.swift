@@ -32,7 +32,7 @@ extension Audio {
         // Start system audio capture
         // CRITICAL: Create audio file BEFORE starting I/O proc to avoid CPU overload
         // Creating files in the audio callback causes HALC_ProxyIOContext::IOWorkLoop overload
-        if let capture = systemAudioCapture as? SystemAudioCapture {
+        if #available(macOS 14.2, *), let capture = systemAudioCapture as? SystemAudioCapture {
             AppLogger.audioSystem.info("System audio capture object exists, setting up")
             let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())

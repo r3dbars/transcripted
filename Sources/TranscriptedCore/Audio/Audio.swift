@@ -106,11 +106,11 @@ class Audio: ObservableObject {
     var sleepTimestamp: Date?
 
     /// Create a snapshot of recording health info for transcript metadata
-    /// Call this when stopping recording to capture health metrics
+    /// Call this when stopping recording to capture health metrics.
+    /// `systemAudioCapture` stays type-erased here; the `RecordingHealthInfo`
+    /// factory downcasts under `#available(macOS 14.2, *)` internally.
     func createHealthInfo() -> RecordingHealthInfo {
-        // Cast the type-erased systemAudioCapture to get buffer stats
-        let systemCapture = systemAudioCapture as? SystemAudioCapture
-        return RecordingHealthInfo.from(audio: self, systemCapture: systemCapture)
+        return RecordingHealthInfo.from(audio: self, systemCapture: systemAudioCapture)
     }
 
     var engine: AVAudioEngine?
@@ -272,16 +272,18 @@ class Audio: ObservableObject {
         }
 
         // Initialize system audio capture (macOS 14.2+)
-        let capture = SystemAudioCapture()
-        systemAudioCapture = capture
+        if #available(macOS 14.2, *) {
+            let capture = SystemAudioCapture()
+            systemAudioCapture = capture
 
-        // Observe SystemAudioCapture's errorMessage to update status
-        // This allows the UI to react to device changes and failures
-        systemAudioCancellable = capture.$errorMessage
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] errorMessage in
-                self?.updateSystemAudioStatus(fromError: errorMessage)
-            }
+            // Observe SystemAudioCapture's errorMessage to update status
+            // This allows the UI to react to device changes and failures
+            systemAudioCancellable = capture.$errorMessage
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] errorMessage in
+                    self?.updateSystemAudioStatus(fromError: errorMessage)
+                }
+        }
 
         // MARK: - Sleep/Wake Observers (Phase 1: Invisible Reliability)
         // Handle macOS sleep/wake to prevent AVAudioEngine crashes and log gaps
@@ -477,7 +479,7 @@ class Audio: ObservableObject {
         }
 
         // Stop system audio capture
-        if let capture = systemAudioCapture as? SystemAudioCapture {
+        if #available(macOS 14.2, *), let capture = systemAudioCapture as? SystemAudioCapture {
             capture.stop()
         }
 
@@ -559,7 +561,7 @@ class Audio: ObservableObject {
         }
 
         // Start system audio capture for level metering only (no file writing)
-        if let capture = systemAudioCapture as? SystemAudioCapture {
+        if #available(macOS 14.2, *), let capture = systemAudioCapture as? SystemAudioCapture {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 do {
                     try capture.prepare()
@@ -592,7 +594,7 @@ class Audio: ObservableObject {
             }
         }
 
-        if let capture = systemAudioCapture as? SystemAudioCapture {
+        if #available(macOS 14.2, *), let capture = systemAudioCapture as? SystemAudioCapture {
             capture.stopSync()  // Synchronous — avoids race where delayed cleanup destroys the next recording's tap
         }
 

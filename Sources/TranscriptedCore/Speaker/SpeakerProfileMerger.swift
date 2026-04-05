@@ -196,6 +196,13 @@ extension SpeakerDatabase {
         }
     }
 
+    /// Parameterless overload satisfying the `SpeakerStore.mergeDuplicates()` protocol witness.
+    /// Swift's witness matching does not accept default-argumented methods, so the store
+    /// protocol sees this zero-arg variant which forwards to the threshold-parameterized impl.
+    func mergeDuplicates() {
+        mergeDuplicates(threshold: 0.6)
+    }
+
     private func mergeDuplicatesImpl(threshold: Double) {
         let speakers = allSpeakersImpl()
         guard speakers.count > 1 else { return }

@@ -25,9 +25,18 @@ struct RecordingHealthInfo {
     let deviceSwitches: Int
     let gapDescriptions: [String]
 
-    /// Create health info from Audio instance
-    static func from(audio: Audio, systemCapture: SystemAudioCapture?) -> RecordingHealthInfo {
-        let successRate = systemCapture?.bufferSuccessRate ?? 1.0
+    /// Create health info from Audio instance.
+    /// `systemCapture` is typed as `Any?` so this file does not leak the
+    /// `@available(macOS 14.2, *)` gate from `SystemAudioCapture` across
+    /// the whole transcript-metadata surface. The cast is scoped to the
+    /// single line below, under an availability check.
+    static func from(audio: Audio, systemCapture: Any?) -> RecordingHealthInfo {
+        let successRate: Double
+        if #available(macOS 14.2, *), let sc = systemCapture as? SystemAudioCapture {
+            successRate = sc.bufferSuccessRate
+        } else {
+            successRate = 1.0
+        }
         return RecordingHealthInfo(
             captureQuality: CaptureQuality.from(successRate: successRate),
             audioGaps: audio.recordingGaps.count,

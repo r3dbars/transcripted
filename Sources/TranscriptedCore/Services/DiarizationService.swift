@@ -269,3 +269,9 @@ class DiarizationService: ObservableObject {
         return 0
     }
 }
+
+// MARK: - DiarizationEngine conformance
+// Empty extension — protocol signatures match DiarizationService's existing methods exactly.
+// Added as part of Step 8 protocol wiring (merge-plan §5.1).
+
+extension DiarizationService: DiarizationEngine {}
