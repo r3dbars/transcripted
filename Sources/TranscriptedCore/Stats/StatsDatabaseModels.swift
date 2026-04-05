@@ -3,17 +3,17 @@ import Foundation
 // MARK: - Data Models
 
 /// Metadata for a recording session
-struct RecordingMetadata: Identifiable {
-    let id: String
-    let date: Date
-    let durationSeconds: Int
-    let wordCount: Int
-    let speakerCount: Int
-    let processingTimeMs: Int
-    let transcriptPath: String?
-    let title: String?
+public struct RecordingMetadata: Identifiable {
+    public let id: String
+    public let date: Date
+    public let durationSeconds: Int
+    public let wordCount: Int
+    public let speakerCount: Int
+    public let processingTimeMs: Int
+    public let transcriptPath: String?
+    public let title: String?
 
-    init(
+    public init(
         id: String = UUID().uuidString,
         date: Date,
         durationSeconds: Int,
@@ -34,7 +34,7 @@ struct RecordingMetadata: Identifiable {
     }
 
     /// Format duration as "Xh Ym" or "Xm"
-    var formattedDuration: String {
+    public var formattedDuration: String {
         let hours = durationSeconds / 3600
         let minutes = (durationSeconds % 3600) / 60
 
@@ -46,7 +46,7 @@ struct RecordingMetadata: Identifiable {
     }
 
     /// Display title (fallback to date if no title)
-    var displayTitle: String {
+    public var displayTitle: String {
         if let title = title, !title.isEmpty {
             return title
         }
@@ -58,14 +58,21 @@ struct RecordingMetadata: Identifiable {
 }
 
 /// Daily activity summary
-struct DailyActivity {
-    let date: String // "yyyy-MM-dd"
-    let recordingCount: Int
-    let totalDurationSeconds: Int
-    let actionItemsCount: Int
+public struct DailyActivity {
+    public let date: String // "yyyy-MM-dd"
+    public let recordingCount: Int
+    public let totalDurationSeconds: Int
+    public let actionItemsCount: Int
+
+    public init(date: String, recordingCount: Int, totalDurationSeconds: Int, actionItemsCount: Int) {
+        self.date = date
+        self.recordingCount = recordingCount
+        self.totalDurationSeconds = totalDurationSeconds
+        self.actionItemsCount = actionItemsCount
+    }
 
     /// Intensity level (0-4) for heat map
-    var intensityLevel: Int {
+    public var intensityLevel: Int {
         if recordingCount == 0 {
             return 0
         } else if recordingCount == 1 {
@@ -80,7 +87,7 @@ struct DailyActivity {
     }
 
     /// Format total duration for display
-    var formattedDuration: String {
+    public var formattedDuration: String {
         let hours = totalDurationSeconds / 3600
         let minutes = (totalDurationSeconds % 3600) / 60
 

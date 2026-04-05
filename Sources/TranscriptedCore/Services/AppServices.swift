@@ -10,16 +10,14 @@ import Foundation
 // Diarization, stats, and the speaker store still default to Core's
 // concrete implementations via empty extensions (see Step 8 wiring).
 
-// NOTE: Visibility kept `internal` here — Step 6 (merge-plan §1.4) will
-// upgrade AppServices, the protocols, and ~44 other types to `public` in
-// one coordinated pass so the visibility surface can be reviewed together.
+@available(macOS 14.0, *)
 @MainActor
-struct AppServices {
-    let speechToText: any SpeechToTextEngine
-    let diarization: any DiarizationEngine
-    let speakerStore: any SpeakerStore
+public struct AppServices {
+    public let speechToText: any SpeechToTextEngine
+    public let diarization: any DiarizationEngine
+    public let speakerStore: any SpeakerStore
 
-    init(
+    public init(
         speechToText: any SpeechToTextEngine,
         diarization: any DiarizationEngine,
         speakerStore: any SpeakerStore

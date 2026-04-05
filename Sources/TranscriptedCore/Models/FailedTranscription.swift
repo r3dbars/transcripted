@@ -1,16 +1,16 @@
 import Foundation
 
 /// Represents a transcription that failed and can be retried
-struct FailedTranscription: Identifiable, Codable, Equatable {
-    let id: UUID
-    let timestamp: Date
-    let micAudioURL: URL
-    let systemAudioURL: URL?
-    let errorMessage: String
-    var retryCount: Int
-    var lastRetryDate: Date?
+public struct FailedTranscription: Identifiable, Codable, Equatable {
+    public let id: UUID
+    public let timestamp: Date
+    public let micAudioURL: URL
+    public let systemAudioURL: URL?
+    public let errorMessage: String
+    public var retryCount: Int
+    public var lastRetryDate: Date?
 
-    init(
+    public init(
         id: UUID = UUID(),
         timestamp: Date = Date(),
         micAudioURL: URL,
@@ -29,7 +29,7 @@ struct FailedTranscription: Identifiable, Codable, Equatable {
     }
 
     /// Returns a user-friendly formatted timestamp
-    var formattedTimestamp: String {
+    public var formattedTimestamp: String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
@@ -37,7 +37,7 @@ struct FailedTranscription: Identifiable, Codable, Equatable {
     }
 
     /// Returns a short error summary for display
-    var shortErrorMessage: String {
+    public var shortErrorMessage: String {
         // Truncate long error messages
         if errorMessage.count > 100 {
             return String(errorMessage.prefix(97)) + "..."
@@ -48,7 +48,7 @@ struct FailedTranscription: Identifiable, Codable, Equatable {
     /// Whether this failure could succeed if retried.
     /// Uses PipelineError classification when available, falls back to keyword matching
     /// for entries persisted before typed errors were introduced.
-    var isRetryable: Bool {
+    public var isRetryable: Bool {
         if let typed = pipelineError {
             return typed.isRetryable
         }
@@ -90,7 +90,7 @@ struct FailedTranscription: Identifiable, Codable, Equatable {
     }
 
     /// Checks if the audio files still exist on disk
-    func audioFilesExist() -> Bool {
+    public func audioFilesExist() -> Bool {
         let micExists = FileManager.default.fileExists(atPath: micAudioURL.path)
         if let systemURL = systemAudioURL {
             let systemExists = FileManager.default.fileExists(atPath: systemURL.path)
@@ -100,7 +100,7 @@ struct FailedTranscription: Identifiable, Codable, Equatable {
     }
 
     /// Returns the total size of audio files in bytes
-    func totalAudioSize() -> Int64? {
+    public func totalAudioSize() -> Int64? {
         var totalSize: Int64 = 0
 
         do {
@@ -123,7 +123,7 @@ struct FailedTranscription: Identifiable, Codable, Equatable {
     }
 
     /// Returns formatted file size string (e.g., "25.3 MB")
-    var formattedFileSize: String {
+    public var formattedFileSize: String {
         guard let bytes = totalAudioSize() else { return "Unknown" }
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file

@@ -8,7 +8,7 @@ extension SpeakerDatabase {
 
     /// Match an embedding against all stored speakers using cosine similarity.
     /// Returns the best match above threshold with similarity score, or nil for a new speaker.
-    func matchSpeaker(embedding: [Float], threshold: Double = 0.6) -> SpeakerMatchResult? {
+    public func matchSpeaker(embedding: [Float], threshold: Double = 0.6) -> SpeakerMatchResult? {
         return queue.sync {
             matchSpeakerImpl(embedding: embedding, threshold: threshold)
         }

@@ -11,7 +11,7 @@ extension SpeakerDatabase {
     ///   - id: Speaker profile UUID
     ///   - name: Display name to set
     ///   - source: Where the name came from (NameSource.userManual)
-    func setDisplayName(id: UUID, name: String, source: String = NameSource.userManual) {
+    public func setDisplayName(id: UUID, name: String, source: String = NameSource.userManual) {
         queue.sync {
             setDisplayNameImpl(id: id, name: name, source: source)
         }
@@ -56,7 +56,7 @@ extension SpeakerDatabase {
     }
 
     /// Reset dispute count (after user manual rename or name confirmed)
-    func resetDisputeCount(id: UUID) {
+    public func resetDisputeCount(id: UUID) {
         queue.sync { [self] in
             guard isDatabaseOpen else { return }
             let sql = "UPDATE speakers SET dispute_count = 0 WHERE id = ?;"
@@ -77,7 +77,7 @@ extension SpeakerDatabase {
 
     /// Find all profiles whose display name matches the query (using fuzzy name variant matching).
     /// Returns matching profiles sorted by call count descending (strongest profile first).
-    func findProfilesByName(_ name: String) -> [SpeakerProfile] {
+    public func findProfilesByName(_ name: String) -> [SpeakerProfile] {
         return queue.sync {
             let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return [] }
@@ -96,7 +96,7 @@ extension SpeakerDatabase {
     /// Merge source profile into target profile.
     /// Blends embeddings weighted by call count, sums call counts, bumps confidence.
     /// Transfers name from source if target has none. Deletes source profile.
-    func mergeProfiles(sourceId: UUID, into targetId: UUID) {
+    public func mergeProfiles(sourceId: UUID, into targetId: UUID) {
         queue.sync {
             mergeProfilesImpl(sourceId: sourceId, into: targetId)
         }
@@ -190,7 +190,7 @@ extension SpeakerDatabase {
     /// Scan all profiles for likely duplicates and merge them.
     /// Keeps the profile with more calls (better embedding). Transfers display name if the
     /// weaker profile has one and the stronger doesn't. Call after each recording.
-    func mergeDuplicates(threshold: Double = 0.6) {
+    public func mergeDuplicates(threshold: Double = 0.6) {
         queue.sync {
             mergeDuplicatesImpl(threshold: threshold)
         }
@@ -199,7 +199,7 @@ extension SpeakerDatabase {
     /// Parameterless overload satisfying the `SpeakerStore.mergeDuplicates()` protocol witness.
     /// Swift's witness matching does not accept default-argumented methods, so the store
     /// protocol sees this zero-arg variant which forwards to the threshold-parameterized impl.
-    func mergeDuplicates() {
+    public func mergeDuplicates() {
         mergeDuplicates(threshold: 0.6)
     }
 
@@ -252,7 +252,7 @@ extension SpeakerDatabase {
     /// After user naming, multiple profiles may end up with the same name (e.g., 4 profiles
     /// all named "Jenny Wen"). This merges them into a single profile — the one with the
     /// highest call count — using the existing weighted embedding blend from mergeProfilesImpl().
-    func mergeProfilesByName() {
+    public func mergeProfilesByName() {
         queue.sync {
             mergeProfilesByNameImpl()
         }
@@ -299,7 +299,7 @@ extension SpeakerDatabase {
     /// Remove unnamed, low-confidence, single-call profiles older than 1 hour.
     /// These are typically noise from AHC over-splitting one speaker into multiple clusters.
     /// Safe to call after each transcription — only prunes stale orphans, never recent profiles.
-    func pruneWeakProfiles() {
+    public func pruneWeakProfiles() {
         queue.sync {
             pruneWeakProfilesImpl()
         }

@@ -7,7 +7,7 @@ import SQLite3
 extension StatsDatabase {
 
     /// Get recordings for a specific date range (thread-safe, sync)
-    func getRecordings(from startDate: Date, to endDate: Date) -> [RecordingMetadata] {
+    public func getRecordings(from startDate: Date, to endDate: Date) -> [RecordingMetadata] {
         return queue.sync {
             getRecordingsImpl(from: startDate, to: endDate)
         }
@@ -44,7 +44,7 @@ extension StatsDatabase {
     // MARK: - Daily Activity Operations
 
     /// Get daily activity for a month (thread-safe, sync)
-    func getDailyActivity(for month: Date) -> [String: DailyActivity] {
+    public func getDailyActivity(for month: Date) -> [String: DailyActivity] {
         return queue.sync {
             getDailyActivityImpl(for: month)
         }
@@ -94,7 +94,7 @@ extension StatsDatabase {
     }
 
     /// Get all dates with activity (for streak calculation) (thread-safe, sync)
-    func getAllActiveDates() -> [String] {
+    public func getAllActiveDates() -> [String] {
         return queue.sync {
             getAllActiveDatesImpl()
         }
@@ -122,7 +122,7 @@ extension StatsDatabase {
     // MARK: - Aggregate Stats
 
     /// Get total recordings count (thread-safe, sync)
-    func getTotalRecordingsCount() -> Int {
+    public func getTotalRecordingsCount() -> Int {
         return queue.sync {
             getTotalRecordingsCountImpl()
         }
@@ -146,7 +146,7 @@ extension StatsDatabase {
     }
 
     /// Get total duration in seconds (thread-safe, sync)
-    func getTotalDurationSeconds() -> Int {
+    public func getTotalDurationSeconds() -> Int {
         return queue.sync {
             getTotalDurationSecondsImpl()
         }
@@ -170,7 +170,7 @@ extension StatsDatabase {
     }
 
     /// Get stats for the last N days (thread-safe, sync)
-    func getStatsForLastDays(_ days: Int) -> (recordings: Int, durationSeconds: Int) {
+    public func getStatsForLastDays(_ days: Int) -> (recordings: Int, durationSeconds: Int) {
         return queue.sync {
             getStatsForLastDaysImpl(days)
         }
@@ -206,7 +206,7 @@ extension StatsDatabase {
     // MARK: - Migration Support
 
     /// Check if a recording exists by transcript path (thread-safe, sync)
-    func recordingExists(transcriptPath: String) -> Bool {
+    public func recordingExists(transcriptPath: String) -> Bool {
         return queue.sync {
             recordingExistsImpl(transcriptPath: transcriptPath)
         }
@@ -232,7 +232,7 @@ extension StatsDatabase {
     }
 
     /// Clear all data (for testing) (thread-safe, async)
-    func clearAllData() {
+    public func clearAllData() {
         queue.async { [weak self] in
             self?.clearAllDataImpl()
         }

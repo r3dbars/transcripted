@@ -16,7 +16,7 @@
 import Foundation
 import Accelerate
 
-enum EmbeddingClusterer {
+public enum EmbeddingClusterer {
 
     /// Post-process diarization segments: merge fragmented speakers,
     /// absorb tiny orphan clusters, then split clusters that contain
@@ -26,7 +26,7 @@ enum EmbeddingClusterer {
     ///   fragmented speaker clusters. Pass `nil` to skip pairwise merge entirely.
     ///   Sortformer default: 0.85 (conservative). PyAnnote: 0.78 (VBx already does
     ///   initial clustering, but fragments dominant speakers on codec-compressed audio).
-    static func postProcess(
+    public static func postProcess(
         segments: [SpeakerSegment],
         existingProfiles: [SpeakerProfile],
         pairwiseMergeThreshold: Float? = 0.85

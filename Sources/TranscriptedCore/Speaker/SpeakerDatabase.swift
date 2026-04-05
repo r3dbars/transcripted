@@ -7,9 +7,9 @@ import Foundation
 import SQLite3
 
 @available(macOS 14.0, *)
-final class SpeakerDatabase: @unchecked Sendable {
+public final class SpeakerDatabase: @unchecked Sendable {
 
-    static let shared = SpeakerDatabase()
+    public static let shared = SpeakerDatabase()
 
     var db: OpaquePointer?
     var isDatabaseOpen = false
@@ -35,8 +35,9 @@ final class SpeakerDatabase: @unchecked Sendable {
         createTables()
     }
 
-    /// Testable initializer for unit tests (accessible via @testable import)
-    init(path: String) {
+    /// Public initializer that accepts a custom SQLite path.
+    /// Used by tests and by callers that want to store the database outside `~/Documents/Transcripted`.
+    public init(path: String) {
         dbPath = URL(fileURLWithPath: path)
         openDatabase()
         createTables()
@@ -216,7 +217,7 @@ final class SpeakerDatabase: @unchecked Sendable {
 
     /// Add a new speaker or update an existing one's embedding.
     /// When updating, uses exponential moving average to refine the voice fingerprint.
-    func addOrUpdateSpeaker(embedding: [Float], existingId: UUID? = nil) -> SpeakerProfile {
+    public func addOrUpdateSpeaker(embedding: [Float], existingId: UUID? = nil) -> SpeakerProfile {
         return queue.sync {
             addOrUpdateSpeakerImpl(embedding: embedding, existingId: existingId)
         }
@@ -381,7 +382,7 @@ final class SpeakerDatabase: @unchecked Sendable {
     // MARK: - Speaker Queries
 
     /// Get all stored speakers
-    func allSpeakers() -> [SpeakerProfile] {
+    public func allSpeakers() -> [SpeakerProfile] {
         return queue.sync { allSpeakersImpl() }
     }
 
@@ -407,7 +408,7 @@ final class SpeakerDatabase: @unchecked Sendable {
     }
 
     /// Get a single speaker by ID
-    func getSpeaker(id: UUID) -> SpeakerProfile? {
+    public func getSpeaker(id: UUID) -> SpeakerProfile? {
         return queue.sync { getSpeakerImpl(id: id) }
     }
 
@@ -431,7 +432,7 @@ final class SpeakerDatabase: @unchecked Sendable {
     }
 
     /// Delete a speaker profile
-    func deleteSpeaker(id: UUID) {
+    public func deleteSpeaker(id: UUID) {
         queue.sync { [self] in
             guard isDatabaseOpen else { return }
             let sql = "DELETE FROM speakers WHERE id = ?;"

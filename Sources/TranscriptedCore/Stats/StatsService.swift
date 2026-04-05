@@ -5,49 +5,49 @@ import Combine
 /// Provides reactive stats updates via Combine publishers
 @available(macOS 14.0, *)
 @MainActor
-final class StatsService: ObservableObject {
+public final class StatsService: ObservableObject {
 
-    static let shared = StatsService()
+    public static let shared = StatsService()
 
     // MARK: - Published Stats (for UI binding)
 
     /// Total hours transcribed (all time)
-    @Published private(set) var totalHoursTranscribed: Double = 0
+    @Published public private(set) var totalHoursTranscribed: Double = 0
 
     /// Total number of recordings
-    @Published private(set) var totalRecordings: Int = 0
+    @Published public private(set) var totalRecordings: Int = 0
 
     /// Current recording streak (consecutive days)
-    @Published private(set) var currentStreak: Int = 0
+    @Published public private(set) var currentStreak: Int = 0
 
     /// Longest streak ever
-    @Published private(set) var longestStreak: Int = 0
+    @Published public private(set) var longestStreak: Int = 0
 
     /// Average meeting duration in seconds
-    @Published private(set) var averageMeetingDuration: TimeInterval = 0
+    @Published public private(set) var averageMeetingDuration: TimeInterval = 0
 
     /// Monthly activity for heat map
-    @Published private(set) var monthlyActivity: [String: DailyActivity] = [:]
+    @Published public private(set) var monthlyActivity: [String: DailyActivity] = [:]
 
     /// Recent transcripts (last 3)
-    @Published private(set) var recentTranscripts: [RecordingMetadata] = []
+    @Published public private(set) var recentTranscripts: [RecordingMetadata] = []
 
     /// Stats for last 30 days
-    @Published private(set) var last30DaysRecordings: Int = 0
-    @Published private(set) var last30DaysDuration: Int = 0
+    @Published public private(set) var last30DaysRecordings: Int = 0
+    @Published public private(set) var last30DaysDuration: Int = 0
     /// Active days in current month
-    @Published private(set) var activeDaysThisMonth: Int = 0
+    @Published public private(set) var activeDaysThisMonth: Int = 0
 
     /// Motivational message based on stats
-    @Published private(set) var motivationalMessage: String = ""
+    @Published public private(set) var motivationalMessage: String = ""
 
     /// Today's stats (for menu bar)
-    @Published private(set) var todayRecordings: Int = 0
-    @Published private(set) var todayDurationSeconds: Int = 0
+    @Published public private(set) var todayRecordings: Int = 0
+    @Published public private(set) var todayDurationSeconds: Int = 0
 
     /// This week's stats (for menu bar)
-    @Published private(set) var weekRecordings: Int = 0
-    @Published private(set) var weekDurationSeconds: Int = 0
+    @Published public private(set) var weekRecordings: Int = 0
+    @Published public private(set) var weekDurationSeconds: Int = 0
 
     // MARK: - Private
 
@@ -63,7 +63,7 @@ final class StatsService: ObservableObject {
     // MARK: - Public Methods
 
     /// Refresh all stats from database
-    func refreshStats() async {
+    public func refreshStats() async {
         // Get all-time stats
         totalRecordings = database.getTotalRecordingsCount()
 
@@ -105,23 +105,23 @@ final class StatsService: ObservableObject {
     }
 
     /// Record a new session (called after transcription completes)
-    func recordSession(_ metadata: RecordingMetadata) async {
+    public func recordSession(_ metadata: RecordingMetadata) async {
         database.recordSession(metadata)
         await refreshStats()
     }
 
     /// Get activity for a specific month
-    func getActivityForMonth(_ date: Date) -> [String: DailyActivity] {
+    public func getActivityForMonth(_ date: Date) -> [String: DailyActivity] {
         return database.getDailyActivity(for: date)
     }
 
     /// Get all recordings
-    func getAllRecordings() -> [RecordingMetadata] {
+    public func getAllRecordings() -> [RecordingMetadata] {
         return database.getAllRecordings()
     }
 
     /// Check if database has data (for migration prompt)
-    func hasExistingData() -> Bool {
+    public func hasExistingData() -> Bool {
         return totalRecordings > 0
     }
 
@@ -219,7 +219,7 @@ final class StatsService: ObservableObject {
     // MARK: - Formatted Stats for Display
 
     /// Format total hours for display (e.g., "14.5h" or "2h 30m")
-    var formattedTotalHours: String {
+    public var formattedTotalHours: String {
         if totalHoursTranscribed >= 1 {
             return String(format: "%.1fh", totalHoursTranscribed)
         } else {
@@ -229,7 +229,7 @@ final class StatsService: ObservableObject {
     }
 
     /// Format last 30 days duration
-    var formattedLast30DaysDuration: String {
+    public var formattedLast30DaysDuration: String {
         let hours = last30DaysDuration / 3600
         let minutes = (last30DaysDuration % 3600) / 60
 
@@ -241,7 +241,7 @@ final class StatsService: ObservableObject {
     }
 
     /// Compact duration for menu bar (e.g., "0m", "47m", "1.5h", "2h")
-    static func formatDurationCompact(_ seconds: Int) -> String {
+    public static func formatDurationCompact(_ seconds: Int) -> String {
         let hours = Double(seconds) / 3600.0
         if hours >= 1 {
             let rounded = (hours * 10).rounded() / 10
@@ -254,12 +254,12 @@ final class StatsService: ObservableObject {
     }
 
     /// Format today's duration compactly
-    var formattedTodayDuration: String {
+    public var formattedTodayDuration: String {
         Self.formatDurationCompact(todayDurationSeconds)
     }
 
     /// Format this week's duration (e.g., "5h 30m")
-    var formattedWeekDuration: String {
+    public var formattedWeekDuration: String {
         let hours = weekDurationSeconds / 3600
         let minutes = (weekDurationSeconds % 3600) / 60
         if hours > 0 {
@@ -269,7 +269,7 @@ final class StatsService: ObservableObject {
     }
 
     /// Format average meeting duration
-    var formattedAverageDuration: String {
+    public var formattedAverageDuration: String {
         let minutes = Int(averageMeetingDuration / 60)
         if minutes >= 60 {
             let hours = minutes / 60
@@ -286,7 +286,7 @@ final class StatsService: ObservableObject {
 extension StatsService {
 
     /// Create a RecordingMetadata from local transcription result
-    static func createMetadata(
+    public static func createMetadata(
         from result: TranscriptionResult,
         transcriptPath: String?,
         title: String?

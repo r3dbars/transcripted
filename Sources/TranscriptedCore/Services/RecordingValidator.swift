@@ -2,29 +2,29 @@ import Foundation
 import AVFoundation
 
 /// Validates system conditions before starting a recording to prevent data loss
-class RecordingValidator {
+public enum RecordingValidator {
 
     /// Minimum required disk space in bytes (100MB)
-    static let minimumDiskSpace: Int64 = 100 * 1024 * 1024
+    public static let minimumDiskSpace: Int64 = 100 * 1024 * 1024
 
     /// Result of validation check
-    enum ValidationResult {
+    public enum ValidationResult {
         case success
         case failure(String)
 
-        var isValid: Bool {
+        public var isValid: Bool {
             if case .success = self { return true }
             return false
         }
 
-        var errorMessage: String? {
+        public var errorMessage: String? {
             if case .failure(let message) = self { return message }
             return nil
         }
     }
 
     /// Performs all pre-recording validation checks
-    static func validateRecordingConditions() -> ValidationResult {
+    public static func validateRecordingConditions() -> ValidationResult {
         // Validate custom save path if set
         if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
            !customPath.isEmpty {
@@ -110,7 +110,7 @@ class RecordingValidator {
     /// Resolves symlinks and rejects paths containing `..` traversals or targeting system directories.
     /// - Parameter url: The candidate save directory URL
     /// - Returns: `.success` if the path is safe, `.failure` with reason otherwise
-    static func validateSavePath(_ url: URL) -> ValidationResult {
+    public static func validateSavePath(_ url: URL) -> ValidationResult {
         // Security: check for ".." traversal components on the RAW path before symlink resolution.
         // After resolvingSymlinksInPath(), ".." components are already normalised away and would
         // never appear in pathComponents — making a post-resolution check useless dead code.

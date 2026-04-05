@@ -15,17 +15,25 @@ import Foundation
 import FluidAudio
 
 /// A speaker segment from diarization with optional voice fingerprint
-struct SpeakerSegment {
-    let speakerId: Int          // Unlimited speakers (PyAnnote offline) or 0-3 (Sortformer streaming)
-    let startTime: Double       // seconds
-    let endTime: Double         // seconds
-    let embedding: [Float]?     // 256-dim voice fingerprint (from WeSpeaker)
-    let qualityScore: Float     // Segment quality (0-1)
+public struct SpeakerSegment {
+    public let speakerId: Int          // Unlimited speakers (PyAnnote offline) or 0-3 (Sortformer streaming)
+    public let startTime: Double       // seconds
+    public let endTime: Double         // seconds
+    public let embedding: [Float]?     // 256-dim voice fingerprint (from WeSpeaker)
+    public let qualityScore: Float     // Segment quality (0-1)
 
-    var duration: Double { endTime - startTime }
+    public init(speakerId: Int, startTime: Double, endTime: Double, embedding: [Float]?, qualityScore: Float) {
+        self.speakerId = speakerId
+        self.startTime = startTime
+        self.endTime = endTime
+        self.embedding = embedding
+        self.qualityScore = qualityScore
+    }
+
+    public var duration: Double { endTime - startTime }
 }
 
-enum DiarizationModelState: Equatable {
+public enum DiarizationModelState: Equatable {
     case notLoaded
     case loading
     case ready
@@ -34,8 +42,8 @@ enum DiarizationModelState: Equatable {
 
 @available(macOS 14.0, *)
 @MainActor
-class DiarizationService: ObservableObject {
-    @Published var modelState: DiarizationModelState = .notLoaded
+public class DiarizationService: ObservableObject {
+    @Published public var modelState: DiarizationModelState = .notLoaded
 
     // Streaming pipeline (Sortformer) — for future real-time preview
     private var diarizerManager: DiarizerManager?
@@ -44,12 +52,14 @@ class DiarizationService: ObservableObject {
     private var offlineDiarizerManager: OfflineDiarizerManager?
     private var offlineModelState: DiarizationModelState = .notLoaded
 
-    var isReady: Bool { modelState == .ready }
+    public init() {}
+
+    public var isReady: Bool { modelState == .ready }
 
     // MARK: - Model Initialization
 
     /// Load all diarization models (streaming + offline) from the app bundle or download.
-    func initialize() async {
+    public func initialize() async {
         guard diarizerManager == nil, offlineDiarizerManager == nil else {
             AppLogger.transcription.debug("Diarization already initialized")
             return
@@ -155,7 +165,7 @@ class DiarizationService: ObservableObject {
 
     /// Run offline speaker diarization on audio samples using PyAnnote pipeline.
     /// Supports unlimited speakers. Samples should be 16kHz mono Float32.
-    nonisolated func diarizeOffline(samples: [Float], sampleRate: Int = 16000) async throws -> [SpeakerSegment] {
+    nonisolated public func diarizeOffline(samples: [Float], sampleRate: Int = 16000) async throws -> [SpeakerSegment] {
         guard let manager = await MainActor.run(body: { self.offlineDiarizerManager }) else {
             throw NSError(domain: "DiarizationService", code: 2, userInfo: [
                 NSLocalizedDescriptionKey: "Offline diarizer model not loaded"
@@ -185,7 +195,7 @@ class DiarizationService: ObservableObject {
     }
 
     /// Run offline speaker diarization on a WAV file.
-    nonisolated func diarizeOffline(audioURL: URL) async throws -> [SpeakerSegment] {
+    nonisolated public func diarizeOffline(audioURL: URL) async throws -> [SpeakerSegment] {
         let samples = try AudioResampler.loadAndResample(url: audioURL, targetRate: 16000)
         return try await diarizeOffline(samples: samples, sampleRate: 16000)
     }
@@ -194,7 +204,7 @@ class DiarizationService: ObservableObject {
 
     /// Run streaming speaker diarization on audio samples using Sortformer.
     /// Limited to 4 speakers. Samples should be 16kHz mono Float32.
-    nonisolated func diarizeStreaming(samples: [Float], sampleRate: Int = 16000) async throws -> [SpeakerSegment] {
+    nonisolated public func diarizeStreaming(samples: [Float], sampleRate: Int = 16000) async throws -> [SpeakerSegment] {
         guard let manager = await MainActor.run(body: { self.diarizerManager }),
               manager.isAvailable else {
             throw NSError(domain: "DiarizationService", code: 1, userInfo: [
@@ -224,14 +234,14 @@ class DiarizationService: ObservableObject {
     }
 
     /// Run streaming speaker diarization on a WAV file.
-    nonisolated func diarizeStreaming(audioURL: URL) async throws -> [SpeakerSegment] {
+    nonisolated public func diarizeStreaming(audioURL: URL) async throws -> [SpeakerSegment] {
         let samples = try AudioResampler.loadAndResample(url: audioURL, targetRate: 16000)
         return try await diarizeStreaming(samples: samples, sampleRate: 16000)
     }
 
     // MARK: - Cleanup
 
-    func cleanup() {
+    public func cleanup() {
         diarizerManager = nil
         offlineDiarizerManager = nil
         modelState = .notLoaded

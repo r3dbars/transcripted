@@ -4,7 +4,7 @@ import Combine
 // MARK: - Audio Capture Engine Protocol
 // Conformer: Audio
 
-protocol AudioCaptureEngine: ObservableObject {
+public protocol AudioCaptureEngine: ObservableObject {
     /// Whether audio is currently being recorded
     var isRecording: Bool { get }
 

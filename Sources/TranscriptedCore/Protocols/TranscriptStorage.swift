@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Transcript Storage Protocol
 // Conformer: TranscriptSaver (static methods — protocol for future instance-based storage)
 
-protocol TranscriptStorage {
+public protocol TranscriptStorage {
     /// Save a transcription result to disk
     /// - Returns: URL of saved transcript file, or nil on failure
     static func saveTranscript(

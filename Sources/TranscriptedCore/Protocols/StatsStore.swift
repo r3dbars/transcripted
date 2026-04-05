@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Stats Database Protocol
 // Conformer: StatsDatabase
 
-protocol StatsStore {
+public protocol StatsStore {
     /// Record a completed transcription
     func recordTranscription(
         date: String,

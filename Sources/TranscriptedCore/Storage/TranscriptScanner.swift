@@ -3,7 +3,7 @@ import Foundation
 /// Scans existing transcript files and migrates them to the stats database
 /// Used for initial migration when user first updates to version with dashboard
 @available(macOS 14.0, *)
-final class TranscriptScanner {
+public enum TranscriptScanner {
 
     /// Scan transcript folder and migrate to database
     /// - Parameters:
@@ -11,7 +11,7 @@ final class TranscriptScanner {
     ///   - progressHandler: Called with progress updates (0.0 to 1.0)
     /// - Returns: Number of transcripts migrated
     @discardableResult
-    static func migrateExistingTranscripts(
+    public static func migrateExistingTranscripts(
         from directory: URL? = nil,
         progressHandler: ((Double, String) -> Void)? = nil
     ) async -> Int {
@@ -218,7 +218,7 @@ final class TranscriptScanner {
     }
 
     /// Check if migration is needed
-    static func needsMigration() -> Bool {
+    public static func needsMigration() -> Bool {
         let database = StatsDatabase.shared
         let dbCount = database.getTotalRecordingsCount()
 

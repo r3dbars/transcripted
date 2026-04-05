@@ -53,7 +53,7 @@ extension TranscriptSaver {
 
     /// Format local transcript as markdown with YAML frontmatter
     @available(macOS 14.0, *)
-    static func formatTranscriptMarkdown(
+    public static func formatTranscriptMarkdown(
         result: TranscriptionResult,
         speakerMappings: [String: SpeakerMapping] = [:],
         speakerSources: [String: String] = [:],

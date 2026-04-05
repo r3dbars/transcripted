@@ -5,7 +5,7 @@ import AVFoundation
 // Users are more motivated when they can see visible progress
 // Simplified to 4 user-focused phases for cognitive clarity
 
-enum DisplayStatus: Equatable {
+public enum DisplayStatus: Equatable {
     case idle
 
     // Processing phases
@@ -18,7 +18,7 @@ enum DisplayStatus: Equatable {
     case failed(message: String)         // Error state
 
     /// Computed progress value (0.0 to 1.0) for UI progress bar
-    var progress: Double {
+    public var progress: Double {
         switch self {
         case .idle:
             return 0.0
@@ -37,7 +37,7 @@ enum DisplayStatus: Equatable {
     }
 
     /// User-friendly status text (outcome-oriented, not technical)
-    var statusText: String {
+    public var statusText: String {
         switch self {
         case .idle:
             return "Ready"
@@ -55,7 +55,7 @@ enum DisplayStatus: Equatable {
     }
 
     /// Icon for the status (SF Symbol name)
-    var icon: String {
+    public var icon: String {
         switch self {
         case .idle:
             return "circle"
@@ -69,7 +69,7 @@ enum DisplayStatus: Equatable {
     }
 
     /// Whether this is a "processing" state (show progress indicator)
-    var isProcessing: Bool {
+    public var isProcessing: Bool {
         switch self {
         case .gettingReady, .transcribing, .finishing:
             return true
@@ -79,15 +79,15 @@ enum DisplayStatus: Equatable {
     }
 }
 
-struct TranscriptionTask: Identifiable {
-    let id: UUID
-    let micURL: URL
-    let systemURL: URL?
-    let outputFolder: URL
-    let startTime: Date
-    let healthInfo: RecordingHealthInfo?
+public struct TranscriptionTask: Identifiable {
+    public let id: UUID
+    public let micURL: URL
+    public let systemURL: URL?
+    public let outputFolder: URL
+    public let startTime: Date
+    public let healthInfo: RecordingHealthInfo?
 
-    init(micURL: URL, systemURL: URL?, outputFolder: URL, healthInfo: RecordingHealthInfo? = nil) {
+    public init(micURL: URL, systemURL: URL?, outputFolder: URL, healthInfo: RecordingHealthInfo? = nil) {
         self.id = UUID()
         self.micURL = micURL
         self.systemURL = systemURL

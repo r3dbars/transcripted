@@ -10,21 +10,21 @@ import OSLog
 /// Usage:
 ///   AppLogger.audioMic.info("Started", ["sampleRate": "\(format.sampleRate)"])
 ///   AppLogger.pipeline.error("Transcription failed", ["error": "\(error)"])
-final class AppLogger: @unchecked Sendable {
-    static let shared = AppLogger()
+public final class AppLogger: @unchecked Sendable {
+    public static let shared = AppLogger()
 
     // MARK: - Subsystem Loggers
 
-    static let audio = SubsystemLogger("audio")
-    static let audioMic = SubsystemLogger("audio.mic")
-    static let audioSystem = SubsystemLogger("audio.system")
-    static let transcription = SubsystemLogger("transcription")
-    static let pipeline = SubsystemLogger("pipeline")
-    static let speakers = SubsystemLogger("speaker-db")
-    static let services = SubsystemLogger("services")
-    static let ui = SubsystemLogger("ui")
-    static let stats = SubsystemLogger("stats")
-    static let app = SubsystemLogger("app")
+    public static let audio = SubsystemLogger("audio")
+    public static let audioMic = SubsystemLogger("audio.mic")
+    public static let audioSystem = SubsystemLogger("audio.system")
+    public static let transcription = SubsystemLogger("transcription")
+    public static let pipeline = SubsystemLogger("pipeline")
+    public static let speakers = SubsystemLogger("speaker-db")
+    public static let services = SubsystemLogger("services")
+    public static let ui = SubsystemLogger("ui")
+    public static let stats = SubsystemLogger("stats")
+    public static let app = SubsystemLogger("app")
 
     let fileLogger: FileLogger
 
@@ -32,7 +32,7 @@ final class AppLogger: @unchecked Sendable {
         fileLogger = FileLogger()
     }
 
-    func log(level: String, subsystem: String, message: String, metadata: [String: String]?) {
+    public func log(level: String, subsystem: String, message: String, metadata: [String: String]?) {
         // Write to file logger (agent-readable)
         fileLogger.write(level: level, subsystem: subsystem, message: message, metadata: metadata)
 
@@ -48,7 +48,7 @@ final class AppLogger: @unchecked Sendable {
     }
 
     /// Synchronous flush — call from applicationWillTerminate
-    func flush() {
+    public func flush() {
         fileLogger.flush()
     }
 
@@ -61,26 +61,26 @@ final class AppLogger: @unchecked Sendable {
 
 /// Lightweight subsystem-scoped logger
 /// Provides clean callsite syntax: AppLogger.audioMic.info("Started")
-struct SubsystemLogger: Sendable {
-    let subsystem: String
+public struct SubsystemLogger: Sendable {
+    public let subsystem: String
 
-    init(_ subsystem: String) {
+    public init(_ subsystem: String) {
         self.subsystem = subsystem
     }
 
-    func debug(_ message: String, _ metadata: [String: String]? = nil) {
+    public func debug(_ message: String, _ metadata: [String: String]? = nil) {
         AppLogger.shared.log(level: "debug", subsystem: subsystem, message: message, metadata: metadata)
     }
 
-    func info(_ message: String, _ metadata: [String: String]? = nil) {
+    public func info(_ message: String, _ metadata: [String: String]? = nil) {
         AppLogger.shared.log(level: "info", subsystem: subsystem, message: message, metadata: metadata)
     }
 
-    func warning(_ message: String, _ metadata: [String: String]? = nil) {
+    public func warning(_ message: String, _ metadata: [String: String]? = nil) {
         AppLogger.shared.log(level: "warning", subsystem: subsystem, message: message, metadata: metadata)
     }
 
-    func error(_ message: String, _ metadata: [String: String]? = nil) {
+    public func error(_ message: String, _ metadata: [String: String]? = nil) {
         AppLogger.shared.log(level: "error", subsystem: subsystem, message: message, metadata: metadata)
     }
 }
