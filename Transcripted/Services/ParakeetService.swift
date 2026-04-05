@@ -53,7 +53,7 @@ class ParakeetService: ObservableObject {
             }
 
             let manager = AsrManager(config: .default)
-            try await manager.initialize(models: models)
+            try await manager.loadModels(models)
 
             asrManager = manager
             modelState = .ready

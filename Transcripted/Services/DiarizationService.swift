@@ -196,7 +196,7 @@ class DiarizationService: ObservableObject {
     /// Limited to 4 speakers. Samples should be 16kHz mono Float32.
     nonisolated func diarizeStreaming(samples: [Float], sampleRate: Int = 16000) async throws -> [SpeakerSegment] {
         guard let manager = await MainActor.run(body: { self.diarizerManager }),
-              await manager.isAvailable else {
+              manager.isAvailable else {
             throw NSError(domain: "DiarizationService", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "Sortformer model not loaded"
             ])
