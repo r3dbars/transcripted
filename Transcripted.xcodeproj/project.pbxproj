@@ -88,7 +88,6 @@
 		MD000011 /* MeetingDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = MD000012 /* MeetingDetector.swift */; };
 		A1003001 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1003002 /* AppLogger.swift */; };
 		A1003003 /* FileLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1003004 /* FileLogger.swift */; };
-		FA000011 /* libFluidAudioAll.a in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000001 /* libFluidAudioAll.a */; };
 		FA000012 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000002 /* Metal.framework */; };
 		FA000013 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000003 /* MetalKit.framework */; };
 		FA000014 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000004 /* Accelerate.framework */; };
@@ -299,7 +298,6 @@
 		A1003002 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
 		A1003004 /* FileLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileLogger.swift; sourceTree = "<group>"; };
 		BF26FA6ED2054F3DCF8D0B45 /* ModelSetupStep.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelSetupStep.swift; sourceTree = "<group>"; };
-		FA000001 /* libFluidAudioAll.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libFluidAudioAll.a; path = "fluidaudio-libs/libFluidAudioAll.a"; sourceTree = "<group>"; };
 		FA000002 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		FA000003 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		FA000004 /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
@@ -402,7 +400,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				FA000011 /* libFluidAudioAll.a in Frameworks */,
 				FA000012 /* Metal.framework in Frameworks */,
 				FA000013 /* MetalKit.framework in Frameworks */,
 				FA000014 /* Accelerate.framework in Frameworks */,
@@ -758,7 +755,6 @@
 		FA000020 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				FA000001 /* libFluidAudioAll.a */,
 				FA000002 /* Metal.framework */,
 				FA000003 /* MetalKit.framework */,
 				FA000004 /* Accelerate.framework */,
@@ -1354,17 +1350,18 @@
 				);
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
-					"$(SRCROOT)/fluidaudio-libs",
+					"$(SRCROOT)/.deps-libs",
 				);
 				MARKETING_VERSION = 0.5.2;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
+					"-lDraftDeps",
 					"-lc++",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.transcripted.app;
 				PRODUCT_NAME = Transcripted;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/fluidaudio-modules $(SRCROOT)/fluidaudio-modules/FastClusterWrapper $(SRCROOT)/fluidaudio-modules/MachTaskSelfWrapper $(SRCROOT)/fluidaudio-modules/yyjson";
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/.deps-modules $(SRCROOT)/.deps-modules/FastClusterWrapper $(SRCROOT)/.deps-modules/MachTaskSelfWrapper $(SRCROOT)/.deps-modules/yyjson";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -1395,17 +1392,18 @@
 				);
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
-					"$(SRCROOT)/fluidaudio-libs",
+					"$(SRCROOT)/.deps-libs",
 				);
 				MARKETING_VERSION = 0.5.2;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
+					"-lDraftDeps",
 					"-lc++",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.transcripted.app;
 				PRODUCT_NAME = Transcripted;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/fluidaudio-modules $(SRCROOT)/fluidaudio-modules/FastClusterWrapper $(SRCROOT)/fluidaudio-modules/MachTaskSelfWrapper $(SRCROOT)/fluidaudio-modules/yyjson";
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/.deps-modules $(SRCROOT)/.deps-modules/FastClusterWrapper $(SRCROOT)/.deps-modules/MachTaskSelfWrapper $(SRCROOT)/.deps-modules/yyjson";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
@@ -1423,7 +1421,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.transcripted.app.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/fluidaudio-modules $(SRCROOT)/fluidaudio-modules/FastClusterWrapper $(SRCROOT)/fluidaudio-modules/MachTaskSelfWrapper $(SRCROOT)/fluidaudio-modules/yyjson";
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/.deps-modules $(SRCROOT)/.deps-modules/FastClusterWrapper $(SRCROOT)/.deps-modules/MachTaskSelfWrapper $(SRCROOT)/.deps-modules/yyjson";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Transcripted.app/Contents/MacOS/Transcripted";
 			};
@@ -1442,7 +1440,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.transcripted.app.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/fluidaudio-modules $(SRCROOT)/fluidaudio-modules/FastClusterWrapper $(SRCROOT)/fluidaudio-modules/MachTaskSelfWrapper $(SRCROOT)/fluidaudio-modules/yyjson";
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/.deps-modules $(SRCROOT)/.deps-modules/FastClusterWrapper $(SRCROOT)/.deps-modules/MachTaskSelfWrapper $(SRCROOT)/.deps-modules/yyjson";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Transcripted.app/Contents/MacOS/Transcripted";
 			};
