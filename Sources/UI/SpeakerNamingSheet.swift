@@ -11,8 +11,6 @@
 
 import AppKit
 import Combine
-
-#if canImport(TranscriptedCore)
 import TranscriptedCore
 
 @available(macOS 14.0, *)
@@ -404,5 +402,3 @@ final class SpeakerRowView: NSView {
         )
     }
 }
-
-#endif // canImport(TranscriptedCore)

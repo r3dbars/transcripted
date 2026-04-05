@@ -4,10 +4,7 @@
 import SwiftUI
 import AppKit
 import Carbon
-
-#if canImport(TranscriptedCore)
 import TranscriptedCore
-#endif
 
 @main
 struct DraftApp: App {
@@ -28,12 +25,10 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     let appState = DraftAppState()
     let overlayController = FloatingOverlayController()
     let sessionController = DraftSessionController()
-    #if canImport(TranscriptedCore)
-    /// Second non-activating panel for meeting mode (Lane C). Only created
-    /// when TranscriptedCore is linked; the draft overlay is unaffected.
+    /// Second non-activating panel for meeting mode (Lane C). Distinct from
+    /// the draft overlay so regressions to one can't break the other.
     @available(macOS 14.0, *)
     lazy var meetingOverlayController = MeetingOverlayController()
-    #endif
     var onboardingController: OnboardingWindowController?
     private var workspaceObservers: [NSObjectProtocol] = []
 
@@ -52,9 +47,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // Set up the floating overlay panel (pure AppKit — no NSHostingView)
         overlayController.setup(sttRouter: appState.sttRouter)
 
-        #if canImport(TranscriptedCore)
         // Meeting overlay + hotkey + speaker naming — Lane C wiring.
-        // Gated so non-TranscriptedCore builds ignore the entire subsystem.
         if #available(macOS 14.0, *) {
             let meetingSession = appState.meetingSession
             meetingOverlayController.setup(meetingSession: meetingSession)
@@ -63,7 +56,6 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             }
             SpeakerNamingSheet.shared.observe(taskManager: meetingSession.taskManager)
         }
-        #endif
 
         // Set up menubar status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)

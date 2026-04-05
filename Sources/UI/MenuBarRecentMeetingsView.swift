@@ -27,15 +27,7 @@ struct RecentMeetingItem {
 enum RecentMeetingsScanner {
 
     static func loadRecent(limit: Int = 5) -> [RecentMeetingItem] {
-        #if canImport(TranscriptedCore)
         let dir = MeetingStoragePaths.transcriptsFolder
-        #else
-        // Without TranscriptedCore we still expose the section, but it lists
-        // nothing so the menubar layout stays consistent across build modes.
-        return []
-        #endif
-
-        #if canImport(TranscriptedCore)
         let fm = FileManager.default
         guard fm.fileExists(atPath: dir.path) else { return [] }
 
@@ -60,7 +52,6 @@ enum RecentMeetingsScanner {
                 .sorted(by: { $0.date > $1.date })
                 .prefix(limit)
         )
-        #endif
     }
 
     /// Best-effort title extraction: check for `title: "..."` in the first ~30
