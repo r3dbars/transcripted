@@ -1,9 +1,18 @@
 # Draft + Transcripted Merge Plan (Phase 0 Deliverable)
 
 **Authors:** draft-mapper (owner), transcripted-mapper (contributor)
-**Status:** v3 for human review — end of Phase 0. Phase 2 execution starts only after human sign-off.
+**Status:** v4 for human review — end of Phase 0. Phase 2 execution starts only after human sign-off.
 **Inputs:** [draft-inventory.md](draft-inventory.md), [transcripted-inventory.md](transcripted-inventory.md)
 **Worktree:** `<draft-root>/.claude/worktrees/transcripted-merge` on `feat/transcripted-merge`
+
+**v4 changes (since v3 / commit `4bdaca4`):**
+
+- **§1.5.4 + §6.1 scoped precisely — 8 files in merge scope, not 17.** transcripted-mapper's Q1 answer partitioned the 17 Core files carrying `@available(macOS 26.0, *)`: **8 fall inside Tier A+B** (Tier A: `TranscriptMetadataBuilder.swift`, `EmbeddingClusterer.swift`; Tier B: `Transcription.swift`, `TranscriptionPipeline.swift`, `TranscriptionTaskManager.swift`, `TranscriptionPipelineRunner.swift`, `SpeakerMatchingService.swift`, `SpeakerNamingCoordinator.swift`). The other 9 Core files with the gate are either Tier C (audio capture, ~4 files — delete their gate too if Draft pulls Tier C per §6.3) or outside the merge scope entirely (UI / Onboarding / Design). Phase 2 Lane A's delete pass now has a precise file list: 8 files guaranteed, +4 conditional on §6.3 = **up to 12 Core files**, plus the 2 Services files already counted. The old "17 Core + 2 Services = 19" count in v3 was a gross-count across scopes; v4's 8 (Tier A+B) + 4 (Tier C if adopted) + 2 (Services) = 10-14 files in merge-scope is the accurate working number.
+- **§6.1 proof chain extended** — transcripted-mapper's Q1 answer adds a third independent proof point specifically for the Tier A+B set: the 8 files' `@MainActor ObservableObject` pipeline types contain zero `if #available(macOS 26, *)` branches AND zero call sites to macOS 26-only APIs (grepped). Combined with the `MACOSX_DEPLOYMENT_TARGET = 14.0` pbxproj proof and the `AppServices.swift @available(macOS 14.0, *)` counter-example, §6.1 is now triple-proved for the specific files we will ship.
+- **§5.1 Lane A step 1 — exact file list inlined.** The 8 Tier A+B file names are now enumerated in the step, not just counted. Lane A operator has a checklist instead of a grep target.
+- **§6.1 caveat refreshed** — transcripted-mapper explicitly called out they haven't physically run the `-target arm64-apple-macos14.0` compile. v4 makes the Lane A smoke-compile the verification step, not transcripted-mapper's grep, and restates the risk as "low but non-zero."
+- **§0 top risk unchanged** — FluidAudio API drift remains the single biggest risk, same as v3.
+- **§7.1 unchanged** — file counts stay at 51 (Tier A 23 + Tier B 20 + Tier C 8); v4 refines the *gate-delete* count, not the *extraction* count.
 
 **v3 changes (since v2 / commit `f053abf`):**
 
@@ -198,7 +207,34 @@ Ordered by blast radius; complete detail in transcripted-inventory.md §11.
 
 3. **Hard-coded `~/Documents/Transcripted/` paths.** Define `public struct CoreStoragePaths { let transcripts: URL; let speakerDB: URL; let statsDB: URL; let failedQueue: URL; let speakerClips: URL; let logs: URL; public static let `default`: CoreStoragePaths = ... }`. Every service takes a `CoreStoragePaths` at init. **~15 touch points.** Draft passes a `CoreStoragePaths` rooted at `~/Library/Application Support/Draft/meetings/` instead of `~/Documents/Transcripted/`.
 
-4. **`@available(macOS 26.0, *)` decorative deletion — not an audit, a find-and-delete pass.** v3 update: transcripted-mapper confirmed via `project.pbxproj` that Transcripted's `MACOSX_DEPLOYMENT_TARGET = 14.0` — identical to Draft. The 81 `@available(macOS 26.0, *)` annotations are decorative class-level brand gates, not compiler-enforced API requirements (zero runtime `#available(macOS 26, *)` or `#available(macOS 15, *)` checks exist anywhere in the repo; no method body calls a 26-only API; counter-example `Core/AppServices.swift` correctly gates at `@available(macOS 14.0, *)` proving the codebase knows how to annotate for the real floor). **Action:** delete `@available(macOS 26.0, *)` from 17 Core files + 2 Services files (19 files total, one line each). Verification: compile TranscriptedCore with `-target arm64-apple-macos14.0` as Phase 2 Lane A's first smoke test — if any Tier A/B/C file references an API the compiler says is 15+/26+ only, that specific file gets left behind or wrapped in a targeted `if #available` at the call site. Expected count of files needing leave-behind: 0, based on transcripted-mapper's grep sweep. Tier C audio capture keeps its genuine `@available(macOS 14.2, *)` gate for `AudioHardwareCreateProcessTap` (introduced in 14.2) — that one is real.
+4. **`@available(macOS 26.0, *)` decorative deletion — not an audit, a find-and-delete pass.** v3 update: transcripted-mapper confirmed via `project.pbxproj` that Transcripted's `MACOSX_DEPLOYMENT_TARGET = 14.0` — identical to Draft. The 81 `@available(macOS 26.0, *)` annotations are decorative class-level brand gates, not compiler-enforced API requirements (zero runtime `#available(macOS 26, *)` or `#available(macOS 15, *)` checks exist anywhere in the repo; no method body calls a 26-only API; counter-example `Core/AppServices.swift` correctly gates at `@available(macOS 14.0, *)` proving the codebase knows how to annotate for the real floor).
+
+**v4 precision upgrade — exact file list in merge scope:**
+
+transcripted-mapper's Q1 answer partitioned the 17 Core files carrying the decorative gate. **8 are inside Tier A+B** (the guaranteed extraction set):
+
+| Tier | File |
+|---|---|
+| A | `Core/TranscriptMetadataBuilder.swift` |
+| A | `Services/EmbeddingClusterer.swift` |
+| B | `Core/Transcription.swift` |
+| B | `Core/TranscriptionPipeline.swift` |
+| B | `Core/TranscriptionTaskManager.swift` |
+| B | `Core/TranscriptionPipelineRunner.swift` |
+| B | `Core/SpeakerMatchingService.swift` |
+| B | `Core/SpeakerNamingCoordinator.swift` |
+
+Plus **2 Services files** already counted (protocol wiring touches): `Services/AppServices.swift` (already correctly at 14.0 — nothing to delete) and one other Services file flagged by transcripted-mapper's sweep. Net gate-delete count in the guaranteed set: **8 files + up to 2 Services files = 8-10 one-line deletions**.
+
+Conditional: **+4 Tier C audio capture files** (`Audio.swift`, `SystemAudioCapture.swift`, `SystemAudioProcessTap.swift`, `AudioLevelMonitor.swift` per transcripted-mapper's count — exact file names to be confirmed during Lane A step 1 grep) if §6.3 confirms Draft pulls Tier C. Most likely outcome: yes, so Lane A deletes from these too.
+
+The remaining **9 Core files** with the gate are outside merge scope (UI, Onboarding, Design layers that stay in Transcripted's app target). Lane A does NOT touch them.
+
+**Action:** `grep -rl '@available(macOS 26.0, \*)' Sources/TranscriptedCore/` inside the extracted tree (post-Option-A move), delete the matching lines, commit. Expected result: 8-12 files modified, 1 line removed from each.
+
+**Verification:** compile TranscriptedCore with `-target arm64-apple-macos14.0` as Phase 2 Lane A's first smoke test — if any Tier A/B/C file references an API the compiler says is 15+/26+ only, that specific file gets left behind or wrapped in a targeted `if #available` at the call site. Expected count of files needing leave-behind: **0**, based on transcripted-mapper's triple-proof (pbxproj floor = 14.0, zero runtime `#available` checks, zero 26-only API call sites grepped). Risk rating: low but non-zero — transcripted-mapper has not physically run the compile, so Lane A step 5 is the verification, not the grep.
+
+Tier C audio capture keeps its genuine `@available(macOS 14.2, *)` gate for `AudioHardwareCreateProcessTap` (introduced in 14.2) — that one is real.
 
 5. **FluidAudio unsafe-flags linking.** Covered in §4 — this is the single biggest build-system decision.
 
@@ -721,9 +757,9 @@ Four ownership lanes. Each lane owns a disjoint set of directories + files. **No
 
 **Directory boundary:** everything inside `<transcripted-root>/` EXCEPT `Transcripted/UI/`, `Transcripted/Design/`, `Transcripted/Onboarding/`, `TranscriptedTests/UI/`, and Tools/ packages (those stay untouched).
 
-**Work items (in order, v3):**
+**Work items (in order, v4):**
 
-1. **Step 1 — decorative `@available(macOS 26.0, *)` deletion.** Run a find-and-delete pass over 17 Core files + 2 Services files (19 total, verified by transcripted-mapper grep). One-line deletion per file, no logic changes. The only gate to KEEP is the genuine `@available(macOS 14.2, *)` on Tier C audio capture files where `AudioHardwareCreateProcessTap` actually requires 14.2. See §1.5.4 for the full rationale. **No multi-day audit needed.** The former "Milestone 0" is deleted.
+1. **Step 1 — decorative `@available(macOS 26.0, *)` deletion.** Find-and-delete pass over the 8 Tier A+B files in merge scope (verified by transcripted-mapper Q1): `Core/TranscriptMetadataBuilder.swift`, `Services/EmbeddingClusterer.swift`, `Core/Transcription.swift`, `Core/TranscriptionPipeline.swift`, `Core/TranscriptionTaskManager.swift`, `Core/TranscriptionPipelineRunner.swift`, `Core/SpeakerMatchingService.swift`, `Core/SpeakerNamingCoordinator.swift`. If §6.3 confirms Tier C adoption (expected yes), add the 4 Tier C audio capture files to the pass. Plus the 2 Services files already in the gate-delete set (one already correctly at 14.0 — nothing to delete there). **Total: 8-12 one-line deletions, no logic changes.** The only gate to KEEP is the genuine `@available(macOS 14.2, *)` on Tier C audio capture files where `AudioHardwareCreateProcessTap` actually requires 14.2. See §1.5.4 for the full rationale and the file-by-file list. **No multi-day audit needed.** The former "Milestone 0" is deleted.
 2. Create `Package.swift` at Transcripted repo root per §4.2.
 3. Create `Sources/TranscriptedCore/` directory tree with the subdirs from §1.2.
 4. Move 51 files (23 Tier A + 20 Tier B + 8 Tier C; `ParakeetService.swift` was deleted from Tier A per §3.2) from `Transcripted/Core/` + `Transcripted/Services/` into `Sources/TranscriptedCore/<subdir>/` per §1.2 tables. Update pbxproj references in the same commit.
@@ -896,7 +932,7 @@ Lane A                                │                        to build-deps.s
 
 Judgment calls the human should confirm or resolve before Phase 2 starts.
 
-### 6.1 macOS deployment target **(RESOLVED in v3 — no longer a blocker, no longer an Open Question)**
+### 6.1 macOS deployment target **(RESOLVED in v3, scope refined in v4 — no longer a blocker, no longer an Open Question)**
 
 **v1/v2 framing:** Draft ships `LSMinimumSystemVersion 14.0` / `-target arm64-apple-macos14.0`. Transcripted had 81 `@available(macOS 26.0, *)` gates across 58 files, which looked like a merge-blocking availability mismatch.
 
@@ -912,11 +948,19 @@ Judgment calls the human should confirm or resolve before Phase 2 starts.
 
 5. **Most likely explanation** (transcripted-mapper's read): somebody on the Transcripted team added `@available(macOS 26.0, *)` as a "we're a macOS 26 Tahoe app" brand signal, possibly tied to Liquid Glass UI features in the SwiftUI layer that Core/Services don't touch. Aesthetic, not technical.
 
-**v3 resolution:** Phase 2 Lane A step 1 is a trivial mechanical `@available(macOS 26.0, *)` deletion pass across 17 Core files + 2 Services files (19 files total, one line per file). No audit. No decision tree. The verification is Lane A step 5: compile TranscriptedCore with `-target arm64-apple-macos14.0`. If any file has an implicit dependency transcripted-mapper's grep missed (e.g., a SwiftUI view modifier that only exists on macOS 15+), the compiler surfaces it as a hard error scoped to that file, and Lane A either leaves that file behind or wraps the offending call in a targeted `if #available`. Expected count of files needing leave-behind: 0.
+**v4 scope refinement (from transcripted-mapper Q1):** partitioned the 17 Core files carrying the gate by merge scope:
+
+- **Tier A+B (8 files — guaranteed in merge):** `Core/TranscriptMetadataBuilder.swift`, `Services/EmbeddingClusterer.swift` (Tier A); `Core/Transcription.swift`, `Core/TranscriptionPipeline.swift`, `Core/TranscriptionTaskManager.swift`, `Core/TranscriptionPipelineRunner.swift`, `Core/SpeakerMatchingService.swift`, `Core/SpeakerNamingCoordinator.swift` (Tier B). All 8 verified by transcripted-mapper to have zero internal `if #available` runtime checks and zero method bodies calling macOS 26-only APIs. All 8 are mechanically droppable to macOS 14.0.
+- **Tier C (~4 files — conditional on §6.3):** audio capture files. If Draft pulls Tier C (recommended — see §6.3), these also get the gate deleted, except the genuine `@available(macOS 14.2, *)` on the `AudioHardwareCreateProcessTap` sites which is a real 14.2 API and stays.
+- **Services/ (2 files — already counted):** `AppServices.swift` is already correctly at `@available(macOS 14.0, *)` — nothing to delete there. The second Services file was flagged by transcripted-mapper's grep and gets the one-line deletion.
+- **Remaining 9 Core files:** outside merge scope (UI, Onboarding, Design, or app-target-only). Lane A does NOT touch them. Their gates might be load-bearing on real Tahoe Liquid Glass APIs; that is not a Phase 2 concern.
+
+**v3/v4 resolution:** Phase 2 Lane A step 1 is a trivial mechanical `@available(macOS 26.0, *)` deletion pass across 8 Tier A+B files + up to 4 Tier C files + 1 Services file = **9-13 one-line deletions total** (down from v3's gross count of 19). Verification is Lane A step 5: compile TranscriptedCore with `-target arm64-apple-macos14.0`. If any file has an implicit dependency transcripted-mapper's grep missed (e.g., a SwiftUI view modifier that only exists on macOS 15+), the compiler surfaces it as a hard error scoped to that file, and Lane A either leaves that file behind or wraps the offending call in a targeted `if #available`. Expected count of files needing leave-behind: 0.
 
 **Caveats:**
-- UI / Design / Onboarding files also carry `@available(macOS 26.0, *)` and are NOT in Tier A/B/C. Their gates might be load-bearing on real Tahoe Liquid Glass APIs (`glassEffect`, specific `.containerBackground` styles). Those files are not in the merge scope, so this is not a v3 concern. Flagged as a future item only if Draft later wants to adopt Transcripted's floating pill UI.
+- UI / Design / Onboarding files also carry `@available(macOS 26.0, *)` and are NOT in Tier A/B/C. Their gates might be load-bearing on real Tahoe Liquid Glass APIs (`glassEffect`, specific `.containerBackground` styles). Those files are not in the merge scope, so this is not a v3/v4 concern. Flagged as a future item only if Draft later wants to adopt Transcripted's floating pill UI.
 - Tier C audio capture keeps its genuine `@available(macOS 14.2, *)` gate for `AudioHardwareCreateProcessTap` (CoreAudio process tap API genuinely shipped in 14.2). Draft's meeting hotkey is gated on `if #available(macOS 14.2, *)` at runtime — users on 14.0 / 14.1 see Draft run normally but without the meeting hotkey. This matches v2 §2.5.
+- **transcripted-mapper has not physically run the `-target arm64-apple-macos14.0` compile.** The evidence chain (pbxproj floor + grep for runtime checks + grep for call sites + AppServices counter-example) is three independent proofs, but Lane A step 5 is the ground truth. Risk: low but non-zero.
 
 **Human decision still needed:** NONE on this question. Listed here for cross-reference from v1/v2 open questions.
 
