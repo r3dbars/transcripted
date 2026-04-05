@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import TranscriptedCore
 
 // MARK: - Menu Bar Setup & Management
 

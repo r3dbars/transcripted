@@ -52,8 +52,8 @@ public class Audio: ObservableObject {
     @Published public var systemAudioStatus: SystemAudioStatus = .unknown
 
     // Silence detection for "Still Recording?" prompt
-    @Published var silenceDuration: TimeInterval = 0.0  // How long we've been in silence
-    @Published var isSilent: Bool = false  // True when audio below threshold
+    @Published public var silenceDuration: TimeInterval = 0.0  // How long we've been in silence
+    @Published public var isSilent: Bool = false  // True when audio below threshold
     let silenceThreshold: Float = 0.02  // Audio level below this = silence
     var lastNonSilentTime: Date?
 
@@ -539,7 +539,7 @@ public class Audio: ObservableObject {
     /// Start lightweight level metering for mic + system audio without recording to files.
     /// Used by MeetingDetector to detect bidirectional speech before full recording starts.
     /// Automatically stops when `start()` is called for full recording.
-    func startMonitoring() {
+    public func startMonitoring() {
         guard !isMonitoring, !isRecording, !isStarting else { return }
         guard let engine = engine, let inputNode = inputNode else { return }
 
@@ -587,7 +587,7 @@ public class Audio: ObservableObject {
     }
 
     /// Stop level metering. Called automatically before `start()` begins full recording.
-    func stopMonitoring() {
+    public func stopMonitoring() {
         guard isMonitoring else { return }
 
         AppLogger.audio.info("Stopping audio level monitoring")

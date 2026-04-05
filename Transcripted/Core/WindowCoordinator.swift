@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TranscriptedCore
 
 // MARK: - Window Lifecycle Management
 

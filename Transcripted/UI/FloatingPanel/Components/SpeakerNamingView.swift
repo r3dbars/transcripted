@@ -7,6 +7,7 @@
 // - Tray stays until explicit Done/Skip — no escape dismiss, no X button.
 
 import SwiftUI
+import TranscriptedCore
 
 // MARK: - SpeakerNamingView
 

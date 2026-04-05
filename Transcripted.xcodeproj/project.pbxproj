@@ -7,24 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		TC100003 /* TranscriptedCore in Frameworks */ = {isa = PBXBuildFile; productRef = TC100002 /* TranscriptedCore */; };
+		TC100010 /* ParakeetEngineAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = TC100011 /* ParakeetEngineAdapter.swift */; };
 		SSH00001 /* SystemSettingsHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = SSH00002 /* SystemSettingsHelper.swift */; };
-		MDS00001 /* ModelDownloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = MDS00002 /* ModelDownloadService.swift */; };
 		MB000001 /* MenuBarStatRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = MB000002 /* MenuBarStatRow.swift */; };
 		4CAF116349811906B83C0406 /* ModelSetupStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF26FA6ED2054F3DCF8D0B45 /* ModelSetupStep.swift */; };
 		A1000001 /* TranscriptedApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000002 /* TranscriptedApp.swift */; };
-		A1000003 /* Transcription.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000004 /* Transcription.swift */; };
-		A1000005 /* Audio.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000006 /* Audio.swift */; };
 		A1000013 /* Clipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000014 /* Clipboard.swift */; };
 		A1000015 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000016 /* Assets.xcassets */; };
-		A1000040 /* CoreAudioUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000041 /* CoreAudioUtils.swift */; };
-		FP000001 /* FilePermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = FP000002 /* FilePermissions.swift */; };
-		A1000044 /* SystemAudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000045 /* SystemAudioCapture.swift */; };
-		AG000001 /* AgentOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = AG000002 /* AgentOutput.swift */; };
-		A1000048 /* TranscriptSaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000049 /* TranscriptSaver.swift */; };
-		A1000050 /* TranscriptionTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000051 /* TranscriptionTaskManager.swift */; };
-		A1000052 /* RecordingValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000053 /* RecordingValidator.swift */; };
-		A1000054 /* FailedTranscription.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000055 /* FailedTranscription.swift */; };
-		A1000056 /* FailedTranscriptionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000057 /* FailedTranscriptionManager.swift */; };
 		A1000058 /* FailedTranscriptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000059 /* FailedTranscriptionsView.swift */; };
 		A1000100 /* OnboardingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000101 /* OnboardingState.swift */; };
 		A1000102 /* OnboardingWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000103 /* OnboardingWindow.swift */; };
@@ -33,9 +23,6 @@
 		DK000001 /* WelcomeStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = DK000002 /* WelcomeStep.swift */; };
 		DK000003 /* PreviewStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = DK000004 /* PreviewStep.swift */; };
 		DK000005 /* BenefitCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DK000006 /* BenefitCard.swift */; };
-		A1000301 /* DateParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000311 /* DateParser.swift */; };
-		A1000500 /* TranscriptUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000501 /* TranscriptUtils.swift */; };
-		A1000803 /* DateFormattingHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000802 /* DateFormattingHelper.swift */; };
 		A1000911 /* PillStateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000901 /* PillStateManager.swift */; };
 		A1000913 /* LawsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000903 /* LawsComponents.swift */; };
 		A1000914 /* AttentionPromptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000904 /* AttentionPromptView.swift */; };
@@ -52,9 +39,6 @@
 		A100091F /* SpeakerNamingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100090F /* SpeakerNamingView.swift */; };
 		A10009E6 /* SpeakerNamingCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10009D6 /* SpeakerNamingCard.swift */; };
 		A10009E7 /* ClipAudioPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10009D7 /* ClipAudioPlayer.swift */; };
-		A1001011 /* StatsDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001001 /* StatsDatabase.swift */; };
-		A1001012 /* StatsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001002 /* StatsService.swift */; };
-		A1001013 /* TranscriptScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001003 /* TranscriptScanner.swift */; };
 		A1001020 /* TranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001021 /* TranscriptStore.swift */; };
 		A1001030 /* TranscriptExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001031 /* TranscriptExporter.swift */; };
 		A1001022 /* TranscriptTrayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1001023 /* TranscriptTrayView.swift */; };
@@ -78,16 +62,7 @@
 		SS001023 /* SettingsRadioGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001024 /* SettingsRadioGroup.swift */; };
 		SS001025 /* SettingsPathRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001026 /* SettingsPathRow.swift */; };
 		SS001027 /* SettingsButtonStyles.swift in Sources */ = {isa = PBXBuildFile; fileRef = SS001028 /* SettingsButtonStyles.swift */; };
-		A1002011 /* AudioResampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002001 /* AudioResampler.swift */; };
-		A1002012 /* ParakeetService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002002 /* ParakeetService.swift */; };
-		A1002013 /* DiarizationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002003 /* DiarizationService.swift */; };
-		A1002014 /* SpeakerDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002004 /* SpeakerDatabase.swift */; };
-		A1002015 /* TranscriptionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002005 /* TranscriptionTypes.swift */; };
-		A1002016 /* SpeakerClipExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002006 /* SpeakerClipExtractor.swift */; };
-		A1002018 /* EmbeddingClusterer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1002007 /* EmbeddingClusterer.swift */; };
 		MD000011 /* MeetingDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = MD000012 /* MeetingDetector.swift */; };
-		A1003001 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1003002 /* AppLogger.swift */; };
-		A1003003 /* FileLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1003004 /* FileLogger.swift */; };
 		FA000012 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000002 /* Metal.framework */; };
 		FA000013 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000003 /* MetalKit.framework */; };
 		FA000014 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA000004 /* Accelerate.framework */; };
@@ -142,24 +117,15 @@
 		T2000032 /* AgentOutputRoundTripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000022A /* AgentOutputRoundTripTests.swift */; };
 		T2000033 /* CrossArtifactConsistencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000023A /* CrossArtifactConsistencyTests.swift */; };
 		T2000034 /* EdgeCaseAndFuzzTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T2000024A /* EdgeCaseAndFuzzTests.swift */; };
-		AX000001 /* AudioDeviceRecovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = AX000002 /* AudioDeviceRecovery.swift */; };
-		AX000003 /* AudioLevelMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AX000004 /* AudioLevelMonitor.swift */; };
-		AX000005 /* AudioFileManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AX000006 /* AudioFileManager.swift */; };
-		SX000001 /* SystemAudioProcessTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = SX000002 /* SystemAudioProcessTap.swift */; };
-		SX000003 /* SystemAudioBufferWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = SX000004 /* SystemAudioBufferWriter.swift */; };
 		NF20640F9501 /* Accessibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF20640F9500 /* Accessibility.swift */; };
 		NF0EF2C81601 /* AnimatedIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF0EF2C81600 /* AnimatedIcon.swift */; };
 		NF7FF695F301 /* Animations.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF7FF695F300 /* Animations.swift */; };
 		NFEE24DA1301 /* AppDelegateDebug.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFEE24DA1300 /* AppDelegateDebug.swift */; };
-		NF9008569A01 /* AppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF9008569A00 /* AppServices.swift */; };
-		NFFEFD8D0101 /* AudioCaptureEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFFEFD8D0100 /* AudioCaptureEngine.swift */; };
 		NFD627BDC701 /* AuroraColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFD627BDC700 /* AuroraColors.swift */; };
 		NFAF5A4F9501 /* BrandColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFAF5A4F9500 /* BrandColors.swift */; };
 		NF41955C0101 /* CardModifiers.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF41955C0100 /* CardModifiers.swift */; };
 		NF5158DACB01 /* ColorHex.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF5158DACB00 /* ColorHex.swift */; };
-		NFDB43E09001 /* DiarizationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFDB43E09000 /* DiarizationEngine.swift */; };
 		NF36F2651501 /* Dimensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF36F2651500 /* Dimensions.swift */; };
-		NFC1C920E301 /* DisplayStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFC1C920E300 /* DisplayStatus.swift */; };
 		NF2B181AA001 /* Gradients.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF2B181AA000 /* Gradients.swift */; };
 		NFA8B23A7601 /* HeatMapColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFA8B23A7600 /* HeatMapColors.swift */; };
 		NFDD34AE1701 /* HotkeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFDD34AE1700 /* HotkeyManager.swift */; };
@@ -171,25 +137,9 @@
 		NF5C44D9E301 /* QuickTipRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF5C44D9E300 /* QuickTipRow.swift */; };
 		NF63CDF92701 /* Radius.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF63CDF92700 /* Radius.swift */; };
 		NF4397517301 /* RecordingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF4397517300 /* RecordingCoordinator.swift */; };
-		NFAB0BEF3E01 /* RetroactiveSpeakerUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFAB0BEF3E00 /* RetroactiveSpeakerUpdater.swift */; };
 		NF5B5398D401 /* Shadows.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF5B5398D400 /* Shadows.swift */; };
 		NF69E9FFC101 /* Spacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF69E9FFC100 /* Spacing.swift */; };
-		NFC916743001 /* SpeakerEmbeddingMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFC916743000 /* SpeakerEmbeddingMatcher.swift */; };
-		NF321D21DA01 /* SpeakerMatchingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF321D21DA00 /* SpeakerMatchingService.swift */; };
-		NFD7C7735401 /* SpeakerNamingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFD7C7735400 /* SpeakerNamingCoordinator.swift */; };
-		NF13D8F10401 /* SpeakerProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF13D8F10400 /* SpeakerProfile.swift */; };
-		NFF6BF80D901 /* SpeakerProfileMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFF6BF80D900 /* SpeakerProfileMerger.swift */; };
-		NF7B41DA9E01 /* SpeakerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF7B41DA9E00 /* SpeakerStore.swift */; };
-		NF91BA817F01 /* SpeechToTextEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF91BA817F00 /* SpeechToTextEngine.swift */; };
-		NF9441096401 /* StatsDatabaseModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF9441096400 /* StatsDatabaseModels.swift */; };
-		NF5C99141501 /* StatsDatabaseQueries.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF5C99141500 /* StatsDatabaseQueries.swift */; };
-		NFF4CABC3601 /* StatsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFF4CABC3600 /* StatsStore.swift */; };
 		NF642BF65101 /* SurfaceColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF642BF65100 /* SurfaceColors.swift */; };
-		NF2BB74F9301 /* TranscriptFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF2BB74F9300 /* TranscriptFormatter.swift */; };
-		NF1665D66701 /* TranscriptMetadataBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF1665D66700 /* TranscriptMetadataBuilder.swift */; };
-		NF0C7CFB5601 /* TranscriptStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF0C7CFB5600 /* TranscriptStorage.swift */; };
-		NF405F06D001 /* TranscriptionPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF405F06D000 /* TranscriptionPipeline.swift */; };
-		NF3119F4D401 /* TranscriptionPipelineRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF3119F4D400 /* TranscriptionPipelineRunner.swift */; };
 		NF80CD7E5D01 /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF80CD7E5D00 /* Typography.swift */; };
 		NF0A9C10DE01 /* ViewModifiers.swift in Sources */ = {isa = PBXBuildFile; fileRef = NF0A9C10DE00 /* ViewModifiers.swift */; };
 		NFED9E4E5E01 /* WindowCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = NFED9E4E5E00 /* WindowCoordinator.swift */; };
@@ -206,29 +156,14 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		TC100011 /* ParakeetEngineAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParakeetEngineAdapter.swift; sourceTree = "<group>"; };
 		MB000002 /* MenuBarStatRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarStatRow.swift; sourceTree = "<group>"; };
 		A1000002 /* TranscriptedApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptedApp.swift; sourceTree = "<group>"; };
-		A1000004 /* Transcription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcription.swift; sourceTree = "<group>"; };
-		A1000006 /* Audio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Audio.swift; sourceTree = "<group>"; };
-		AX000002 /* AudioDeviceRecovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDeviceRecovery.swift; sourceTree = "<group>"; };
-		AX000004 /* AudioLevelMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioLevelMonitor.swift; sourceTree = "<group>"; };
-		AX000006 /* AudioFileManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioFileManager.swift; sourceTree = "<group>"; };
 		A1000014 /* Clipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Clipboard.swift; sourceTree = "<group>"; };
 		A1000016 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000017 /* Transcripted.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Transcripted.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1000018 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1000019 /* Transcripted.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Transcripted.entitlements; sourceTree = "<group>"; };
-		A1000041 /* CoreAudioUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioUtils.swift; sourceTree = "<group>"; };
-		FP000002 /* FilePermissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilePermissions.swift; sourceTree = "<group>"; };
-		A1000045 /* SystemAudioCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemAudioCapture.swift; sourceTree = "<group>"; };
-		SX000002 /* SystemAudioProcessTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemAudioProcessTap.swift; sourceTree = "<group>"; };
-		SX000004 /* SystemAudioBufferWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemAudioBufferWriter.swift; sourceTree = "<group>"; };
-		AG000002 /* AgentOutput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentOutput.swift; sourceTree = "<group>"; };
-		A1000049 /* TranscriptSaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSaver.swift; sourceTree = "<group>"; };
-		A1000051 /* TranscriptionTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTaskManager.swift; sourceTree = "<group>"; };
-		A1000053 /* RecordingValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingValidator.swift; sourceTree = "<group>"; };
-		A1000055 /* FailedTranscription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailedTranscription.swift; sourceTree = "<group>"; };
-		A1000057 /* FailedTranscriptionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailedTranscriptionManager.swift; sourceTree = "<group>"; };
 		A1000059 /* FailedTranscriptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailedTranscriptionsView.swift; sourceTree = "<group>"; };
 		A1000101 /* OnboardingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingState.swift; sourceTree = "<group>"; };
 		A1000103 /* OnboardingWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingWindow.swift; sourceTree = "<group>"; };
@@ -237,9 +172,6 @@
 		DK000002 /* WelcomeStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeStep.swift; sourceTree = "<group>"; };
 		DK000004 /* PreviewStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewStep.swift; sourceTree = "<group>"; };
 		DK000006 /* BenefitCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BenefitCard.swift; sourceTree = "<group>"; };
-		A1000311 /* DateParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParser.swift; sourceTree = "<group>"; };
-		A1000501 /* TranscriptUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptUtils.swift; sourceTree = "<group>"; };
-		A1000802 /* DateFormattingHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateFormattingHelper.swift; sourceTree = "<group>"; };
 		A1000901 /* PillStateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillStateManager.swift; sourceTree = "<group>"; };
 		A1000903 /* LawsComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LawsComponents.swift; sourceTree = "<group>"; };
 		A1000904 /* AttentionPromptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionPromptView.swift; sourceTree = "<group>"; };
@@ -256,14 +188,10 @@
 		A100090F /* SpeakerNamingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerNamingView.swift; sourceTree = "<group>"; };
 		A10009D6 /* SpeakerNamingCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerNamingCard.swift; sourceTree = "<group>"; };
 		A10009D7 /* ClipAudioPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipAudioPlayer.swift; sourceTree = "<group>"; };
-		A1001001 /* StatsDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsDatabase.swift; sourceTree = "<group>"; };
-		A1001002 /* StatsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsService.swift; sourceTree = "<group>"; };
-		A1001003 /* TranscriptScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptScanner.swift; sourceTree = "<group>"; };
 		A1001021 /* TranscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptStore.swift; sourceTree = "<group>"; };
 		A1001031 /* TranscriptExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptExporter.swift; sourceTree = "<group>"; };
 		A2000002 /* DiagnosticExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticExporter.swift; sourceTree = "<group>"; };
 		SSH00002 /* SystemSettingsHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSettingsHelper.swift; sourceTree = "<group>"; };
-		MDS00002 /* ModelDownloadService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadService.swift; sourceTree = "<group>"; };
 		PC000001 /* PillCalloutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillCalloutView.swift; sourceTree = "<group>"; };
 		PC000002 /* PillCalloutController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillCalloutController.swift; sourceTree = "<group>"; };
 		A1001023 /* TranscriptTrayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptTrayView.swift; sourceTree = "<group>"; };
@@ -287,16 +215,7 @@
 		SS001024 /* SettingsRadioGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsRadioGroup.swift; sourceTree = "<group>"; };
 		SS001026 /* SettingsPathRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPathRow.swift; sourceTree = "<group>"; };
 		SS001028 /* SettingsButtonStyles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsButtonStyles.swift; sourceTree = "<group>"; };
-		A1002001 /* AudioResampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioResampler.swift; sourceTree = "<group>"; };
-		A1002002 /* ParakeetService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParakeetService.swift; sourceTree = "<group>"; };
-		A1002003 /* DiarizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiarizationService.swift; sourceTree = "<group>"; };
-		A1002004 /* SpeakerDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDatabase.swift; sourceTree = "<group>"; };
-		A1002005 /* TranscriptionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTypes.swift; sourceTree = "<group>"; };
-		A1002006 /* SpeakerClipExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerClipExtractor.swift; sourceTree = "<group>"; };
-		A1002007 /* EmbeddingClusterer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingClusterer.swift; sourceTree = "<group>"; };
 		MD000012 /* MeetingDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDetector.swift; sourceTree = "<group>"; };
-		A1003002 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
-		A1003004 /* FileLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileLogger.swift; sourceTree = "<group>"; };
 		BF26FA6ED2054F3DCF8D0B45 /* ModelSetupStep.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ModelSetupStep.swift; sourceTree = "<group>"; };
 		FA000002 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		FA000003 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
@@ -351,15 +270,11 @@
 		NF0EF2C81600 /* AnimatedIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimatedIcon.swift; sourceTree = "<group>"; };
 		NF7FF695F300 /* Animations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Animations.swift; sourceTree = "<group>"; };
 		NFEE24DA1300 /* AppDelegateDebug.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegateDebug.swift; sourceTree = "<group>"; };
-		NF9008569A00 /* AppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppServices.swift; sourceTree = "<group>"; };
-		NFFEFD8D0100 /* AudioCaptureEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCaptureEngine.swift; sourceTree = "<group>"; };
 		NFD627BDC700 /* AuroraColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuroraColors.swift; sourceTree = "<group>"; };
 		NFAF5A4F9500 /* BrandColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandColors.swift; sourceTree = "<group>"; };
 		NF41955C0100 /* CardModifiers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardModifiers.swift; sourceTree = "<group>"; };
 		NF5158DACB00 /* ColorHex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorHex.swift; sourceTree = "<group>"; };
-		NFDB43E09000 /* DiarizationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiarizationEngine.swift; sourceTree = "<group>"; };
 		NF36F2651500 /* Dimensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dimensions.swift; sourceTree = "<group>"; };
-		NFC1C920E300 /* DisplayStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayStatus.swift; sourceTree = "<group>"; };
 		NF2B181AA000 /* Gradients.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gradients.swift; sourceTree = "<group>"; };
 		NFA8B23A7600 /* HeatMapColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeatMapColors.swift; sourceTree = "<group>"; };
 		NFDD34AE1700 /* HotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManager.swift; sourceTree = "<group>"; };
@@ -371,25 +286,9 @@
 		NF5C44D9E300 /* QuickTipRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickTipRow.swift; sourceTree = "<group>"; };
 		NF63CDF92700 /* Radius.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Radius.swift; sourceTree = "<group>"; };
 		NF4397517300 /* RecordingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingCoordinator.swift; sourceTree = "<group>"; };
-		NFAB0BEF3E00 /* RetroactiveSpeakerUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetroactiveSpeakerUpdater.swift; sourceTree = "<group>"; };
 		NF5B5398D400 /* Shadows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shadows.swift; sourceTree = "<group>"; };
 		NF69E9FFC100 /* Spacing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Spacing.swift; sourceTree = "<group>"; };
-		NFC916743000 /* SpeakerEmbeddingMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerEmbeddingMatcher.swift; sourceTree = "<group>"; };
-		NF321D21DA00 /* SpeakerMatchingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMatchingService.swift; sourceTree = "<group>"; };
-		NFD7C7735400 /* SpeakerNamingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerNamingCoordinator.swift; sourceTree = "<group>"; };
-		NF13D8F10400 /* SpeakerProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerProfile.swift; sourceTree = "<group>"; };
-		NFF6BF80D900 /* SpeakerProfileMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerProfileMerger.swift; sourceTree = "<group>"; };
-		NF7B41DA9E00 /* SpeakerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerStore.swift; sourceTree = "<group>"; };
-		NF91BA817F00 /* SpeechToTextEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechToTextEngine.swift; sourceTree = "<group>"; };
-		NF9441096400 /* StatsDatabaseModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsDatabaseModels.swift; sourceTree = "<group>"; };
-		NF5C99141500 /* StatsDatabaseQueries.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsDatabaseQueries.swift; sourceTree = "<group>"; };
-		NFF4CABC3600 /* StatsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsStore.swift; sourceTree = "<group>"; };
 		NF642BF65100 /* SurfaceColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceColors.swift; sourceTree = "<group>"; };
-		NF2BB74F9300 /* TranscriptFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptFormatter.swift; sourceTree = "<group>"; };
-		NF1665D66700 /* TranscriptMetadataBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptMetadataBuilder.swift; sourceTree = "<group>"; };
-		NF0C7CFB5600 /* TranscriptStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptStorage.swift; sourceTree = "<group>"; };
-		NF405F06D000 /* TranscriptionPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionPipeline.swift; sourceTree = "<group>"; };
-		NF3119F4D400 /* TranscriptionPipelineRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionPipelineRunner.swift; sourceTree = "<group>"; };
 		NF80CD7E5D00 /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
 		NF0A9C10DE00 /* ViewModifiers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModifiers.swift; sourceTree = "<group>"; };
 		NFED9E4E5E00 /* WindowCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowCoordinator.swift; sourceTree = "<group>"; };
@@ -408,20 +307,17 @@
 				SP000001 /* Sparkle in Frameworks */,
 				ST000011 /* Hub in Frameworks */,
 				ST000021 /* Tokenizers in Frameworks */,
+				TC100003 /* TranscriptedCore in Frameworks */,
 			
 				NF20640F9501 /* Accessibility.swift in Sources */,
 				NF0EF2C81601 /* AnimatedIcon.swift in Sources */,
 				NF7FF695F301 /* Animations.swift in Sources */,
 				NFEE24DA1301 /* AppDelegateDebug.swift in Sources */,
-				NF9008569A01 /* AppServices.swift in Sources */,
-				NFFEFD8D0101 /* AudioCaptureEngine.swift in Sources */,
 				NFD627BDC701 /* AuroraColors.swift in Sources */,
 				NFAF5A4F9501 /* BrandColors.swift in Sources */,
 				NF41955C0101 /* CardModifiers.swift in Sources */,
 				NF5158DACB01 /* ColorHex.swift in Sources */,
-				NFDB43E09001 /* DiarizationEngine.swift in Sources */,
 				NF36F2651501 /* Dimensions.swift in Sources */,
-				NFC1C920E301 /* DisplayStatus.swift in Sources */,
 				NF2B181AA001 /* Gradients.swift in Sources */,
 				NFA8B23A7601 /* HeatMapColors.swift in Sources */,
 				NFDD34AE1701 /* HotkeyManager.swift in Sources */,
@@ -433,25 +329,9 @@
 				NF5C44D9E301 /* QuickTipRow.swift in Sources */,
 				NF63CDF92701 /* Radius.swift in Sources */,
 				NF4397517301 /* RecordingCoordinator.swift in Sources */,
-				NFAB0BEF3E01 /* RetroactiveSpeakerUpdater.swift in Sources */,
 				NF5B5398D401 /* Shadows.swift in Sources */,
 				NF69E9FFC101 /* Spacing.swift in Sources */,
-				NFC916743001 /* SpeakerEmbeddingMatcher.swift in Sources */,
-				NF321D21DA01 /* SpeakerMatchingService.swift in Sources */,
-				NFD7C7735401 /* SpeakerNamingCoordinator.swift in Sources */,
-				NF13D8F10401 /* SpeakerProfile.swift in Sources */,
-				NFF6BF80D901 /* SpeakerProfileMerger.swift in Sources */,
-				NF7B41DA9E01 /* SpeakerStore.swift in Sources */,
-				NF91BA817F01 /* SpeechToTextEngine.swift in Sources */,
-				NF9441096401 /* StatsDatabaseModels.swift in Sources */,
-				NF5C99141501 /* StatsDatabaseQueries.swift in Sources */,
-				NFF4CABC3601 /* StatsStore.swift in Sources */,
 				NF642BF65101 /* SurfaceColors.swift in Sources */,
-				NF2BB74F9301 /* TranscriptFormatter.swift in Sources */,
-				NF1665D66701 /* TranscriptMetadataBuilder.swift in Sources */,
-				NF0C7CFB5601 /* TranscriptStorage.swift in Sources */,
-				NF405F06D001 /* TranscriptionPipeline.swift in Sources */,
-				NF3119F4D401 /* TranscriptionPipelineRunner.swift in Sources */,
 				NF80CD7E5D01 /* Typography.swift in Sources */,
 				NF0A9C10DE01 /* ViewModifiers.swift in Sources */,
 				NFED9E4E5E01 /* WindowCoordinator.swift in Sources */,);
@@ -506,51 +386,16 @@
 			isa = PBXGroup;
 			children = (
 				A1003010 /* Logging */,
-				A1000004 /* Transcription.swift */,
-				A1000051 /* TranscriptionTaskManager.swift */,
-				A1000006 /* Audio.swift */,
-				AX000002 /* AudioDeviceRecovery.swift */,
-				AX000004 /* AudioLevelMonitor.swift */,
-				AX000006 /* AudioFileManager.swift */,
 				A1000014 /* Clipboard.swift */,
-				A1000041 /* CoreAudioUtils.swift */,
-				FP000002 /* FilePermissions.swift */,
-				A1000045 /* SystemAudioCapture.swift */,
-				SX000002 /* SystemAudioProcessTap.swift */,
-				SX000004 /* SystemAudioBufferWriter.swift */,
-				AG000002 /* AgentOutput.swift */,
-				A1000049 /* TranscriptSaver.swift */,
-				A1000501 /* TranscriptUtils.swift */,
-				A1000053 /* RecordingValidator.swift */,
-				A1000055 /* FailedTranscription.swift */,
-				A1000057 /* FailedTranscriptionManager.swift */,
-				A1000311 /* DateParser.swift */,
-				A1000802 /* DateFormattingHelper.swift */,
-				A1001001 /* StatsDatabase.swift */,
-				A1001002 /* StatsService.swift */,
-				A1001003 /* TranscriptScanner.swift */,
 				A1001021 /* TranscriptStore.swift */,
 				A1001031 /* TranscriptExporter.swift */,
-				A1002005 /* TranscriptionTypes.swift */,
 				A2000002 /* DiagnosticExporter.swift */,
-							NFC1C920E300 /* DisplayStatus.swift */,
-				NFD7C7735400 /* SpeakerNamingCoordinator.swift */,
-				NF3119F4D400 /* TranscriptionPipelineRunner.swift */,
 				NFDD34AE1700 /* HotkeyManager.swift */,
 				NF61402F6900 /* MenuBarManager.swift */,
 				NF47F85CA500 /* NotificationCoordinator.swift */,
 				NFED9E4E5E00 /* WindowCoordinator.swift */,
 				NF4397517300 /* RecordingCoordinator.swift */,
 				NFEE24DA1300 /* AppDelegateDebug.swift */,
-				NF9008569A00 /* AppServices.swift */,
-				NFAB0BEF3E00 /* RetroactiveSpeakerUpdater.swift */,
-				NF2BB74F9300 /* TranscriptFormatter.swift */,
-				NF1665D66700 /* TranscriptMetadataBuilder.swift */,
-				NF9441096400 /* StatsDatabaseModels.swift */,
-				NF5C99141500 /* StatsDatabaseQueries.swift */,
-				NF321D21DA00 /* SpeakerMatchingService.swift */,
-				NF405F06D000 /* TranscriptionPipeline.swift */,
-				MDS00002 /* ModelDownloadService.swift */,
 				SSH00002 /* SystemSettingsHelper.swift */,
 			);
 			path = Core;
@@ -627,17 +472,9 @@
 		A1000320 /* Services */ = {
 			isa = PBXGroup;
 			children = (
-				A1002001 /* AudioResampler.swift */,
-				A1002002 /* ParakeetService.swift */,
 				MD000012 /* MeetingDetector.swift */,
-				A1002003 /* DiarizationService.swift */,
-				A1002004 /* SpeakerDatabase.swift */,
-				A1002006 /* SpeakerClipExtractor.swift */,
-				A1002007 /* EmbeddingClusterer.swift */,
-							NG00000004 /* Protocols */,
-				NF13D8F10400 /* SpeakerProfile.swift */,
-				NFC916743000 /* SpeakerEmbeddingMatcher.swift */,
-				NFF6BF80D900 /* SpeakerProfileMerger.swift */,
+				TC100011 /* ParakeetEngineAdapter.swift */,
+				NG00000004 /* Protocols */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -746,8 +583,6 @@
 		A1003010 /* Logging */ = {
 			isa = PBXGroup;
 			children = (
-				A1003002 /* AppLogger.swift */,
-				A1003004 /* FileLogger.swift */,
 			);
 			path = Logging;
 			sourceTree = "<group>";
@@ -896,12 +731,6 @@
 		NG00000004 /* Protocols */ = {
 			isa = PBXGroup;
 			children = (
-				NF91BA817F00 /* SpeechToTextEngine.swift */,
-				NFDB43E09000 /* DiarizationEngine.swift */,
-				NF7B41DA9E00 /* SpeakerStore.swift */,
-				NF0C7CFB5600 /* TranscriptStorage.swift */,
-				NFF4CABC3600 /* StatsStore.swift */,
-				NFFEFD8D0100 /* AudioCaptureEngine.swift */,
 			);
 			path = Protocols;
 			sourceTree = "<group>";
@@ -926,6 +755,7 @@
 				SP000002 /* Sparkle */,
 				ST000012 /* Hub */,
 				ST000022 /* Tokenizers */,
+				TC100002 /* TranscriptedCore */,
 			);
 			productName = Transcripted;
 			productReference = A1000017 /* Transcripted.app */;
@@ -979,6 +809,7 @@
 			packageReferences = (
 				SP000010 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				ST000010 /* XCRemoteSwiftPackageReference "swift-transformers" */,
+				TC100001 /* XCLocalSwiftPackageReference "." */,
 			);
 			productRefGroup = A1000023 /* Products */;
 			projectDirPath = "";
@@ -1008,24 +839,7 @@
 			files = (
 				MB000001 /* MenuBarStatRow.swift in Sources */,
 				A1000001 /* TranscriptedApp.swift in Sources */,
-				A1000003 /* Transcription.swift in Sources */,
-				A1000050 /* TranscriptionTaskManager.swift in Sources */,
-				A1000005 /* Audio.swift in Sources */,
-				AX000001 /* AudioDeviceRecovery.swift in Sources */,
-				AX000003 /* AudioLevelMonitor.swift in Sources */,
-				AX000005 /* AudioFileManager.swift in Sources */,
 				A1000013 /* Clipboard.swift in Sources */,
-				A1000040 /* CoreAudioUtils.swift in Sources */,
-				FP000001 /* FilePermissions.swift in Sources */,
-				A1000044 /* SystemAudioCapture.swift in Sources */,
-				SX000001 /* SystemAudioProcessTap.swift in Sources */,
-				SX000003 /* SystemAudioBufferWriter.swift in Sources */,
-				AG000001 /* AgentOutput.swift in Sources */,
-				A1000048 /* TranscriptSaver.swift in Sources */,
-				A1000500 /* TranscriptUtils.swift in Sources */,
-				A1000052 /* RecordingValidator.swift in Sources */,
-				A1000054 /* FailedTranscription.swift in Sources */,
-				A1000056 /* FailedTranscriptionManager.swift in Sources */,
 				A1000058 /* FailedTranscriptionsView.swift in Sources */,
 				A1000100 /* OnboardingState.swift in Sources */,
 				A1000102 /* OnboardingWindow.swift in Sources */,
@@ -1034,8 +848,6 @@
 				DK000001 /* WelcomeStep.swift in Sources */,
 				DK000003 /* PreviewStep.swift in Sources */,
 				DK000005 /* BenefitCard.swift in Sources */,
-				A1000301 /* DateParser.swift in Sources */,
-				A1000803 /* DateFormattingHelper.swift in Sources */,
 				A1000911 /* PillStateManager.swift in Sources */,
 				A1000913 /* LawsComponents.swift in Sources */,
 				A1000914 /* AttentionPromptView.swift in Sources */,
@@ -1049,9 +861,6 @@
 				A100091C /* AuroraIdleView.swift in Sources */,
 				A100091D /* AuroraProcessingView.swift in Sources */,
 				A1000940 /* SavedPillView.swift in Sources */,
-				A1001011 /* StatsDatabase.swift in Sources */,
-				A1001012 /* StatsService.swift in Sources */,
-				A1001013 /* TranscriptScanner.swift in Sources */,
 				A1001020 /* TranscriptStore.swift in Sources */,
 				A1001030 /* TranscriptExporter.swift in Sources */,
 				A1001022 /* TranscriptTrayView.swift in Sources */,
@@ -1075,22 +884,13 @@
 				SS001023 /* SettingsRadioGroup.swift in Sources */,
 				SS001025 /* SettingsPathRow.swift in Sources */,
 				SS001027 /* SettingsButtonStyles.swift in Sources */,
-				A1002011 /* AudioResampler.swift in Sources */,
-				A1002012 /* ParakeetService.swift in Sources */,
-				A1002013 /* DiarizationService.swift in Sources */,
-				A1002014 /* SpeakerDatabase.swift in Sources */,
-				A1002015 /* TranscriptionTypes.swift in Sources */,
-				A1002016 /* SpeakerClipExtractor.swift in Sources */,
-				A1002018 /* EmbeddingClusterer.swift in Sources */,
 				MD000011 /* MeetingDetector.swift in Sources */,
+				TC100010 /* ParakeetEngineAdapter.swift in Sources */,
 				A100091F /* SpeakerNamingView.swift in Sources */,
 				A10009E6 /* SpeakerNamingCard.swift in Sources */,
 				A10009E7 /* ClipAudioPlayer.swift in Sources */,
-				A1003001 /* AppLogger.swift in Sources */,
-				A1003003 /* FileLogger.swift in Sources */,
 				4CAF116349811906B83C0406 /* ModelSetupStep.swift in Sources */,
 				A2000001 /* DiagnosticExporter.swift in Sources */,
-				MDS00001 /* ModelDownloadService.swift in Sources */,
 				SSH00001 /* SystemSettingsHelper.swift in Sources */,
 				PC000011 /* PillCalloutView.swift in Sources */,
 				PC000012 /* PillCalloutController.swift in Sources */,
@@ -1115,32 +915,12 @@
 				NF9515C01901 /* PremiumCard.swift in Sources */,
 				NF5C44D9E301 /* QuickTipRow.swift in Sources */,
 				NF0EF2C81601 /* AnimatedIcon.swift in Sources */,
-				NFC1C920E301 /* DisplayStatus.swift in Sources */,
-				NFD7C7735401 /* SpeakerNamingCoordinator.swift in Sources */,
-				NF3119F4D401 /* TranscriptionPipelineRunner.swift in Sources */,
 				NFDD34AE1701 /* HotkeyManager.swift in Sources */,
 				NF61402F6901 /* MenuBarManager.swift in Sources */,
 				NF47F85CA501 /* NotificationCoordinator.swift in Sources */,
 				NFED9E4E5E01 /* WindowCoordinator.swift in Sources */,
 				NF4397517301 /* RecordingCoordinator.swift in Sources */,
 				NFEE24DA1301 /* AppDelegateDebug.swift in Sources */,
-				NF9008569A01 /* AppServices.swift in Sources */,
-				NFAB0BEF3E01 /* RetroactiveSpeakerUpdater.swift in Sources */,
-				NF2BB74F9301 /* TranscriptFormatter.swift in Sources */,
-				NF1665D66701 /* TranscriptMetadataBuilder.swift in Sources */,
-				NF9441096401 /* StatsDatabaseModels.swift in Sources */,
-				NF5C99141501 /* StatsDatabaseQueries.swift in Sources */,
-				NF321D21DA01 /* SpeakerMatchingService.swift in Sources */,
-				NF405F06D001 /* TranscriptionPipeline.swift in Sources */,
-				NF13D8F10401 /* SpeakerProfile.swift in Sources */,
-				NFC916743001 /* SpeakerEmbeddingMatcher.swift in Sources */,
-				NFF6BF80D901 /* SpeakerProfileMerger.swift in Sources */,
-				NF91BA817F01 /* SpeechToTextEngine.swift in Sources */,
-				NFDB43E09001 /* DiarizationEngine.swift in Sources */,
-				NF7B41DA9E01 /* SpeakerStore.swift in Sources */,
-				NF0C7CFB5601 /* TranscriptStorage.swift in Sources */,
-				NFF4CABC3601 /* StatsStore.swift in Sources */,
-				NFFEFD8D0101 /* AudioCaptureEngine.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1478,6 +1258,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		TC100001 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		SP000010 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -1512,6 +1299,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = ST000010 /* XCRemoteSwiftPackageReference "swift-transformers" */;
 			productName = Tokenizers;
+		};
+		TC100002 /* TranscriptedCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = TC100001 /* XCLocalSwiftPackageReference "." */;
+			productName = TranscriptedCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

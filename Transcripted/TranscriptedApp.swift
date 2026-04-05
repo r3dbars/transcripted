@@ -5,6 +5,7 @@ import Combine
 import UserNotifications
 #if canImport(Sparkle)
 import Sparkle
+import TranscriptedCore
 #endif
 
 @available(macOS 26.0, *)
@@ -106,7 +107,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifi
         // Initialize managers
         let ftm = FailedTranscriptionManager()
         let aud = Audio()
-        let tm = TranscriptionTaskManager(failedTranscriptionManager: ftm)
+        // Wire up Core's TranscriptionTaskManager with the app-target Parakeet adapter
+        // and Core's DiarizationService + SpeakerDatabase. Core is STT-agnostic, so the
+        // speechToText conformer is supplied by the embedder (ParakeetEngineAdapter lives
+        // in Transcripted/Services/).
+        let parakeet = ParakeetEngineAdapter()
+        let diarization = DiarizationService()
+        let speakerDB = SpeakerDatabase.shared
+        let tm = TranscriptionTaskManager(
+            failedTranscriptionManager: ftm,
+            speechToText: parakeet,
+            diarization: diarization,
+            speakerStore: speakerDB
+        )
         failedTranscriptionManager = ftm
         audio = aud
         taskManager = tm

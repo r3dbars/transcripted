@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import TranscriptedCore
 
 // MARK: - TranscriptTrayView
 

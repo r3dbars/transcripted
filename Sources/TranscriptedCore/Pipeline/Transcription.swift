@@ -33,9 +33,9 @@ public class Transcription: ObservableObject {
     @Published public var processingStatus: String = ""
     @Published public var lastSavedFileURL: URL?
 
-    let parakeet: any SpeechToTextEngine
-    let diarization: any DiarizationEngine
-    let speakerDB: any SpeakerStore
+    public let parakeet: any SpeechToTextEngine
+    public let diarization: any DiarizationEngine
+    public let speakerDB: any SpeakerStore
 
     public init(
         speechToText: any SpeechToTextEngine,

@@ -335,7 +335,7 @@ public enum AgentOutput {
     }
 
     /// Generate a paste-ready prompt for connecting an AI agent.
-    static func clipboardPrompt(folder: URL, filename: String?) -> String {
+    public static func clipboardPrompt(folder: URL, filename: String?) -> String {
         var prompt = """
         I use Transcripted to record meetings locally on my Mac.
         My transcripts are saved at: \(folder.path)

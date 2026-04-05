@@ -1,4 +1,5 @@
 import SwiftUI
+import TranscriptedCore
 
 // MARK: - Aurora Recording View
 /// Clean recording pill with two audio-reactive VU dots.
