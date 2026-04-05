@@ -16,10 +16,8 @@ extension StatsDatabase {
     private func getRecordingsImpl(from startDate: Date, to endDate: Date) -> [RecordingMetadata] {
         var recordings: [RecordingMetadata] = []
 
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        let startStr = dateFormatter.string(from: startDate)
-        let endStr = dateFormatter.string(from: endDate)
+        let startStr = DateFormattingHelper.formatISODate(startDate)
+        let endStr = DateFormattingHelper.formatISODate(endDate)
 
         let sql = "SELECT id, date, time, duration_seconds, word_count, speaker_count, processing_time_ms, transcript_path, title FROM recordings WHERE date >= ? AND date <= ? ORDER BY date DESC, time DESC;"
         var statement: OpaquePointer?
@@ -60,10 +58,8 @@ extension StatsDatabase {
             return activities
         }
 
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        let startStr = dateFormatter.string(from: startOfMonth)
-        let endStr = dateFormatter.string(from: endOfMonth)
+        let startStr = DateFormattingHelper.formatISODate(startOfMonth)
+        let endStr = DateFormattingHelper.formatISODate(endOfMonth)
 
         let sql = "SELECT date, recording_count, total_duration_seconds, action_items_count FROM daily_activity WHERE date >= ? AND date <= ?;"
         var statement: OpaquePointer?
@@ -177,10 +173,8 @@ extension StatsDatabase {
     }
 
     private func getStatsForLastDaysImpl(_ days: Int) -> (recordings: Int, durationSeconds: Int) {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
         let startDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
-        let startStr = dateFormatter.string(from: startDate)
+        let startStr = DateFormattingHelper.formatISODate(startDate)
 
         var recordings = 0
         var duration = 0

@@ -379,47 +379,11 @@ class Audio: ObservableObject {
             return
         }
 
-        // Set isStarting to prevent double-start during async setup
-        isStarting = true
-        error = nil
-        systemBufferCount = 0  // Reset debug counter (lock-protected)
-        resetSilenceTracking()  // Start fresh silence tracking
-        systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
-        systemAudioSilenceStart = nil  // Reset system audio silence tracking
-
-        // Reset health tracking for new recording session
-        recordingGaps = []
-        deviceSwitchCount = 0
-        sleepTimestamp = nil
-        lastRecoveryTime = nil
-        consecutiveMicWriteErrors = 0
-        consecutiveSystemWriteErrors = 0
-        systemAudioFailed = false
-
-        AppLogger.audio.info("Starting audio capture")
-
-        onRecordingStart?()
-
-        Task {
-            do {
-                try await startAudioCapture()
-                await MainActor.run {
-                    self.isRecording = true
-                    self.isStarting = false
-                }
-            } catch {
-                await MainActor.run {
-                    self.error = "Recording failed to start: \(error.localizedDescription). Try quitting and reopening Transcripted."
-                    self.isRecording = false
-                    self.isStarting = false
-                    self.stop()
-                }
-            }
-        }
+        startAudioCaptureAsync()
     }
 
-    /// Helper method to start audio capture asynchronously
-    /// Used when permission is already granted or after permission request completes
+    /// Resets recording state and launches the capture task.
+    /// Called directly when permission is already granted, or from the permission callback.
     private func startAudioCaptureAsync() {
         // Set isStarting to prevent double-start during async setup
         isStarting = true

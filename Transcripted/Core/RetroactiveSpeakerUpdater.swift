@@ -136,6 +136,13 @@ extension TranscriptSaver {
         }
     }
 
+    private static let speakerBreakdownRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"- \*\*(.+?):\*\* (\d+) utterances?, ~(\d+) words?, (\d+):(\d+)"#
+    )
+    private static let footerSpeakerCountRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"\| (\d+) speakers\*"#
+    )
+
     /// Merge duplicate speaker lines in the "Remote Speaker Breakdown" section.
     /// When two diarizer IDs get the same name, their stats should be combined
     /// into a single line (summing utterances, words, and speaking time).
@@ -157,8 +164,7 @@ extension TranscriptSaver {
             var speakingSeconds: Double = 0
         }
 
-        let pattern = #"- \*\*(.+?):\*\* (\d+) utterances?, ~(\d+) words?, (\d+):(\d+)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return content }
+        guard let regex = speakerBreakdownRegex else { return content }
 
         var statsByName: [String: SpeakerStats] = [:]
         var nameOrder: [String] = []
@@ -216,8 +222,7 @@ extension TranscriptSaver {
         // The footer uses total = mic_speakers + system_speakers.
         // We can't know mic_speakers from here, so fix the total by the same delta.
         let delta = oldSystemSpeakers - newSystemSpeakers
-        let footerPattern = #"\| (\d+) speakers\*"#
-        if let footerRegex = try? NSRegularExpression(pattern: footerPattern),
+        if let footerRegex = footerSpeakerCountRegex,
            let footerMatch = footerRegex.firstMatch(in: result, range: NSRange(location: 0, length: (result as NSString).length)),
            let oldTotal = Int((result as NSString).substring(with: footerMatch.range(at: 1))) {
             let newTotal = oldTotal - delta

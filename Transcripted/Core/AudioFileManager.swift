@@ -247,10 +247,9 @@ extension Audio {
         timer?.invalidate()
         diskCheckCounter = 0
         timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+            // Timer is scheduled on the main run loop (startTimer is called from MainActor.run)
             guard let self = self, let start = self.startTime else { return }
-            DispatchQueue.main.async {
-                self.recordingDuration = Date().timeIntervalSince(start)
-            }
+            self.recordingDuration = Date().timeIntervalSince(start)
 
             // Periodic disk check during recording (~every 30s)
             self.diskCheckCounter += 1
@@ -260,10 +259,8 @@ extension Audio {
                    let freeSpace = attrs[FileAttributeKey.systemFreeSize] as? Int64 {
                     if freeSpace < 50_000_000 { // 50MB
                         AppLogger.audio.error("Disk space critically low during recording, stopping", ["freeSpace": "\(freeSpace / 1_000_000)MB"])
-                        DispatchQueue.main.async {
-                            self.error = "Recording stopped — disk space critically low (\(freeSpace / 1_000_000)MB free)"
-                            self.stop()
-                        }
+                        self.error = "Recording stopped — disk space critically low (\(freeSpace / 1_000_000)MB free)"
+                        self.stop()
                         return
                     } else if freeSpace < 100_000_000 { // 100MB
                         AppLogger.audio.warning("Disk space low during recording", ["freeSpace": "\(freeSpace / 1_000_000)MB"])

@@ -25,6 +25,9 @@ final class StatsDatabase {
         return fmt
     }()
 
+    /// Cached ISO 8601 formatter for the created_at column.
+    private static let isoFormatter = ISO8601DateFormatter()
+
     /// SQLITE_TRANSIENT tells SQLite to copy text immediately, preventing dangling pointer issues
     /// from temporary (NSString).utf8String pointers
     let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -203,18 +206,9 @@ final class StatsDatabase {
             var statement: OpaquePointer?
 
             if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-                let dateFormatter = DateFormatter()
-                dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-                dateFormatter.dateFormat = "yyyy-MM-dd"
-                let dateString = dateFormatter.string(from: metadata.date)
-
-                let timeFormatter = DateFormatter()
-                timeFormatter.locale = Locale(identifier: "en_US_POSIX")
-                timeFormatter.dateFormat = "HH:mm:ss"
-                let timeString = timeFormatter.string(from: metadata.date)
-
-                let isoFormatter = ISO8601DateFormatter()
-                let createdAt = isoFormatter.string(from: metadata.date)
+                let dateString = DateFormattingHelper.formatISODate(metadata.date)
+                let timeString = DateFormattingHelper.formatTimeOnly(metadata.date)
+                let createdAt = Self.isoFormatter.string(from: metadata.date)
 
                 sqlite3_bind_text(statement, 1, (metadata.id as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(statement, 2, (dateString as NSString).utf8String, -1, SQLITE_TRANSIENT)
@@ -300,9 +294,7 @@ final class StatsDatabase {
     // MARK: - Daily Activity Update
 
     func updateDailyActivityImpl(for date: Date, durationDelta: Int) {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        let dateStr = dateFormatter.string(from: date)
+        let dateStr = DateFormattingHelper.formatISODate(date)
 
         // Upsert: insert new or increment existing daily activity
         let updateSQL = """
