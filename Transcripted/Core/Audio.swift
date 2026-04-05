@@ -40,7 +40,6 @@ enum SystemAudioStatus: Equatable {
 /// Note: This class does NOT use @MainActor because it manages AVAudioEngine
 /// which requires synchronous access from audio tap callbacks on audio threads.
 /// UI updates are dispatched to main thread explicitly.
-@available(macOS 26.0, *)
 class Audio: ObservableObject {
     @Published var isRecording: Bool = false
     @Published private(set) var isMonitoring: Bool = false  // Lightweight level metering without file recording

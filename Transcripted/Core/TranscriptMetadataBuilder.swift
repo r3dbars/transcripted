@@ -26,7 +26,6 @@ struct RecordingHealthInfo {
     let gapDescriptions: [String]
 
     /// Create health info from Audio instance
-    @available(macOS 26.0, *)
     static func from(audio: Audio, systemCapture: SystemAudioCapture?) -> RecordingHealthInfo {
         let successRate = systemCapture?.bufferSuccessRate ?? 1.0
         return RecordingHealthInfo(

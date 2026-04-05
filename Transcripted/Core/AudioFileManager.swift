@@ -7,7 +7,6 @@ import QuartzCore
 
 /// Extension handling audio file creation, WAV writing, buffer copying, and format conversion.
 /// Runs on audio callback threads — NOT @MainActor.
-@available(macOS 26.0, *)
 extension Audio {
 
     // MARK: - Audio Capture Setup

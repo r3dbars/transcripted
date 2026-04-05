@@ -4,7 +4,6 @@ import UserNotifications
 
 // MARK: - Pipeline Execution (Multichannel Transcription + Speaker Identification)
 
-@available(macOS 26.0, *)
 extension TranscriptionTaskManager {
 
     /// Transcribe with multichannel mode (requires both mic and system audio)

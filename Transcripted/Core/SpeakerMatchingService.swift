@@ -3,7 +3,6 @@ import Accelerate
 
 // MARK: - In-Memory Speaker Matching
 
-@available(macOS 26.0, *)
 extension Transcription {
 
     /// Result of matching against an in-memory snapshot of profiles

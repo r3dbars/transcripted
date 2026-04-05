@@ -2,7 +2,6 @@ import Foundation
 
 // MARK: - Speaker Naming Flow Coordination
 
-@available(macOS 26.0, *)
 extension TranscriptionTaskManager {
 
     /// Handle completion of the speaker naming flow.

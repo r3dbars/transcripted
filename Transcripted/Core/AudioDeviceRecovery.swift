@@ -8,7 +8,6 @@ import QuartzCore
 
 /// Extension handling mic device recovery, watchdog timer, and sleep/wake resilience.
 /// Runs on background threads — NOT @MainActor.
-@available(macOS 26.0, *)
 extension Audio {
 
     // MARK: - Watchdog Timer

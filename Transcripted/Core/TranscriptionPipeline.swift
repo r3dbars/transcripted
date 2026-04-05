@@ -4,7 +4,6 @@ import Accelerate
 
 // MARK: - Local Multichannel Transcription
 
-@available(macOS 26.0, *)
 extension Transcription {
 
     /// Transcribe mic + system audio using local Parakeet STT + offline diarization.
