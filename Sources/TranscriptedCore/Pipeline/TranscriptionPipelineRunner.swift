@@ -1,6 +1,5 @@
 import Foundation
 import AVFoundation
-import UserNotifications
 
 // MARK: - Pipeline Execution (Multichannel Transcription + Speaker Identification)
 
@@ -147,8 +146,9 @@ extension TranscriptionTaskManager {
         }
 
         // Phase 2: Save transcript with speaker names
-        await MainActor.run {
+        let notifier: TranscriptNotifier? = await MainActor.run {
             self.displayStatus = .finishing
+            return self.notifier
         }
 
         guard let savedURL = TranscriptSaver.saveTranscript(
@@ -157,7 +157,8 @@ extension TranscriptionTaskManager {
             speakerSources: speakerSources,
             speakerDbIds: speakerDbIds,
             directory: outputFolder,
-            healthInfo: healthInfo
+            healthInfo: healthInfo,
+            notifier: notifier
         ) else {
             throw PipelineError.saveFailed(detail: "Could not write transcript to \(outputFolder.lastPathComponent)")
         }

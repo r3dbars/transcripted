@@ -1,19 +1,20 @@
 import Foundation
-import UserNotifications
 
 /// Handles automatic saving of transcripts to the filesystem
 public class TranscriptSaver {
 
-    /// Default save location: ~/Documents/Transcripted/
-    /// Reads custom location from UserDefaults if set.
+    /// Default save location for the standalone Transcripted app.
+    /// Falls back to `CoreStoragePaths.default.transcripts` unless the user has set a
+    /// custom location in UserDefaults (the Settings window offers this knob).
     /// Security: validates the custom path against directory traversal and forbidden system
     /// directories before use. Falls back to the default location if validation fails, so
     /// a tampered UserDefaults value cannot redirect transcripts to an arbitrary path.
+    ///
+    /// Embedders (e.g. the Draft app) should NOT rely on this property — instead pass an
+    /// explicit `directory:` argument to `saveTranscript(...)` so their own storage layout
+    /// is honoured.
     public static var defaultSaveDirectory: URL {
-        let fallback: URL = {
-            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            return documentsPath.appendingPathComponent("Transcripted")
-        }()
+        let fallback = CoreStoragePaths.default.transcripts
 
         // Check for custom save location first
         if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
@@ -41,9 +42,15 @@ public class TranscriptSaver {
     ///   - text: The transcript text to save
     ///   - duration: Recording duration in seconds
     ///   - directory: Optional custom directory (defaults to ~/Documents/Transcripted/)
+    ///   - notifier: Optional notifier; invoked on the main actor after a successful save.
     /// - Returns: URL of saved file, or nil if save failed
     @discardableResult
-    public static func save(text: String, duration: TimeInterval, directory: URL? = nil) -> URL? {
+    public static func save(
+        text: String,
+        duration: TimeInterval,
+        directory: URL? = nil,
+        notifier: TranscriptNotifier? = nil
+    ) -> URL? {
         // Use default directory if not specified
         let saveDir = directory ?? defaultSaveDirectory
 
@@ -73,8 +80,13 @@ public class TranscriptSaver {
             FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
             AppLogger.pipeline.info("Transcript saved", ["path": fileURL.path])
 
-            // Show system notification
-            showSaveNotification(fileURL: fileURL)
+            // Notify the embedder so they can present a user-facing alert
+            if let notifier {
+                let savedURL = fileURL
+                Task { @MainActor in
+                    notifier.notifyTranscriptSaved(fileURL: savedURL)
+                }
+            }
 
             return fileURL
         } catch {
@@ -102,7 +114,8 @@ public class TranscriptSaver {
         speakerDbIds: [String: UUID] = [:],
         directory: URL? = nil,
         meetingTitle: String? = nil,
-        healthInfo: RecordingHealthInfo? = nil
+        healthInfo: RecordingHealthInfo? = nil,
+        notifier: TranscriptNotifier? = nil
     ) -> URL? {
         let saveDir = directory ?? defaultSaveDirectory
 
@@ -163,7 +176,11 @@ public class TranscriptSaver {
         }
 
         if let savedURL {
-            showSaveNotification(fileURL: savedURL)
+            if let notifier {
+                Task { @MainActor in
+                    notifier.notifyTranscriptSaved(fileURL: savedURL)
+                }
+            }
 
             // Record to stats database (outside queue — dispatches to MainActor)
             Task { @MainActor in
@@ -177,40 +194,5 @@ public class TranscriptSaver {
         }
 
         return savedURL
-    }
-
-    // MARK: - Notifications
-
-    /// Notification category identifier for "Show in Finder" action
-    static let notificationCategoryId = "TRANSCRIPT_SAVED"
-    static let showInFinderActionId = "SHOW_IN_FINDER"
-
-    /// Show macOS notification that transcript was saved.
-    /// Guards on authorization status to avoid UNErrorDomain error 1.
-    static func showSaveNotification(fileURL: URL) {
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            guard settings.authorizationStatus == .authorized else {
-                AppLogger.pipeline.debug("Skipping save notification — not authorized")
-                return
-            }
-
-            let content = UNMutableNotificationContent()
-            content.title = "Transcript Saved"
-            content.body = fileURL.lastPathComponent
-            content.categoryIdentifier = notificationCategoryId
-            content.userInfo = ["fileURL": fileURL.path]
-
-            let request = UNNotificationRequest(
-                identifier: UUID().uuidString,
-                content: content,
-                trigger: nil // deliver immediately
-            )
-
-            UNUserNotificationCenter.current().add(request) { error in
-                if let error = error {
-                    AppLogger.pipeline.error("Failed to deliver notification", ["error": error.localizedDescription])
-                }
-            }
-        }
     }
 }

@@ -52,7 +52,14 @@ public class DiarizationService: ObservableObject {
     private var offlineDiarizerManager: OfflineDiarizerManager?
     private var offlineModelState: DiarizationModelState = .notLoaded
 
-    public init() {}
+    /// Provider that resolves bundled model directories. Embedders can swap this to
+    /// redirect lookups (e.g. a shared cache in Application Support). Returning `nil`
+    /// from the provider falls through to HuggingFace download via `ModelDownloadService`.
+    private let bundleProvider: ModelBundleProvider
+
+    public init(bundleProvider: @escaping ModelBundleProvider = defaultModelBundleProvider) {
+        self.bundleProvider = bundleProvider
+    }
 
     public var isReady: Bool { modelState == .ready }
 
@@ -89,7 +96,7 @@ public class DiarizationService: ObservableObject {
         let loadStart = Date()
         let manager = DiarizerManager(config: .default)
 
-        if let bundlePath = bundledModelsPath(directory: "sortformer-models") {
+        if let bundlePath = bundleProvider("sortformer-models") {
             AppLogger.transcription.info("Sortformer loading from bundle", ["path": "\(bundlePath)"])
             let models = try await DiarizerModels.load(from: bundlePath)
             manager.initialize(models: models)
@@ -133,7 +140,7 @@ public class DiarizationService: ObservableObject {
         ).withSpeakers(min: 3, max: 11)
         let manager = OfflineDiarizerManager(config: offlineConfig)
 
-        if let bundlePath = bundledModelsPath(directory: "offline-diarizer-models") {
+        if let bundlePath = bundleProvider("offline-diarizer-models") {
             AppLogger.transcription.info("Offline diarizer loading from bundle", ["path": "\(bundlePath)"])
             let models = try await OfflineDiarizerModels.load(from: bundlePath)
             manager.initialize(models: models)
@@ -148,17 +155,6 @@ public class DiarizationService: ObservableObject {
         offlineModelState = .ready
         let elapsed = String(format: "%.1fs", Date().timeIntervalSince(loadStart))
         AppLogger.transcription.info("Offline diarizer models loaded", ["elapsed": elapsed])
-    }
-
-    /// Check for diarization models bundled inside the app at build time.
-    private func bundledModelsPath(directory: String) -> URL? {
-        guard let resourcePath = Bundle.main.resourcePath else { return nil }
-
-        let path = URL(fileURLWithPath: resourcePath)
-            .appendingPathComponent(directory)
-        guard FileManager.default.fileExists(atPath: path.path) else { return nil }
-
-        return path
     }
 
     // MARK: - Offline Diarization (PyAnnote)
