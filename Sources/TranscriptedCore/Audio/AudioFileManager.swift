@@ -111,6 +111,11 @@ extension Audio {
                             AppLogger.audioSystem.debug("System buffer", ["number": "\(currentBufferCount)", "sampleRate": "\(Int(fmt.sampleRate))", "channels": "\(fmt.channelCount)", "frames": "\(bufferCopy.frameLength)"])
                         }
 
+                        // Live-preview hook: fire with the already-copied buffer so
+                        // embedders (e.g., Draft's dual-stream meeting preview) can
+                        // retain it safely beyond the CoreAudio I/O proc scope.
+                        self.onSystemPCMBuffer?(bufferCopy)
+
                         // Dispatch file write to background queue (non-blocking)
                         // File already exists, so this is just a write operation
                         self.systemAudioFileQueue.async { [weak self] in
@@ -212,6 +217,13 @@ extension Audio {
     func handleMicBuffer(_ buffer: AVAudioPCMBuffer) {
         lastBufferTime = CACurrentMediaTime()
         calculateLevel(buffer: buffer)
+
+        // Live-preview hook: fire synchronously on the audio thread so embedders
+        // (e.g., Draft's dual-stream meeting preview) can pull the raw buffer
+        // before it gets downmixed/written. Consumer is responsible for copying
+        // and hopping off the audio thread — see Audio.swift `onMicPCMBuffer`
+        // documentation for threading contract.
+        self.onMicPCMBuffer?(buffer)
 
         micAudioFileQueue.async { [weak self] in
             guard let self = self,
