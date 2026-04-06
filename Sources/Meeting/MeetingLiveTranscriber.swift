@@ -43,6 +43,7 @@ final class MeetingLiveTranscriber: ObservableObject {
         let kind: Kind
         let text: String
         let timestamp: Date
+        let observedAudioSeconds: TimeInterval
     }
 
 
@@ -82,6 +83,7 @@ final class MeetingLiveTranscriber: ObservableObject {
     // crossing actor boundaries on the hot path.
     private nonisolated(unsafe) var eou: StreamingEouAsrManager?
     private nonisolated(unsafe) var pendingSamples: [Float] = []
+    private nonisolated(unsafe) var observedAudioSeconds: TimeInterval = 0
     private let samplesLock = NSLock()
 
     // Feed ~320ms of 16kHz audio per chunk, matching the EOU shift size
@@ -136,7 +138,8 @@ final class MeetingLiveTranscriber: ObservableObject {
                     source: self.source,
                     kind: .partial,
                     text: trimmed,
-                    timestamp: Date()
+                    timestamp: Date(),
+                    observedAudioSeconds: self.currentObservedAudioSeconds()
                 ))
             }
         }
@@ -157,7 +160,8 @@ final class MeetingLiveTranscriber: ObservableObject {
                     source: self.source,
                     kind: .committed,
                     text: trimmed,
-                    timestamp: Date()
+                    timestamp: Date(),
+                    observedAudioSeconds: self.currentObservedAudioSeconds()
                 ))
             }
         }
@@ -176,11 +180,18 @@ final class MeetingLiveTranscriber: ObservableObject {
 
         samplesLock.lock()
         pendingSamples.removeAll(keepingCapacity: true)
+        observedAudioSeconds = 0
         samplesLock.unlock()
 
         committedText = ""
         liveText = ""
-        onUpdate?(Update(source: source, kind: .reset, text: "", timestamp: Date()))
+        onUpdate?(Update(
+            source: source,
+            kind: .reset,
+            text: "",
+            timestamp: Date(),
+            observedAudioSeconds: 0
+        ))
     }
 
     // MARK: - Ingest (audio-thread entry point)
@@ -214,6 +225,7 @@ final class MeetingLiveTranscriber: ObservableObject {
         // holding it across an async suspension point.
         samplesLock.lock()
         pendingSamples.append(contentsOf: resampled)
+        observedAudioSeconds += Double(resampled.count) / 16000.0
 
         var chunks: [[Float]] = []
         while pendingSamples.count >= chunkSamples {
@@ -300,6 +312,12 @@ final class MeetingLiveTranscriber: ObservableObject {
         }
 
         return nil
+    }
+
+    private nonisolated func currentObservedAudioSeconds() -> TimeInterval {
+        samplesLock.lock()
+        defer { samplesLock.unlock() }
+        return observedAudioSeconds
     }
 
     /// Wrap a Float array in an AVAudioPCMBuffer matching `pcmFormat`

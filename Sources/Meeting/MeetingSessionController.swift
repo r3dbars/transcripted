@@ -62,10 +62,8 @@ final class MeetingSessionController: ObservableObject {
     @Published private(set) var lastSavedTranscriptURL: URL? = nil
     @Published private(set) var lastSavedTitle: String? = nil
 
-    // Live transcription preview (dual-stream). Populated by a pair of
-    // StreamingEouAsrManager-backed transcribers during recording, cleared on
-    // stop. Best-effort — the authoritative transcript still comes from the
-    // offline pipeline in Core's TranscriptionTaskManager.
+    // Live transcript preview is intentionally disabled. The authoritative
+    // meeting transcript comes from the offline pipeline after stop.
     @Published private(set) var liveMicTranscript: String = ""
     @Published private(set) var liveSystemTranscript: String = ""
     @Published private(set) var liveTranscriptLines: [LiveTranscriptLine] = []
@@ -82,15 +80,8 @@ final class MeetingSessionController: ObservableObject {
     private let speakerDatabase: SpeakerDatabase
     private let downloader: MeetingModelDownloader
 
-    // Dual-stream live preview transcribers (one per audio source).
-    // Each wraps its own StreamingEouAsrManager instance (~120MB CoreML
-    // model, loaded once during prepareModels()). If model discovery or
-    // loading fails, these stay inert and the recording proceeds normally
-    // without a live preview.
     private let micLiveTranscriber: MeetingLiveTranscriber?
     private let systemLiveTranscriber: MeetingLiveTranscriber?
-    private let livePreviewTimestampCompensation: TimeInterval = 0.8
-    private var livePreviewStartedAt: Date?
 
     private var cancellables: Set<AnyCancellable> = []
 
@@ -159,62 +150,10 @@ final class MeetingSessionController: ObservableObject {
         // Model downloader — coordinates Parakeet + PyAnnote readiness.
         self.downloader = MeetingModelDownloader(stt: sttAdapter, diarization: diarization)
 
-        // Dual-stream live preview transcribers. We locate the EOU model
-        // directory at construction time (bundled-in-app or cached in
-        // ~/Library/Application Support/FluidAudio/Models). If it doesn't
-        // exist yet (e.g., first launch before Draft's dictation path has
-        // downloaded it), live preview stays disabled for this session;
-        // recording + offline transcription still work.
-        if let modelDir = Self.locateEouModelDir() {
-            self.micLiveTranscriber = MeetingLiveTranscriber(source: .mic, modelDir: modelDir)
-            self.systemLiveTranscriber = MeetingLiveTranscriber(source: .system, modelDir: modelDir)
-        } else {
-            self.micLiveTranscriber = nil
-            self.systemLiveTranscriber = nil
-            print("⚠️ MEETING | EOU model not found — live preview disabled for this session")
-        }
-
-        self.micLiveTranscriber?.onUpdate = { [weak self] update in
-            self?.applyLivePreviewUpdate(update)
-        }
-        self.systemLiveTranscriber?.onUpdate = { [weak self] update in
-            self?.applyLivePreviewUpdate(update)
-        }
+        self.micLiveTranscriber = nil
+        self.systemLiveTranscriber = nil
 
         wireSubscriptions()
-    }
-
-    /// Locate the Parakeet EOU 120M model on disk. Returns nil if neither
-    /// the bundled copy nor the FluidAudio cache has it. Same lookup order
-    /// as ParakeetEngine.initializeEouModel() — if dictation has been run
-    /// at least once, the cache will be populated.
-    private static func locateEouModelDir() -> URL? {
-        // 1. App bundle (shipped via build.sh)
-        if let resourcePath = Bundle.main.resourcePath {
-            let bundled = URL(fileURLWithPath: resourcePath)
-                .appendingPathComponent("parakeet-models")
-                .appendingPathComponent("parakeet-eou-120m-coreml")
-            if FileManager.default.fileExists(
-                atPath: bundled.appendingPathComponent("streaming_encoder.mlmodelc").path
-            ) {
-                return bundled
-            }
-        }
-
-        // 2. FluidAudio cache (downloaded by Draft's dictation path)
-        if let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        ).first {
-            let cached = appSupport
-                .appendingPathComponent("FluidAudio/Models/parakeet-eou-streaming/320ms", isDirectory: true)
-            if FileManager.default.fileExists(
-                atPath: cached.appendingPathComponent("streaming_encoder.mlmodelc").path
-            ) {
-                return cached
-            }
-        }
-
-        return nil
     }
 
     // MARK: - Public API
@@ -229,18 +168,6 @@ final class MeetingSessionController: ObservableObject {
         state = .loadingModels
         do {
             try await downloader.ensureModelsReady()
-
-            // Kick off live-preview model loads in parallel. We wait for
-            // them so the overlay's first chunk isn't dropped, but we don't
-            // propagate their errors — they're best-effort.
-            await withTaskGroup(of: Void.self) { group in
-                if let mic = micLiveTranscriber {
-                    group.addTask { await mic.start() }
-                }
-                if let sys = systemLiveTranscriber {
-                    group.addTask { await sys.start() }
-                }
-            }
 
             state = .ready
         } catch {
@@ -265,18 +192,6 @@ final class MeetingSessionController: ObservableObject {
         liveMicTranscript = ""
         liveSystemTranscript = ""
         liveTranscriptLines = []
-        livePreviewStartedAt = Date()
-        if let mic = micLiveTranscriber {
-            capture.setMicLivePreviewHandler { [weak mic] buffer in
-                mic?.ingest(buffer: buffer)
-            }
-        }
-        if let sys = systemLiveTranscriber {
-            capture.setSystemLivePreviewHandler { [weak sys] buffer in
-                sys?.ingest(buffer: buffer)
-            }
-        }
-
         capture.startRecording()
         state = .recording
     }
@@ -287,22 +202,13 @@ final class MeetingSessionController: ObservableObject {
     func stopRecording() async {
         guard case .recording = state else { return }
 
-        // Unwire live-preview handlers before stopping capture so any
-        // in-flight buffer from the audio thread can't reach a reset
-        // transcriber.
         capture.setMicLivePreviewHandler(nil)
         capture.setSystemLivePreviewHandler(nil)
 
         let files = await capture.stopAndAwaitFiles()
         state = .transcribing
 
-        // Clear live-preview state. The offline pipeline will produce the
-        // authoritative transcript and save it to disk; the live text is
-        // preview-only and doesn't need to be preserved.
-        await micLiveTranscriber?.stop()
-        await systemLiveTranscriber?.stop()
         liveTranscriptLines = []
-        livePreviewStartedAt = nil
 
         guard let micURL = files.micURL else {
             state = .error("No microphone audio was captured.")
@@ -322,56 +228,6 @@ final class MeetingSessionController: ObservableObject {
     func cancelActiveTranscription() {
         taskManager.cancelAll()
         state = .ready
-    }
-
-    private func applyLivePreviewUpdate(_ update: MeetingLiveTranscriber.Update) {
-        let source: LiveTranscriptLine.Source = (update.source == .mic) ? .mic : .system
-        let rawStartedAt = update.timestamp.timeIntervalSince(livePreviewStartedAt ?? update.timestamp)
-        let startedAt = max(0, rawStartedAt - livePreviewTimestampCompensation)
-
-        switch update.kind {
-        case .reset:
-            liveTranscriptLines.removeAll()
-
-        case .partial:
-            let text = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let index = liveTranscriptLines.lastIndex(where: { $0.source == source && $0.isPartial }) {
-                if text.isEmpty {
-                    liveTranscriptLines.remove(at: index)
-                } else {
-                    liveTranscriptLines[index].text = text
-                    liveTranscriptLines[index].updatedAt = update.timestamp
-                }
-            } else if !text.isEmpty {
-                liveTranscriptLines.append(LiveTranscriptLine(
-                    id: UUID(),
-                    source: source,
-                    text: text,
-                    isPartial: true,
-                    startedAt: startedAt,
-                    updatedAt: update.timestamp
-                ))
-            }
-
-        case .committed:
-            let text = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { return }
-
-            if let index = liveTranscriptLines.lastIndex(where: { $0.source == source && $0.isPartial }) {
-                liveTranscriptLines[index].text = text
-                liveTranscriptLines[index].isPartial = false
-                liveTranscriptLines[index].updatedAt = update.timestamp
-            } else {
-                liveTranscriptLines.append(LiveTranscriptLine(
-                    id: UUID(),
-                    source: source,
-                    text: text,
-                    isPartial: false,
-                    startedAt: startedAt,
-                    updatedAt: update.timestamp
-                ))
-            }
-        }
     }
 
     // MARK: - Subscriptions
@@ -413,16 +269,5 @@ final class MeetingSessionController: ObservableObject {
         taskManager.$lastSavedTitle
             .assign(to: &$lastSavedTitle)
 
-        // Live-preview text forwarding. Each transcriber publishes its
-        // own liveText on the MainActor; we mirror it here so the meeting
-        // overlay only needs to subscribe to the session controller.
-        if let mic = micLiveTranscriber {
-            mic.$liveText
-                .assign(to: &$liveMicTranscript)
-        }
-        if let sys = systemLiveTranscriber {
-            sys.$liveText
-                .assign(to: &$liveSystemTranscript)
-        }
     }
 }
