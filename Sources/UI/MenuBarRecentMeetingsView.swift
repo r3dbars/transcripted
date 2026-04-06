@@ -26,7 +26,7 @@ struct RecentMeetingItem {
 @MainActor
 enum RecentMeetingsScanner {
 
-    static func loadRecent(limit: Int = 4) -> [RecentMeetingItem] {
+    static func loadRecent(limit: Int = 3) -> [RecentMeetingItem] {
         let dir = MeetingStoragePaths.transcriptsFolder
         let fm = FileManager.default
         guard fm.fileExists(atPath: dir.path) else { return [] }
@@ -80,7 +80,7 @@ enum RecentMeetingsScanner {
 @MainActor
 final class MenuBarRecentMeetingsView: NSView {
 
-    private let headerLabel = NSTextField(labelWithString: "Recent Transcripts")
+    private let headerLabel = NSTextField(labelWithString: "Recent")
     private let emptyLabel = NSTextField(labelWithString: "No meeting transcripts yet.")
     private let listContainer = NSView()
 
@@ -137,7 +137,7 @@ final class MenuBarRecentMeetingsView: NSView {
         listContainer.isHidden = false
 
         let listTop = cursorY
-        let rowHeight: CGFloat = 36
+        let rowHeight: CGFloat = 34
         let rowSpacing: CGFloat = 4
         let totalRowsHeight = CGFloat(rowViews.count) * rowHeight
             + CGFloat(max(0, rowViews.count - 1)) * rowSpacing
@@ -198,7 +198,7 @@ final class MenuBarRecentMeetingsView: NSView {
     var intrinsicHeight: CGFloat {
         let headerBlock: CGFloat = 18 + 8
         if rowViews.isEmpty { return headerBlock + 16 }
-        let rowHeight: CGFloat = 36
+        let rowHeight: CGFloat = 34
         let rowSpacing: CGFloat = 4
         return headerBlock
             + CGFloat(rowViews.count) * rowHeight
