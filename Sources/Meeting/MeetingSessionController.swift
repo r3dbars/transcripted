@@ -25,6 +25,24 @@ import TranscriptedCore
 @available(macOS 14.0, *)
 @MainActor
 final class MeetingSessionController: ObservableObject {
+    struct ModelWarmupStatus: Equatable {
+        let title: String
+        let subtitle: String
+        let detail: String
+        let progress: Double
+        let dictationStatus: String
+        let meetingsStatus: String
+
+        static let ready = ModelWarmupStatus(
+            title: "Draft is ready",
+            subtitle: "Dictation and meetings are available",
+            detail: "",
+            progress: 1.0,
+            dictationStatus: "Ready",
+            meetingsStatus: "Ready"
+        )
+    }
+
     struct FailedMeetingItem: Identifiable, Equatable {
         let id: UUID
         let timestamp: Date
@@ -57,10 +75,12 @@ final class MeetingSessionController: ObservableObject {
     @Published private(set) var lastSavedTitle: String? = nil
 
     @Published private(set) var failedMeetings: [FailedMeetingItem] = []
+    @Published private(set) var warmupStatus: ModelWarmupStatus = .ready
 
     // MARK: - Core services (owned)
 
     private let storagePaths: CoreStoragePaths
+    private let parakeetEngine: ParakeetEngine
     let capture: MeetingCaptureBridge
     let services: AppServices
     let taskManager: TranscriptionTaskManager
@@ -79,6 +99,7 @@ final class MeetingSessionController: ObservableObject {
     /// - Parameter parakeet: Draft's existing ParakeetEngine instance. Shared
     ///   with STTRouter so we do not spin up a second AsrManager.
     init(parakeet: ParakeetEngine) {
+        self.parakeetEngine = parakeet
         // Ensure the Draft meetings directory exists on disk before anyone
         // tries to write to it. MeetingStoragePaths.root is idempotent.
         _ = MeetingStoragePaths.root
@@ -257,7 +278,101 @@ final class MeetingSessionController: ObservableObject {
             }
             .store(in: &cancellables)
 
+        parakeetEngine.$modelDownloadState
+            .sink { [weak self] _ in
+                self?.refreshWarmupStatus()
+            }
+            .store(in: &cancellables)
+
+        diarization.$modelState
+            .sink { [weak self] _ in
+                self?.refreshWarmupStatus()
+            }
+            .store(in: &cancellables)
+
         refreshFailedMeetings()
+        refreshWarmupStatus()
+    }
+
+    private func refreshWarmupStatus() {
+        let dictationState = parakeetEngine.modelDownloadState
+        let meetingState = diarization.modelState
+
+        if case .ready = dictationState, case .ready = meetingState {
+            warmupStatus = .ready
+            return
+        }
+
+        switch dictationState {
+        case .downloading(let progress):
+            warmupStatus = ModelWarmupStatus(
+                title: "Getting Draft ready",
+                subtitle: "Downloading the dictation model",
+                detail: "This can take a minute or two on first launch.",
+                progress: max(0.08, min(0.62, 0.08 + progress * 0.54)),
+                dictationStatus: "Downloading \(Int(progress * 100))%",
+                meetingsStatus: "Waiting"
+            )
+        case .loading:
+            warmupStatus = ModelWarmupStatus(
+                title: "Getting Draft ready",
+                subtitle: "Preparing dictation",
+                detail: "Loading the local voice model into memory.",
+                progress: 0.68,
+                dictationStatus: "Loading",
+                meetingsStatus: "Waiting"
+            )
+        case .failed(let message):
+            warmupStatus = ModelWarmupStatus(
+                title: "Couldn’t load Draft",
+                subtitle: "The dictation model failed to load",
+                detail: message,
+                progress: 0,
+                dictationStatus: "Failed",
+                meetingsStatus: "Waiting"
+            )
+        case .ready:
+            switch meetingState {
+            case .ready:
+                warmupStatus = .ready
+            case .failed(let message):
+                warmupStatus = ModelWarmupStatus(
+                    title: "Couldn’t load meetings",
+                    subtitle: "Meeting transcription models failed to load",
+                    detail: message,
+                    progress: 0.72,
+                    dictationStatus: "Ready",
+                    meetingsStatus: "Failed"
+                )
+            case .loading:
+                warmupStatus = ModelWarmupStatus(
+                    title: "Getting Draft ready",
+                    subtitle: "Loading meeting transcription",
+                    detail: "Preparing speaker diarization and meeting understanding.",
+                    progress: 0.86,
+                    dictationStatus: "Ready",
+                    meetingsStatus: "Loading"
+                )
+            case .notLoaded:
+                warmupStatus = ModelWarmupStatus(
+                    title: "Getting Draft ready",
+                    subtitle: "Preparing meeting transcription",
+                    detail: "Setting up speaker diarization and meeting transcription.",
+                    progress: 0.76,
+                    dictationStatus: "Ready",
+                    meetingsStatus: "Starting"
+                )
+            }
+        case .notLoaded:
+            warmupStatus = ModelWarmupStatus(
+                title: "Getting Draft ready",
+                subtitle: "Preparing dictation",
+                detail: "Loading dictation and meeting models.",
+                progress: 0.05,
+                dictationStatus: "Starting",
+                meetingsStatus: "Waiting"
+            )
+        }
     }
 
     private func refreshFailedMeetings() {

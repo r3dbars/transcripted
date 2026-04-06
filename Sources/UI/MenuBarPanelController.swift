@@ -37,19 +37,17 @@ final class MenuBarPanelController: NSViewController {
 
     private func refreshAll() {
         guard let content = contentView else { return }
+        let warmupStatus = appState.meetingSession.warmupStatus
+        let isReady = warmupStatus == .ready
 
         // Header
-        let isReady = appState.sttRouter.isModelLoaded
         content.headerView.update(isReady: isReady, statusText: statusText)
 
         // Model download
-        let showDownload = !appState.sttRouter.isModelLoaded
+        let showDownload = !isReady
         content.modelDownloadView.isHidden = !showDownload
         if showDownload {
-            content.modelDownloadView.update(
-                voiceModelLoaded: appState.sttRouter.isModelLoaded,
-                voiceState: appState.sttRouter.parakeetEngine.modelDownloadState
-            )
+            content.modelDownloadView.update(warmupStatus: warmupStatus)
         }
 
         // Hotkey error
@@ -90,27 +88,25 @@ final class MenuBarPanelController: NSViewController {
     }
 
     private var statusText: String {
-        if !appState.sttRouter.isModelLoaded {
-            return "Loading voice model..."
+        let warmupStatus = appState.meetingSession.warmupStatus
+        if warmupStatus != .ready {
+            return warmupStatus.subtitle
         }
         return "Ready"
     }
 
     private func setupSubscriptions() {
-        // Model state
-        appState.sttRouter.parakeetEngine.$modelDownloadState
+        // Warm-up / model state
+        appState.meetingSession.$warmupStatus
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] warmupStatus in
                 guard let self = self else { return }
-                let isReady = self.appState.sttRouter.isModelLoaded
+                let isReady = warmupStatus == .ready
                 self.contentView?.headerView.update(isReady: isReady, statusText: self.statusText)
-                let showDownload = !self.appState.sttRouter.isModelLoaded
+                let showDownload = !isReady
                 self.contentView?.modelDownloadView.isHidden = !showDownload
                 if showDownload {
-                    self.contentView?.modelDownloadView.update(
-                        voiceModelLoaded: self.appState.sttRouter.isModelLoaded,
-                        voiceState: self.appState.sttRouter.parakeetEngine.modelDownloadState
-                    )
+                    self.contentView?.modelDownloadView.update(warmupStatus: warmupStatus)
                 }
                 self.contentView?.needsLayout = true
             }

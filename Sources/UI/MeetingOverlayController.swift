@@ -68,6 +68,14 @@ final class MeetingOverlayRootView: NSView {
     private let systemWaveform = WaveformHostView(frame: .zero)
     private let closeButton = NSButton()
     private let chevronButton = NSButton()
+    private let warmupTitleLabel = NSTextField(labelWithString: "Getting Draft ready")
+    private let warmupSubtitleLabel = NSTextField(labelWithString: "Loading dictation and meeting models")
+    private let warmupDetailLabel = NSTextField(wrappingLabelWithString: "")
+    private let warmupProgress = NSProgressIndicator()
+    private let dictationStatusLabel = NSTextField(labelWithString: "Dictation  Waiting")
+    private let meetingsStatusLabel = NSTextField(labelWithString: "Meetings  Waiting")
+    private var currentState: MeetingOverlayController.OverlayState = .idle
+    private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
 
     /// Invoked when the user clicks the close/stop button.
     var onClose: (() -> Void)?
@@ -116,6 +124,42 @@ final class MeetingOverlayRootView: NSView {
         systemWaveform.tintColor = MeetingOverlayTokens.waveformTint
         addSubview(systemWaveform)
 
+        warmupTitleLabel.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
+        warmupTitleLabel.textColor = MeetingOverlayTokens.textPrimary
+        warmupTitleLabel.isHidden = true
+        addSubview(warmupTitleLabel)
+
+        warmupSubtitleLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        warmupSubtitleLabel.textColor = MeetingOverlayTokens.textSecondary
+        warmupSubtitleLabel.isHidden = true
+        addSubview(warmupSubtitleLabel)
+
+        warmupDetailLabel.font = NSFont.systemFont(ofSize: 11)
+        warmupDetailLabel.textColor = MeetingOverlayTokens.textMuted
+        warmupDetailLabel.lineBreakMode = .byWordWrapping
+        warmupDetailLabel.maximumNumberOfLines = 2
+        warmupDetailLabel.isHidden = true
+        addSubview(warmupDetailLabel)
+
+        warmupProgress.style = .bar
+        warmupProgress.isIndeterminate = false
+        warmupProgress.minValue = 0
+        warmupProgress.maxValue = 1
+        warmupProgress.doubleValue = 0
+        warmupProgress.isHidden = true
+        addSubview(warmupProgress)
+
+        dictationStatusLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        dictationStatusLabel.textColor = MeetingOverlayTokens.textSecondary
+        dictationStatusLabel.isHidden = true
+        addSubview(dictationStatusLabel)
+
+        meetingsStatusLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        meetingsStatusLabel.alignment = .right
+        meetingsStatusLabel.textColor = MeetingOverlayTokens.textSecondary
+        meetingsStatusLabel.isHidden = true
+        addSubview(meetingsStatusLabel)
+
         // Close/stop button — square X at the right edge.
         if let img = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Stop meeting") {
             closeButton.image = img
@@ -140,6 +184,11 @@ final class MeetingOverlayRootView: NSView {
 
     override func layout() {
         super.layout()
+        if currentState == .preparing {
+            layoutWarmup()
+            return
+        }
+
         let pad: CGFloat = 12
         let dotSize = MeetingOverlayTokens.dotSize
         let headerHeight = MeetingOverlayTokens.panelHeight
@@ -230,7 +279,18 @@ final class MeetingOverlayRootView: NSView {
             width: levelBarWidth,
             height: levelBarHeight
         )
+    }
 
+    private func layoutWarmup() {
+        let pad: CGFloat = 16
+        let contentWidth = bounds.width - pad * 2
+
+        warmupTitleLabel.frame = NSRect(x: pad, y: bounds.height - 40, width: contentWidth, height: 22)
+        warmupSubtitleLabel.frame = NSRect(x: pad, y: bounds.height - 66, width: contentWidth, height: 18)
+        warmupProgress.frame = NSRect(x: pad, y: bounds.height - 92, width: contentWidth, height: 10)
+        dictationStatusLabel.frame = NSRect(x: pad, y: bounds.height - 118, width: 136, height: 14)
+        meetingsStatusLabel.frame = NSRect(x: bounds.width - pad - 136, y: bounds.height - 118, width: 136, height: 14)
+        warmupDetailLabel.frame = NSRect(x: pad, y: 16, width: contentWidth, height: 26)
     }
 
     // MARK: - Update API
@@ -243,8 +303,42 @@ final class MeetingOverlayRootView: NSView {
         duration: TimeInterval,
         micLevel: Float,
         systemLevel: Float,
-        participants: [String]
+        participants: [String],
+        warmupStatus: MeetingSessionController.ModelWarmupStatus?
     ) {
+        currentState = state
+        if let warmupStatus {
+            currentWarmupStatus = warmupStatus
+        }
+
+        let isPreparing = state == .preparing
+        statusDot.isHidden = isPreparing
+        titleLabel.isHidden = isPreparing
+        timerLabel.isHidden = isPreparing
+        micLabel.isHidden = isPreparing
+        systemLabel.isHidden = isPreparing
+        micWaveform.isHidden = isPreparing
+        systemWaveform.isHidden = isPreparing
+        closeButton.isHidden = isPreparing
+        chevronButton.isHidden = true
+        warmupTitleLabel.isHidden = !isPreparing
+        warmupSubtitleLabel.isHidden = !isPreparing
+        warmupDetailLabel.isHidden = !isPreparing
+        warmupProgress.isHidden = !isPreparing
+        dictationStatusLabel.isHidden = !isPreparing
+        meetingsStatusLabel.isHidden = !isPreparing
+
+        if isPreparing {
+            warmupTitleLabel.stringValue = currentWarmupStatus.title
+            warmupSubtitleLabel.stringValue = currentWarmupStatus.subtitle
+            warmupDetailLabel.stringValue = currentWarmupStatus.detail
+            warmupProgress.doubleValue = currentWarmupStatus.progress
+            dictationStatusLabel.stringValue = "Dictation  \(currentWarmupStatus.dictationStatus)"
+            meetingsStatusLabel.stringValue = "Meetings  \(currentWarmupStatus.meetingsStatus)"
+            needsLayout = true
+            return
+        }
+
         switch state {
         case .idle:
             titleLabel.stringValue = "Meeting"
@@ -299,6 +393,7 @@ enum MeetingOverlayTokens {
     static let panelStroke   = NSColor.white.withAlphaComponent(0.08)
     static let textPrimary   = OverlayTokens.textPrimary
     static let textSecondary = OverlayTokens.textSecondary
+    static let textMuted     = OverlayTokens.textMuted
     static let waveformTint  = OverlayTokens.textPrimary
     static let dotIdle       = OverlayTokens.textMuted
     static let dotPrep       = OverlayTokens.textSecondary
@@ -308,6 +403,7 @@ enum MeetingOverlayTokens {
 
     static let panelWidth: CGFloat  = 360
     static let panelHeight: CGFloat = 48
+    static let warmupHeight: CGFloat = 146
     static let cornerRadius: CGFloat = OverlayTokens.cornerRadius
     static let dotSize: CGFloat     = 8
 }
@@ -340,6 +436,7 @@ final class MeetingOverlayController {
     private var currentMicLevel: Float = 0
     private var currentSystemLevel: Float = 0
     private var currentParticipants: [String] = []
+    private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
 
     // MARK: - Panel & views
 
@@ -443,6 +540,14 @@ final class MeetingOverlayController {
             }
             .store(in: &subscriptions)
 
+        session.$warmupStatus
+            .receive(on: RunLoop.main)
+            .sink { [weak self] status in
+                self?.currentWarmupStatus = status
+                self?.pushToView()
+            }
+            .store(in: &subscriptions)
+
     }
 
     private func applySessionState(_ sessionState: MeetingSessionController.State) {
@@ -510,7 +615,7 @@ final class MeetingOverlayController {
     /// Target height for the panel based on the current `isExpanded` flag.
     /// Kept as a helper so show/animate paths agree on the value.
     private func currentPanelHeight() -> CGFloat {
-        MeetingOverlayTokens.panelHeight
+        state == .preparing ? MeetingOverlayTokens.warmupHeight : MeetingOverlayTokens.panelHeight
     }
 
     private func hidePanel() {
@@ -552,12 +657,25 @@ final class MeetingOverlayController {
     // MARK: - View push
 
     private func pushToView() {
+        resizePanelIfNeeded()
         rootView?.update(
             state: state,
             duration: currentDuration,
             micLevel: currentMicLevel,
             systemLevel: currentSystemLevel,
-            participants: currentParticipants
+            participants: currentParticipants,
+            warmupStatus: currentWarmupStatus
         )
+    }
+
+    private func resizePanelIfNeeded() {
+        guard let panel, panel.isVisible else { return }
+        let desiredHeight = currentPanelHeight()
+        guard abs(panel.frame.height - desiredHeight) > 0.5 else { return }
+
+        var frame = panel.frame
+        frame.origin.y += frame.height - desiredHeight
+        frame.size.height = desiredHeight
+        panel.setFrame(frame, display: true, animate: true)
     }
 }

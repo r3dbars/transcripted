@@ -8,7 +8,6 @@ final class MenuBarHeaderView: NSView {
     private let titleLabel = NSTextField(labelWithString: "Draft")
     private let statusDot = NSView()
     private let statusLabel = NSTextField(labelWithString: "Ready")
-    private let subtitleLabel = NSTextField(labelWithString: "Dictation and meetings")
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -31,10 +30,6 @@ final class MenuBarHeaderView: NSView {
         statusLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         statusLabel.textColor = MenuTokens.textSecondaryNS
         addSubview(statusLabel)
-
-        subtitleLabel.font = NSFont.systemFont(ofSize: 11)
-        subtitleLabel.textColor = MenuTokens.textMutedNS
-        addSubview(subtitleLabel)
     }
 
     override func layout() {
@@ -42,17 +37,9 @@ final class MenuBarHeaderView: NSView {
         let titleSize = titleLabel.fittingSize
         titleLabel.frame = NSRect(x: 0, y: bounds.height - titleSize.height, width: titleSize.width, height: titleSize.height)
 
-        let subtitleSize = subtitleLabel.fittingSize
-        subtitleLabel.frame = NSRect(
-            x: 0,
-            y: titleLabel.frame.minY - 4 - subtitleSize.height,
-            width: bounds.width,
-            height: subtitleSize.height
-        )
-
         let dotSize = MenuTokens.statusDotSize
         let statusSize = statusLabel.fittingSize
-        let statusY = subtitleLabel.frame.minY - 4 - statusSize.height
+        let statusY = titleLabel.frame.minY - 6 - statusSize.height
         statusDot.frame = NSRect(x: 0, y: statusY + (statusSize.height - dotSize) / 2, width: dotSize, height: dotSize)
         statusLabel.frame = NSRect(x: dotSize + 6, y: statusY, width: bounds.width - dotSize - 6, height: statusSize.height)
     }
@@ -63,5 +50,5 @@ final class MenuBarHeaderView: NSView {
         needsLayout = true
     }
 
-    var intrinsicHeight: CGFloat { 58 }
+    var intrinsicHeight: CGFloat { 42 }
 }
