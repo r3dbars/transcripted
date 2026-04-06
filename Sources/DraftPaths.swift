@@ -17,4 +17,9 @@ extension FileManager {
     var meetingSupportDir: URL {
         draftAppSupportDir.appendingPathComponent("meetings", isDirectory: true)
     }
+
+    /// ~/Library/Application Support/Draft/dictations/
+    var dictationSupportDir: URL {
+        draftAppSupportDir.appendingPathComponent("dictations", isDirectory: true)
+    }
 }

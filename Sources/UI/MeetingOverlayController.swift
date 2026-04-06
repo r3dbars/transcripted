@@ -491,12 +491,12 @@ final class MeetingOverlayController {
             guard let session else { return }
             switch session.state {
             case .idle, .ready, .error:
-                await session.startRecording()
+                await session.startRecording(trigger: .hotkey)
             case .loadingModels:
                 // Still loading — ignore to avoid double-starts.
                 break
             case .recording:
-                await session.stopRecording()
+                await session.stopRecording(reason: .hotkeyToggle)
             case .transcribing:
                 // Already processing — leave it alone.
                 break
@@ -647,7 +647,7 @@ final class MeetingOverlayController {
         Task { [weak session] in
             guard let session else { return }
             if case .recording = session.state {
-                await session.stopRecording()
+                await session.stopRecording(reason: .overlayStopButton)
             }
         }
     }

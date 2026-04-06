@@ -59,7 +59,7 @@ class DraftAppState: ObservableObject {
         if #available(macOS 14.0, *) {
             Task { [weak self] in
                 guard let self else { return }
-                await self.meetingSession.prepareModels()
+                await self.meetingSession.prepareModels(showLoadingUI: false)
             }
         }
 
