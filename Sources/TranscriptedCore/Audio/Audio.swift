@@ -252,6 +252,26 @@ public class Audio: ObservableObject {
     // Callback for when recording starts (used for pre-loading models)
     public var onRecordingStart: (() -> Void)?
 
+    // MARK: - Live PCM buffer hooks (Draft live-preview integration)
+    //
+    // These callbacks let an embedder tap the raw PCM buffers as they arrive
+    // from CoreAudio, in parallel with the WAV file writes. Used by Draft to
+    // drive live dual-channel transcription preview via FluidAudio's
+    // StreamingEouAsrManager without a second audio engine.
+    //
+    // Threading: fired on the audio thread (same thread as the tap callback).
+    // Consumers MUST NOT do I/O, locks, or allocations on this thread — copy
+    // the buffer and dispatch to a worker queue. Matching the convention of
+    // `onRecordingComplete`, optional reads are unsynchronized: set the hook
+    // once before `start()` and do not reassign during recording.
+    //
+    // Mic buffers arrive in the hardware's native format (possibly multi-
+    // channel at 44.1/48/96 kHz). System buffers arrive in the aggregate-
+    // device format (typically stereo at 48 kHz). Callers are responsible
+    // for any downmix/resample they need.
+    public var onMicPCMBuffer: ((AVAudioPCMBuffer) -> Void)?
+    public var onSystemPCMBuffer: ((AVAudioPCMBuffer) -> Void)?
+
     /// Filesystem layout used for writing raw mic/system WAV captures.
     /// Embedders can redirect captures by passing a custom `CoreStoragePaths` at init.
     let paths: CoreStoragePaths
