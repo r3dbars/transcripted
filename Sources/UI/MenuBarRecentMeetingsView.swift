@@ -1,31 +1,17 @@
 // MenuBarRecentMeetingsView.swift
-// "Recent Transcripts" section for the menubar popover. Lists the most recent
-// transcripts saved under MeetingStoragePaths.transcriptsFolder.
-//
-// Pure AppKit — controller (MenuBarPanelController) drives updates via
-// explicit `update(meetings:)` calls. This view has no subscriptions.
+// Compact recent meetings list for the menubar popover.
 
 import AppKit
 import Foundation
 
-// MARK: - Data model
-
-/// Row model for the recent meetings list. Intentionally derived-only (nothing
-/// persisted) so the section can be rebuilt cheaply from the filesystem every
-/// time the menubar opens.
 struct RecentMeetingItem {
     let title: String
     let date: Date
     let transcriptURL: URL
 }
 
-/// Scans `MeetingStoragePaths.transcriptsFolder` for `.md` transcripts and
-/// returns the N most recent, sorted newest-first. Parses only the title from
-/// either the YAML frontmatter (`title: "..."`) or the filename as a fallback.
-/// Uses file creation date as the sort key.
 @MainActor
 enum RecentMeetingsScanner {
-
     static func loadRecent(limit: Int = 3) -> [RecentMeetingItem] {
         let dir = MeetingStoragePaths.transcriptsFolder
         let fm = FileManager.default
@@ -39,11 +25,10 @@ enum RecentMeetingsScanner {
         ) else { return [] }
 
         let markdowns = urls.filter { $0.pathExtension == "md" }
-
         let items: [(url: URL, date: Date)] = markdowns.compactMap { url in
             let values = try? url.resourceValues(forKeys: Set(keys))
-            let date = values?.creationDate ?? values?.contentModificationDate ?? Date.distantPast
-            return (url: url, date: date)
+            let date = values?.creationDate ?? values?.contentModificationDate ?? .distantPast
+            return (url, date)
         }
 
         return Array(
@@ -56,40 +41,15 @@ enum RecentMeetingsScanner {
                 }
         )
     }
-
-    /// Best-effort title extraction: check for `title: "..."` in the first ~30
-    /// lines (YAML frontmatter region), then fall back to the filename with
-    /// underscores replaced.
-    private static func extractTitle(from url: URL) -> String {
-        if let text = try? String(contentsOf: url, encoding: .utf8) {
-            let lines = text.components(separatedBy: "\n").prefix(40)
-            for line in lines {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("title:") {
-                    let value = trimmed.dropFirst("title:".count)
-                        .trimmingCharacters(in: .whitespaces)
-                        .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-                    if !value.isEmpty { return value }
-                }
-            }
-        }
-        return url.deletingPathExtension().lastPathComponent
-            .replacingOccurrences(of: "_", with: " ")
-    }
 }
-
-// MARK: - Section view
 
 @MainActor
 final class MenuBarRecentMeetingsView: NSView {
-
     private let headerLabel = NSTextField(labelWithString: "Recent meetings")
     private let emptyLabel = NSTextField(labelWithString: "No meetings yet.")
-    private let listContainer = NSView()
+    private let listContainer = FlippedRecentMeetingsContainer()
 
-    private var rowViews: [RecentMeetingRowView] = []
-    private var items: [RecentMeetingItem] = []
-    private var failedItems: [MeetingSessionController.FailedMeetingItem] = []
+    private var rowViews: [NSView] = []
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -99,8 +59,10 @@ final class MenuBarRecentMeetingsView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    override var isFlipped: Bool { true }
+
     private func setupViews() {
-        headerLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        headerLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
         headerLabel.textColor = MenuTokens.textPrimaryNS
         addSubview(headerLabel)
 
@@ -114,55 +76,27 @@ final class MenuBarRecentMeetingsView: NSView {
     override func layout() {
         super.layout()
 
-        let headerH: CGFloat = 18
-        headerLabel.frame = NSRect(
-            x: 0,
-            y: bounds.height - headerH,
-            width: bounds.width,
-            height: headerH
-        )
-
-        let cursorY = bounds.height - headerH - 8
+        headerLabel.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 16)
+        let listY: CGFloat = 24
 
         if rowViews.isEmpty {
-            listContainer.isHidden = true
             emptyLabel.isHidden = false
-            emptyLabel.frame = NSRect(
-                x: 0,
-                y: cursorY - 16,
-                width: bounds.width,
-                height: 16
-            )
+            listContainer.isHidden = true
+            emptyLabel.frame = NSRect(x: 0, y: listY, width: bounds.width, height: 14)
             return
         }
 
         emptyLabel.isHidden = true
         listContainer.isHidden = false
 
-        let listTop = cursorY
-        let rowHeight: CGFloat = 34
-        let rowSpacing: CGFloat = 4
-        let totalRowsHeight = CGFloat(rowViews.count) * rowHeight
-            + CGFloat(max(0, rowViews.count - 1)) * rowSpacing
-
-        listContainer.frame = NSRect(
-            x: 0,
-            y: listTop - totalRowsHeight,
-            width: bounds.width,
-            height: totalRowsHeight
-        )
-
-        var y = totalRowsHeight
+        var y: CGFloat = 0
         for row in rowViews {
-            y -= rowHeight
-            row.frame = NSRect(
-                x: 0,
-                y: y,
-                width: listContainer.bounds.width,
-                height: rowHeight
-            )
-            y -= rowSpacing
+            let rowHeight = row.intrinsicContentSize.height
+            row.frame = NSRect(x: 0, y: y, width: bounds.width, height: rowHeight)
+            y += rowHeight
         }
+
+        listContainer.frame = NSRect(x: 0, y: listY, width: bounds.width, height: y)
     }
 
     func update(
@@ -171,81 +105,194 @@ final class MenuBarRecentMeetingsView: NSView {
         onRetryFailedMeeting: @escaping (UUID) -> Void,
         onDismissFailedMeeting: @escaping (UUID) -> Void
     ) {
-        self.items = meetings
-        self.failedItems = failedMeetings
-
-        // Rebuild rows from scratch — the list is short (5 items) so there is
-        // no value in recycling.
         listContainer.subviews.forEach { $0.removeFromSuperview() }
         rowViews.removeAll()
 
-        for item in failedMeetings {
-            let row = RecentMeetingRowView(
-                failedItem: item,
-                onRetry: { onRetryFailedMeeting(item.id) },
-                onDismiss: { onDismissFailedMeeting(item.id) }
+        for failed in failedMeetings {
+            let row = FailedMeetingRowView(
+                item: failed,
+                onRetry: { onRetryFailedMeeting(failed.id) },
+                onDismiss: { onDismissFailedMeeting(failed.id) }
             )
             listContainer.addSubview(row)
             rowViews.append(row)
         }
 
-        for item in meetings {
-            let row = RecentMeetingRowView(item: item)
+        for (index, item) in meetings.enumerated() {
+            let row = RecentMeetingRowView(item: item, showsDivider: index < meetings.count - 1)
             listContainer.addSubview(row)
             rowViews.append(row)
         }
 
         needsLayout = true
+        invalidateIntrinsicContentSize()
     }
 
     var intrinsicHeight: CGFloat {
-        let headerBlock: CGFloat = 18 + 8
-        if rowViews.isEmpty { return headerBlock + 16 }
-        let rowHeight: CGFloat = 34
-        let rowSpacing: CGFloat = 4
-        return headerBlock
-            + CGFloat(rowViews.count) * rowHeight
-            + CGFloat(max(0, rowViews.count - 1)) * rowSpacing
+        let contentHeight = rowViews.reduce(CGFloat(0)) { $0 + $1.intrinsicContentSize.height }
+        if rowViews.isEmpty { return 40 }
+        return 24 + contentHeight
     }
 }
 
-// MARK: - One row
+private final class FlippedRecentMeetingsContainer: NSView {
+    override var isFlipped: Bool { true }
+}
 
 @MainActor
-final class RecentMeetingRowView: NSView {
+private final class RecentMeetingRowView: NSView {
+    private let item: RecentMeetingItem
     private let titleLabel = NSTextField(labelWithString: "")
     private let dateLabel = NSTextField(labelWithString: "")
-    private let actionButton = NSButton()
-    private let secondaryButton = NSButton()
-    private let item: RecentMeetingItem?
-    private let failedItem: MeetingSessionController.FailedMeetingItem?
-    private let onRetry: (() -> Void)?
-    private let onDismiss: (() -> Void)?
-    private var secondaryResetTask: Task<Void, Never>?
+    private let moreButton = NSButton(title: "⋯", target: nil, action: nil)
+    private let divider = NSView()
+    private let showsDivider: Bool
+    private var trackingAreaRef: NSTrackingArea?
+    private var resetTask: Task<Void, Never>?
 
     private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale.current
-        f.dateFormat = "MMM d 'at' h:mm a"
-        return f
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.dateFormat = "MMM d 'at' h:mm a"
+        return formatter
     }()
 
-    init(item: RecentMeetingItem) {
+    init(item: RecentMeetingItem, showsDivider: Bool) {
         self.item = item
-        self.failedItem = nil
-        self.onRetry = nil
-        self.onDismiss = nil
+        self.showsDivider = showsDivider
         super.init(frame: .zero)
         setupViews()
     }
 
-    init(
-        failedItem: MeetingSessionController.FailedMeetingItem,
-        onRetry: @escaping () -> Void,
-        onDismiss: @escaping () -> Void
-    ) {
-        self.item = nil
-        self.failedItem = failedItem
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var isFlipped: Bool { true }
+
+    deinit {
+        resetTask?.cancel()
+    }
+
+    private func setupViews() {
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.backgroundColor = NSColor.clear.cgColor
+
+        titleLabel.stringValue = item.title
+        titleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        titleLabel.textColor = MenuTokens.textPrimaryNS
+        titleLabel.lineBreakMode = .byTruncatingTail
+        addSubview(titleLabel)
+
+        dateLabel.stringValue = Self.dateFormatter.string(from: item.date)
+        dateLabel.font = NSFont.systemFont(ofSize: 9)
+        dateLabel.textColor = MenuTokens.textSecondaryNS
+        addSubview(dateLabel)
+
+        moreButton.isBordered = false
+        moreButton.bezelStyle = .inline
+        moreButton.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        moreButton.contentTintColor = MenuTokens.textSecondaryNS
+        moreButton.target = self
+        moreButton.action = #selector(showMenu)
+        addSubview(moreButton)
+
+        divider.wantsLayer = true
+        divider.layer?.backgroundColor = MenuTokens.sectionDividerNS.cgColor
+        divider.isHidden = !showsDivider
+        addSubview(divider)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaRef {
+            removeTrackingArea(trackingAreaRef)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingAreaRef = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        layer?.backgroundColor = MenuTokens.recentHoverNS.cgColor
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard !moreButton.frame.contains(point) else {
+            super.mouseDown(with: event)
+            return
+        }
+        NSWorkspace.shared.open(item.transcriptURL)
+    }
+
+    override func layout() {
+        super.layout()
+        let moreWidth = max(24, moreButton.fittingSize.width + 8)
+        moreButton.frame = NSRect(x: bounds.width - moreWidth, y: 8, width: moreWidth, height: 24)
+        let textWidth = bounds.width - moreButton.frame.width - 12
+        titleLabel.frame = NSRect(x: 0, y: 6, width: textWidth, height: 14)
+        dateLabel.frame = NSRect(x: 0, y: 21, width: textWidth, height: 12)
+        divider.frame = NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: MenuTokens.recentRowHeight)
+    }
+
+    @objc private func showMenu() {
+        let menu = NSMenu()
+        let copyItem = menu.addItem(withTitle: "Copy transcript", action: #selector(copyTranscript), keyEquivalent: "")
+        copyItem.target = self
+        let revealItem = menu.addItem(withTitle: "Show in Finder", action: #selector(showInFinder), keyEquivalent: "")
+        revealItem.target = self
+        menu.popUp(positioning: nil, at: NSPoint(x: moreButton.frame.minX, y: moreButton.frame.maxY), in: self)
+    }
+
+    @objc private func copyTranscript() {
+        guard let text = MeetingTranscriptStyler.transcriptBody(at: item.transcriptURL) else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+
+        resetTask?.cancel()
+        moreButton.title = "Copied"
+        needsLayout = true
+        resetTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.moreButton.title = "⋯"
+            self.needsLayout = true
+        }
+    }
+
+    @objc private func showInFinder() {
+        NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
+    }
+}
+
+@MainActor
+private final class FailedMeetingRowView: NSView {
+    private let item: MeetingSessionController.FailedMeetingItem
+    private let onRetry: () -> Void
+    private let onDismiss: () -> Void
+
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let subtitleLabel = NSTextField(labelWithString: "")
+    private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
+    private let dismissButton = NSButton(title: "Dismiss", target: nil, action: nil)
+
+    init(item: MeetingSessionController.FailedMeetingItem, onRetry: @escaping () -> Void, onDismiss: @escaping () -> Void) {
+        self.item = item
         self.onRetry = onRetry
         self.onDismiss = onDismiss
         super.init(frame: .zero)
@@ -255,135 +302,64 @@ final class RecentMeetingRowView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    deinit {
-        secondaryResetTask?.cancel()
-    }
+    override var isFlipped: Bool { true }
 
     private func setupViews() {
         wantsLayer = true
-        layer?.cornerRadius = MenuTokens.cardCornerRadius
-        layer?.backgroundColor = (failedItem == nil ? MenuTokens.cardBackgroundNS : NSColor.systemOrange.withAlphaComponent(0.08)).cgColor
-        layer?.borderColor = (failedItem == nil ? MenuTokens.cardBorderNS : NSColor.systemOrange.withAlphaComponent(0.2)).cgColor
+        layer?.cornerRadius = 10
+        layer?.backgroundColor = MenuTokens.failedBackgroundNS.cgColor
         layer?.borderWidth = 1
+        layer?.borderColor = MenuTokens.failedBorderNS.cgColor
 
-        titleLabel.stringValue = item?.title ?? failedItem?.title ?? ""
+        titleLabel.stringValue = item.title
         titleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         titleLabel.textColor = MenuTokens.textPrimaryNS
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.maximumNumberOfLines = 1
         addSubview(titleLabel)
 
-        if let item {
-            dateLabel.stringValue = Self.dateFormatter.string(from: item.date)
-        } else {
-            dateLabel.stringValue = failedItem?.subtitle ?? ""
-        }
-        dateLabel.font = NSFont.systemFont(ofSize: 9)
-        dateLabel.textColor = MenuTokens.textSecondaryNS
-        dateLabel.lineBreakMode = .byTruncatingTail
-        dateLabel.maximumNumberOfLines = 1
-        addSubview(dateLabel)
+        subtitleLabel.stringValue = item.subtitle
+        subtitleLabel.font = NSFont.systemFont(ofSize: 9)
+        subtitleLabel.textColor = MenuTokens.textSecondaryNS
+        addSubview(subtitleLabel)
 
-        actionButton.title = item == nil ? "Retry" : "Open"
-        actionButton.bezelStyle = .inline
-        actionButton.font = NSFont.systemFont(ofSize: 10)
-        actionButton.target = self
-        actionButton.action = #selector(handlePrimaryAction)
-        actionButton.isEnabled = failedItem?.isRetryable ?? true
-        addSubview(actionButton)
+        retryButton.isBordered = false
+        retryButton.bezelStyle = .inline
+        retryButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        retryButton.contentTintColor = MenuTokens.textPrimaryNS
+        retryButton.target = self
+        retryButton.action = #selector(retry)
+        retryButton.isEnabled = item.isRetryable
+        addSubview(retryButton)
 
-        secondaryButton.title = item == nil ? "Dismiss" : "⋯"
-        secondaryButton.bezelStyle = .inline
-        secondaryButton.font = NSFont.systemFont(ofSize: 10)
-        secondaryButton.target = self
-        secondaryButton.action = #selector(handleSecondaryAction)
-        secondaryButton.isHidden = failedItem == nil && item == nil
-        addSubview(secondaryButton)
+        dismissButton.isBordered = false
+        dismissButton.bezelStyle = .inline
+        dismissButton.font = NSFont.systemFont(ofSize: 10)
+        dismissButton.contentTintColor = MenuTokens.textSecondaryNS
+        dismissButton.target = self
+        dismissButton.action = #selector(dismiss)
+        addSubview(dismissButton)
     }
 
     override func layout() {
         super.layout()
-        let pad: CGFloat = 9
-        let secondaryWidth: CGFloat = secondaryButton.isHidden ? 0 : max(
-            failedItem == nil ? 20 : 52,
-            secondaryButton.fittingSize.width + 10
-        )
-        if !secondaryButton.isHidden {
-            secondaryButton.frame = NSRect(
-                x: bounds.width - pad - secondaryWidth,
-                y: (bounds.height - 16) / 2,
-                width: secondaryWidth,
-                height: 16
-            )
-        }
-        let primaryWidth: CGFloat = max(40, actionButton.fittingSize.width + 10)
-        actionButton.frame = NSRect(
-            x: bounds.width - pad - secondaryWidth - (secondaryButton.isHidden ? 0 : 8) - primaryWidth,
-            y: (bounds.height - 16) / 2,
-            width: primaryWidth,
-            height: 16
-        )
-
-        let leftW = actionButton.frame.minX - pad - 8
-        titleLabel.frame = NSRect(
-            x: pad,
-            y: bounds.height / 2 + 1,
-            width: leftW,
-            height: 12
-        )
-        dateLabel.frame = NSRect(
-            x: pad,
-            y: bounds.height / 2 - 10,
-            width: leftW,
-            height: 10
-        )
+        let pad: CGFloat = 10
+        let dismissSize = dismissButton.fittingSize
+        dismissButton.frame = NSRect(x: bounds.width - pad - dismissSize.width, y: 13, width: dismissSize.width, height: dismissSize.height)
+        let retrySize = retryButton.fittingSize
+        retryButton.frame = NSRect(x: dismissButton.frame.minX - 12 - retrySize.width, y: 13, width: retrySize.width, height: retrySize.height)
+        let textWidth = retryButton.frame.minX - pad - 12
+        titleLabel.frame = NSRect(x: pad, y: 8, width: textWidth, height: 13)
+        subtitleLabel.frame = NSRect(x: pad, y: 22, width: textWidth, height: 11)
     }
 
-    @objc private func handlePrimaryAction() {
-        if let item {
-            NSWorkspace.shared.open(item.transcriptURL)
-        } else {
-            onRetry?()
-        }
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: MenuTokens.failedRowHeight)
     }
 
-    @objc private func handleSecondaryAction() {
-        if item != nil {
-            let menu = NSMenu()
-            let copyItem = menu.addItem(withTitle: "Copy transcript", action: #selector(handleCopyTranscript), keyEquivalent: "")
-            copyItem.target = self
-            let revealItem = menu.addItem(withTitle: "Show in Finder", action: #selector(handleRevealInFinder), keyEquivalent: "")
-            revealItem.target = self
-            menu.popUp(positioning: nil, at: NSPoint(x: secondaryButton.frame.minX, y: secondaryButton.frame.minY - 2), in: self)
-        } else {
-            onDismiss?()
-        }
+    @objc private func retry() {
+        onRetry()
     }
 
-    @objc private func handleCopyTranscript() {
-        guard let item,
-              let text = MeetingTranscriptStyler.transcriptBody(at: item.transcriptURL) else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        showSecondaryFeedback("Copied")
-    }
-
-    @objc private func handleRevealInFinder() {
-        guard let item else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
-    }
-
-    private func showSecondaryFeedback(_ title: String) {
-        guard item != nil else { return }
-        secondaryResetTask?.cancel()
-        secondaryButton.title = title
-        needsLayout = true
-        secondaryResetTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 1_100_000_000)
-            guard let self, !Task.isCancelled else { return }
-            self.secondaryButton.title = "⋯"
-            self.needsLayout = true
-        }
+    @objc private func dismiss() {
+        onDismiss()
     }
 }

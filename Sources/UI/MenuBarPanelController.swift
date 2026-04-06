@@ -1,6 +1,5 @@
 // MenuBarPanelController.swift
-// NSViewController that hosts MenuBarContentView and manages Combine subscriptions
-// Created fresh each time the popover opens — subscriptions auto-cancelled on dealloc
+// NSViewController that hosts the menubar popover and wires actions/subscriptions.
 
 import AppKit
 import Combine
@@ -8,11 +7,19 @@ import Combine
 @MainActor
 final class MenuBarPanelController: NSViewController {
     private let appState: DraftAppState
+    private let dismissPopover: () -> Void
+    private let preferredSourceAppProvider: () -> NSRunningApplication?
     private var contentView: MenuBarContentView?
     private var subscriptions = Set<AnyCancellable>()
 
-    init(appState: DraftAppState) {
+    init(
+        appState: DraftAppState,
+        preferredSourceAppProvider: @escaping () -> NSRunningApplication?,
+        dismissPopover: @escaping () -> Void
+    ) {
         self.appState = appState
+        self.preferredSourceAppProvider = preferredSourceAppProvider
+        self.dismissPopover = dismissPopover
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -20,18 +27,16 @@ final class MenuBarPanelController: NSViewController {
     required init?(coder: NSCoder) { fatalError() }
 
     override func loadView() {
-        let content = MenuBarContentView(frame: NSRect(x: 0, y: 0,
-                                                        width: MenuTokens.panelWidth,
-                                                        height: MenuTokens.panelHeight))
+        let content = MenuBarContentView(frame: NSRect(x: 0, y: 0, width: MenuTokens.panelWidth, height: MenuTokens.panelHeight))
         content.appState = appState
         content.settingsView.appState = appState
-        self.contentView = content
-        self.view = content
+        content.shortcutsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
+        content.shortcutsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
+        view = content
+        contentView = content
+        view.appearance = NSAppearance(named: .darkAqua)
 
-        // Initial data push
         refreshAll()
-
-        // Subscribe to engine changes
         setupSubscriptions()
     }
 
@@ -40,30 +45,17 @@ final class MenuBarPanelController: NSViewController {
         let warmupStatus = appState.meetingSession.warmupStatus
         let isReady = warmupStatus == .ready
 
-        // Header
-        content.headerView.update(isReady: isReady, statusText: statusText)
-
-        // Model download
-        let showDownload = !isReady
-        content.modelDownloadView.isHidden = !showDownload
-        if showDownload {
-            content.modelDownloadView.update(warmupStatus: warmupStatus)
-        }
-
-        // Hotkey error
-        content.hotkeyErrorBanner.update(error: appState.contextCapture.hotkeyError)
-        content.hotkeyErrorBanner.onDismiss = { [weak self] in
-            self?.appState.contextCapture.hotkeyError = nil
-        }
-
-        // Shortcuts
-        content.shortcutsView.update(
-            dictationKey: appState.contextCapture.dictationShortcutDisplay,
-            meetingKey: appState.contextCapture.meetingShortcutDisplay
+        content.headerView.update(
+            warmupStatus: warmupStatus,
+            hotkeyError: appState.contextCapture.hotkeyError
         )
 
-        // Recent Meetings — scans ~/Library/Application Support/Draft/meetings/transcripts
-        // each time the popover opens (no subscription; list is short).
+        content.shortcutsView.update(
+            dictationKey: appState.contextCapture.dictationShortcutDisplay,
+            meetingKey: appState.contextCapture.meetingShortcutDisplay,
+            isEnabled: isReady
+        )
+
         if #available(macOS 14.0, *) {
             content.recentMeetingsView.update(
                 meetings: RecentMeetingsScanner.loadRecent(),
@@ -87,45 +79,26 @@ final class MenuBarPanelController: NSViewController {
         content.needsLayout = true
     }
 
-    private var statusText: String {
-        let warmupStatus = appState.meetingSession.warmupStatus
-        if warmupStatus != .ready {
-            return warmupStatus.subtitle
-        }
-        return "Ready"
-    }
-
     private func setupSubscriptions() {
-        // Warm-up / model state
         appState.meetingSession.$warmupStatus
             .receive(on: RunLoop.main)
-            .sink { [weak self] warmupStatus in
-                guard let self = self else { return }
-                let isReady = warmupStatus == .ready
-                self.contentView?.headerView.update(isReady: isReady, statusText: self.statusText)
-                let showDownload = !isReady
-                self.contentView?.modelDownloadView.isHidden = !showDownload
-                if showDownload {
-                    self.contentView?.modelDownloadView.update(warmupStatus: warmupStatus)
-                }
-                self.contentView?.needsLayout = true
+            .sink { [weak self] _ in
+                self?.refreshAll()
             }
             .store(in: &subscriptions)
 
-        // Hotkey display
         appState.contextCapture.$dictationShortcutDisplay
             .combineLatest(appState.contextCapture.$meetingShortcutDisplay)
             .receive(on: RunLoop.main)
-            .sink { [weak self] (dictation, meeting) in
-                self?.contentView?.shortcutsView.update(dictationKey: dictation, meetingKey: meeting)
+            .sink { [weak self] _, _ in
+                self?.refreshAll()
             }
             .store(in: &subscriptions)
 
-        // Hotkey error
         appState.contextCapture.$hotkeyError
             .receive(on: RunLoop.main)
-            .sink { [weak self] error in
-                self?.contentView?.hotkeyErrorBanner.update(error: error)
+            .sink { [weak self] _ in
+                self?.refreshAll()
             }
             .store(in: &subscriptions)
 
@@ -144,5 +117,30 @@ final class MenuBarPanelController: NSViewController {
                 }
                 .store(in: &subscriptions)
         }
+    }
+
+    private func startDictationFromMenu() {
+        guard let session = appState.contextCapture.sessionController else { return }
+        let sourceApp = resolvedSourceApp()
+        dismissPopover()
+        sourceApp?.activate(options: [])
+        session.startDictation(sourceApp: sourceApp)
+    }
+
+    private func startMeetingFromMenu() {
+        if #available(macOS 14.0, *) {
+            let sourceApp = resolvedSourceApp()
+            dismissPopover()
+            sourceApp?.activate(options: [])
+            Task {
+                await appState.meetingSession.startRecording()
+            }
+        }
+    }
+
+    private func resolvedSourceApp() -> NSRunningApplication? {
+        let app = preferredSourceAppProvider()
+        guard app?.bundleIdentifier != Bundle.main.bundleIdentifier else { return nil }
+        return app
     }
 }
