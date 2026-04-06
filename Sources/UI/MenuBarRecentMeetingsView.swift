@@ -40,17 +40,20 @@ enum RecentMeetingsScanner {
 
         let markdowns = urls.filter { $0.pathExtension == "md" }
 
-        let items: [RecentMeetingItem] = markdowns.compactMap { url in
+        let items: [(url: URL, date: Date)] = markdowns.compactMap { url in
             let values = try? url.resourceValues(forKeys: Set(keys))
             let date = values?.creationDate ?? values?.contentModificationDate ?? Date.distantPast
-            let title = extractTitle(from: url)
-            return RecentMeetingItem(title: title, date: date, transcriptURL: url)
+            return (url: url, date: date)
         }
 
         return Array(
             items
                 .sorted(by: { $0.date > $1.date })
                 .prefix(limit)
+                .map { entry in
+                    let styled = MeetingTranscriptStyler.restyleTranscript(at: entry.url)
+                    return RecentMeetingItem(title: styled.title, date: entry.date, transcriptURL: styled.url)
+                }
         )
     }
 
@@ -80,8 +83,8 @@ enum RecentMeetingsScanner {
 @MainActor
 final class MenuBarRecentMeetingsView: NSView {
 
-    private let headerLabel = NSTextField(labelWithString: "Recent")
-    private let emptyLabel = NSTextField(labelWithString: "No meeting transcripts yet.")
+    private let headerLabel = NSTextField(labelWithString: "Recent meetings")
+    private let emptyLabel = NSTextField(labelWithString: "No meetings yet.")
     private let listContainer = NSView()
 
     private var rowViews: [RecentMeetingRowView] = []
@@ -218,11 +221,12 @@ final class RecentMeetingRowView: NSView {
     private let failedItem: MeetingSessionController.FailedMeetingItem?
     private let onRetry: (() -> Void)?
     private let onDismiss: (() -> Void)?
+    private var secondaryResetTask: Task<Void, Never>?
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .short
+        f.locale = Locale.current
+        f.dateFormat = "MMM d 'at' h:mm a"
         return f
     }()
 
@@ -251,6 +255,10 @@ final class RecentMeetingRowView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    deinit {
+        secondaryResetTask?.cancel()
+    }
+
     private func setupViews() {
         wantsLayer = true
         layer?.cornerRadius = MenuTokens.cardCornerRadius
@@ -268,7 +276,7 @@ final class RecentMeetingRowView: NSView {
         if let item {
             dateLabel.stringValue = Self.dateFormatter.string(from: item.date)
         } else {
-            dateLabel.stringValue = failedItem?.errorMessage ?? ""
+            dateLabel.stringValue = failedItem?.subtitle ?? ""
         }
         dateLabel.font = NSFont.systemFont(ofSize: 9)
         dateLabel.textColor = MenuTokens.textSecondaryNS
@@ -284,19 +292,22 @@ final class RecentMeetingRowView: NSView {
         actionButton.isEnabled = failedItem?.isRetryable ?? true
         addSubview(actionButton)
 
-        secondaryButton.title = "Dismiss"
+        secondaryButton.title = item == nil ? "Dismiss" : "⋯"
         secondaryButton.bezelStyle = .inline
         secondaryButton.font = NSFont.systemFont(ofSize: 10)
         secondaryButton.target = self
         secondaryButton.action = #selector(handleSecondaryAction)
-        secondaryButton.isHidden = item != nil
+        secondaryButton.isHidden = failedItem == nil && item == nil
         addSubview(secondaryButton)
     }
 
     override func layout() {
         super.layout()
         let pad: CGFloat = 9
-        let secondaryWidth: CGFloat = secondaryButton.isHidden ? 0 : 52
+        let secondaryWidth: CGFloat = secondaryButton.isHidden ? 0 : max(
+            failedItem == nil ? 20 : 52,
+            secondaryButton.fittingSize.width + 10
+        )
         if !secondaryButton.isHidden {
             secondaryButton.frame = NSRect(
                 x: bounds.width - pad - secondaryWidth,
@@ -305,7 +316,7 @@ final class RecentMeetingRowView: NSView {
                 height: 16
             )
         }
-        let primaryWidth: CGFloat = 40
+        let primaryWidth: CGFloat = max(40, actionButton.fittingSize.width + 10)
         actionButton.frame = NSRect(
             x: bounds.width - pad - secondaryWidth - (secondaryButton.isHidden ? 0 : 8) - primaryWidth,
             y: (bounds.height - 16) / 2,
@@ -337,6 +348,42 @@ final class RecentMeetingRowView: NSView {
     }
 
     @objc private func handleSecondaryAction() {
-        onDismiss?()
+        if item != nil {
+            let menu = NSMenu()
+            let copyItem = menu.addItem(withTitle: "Copy transcript", action: #selector(handleCopyTranscript), keyEquivalent: "")
+            copyItem.target = self
+            let revealItem = menu.addItem(withTitle: "Show in Finder", action: #selector(handleRevealInFinder), keyEquivalent: "")
+            revealItem.target = self
+            menu.popUp(positioning: nil, at: NSPoint(x: secondaryButton.frame.minX, y: secondaryButton.frame.minY - 2), in: self)
+        } else {
+            onDismiss?()
+        }
+    }
+
+    @objc private func handleCopyTranscript() {
+        guard let item,
+              let text = MeetingTranscriptStyler.transcriptBody(at: item.transcriptURL) else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        showSecondaryFeedback("Copied")
+    }
+
+    @objc private func handleRevealInFinder() {
+        guard let item else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
+    }
+
+    private func showSecondaryFeedback(_ title: String) {
+        guard item != nil else { return }
+        secondaryResetTask?.cancel()
+        secondaryButton.title = title
+        needsLayout = true
+        secondaryResetTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_100_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.secondaryButton.title = "⋯"
+            self.needsLayout = true
+        }
     }
 }

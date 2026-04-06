@@ -5,8 +5,7 @@ import AppKit
 
 @MainActor
 final class MenuBarSettingsView: NSView {
-    private let engineCaption = NSTextField(labelWithString: "Speech model")
-    private let engineValueLabel = NSTextField(labelWithString: "Parakeet (CoreML)")
+    private let footerLabel = NSTextField(labelWithString: "Runs locally on your Mac")
     private let resetButton = NSButton(title: "Reset Shortcuts", target: nil, action: nil)
     private let feedbackButton = NSButton(title: "Send Feedback", target: nil, action: nil)
     private let quitButton = NSButton(title: "Quit Draft", target: nil, action: nil)
@@ -22,17 +21,13 @@ final class MenuBarSettingsView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func setupViews() {
-        engineCaption.font = NSFont.systemFont(ofSize: 10)
-        engineCaption.textColor = MenuTokens.textSecondaryNS
-        addSubview(engineCaption)
-
-        engineValueLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        engineValueLabel.textColor = MenuTokens.textPrimaryNS
-        addSubview(engineValueLabel)
+        footerLabel.font = NSFont.systemFont(ofSize: 10)
+        footerLabel.textColor = MenuTokens.textMutedNS
+        addSubview(footerLabel)
 
         resetButton.bezelStyle = .inline
         resetButton.isBordered = false
-        resetButton.font = NSFont.systemFont(ofSize: 11)
+        resetButton.font = NSFont.systemFont(ofSize: 10)
         resetButton.contentTintColor = MenuTokens.textSecondaryNS
         resetButton.target = self
         resetButton.action = #selector(resetShortcuts)
@@ -40,7 +35,7 @@ final class MenuBarSettingsView: NSView {
 
         feedbackButton.bezelStyle = .inline
         feedbackButton.isBordered = false
-        feedbackButton.font = NSFont.systemFont(ofSize: 11)
+        feedbackButton.font = NSFont.systemFont(ofSize: 10)
         feedbackButton.contentTintColor = MenuTokens.textSecondaryNS
         feedbackButton.target = self
         feedbackButton.action = #selector(sendFeedback)
@@ -48,7 +43,7 @@ final class MenuBarSettingsView: NSView {
 
         quitButton.bezelStyle = .inline
         quitButton.isBordered = false
-        quitButton.font = NSFont.systemFont(ofSize: 11)
+        quitButton.font = NSFont.systemFont(ofSize: 10)
         quitButton.contentTintColor = MenuTokens.textSecondaryNS
         quitButton.target = self
         quitButton.action = #selector(quitApp)
@@ -57,11 +52,7 @@ final class MenuBarSettingsView: NSView {
 
     override func layout() {
         super.layout()
-        let w = bounds.width
-        let pad: CGFloat = 2
-        let contentW = w - pad * 2
-        engineCaption.frame = NSRect(x: pad, y: bounds.height - 14, width: contentW, height: 12)
-        engineValueLabel.frame = NSRect(x: pad, y: bounds.height - 30, width: contentW, height: 14)
+        footerLabel.frame = NSRect(x: 0, y: bounds.height - 12, width: bounds.width, height: 12)
 
         let quitSize = quitButton.fittingSize
         quitButton.frame = NSRect(x: bounds.width - quitSize.width, y: 0, width: quitSize.width, height: quitSize.height)
@@ -91,5 +82,5 @@ final class MenuBarSettingsView: NSView {
         NSApplication.shared.terminate(nil)
     }
 
-    var intrinsicHeight: CGFloat { 38 }
+    var intrinsicHeight: CGFloat { 26 }
 }

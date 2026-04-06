@@ -7,7 +7,6 @@ import Carbon
 @MainActor
 final class MenuBarShortcutsView: NSView {
     private let titleLabel = NSTextField(labelWithString: "Shortcuts")
-    private let hintLabel = NSTextField(labelWithString: "Click a shortcut to change it")
     private let dictationRow = ShortcutRowView()
     private let meetingRow = ShortcutRowView()
     private var keyMonitor: Any?
@@ -24,10 +23,6 @@ final class MenuBarShortcutsView: NSView {
         titleLabel.textColor = MenuTokens.textPrimaryNS
         addSubview(titleLabel)
 
-        hintLabel.font = NSFont.systemFont(ofSize: 10)
-        hintLabel.textColor = MenuTokens.textMutedNS
-        addSubview(hintLabel)
-
         dictationRow.onSelect = { [weak self] in self?.startRecording(.dictation) }
         meetingRow.onSelect = { [weak self] in self?.startRecording(.meeting) }
         addSubview(dictationRow)
@@ -41,9 +36,8 @@ final class MenuBarShortcutsView: NSView {
         super.layout()
         let width = bounds.width
         titleLabel.frame = NSRect(x: 0, y: bounds.height - 16, width: width, height: 16)
-        hintLabel.frame = NSRect(x: 0, y: bounds.height - 30, width: width, height: 12)
-        dictationRow.frame = NSRect(x: 0, y: bounds.height - 30 - 6 - 28, width: width, height: 28)
-        meetingRow.frame = NSRect(x: 0, y: 0, width: width, height: 24)
+        dictationRow.frame = NSRect(x: 0, y: bounds.height - 16 - 8 - 26, width: width, height: 26)
+        meetingRow.frame = NSRect(x: 0, y: 0, width: width, height: 26)
     }
 
     func update(dictationKey: String, meetingKey: String) {
@@ -105,7 +99,7 @@ final class MenuBarShortcutsView: NSView {
         )
     }
 
-    var intrinsicHeight: CGFloat { 88 }
+    var intrinsicHeight: CGFloat { 74 }
 }
 
 private final class ShortcutRowView: NSView {

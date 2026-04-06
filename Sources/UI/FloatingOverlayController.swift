@@ -16,6 +16,7 @@ class FloatingOverlayController {
         case loading      // Voice model still loading — waiting for readiness
         case listening    // Recording (both modes)
         case drafting     // Processing (vision+draft for draft mode, polish for dictation)
+        case success      // Finished successfully — brief confirmation before dismiss
         case streaming    // Tokens arriving (draft mode only)
         case review       // Editable draft (draft mode only)
         case diffFlash    // Read-only word diff of user's edits before confirming
@@ -68,6 +69,7 @@ class FloatingOverlayController {
         }
         errorDismissTask?.cancel()
         loadingTimerTask?.cancel()
+        successDismissTask?.cancel()
     }
 
     var sttRouter: STTRouter?
@@ -186,7 +188,7 @@ class FloatingOverlayController {
         errorMessage = ""
 
         let rawTargetRect = sourceApp.flatMap { AccessibilityBridge.focusedTextFieldRect(for: $0) }
-        let initialHeight = (state == .listening || state == .idle)
+        let initialHeight = (state == .listening || state == .idle || state == .success)
             ? OverlayTokens.panelCompactHeight
             : OverlayTokens.panelMinHeight
         let panelSize = NSSize(width: OverlayTokens.panelWidth, height: initialHeight)
@@ -349,6 +351,7 @@ class FloatingOverlayController {
 
     private var errorDismissTask: Task<Void, Never>?
     private var loadingTimerTask: Task<Void, Never>?
+    private var successDismissTask: Task<Void, Never>?
 
     func showLoadingState() {
         errorDismissTask?.cancel()
@@ -408,6 +411,26 @@ class FloatingOverlayController {
         }
     }
 
+    func showSuccessAndDismiss(completion: (() -> Void)? = nil) {
+        errorDismissTask?.cancel()
+        loadingTimerTask?.cancel()
+        successDismissTask?.cancel()
+        errorMessage = ""
+        state = .success
+        resizePanelToCompact()
+        if !isVisible {
+            showPanel(near: nil)
+        }
+        pushStateToViews()
+        successDismissTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 450_000_000)
+            } catch { return }
+            guard let self else { return }
+            self.hideWithConfirmAnimation(completion: completion)
+        }
+    }
+
     // MARK: - Internal Hide
 
     private func _performHide() {
@@ -424,6 +447,8 @@ class FloatingOverlayController {
         errorDismissTask = nil
         loadingTimerTask?.cancel()
         loadingTimerTask = nil
+        successDismissTask?.cancel()
+        successDismissTask = nil
         state = .idle
         reviewText = ""
         streamingText = ""

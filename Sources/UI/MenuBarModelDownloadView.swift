@@ -8,11 +8,7 @@ final class MenuBarModelDownloadView: NSView {
     private let titleLabel = NSTextField(labelWithString: "Getting Draft ready")
     private let subtitleLabel = NSTextField(labelWithString: "Loading dictation and meeting models")
     private let progressBar = NSProgressIndicator()
-    private let dictationLabel = NSTextField(labelWithString: "Dictation")
-    private let dictationStatusLabel = NSTextField(labelWithString: "Waiting")
-    private let meetingsLabel = NSTextField(labelWithString: "Meetings")
-    private let meetingsStatusLabel = NSTextField(labelWithString: "Waiting")
-    private let detailLabel = NSTextField(wrappingLabelWithString: "")
+    private let statusLabel = NSTextField(labelWithString: "")
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -37,28 +33,10 @@ final class MenuBarModelDownloadView: NSView {
         progressBar.doubleValue = 0
         addSubview(progressBar)
 
-        dictationLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
-        dictationLabel.textColor = MenuTokens.textMutedNS
-        addSubview(dictationLabel)
-
-        dictationStatusLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
-        dictationStatusLabel.textColor = MenuTokens.textSecondaryNS
-        addSubview(dictationStatusLabel)
-
-        meetingsLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
-        meetingsLabel.textColor = MenuTokens.textMutedNS
-        addSubview(meetingsLabel)
-
-        meetingsStatusLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
-        meetingsStatusLabel.textColor = MenuTokens.textSecondaryNS
-        meetingsStatusLabel.alignment = .right
-        addSubview(meetingsStatusLabel)
-
-        detailLabel.font = NSFont.systemFont(ofSize: 10)
-        detailLabel.textColor = MenuTokens.textSecondaryNS
-        detailLabel.maximumNumberOfLines = 2
-        detailLabel.lineBreakMode = .byWordWrapping
-        addSubview(detailLabel)
+        statusLabel.font = NSFont.systemFont(ofSize: 10)
+        statusLabel.textColor = MenuTokens.textSecondaryNS
+        statusLabel.lineBreakMode = .byTruncatingTail
+        addSubview(statusLabel)
     }
 
     @available(*, unavailable)
@@ -72,26 +50,20 @@ final class MenuBarModelDownloadView: NSView {
         titleLabel.frame = NSRect(x: pad, y: bounds.height - 26, width: contentWidth, height: 16)
         subtitleLabel.frame = NSRect(x: pad, y: bounds.height - 44, width: contentWidth, height: 14)
         progressBar.frame = NSRect(x: pad, y: bounds.height - 62, width: contentWidth, height: 8)
-
-        let rowY = bounds.height - 84
-        dictationLabel.frame = NSRect(x: pad, y: rowY, width: 54, height: 12)
-        dictationStatusLabel.frame = NSRect(x: dictationLabel.frame.maxX + 4, y: rowY, width: 90, height: 12)
-
-        meetingsStatusLabel.frame = NSRect(x: bounds.width - pad - 72, y: rowY, width: 72, height: 12)
-        meetingsLabel.frame = NSRect(x: meetingsStatusLabel.frame.minX - 56, y: rowY, width: 52, height: 12)
-
-        detailLabel.frame = NSRect(x: pad, y: 12, width: contentWidth, height: 24)
+        statusLabel.frame = NSRect(x: pad, y: 12, width: contentWidth, height: 12)
     }
 
     func update(warmupStatus: MeetingSessionController.ModelWarmupStatus) {
         titleLabel.stringValue = warmupStatus.title
         subtitleLabel.stringValue = warmupStatus.subtitle
         progressBar.doubleValue = warmupStatus.progress
-        dictationStatusLabel.stringValue = warmupStatus.dictationStatus
-        meetingsStatusLabel.stringValue = warmupStatus.meetingsStatus
-        detailLabel.stringValue = warmupStatus.detail
+        if warmupStatus.dictationStatus == "Failed" || warmupStatus.meetingsStatus == "Failed" {
+            statusLabel.stringValue = warmupStatus.detail
+        } else {
+            statusLabel.stringValue = "Dictation \(warmupStatus.dictationStatus) • Meetings \(warmupStatus.meetingsStatus)"
+        }
         needsLayout = true
     }
 
-    var intrinsicHeight: CGFloat { 104 }
+    var intrinsicHeight: CGFloat { 78 }
 }

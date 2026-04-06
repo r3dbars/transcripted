@@ -18,7 +18,7 @@ final class MenuBarHeaderView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func setupViews() {
-        titleLabel.font = NSFont.systemFont(ofSize: 17, weight: .semibold)
+        titleLabel.font = NSFont.systemFont(ofSize: 16, weight: .semibold)
         titleLabel.textColor = MenuTokens.textPrimaryNS
         addSubview(titleLabel)
 
@@ -27,7 +27,7 @@ final class MenuBarHeaderView: NSView {
         statusDot.layer?.backgroundColor = MenuTokens.statusGreenNS.cgColor
         addSubview(statusDot)
 
-        statusLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        statusLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
         statusLabel.textColor = MenuTokens.textSecondaryNS
         addSubview(statusLabel)
     }
@@ -50,5 +50,5 @@ final class MenuBarHeaderView: NSView {
         needsLayout = true
     }
 
-    var intrinsicHeight: CGFloat { 42 }
+    var intrinsicHeight: CGFloat { 36 }
 }
