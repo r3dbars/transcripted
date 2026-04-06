@@ -1,4 +1,5 @@
 import SwiftUI
+import TranscriptedCore
 
 // MARK: - Failed Badge Overlay
 

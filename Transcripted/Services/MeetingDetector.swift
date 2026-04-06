@@ -18,6 +18,7 @@
 import Foundation
 import AppKit
 import Combine
+import TranscriptedCore
 
 @available(macOS 26.0, *)
 @MainActor

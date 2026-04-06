@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import TranscriptedCore
 
 // MARK: - Recording Lifecycle & Orphaned File Cleanup
 

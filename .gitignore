@@ -48,6 +48,11 @@ playground.xcworkspace
 
 .build/
 
+# Transcripted<->Draft dependency symlinks (created by build-transcripted-deps.sh,
+# pointing at the sibling Draft checkout's deps-libs/ and deps-modules/).
+.deps-libs
+.deps-modules
+
 # CocoaPods
 #
 # We recommend against adding the Pods directory to your .gitignore. However

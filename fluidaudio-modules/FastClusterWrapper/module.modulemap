@@ -1,4 +1,0 @@
-module FastClusterWrapper {
-    header "FastClusterWrapper.h"
-    export *
-}

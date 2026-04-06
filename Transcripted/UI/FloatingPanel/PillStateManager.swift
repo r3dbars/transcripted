@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import AppKit
+import TranscriptedCore
 
 // MARK: - Sound Feedback
 

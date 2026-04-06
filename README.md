@@ -390,6 +390,14 @@ Monitored apps by bundle ID: Zoom (`us.zoom.xos`), Teams (`com.microsoft.teams2`
 
 Have an idea? [Open an issue](https://github.com/r3dbars/transcripted/issues/new?template=feature_request.md).
 
+## Architecture
+
+The audio, transcription, stats, and speaker-identification pipeline lives in **`Sources/TranscriptedCore/`** as a Swift Package (`Package.swift` at the repo root). The macOS app target in `Transcripted/` consumes this package via Xcode's local Swift Package reference and supplies embedder adapters for speech-to-text (`ParakeetEngineAdapter` → FluidAudio) and notifications (`TranscriptedNotificationsAdapter` → `UNUserNotificationCenter`).
+
+A sibling app, **[Draft](../Draft/)**, reuses the same `TranscriptedCore` package for its meeting-mode recording feature. It supplies its own adapters (routing to Draft's existing Parakeet runner and storing meeting artifacts under `~/Library/Application Support/Draft/meetings/`). Because Core is UI-, STT-, and storage-layout-agnostic, both apps ship the same recording pipeline without forking it.
+
+See `CLAUDE.md` for the full agent-oriented navigation map and `CONTRIBUTING.md` for development setup.
+
 ## Contributing
 
 Contributions welcome — bug reports, feature requests, docs, or code. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and guidelines. Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before contributing.
