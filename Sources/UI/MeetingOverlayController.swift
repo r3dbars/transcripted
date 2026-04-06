@@ -1,0 +1,752 @@
+// MeetingOverlayController.swift
+// Second non-activating NSPanel for meeting-mode recording/transcription status.
+// Separate from FloatingOverlayController (draft/dictation) by design — the
+// meeting panel has its own lifecycle, state machine, and visual language.
+// See merge-plan.md §5.3.
+//
+// Pure AppKit: NSPanel + NSView subclasses + Combine subscriptions on the
+// controller only. Views are dumb renderers with `update()` methods — no
+// @Published observation from views, no SwiftUI, no NSHostingView.
+
+import AppKit
+import Combine
+import TranscriptedCore
+
+// MARK: - Panel
+
+/// Non-activating NSPanel for the meeting overlay. Distinct from
+/// `FloatingOverlayPanel` so cross-feature regressions to one don't break the
+/// other.
+@available(macOS 14.0, *)
+final class MeetingOverlayPanel: NSPanel {
+    override init(
+        contentRect: NSRect,
+        styleMask style: NSWindow.StyleMask,
+        backing backingStoreType: NSWindow.BackingStoreType,
+        defer flag: Bool
+    ) {
+        super.init(
+            contentRect: contentRect,
+            styleMask: [.nonactivatingPanel, .fullSizeContentView, .borderless],
+            backing: .buffered,
+            defer: true
+        )
+        self.level = .popUpMenu
+        self.isFloatingPanel = true
+        self.becomesKeyOnlyIfNeeded = true
+        self.backgroundColor = .clear
+        self.isOpaque = false
+        self.hasShadow = true
+        self.titlebarAppearsTransparent = true
+        self.titleVisibility = .hidden
+        self.isMovableByWindowBackground = true
+        self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+    }
+
+    // Never steals keyboard focus — meeting UI is read-only status.
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
+// MARK: - Root View
+
+/// Single horizontal pill-style view for the meeting overlay. Shows a record
+/// indicator, state title, elapsed timer, audio level bar, and (when known) a
+/// participant list.
+///
+/// Pure AppKit — no observers, no bindings. `update(...)` is called explicitly
+/// by `MeetingOverlayController` in response to Combine events.
+@available(macOS 14.0, *)
+@MainActor
+final class MeetingOverlayRootView: NSView {
+    private let statusDot = NSView()
+    private let titleLabel = NSTextField(labelWithString: "Meeting")
+    private let timerLabel = NSTextField(labelWithString: "00:00")
+    // Two stacked audio level bars: mic on top (red), system audio on bottom (blue).
+    private let micLevelBar = NSView()
+    private let micLevelFill = NSView()
+    private let systemLevelBar = NSView()
+    private let systemLevelFill = NSView()
+    private let participantsLabel = NSTextField(labelWithString: "")
+    private let closeButton = NSButton()
+    private let chevronButton = NSButton()
+
+    // Live-transcript preview area — hidden unless the panel is expanded
+    // (height > MeetingOverlayTokens.panelHeight). Contains a non-editable
+    // NSTextView inside an NSScrollView showing two color-coded blocks:
+    // [MIC] lines in red, [SYS] lines in blue.
+    private let transcriptScroll = NSScrollView()
+    private let transcriptText = NSTextView()
+
+    /// Invoked when the user clicks the close/stop button.
+    var onClose: (() -> Void)?
+
+    /// Invoked when the user clicks the expand/collapse chevron.
+    var onChevronToggle: (() -> Void)?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        setupViews()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func setupViews() {
+        wantsLayer = true
+        layer?.cornerRadius = MeetingOverlayTokens.cornerRadius
+        layer?.masksToBounds = true
+        layer?.backgroundColor = MeetingOverlayTokens.panelBg.cgColor
+
+        // Record status dot (red during recording, orange while prep/transcribe, grey idle).
+        statusDot.wantsLayer = true
+        statusDot.layer?.cornerRadius = MeetingOverlayTokens.dotSize / 2
+        statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotIdle.cgColor
+        addSubview(statusDot)
+
+        titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = MeetingOverlayTokens.textPrimary
+        addSubview(titleLabel)
+
+        timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        timerLabel.textColor = MeetingOverlayTokens.textSecondary
+        addSubview(timerLabel)
+
+        // Mic + system audio level bars (stacked). Mic on top (red), system on bottom (blue).
+        for bar in [micLevelBar, systemLevelBar] {
+            bar.wantsLayer = true
+            bar.layer?.cornerRadius = 1.5
+            bar.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
+            addSubview(bar)
+        }
+
+        micLevelFill.wantsLayer = true
+        micLevelFill.layer?.cornerRadius = 1.5
+        micLevelFill.layer?.backgroundColor = MeetingOverlayTokens.accentRed.cgColor
+        micLevelBar.addSubview(micLevelFill)
+
+        systemLevelFill.wantsLayer = true
+        systemLevelFill.layer?.cornerRadius = 1.5
+        systemLevelFill.layer?.backgroundColor = MeetingOverlayTokens.accentBlue.cgColor
+        systemLevelBar.addSubview(systemLevelFill)
+
+        participantsLabel.font = NSFont.systemFont(ofSize: 11)
+        participantsLabel.textColor = MeetingOverlayTokens.textSecondary
+        participantsLabel.lineBreakMode = .byTruncatingTail
+        addSubview(participantsLabel)
+
+        // Close/stop button — square X at the right edge.
+        if let img = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Stop meeting") {
+            closeButton.image = img
+            closeButton.contentTintColor = MeetingOverlayTokens.textSecondary
+        }
+        closeButton.bezelStyle = .inline
+        closeButton.isBordered = false
+        closeButton.target = self
+        closeButton.action = #selector(handleClose)
+        addSubview(closeButton)
+
+        // Expand/collapse chevron — toggles the live-transcript preview.
+        if let img = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Show live transcript") {
+            chevronButton.image = img
+            chevronButton.contentTintColor = MeetingOverlayTokens.textSecondary
+        }
+        chevronButton.bezelStyle = .inline
+        chevronButton.isBordered = false
+        chevronButton.target = self
+        chevronButton.action = #selector(handleChevron)
+        addSubview(chevronButton)
+
+        // Live-transcript scroll view (hidden in collapsed mode).
+        transcriptScroll.hasVerticalScroller = true
+        transcriptScroll.hasHorizontalScroller = false
+        transcriptScroll.autohidesScrollers = true
+        transcriptScroll.drawsBackground = false
+        transcriptScroll.borderType = .noBorder
+
+        transcriptText.isEditable = false
+        transcriptText.isSelectable = false
+        transcriptText.drawsBackground = false
+        transcriptText.textContainerInset = NSSize(width: 0, height: 4)
+        transcriptText.font = NSFont.systemFont(ofSize: 11)
+        transcriptText.textColor = MeetingOverlayTokens.textPrimary
+        transcriptText.isVerticallyResizable = true
+        transcriptText.isHorizontallyResizable = false
+        transcriptText.textContainer?.widthTracksTextView = true
+        transcriptText.textContainer?.heightTracksTextView = false
+
+        transcriptScroll.documentView = transcriptText
+        transcriptScroll.isHidden = true
+        addSubview(transcriptScroll)
+    }
+
+    override func layout() {
+        super.layout()
+        let pad: CGFloat = 12
+        let dotSize = MeetingOverlayTokens.dotSize
+        let headerHeight = MeetingOverlayTokens.panelHeight  // 52 — header row is always this tall
+
+        // Header row sits at the top of the view, even when the panel
+        // grows to show the expanded transcript area. Using bounds.maxY
+        // keeps it anchored to the top edge during the grow animation.
+        let headerMidY = bounds.height - headerHeight / 2
+
+        statusDot.frame = NSRect(
+            x: pad,
+            y: headerMidY - dotSize / 2,
+            width: dotSize,
+            height: dotSize
+        )
+
+        let titleX = statusDot.frame.maxX + 8
+        let titleSize = titleLabel.fittingSize
+        titleLabel.frame = NSRect(
+            x: titleX,
+            y: headerMidY - titleSize.height / 2,
+            width: min(titleSize.width, 140),
+            height: titleSize.height
+        )
+
+        let timerSize = timerLabel.fittingSize
+        let timerX = titleLabel.frame.maxX + 8
+        timerLabel.frame = NSRect(
+            x: timerX,
+            y: headerMidY - timerSize.height / 2,
+            width: timerSize.width,
+            height: timerSize.height
+        )
+
+        // Close button pinned to the right of the header.
+        let closeSize: CGFloat = 18
+        closeButton.frame = NSRect(
+            x: bounds.width - pad - closeSize,
+            y: headerMidY - closeSize / 2,
+            width: closeSize,
+            height: closeSize
+        )
+
+        // Chevron button sits just left of the close button.
+        let chevronSize: CGFloat = 16
+        chevronButton.frame = NSRect(
+            x: closeButton.frame.minX - chevronSize - 6,
+            y: headerMidY - chevronSize / 2,
+            width: chevronSize,
+            height: chevronSize
+        )
+
+        // Two level bars (mic top, system bottom) fill the horizontal
+        // space between timer and chevron. Participants strip sits beneath.
+        let levelBarX = timerLabel.frame.maxX + 12
+        let levelBarRight = chevronButton.frame.minX - 8
+        let levelBarWidth = max(0, levelBarRight - levelBarX)
+        let levelBarHeight: CGFloat = 3
+        let levelBarGap: CGFloat = 1
+
+        micLevelBar.frame = NSRect(
+            x: levelBarX,
+            y: headerMidY + 3,
+            width: levelBarWidth,
+            height: levelBarHeight
+        )
+        systemLevelBar.frame = NSRect(
+            x: levelBarX,
+            y: headerMidY + 3 - levelBarHeight - levelBarGap,
+            width: levelBarWidth,
+            height: levelBarHeight
+        )
+
+        // Participants label sits beneath both level bars.
+        let participantsHeight: CGFloat = 14
+        participantsLabel.frame = NSRect(
+            x: levelBarX,
+            y: headerMidY - participantsHeight - 2,
+            width: levelBarWidth,
+            height: participantsHeight
+        )
+
+        // Fill widths reflect latest levels for each source.
+        let micFillWidth = micLevelBar.bounds.width * CGFloat(currentMicLevel)
+        micLevelFill.frame = NSRect(x: 0, y: 0, width: micFillWidth, height: micLevelBar.bounds.height)
+
+        let systemFillWidth = systemLevelBar.bounds.width * CGFloat(currentSystemLevel)
+        systemLevelFill.frame = NSRect(x: 0, y: 0, width: systemFillWidth, height: systemLevelBar.bounds.height)
+
+        // Expanded mode: transcript scroll view takes everything below the
+        // header row. A thin divider would be nice; skipped to keep the
+        // pill visually minimal. A small inset keeps the rounded corners
+        // clean.
+        if bounds.height > headerHeight + 4 {
+            transcriptScroll.isHidden = false
+            transcriptScroll.frame = NSRect(
+                x: pad,
+                y: 6,
+                width: bounds.width - pad * 2,
+                height: bounds.height - headerHeight - 2
+            )
+        } else {
+            transcriptScroll.isHidden = true
+        }
+    }
+
+    // MARK: - Update API
+
+    private var currentMicLevel: Float = 0
+    private var currentSystemLevel: Float = 0
+    private var lastMicText: String = ""
+    private var lastSystemText: String = ""
+
+    func update(
+        state: MeetingOverlayController.OverlayState,
+        duration: TimeInterval,
+        micLevel: Float,
+        systemLevel: Float,
+        participants: [String],
+        micTranscript: String,
+        systemTranscript: String,
+        isExpanded: Bool
+    ) {
+        switch state {
+        case .idle:
+            titleLabel.stringValue = "Meeting"
+            statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotIdle.cgColor
+        case .preparing:
+            titleLabel.stringValue = "Loading models…"
+            statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotPrep.cgColor
+        case .recording:
+            titleLabel.stringValue = "Recording meeting"
+            statusDot.layer?.backgroundColor = MeetingOverlayTokens.accentRed.cgColor
+        case .transcribing:
+            titleLabel.stringValue = "Transcribing…"
+            statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotPrep.cgColor
+        case .saved:
+            titleLabel.stringValue = "Saved"
+            statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotSaved.cgColor
+        case .error(let message):
+            titleLabel.stringValue = message.isEmpty ? "Error" : message
+            statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotError.cgColor
+        }
+
+        timerLabel.stringValue = formatDuration(duration)
+        currentMicLevel = max(0, min(1, micLevel))
+        currentSystemLevel = max(0, min(1, systemLevel))
+
+        if participants.isEmpty {
+            participantsLabel.stringValue = ""
+        } else {
+            participantsLabel.stringValue = participants.joined(separator: ", ")
+        }
+
+        // Chevron glyph tracks expansion state.
+        let chevronName = isExpanded ? "chevron.up" : "chevron.down"
+        chevronButton.image = NSImage(
+            systemSymbolName: chevronName,
+            accessibilityDescription: isExpanded ? "Hide live transcript" : "Show live transcript"
+        )
+
+        // Only rebuild the attributed string when the text actually
+        // changed — EOU's partial callback fires on every chunk, so
+        // avoid re-laying out the text view when nothing moved.
+        if micTranscript != lastMicText || systemTranscript != lastSystemText {
+            lastMicText = micTranscript
+            lastSystemText = systemTranscript
+            applyTranscript(mic: micTranscript, system: systemTranscript)
+        }
+
+        needsLayout = true
+    }
+
+    /// Build a two-block attributed string: "MIC" header + red-tinted body,
+    /// then "SYS" header + blue-tinted body. Scrolls to the bottom after
+    /// each update so the latest tokens stay visible.
+    private func applyTranscript(mic: String, system: String) {
+        let result = NSMutableAttributedString()
+
+        let headerFont = NSFont.systemFont(ofSize: 9, weight: .bold)
+        let bodyFont = NSFont.systemFont(ofSize: 11)
+        let micPlaceholder = "Waiting for microphone…"
+        let sysPlaceholder = "Waiting for system audio…"
+        let idleColor = NSColor(white: 0.5, alpha: 1.0)
+
+        // MIC block
+        result.append(NSAttributedString(
+            string: "MIC\n",
+            attributes: [
+                .font: headerFont,
+                .foregroundColor: MeetingOverlayTokens.accentRed,
+                .kern: 1.0
+            ]
+        ))
+        let micBody = mic.isEmpty ? micPlaceholder : mic
+        result.append(NSAttributedString(
+            string: micBody + "\n\n",
+            attributes: [
+                .font: bodyFont,
+                .foregroundColor: mic.isEmpty ? idleColor : MeetingOverlayTokens.textPrimary
+            ]
+        ))
+
+        // SYSTEM block
+        result.append(NSAttributedString(
+            string: "SYSTEM\n",
+            attributes: [
+                .font: headerFont,
+                .foregroundColor: MeetingOverlayTokens.accentBlue,
+                .kern: 1.0
+            ]
+        ))
+        let sysBody = system.isEmpty ? sysPlaceholder : system
+        result.append(NSAttributedString(
+            string: sysBody,
+            attributes: [
+                .font: bodyFont,
+                .foregroundColor: system.isEmpty ? idleColor : MeetingOverlayTokens.textPrimary
+            ]
+        ))
+
+        transcriptText.textStorage?.setAttributedString(result)
+        transcriptText.scrollToEndOfDocument(nil)
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds))
+        let m = total / 60
+        let s = total % 60
+        return String(format: "%02d:%02d", m, s)
+    }
+
+    @objc private func handleClose() {
+        onClose?()
+    }
+
+    @objc private func handleChevron() {
+        onChevronToggle?()
+    }
+}
+
+// MARK: - Design tokens (local — keeps the meeting overlay visually distinct
+// from the draft overlay without polluting OverlayTokens).
+
+@available(macOS 14.0, *)
+enum MeetingOverlayTokens {
+    static let panelBg       = NSColor.black.withAlphaComponent(0.78)
+    static let accentRed     = NSColor(red: 0.95, green: 0.22, blue: 0.22, alpha: 1.0)   // mic audio
+    static let accentBlue    = NSColor(red: 0.40, green: 0.75, blue: 0.90, alpha: 1.0)   // system audio
+    static let textPrimary   = NSColor.white
+    static let textSecondary = NSColor(white: 0.65, alpha: 1.0)
+    static let dotIdle       = NSColor(white: 0.45, alpha: 1.0)
+    static let dotPrep       = NSColor.systemOrange
+    static let dotSaved      = NSColor.systemGreen
+    static let dotError      = NSColor.systemRed
+
+    static let panelWidth: CGFloat  = 360
+    static let panelHeight: CGFloat = 52          // collapsed (header row only)
+    static let panelExpandedHeight: CGFloat = 220 // header + dual live-transcript panes
+    static let cornerRadius: CGFloat = 14
+    static let dotSize: CGFloat     = 8
+}
+
+// MARK: - Controller
+
+/// Owns the `MeetingOverlayPanel`, subscribes to `MeetingSessionController`
+/// @Published state, and pushes updates to `MeetingOverlayRootView`.
+///
+/// Also forwards the ⌥M hotkey intent (toggle meeting recording) through its
+/// `toggleFromHotkey()` method — wired by the `DraftAppDelegate` onto
+/// `ContextCaptureEngine.onMeetingToggle`.
+@available(macOS 14.0, *)
+@MainActor
+final class MeetingOverlayController {
+
+    enum OverlayState: Equatable {
+        case idle
+        case preparing
+        case recording
+        case transcribing
+        case saved
+        case error(String)
+    }
+
+    // MARK: - State
+
+    private(set) var state: OverlayState = .idle
+    private var currentDuration: TimeInterval = 0
+    private var currentMicLevel: Float = 0
+    private var currentSystemLevel: Float = 0
+    private var currentParticipants: [String] = []
+    private var currentMicTranscript: String = ""
+    private var currentSystemTranscript: String = ""
+    /// When true, the panel is grown to show the dual live-transcript
+    /// preview. Toggled by the chevron button in the header row.
+    private var isExpanded: Bool = false
+
+    // MARK: - Panel & views
+
+    private var panel: MeetingOverlayPanel?
+    private var rootView: MeetingOverlayRootView?
+    private var subscriptions: Set<AnyCancellable> = []
+    private var autoHideTask: Task<Void, Never>?
+
+    // MARK: - Dependencies
+
+    /// The session controller the overlay reflects and forwards hotkey events to.
+    /// Set once by `DraftAppDelegate` during app launch.
+    weak var meetingSession: MeetingSessionController?
+
+    // MARK: - Setup
+
+    /// Create the panel, wire subscriptions, and keep it hidden until state
+    /// becomes non-idle. Safe to call once at app launch; re-calls are ignored.
+    func setup(meetingSession: MeetingSessionController) {
+        guard panel == nil else { return }
+        self.meetingSession = meetingSession
+
+        let frame = NSRect(
+            x: 0, y: 0,
+            width: MeetingOverlayTokens.panelWidth,
+            height: MeetingOverlayTokens.panelHeight
+        )
+
+        let panel = MeetingOverlayPanel(
+            contentRect: frame,
+            styleMask: [],
+            backing: .buffered,
+            defer: true
+        )
+
+        let rootView = MeetingOverlayRootView(frame: panel.contentView?.bounds ?? frame)
+        rootView.autoresizingMask = [.width, .height]
+        rootView.onClose = { [weak self] in self?.handleCloseTapped() }
+        rootView.onChevronToggle = { [weak self] in self?.toggleExpanded() }
+        panel.contentView?.addSubview(rootView)
+
+        self.panel = panel
+        self.rootView = rootView
+
+        wireSubscriptions(to: meetingSession)
+    }
+
+    // MARK: - Hotkey entry point
+
+    /// Called from `ContextCaptureEngine.onMeetingToggle` when ⌥M fires.
+    /// Toggles recording start/stop based on current session state.
+    func toggleFromHotkey() {
+        guard let session = meetingSession else { return }
+        Task { [weak session] in
+            guard let session else { return }
+            switch session.state {
+            case .idle, .ready, .error:
+                await session.startRecording()
+            case .loadingModels:
+                // Still loading — ignore to avoid double-starts.
+                break
+            case .recording:
+                await session.stopRecording()
+            case .transcribing:
+                // Already processing — leave it alone.
+                break
+            }
+        }
+    }
+
+    // MARK: - Subscriptions
+
+    private func wireSubscriptions(to session: MeetingSessionController) {
+        session.$state
+            .receive(on: RunLoop.main)
+            .sink { [weak self] sessionState in
+                self?.applySessionState(sessionState)
+            }
+            .store(in: &subscriptions)
+
+        session.$recordingDuration
+            .receive(on: RunLoop.main)
+            .sink { [weak self] duration in
+                self?.currentDuration = duration
+                self?.pushToView()
+            }
+            .store(in: &subscriptions)
+
+        session.$audioLevel
+            .receive(on: RunLoop.main)
+            .sink { [weak self] level in
+                self?.currentMicLevel = level
+                self?.pushToView()
+            }
+            .store(in: &subscriptions)
+
+        session.$systemLevel
+            .receive(on: RunLoop.main)
+            .sink { [weak self] level in
+                self?.currentSystemLevel = level
+                self?.pushToView()
+            }
+            .store(in: &subscriptions)
+
+        session.$liveMicTranscript
+            .receive(on: RunLoop.main)
+            .sink { [weak self] text in
+                self?.currentMicTranscript = text
+                self?.pushToView()
+            }
+            .store(in: &subscriptions)
+
+        session.$liveSystemTranscript
+            .receive(on: RunLoop.main)
+            .sink { [weak self] text in
+                self?.currentSystemTranscript = text
+                self?.pushToView()
+            }
+            .store(in: &subscriptions)
+    }
+
+    private func applySessionState(_ sessionState: MeetingSessionController.State) {
+        switch sessionState {
+        case .idle:
+            state = .idle
+            hidePanel()
+        case .loadingModels:
+            state = .preparing
+            showPanel()
+        case .ready:
+            // Ready but not recording — hide unless we're already showing a
+            // terminal state (saved/error); the auto-hide task handles those.
+            if case .saved = state { break }
+            if case .error = state { break }
+            state = .idle
+            hidePanel()
+        case .recording:
+            state = .recording
+            autoHideTask?.cancel()
+            showPanel()
+        case .transcribing:
+            state = .transcribing
+            showPanel()
+        case .error(let message):
+            state = .error(message)
+            showPanel()
+            scheduleAutoHide(after: 5)
+        }
+        pushToView()
+    }
+
+    // MARK: - Panel show/hide
+
+    private func showPanel() {
+        guard let panel = panel else { return }
+        if panel.isVisible { return }
+
+        let desiredHeight = currentPanelHeight()
+
+        // Position at top-center of the screen containing the mouse.
+        let mousePos = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first(where: { NSMouseInRect(mousePos, $0.frame, false) })
+            ?? NSScreen.main
+        if let visibleFrame = screen?.visibleFrame {
+            let origin = NSPoint(
+                x: visibleFrame.midX - MeetingOverlayTokens.panelWidth / 2,
+                y: visibleFrame.maxY - desiredHeight - 12
+            )
+            panel.setFrameOrigin(origin)
+        }
+        panel.setContentSize(NSSize(
+            width: MeetingOverlayTokens.panelWidth,
+            height: desiredHeight
+        ))
+        panel.alphaValue = 0
+        panel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.18
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1.0
+        }
+    }
+
+    /// Target height for the panel based on the current `isExpanded` flag.
+    /// Kept as a helper so show/animate paths agree on the value.
+    private func currentPanelHeight() -> CGFloat {
+        isExpanded
+            ? MeetingOverlayTokens.panelExpandedHeight
+            : MeetingOverlayTokens.panelHeight
+    }
+
+    /// Toggle the expanded live-transcript preview. Animates the panel's
+    /// frame so it grows downward from the top edge (origin.y decreases by
+    /// the height delta, so the top of the panel stays anchored).
+    private func toggleExpanded() {
+        guard let panel = panel else { return }
+        isExpanded.toggle()
+
+        let newHeight = currentPanelHeight()
+        let currentFrame = panel.frame
+        let heightDelta = newHeight - currentFrame.height
+
+        // Keep the top edge of the panel stable — growing downward means
+        // the origin y decreases. If the panel were pinned to the bottom,
+        // we'd do the opposite.
+        let newFrame = NSRect(
+            x: currentFrame.origin.x,
+            y: currentFrame.origin.y - heightDelta,
+            width: currentFrame.width,
+            height: newHeight
+        )
+
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.22
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(newFrame, display: true)
+        }
+
+        pushToView()
+    }
+
+    private func hidePanel() {
+        guard let panel = panel, panel.isVisible else { return }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.14
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            panel.animator().alphaValue = 0
+        }, completionHandler: { [weak panel] in
+            panel?.orderOut(nil)
+        })
+    }
+
+    private func scheduleAutoHide(after seconds: Double) {
+        autoHideTask?.cancel()
+        autoHideTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.hidePanel()
+        }
+    }
+
+    private func handleCloseTapped() {
+        guard let session = meetingSession else { hidePanel(); return }
+        Task { [weak session] in
+            guard let session else { return }
+            switch session.state {
+            case .recording:
+                await session.stopRecording()
+            case .transcribing:
+                session.cancelActiveTranscription()
+            default:
+                break
+            }
+        }
+        hidePanel()
+    }
+
+    // MARK: - View push
+
+    private func pushToView() {
+        rootView?.update(
+            state: state,
+            duration: currentDuration,
+            micLevel: currentMicLevel,
+            systemLevel: currentSystemLevel,
+            participants: currentParticipants,
+            micTranscript: currentMicTranscript,
+            systemTranscript: currentSystemTranscript,
+            isExpanded: isExpanded
+        )
+    }
+}

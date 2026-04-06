@@ -271,20 +271,37 @@ When a new version is available, Draft will prompt you to update. Updates downlo
 If you'd like to build Draft yourself:
 
 ```bash
+# Clone Draft and Transcripted side-by-side (see Cross-repo dependency below)
 git clone https://github.com/r3dbars/Draft.git
+git clone https://github.com/r3dbars/Transcripted.git
+
 cd Draft
-bash build-deps.sh   # Build FluidAudio + MLX dependencies (~2 min, one-time)
+bash build-deps.sh   # Build FluidAudio + MLX + TranscriptedCore unified deps (~5 min, one-time)
 bash build.sh        # Compile + sign + launch (~5s)
-bash run-tests.sh    # Run 147 pure-function tests (~2s)
+bash run-tests.sh    # Run 168 pure-function tests (~2s)
 ```
 
-No Xcode project. No CocoaPods. No SPM. Just `swiftc` and Apple frameworks.
+No Xcode project. No CocoaPods. Just `swiftc`, SPM (used only by `build-deps.sh` to resolve Apple/third-party dependencies), and Apple frameworks.
+
+### Cross-repo dependency: TranscriptedCore
+
+Draft's meeting-mode features consume **TranscriptedCore**, an SPM library extracted from the [Transcripted](https://github.com/r3dbars/Transcripted) repo (tag `extract/core-v1`). `Sources/Meeting/` files in Draft do `import TranscriptedCore` and supply Draft-specific adapters (`MeetingSTTAdapter`, `CoreStoragePaths`) so meeting recordings land under `~/Library/Application Support/Draft/meetings/` with Draft's own Parakeet model path.
+
+`build-deps.sh` discovers a sibling Transcripted checkout at runtime — in order, it checks:
+
+1. `$DRAFT_TRANSCRIPTED_ROOT` (explicit override)
+2. A matching worktree at `Transcripted/.claude/worktrees/<same-name>` (used when both repos are cloned as git worktrees under `.claude/worktrees/`)
+3. `Transcripted/.claude/worktrees/core-extract` (the canonical merge worktree used during extraction)
+4. `<parent>/Transcripted` (the Transcripted main checkout alongside Draft)
+
+If the default `~/code/Draft` + `~/code/Transcripted` layout doesn't match your setup, export `DRAFT_TRANSCRIPTED_ROOT=/path/to/Transcripted` before running `build-deps.sh`.
 
 ### What the build scripts do
 
-- **`build-deps.sh`** — Downloads and compiles [FluidAudio](https://github.com/nicholasgasior/FluidAudio) (speech recognition) and [mlx-swift-lm](https://github.com/ml-explore/mlx-swift-examples) (local inference) into a single static library. Also compiles the Metal shaders that MLX uses for GPU acceleration. You only need to run this once.
-- **`build.sh`** — Compiles all Swift source files into a single binary, signs the app bundle, and launches it. Takes about 5 seconds.
-- **`run-tests.sh`** — Compiles and runs the test suite. 147 pure-function tests covering context parsing, platform formatting, refusal detection, message filtering, style utilities, and more. No XCTest or Xcode required. Runs in about 2 seconds.
+- **`build-deps.sh`** — Resolves and compiles [FluidAudio 0.7.9](https://github.com/FluidInference/FluidAudio) (speech recognition) and [mlx-swift-lm](https://github.com/ml-explore/mlx-swift-lm) (local inference) **and** TranscriptedCore together in a single SPM graph, producing a unified static library `deps-libs/libDraftDeps.a` plus swiftmodules in `deps-modules/`. The unified graph prevents duplicate-symbol conflicts that would happen if each dependency pulled its own copy of shared packages (Hub, Tokenizers, Crypto). Also compiles the MLX Metal shaders into `deps-libs/mlx.metallib`. Run once; rerun with `--force` after pulling new Core changes or switching Transcripted worktrees.
+- **`build.sh`** — Compiles all Swift source files into a single binary, signs the app bundle, and launches it. Takes about 5 seconds. Uses the cached artifacts from `build-deps.sh` via `-I deps-modules` and `-L deps-libs -lDraftDeps`.
+- **`run-tests.sh`** — Compiles and runs the test suite. 168 pure-function tests covering context parsing, platform formatting, refusal detection, message filtering, style utilities, meeting session state, and more. No XCTest or Xcode required. Runs in about 2 seconds.
+- **`run-integration-smoke.sh`** — Compiles a small smoke-test binary against Draft's full dependency chain and verifies that `TranscriptedCore` types (`CoreStoragePaths`, `AudioResampler`, `DiarizationService`, `SpeakerDatabase`, `FailedTranscriptionManager`, `AppServices`) are reachable from Draft. Run this after any cross-repo change to confirm the library boundary is intact.
 
 ---
 

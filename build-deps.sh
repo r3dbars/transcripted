@@ -13,6 +13,73 @@ DEPS_BUILD="$DRAFT_DIR/.deps-build"
 DEPS_LIBS="$DRAFT_DIR/deps-libs"
 DEPS_MODULES="$DRAFT_DIR/deps-modules"
 
+# ---------------------------------------------------------------------------
+# Discover the Transcripted checkout that supplies Sources/TranscriptedCore
+# ---------------------------------------------------------------------------
+# TranscriptedCore is the SPM library extracted from the Transcripted repo at
+# tag `extract/core-v1`. Draft's unified deps build inlines it as a target so
+# FluidAudio + MLX become normal SPM dependency edges (see the heredoc below).
+#
+# Previously this path was a committed symlink at $DRAFT_DIR/Transcripted ->
+# ../../../../Transcripted/.claude/worktrees/core-extract. That broke whenever
+# Draft was checked out to a different depth (e.g. a non-worktree clone) and
+# required callers to place both repos at matching positions. Replace it with
+# runtime discovery:
+#
+#   1. $DRAFT_TRANSCRIPTED_ROOT             — explicit override
+#   2. Sibling worktree with the same name  — e.g. both at .claude/worktrees/X
+#   3. Transcripted/.claude/worktrees/core-extract (canonical merge worktree)
+#   4. Transcripted main checkout (sibling dir to Draft)
+
+discover_transcripted() {
+    local searched=()
+
+    try_root() {
+        local candidate="$1"
+        searched+=("$candidate")
+        if [ -d "$candidate/Sources/TranscriptedCore" ] && [ -f "$candidate/Package.swift" ]; then
+            TRANSCRIPTED_ROOT="$candidate"
+            return 0
+        fi
+        return 1
+    }
+
+    if [ -n "$DRAFT_TRANSCRIPTED_ROOT" ]; then
+        try_root "$DRAFT_TRANSCRIPTED_ROOT" && return 0
+        echo "[build-deps] ERROR: DRAFT_TRANSCRIPTED_ROOT='$DRAFT_TRANSCRIPTED_ROOT' does not contain Sources/TranscriptedCore"
+        exit 1
+    fi
+
+    local code_parent
+    case "$DRAFT_DIR" in
+        */.claude/worktrees/*)
+            # <code>/Draft/.claude/worktrees/<name> -> <code>
+            code_parent="$(cd "$DRAFT_DIR/../../../.." && pwd)"
+            local worktree_name
+            worktree_name="$(basename "$DRAFT_DIR")"
+            try_root "$code_parent/Transcripted/.claude/worktrees/$worktree_name" && return 0
+            ;;
+        *)
+            code_parent="$(cd "$DRAFT_DIR/.." && pwd)"
+            ;;
+    esac
+
+    try_root "$code_parent/Transcripted/.claude/worktrees/core-extract" && return 0
+    try_root "$code_parent/Transcripted" && return 0
+
+    echo "[build-deps] ERROR: Could not locate a Transcripted checkout with Sources/TranscriptedCore. Searched:"
+    for path in "${searched[@]}"; do
+        echo "[build-deps]   - $path"
+    done
+    echo "[build-deps]"
+    echo "[build-deps] Set DRAFT_TRANSCRIPTED_ROOT=/path/to/Transcripted to override, or clone"
+    echo "[build-deps] Transcripted alongside Draft (e.g. ~/code/Draft and ~/code/Transcripted)."
+    exit 1
+}
+
+discover_transcripted
+echo "[build-deps] Using TranscriptedCore from: $TRANSCRIPTED_ROOT"
+
 # Skip if already built (use --force to rebuild)
 if [ -f "$DEPS_LIBS/libDraftDeps.a" ] && [ -d "$DEPS_MODULES" ] && [ "$1" != "--force" ]; then
     echo "Dependencies already built. Use --force to rebuild."
@@ -27,6 +94,12 @@ echo "Building FluidAudio + mlx-swift-lm (unified)..."
 rm -rf "$DEPS_BUILD" "$DEPS_LIBS" "$DEPS_MODULES"
 mkdir -p "$DEPS_BUILD/Sources"
 
+# Symlink TranscriptedCore's source tree into $DEPS_BUILD so SPM's target
+# path validation accepts it (SPM forbids target paths that escape the
+# package root). The symlink lets us build Core from Draft's unified
+# package graph with proper FluidAudio/MLX dependency edges.
+ln -sfn "$TRANSCRIPTED_ROOT/Sources/TranscriptedCore" "$DEPS_BUILD/TranscriptedCore"
+
 # Create unified Package.swift — both dependencies resolved together
 cat > "$DEPS_BUILD/Package.swift" << 'PACKAGE_EOF'
 // swift-tools-version:5.9
@@ -39,12 +112,29 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift-lm", revision: "25b00d4"),
     ],
     targets: [
+        // TranscriptedCore is built directly from its source tree rather than
+        // consumed via .package(path:) because Core's own Package.swift uses
+        // relative unsafeFlags (-I ./.deps-modules) that assume a prebuilt
+        // mega-library. Inlining as a target here makes FluidAudio + MLX
+        // available through normal SPM dependency edges, producing a real
+        // TranscriptedCore.swiftmodule that build-deps.sh copies into
+        // deps-modules/ for build.sh to consume.
+        .target(
+            name: "TranscriptedCore",
+            dependencies: [
+                .product(name: "FluidAudio", package: "FluidAudio"),
+                .product(name: "MLXLLM", package: "mlx-swift-lm"),
+                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+            ],
+            path: "TranscriptedCore"
+        ),
         .target(
             name: "Shim",
             dependencies: [
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+                "TranscriptedCore",
             ],
             path: "Sources"
         )
@@ -56,6 +146,7 @@ cat > "$DEPS_BUILD/Sources/Shim.swift" << 'SWIFT_EOF'
 import FluidAudio
 import MLXLLM
 import MLXLMCommon
+import TranscriptedCore
 SWIFT_EOF
 
 # Build in release mode

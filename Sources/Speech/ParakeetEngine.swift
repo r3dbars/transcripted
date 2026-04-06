@@ -10,6 +10,7 @@ import Combine
 import CoreAudio
 import FluidAudio
 import Foundation
+import TranscriptedCore
 
 enum ParakeetModelState {
     case notLoaded
@@ -692,6 +693,51 @@ class ParakeetEngine: ObservableObject {
             sampleBuffer.removeAll(keepingCapacity: true)
             return nil
         }
+    }
+
+    // MARK: - Pure-Sample Transcription (for Meeting pipeline)
+
+    /// Transcribe pre-resampled 16kHz mono Float32 samples directly, bypassing
+    /// ParakeetEngine's recording lifecycle (audioEngine, sampleBuffer, EOU streaming).
+    ///
+    /// Used by `MeetingSTTAdapter` to satisfy Core's `SpeechToTextEngine` protocol:
+    /// Core's TranscriptionPipeline owns its own recording (mic + system audio files via
+    /// `Audio.swift`), extracts 16kHz samples per speaker segment, and calls this method
+    /// once per segment. This is distinct from Draft's drafting flow, which uses
+    /// `startRecording()` / `transcribe()` to capture and transcribe in one shot.
+    ///
+    /// - Parameters:
+    ///   - samples: 16kHz mono Float32 samples. Caller must resample; we do not.
+    ///   - source: FluidAudio's `AudioSource` (`.microphone` or `.system`).
+    /// - Returns: Transcribed text, trimmed. Empty string if Parakeet returned nothing.
+    /// - Throws: Re-throws `AsrManager.transcribe` errors (including model-not-ready).
+    func transcribeSamples(_ samples: [Float], source: AudioSource) async throws -> String {
+        guard let manager = asrManager, asrManagerReady else {
+            EventReporter.shared.capture(level: .error, engine: "parakeet", event: "asr_manager_unavailable",
+                message: "ASR manager not available for transcribeSamples")
+            throw NSError(domain: "ParakeetEngine", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Parakeet ASR manager is not loaded"
+            ])
+        }
+        guard !samples.isEmpty else { return "" }
+
+        let startTime = CFAbsoluteTimeGetCurrent()
+        let result = try await manager.transcribe(samples, source: source)
+        let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+        let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let audioDuration = Double(samples.count) / 16000.0
+        let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
+        EventReporter.shared.capture(level: .info, engine: "parakeet", event: "meeting_segment_transcribed",
+            message: "Meeting segment transcribed in \(String(format: "%.2f", elapsed))s",
+            context: [
+                "elapsed_s": String(format: "%.3f", elapsed),
+                "audio_duration_s": String(format: "%.2f", audioDuration),
+                "rtf": String(format: "%.3f", rtf),
+                "chars": "\(trimmed.count)",
+            ])
+
+        return trimmed
     }
 
     // MARK: - Cleanup

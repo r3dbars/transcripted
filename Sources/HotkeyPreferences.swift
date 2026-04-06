@@ -16,6 +16,7 @@ enum HotkeyPreferences {
 
     static let defaultDraft = HotkeyBinding(keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(optionKey))
     static let defaultDictation = HotkeyBinding(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey))
+    static let defaultMeeting = HotkeyBinding(keyCode: UInt32(kVK_ANSI_M), modifiers: UInt32(optionKey))
 
     // MARK: - Right Option Tap-to-Dictate
 
@@ -40,6 +41,8 @@ enum HotkeyPreferences {
     private static let draftModifiersKey  = "hotkey-draft-modifiers"
     private static let dictationKeyCodeKey   = "hotkey-dictation-keyCode"
     private static let dictationModifiersKey = "hotkey-dictation-modifiers"
+    private static let meetingKeyCodeKey     = "hotkey-meeting-keyCode"
+    private static let meetingModifiersKey   = "hotkey-meeting-modifiers"
 
     // MARK: - Read
 
@@ -61,6 +64,15 @@ enum HotkeyPreferences {
         )
     }
 
+    static func meetingBinding() -> HotkeyBinding {
+        let ud = UserDefaults.standard
+        guard ud.object(forKey: meetingKeyCodeKey) != nil else { return defaultMeeting }
+        return HotkeyBinding(
+            keyCode: UInt32(ud.integer(forKey: meetingKeyCodeKey)),
+            modifiers: UInt32(ud.integer(forKey: meetingModifiersKey))
+        )
+    }
+
     // MARK: - Write
 
     static func save(draft binding: HotkeyBinding) {
@@ -77,12 +89,21 @@ enum HotkeyPreferences {
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
 
+    static func save(meeting binding: HotkeyBinding) {
+        let ud = UserDefaults.standard
+        ud.set(Int(binding.keyCode), forKey: meetingKeyCodeKey)
+        ud.set(Int(binding.modifiers), forKey: meetingModifiersKey)
+        NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
+    }
+
     static func resetToDefaults() {
         let ud = UserDefaults.standard
         ud.removeObject(forKey: draftKeyCodeKey)
         ud.removeObject(forKey: draftModifiersKey)
         ud.removeObject(forKey: dictationKeyCodeKey)
         ud.removeObject(forKey: dictationModifiersKey)
+        ud.removeObject(forKey: meetingKeyCodeKey)
+        ud.removeObject(forKey: meetingModifiersKey)
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
 
