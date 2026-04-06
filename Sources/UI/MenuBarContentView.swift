@@ -13,6 +13,7 @@ final class MenuBarContentView: NSView {
     let hotkeyErrorBanner = HotkeyErrorBanner()
     let statsView = MenuBarStatsView(frame: .zero)
     let shortcutsView = MenuBarShortcutsView(frame: .zero)
+    let recentMeetingsView = MenuBarRecentMeetingsView(frame: .zero)
     let styleView = MenuBarStyleView(frame: .zero)
     let agentView = MenuBarAgentView(frame: .zero)
 
@@ -45,6 +46,7 @@ final class MenuBarContentView: NSView {
         documentView.addSubview(hotkeyErrorBanner)
         documentView.addSubview(statsView)
         documentView.addSubview(shortcutsView)
+        documentView.addSubview(recentMeetingsView)
         documentView.addSubview(styleView)
         documentView.addSubview(agentView)
 
@@ -103,6 +105,12 @@ final class MenuBarContentView: NSView {
         let shortcutsH = shortcutsView.intrinsicHeight
         shortcutsView.frame = NSRect(x: pad, y: y, width: w, height: shortcutsH)
         y += shortcutsH + 4
+
+        // Divider gap + Recent Meetings
+        y += 4
+        let recentH = recentMeetingsView.intrinsicHeight
+        recentMeetingsView.frame = NSRect(x: pad, y: y, width: w, height: recentH)
+        y += recentH + 4
 
         // Divider gap + Style
         y += 4
@@ -165,6 +173,12 @@ final class MenuBarContentView: NSView {
         let shortcutsH = shortcutsView.intrinsicHeight
         y -= shortcutsH
         shortcutsView.frame = NSRect(x: pad, y: y, width: w, height: shortcutsH)
+
+        // Recent Meetings
+        y -= 8
+        let recentH = recentMeetingsView.intrinsicHeight
+        y -= recentH
+        recentMeetingsView.frame = NSRect(x: pad, y: y, width: w, height: recentH)
 
         // Style
         y -= 8

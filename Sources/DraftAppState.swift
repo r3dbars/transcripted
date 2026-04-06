@@ -3,6 +3,7 @@
 
 import SwiftUI
 import ServiceManagement
+import TranscriptedCore
 
 @MainActor
 class DraftAppState: ObservableObject {
@@ -19,6 +20,13 @@ class DraftAppState: ObservableObject {
     #if BETA_BUILD
     let updateManager = UpdateManager()
     #endif
+
+    /// Meeting-mode pipeline (Lane B). Lazily instantiated so unit tests that
+    /// don't exercise the meeting feature don't pay the construction cost.
+    @available(macOS 14.0, *)
+    lazy var meetingSession: MeetingSessionController = MeetingSessionController(
+        parakeet: sttRouter.parakeetEngine
+    )
 
     private var promptsObserver: NSObjectProtocol?
     private var wakeHealthCheckTask: Task<Void, Never>?
@@ -81,6 +89,15 @@ class DraftAppState: ObservableObject {
         }
         Task {
             await localInference.initialize()
+        }
+
+        // Preload meeting diarization + STT models in the background so the
+        // first ⌥M press doesn't block on a cold model download.
+        if #available(macOS 14.0, *) {
+            Task { [weak self] in
+                guard let self else { return }
+                await self.meetingSession.prepareModels()
+            }
         }
 
         let geminiStatus = GeminiEngine.isAvailable ? "configured" : "not configured"

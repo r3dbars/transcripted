@@ -51,6 +51,8 @@ cat > "$BUILD_DIR/Draft.entitlements" << 'EOF'
     <false/>
     <key>com.apple.security.device.audio-input</key>
     <true/>
+    <key>com.apple.security.device.audio-capture</key>
+    <true/>
     <key>com.apple.security.speech.recognition</key>
     <true/>
 </dict>
@@ -111,18 +113,34 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Sign — auto-detect the first valid Developer ID on this machine
-SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
-if [ -n "$SIGN_ID" ]; then
-    echo "Signing with: $SIGN_ID"
-    codesign --force --deep --sign "$SIGN_ID" \
+# Sign — auto-detect the first valid Developer ID on this machine.
+# We extract the SHA-1 hash (not the name) because the same cert may exist in
+# both System.keychain and login.keychain, which makes name-based lookup
+# ambiguous and silently fails codesign — leaving the binary ad-hoc signed and
+# wiping TCC permissions on every rebuild. Hashes are unambiguous.
+SIGN_HASH=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | awk '{print $2}')
+SIGN_NAME=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
+if [ -n "$SIGN_HASH" ]; then
+    echo "Signing with: $SIGN_NAME ($SIGN_HASH)"
+    if ! codesign --force --deep --sign "$SIGN_HASH" \
         --entitlements "$BUILD_DIR/Draft.entitlements" \
-        "$APP_BUNDLE" 2>&1
+        "$APP_BUNDLE"; then
+        echo "Codesign failed — aborting build"
+        exit 1
+    fi
 else
     echo "No Developer ID found — signing ad-hoc (permissions may not persist)"
     codesign --force --deep --sign - \
         --entitlements "$BUILD_DIR/Draft.entitlements" \
         "$APP_BUNDLE" 2>&1
+fi
+
+# Verify the signature took — catches silent codesign failures that would
+# otherwise leave behind a linker-stamped ad-hoc binary.
+if codesign -dv "$APP_BUNDLE" 2>&1 | grep -q "Signature=adhoc"; then
+    if [ -n "$SIGN_HASH" ]; then
+        echo "WARNING: expected Developer ID signature but binary is ad-hoc — permissions will reset on each build"
+    fi
 fi
 
 echo "Build complete!"

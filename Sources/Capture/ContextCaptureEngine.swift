@@ -9,6 +9,11 @@ import Carbon
 // Global reference so the C callback can reach the session controller
 private weak var _sharedSessionController: DraftSessionController?
 
+// Global callback for meeting hotkey (id 3). Separate from the session
+// controller so meeting UI can be wired independently of draft/dictation.
+// Stored on the MainActor and invoked from the Carbon callback via Task.
+private var _sharedMeetingToggle: (() -> Void)?
+
 private func hotkeyHandler(
     nextHandler: EventHandlerCallRef?,
     event: EventRef?,
@@ -48,6 +53,12 @@ private func hotkeyHandler(
             } else {
                 session.startSession(imageData: imageData, sourceApp: frontApp)
             }
+        }
+    } else if hotkeyID.id == 3 {
+        // ⌥M — Meeting mode: toggle meeting recording.
+        // No screenshot, no cross-mode switching with draft/dictation.
+        Task { @MainActor in
+            _sharedMeetingToggle?()
         }
     }
     // Dictation (hotkey ID 2) is no longer Carbon — handled by right-Option tap monitors
@@ -140,6 +151,7 @@ private final class RightOptionTapDetector {
 @MainActor
 class ContextCaptureEngine: ObservableObject {
     private var hotkeyRef: EventHotKeyRef?
+    private var meetingHotkeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
     private var hotkeyChangeObserver: NSObjectProtocol?
     private let rightOptionDetector = RightOptionTapDetector()
@@ -147,6 +159,7 @@ class ContextCaptureEngine: ObservableObject {
     /// Human-readable display strings for current shortcuts (drives MenuBarPanel pills + overlay hints)
     @Published var draftShortcutDisplay: String = HotkeyPreferences.displayString(for: HotkeyPreferences.draftBinding())
     @Published var dictationShortcutDisplay: String = HotkeyPreferences.rightOptionDictationEnabled() ? "Right ⌥" : HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
+    @Published var meetingShortcutDisplay: String = HotkeyPreferences.displayString(for: HotkeyPreferences.meetingBinding())
 
     /// Non-nil when hotkey registration failed — shown as a dismissible banner in MenuBarPanel
     @Published var hotkeyError: String?
@@ -155,6 +168,15 @@ class ContextCaptureEngine: ObservableObject {
     var sessionController: DraftSessionController? {
         didSet {
             _sharedSessionController = sessionController
+        }
+    }
+
+    /// Closure invoked when ⌥M (hotkey id 3) fires. Wired by DraftAppDelegate
+    /// to `MeetingSessionController.toggleMeeting()` (or equivalent). Nil when
+    /// the meeting subsystem is unavailable — the hotkey simply does nothing.
+    var onMeetingToggle: (() -> Void)? {
+        didSet {
+            _sharedMeetingToggle = onMeetingToggle
         }
     }
 
@@ -201,13 +223,17 @@ class ContextCaptureEngine: ObservableObject {
         }
     }
 
-    /// Unregisters current draft hotkey and re-registers with latest preferences.
+    /// Unregisters current draft + meeting hotkeys and re-registers with latest preferences.
     /// Preserves the event handler — only the key+modifier binding changes.
     /// Dictation (right-Option tap) doesn't use Carbon and needs no re-registration.
     private func reRegisterHotkeys() {
         if let ref = hotkeyRef {
             UnregisterEventHotKey(ref)
             hotkeyRef = nil
+        }
+        if let ref = meetingHotkeyRef {
+            UnregisterEventHotKey(ref)
+            meetingHotkeyRef = nil
         }
         registerHotkeysFromPreferences()
 
@@ -225,6 +251,7 @@ class ContextCaptureEngine: ObservableObject {
 
     private func registerHotkeysFromPreferences() {
         let draftBinding = HotkeyPreferences.draftBinding()
+        let meetingBinding = HotkeyPreferences.meetingBinding()
         var errors: [String] = []
 
         // Draft mode — hotkey ID 1 (Carbon hotkey: modifier + key)
@@ -243,6 +270,22 @@ class ContextCaptureEngine: ObservableObject {
                 message: "Draft hotkey registration failed", context: ["os_status": "\(draftStatus)"])
         }
 
+        // Meeting mode — hotkey ID 3 (Carbon hotkey: modifier + key)
+        let meetingHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 3)  // 'DRFT'
+        let meetingStatus = RegisterEventHotKey(
+            meetingBinding.keyCode,
+            meetingBinding.modifiers,
+            meetingHotkeyID,
+            GetApplicationEventTarget(),
+            0,
+            &meetingHotkeyRef
+        )
+        if meetingStatus != noErr {
+            errors.append("Meeting shortcut")
+            EventReporter.shared.capture(level: .error, engine: "capture", event: "hotkey_register_failed",
+                message: "Meeting hotkey registration failed", context: ["os_status": "\(meetingStatus)"])
+        }
+
         // Dictation uses right-Option tap (NSEvent monitors, not Carbon) — no registration needed here
 
         // Surface registration failures to the user via MenuBarPanel
@@ -253,6 +296,7 @@ class ContextCaptureEngine: ObservableObject {
         dictationShortcutDisplay = HotkeyPreferences.rightOptionDictationEnabled()
             ? "Right ⌥"
             : HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
+        meetingShortcutDisplay = HotkeyPreferences.displayString(for: meetingBinding)
     }
 
     /// Handles a right Option key tap — same routing as ⌥Space (dictation toggle)
@@ -272,6 +316,7 @@ class ContextCaptureEngine: ObservableObject {
 
     deinit {
         if let ref = hotkeyRef { UnregisterEventHotKey(ref) }
+        if let ref = meetingHotkeyRef { UnregisterEventHotKey(ref) }
         if let ref = eventHandlerRef { RemoveEventHandler(ref) }
         if let observer = hotkeyChangeObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -284,6 +329,10 @@ class ContextCaptureEngine: ObservableObject {
             UnregisterEventHotKey(ref)
             hotkeyRef = nil
         }
+        if let ref = meetingHotkeyRef {
+            UnregisterEventHotKey(ref)
+            meetingHotkeyRef = nil
+        }
         if let ref = eventHandlerRef {
             RemoveEventHandler(ref)
             eventHandlerRef = nil
@@ -294,5 +343,6 @@ class ContextCaptureEngine: ObservableObject {
         }
         rightOptionDetector.remove()
         _sharedSessionController = nil
+        _sharedMeetingToggle = nil
     }
 }
