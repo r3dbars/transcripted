@@ -14,6 +14,7 @@
 //   3. Keeping the bridge isolated from the pipeline lets Lane C swap in a mock
 //      for preview/testing without touching CoreAudio.
 
+import AVFoundation
 import Combine
 import Foundation
 import TranscriptedCore
@@ -25,7 +26,8 @@ final class MeetingCaptureBridge: ObservableObject {
     // MARK: - Published state (mirrored from Core's Audio)
 
     @Published private(set) var isRecording: Bool = false
-    @Published private(set) var audioLevel: Float = 0
+    @Published private(set) var audioLevel: Float = 0          // mic-only level (preserved for existing callers)
+    @Published private(set) var systemLevel: Float = 0         // system audio level (latest frame from Core's rolling history)
     @Published private(set) var recordingDuration: TimeInterval = 0
     @Published private(set) var systemAudioStatus: SystemAudioStatus = .unknown
 
@@ -79,6 +81,29 @@ final class MeetingCaptureBridge: ObservableObject {
         audio.createHealthInfo()
     }
 
+    // MARK: - Live PCM buffer routing (dual-stream preview)
+    //
+    // These forward TranscriptedCore's new live-buffer hooks through the
+    // bridge so MeetingSessionController can route mic + system buffers to
+    // a pair of StreamingEouAsrManager instances without touching the
+    // Audio class directly. Fired on the CoreAudio capture thread — the
+    // handler MUST be real-time safe (no I/O, no locks held across async,
+    // no allocations beyond small copies). See Audio.swift's
+    // `onMicPCMBuffer` docstring in TranscriptedCore for the full contract.
+
+    /// Install a live-preview handler for mic buffers, or clear with `nil`.
+    /// Call once before `startRecording()`; do not reassign mid-session.
+    func setMicLivePreviewHandler(_ handler: ((AVAudioPCMBuffer) -> Void)?) {
+        audio.onMicPCMBuffer = handler
+    }
+
+    /// Install a live-preview handler for system-audio buffers, or clear
+    /// with `nil`. Call once before `startRecording()`; do not reassign
+    /// mid-session.
+    func setSystemLivePreviewHandler(_ handler: ((AVAudioPCMBuffer) -> Void)?) {
+        audio.onSystemPCMBuffer = handler
+    }
+
     // MARK: - Private
 
     private func wireCallbacks() {
@@ -104,6 +129,13 @@ final class MeetingCaptureBridge: ObservableObject {
         audio.$audioLevel
             .receive(on: RunLoop.main)
             .assign(to: &$audioLevel)
+
+        // System audio level is published as a rolling 15-frame history by Core.
+        // We take the most recent frame as the current "system level" for the UI.
+        audio.$systemAudioLevelHistory
+            .map { $0.last ?? 0 }
+            .receive(on: RunLoop.main)
+            .assign(to: &$systemLevel)
 
         audio.$recordingDuration
             .receive(on: RunLoop.main)
