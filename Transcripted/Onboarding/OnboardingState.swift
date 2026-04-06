@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import TranscriptedCore
 
 /// Manages the state of the onboarding flow
 /// Uses @Observable macro for automatic SwiftUI integration
@@ -227,7 +228,7 @@ class OnboardingState {
 
         // These services are created just for download/validation during onboarding.
         // setupApp() creates fresh instances afterward; the second init is a fast cache hit.
-        let parakeet = ParakeetService()
+        let parakeet = ParakeetEngineAdapter()
         let diarization = DiarizationService()
 
         // Initialize both in parallel (retry logic built into each service)

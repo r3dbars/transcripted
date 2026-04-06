@@ -1,0 +1,199 @@
+import Foundation
+import Combine
+
+/// Manages the queue of failed transcriptions with persistent storage
+@MainActor
+public class FailedTranscriptionManager: ObservableObject {
+    @Published public var failedTranscriptions: [FailedTranscription] = []
+
+    private let storageURL: URL
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    public init(paths: CoreStoragePaths = .default) {
+        // Ensure the parent folder exists before first save; the load pass tolerates a missing file.
+        try? FileManager.default.createDirectory(
+            at: paths.failedQueue.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        self.storageURL = paths.failedQueue
+
+        // Configure date encoding/decoding
+        encoder.dateEncodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .iso8601
+
+        // Load existing failed transcriptions and auto-clean permanent failures
+        loadFailedTranscriptions()
+        cleanupPermanentFailures()
+    }
+
+    /// Loads failed transcriptions from disk
+    private func loadFailedTranscriptions() {
+        guard FileManager.default.fileExists(atPath: storageURL.path) else {
+            AppLogger.pipeline.debug("No existing failed transcriptions file")
+            return
+        }
+
+        do {
+            let data = try Data(contentsOf: storageURL)
+            let loaded = try decoder.decode([FailedTranscription].self, from: data)
+
+            // Security: audio file paths are deserialized from a JSON file that the user could
+            // tamper with. Validate each path is sandboxed within the user's home directory before
+            // accepting it — this prevents a crafted JSON from directing removeItem(at:) to an
+            // arbitrary path (e.g. /etc/hosts) when entries are cleaned up.
+            let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
+            let sandboxedEntries = loaded.filter { entry in
+                let micSafe = entry.micAudioURL.path.hasPrefix(homeDir)
+                let systemSafe = entry.systemAudioURL.map { $0.path.hasPrefix(homeDir) } ?? true
+                if !micSafe || !systemSafe {
+                    AppLogger.pipeline.error("Rejected failed transcription entry with out-of-sandbox audio path", [
+                        "micURL": entry.micAudioURL.path,
+                        "systemURL": entry.systemAudioURL?.path ?? "none"
+                    ])
+                }
+                return micSafe && systemSafe
+            }
+
+            // Filter out entries where audio files no longer exist
+            failedTranscriptions = sandboxedEntries.filter { $0.audioFilesExist() }
+
+            // Save back if we filtered any out
+            if failedTranscriptions.count != loaded.count {
+                AppLogger.pipeline.info("Removed entries with missing audio files or unsafe paths", ["count": "\(loaded.count - failedTranscriptions.count)"])
+                saveFailedTranscriptions()
+            }
+
+            AppLogger.pipeline.info("Loaded failed transcriptions", ["count": "\(failedTranscriptions.count)"])
+        } catch {
+            // Backup corrupt file before it gets overwritten on next save
+            let backupURL = storageURL.deletingLastPathComponent().appendingPathComponent("failed_transcriptions_backup.json")
+            try? FileManager.default.copyItem(at: storageURL, to: backupURL)
+            AppLogger.pipeline.error("Corrupt failed transcriptions file, backed up", ["error": "\(error)"])
+        }
+    }
+
+    /// Saves failed transcriptions to disk
+    private func saveFailedTranscriptions() {
+        do {
+            let data = try encoder.encode(failedTranscriptions)
+            try data.write(to: storageURL, options: .atomic)
+            FileManager.default.restrictToOwnerOnly(atPath: storageURL.path)
+            AppLogger.pipeline.info("Saved failed transcriptions", ["count": "\(failedTranscriptions.count)"])
+        } catch {
+            AppLogger.pipeline.error("Error saving failed transcriptions", ["error": "\(error)"])
+        }
+    }
+
+    /// Adds a new failed transcription to the queue
+    public func addFailedTranscription(
+        micAudioURL: URL,
+        systemAudioURL: URL?,
+        errorMessage: String
+    ) {
+        let failed = FailedTranscription(
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL,
+            errorMessage: errorMessage
+        )
+
+        failedTranscriptions.append(failed)
+        saveFailedTranscriptions()
+
+        AppLogger.pipeline.info("Added failed transcription", ["id": "\(failed.id)"])
+    }
+
+    /// Removes a failed transcription from the queue
+    public func removeFailedTranscription(id: UUID) {
+        guard let index = failedTranscriptions.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        failedTranscriptions.remove(at: index)
+        saveFailedTranscriptions()
+
+        AppLogger.pipeline.info("Removed failed transcription", ["id": "\(id)"])
+    }
+
+    /// Removes a failed transcription and deletes its audio files
+    public func deleteFailedTranscription(id: UUID) {
+        guard let failed = failedTranscriptions.first(where: { $0.id == id }) else {
+            return
+        }
+
+        // Delete audio files
+        do {
+            try FileManager.default.removeItem(at: failed.micAudioURL)
+            AppLogger.pipeline.info("Deleted mic audio", ["file": failed.micAudioURL.lastPathComponent])
+
+            if let systemURL = failed.systemAudioURL {
+                try? FileManager.default.removeItem(at: systemURL)
+                AppLogger.pipeline.info("Deleted system audio", ["file": systemURL.lastPathComponent])
+            }
+        } catch {
+            AppLogger.pipeline.error("Error deleting audio files", ["error": "\(error)"])
+        }
+
+        // Remove from queue
+        removeFailedTranscription(id: id)
+    }
+
+    /// Increments retry count for a failed transcription
+    public func incrementRetryCount(id: UUID) {
+        guard let index = failedTranscriptions.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        failedTranscriptions[index].retryCount += 1
+        failedTranscriptions[index].lastRetryDate = Date()
+        saveFailedTranscriptions()
+
+        AppLogger.pipeline.info("Incremented retry count", ["id": "\(id)", "retryCount": "\(failedTranscriptions[index].retryCount)"])
+    }
+
+    /// Gets the total number of failed transcriptions
+    public var count: Int {
+        return failedTranscriptions.count
+    }
+
+    /// Auto-clean permanent failures (unrecoverable errors or exhausted retries).
+    /// Deletes audio files and removes from queue on launch.
+    private func cleanupPermanentFailures() {
+        let toRemove = failedTranscriptions.filter { failed in
+            // Permanent error that will never succeed
+            !failed.isRetryable ||
+            // Exhausted retries (3+ attempts, still failing)
+            failed.retryCount >= 3
+        }
+
+        guard !toRemove.isEmpty else { return }
+
+        for failure in toRemove {
+            // Delete audio files to reclaim disk space
+            try? FileManager.default.removeItem(at: failure.micAudioURL)
+            if let systemURL = failure.systemAudioURL {
+                try? FileManager.default.removeItem(at: systemURL)
+            }
+        }
+
+        let removedIds = Set(toRemove.map { $0.id })
+        failedTranscriptions.removeAll { removedIds.contains($0.id) }
+        saveFailedTranscriptions()
+
+        AppLogger.pipeline.info("Auto-cleaned permanent failures", ["count": "\(toRemove.count)"])
+    }
+
+    /// Cleans up failed transcriptions older than the specified number of days
+    public func cleanupOldFailedTranscriptions(olderThanDays days: Int) {
+        // Nil-coalesce: date arithmetic rarely returns nil, but force unwrap would crash on edge cases
+        let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+
+        let oldFailures = failedTranscriptions.filter { $0.timestamp < cutoffDate }
+
+        for failure in oldFailures {
+            deleteFailedTranscription(id: failure.id)
+        }
+
+        AppLogger.pipeline.info("Cleaned up old failed transcriptions", ["count": "\(oldFailures.count)", "olderThanDays": "\(days)"])
+    }
+}

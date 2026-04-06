@@ -1,4 +1,5 @@
 import SwiftUI
+import TranscriptedCore
 
 /// Model Setup step - Downloads and initializes AI models
 /// Dark theme with progress bars matching pill aesthetic

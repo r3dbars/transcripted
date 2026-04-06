@@ -18,16 +18,16 @@ let package = Package(
             path: "Sources/TranscriptedCLI",
             swiftSettings: [
                 .unsafeFlags([
-                    "-I", "\(repoRoot)/fluidaudio-modules",
-                    "-I", "\(repoRoot)/fluidaudio-modules/FastClusterWrapper",
-                    "-I", "\(repoRoot)/fluidaudio-modules/MachTaskSelfWrapper",
-                    "-I", "\(repoRoot)/fluidaudio-modules/yyjson",
+                    "-I", "\(repoRoot)/.deps-modules",
+                    "-I", "\(repoRoot)/.deps-modules/FastClusterWrapper",
+                    "-I", "\(repoRoot)/.deps-modules/MachTaskSelfWrapper",
+                    "-I", "\(repoRoot)/.deps-modules/yyjson",
                 ]),
             ],
             linkerSettings: [
                 .unsafeFlags([
-                    "-L\(repoRoot)/Tools/TranscriptedCLI",
-                    "-lFluidAudioCLI",
+                    "-L\(repoRoot)/.deps-libs",
+                    "-lDraftDeps",
                     "-lc++",
                 ]),
                 .linkedFramework("Metal"),

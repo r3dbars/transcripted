@@ -2,6 +2,7 @@ import SwiftUI
 import AVFoundation
 import AppKit
 import CoreGraphics
+import TranscriptedCore
 
 @available(macOS 26.0, *)
 struct TroubleshootingSettingsSection: View {

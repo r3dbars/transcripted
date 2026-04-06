@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import TranscriptedCore
 
 /// Navigation tab options for the settings window
 enum SettingsTab: String, CaseIterable, Identifiable {

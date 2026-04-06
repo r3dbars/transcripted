@@ -1,4 +1,5 @@
 import SwiftUI
+import TranscriptedCore
 
 @available(macOS 26.0, *)
 struct SpeakersSettingsSection: View {

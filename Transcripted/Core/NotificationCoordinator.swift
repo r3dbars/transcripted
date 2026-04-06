@@ -1,8 +1,15 @@
 import Foundation
 import UserNotifications
 import AppKit
+import TranscriptedCore
 
 // MARK: - Notification Categories, Permissions & Delegate
+
+// Notification category/action identifiers for transcript saved notifications.
+// Previously lived as static constants on Core's TranscriptSaver; inlined here
+// because Core is now a library and shouldn't own UI notification identifiers.
+private let transcriptSavedNotificationCategoryId = "TRANSCRIPT_SAVED"
+private let transcriptSavedShowInFinderActionId = "SHOW_IN_FINDER"
 
 @available(macOS 26.0, *)
 extension AppDelegate {
@@ -26,12 +33,12 @@ extension AppDelegate {
 
         // "Show in Finder" action for transcript saved notifications
         let showAction = UNNotificationAction(
-            identifier: TranscriptSaver.showInFinderActionId,
+            identifier: transcriptSavedShowInFinderActionId,
             title: "Show in Finder",
             options: .foreground
         )
         let savedCategory = UNNotificationCategory(
-            identifier: TranscriptSaver.notificationCategoryId,
+            identifier: transcriptSavedNotificationCategoryId,
             actions: [showAction],
             intentIdentifiers: []
         )
@@ -113,7 +120,7 @@ extension AppDelegate {
             switch actionId {
             case "STOP_RECORDING":
                 self.audio?.stop()
-            case TranscriptSaver.showInFinderActionId:
+            case transcriptSavedShowInFinderActionId:
                 if let path = userInfo["fileURL"] as? String {
                     let url = URL(fileURLWithPath: path)
                     NSWorkspace.shared.activateFileViewerSelecting([url])

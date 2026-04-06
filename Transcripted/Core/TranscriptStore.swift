@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import os
+import TranscriptedCore
 
 // MARK: - TranscriptSummary
 

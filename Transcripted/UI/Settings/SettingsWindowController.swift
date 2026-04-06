@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TranscriptedCore
 
 /// Window controller for the redesigned settings window
 /// Manages the NSWindow lifecycle and hosts the SwiftUI settings view

@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import TranscriptedCore
 
 @available(macOS 14.0, *)
 struct SettingsTopBar: View {
