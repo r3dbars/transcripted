@@ -8,8 +8,7 @@ import Combine
 @MainActor
 class FloatingOverlayController {
     enum SessionMode {
-        case draft      // Option+D: screenshot + voice + AI rewrite + review
-        case dictation  // Option+Space: voice + light polish + auto-paste
+        case dictation
     }
 
     enum OverlayState {
@@ -23,7 +22,6 @@ class FloatingOverlayController {
     }
 
     /// Human-readable shortcut hints (reads live from UserDefaults)
-    var draftShortcutHint: String { HotkeyPreferences.displayString(for: HotkeyPreferences.draftBinding()) }
     var dictationShortcutHint: String {
         if HotkeyPreferences.rightOptionDictationEnabled() { return "Right ⌥" }
         return HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
@@ -37,7 +35,7 @@ class FloatingOverlayController {
             pushStateToViews()
         }
     }
-    var activeMode: SessionMode = .draft {
+    var activeMode: SessionMode = .dictation {
         didSet { pushStateToViews() }
     }
     var isVisible = false
@@ -47,22 +45,6 @@ class FloatingOverlayController {
     var loadingElapsedSeconds: Int = 0 {
         didSet { pushStateToViews() }
     }
-    var transcriptExpanded = false {
-        didSet { pushStateToViews() }
-    }
-    var hasContext: Bool = true
-
-    /// The AI's original draft text, stored when streaming finishes.
-    var originalDraftForComparison: String = ""
-
-    /// Human-readable description of what the user changed (set before entering diffFlash state)
-    var editDescription: String = ""
-
-    private var streamingNewlineCount = 0
-
-    /// Closures for Enter/Escape in review mode — set by DraftSessionController
-    var onConfirm: (() -> Void)?
-    var onCancel: (() -> Void)?
     /// Closure for Escape during non-review states (listening/drafting/streaming)
     var onEscapeDuringSession: (() -> Void)?
 
@@ -86,7 +68,6 @@ class FloatingOverlayController {
         }
         errorDismissTask?.cancel()
         loadingTimerTask?.cancel()
-        toastDismissTask?.cancel()
     }
 
     var sttRouter: STTRouter?
@@ -115,6 +96,9 @@ class FloatingOverlayController {
         blurView.state = .active
         blurView.wantsLayer = true
         blurView.layer?.cornerRadius = OverlayTokens.cornerRadius
+        blurView.layer?.backgroundColor = OverlayTokens.panelBg.cgColor
+        blurView.layer?.borderWidth = 1
+        blurView.layer?.borderColor = OverlayTokens.panelStroke.cgColor
         blurView.frame = panel.contentView?.bounds ?? .zero
         blurView.autoresizingMask = [.width, .height]
         panel.contentView?.addSubview(blurView)
@@ -125,16 +109,6 @@ class FloatingOverlayController {
         rootView.autoresizingMask = [.width, .height]
         panel.contentView?.addSubview(rootView, positioned: .above, relativeTo: blurView)
         self.rootView = rootView
-
-        // Wire keyboard callbacks from DraftTextView → controller closures
-        rootView.reviewView.draftTextView.onConfirm = { [weak self] in self?.onConfirm?() }
-        rootView.reviewView.draftTextView.onCancel = { [weak self] in self?.onCancel?() }
-        rootView.reviewView.draftTextView.onTextChange = { [weak self] text in
-            self?.reviewText = text
-        }
-        rootView.headerView.onToggleTranscript = { [weak self] in
-            self?.toggleTranscript()
-        }
 
         // Drag handle at the top — pure AppKit, above the root view
         let headerHeight: CGFloat = OverlayTokens.headerHeight
@@ -155,6 +129,8 @@ class FloatingOverlayController {
         panel.contentView?.wantsLayer = true
         panel.contentView?.layer?.cornerRadius = OverlayTokens.cornerRadius
         panel.contentView?.layer?.masksToBounds = true
+        panel.contentView?.layer?.borderWidth = 1
+        panel.contentView?.layer?.borderColor = OverlayTokens.panelStroke.cgColor
 
         self.panel = panel
 
@@ -163,16 +139,6 @@ class FloatingOverlayController {
             .receive(on: RunLoop.main)
             .sink { [weak self] level in
                 self?.rootView?.headerView.updateWaveformLevel(level)
-            }
-            .store(in: &subscriptions)
-
-        sttRouter.$liveTranscript
-            .receive(on: RunLoop.main)
-            .sink { [weak self] text in
-                guard let self = self else { return }
-                if self.state == .listening {
-                    self.rootView?.listeningView.updateTranscript(text)
-                }
             }
             .store(in: &subscriptions)
 
@@ -191,16 +157,16 @@ class FloatingOverlayController {
         rootView?.updateForState(
             state,
             mode: activeMode,
-            transcriptExpanded: transcriptExpanded,
-            hasContext: hasContext,
-            draftShortcutHint: draftShortcutHint,
+            transcriptExpanded: false,
+            hasContext: true,
+            draftShortcutHint: "",
             dictationShortcutHint: dictationShortcutHint,
             errorMessage: errorMessage,
             loadingElapsedSeconds: loadingElapsedSeconds,
             isTranscribing: sttRouter?.isTranscribing ?? false,
             liveTranscript: sttRouter?.liveTranscript ?? "",
-            originalDraft: originalDraftForComparison,
-            reviewText: reviewText
+            originalDraft: "",
+            reviewText: ""
         )
     }
 
@@ -297,183 +263,13 @@ class FloatingOverlayController {
         installEscapeMonitor()
     }
 
-    func showReview(text: String) {
-        reviewText = text
-        if originalDraftForComparison.isEmpty {
-            originalDraftForComparison = text
-        }
-        state = .review
-        EventTracker.track("draft.shown", with: ["word_count": "\(text.split(whereSeparator: \.isWhitespace).count)"])
-
-        // Resize to fit text
-        let lineCount = max(1, text.components(separatedBy: "\n").count)
-        let charEstimate = CGFloat(text.count) / 50.0
-        let lines = max(CGFloat(lineCount), charEstimate)
-        let estimatedHeight = max(OverlayTokens.panelMinHeight, min(OverlayTokens.panelMaxHeight, lines * 20 + 120))
-        resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: estimatedHeight))
-
-        // Update review view with text
-        rootView?.reviewView.update(text: text, originalDraft: originalDraftForComparison)
-
-        // Make key-capable and focus the text view — AppKit responder chain is synchronous
-        if let panel = panel {
-            panel.allowKeyStatus = true
-            panel.makeKeyAndOrderFront(nil)
-            panel.makeFirstResponder(rootView?.reviewView.draftTextView)
-        }
-    }
-
     func enterDraftingState() {
-        transcriptExpanded = false
         state = .drafting
-        resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
+        resizePanelToCompact()
     }
 
     func resizePanelToCompact() {
         resizePanelInstant(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelCompactHeight))
-    }
-
-    func toggleTranscript() {
-        guard activeMode == .draft else { return }
-        transcriptExpanded.toggle()
-        let height = transcriptExpanded ? OverlayTokens.panelMinHeight : OverlayTokens.panelCompactHeight
-        resizePanelInstant(to: NSSize(width: OverlayTokens.panelWidth, height: height))
-    }
-
-    func startStreaming(near sourceApp: NSRunningApplication? = nil) {
-        guard state == .drafting || state == .listening else { return }
-        streamingText = ""
-        streamingNewlineCount = 0
-        transcriptExpanded = false
-        state = .streaming
-        rootView?.streamingView.clear()
-        if !isVisible {
-            showPanel(near: sourceApp)
-        }
-        resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
-        panel?.allowKeyStatus = false
-    }
-
-    func appendStreamToken(_ token: String) {
-        guard state == .streaming else { return }
-        streamingText += token
-        for c in token where c == "\n" { streamingNewlineCount += 1 }
-
-        // Push token to the streaming view
-        rootView?.streamingView.appendToken(token)
-
-        // Dynamically resize as text grows
-        let lineCount = max(1, streamingNewlineCount + 1)
-        let charEstimate = CGFloat(streamingText.count) / 50.0
-        let lines = max(CGFloat(lineCount), charEstimate)
-        let estimatedHeight = max(OverlayTokens.panelMinHeight, min(OverlayTokens.panelMaxHeight, lines * 20 + 120))
-        if let panel = panel, abs(panel.frame.height - estimatedHeight) > 20 {
-            resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: estimatedHeight))
-        }
-    }
-
-    func finishStreaming() {
-        guard state == .streaming else { return }
-        showReview(text: streamingText)
-        streamingText = ""
-    }
-
-    func showDiffFlash(editDescription: String) {
-        self.editDescription = editDescription
-        state = .diffFlash
-
-        // Update diff strip in full mode
-        rootView?.reviewView.diffStrip.isFullDiffMode = true
-        rootView?.reviewView.diffStrip.update(
-            original: originalDraftForComparison,
-            edited: reviewText,
-            description: editDescription
-        )
-        rootView?.reviewView.setEditable(false)
-
-        if let panel = panel {
-            panel.allowKeyStatus = true
-            panel.makeKeyAndOrderFront(nil)
-            panel.makeFirstResponder(rootView?.reviewView.draftTextView)
-        }
-    }
-
-    // MARK: - Training Toast
-
-    private var toastPanel: FloatingOverlayPanel?
-    private var toastHostView: OverlayToastView?
-    private var toastDismissTask: Task<Void, Never>?
-
-    func showTrainingToast(_ message: String) {
-        guard let mainPanel = panel else { return }
-
-        if toastPanel == nil {
-            let toast = FloatingOverlayPanel(
-                contentRect: NSRect(x: 0, y: 0, width: OverlayTokens.panelWidth, height: 44),
-                styleMask: [],
-                backing: .buffered,
-                defer: true
-            )
-            toast.ignoresMouseEvents = true
-            toast.allowKeyStatus = false
-            toast.contentView?.wantsLayer = true
-            toast.contentView?.layer?.cornerRadius = 10
-            toast.contentView?.layer?.masksToBounds = true
-            toastPanel = toast
-        }
-
-        guard let toast = toastPanel else { return }
-
-        let mainFrame = mainPanel.frame
-        let toastOrigin = NSPoint(
-            x: mainFrame.origin.x,
-            y: mainFrame.origin.y - 44 - DraftConstants.trainingToastOffset
-        )
-        toast.setFrameOrigin(toastOrigin)
-        toast.setContentSize(NSSize(width: OverlayTokens.panelWidth, height: 44))
-
-        // Reuse or create AppKit toast view (no NSHostingView)
-        if toastHostView == nil {
-            let tv = OverlayToastView(frame: toast.contentView?.bounds ?? .zero)
-            tv.autoresizingMask = [.width, .height]
-            toastHostView = tv
-        }
-        if let tv = toastHostView {
-            tv.update(message: message)
-            tv.frame = toast.contentView?.bounds ?? .zero
-            toast.contentView?.subviews.forEach { $0.removeFromSuperview() }
-            toast.contentView?.addSubview(tv)
-        }
-
-        toast.alphaValue = 0
-        toast.orderFrontRegardless()
-
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.2
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            toast.animator().alphaValue = 1.0
-        })
-
-        toastDismissTask?.cancel()
-        toastDismissTask = Task { @MainActor [weak self] in
-            do {
-                try await Task.sleep(nanoseconds: DraftConstants.trainingToastDuration)
-            } catch { return }
-            self?.dismissToast()
-        }
-    }
-
-    private func dismissToast() {
-        guard let toast = toastPanel else { return }
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = DraftConstants.trainingToastFadeDuration
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            toast.animator().alphaValue = 0
-        }, completionHandler: { [weak toast] in
-            Task { @MainActor in
-                toast?.orderOut(nil)
-            }
-        })
     }
 
     // MARK: - Hide Animations
@@ -576,7 +372,6 @@ class FloatingOverlayController {
     func showError(_ message: String) {
         errorDismissTask?.cancel()
         errorMessage = message
-        transcriptExpanded = false
         state = .drafting
         resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
         if !isVisible {
@@ -597,7 +392,6 @@ class FloatingOverlayController {
     func showNoSpeechAndDismiss() {
         errorDismissTask?.cancel()
         errorMessage = "No speech detected"
-        transcriptExpanded = false
         state = .drafting
         resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
         if !isVisible {
@@ -634,14 +428,6 @@ class FloatingOverlayController {
         reviewText = ""
         streamingText = ""
         errorMessage = ""
-        transcriptExpanded = false
-        originalDraftForComparison = ""
-        editDescription = ""
-        onConfirm = nil
-        onCancel = nil
-
-        // Reset diff strip mode for next session
-        rootView?.reviewView.diffStrip.isFullDiffMode = false
     }
 
     // MARK: - System Wake Recovery & Periodic AG Refresh
@@ -661,7 +447,7 @@ class FloatingOverlayController {
             guard event.keyCode == 53 else { return }
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
-                guard self.state == .loading || self.state == .listening || self.state == .drafting || self.state == .streaming else { return }
+                guard self.state == .loading || self.state == .listening || self.state == .drafting else { return }
                 self.onEscapeDuringSession?()
             }
         }

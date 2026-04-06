@@ -1,6 +1,6 @@
 // OverlayRootView.swift
-// Root NSView for the floating overlay — composes header, content, toolbar
-// Manages state-based visibility of child content views (lazy creation, never destruction)
+// Root NSView for the floating overlay — dictation now uses a compact header-first
+// layout, only expanding to show error or recovery states.
 
 import AppKit
 
@@ -14,27 +14,7 @@ final class OverlayRootView: NSView {
     private let bottomDivider = NSView()
     let toolbarView = OverlayToolbarView(frame: .zero)
 
-    // MARK: - Lazy content children (created on first use, reused across state transitions)
-
-    private var _loadingView: OverlayLoadingView?
-    var loadingView: OverlayLoadingView {
-        if let v = _loadingView { return v }
-        let v = OverlayLoadingView(frame: .zero)
-        v.isHidden = true
-        contentContainer.addSubview(v)
-        _loadingView = v
-        return v
-    }
-
-    private var _listeningView: OverlayListeningView?
-    var listeningView: OverlayListeningView {
-        if let v = _listeningView { return v }
-        let v = OverlayListeningView(frame: .zero)
-        v.isHidden = true
-        contentContainer.addSubview(v)
-        _listeningView = v
-        return v
-    }
+    // MARK: - Lazy content children (only drafting/error is still used in the compact dictation flow)
 
     private var _draftingView: OverlayDraftingView?
     var draftingView: OverlayDraftingView {
@@ -46,30 +26,10 @@ final class OverlayRootView: NSView {
         return v
     }
 
-    private var _streamingView: OverlayStreamingView?
-    var streamingView: OverlayStreamingView {
-        if let v = _streamingView { return v }
-        let v = OverlayStreamingView(frame: .zero)
-        v.isHidden = true
-        contentContainer.addSubview(v)
-        _streamingView = v
-        return v
-    }
-
-    private var _reviewView: OverlayReviewView?
-    var reviewView: OverlayReviewView {
-        if let v = _reviewView { return v }
-        let v = OverlayReviewView(frame: .zero)
-        v.isHidden = true
-        contentContainer.addSubview(v)
-        _reviewView = v
-        return v
-    }
-
     // MARK: - State tracking
 
     private var currentState: FloatingOverlayController.OverlayState = .idle
-    private var currentMode: FloatingOverlayController.SessionMode = .draft
+    private var currentMode: FloatingOverlayController.SessionMode = .dictation
 
     // MARK: - Init
 
@@ -91,13 +51,10 @@ final class OverlayRootView: NSView {
         bottomDivider.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
         addSubview(bottomDivider)
 
-        // Content container clips children
+        addSubview(headerView)
         contentContainer.wantsLayer = true
         contentContainer.layer?.masksToBounds = true
         addSubview(contentContainer)
-
-        addSubview(headerView)
-        addSubview(toolbarView)
     }
 
     // MARK: - Layout
@@ -109,7 +66,6 @@ final class OverlayRootView: NSView {
         let headerH = OverlayTokens.headerHeight
         let dividerH = OverlayTokens.dividerHeight
         let showContent = shouldShowContent()
-        let toolbarH = showContent ? toolbarHeight() : 0
 
         // Header at top
         headerView.frame = NSRect(x: 0, y: bounds.height - headerH, width: w, height: headerH)
@@ -119,16 +75,11 @@ final class OverlayRootView: NSView {
             topDivider.frame = NSRect(x: 0, y: bounds.height - headerH - dividerH, width: w, height: dividerH)
             topDivider.isHidden = false
 
-            // Bottom divider above toolbar
-            bottomDivider.frame = NSRect(x: 0, y: toolbarH, width: w, height: dividerH)
-            bottomDivider.isHidden = toolbarH == 0
+            bottomDivider.isHidden = true
 
-            // Toolbar at bottom
-            toolbarView.frame = NSRect(x: 0, y: 0, width: w, height: toolbarH)
-
-            // Content fills middle
+            // Content fills the space beneath the header divider.
             let contentTop = bounds.height - headerH - dividerH
-            let contentBottom = toolbarH + (toolbarH > 0 ? dividerH : 0)
+            let contentBottom: CGFloat = 0
             let contentH = max(0, contentTop - contentBottom)
             contentContainer.frame = NSRect(x: 0, y: contentBottom, width: w, height: contentH)
             contentContainer.isHidden = false
@@ -141,25 +92,12 @@ final class OverlayRootView: NSView {
             topDivider.isHidden = true
             bottomDivider.isHidden = true
             contentContainer.isHidden = true
-            toolbarView.frame = .zero
         }
     }
 
     private func shouldShowContent() -> Bool {
         if currentState == .idle { return false }
-        // Listening stays compact unless transcript is expanded
-        // (transcriptExpanded is managed via updateForState)
-        if currentState == .listening, contentContainer.isHidden { return false }
-        // Dictation drafting stays compact
-        if currentState == .drafting, currentMode == .dictation { return false }
-        return true
-    }
-
-    private func toolbarHeight() -> CGFloat {
-        if currentState == .review || currentState == .diffFlash {
-            return OverlayTokens.toolbarHeight
-        }
-        return 0
+        return currentState == .drafting
     }
 
     // MARK: - State Updates
@@ -191,73 +129,22 @@ final class OverlayRootView: NSView {
         )
 
         // Determine if content area should be visible
-        let showContent: Bool
-        switch state {
-        case .idle:
-            showContent = false
-        case .listening:
-            showContent = transcriptExpanded
-        case .drafting:
-            showContent = mode != .dictation
-        case .loading, .streaming, .review, .diffFlash:
-            showContent = true
-        }
+        let showContent = state == .drafting && !errorMessage.isEmpty
 
         contentContainer.isHidden = !showContent
 
-        // Hide all content children, show the active one
-        _loadingView?.isHidden = true
-        _listeningView?.isHidden = true
         _draftingView?.isHidden = true
-        _streamingView?.isHidden = true
-        _reviewView?.isHidden = true
 
         if showContent {
-            switch state {
-            case .loading:
-                loadingView.isHidden = false
-                loadingView.update(elapsedSeconds: loadingElapsedSeconds)
-
-            case .listening:
-                listeningView.isHidden = false
-                listeningView.updateTranscript(liveTranscript)
-                listeningView.updatePlaceholder(
-                    mode: mode,
-                    draftHint: draftShortcutHint,
-                    dictationHint: dictationShortcutHint
-                )
-
-            case .drafting:
-                draftingView.isHidden = false
-                let statusText = isTranscribing ? "Transcribing..." : "Processing..."
-                draftingView.update(
-                    error: errorMessage.isEmpty ? nil : errorMessage,
-                    isTranscribing: isTranscribing,
-                    transcriptText: liveTranscript,
-                    statusText: statusText
-                )
-
-            case .streaming:
-                streamingView.isHidden = false
-                // Streaming tokens are appended separately via appendStreamToken()
-
-            case .review:
-                reviewView.isHidden = false
-                reviewView.setEditable(true)
-                // Text is set via showReview() in the controller, not here
-
-            case .diffFlash:
-                reviewView.isHidden = false
-                reviewView.setEditable(false)
-
-            case .idle:
-                break
-            }
+            draftingView.isHidden = false
+            let statusText = isTranscribing ? "Transcribing..." : "Processing..."
+            draftingView.update(
+                error: errorMessage.isEmpty ? nil : errorMessage,
+                isTranscribing: isTranscribing,
+                transcriptText: liveTranscript,
+                statusText: statusText
+            )
         }
-
-        // Update toolbar
-        let hasEdits = !originalDraft.isEmpty && reviewText != originalDraft
-        toolbarView.update(state: state, hasEdits: hasEdits, hasContext: hasContext)
 
         // Trigger relayout
         needsLayout = true

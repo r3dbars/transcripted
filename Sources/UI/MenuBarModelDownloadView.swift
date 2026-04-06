@@ -11,8 +11,10 @@ final class MenuBarModelDownloadView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = MenuTokens.cardCornerRadius
         layer?.backgroundColor = MenuTokens.cardBackgroundNS.cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = MenuTokens.cardBorderNS.cgColor
 
         addSubview(voiceRow)
 

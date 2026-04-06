@@ -1,5 +1,5 @@
 // MenuBarRecentMeetingsView.swift
-// "Recent Meetings" section for the menubar popover. Lists the most recent
+// "Recent Transcripts" section for the menubar popover. Lists the most recent
 // transcripts saved under MeetingStoragePaths.transcriptsFolder.
 //
 // Pure AppKit — controller (MenuBarPanelController) drives updates via
@@ -26,7 +26,7 @@ struct RecentMeetingItem {
 @MainActor
 enum RecentMeetingsScanner {
 
-    static func loadRecent(limit: Int = 5) -> [RecentMeetingItem] {
+    static func loadRecent(limit: Int = 4) -> [RecentMeetingItem] {
         let dir = MeetingStoragePaths.transcriptsFolder
         let fm = FileManager.default
         guard fm.fileExists(atPath: dir.path) else { return [] }
@@ -80,14 +80,11 @@ enum RecentMeetingsScanner {
 @MainActor
 final class MenuBarRecentMeetingsView: NSView {
 
-    private let headerLabel = NSTextField(labelWithString: "Recent Meetings")
-    private let emptyLabel = NSTextField(labelWithString: "No meetings yet — press ⌥M to record one.")
-    private let failedHeaderLabel = NSTextField(labelWithString: "Needs Attention")
-    private let failedContainer = NSView()
+    private let headerLabel = NSTextField(labelWithString: "Recent Transcripts")
+    private let emptyLabel = NSTextField(labelWithString: "No meeting transcripts yet.")
     private let listContainer = NSView()
 
     private var rowViews: [RecentMeetingRowView] = []
-    private var failedRowViews: [FailedMeetingRowView] = []
     private var items: [RecentMeetingItem] = []
     private var failedItems: [MeetingSessionController.FailedMeetingItem] = []
 
@@ -100,27 +97,21 @@ final class MenuBarRecentMeetingsView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func setupViews() {
-        headerLabel.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
+        headerLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         headerLabel.textColor = MenuTokens.textPrimaryNS
         addSubview(headerLabel)
 
-        failedHeaderLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        failedHeaderLabel.textColor = MenuTokens.textPrimaryNS
-        failedHeaderLabel.isHidden = true
-        addSubview(failedHeaderLabel)
-
-        emptyLabel.font = NSFont.systemFont(ofSize: 12)
+        emptyLabel.font = NSFont.systemFont(ofSize: 11)
         emptyLabel.textColor = MenuTokens.textMutedNS
         addSubview(emptyLabel)
 
-        addSubview(failedContainer)
         addSubview(listContainer)
     }
 
     override func layout() {
         super.layout()
 
-        let headerH: CGFloat = 20
+        let headerH: CGFloat = 18
         headerLabel.frame = NSRect(
             x: 0,
             y: bounds.height - headerH,
@@ -128,47 +119,16 @@ final class MenuBarRecentMeetingsView: NSView {
             height: headerH
         )
 
-        var cursorY = bounds.height - headerH - 8
+        let cursorY = bounds.height - headerH - 8
 
-        if failedItems.isEmpty {
-            failedHeaderLabel.isHidden = true
-            failedContainer.isHidden = true
-        } else {
-            failedHeaderLabel.isHidden = false
-            failedContainer.isHidden = false
-            failedHeaderLabel.frame = NSRect(x: 0, y: cursorY - 18, width: bounds.width, height: 18)
-            cursorY -= 24
-
-            let rowHeight: CGFloat = 48
-            let rowSpacing: CGFloat = 6
-            let totalFailedHeight = CGFloat(failedRowViews.count) * rowHeight
-                + CGFloat(max(0, failedRowViews.count - 1)) * rowSpacing
-
-            failedContainer.frame = NSRect(
-                x: 0,
-                y: cursorY - totalFailedHeight,
-                width: bounds.width,
-                height: totalFailedHeight
-            )
-
-            var failedY = totalFailedHeight
-            for row in failedRowViews {
-                failedY -= rowHeight
-                row.frame = NSRect(x: 0, y: failedY, width: failedContainer.bounds.width, height: rowHeight)
-                failedY -= rowSpacing
-            }
-
-            cursorY = failedContainer.frame.minY - 12
-        }
-
-        if items.isEmpty {
+        if rowViews.isEmpty {
             listContainer.isHidden = true
             emptyLabel.isHidden = false
             emptyLabel.frame = NSRect(
                 x: 0,
-                y: cursorY - 18,
+                y: cursorY - 16,
                 width: bounds.width,
-                height: 18
+                height: 16
             )
             return
         }
@@ -177,7 +137,7 @@ final class MenuBarRecentMeetingsView: NSView {
         listContainer.isHidden = false
 
         let listTop = cursorY
-        let rowHeight: CGFloat = 34
+        let rowHeight: CGFloat = 36
         let rowSpacing: CGFloat = 4
         let totalRowsHeight = CGFloat(rowViews.count) * rowHeight
             + CGFloat(max(0, rowViews.count - 1)) * rowSpacing
@@ -215,8 +175,16 @@ final class MenuBarRecentMeetingsView: NSView {
         // no value in recycling.
         listContainer.subviews.forEach { $0.removeFromSuperview() }
         rowViews.removeAll()
-        failedContainer.subviews.forEach { $0.removeFromSuperview() }
-        failedRowViews.removeAll()
+
+        for item in failedMeetings {
+            let row = RecentMeetingRowView(
+                failedItem: item,
+                onRetry: { onRetryFailedMeeting(item.id) },
+                onDismiss: { onDismissFailedMeeting(item.id) }
+            )
+            listContainer.addSubview(row)
+            rowViews.append(row)
+        }
 
         for item in meetings {
             let row = RecentMeetingRowView(item: item)
@@ -224,36 +192,15 @@ final class MenuBarRecentMeetingsView: NSView {
             rowViews.append(row)
         }
 
-        for item in failedMeetings {
-            let row = FailedMeetingRowView(
-                item: item,
-                onRetry: { onRetryFailedMeeting(item.id) },
-                onDismiss: { onDismissFailedMeeting(item.id) }
-            )
-            failedContainer.addSubview(row)
-            failedRowViews.append(row)
-        }
-
         needsLayout = true
     }
 
     var intrinsicHeight: CGFloat {
-        let headerBlock: CGFloat = 20 + 8
-        let failedBlock: CGFloat
-        if failedItems.isEmpty {
-            failedBlock = 0
-        } else {
-            let rowHeight: CGFloat = 48
-            let rowSpacing: CGFloat = 6
-            failedBlock = 18 + 6
-                + CGFloat(failedRowViews.count) * rowHeight
-                + CGFloat(max(0, failedRowViews.count - 1)) * rowSpacing
-                + 12
-        }
-        if items.isEmpty { return headerBlock + failedBlock + 18 }
-        let rowHeight: CGFloat = 34
+        let headerBlock: CGFloat = 18 + 8
+        if rowViews.isEmpty { return headerBlock + 16 }
+        let rowHeight: CGFloat = 36
         let rowSpacing: CGFloat = 4
-        return headerBlock + failedBlock
+        return headerBlock
             + CGFloat(rowViews.count) * rowHeight
             + CGFloat(max(0, rowViews.count - 1)) * rowSpacing
     }
@@ -263,11 +210,14 @@ final class MenuBarRecentMeetingsView: NSView {
 
 @MainActor
 final class RecentMeetingRowView: NSView {
-
     private let titleLabel = NSTextField(labelWithString: "")
     private let dateLabel = NSTextField(labelWithString: "")
-    private let openButton = NSButton()
-    private let item: RecentMeetingItem
+    private let actionButton = NSButton()
+    private let secondaryButton = NSButton()
+    private let item: RecentMeetingItem?
+    private let failedItem: MeetingSessionController.FailedMeetingItem?
+    private let onRetry: (() -> Void)?
+    private let onDismiss: (() -> Void)?
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -278,6 +228,22 @@ final class RecentMeetingRowView: NSView {
 
     init(item: RecentMeetingItem) {
         self.item = item
+        self.failedItem = nil
+        self.onRetry = nil
+        self.onDismiss = nil
+        super.init(frame: .zero)
+        setupViews()
+    }
+
+    init(
+        failedItem: MeetingSessionController.FailedMeetingItem,
+        onRetry: @escaping () -> Void,
+        onDismiss: @escaping () -> Void
+    ) {
+        self.item = nil
+        self.failedItem = failedItem
+        self.onRetry = onRetry
+        self.onDismiss = onDismiss
         super.init(frame: .zero)
         setupViews()
     }
@@ -288,145 +254,89 @@ final class RecentMeetingRowView: NSView {
     private func setupViews() {
         wantsLayer = true
         layer?.cornerRadius = MenuTokens.cardCornerRadius
-        layer?.backgroundColor = MenuTokens.cardBackgroundNS.cgColor
-        layer?.borderColor = MenuTokens.cardBorderNS.cgColor
+        layer?.backgroundColor = (failedItem == nil ? MenuTokens.cardBackgroundNS : NSColor.systemOrange.withAlphaComponent(0.08)).cgColor
+        layer?.borderColor = (failedItem == nil ? MenuTokens.cardBorderNS : NSColor.systemOrange.withAlphaComponent(0.2)).cgColor
         layer?.borderWidth = 1
 
-        titleLabel.stringValue = item.title
-        titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        titleLabel.stringValue = item?.title ?? failedItem?.title ?? ""
+        titleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         titleLabel.textColor = MenuTokens.textPrimaryNS
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.maximumNumberOfLines = 1
         addSubview(titleLabel)
 
-        dateLabel.stringValue = Self.dateFormatter.string(from: item.date)
-        dateLabel.font = NSFont.systemFont(ofSize: 10)
+        if let item {
+            dateLabel.stringValue = Self.dateFormatter.string(from: item.date)
+        } else {
+            dateLabel.stringValue = failedItem?.errorMessage ?? ""
+        }
+        dateLabel.font = NSFont.systemFont(ofSize: 9)
         dateLabel.textColor = MenuTokens.textSecondaryNS
+        dateLabel.lineBreakMode = .byTruncatingTail
+        dateLabel.maximumNumberOfLines = 1
         addSubview(dateLabel)
 
-        openButton.title = "Open"
-        openButton.bezelStyle = .inline
-        openButton.font = NSFont.systemFont(ofSize: 11)
-        openButton.target = self
-        openButton.action = #selector(handleOpen)
-        addSubview(openButton)
+        actionButton.title = item == nil ? "Retry" : "Open"
+        actionButton.bezelStyle = .inline
+        actionButton.font = NSFont.systemFont(ofSize: 10)
+        actionButton.target = self
+        actionButton.action = #selector(handlePrimaryAction)
+        actionButton.isEnabled = failedItem?.isRetryable ?? true
+        addSubview(actionButton)
+
+        secondaryButton.title = "Dismiss"
+        secondaryButton.bezelStyle = .inline
+        secondaryButton.font = NSFont.systemFont(ofSize: 10)
+        secondaryButton.target = self
+        secondaryButton.action = #selector(handleSecondaryAction)
+        secondaryButton.isHidden = item != nil
+        addSubview(secondaryButton)
     }
 
     override func layout() {
         super.layout()
-        let pad: CGFloat = 10
-
-        let btnW: CGFloat = 56
-        openButton.frame = NSRect(
-            x: bounds.width - pad - btnW,
-            y: (bounds.height - 20) / 2,
-            width: btnW,
-            height: 20
+        let pad: CGFloat = 9
+        let secondaryWidth: CGFloat = secondaryButton.isHidden ? 0 : 52
+        if !secondaryButton.isHidden {
+            secondaryButton.frame = NSRect(
+                x: bounds.width - pad - secondaryWidth,
+                y: (bounds.height - 16) / 2,
+                width: secondaryWidth,
+                height: 16
+            )
+        }
+        let primaryWidth: CGFloat = 40
+        actionButton.frame = NSRect(
+            x: bounds.width - pad - secondaryWidth - (secondaryButton.isHidden ? 0 : 8) - primaryWidth,
+            y: (bounds.height - 16) / 2,
+            width: primaryWidth,
+            height: 16
         )
 
-        let leftW = openButton.frame.minX - pad - 8
+        let leftW = actionButton.frame.minX - pad - 8
         titleLabel.frame = NSRect(
             x: pad,
             y: bounds.height / 2 + 1,
             width: leftW,
-            height: 14
+            height: 12
         )
         dateLabel.frame = NSRect(
             x: pad,
-            y: bounds.height / 2 - 14,
+            y: bounds.height / 2 - 10,
             width: leftW,
-            height: 12
+            height: 10
         )
     }
 
-    @objc private func handleOpen() {
-        NSWorkspace.shared.open(item.transcriptURL)
-    }
-}
-
-// MARK: - Failed meeting row
-
-@MainActor
-final class FailedMeetingRowView: NSView {
-    private let titleLabel = NSTextField(labelWithString: "")
-    private let errorLabel = NSTextField(labelWithString: "")
-    private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
-    private let dismissButton = NSButton(title: "Dismiss", target: nil, action: nil)
-    private let onRetry: () -> Void
-    private let onDismiss: () -> Void
-
-    init(
-        item: MeetingSessionController.FailedMeetingItem,
-        onRetry: @escaping () -> Void,
-        onDismiss: @escaping () -> Void
-    ) {
-        self.onRetry = onRetry
-        self.onDismiss = onDismiss
-        super.init(frame: .zero)
-        setupViews(item: item)
+    @objc private func handlePrimaryAction() {
+        if let item {
+            NSWorkspace.shared.open(item.transcriptURL)
+        } else {
+            onRetry?()
+        }
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    private func setupViews(item: MeetingSessionController.FailedMeetingItem) {
-        wantsLayer = true
-        layer?.cornerRadius = MenuTokens.cardCornerRadius
-        layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.08).cgColor
-        layer?.borderColor = NSColor.systemOrange.withAlphaComponent(0.25).cgColor
-        layer?.borderWidth = 1
-
-        titleLabel.stringValue = item.title
-        titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        titleLabel.textColor = MenuTokens.textPrimaryNS
-        addSubview(titleLabel)
-
-        errorLabel.stringValue = item.errorMessage
-        errorLabel.font = NSFont.systemFont(ofSize: 10)
-        errorLabel.textColor = MenuTokens.textSecondaryNS
-        errorLabel.lineBreakMode = .byTruncatingTail
-        errorLabel.maximumNumberOfLines = 1
-        addSubview(errorLabel)
-
-        retryButton.bezelStyle = .inline
-        retryButton.font = NSFont.systemFont(ofSize: 11)
-        retryButton.target = self
-        retryButton.action = #selector(handleRetry)
-        retryButton.isEnabled = item.isRetryable
-        retryButton.title = item.isRetryable ? "Retry" : "Not Retryable"
-        addSubview(retryButton)
-
-        dismissButton.bezelStyle = .inline
-        dismissButton.font = NSFont.systemFont(ofSize: 11)
-        dismissButton.target = self
-        dismissButton.action = #selector(handleDismiss)
-        addSubview(dismissButton)
+    @objc private func handleSecondaryAction() {
+        onDismiss?()
     }
-
-    override func layout() {
-        super.layout()
-        let pad: CGFloat = 10
-        let dismissSize = dismissButton.fittingSize
-        let retrySize = retryButton.fittingSize
-
-        dismissButton.frame = NSRect(
-            x: bounds.width - pad - dismissSize.width,
-            y: 8,
-            width: dismissSize.width,
-            height: dismissSize.height
-        )
-        retryButton.frame = NSRect(
-            x: dismissButton.frame.minX - 8 - retrySize.width,
-            y: 8,
-            width: retrySize.width,
-            height: retrySize.height
-        )
-
-        let textWidth = retryButton.frame.minX - pad - 8
-        titleLabel.frame = NSRect(x: pad, y: bounds.height - 20, width: textWidth, height: 14)
-        errorLabel.frame = NSRect(x: pad, y: 10, width: textWidth, height: 12)
-    }
-
-    @objc private func handleRetry() { onRetry() }
-    @objc private func handleDismiss() { onDismiss() }
 }

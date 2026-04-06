@@ -149,6 +149,8 @@ private final class ShortcutRecorderRow: NSView {
 
         shortcutButton.bezelStyle = .rounded
         shortcutButton.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        shortcutButton.contentTintColor = MenuTokens.textPrimaryNS
+        shortcutButton.bezelColor = MenuTokens.buttonBackgroundNS
         shortcutButton.target = self
         shortcutButton.action = #selector(recordTapped)
         addSubview(shortcutButton)
@@ -181,6 +183,7 @@ private final class ShortcutRecorderRow: NSView {
 
     func update(displayText: String, isRecording: Bool, isDefault: Bool) {
         shortcutButton.title = displayText
+        shortcutButton.bezelColor = isRecording ? NSColor.systemOrange.withAlphaComponent(0.35) : MenuTokens.buttonBackgroundNS
         resetRowButton.isHidden = isDefault
         needsLayout = true
     }
