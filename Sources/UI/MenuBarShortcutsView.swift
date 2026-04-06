@@ -1,5 +1,5 @@
 // MenuBarShortcutsView.swift
-// Pill-shaped shortcut badges: "⌥D Draft", "⌥Space Dictation"
+// Pill-shaped shortcut badges for the active capture flows.
 
 import AppKit
 
@@ -26,9 +26,9 @@ final class MenuBarShortcutsView: NSView {
         pill2.frame = NSRect(x: pill1Size.width + 12, y: y, width: pill2Size.width, height: pill2Size.height)
     }
 
-    func update(draftKey: String, dictationKey: String) {
-        pill1.update(key: draftKey, label: "Draft")
-        pill2.update(key: dictationKey, label: "Dictation")
+    func update(dictationKey: String, meetingKey: String) {
+        pill1.update(key: dictationKey, label: "Dictation")
+        pill2.update(key: meetingKey, label: "Meetings")
         needsLayout = true
     }
 

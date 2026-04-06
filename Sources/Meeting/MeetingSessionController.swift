@@ -25,6 +25,19 @@ import TranscriptedCore
 @available(macOS 14.0, *)
 @MainActor
 final class MeetingSessionController: ObservableObject {
+    struct LiveTranscriptLine: Identifiable, Equatable {
+        enum Source: Equatable {
+            case mic
+            case system
+        }
+
+        let id: UUID
+        var source: Source
+        var text: String
+        var isPartial: Bool
+        var startedAt: TimeInterval
+        var updatedAt: Date
+    }
 
     // MARK: - Published state (for meeting UI bindings)
 
@@ -55,6 +68,7 @@ final class MeetingSessionController: ObservableObject {
     // offline pipeline in Core's TranscriptionTaskManager.
     @Published private(set) var liveMicTranscript: String = ""
     @Published private(set) var liveSystemTranscript: String = ""
+    @Published private(set) var liveTranscriptLines: [LiveTranscriptLine] = []
 
     // MARK: - Core services (owned)
 
@@ -75,6 +89,8 @@ final class MeetingSessionController: ObservableObject {
     // without a live preview.
     private let micLiveTranscriber: MeetingLiveTranscriber?
     private let systemLiveTranscriber: MeetingLiveTranscriber?
+    private let livePreviewTimestampCompensation: TimeInterval = 0.8
+    private var livePreviewStartedAt: Date?
 
     private var cancellables: Set<AnyCancellable> = []
 
@@ -156,6 +172,13 @@ final class MeetingSessionController: ObservableObject {
             self.micLiveTranscriber = nil
             self.systemLiveTranscriber = nil
             print("⚠️ MEETING | EOU model not found — live preview disabled for this session")
+        }
+
+        self.micLiveTranscriber?.onUpdate = { [weak self] update in
+            self?.applyLivePreviewUpdate(update)
+        }
+        self.systemLiveTranscriber?.onUpdate = { [weak self] update in
+            self?.applyLivePreviewUpdate(update)
         }
 
         wireSubscriptions()
@@ -241,6 +264,8 @@ final class MeetingSessionController: ObservableObject {
         // dictation streaming path.
         liveMicTranscript = ""
         liveSystemTranscript = ""
+        liveTranscriptLines = []
+        livePreviewStartedAt = Date()
         if let mic = micLiveTranscriber {
             capture.setMicLivePreviewHandler { [weak mic] buffer in
                 mic?.ingest(buffer: buffer)
@@ -276,6 +301,8 @@ final class MeetingSessionController: ObservableObject {
         // preview-only and doesn't need to be preserved.
         await micLiveTranscriber?.stop()
         await systemLiveTranscriber?.stop()
+        liveTranscriptLines = []
+        livePreviewStartedAt = nil
 
         guard let micURL = files.micURL else {
             state = .error("No microphone audio was captured.")
@@ -295,6 +322,56 @@ final class MeetingSessionController: ObservableObject {
     func cancelActiveTranscription() {
         taskManager.cancelAll()
         state = .ready
+    }
+
+    private func applyLivePreviewUpdate(_ update: MeetingLiveTranscriber.Update) {
+        let source: LiveTranscriptLine.Source = (update.source == .mic) ? .mic : .system
+        let rawStartedAt = update.timestamp.timeIntervalSince(livePreviewStartedAt ?? update.timestamp)
+        let startedAt = max(0, rawStartedAt - livePreviewTimestampCompensation)
+
+        switch update.kind {
+        case .reset:
+            liveTranscriptLines.removeAll()
+
+        case .partial:
+            let text = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let index = liveTranscriptLines.lastIndex(where: { $0.source == source && $0.isPartial }) {
+                if text.isEmpty {
+                    liveTranscriptLines.remove(at: index)
+                } else {
+                    liveTranscriptLines[index].text = text
+                    liveTranscriptLines[index].updatedAt = update.timestamp
+                }
+            } else if !text.isEmpty {
+                liveTranscriptLines.append(LiveTranscriptLine(
+                    id: UUID(),
+                    source: source,
+                    text: text,
+                    isPartial: true,
+                    startedAt: startedAt,
+                    updatedAt: update.timestamp
+                ))
+            }
+
+        case .committed:
+            let text = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return }
+
+            if let index = liveTranscriptLines.lastIndex(where: { $0.source == source && $0.isPartial }) {
+                liveTranscriptLines[index].text = text
+                liveTranscriptLines[index].isPartial = false
+                liveTranscriptLines[index].updatedAt = update.timestamp
+            } else {
+                liveTranscriptLines.append(LiveTranscriptLine(
+                    id: UUID(),
+                    source: source,
+                    text: text,
+                    isPartial: false,
+                    startedAt: startedAt,
+                    updatedAt: update.timestamp
+                ))
+            }
+        }
     }
 
     // MARK: - Subscriptions

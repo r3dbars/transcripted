@@ -1,13 +1,12 @@
 // MenuBarModelDownloadView.swift
-// Model download progress for Parakeet and Qwen during first launch
+// Model download progress for the local Parakeet speech model during first launch
 
 import AppKit
 
 @MainActor
 final class MenuBarModelDownloadView: NSView {
     private let voiceRow = ModelDownloadRow()
-    private let llmRow = ModelDownloadRow()
-    private let footerLabel = NSTextField(labelWithString: "Models download once and run locally on your Mac.")
+    private let footerLabel = NSTextField(labelWithString: "Models download once and stay local on your Mac.")
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -16,7 +15,6 @@ final class MenuBarModelDownloadView: NSView {
         layer?.backgroundColor = MenuTokens.cardBackgroundNS.cgColor
 
         addSubview(voiceRow)
-        addSubview(llmRow)
 
         footerLabel.font = NSFont.systemFont(ofSize: 10)
         footerLabel.textColor = MenuTokens.textSecondaryNS
@@ -32,19 +30,15 @@ final class MenuBarModelDownloadView: NSView {
         let rowH: CGFloat = 36
         let footerH: CGFloat = 14
         voiceRow.frame = NSRect(x: pad, y: bounds.height - pad - rowH, width: bounds.width - pad * 2, height: rowH)
-        llmRow.frame = NSRect(x: pad, y: bounds.height - pad - rowH * 2 - 4, width: bounds.width - pad * 2, height: rowH)
         footerLabel.frame = NSRect(x: pad, y: pad, width: bounds.width - pad * 2, height: footerH)
     }
 
-    func update(voiceModelLoaded: Bool, voiceState: ParakeetModelState,
-                llmReady: Bool, llmState: ModelState) {
+    func update(voiceModelLoaded: Bool, voiceState: ParakeetModelState) {
         voiceRow.update(label: "Voice model", detail: "Parakeet CoreML (~600 MB)",
                         isReady: voiceModelLoaded, state: voiceState)
-        llmRow.update(label: "Language model", detail: "Qwen 3.5-4B (~2.5 GB)",
-                      isReady: llmReady, state: llmState)
     }
 
-    var intrinsicHeight: CGFloat { 100 }
+    var intrinsicHeight: CGFloat { 64 }
 }
 
 private final class ModelDownloadRow: NSView {

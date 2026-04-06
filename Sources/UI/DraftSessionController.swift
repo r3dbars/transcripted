@@ -90,24 +90,10 @@ class DraftSessionController: ObservableObject {
 
     /// Start a new recording session — called on first hotkey press
     func startSession(imageData: Data?, sourceApp: NSRunningApplication?) {
-        guard let (appState, overlayController) = readyState() else { return }
-        guard !isInSession, !isDictating else { return }
-        isInSession = true
-        sessionSourceApp = sourceApp
-        sessionStartTime = CFAbsoluteTimeGetCurrent()
-        lastCompletedText = nil
-
-        lastCapturedContext = nil
-        sessionImageData = imageData
-        appState.drafter.clear()
-
-        // Show overlay and start recording
-        overlayController.hasContext = true
-        overlayController.activeMode = .draft
-        overlayController.state = .listening
-        overlayController.showPanel(near: sourceApp)
-
-        beginRecording(imageData: imageData, sourceApp: sourceApp)
+        let _ = imageData
+        let _ = sourceApp
+        guard let (_, overlayController) = readyState() else { return }
+        overlayController.showError("Draft mode has been removed")
     }
 
     /// Actually start recording — called directly from startSession
@@ -135,136 +121,11 @@ class DraftSessionController: ObservableObject {
 
     /// Stop recording and trigger drafting — called on second hotkey press
     func stopSessionAndDraft() {
-        guard let (appState, overlayController) = readyState() else { return }
-        guard isInSession else { return }
-        overlayController.enterDraftingState()
-
-        // Cancel any in-progress background generation (e.g., style refinement)
-        // to prevent "Model busy" errors when starting the user's draft.
-        styleRefinementTask?.cancel()
-        styleRefinementTask = nil
-        sessionTimeoutTask?.cancel()
-        sessionTimeoutTask = nil
-
-        streamingTask?.cancel()
-        streamingTask = Task {
-            // Cancel any lingering Gemini generation
-            await appState.geminiEngine.cancelGeneration()
-            // Stop recording and wait for transcription model if still loading
-            appState.sttRouter.stopRecording()
-            if !appState.sttRouter.isModelLoaded {
-                appState.logger.log("SESSION | waiting for voice model before transcribe…")
-                for _ in 0..<DraftConstants.modelLoadMaxIterations {
-                    guard !Task.isCancelled else { return }
-                    if appState.sttRouter.isModelLoaded { break }
-                    try? await Task.sleep(nanoseconds: DraftConstants.modelLoadPollInterval)
-                }
-                guard appState.sttRouter.isModelLoaded else {
-                    appState.logger.log("SESSION | voice model failed to load for transcription")
-                    overlayController.showError("Voice model failed to load")
-                    isInSession = false
-                    return
-                }
-            }
-            let voiceText = (await appState.sttRouter.transcribe() ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            guard !voiceText.isEmpty else {
-                appState.logger.log("SESSION | no voice input, cancelling")
-                EventReporter.shared.capture(level: .warning, engine: "overlay", event: "no_voice_input",
-                    message: "Voice text empty after recording")
-                visionTask?.cancel()
-                visionTask = nil
-                overlayController.showNoSpeechAndDismiss()
-                isInSession = false
-                return
-            }
-
-            let platform = PlatformFormatter.detect(from: sessionSourceApp)
-
-            guard GeminiEngine.isAvailable else {
-                appState.logger.log("SESSION | no Gemini API key configured")
-                EventReporter.shared.capture(level: .error, engine: "overlay", event: "gemini_not_configured",
-                    message: "No Gemini API key — configure in Settings")
-                overlayController.showError("No Gemini API key — check Settings")
-                isInSession = false
-                return
-            }
-
-            appState.logger.log("SESSION | streaming draft via Gemini [\(platform.rawValue)] — \(voiceText.count) chars, image: \(sessionImageData != nil)")
-
-            var systemPrompt = appState.styleEngine.buildSystemPrompt()
-            if !platform.formattingInstructions.isEmpty {
-                systemPrompt += "\n\n" + platform.formattingInstructions
-            }
-
-            // Build user message — Gemini sees the screenshot as an image part,
-            // so the text prompt just provides platform context and voice instructions.
-            let trimmedVoice = voiceText.trimmingCharacters(in: .whitespacesAndNewlines)
-            let userMessage: String
-            if sessionImageData != nil {
-                userMessage = "Write a reply to the conversation shown in the screenshot.\n\nPLATFORM: \(platform.rawValue)\n\nUSER WANTS TO SAY:\n\(trimmedVoice)\n\nWrite a reply. Match the conversation's length and energy. Output only the message text."
-            } else {
-                userMessage = "Clean up this dictation. Fix grammar, keep their tone. Output only the message.\n\n\(trimmedVoice)"
-            }
-
-            let stream = await appState.geminiEngine.generate(
-                prompt: userMessage,
-                systemPrompt: systemPrompt.isEmpty ? nil : systemPrompt,
-                imageData: sessionImageData,
-                maxTokens: DraftConstants.geminiDraftMaxTokens,
-                temperature: 0.7
-            )
-
-            var fullText = ""
-            var gotFirstToken = false
-
-            do {
-                for try await token in stream {
-                    guard !Task.isCancelled else { break }
-                    if !gotFirstToken {
-                        gotFirstToken = true
-                        overlayController.startStreaming(near: sessionSourceApp)
-                    }
-                    fullText += token
-                    overlayController.appendStreamToken(token)
-                }
-            } catch {
-                guard !Task.isCancelled else { return }
-                visionTask?.cancel()
-                visionTask = nil
-                appState.logger.log("SESSION | stream error: \(error.localizedDescription)")
-                EventReporter.shared.capture(level: .error, engine: "overlay", event: "stream_draft_failed",
-                    message: error.localizedDescription)
-                overlayController.hideWithCancelAnimation()
-                isInSession = false
-                return
-            }
-
-            guard !Task.isCancelled, !fullText.isEmpty else {
-                if !Task.isCancelled {
-                    appState.logger.log("SESSION | empty draft")
-                    EventReporter.shared.capture(level: .warning, engine: "overlay", event: "draft_empty",
-                        message: "Draft was empty after streaming completed")
-                    overlayController.hideWithCancelAnimation()
-                    isInSession = false
-                }
-                return
-            }
-
-            let processed = platform.postProcess(fullText)
-            appState.drafter.originalDraft = processed
-            appState.drafter.lastRawText = voiceText
-
-            overlayController.onConfirm = { [weak self] in
-                self?.confirmAndInject(platform: platform)
-            }
-            overlayController.onCancel = { [weak self] in
-                self?.cancelSession()
-            }
-            overlayController.finishStreaming()
-            appState.logger.log("REVIEW | streaming complete, \(processed.count) chars")
+        guard let (_, overlayController) = readyState() else { return }
+        if isInSession {
+            cancelSession()
         }
+        overlayController.showError("Draft mode has been removed")
     }
 
     func cancelSession() {
@@ -299,7 +160,7 @@ class DraftSessionController: ObservableObject {
 
     /// Start dictation — show overlay and begin voice recording (no screenshot/vision)
     func startDictation(sourceApp: NSRunningApplication?) {
-        guard let (appState, overlayController) = readyState() else { return }
+        guard let (_, overlayController) = readyState() else { return }
         guard !isDictating, !isInSession else { return }
         isDictating = true
         sessionSourceApp = sourceApp

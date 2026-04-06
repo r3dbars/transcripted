@@ -71,10 +71,10 @@ final class MeetingOverlayRootView: NSView {
     private let closeButton = NSButton()
     private let chevronButton = NSButton()
 
-    // Live-transcript preview area — hidden unless the panel is expanded
+    // Live capture preview area — hidden unless the panel is expanded
     // (height > MeetingOverlayTokens.panelHeight). Contains a non-editable
-    // NSTextView inside an NSScrollView showing two color-coded blocks:
-    // [MIC] lines in red, [SYS] lines in blue.
+    // NSTextView inside an NSScrollView showing only the latest few
+    // utterances so users can verify capture quality at a glance.
     private let transcriptScroll = NSScrollView()
     private let transcriptText = NSTextView()
 
@@ -146,8 +146,8 @@ final class MeetingOverlayRootView: NSView {
         closeButton.action = #selector(handleClose)
         addSubview(closeButton)
 
-        // Expand/collapse chevron — toggles the live-transcript preview.
-        if let img = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Show live transcript") {
+        // Expand/collapse chevron — toggles the compact live-capture preview.
+        if let img = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Show live capture preview") {
             chevronButton.image = img
             chevronButton.contentTintColor = MeetingOverlayTokens.textSecondary
         }
@@ -167,7 +167,7 @@ final class MeetingOverlayRootView: NSView {
         transcriptText.isEditable = false
         transcriptText.isSelectable = false
         transcriptText.drawsBackground = false
-        transcriptText.textContainerInset = NSSize(width: 0, height: 4)
+        transcriptText.textContainerInset = NSSize(width: 0, height: 6)
         transcriptText.font = NSFont.systemFont(ofSize: 11)
         transcriptText.textColor = MeetingOverlayTokens.textPrimary
         transcriptText.isVerticallyResizable = true
@@ -292,8 +292,7 @@ final class MeetingOverlayRootView: NSView {
 
     private var currentMicLevel: Float = 0
     private var currentSystemLevel: Float = 0
-    private var lastMicText: String = ""
-    private var lastSystemText: String = ""
+    private var lastRenderedLines: [MeetingSessionController.LiveTranscriptLine] = []
 
     func update(
         state: MeetingOverlayController.OverlayState,
@@ -301,8 +300,7 @@ final class MeetingOverlayRootView: NSView {
         micLevel: Float,
         systemLevel: Float,
         participants: [String],
-        micTranscript: String,
-        systemTranscript: String,
+        transcriptLines: [MeetingSessionController.LiveTranscriptLine],
         isExpanded: Bool
     ) {
         switch state {
@@ -340,71 +338,111 @@ final class MeetingOverlayRootView: NSView {
         let chevronName = isExpanded ? "chevron.up" : "chevron.down"
         chevronButton.image = NSImage(
             systemSymbolName: chevronName,
-            accessibilityDescription: isExpanded ? "Hide live transcript" : "Show live transcript"
+            accessibilityDescription: isExpanded ? "Hide live capture preview" : "Show live capture preview"
         )
 
         // Only rebuild the attributed string when the text actually
         // changed — EOU's partial callback fires on every chunk, so
         // avoid re-laying out the text view when nothing moved.
-        if micTranscript != lastMicText || systemTranscript != lastSystemText {
-            lastMicText = micTranscript
-            lastSystemText = systemTranscript
-            applyTranscript(mic: micTranscript, system: systemTranscript)
+        if transcriptLines != lastRenderedLines {
+            lastRenderedLines = transcriptLines
+            applyTranscript(lines: transcriptLines)
         }
 
         needsLayout = true
     }
 
-    /// Build a two-block attributed string: "MIC" header + red-tinted body,
-    /// then "SYS" header + blue-tinted body. Scrolls to the bottom after
-    /// each update so the latest tokens stay visible.
-    private func applyTranscript(mic: String, system: String) {
+    /// Build a compact trust preview ordered by callback arrival so users can
+    /// quickly verify that both mic and meeting audio are being captured.
+    private func applyTranscript(lines: [MeetingSessionController.LiveTranscriptLine]) {
         let result = NSMutableAttributedString()
 
-        let headerFont = NSFont.systemFont(ofSize: 9, weight: .bold)
-        let bodyFont = NSFont.systemFont(ofSize: 11)
-        let micPlaceholder = "Waiting for microphone…"
-        let sysPlaceholder = "Waiting for system audio…"
+        let metaFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        let bodyFont = NSFont.systemFont(ofSize: 11, weight: .regular)
+        let partialBodyFont = NSFont.systemFont(ofSize: 11, weight: .regular)
         let idleColor = NSColor(white: 0.5, alpha: 1.0)
+        let metaColor = MeetingOverlayTokens.textSecondary
 
-        // MIC block
-        result.append(NSAttributedString(
-            string: "MIC\n",
-            attributes: [
-                .font: headerFont,
-                .foregroundColor: MeetingOverlayTokens.accentRed,
-                .kern: 1.0
-            ]
-        ))
-        let micBody = mic.isEmpty ? micPlaceholder : mic
-        result.append(NSAttributedString(
-            string: micBody + "\n\n",
-            attributes: [
-                .font: bodyFont,
-                .foregroundColor: mic.isEmpty ? idleColor : MeetingOverlayTokens.textPrimary
-            ]
-        ))
+        let bodyParagraph = NSMutableParagraphStyle()
+        bodyParagraph.lineSpacing = 1.5
+        bodyParagraph.paragraphSpacing = 9
+        bodyParagraph.lineBreakMode = .byWordWrapping
 
-        // SYSTEM block
-        result.append(NSAttributedString(
-            string: "SYSTEM\n",
-            attributes: [
-                .font: headerFont,
-                .foregroundColor: MeetingOverlayTokens.accentBlue,
-                .kern: 1.0
-            ]
-        ))
-        let sysBody = system.isEmpty ? sysPlaceholder : system
-        result.append(NSAttributedString(
-            string: sysBody,
-            attributes: [
-                .font: bodyFont,
-                .foregroundColor: system.isEmpty ? idleColor : MeetingOverlayTokens.textPrimary
-            ]
-        ))
+        let metaParagraph = NSMutableParagraphStyle()
+        metaParagraph.paragraphSpacing = 2
+
+        if lines.isEmpty {
+            result.append(NSAttributedString(
+                string: "Live capture preview\nThe latest mic and meeting audio will appear here.",
+                attributes: [
+                    .font: bodyFont,
+                    .paragraphStyle: bodyParagraph,
+                    .foregroundColor: idleColor
+                ]
+            ))
+        } else {
+            let previewLines = compactPreviewLines(from: lines).suffix(3)
+            for line in previewLines {
+                let timestamp = "[" + formatDuration(line.startedAt) + "]"
+                let sourceTitle = line.source == .mic ? "You" : "Meeting audio"
+                let accent = line.source == .mic ? MeetingOverlayTokens.accentRed : MeetingOverlayTokens.accentBlue
+                let bodyColor = line.isPartial
+                    ? MeetingOverlayTokens.textPrimary.withAlphaComponent(0.82)
+                    : MeetingOverlayTokens.textPrimary
+                let sourceSuffix = line.isPartial ? " • live" : ""
+
+                result.append(NSAttributedString(
+                    string: timestamp + " ",
+                    attributes: [
+                        .font: metaFont,
+                        .foregroundColor: metaColor,
+                        .paragraphStyle: metaParagraph
+                    ]
+                ))
+                result.append(NSAttributedString(
+                    string: sourceTitle + sourceSuffix + "\n",
+                    attributes: [
+                        .font: metaFont,
+                        .foregroundColor: accent,
+                        .paragraphStyle: metaParagraph
+                    ]
+                ))
+                result.append(NSAttributedString(
+                    string: line.text + "\n",
+                    attributes: [
+                        .font: line.isPartial ? partialBodyFont : bodyFont,
+                        .foregroundColor: bodyColor,
+                        .paragraphStyle: bodyParagraph
+                    ]
+                ))
+            }
+        }
 
         transcriptText.textStorage?.setAttributedString(result)
         transcriptText.scrollToEndOfDocument(nil)
+    }
+
+    private func compactPreviewLines(
+        from lines: [MeetingSessionController.LiveTranscriptLine]
+    ) -> [MeetingSessionController.LiveTranscriptLine] {
+        var compacted: [MeetingSessionController.LiveTranscriptLine] = []
+
+        for line in lines {
+            guard !line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+
+            if let last = compacted.indices.last,
+               compacted[last].source == line.source,
+               abs(line.startedAt - compacted[last].startedAt) <= 2.5 {
+                compacted[last].text = line.text
+                compacted[last].isPartial = line.isPartial
+                compacted[last].updatedAt = line.updatedAt
+                continue
+            }
+
+            compacted.append(line)
+        }
+
+        return compacted
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
@@ -440,7 +478,7 @@ enum MeetingOverlayTokens {
 
     static let panelWidth: CGFloat  = 360
     static let panelHeight: CGFloat = 52          // collapsed (header row only)
-    static let panelExpandedHeight: CGFloat = 220 // header + dual live-transcript panes
+    static let panelExpandedHeight: CGFloat = 170 // header + compact live preview
     static let cornerRadius: CGFloat = 14
     static let dotSize: CGFloat     = 8
 }
@@ -473,8 +511,7 @@ final class MeetingOverlayController {
     private var currentMicLevel: Float = 0
     private var currentSystemLevel: Float = 0
     private var currentParticipants: [String] = []
-    private var currentMicTranscript: String = ""
-    private var currentSystemTranscript: String = ""
+    private var currentTranscriptLines: [MeetingSessionController.LiveTranscriptLine] = []
     /// When true, the panel is grown to show the dual live-transcript
     /// preview. Toggled by the chevron button in the header row.
     private var isExpanded: Bool = false
@@ -582,18 +619,10 @@ final class MeetingOverlayController {
             }
             .store(in: &subscriptions)
 
-        session.$liveMicTranscript
+        session.$liveTranscriptLines
             .receive(on: RunLoop.main)
-            .sink { [weak self] text in
-                self?.currentMicTranscript = text
-                self?.pushToView()
-            }
-            .store(in: &subscriptions)
-
-        session.$liveSystemTranscript
-            .receive(on: RunLoop.main)
-            .sink { [weak self] text in
-                self?.currentSystemTranscript = text
+            .sink { [weak self] lines in
+                self?.currentTranscriptLines = lines
                 self?.pushToView()
             }
             .store(in: &subscriptions)
@@ -669,7 +698,7 @@ final class MeetingOverlayController {
             : MeetingOverlayTokens.panelHeight
     }
 
-    /// Toggle the expanded live-transcript preview. Animates the panel's
+    /// Toggle the expanded live-capture preview. Animates the panel's
     /// frame so it grows downward from the top edge (origin.y decreases by
     /// the height delta, so the top of the panel stays anchored).
     private func toggleExpanded() {
@@ -744,8 +773,7 @@ final class MeetingOverlayController {
             micLevel: currentMicLevel,
             systemLevel: currentSystemLevel,
             participants: currentParticipants,
-            micTranscript: currentMicTranscript,
-            systemTranscript: currentSystemTranscript,
+            transcriptLines: currentTranscriptLines,
             isExpanded: isExpanded
         )
     }

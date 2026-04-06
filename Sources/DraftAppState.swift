@@ -35,31 +35,6 @@ class DraftAppState: ObservableObject {
     func initialize() async {
         guard !isInitialized else { return }
         isInitialized = true
-        drafter.styleEngine = styleEngine
-        drafter.promptStore = promptStore
-        styleEngine.promptStore = promptStore
-
-        #if !BETA_BUILD
-        // Wire analysis engine with local inference
-        analysisEngine.localInference = localInference
-
-        // Start native analysis engine
-        analysisEngine.start()
-
-        // Listen for prompt changes applied by the analysis engine
-        if promptsObserver == nil {
-            promptsObserver = NotificationCenter.default.addObserver(
-                forName: .promptsDidChange,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.promptStore.reload()
-                    self?.logger.log("AGENT | prompts.json reloaded after analysis change")
-                }
-            }
-        }
-        #endif
 
         #if BETA_BUILD
         // Register as login item so model is pre-loaded when user needs it
@@ -87,9 +62,6 @@ class DraftAppState: ObservableObject {
             await sttRouter.parakeetEngine.initialize()
             sttRouter.parakeetEngine.prewarm()
         }
-        Task {
-            await localInference.initialize()
-        }
 
         // Preload meeting diarization + STT models in the background so the
         // first ⌥M press doesn't block on a cold model download.
@@ -100,11 +72,8 @@ class DraftAppState: ObservableObject {
             }
         }
 
-        let geminiStatus = GeminiEngine.isAvailable ? "configured" : "not configured"
-        logger.log("APP LAUNCHED | style: \(styleEngine.exampleCount) examples, gemini: \(geminiStatus)")
-        EventTracker.track("app.launched", with: [
-            "style_examples": "\(styleEngine.exampleCount)",
-        ])
+        logger.log("APP LAUNCHED | modes: dictation + meetings")
+        EventTracker.track("app.launched")
 
         // Wire EventReporter with live engine state for context enrichment
         EventReporter.shared.setEngineStateSummary { [weak self] in
@@ -112,15 +81,11 @@ class DraftAppState: ObservableObject {
             return [
                 "parakeet_loaded": "\(sttRouter.parakeetEngine.isModelLoaded)",
                 "stt_recording": "\(sttRouter.isRecording)",
-                "style_examples": "\(styleEngine.exampleCount)",
-                "llm_state": localInference.statusLabel,
-                "gemini_available": "\(GeminiEngine.isAvailable)",
+                "meeting_state": meetingStateSummary,
             ]
         }
         EventReporter.shared.capture(level: .info, engine: "app", event: "app_launched",
-            message: "Draft initialized (local inference)", context: [
-                "style_examples": "\(styleEngine.exampleCount)",
-            ])
+            message: "Draft initialized for dictation and meetings")
     }
 
     #if BETA_BUILD
@@ -140,52 +105,6 @@ class DraftAppState: ObservableObject {
         contextCapture.registerHotkey()
         logger.log("WAKE | hotkeys re-registered")
 
-        // 2. Analysis engine file watcher — DispatchSource file descriptors can stale.
-        #if !BETA_BUILD
-        analysisEngine.stop()
-        analysisEngine.start()
-        logger.log("WAKE | analysis file watcher restarted")
-        #endif
-
-        // 3. MLX model — Metal GPU contexts can become invalid after sleep.
-        //    If the model was loaded, verify it's still responsive. If not, reload.
-        //    Skip if a session is active or the model is mid-generation.
-        if localInference.isReady {
-            let sessionActive = contextCapture.sessionController?.isInSession == true
-                || contextCapture.sessionController?.isDictating == true
-            if sessionActive {
-                logger.log("WAKE | skipping MLX health check — session active")
-            } else {
-                wakeHealthCheckTask?.cancel()
-                wakeHealthCheckTask = Task {
-                    guard !Task.isCancelled else { return }
-                    // Skip if model is busy (actor-isolated check)
-                    guard await !localInference.draftEngine.isBusy else {
-                        logger.log("WAKE | skipping MLX health check — model generating")
-                        return
-                    }
-                    do {
-                        // Quick health check — generate a single token
-                        let _ = try await localInference.draftEngine.complete(
-                            prompt: "hi",
-                            systemPrompt: "Reply with OK",
-                            maxTokens: 4,
-                            temperature: 0
-                        )
-                        logger.log("WAKE | MLX model health check passed")
-                    } catch {
-                        guard !Task.isCancelled else { return }
-                        logger.log("WAKE | MLX model health check failed: \(error.localizedDescription), reloading")
-                        EventReporter.shared.capture(level: .warning, engine: "local",
-                            event: "wake_model_stale",
-                            message: "MLX model unresponsive after wake, reloading: \(error.localizedDescription)")
-                        localInference.cleanup()
-                        await localInference.initialize()
-                    }
-                }
-            }
-        }
-
         // ParakeetEngine handles its own wake recovery via NSWorkspace.didWakeNotification
         // observer installed during prewarm(). No action needed here.
 
@@ -199,13 +118,25 @@ class DraftAppState: ObservableObject {
         #endif
         wakeHealthCheckTask?.cancel()
         wakeHealthCheckTask = nil
-        analysisEngine.stop()
         sttRouter.parakeetEngine.cleanup()
-        localInference.cleanup()
         contextCapture.unregisterHotkey()
         if let observer = promptsObserver {
             NotificationCenter.default.removeObserver(observer)
             promptsObserver = nil
         }
+    }
+
+    private var meetingStateSummary: String {
+        if #available(macOS 14.0, *) {
+            switch meetingSession.state {
+            case .idle: return "idle"
+            case .loadingModels: return "loadingModels"
+            case .ready: return "ready"
+            case .recording: return "recording"
+            case .transcribing: return "transcribing"
+            case .error: return "error"
+            }
+        }
+        return "unavailable"
     }
 }

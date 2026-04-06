@@ -32,6 +32,19 @@ import TranscriptedCore
 @available(macOS 14.0, *)
 @MainActor
 final class MeetingLiveTranscriber: ObservableObject {
+    struct Update {
+        enum Kind {
+            case partial
+            case committed
+            case reset
+        }
+
+        let source: Source
+        let kind: Kind
+        let text: String
+        let timestamp: Date
+    }
+
 
     /// The stream this transcriber is attached to. Purely for logging +
     /// distinguishing log lines in EventReporter; the ASR path is identical.
@@ -49,6 +62,10 @@ final class MeetingLiveTranscriber: ObservableObject {
     /// True once `start()` has successfully loaded the model. Reads of
     /// `ingest(buffer:)` before this do nothing.
     @Published private(set) var isReady: Bool = false
+
+    /// Emits source-aware preview updates so the overlay can thread mic and
+    /// system speech into a single back-and-forth conversation view.
+    var onUpdate: ((Update) -> Void)?
 
     // MARK: - Configuration
 
@@ -115,6 +132,12 @@ final class MeetingLiveTranscriber: ObservableObject {
                 self.liveText = self.committedText.isEmpty
                     ? trimmed
                     : (trimmed.isEmpty ? self.committedText : self.committedText + " " + trimmed)
+                self.onUpdate?(Update(
+                    source: self.source,
+                    kind: .partial,
+                    text: trimmed,
+                    timestamp: Date()
+                ))
             }
         }
 
@@ -130,6 +153,12 @@ final class MeetingLiveTranscriber: ObservableObject {
                     ? trimmed
                     : self.committedText + " " + trimmed
                 self.liveText = self.committedText
+                self.onUpdate?(Update(
+                    source: self.source,
+                    kind: .committed,
+                    text: trimmed,
+                    timestamp: Date()
+                ))
             }
         }
 
@@ -151,6 +180,7 @@ final class MeetingLiveTranscriber: ObservableObject {
 
         committedText = ""
         liveText = ""
+        onUpdate?(Update(source: source, kind: .reset, text: "", timestamp: Date()))
     }
 
     // MARK: - Ingest (audio-thread entry point)
@@ -216,24 +246,60 @@ final class MeetingLiveTranscriber: ObservableObject {
     /// Down-mix a multi-channel buffer to mono Float32. For mono input this
     /// is a direct copy of channel 0's samples.
     private nonisolated static func monoSamples(from buffer: AVAudioPCMBuffer) -> [Float]? {
-        guard let channelData = buffer.floatChannelData else { return nil }
         let frameCount = Int(buffer.frameLength)
         let channelCount = Int(buffer.format.channelCount)
         guard frameCount > 0, channelCount > 0 else { return nil }
 
-        if channelCount == 1 {
-            return Array(UnsafeBufferPointer(start: channelData[0], count: frameCount))
+        if !buffer.format.isInterleaved, let channelData = buffer.floatChannelData {
+            if channelCount == 1 {
+                return Array(UnsafeBufferPointer(start: channelData[0], count: frameCount))
+            }
+
+            var out = [Float](repeating: 0, count: frameCount)
+            for frame in 0..<frameCount {
+                var sum: Float = 0
+                for ch in 0..<channelCount {
+                    sum += channelData[ch][frame]
+                }
+                out[frame] = sum / Float(channelCount)
+            }
+            return out
         }
 
-        var out = [Float](repeating: 0, count: frameCount)
-        for frame in 0..<frameCount {
-            var sum: Float = 0
-            for ch in 0..<channelCount {
-                sum += channelData[ch][frame]
+        let totalSamples = frameCount * channelCount
+        guard let mData = buffer.audioBufferList.pointee.mBuffers.mData else { return nil }
+
+        if buffer.format.commonFormat == .pcmFormatFloat32 {
+            let interleaved = mData.bindMemory(to: Float.self, capacity: totalSamples)
+            if channelCount == 1 {
+                return Array(UnsafeBufferPointer(start: interleaved, count: frameCount))
             }
-            out[frame] = sum / Float(channelCount)
+
+            var out = [Float](repeating: 0, count: frameCount)
+            for frame in 0..<frameCount {
+                var sum: Float = 0
+                for ch in 0..<channelCount {
+                    sum += interleaved[frame * channelCount + ch]
+                }
+                out[frame] = sum / Float(channelCount)
+            }
+            return out
         }
-        return out
+
+        if buffer.format.commonFormat == .pcmFormatInt16 {
+            let interleaved = mData.bindMemory(to: Int16.self, capacity: totalSamples)
+            var out = [Float](repeating: 0, count: frameCount)
+            for frame in 0..<frameCount {
+                var sum: Float = 0
+                for ch in 0..<channelCount {
+                    sum += Float(interleaved[frame * channelCount + ch]) / Float(Int16.max)
+                }
+                out[frame] = sum / Float(channelCount)
+            }
+            return out
+        }
+
+        return nil
     }
 
     /// Wrap a Float array in an AVAudioPCMBuffer matching `pcmFormat`

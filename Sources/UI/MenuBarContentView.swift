@@ -11,11 +11,8 @@ final class MenuBarContentView: NSView {
     let headerView = MenuBarHeaderView(frame: .zero)
     let modelDownloadView = MenuBarModelDownloadView(frame: .zero)
     let hotkeyErrorBanner = HotkeyErrorBanner()
-    let statsView = MenuBarStatsView(frame: .zero)
     let shortcutsView = MenuBarShortcutsView(frame: .zero)
     let recentMeetingsView = MenuBarRecentMeetingsView(frame: .zero)
-    let styleView = MenuBarStyleView(frame: .zero)
-    let agentView = MenuBarAgentView(frame: .zero)
 
     private let settingsButton = NSButton()
     private var settingsPopover: NSPopover?
@@ -44,11 +41,8 @@ final class MenuBarContentView: NSView {
         documentView.addSubview(headerView)
         documentView.addSubview(modelDownloadView)
         documentView.addSubview(hotkeyErrorBanner)
-        documentView.addSubview(statsView)
         documentView.addSubview(shortcutsView)
         documentView.addSubview(recentMeetingsView)
-        documentView.addSubview(styleView)
-        documentView.addSubview(agentView)
 
         // Settings gear button (top-right)
         if let img = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings") {
@@ -94,12 +88,6 @@ final class MenuBarContentView: NSView {
             y += bannerH + 4
         }
 
-        // Divider gap + Stats
-        y += 4
-        let statsH = statsView.intrinsicHeight
-        statsView.frame = NSRect(x: pad, y: y, width: w, height: statsH)
-        y += statsH + 4
-
         // Divider gap + Shortcuts
         y += 4
         let shortcutsH = shortcutsView.intrinsicHeight
@@ -112,17 +100,7 @@ final class MenuBarContentView: NSView {
         recentMeetingsView.frame = NSRect(x: pad, y: y, width: w, height: recentH)
         y += recentH + 4
 
-        // Divider gap + Style
-        y += 4
-        let styleH = styleView.intrinsicHeight
-        styleView.frame = NSRect(x: pad, y: y, width: w, height: styleH)
-        y += styleH + 4
-
-        // Divider gap + Agent
-        y += 4
-        let agentH = agentView.intrinsicHeight
-        agentView.frame = NSRect(x: pad, y: y, width: w, height: agentH)
-        y += agentH + pad
+        y += pad
 
         // Set document view size for scrolling
         // AppKit scroll views use flipped coordinates, but we're using non-flipped
@@ -162,12 +140,6 @@ final class MenuBarContentView: NSView {
             hotkeyErrorBanner.frame = NSRect(x: pad, y: y, width: w, height: bannerH)
         }
 
-        // Stats
-        y -= 8
-        let statsH = statsView.intrinsicHeight
-        y -= statsH
-        statsView.frame = NSRect(x: pad, y: y, width: w, height: statsH)
-
         // Shortcuts
         y -= 8
         let shortcutsH = shortcutsView.intrinsicHeight
@@ -180,17 +152,6 @@ final class MenuBarContentView: NSView {
         y -= recentH
         recentMeetingsView.frame = NSRect(x: pad, y: y, width: w, height: recentH)
 
-        // Style
-        y -= 8
-        let styleH = styleView.intrinsicHeight
-        y -= styleH
-        styleView.frame = NSRect(x: pad, y: y, width: w, height: styleH)
-
-        // Agent
-        y -= 8
-        let agentH = agentView.intrinsicHeight
-        y -= agentH
-        agentView.frame = NSRect(x: pad, y: y, width: w, height: agentH)
     }
 
     @objc private func toggleSettings() {
@@ -207,9 +168,6 @@ final class MenuBarContentView: NSView {
         let vc = NSViewController()
         settingsView.appState = appState
         settingsView.frame = NSRect(x: 0, y: 0, width: 280, height: 480)
-        if let llmStatus = appState?.localInference.statusLabel {
-            settingsView.update(llmStatus: llmStatus)
-        }
         vc.view = settingsView
         pop.contentViewController = vc
 

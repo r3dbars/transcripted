@@ -1,5 +1,5 @@
 // DraftApp.swift
-// Menubar-only app — no Dock icon, floating overlay for drafting
+// Menubar app for local dictation + meeting transcription
 
 import SwiftUI
 import AppKit
@@ -60,7 +60,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // Set up menubar status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "pencil.and.outline", accessibilityDescription: "Draft")
+            button.image = NSImage(systemSymbolName: "mic.and.signal.meter", accessibilityDescription: "Draft")
             button.action = #selector(togglePopover)
             button.target = self
         }
@@ -72,7 +72,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         pop.delegate = self
         popover = pop
 
-        // Engine recovery on wake — hotkeys, file watchers, MLX model health check
+        // Engine recovery on wake — hotkeys and overlay state
         let wakeRecoveryObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
@@ -89,11 +89,6 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         Task { @MainActor in
             await appState.initialize()
             appState.contextCapture.registerHotkey()
-
-            // Show onboarding if first launch
-            if !UserDefaults.standard.bool(forKey: "onboarding-completed") {
-                showOnboardingWindow()
-            }
         }
     }
 
@@ -112,42 +107,20 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         appState.shutdown()
     }
 
-    func showOnboardingWindow() {
-        let controller = OnboardingWindowController()
-        controller.sessionController = sessionController
-        controller.overlayController = overlayController
-        controller.appState = appState
-        controller.show()
-        onboardingController = controller
-    }
-
     @objc func togglePopover() {
         guard let button = statusItem?.button, let popover = popover else { return }
         if popover.isShown {
             popover.performClose(nil)
             popover.contentViewController = nil
         } else {
-            // Pure AppKit controller — no NSHostingController, no AttributeGraph corruption risk
+            // Pure AppKit controller — no long-lived NSHostingController state.
             popover.contentViewController = nil
-            // Check if onboarding is needed — use SwiftUI bridge temporarily (Phase 3 converts)
-            if !appState.styleEngine.hasCompletedOnboarding {
-                #if BETA_BUILD
-                if !PermissionsOnboardingView.hasCompleted {
-                    popover.contentViewController = NSHostingController(
-                        rootView: PermissionsOnboardingView(onComplete: {
-                            PermissionsOnboardingView.markCompleted()
-                        })
-                    )
-                } else {
-                    popover.contentViewController = NSHostingController(
-                        rootView: StyleOnboardingView(styleEngine: appState.styleEngine)
-                    )
-                }
-                #else
+            if !PermissionsOnboardingView.hasCompleted {
                 popover.contentViewController = NSHostingController(
-                    rootView: StyleOnboardingView(styleEngine: appState.styleEngine, localInference: appState.localInference)
+                    rootView: PermissionsOnboardingView(onComplete: {
+                        PermissionsOnboardingView.markCompleted()
+                    })
                 )
-                #endif
             } else {
                 popover.contentViewController = MenuBarPanelController(appState: appState)
             }
