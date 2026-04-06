@@ -1,8 +1,7 @@
 // ParakeetEngine.swift
-// FluidAudio-based STT engine — CoreML Parakeet TDT V3 for batch transcription,
-// Parakeet EOU 120M for streaming live display.
+// FluidAudio-based STT engine — CoreML Parakeet TDT V3 for batch transcription.
 // AVAudioEngine tap → NSLock-batched samples → resampled to 16kHz → AsrManager.transcribe()
-// for final batch inference. StreamingEouAsrManager provides display-only live text.
+// for final batch inference.
 
 import AppKit
 import AVFoundation
@@ -38,7 +37,9 @@ class ParakeetEngine: ObservableObject {
     private var isEnginePrewarmed = false
     private var wakeObserver: NSObjectProtocol?
 
-    // Parakeet EOU streaming (display-only live text — TDT V3 owns the final transcript)
+    // Live streaming text is intentionally disabled — the product focuses on
+    // stable capture and final transcription rather than provisional text.
+    private let liveDisplayEnabled = false
     private nonisolated(unsafe) var eouManager: StreamingEouAsrManager?
     private var committedStreamText: String = ""
     // Accumulates resampled 16kHz samples between tap callbacks before flushing to EOU.
@@ -148,8 +149,9 @@ class ParakeetEngine: ObservableObject {
                 message: "Parakeet ASR models initialized successfully",
                 context: ["load_source": loadSource])
 
-            // Load Parakeet EOU streaming model for live display (~120MB, much smaller than TDT V3)
-            await initializeEouModel()
+            if liveDisplayEnabled {
+                await initializeEouModel()
+            }
 
         } catch {
             modelDownloadState = .failed(error.localizedDescription)
@@ -420,9 +422,8 @@ class ParakeetEngine: ObservableObject {
                   let channelData = buffer.floatChannelData?[0] else { return }
             let frameLength = Int(buffer.frameLength)
 
-            // Consumer 1: Parakeet EOU streaming (live display)
-            // Resample to 16kHz, accumulate, flush in ~320ms chunks to StreamingEouAsrManager
-            if let eou = self.eouManager {
+            // Consumer 1: optional live streaming display (currently disabled).
+            if self.liveDisplayEnabled, let eou = self.eouManager {
                 let rawSamples = Array(UnsafeBufferPointer(start: channelData, count: frameLength))
                 let resampled = AudioResampler.resample(rawSamples, from: self.nativeSampleRate, to: 16000)
                 self.streamingSamplesLock.lock()
@@ -499,10 +500,12 @@ class ParakeetEngine: ObservableObject {
         isRecording = true
         liveTranscript = ""
         committedStreamText = ""
-        streamingSamplesLock.lock()
-        streamingSampleBuffer.removeAll(keepingCapacity: true)
-        streamingSamplesLock.unlock()
-        Task { await eouManager?.reset() }
+        if liveDisplayEnabled {
+            streamingSamplesLock.lock()
+            streamingSampleBuffer.removeAll(keepingCapacity: true)
+            streamingSamplesLock.unlock()
+            Task { await eouManager?.reset() }
+        }
         print("🎤 PARAKEET | recording started (\(inputDeviceName), \(nativeSampleRate)Hz)")
 
         // Watchdog: detect zombie audio engine (running but no samples flowing after sleep/wake).
@@ -573,16 +576,17 @@ class ParakeetEngine: ObservableObject {
         guard isRecording else { return }
         audioWatchdogTask?.cancel()
         audioWatchdogTask = nil
-        // Flush any remaining EOU streaming samples before stopping
-        streamingSamplesLock.lock()
-        let remainingEou: [Float] = streamingSampleBuffer
-        streamingSampleBuffer.removeAll(keepingCapacity: true)
-        streamingSamplesLock.unlock()
-        if let eou = eouManager, !remainingEou.isEmpty, let pcm = makePCMBuffer(from: remainingEou) {
-            Task {
-                do { _ = try await eou.process(audioBuffer: pcm) }
-                catch { EventReporter.shared.capture(level: .warning, engine: "parakeet",
-                    event: "eou_process_error", message: error.localizedDescription) }
+        if liveDisplayEnabled {
+            streamingSamplesLock.lock()
+            let remainingEou: [Float] = streamingSampleBuffer
+            streamingSampleBuffer.removeAll(keepingCapacity: true)
+            streamingSamplesLock.unlock()
+            if let eou = eouManager, !remainingEou.isEmpty, let pcm = makePCMBuffer(from: remainingEou) {
+                Task {
+                    do { _ = try await eou.process(audioBuffer: pcm) }
+                    catch { EventReporter.shared.capture(level: .warning, engine: "parakeet",
+                        event: "eou_process_error", message: error.localizedDescription) }
+                }
             }
         }
         audioEngine.inputNode.removeTap(onBus: 0)
@@ -746,10 +750,12 @@ class ParakeetEngine: ObservableObject {
         audioWatchdogTask?.cancel()
         audioWatchdogTask = nil
         if isRecording {
-            streamingSamplesLock.lock()
-            streamingSampleBuffer.removeAll(keepingCapacity: true)
-            streamingSamplesLock.unlock()
-            Task { await eouManager?.reset() }
+            if liveDisplayEnabled {
+                streamingSamplesLock.lock()
+                streamingSampleBuffer.removeAll(keepingCapacity: true)
+                streamingSamplesLock.unlock()
+                Task { await eouManager?.reset() }
+            }
             audioEngine.inputNode.removeTap(onBus: 0)
             isRecording = false
             audioLevel = 0
