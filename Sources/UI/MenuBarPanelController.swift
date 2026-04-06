@@ -66,7 +66,25 @@ final class MenuBarPanelController: NSViewController {
 
         // Recent Meetings — scans ~/Library/Application Support/Draft/meetings/transcripts
         // each time the popover opens (no subscription; list is short).
-        content.recentMeetingsView.update(meetings: RecentMeetingsScanner.loadRecent())
+        if #available(macOS 14.0, *) {
+            content.recentMeetingsView.update(
+                meetings: RecentMeetingsScanner.loadRecent(),
+                failedMeetings: appState.meetingSession.failedMeetings,
+                onRetryFailedMeeting: { [weak self] id in
+                    self?.appState.meetingSession.retryFailedMeeting(id: id)
+                },
+                onDismissFailedMeeting: { [weak self] id in
+                    self?.appState.meetingSession.dismissFailedMeeting(id: id)
+                }
+            )
+        } else {
+            content.recentMeetingsView.update(
+                meetings: RecentMeetingsScanner.loadRecent(),
+                failedMeetings: [],
+                onRetryFailedMeeting: { _ in },
+                onDismissFailedMeeting: { _ in }
+            )
+        }
 
         content.needsLayout = true
     }
@@ -114,5 +132,21 @@ final class MenuBarPanelController: NSViewController {
                 self?.contentView?.hotkeyErrorBanner.update(error: error)
             }
             .store(in: &subscriptions)
+
+        if #available(macOS 14.0, *) {
+            appState.meetingSession.$lastSavedTranscriptURL
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in
+                    self?.refreshAll()
+                }
+                .store(in: &subscriptions)
+
+            appState.meetingSession.$failedMeetings
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in
+                    self?.refreshAll()
+                }
+                .store(in: &subscriptions)
+        }
     }
 }

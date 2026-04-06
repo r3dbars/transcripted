@@ -82,10 +82,14 @@ final class MenuBarRecentMeetingsView: NSView {
 
     private let headerLabel = NSTextField(labelWithString: "Recent Meetings")
     private let emptyLabel = NSTextField(labelWithString: "No meetings yet — press ⌥M to record one.")
+    private let failedHeaderLabel = NSTextField(labelWithString: "Needs Attention")
+    private let failedContainer = NSView()
     private let listContainer = NSView()
 
     private var rowViews: [RecentMeetingRowView] = []
+    private var failedRowViews: [FailedMeetingRowView] = []
     private var items: [RecentMeetingItem] = []
+    private var failedItems: [MeetingSessionController.FailedMeetingItem] = []
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -100,10 +104,16 @@ final class MenuBarRecentMeetingsView: NSView {
         headerLabel.textColor = MenuTokens.textPrimaryNS
         addSubview(headerLabel)
 
+        failedHeaderLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        failedHeaderLabel.textColor = MenuTokens.textPrimaryNS
+        failedHeaderLabel.isHidden = true
+        addSubview(failedHeaderLabel)
+
         emptyLabel.font = NSFont.systemFont(ofSize: 12)
         emptyLabel.textColor = MenuTokens.textMutedNS
         addSubview(emptyLabel)
 
+        addSubview(failedContainer)
         addSubview(listContainer)
     }
 
@@ -118,12 +128,45 @@ final class MenuBarRecentMeetingsView: NSView {
             height: headerH
         )
 
+        var cursorY = bounds.height - headerH - 8
+
+        if failedItems.isEmpty {
+            failedHeaderLabel.isHidden = true
+            failedContainer.isHidden = true
+        } else {
+            failedHeaderLabel.isHidden = false
+            failedContainer.isHidden = false
+            failedHeaderLabel.frame = NSRect(x: 0, y: cursorY - 18, width: bounds.width, height: 18)
+            cursorY -= 24
+
+            let rowHeight: CGFloat = 48
+            let rowSpacing: CGFloat = 6
+            let totalFailedHeight = CGFloat(failedRowViews.count) * rowHeight
+                + CGFloat(max(0, failedRowViews.count - 1)) * rowSpacing
+
+            failedContainer.frame = NSRect(
+                x: 0,
+                y: cursorY - totalFailedHeight,
+                width: bounds.width,
+                height: totalFailedHeight
+            )
+
+            var failedY = totalFailedHeight
+            for row in failedRowViews {
+                failedY -= rowHeight
+                row.frame = NSRect(x: 0, y: failedY, width: failedContainer.bounds.width, height: rowHeight)
+                failedY -= rowSpacing
+            }
+
+            cursorY = failedContainer.frame.minY - 12
+        }
+
         if items.isEmpty {
             listContainer.isHidden = true
             emptyLabel.isHidden = false
             emptyLabel.frame = NSRect(
                 x: 0,
-                y: bounds.height - headerH - 22,
+                y: cursorY - 18,
                 width: bounds.width,
                 height: 18
             )
@@ -133,7 +176,7 @@ final class MenuBarRecentMeetingsView: NSView {
         emptyLabel.isHidden = true
         listContainer.isHidden = false
 
-        let listTop = bounds.height - headerH - 8
+        let listTop = cursorY
         let rowHeight: CGFloat = 34
         let rowSpacing: CGFloat = 4
         let totalRowsHeight = CGFloat(rowViews.count) * rowHeight
@@ -159,13 +202,21 @@ final class MenuBarRecentMeetingsView: NSView {
         }
     }
 
-    func update(meetings: [RecentMeetingItem]) {
+    func update(
+        meetings: [RecentMeetingItem],
+        failedMeetings: [MeetingSessionController.FailedMeetingItem],
+        onRetryFailedMeeting: @escaping (UUID) -> Void,
+        onDismissFailedMeeting: @escaping (UUID) -> Void
+    ) {
         self.items = meetings
+        self.failedItems = failedMeetings
 
         // Rebuild rows from scratch — the list is short (5 items) so there is
         // no value in recycling.
         listContainer.subviews.forEach { $0.removeFromSuperview() }
         rowViews.removeAll()
+        failedContainer.subviews.forEach { $0.removeFromSuperview() }
+        failedRowViews.removeAll()
 
         for item in meetings {
             let row = RecentMeetingRowView(item: item)
@@ -173,15 +224,36 @@ final class MenuBarRecentMeetingsView: NSView {
             rowViews.append(row)
         }
 
+        for item in failedMeetings {
+            let row = FailedMeetingRowView(
+                item: item,
+                onRetry: { onRetryFailedMeeting(item.id) },
+                onDismiss: { onDismissFailedMeeting(item.id) }
+            )
+            failedContainer.addSubview(row)
+            failedRowViews.append(row)
+        }
+
         needsLayout = true
     }
 
     var intrinsicHeight: CGFloat {
         let headerBlock: CGFloat = 20 + 8
-        if items.isEmpty { return headerBlock + 18 }
+        let failedBlock: CGFloat
+        if failedItems.isEmpty {
+            failedBlock = 0
+        } else {
+            let rowHeight: CGFloat = 48
+            let rowSpacing: CGFloat = 6
+            failedBlock = 18 + 6
+                + CGFloat(failedRowViews.count) * rowHeight
+                + CGFloat(max(0, failedRowViews.count - 1)) * rowSpacing
+                + 12
+        }
+        if items.isEmpty { return headerBlock + failedBlock + 18 }
         let rowHeight: CGFloat = 34
         let rowSpacing: CGFloat = 4
-        return headerBlock
+        return headerBlock + failedBlock
             + CGFloat(rowViews.count) * rowHeight
             + CGFloat(max(0, rowViews.count - 1)) * rowSpacing
     }
@@ -270,4 +342,91 @@ final class RecentMeetingRowView: NSView {
     @objc private func handleOpen() {
         NSWorkspace.shared.open(item.transcriptURL)
     }
+}
+
+// MARK: - Failed meeting row
+
+@MainActor
+final class FailedMeetingRowView: NSView {
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let errorLabel = NSTextField(labelWithString: "")
+    private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
+    private let dismissButton = NSButton(title: "Dismiss", target: nil, action: nil)
+    private let onRetry: () -> Void
+    private let onDismiss: () -> Void
+
+    init(
+        item: MeetingSessionController.FailedMeetingItem,
+        onRetry: @escaping () -> Void,
+        onDismiss: @escaping () -> Void
+    ) {
+        self.onRetry = onRetry
+        self.onDismiss = onDismiss
+        super.init(frame: .zero)
+        setupViews(item: item)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func setupViews(item: MeetingSessionController.FailedMeetingItem) {
+        wantsLayer = true
+        layer?.cornerRadius = MenuTokens.cardCornerRadius
+        layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.08).cgColor
+        layer?.borderColor = NSColor.systemOrange.withAlphaComponent(0.25).cgColor
+        layer?.borderWidth = 1
+
+        titleLabel.stringValue = item.title
+        titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        titleLabel.textColor = MenuTokens.textPrimaryNS
+        addSubview(titleLabel)
+
+        errorLabel.stringValue = item.errorMessage
+        errorLabel.font = NSFont.systemFont(ofSize: 10)
+        errorLabel.textColor = MenuTokens.textSecondaryNS
+        errorLabel.lineBreakMode = .byTruncatingTail
+        errorLabel.maximumNumberOfLines = 1
+        addSubview(errorLabel)
+
+        retryButton.bezelStyle = .inline
+        retryButton.font = NSFont.systemFont(ofSize: 11)
+        retryButton.target = self
+        retryButton.action = #selector(handleRetry)
+        retryButton.isEnabled = item.isRetryable
+        retryButton.title = item.isRetryable ? "Retry" : "Not Retryable"
+        addSubview(retryButton)
+
+        dismissButton.bezelStyle = .inline
+        dismissButton.font = NSFont.systemFont(ofSize: 11)
+        dismissButton.target = self
+        dismissButton.action = #selector(handleDismiss)
+        addSubview(dismissButton)
+    }
+
+    override func layout() {
+        super.layout()
+        let pad: CGFloat = 10
+        let dismissSize = dismissButton.fittingSize
+        let retrySize = retryButton.fittingSize
+
+        dismissButton.frame = NSRect(
+            x: bounds.width - pad - dismissSize.width,
+            y: 8,
+            width: dismissSize.width,
+            height: dismissSize.height
+        )
+        retryButton.frame = NSRect(
+            x: dismissButton.frame.minX - 8 - retrySize.width,
+            y: 8,
+            width: retrySize.width,
+            height: retrySize.height
+        )
+
+        let textWidth = retryButton.frame.minX - pad - 8
+        titleLabel.frame = NSRect(x: pad, y: bounds.height - 20, width: textWidth, height: 14)
+        errorLabel.frame = NSRect(x: pad, y: 10, width: textWidth, height: 12)
+    }
+
+    @objc private func handleRetry() { onRetry() }
+    @objc private func handleDismiss() { onDismiss() }
 }

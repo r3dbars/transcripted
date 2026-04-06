@@ -94,6 +94,8 @@ private final class ModelDownloadRow: NSView {
     func update(label: String, detail: String, isReady: Bool, state: Any) {
         nameLabel.stringValue = label
         detailLabel.stringValue = detail
+        statusLabel.textColor = MenuTokens.textSecondaryNS
+        statusLabel.toolTip = nil
 
         if isReady {
             checkmark.isHidden = false
@@ -107,24 +109,6 @@ private final class ModelDownloadRow: NSView {
 
         if let ps = state as? ParakeetModelState {
             switch ps {
-            case .downloading(let p):
-                statusLabel.stringValue = "\(Int(p * 100))%"
-                progressBar.isHidden = false
-                progressBar.doubleValue = p
-            case .loading:
-                statusLabel.stringValue = "Loading..."
-                progressBar.isHidden = true
-            case .failed(let reason):
-                statusLabel.stringValue = "Failed"
-                statusLabel.textColor = NSColor.systemRed
-                statusLabel.toolTip = reason
-                progressBar.isHidden = true
-            default:
-                statusLabel.stringValue = "Waiting..."
-                progressBar.isHidden = true
-            }
-        } else if let ms = state as? ModelState {
-            switch ms {
             case .downloading(let p):
                 statusLabel.stringValue = "\(Int(p * 100))%"
                 progressBar.isHidden = false

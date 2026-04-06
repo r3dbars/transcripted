@@ -10,17 +10,13 @@ swiftc \
     Tests/TestHelpers.swift \
     Tests/TestRunner.swift \
     Tests/CapturedContextTests.swift \
-    Tests/PlatformFormatterTests.swift \
     Tests/RefusalDetectionTests.swift \
     Tests/StyleUtilsTests.swift \
-    Tests/InsightCardTests.swift \
     Tests/DiffSummaryTests.swift \
     Sources/Capture/CapturedContext.swift \
-    Sources/Draft/PlatformFormatter.swift \
     Sources/Draft/DraftUtils.swift \
     Sources/Style/StyleUtils.swift \
     Sources/DraftConstants.swift \
-    Sources/Analysis/InsightCard.swift \
     Sources/Draft/DiffSummary.swift \
     -framework AppKit \
     -parse-as-library \

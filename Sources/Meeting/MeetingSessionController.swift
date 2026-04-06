@@ -25,18 +25,12 @@ import TranscriptedCore
 @available(macOS 14.0, *)
 @MainActor
 final class MeetingSessionController: ObservableObject {
-    struct LiveTranscriptLine: Identifiable, Equatable {
-        enum Source: Equatable {
-            case mic
-            case system
-        }
-
+    struct FailedMeetingItem: Identifiable, Equatable {
         let id: UUID
-        var source: Source
-        var text: String
-        var isPartial: Bool
-        var startedAt: TimeInterval
-        var updatedAt: Date
+        let timestamp: Date
+        let title: String
+        let errorMessage: String
+        let isRetryable: Bool
     }
 
     // MARK: - Published state (for meeting UI bindings)
@@ -62,11 +56,7 @@ final class MeetingSessionController: ObservableObject {
     @Published private(set) var lastSavedTranscriptURL: URL? = nil
     @Published private(set) var lastSavedTitle: String? = nil
 
-    // Live transcript preview is intentionally disabled. The authoritative
-    // meeting transcript comes from the offline pipeline after stop.
-    @Published private(set) var liveMicTranscript: String = ""
-    @Published private(set) var liveSystemTranscript: String = ""
-    @Published private(set) var liveTranscriptLines: [LiveTranscriptLine] = []
+    @Published private(set) var failedMeetings: [FailedMeetingItem] = []
 
     // MARK: - Core services (owned)
 
@@ -79,9 +69,6 @@ final class MeetingSessionController: ObservableObject {
     private let sttAdapter: MeetingSTTAdapter
     private let speakerDatabase: SpeakerDatabase
     private let downloader: MeetingModelDownloader
-
-    private let micLiveTranscriber: MeetingLiveTranscriber?
-    private let systemLiveTranscriber: MeetingLiveTranscriber?
 
     private var cancellables: Set<AnyCancellable> = []
 
@@ -150,9 +137,6 @@ final class MeetingSessionController: ObservableObject {
         // Model downloader — coordinates Parakeet + PyAnnote readiness.
         self.downloader = MeetingModelDownloader(stt: sttAdapter, diarization: diarization)
 
-        self.micLiveTranscriber = nil
-        self.systemLiveTranscriber = nil
-
         wireSubscriptions()
     }
 
@@ -161,9 +145,6 @@ final class MeetingSessionController: ObservableObject {
     /// Load STT + diarization models. Call once before the first recording.
     /// Transitions state: idle → loadingModels → ready, or → error(String).
     ///
-    /// Also loads the dual-stream live-preview EOU models in parallel —
-    /// these are non-fatal (a failure here keeps the meeting flow working,
-    /// it just disables the live transcript preview in the expanded overlay).
     func prepareModels() async {
         state = .loadingModels
         do {
@@ -184,14 +165,6 @@ final class MeetingSessionController: ObservableObject {
         }
         guard case .ready = state else { return }
 
-        // Wire up live-preview buffer routing before starting capture so
-        // no buffers are missed. Each transcriber's ingest is nonisolated
-        // and runs on the CoreAudio capture thread — copies + resamples +
-        // hands off to Task.detached internally, matching ParakeetEngine's
-        // dictation streaming path.
-        liveMicTranscript = ""
-        liveSystemTranscript = ""
-        liveTranscriptLines = []
         capture.startRecording()
         state = .recording
     }
@@ -202,13 +175,8 @@ final class MeetingSessionController: ObservableObject {
     func stopRecording() async {
         guard case .recording = state else { return }
 
-        capture.setMicLivePreviewHandler(nil)
-        capture.setSystemLivePreviewHandler(nil)
-
         let files = await capture.stopAndAwaitFiles()
         state = .transcribing
-
-        liveTranscriptLines = []
 
         guard let micURL = files.micURL else {
             state = .error("No microphone audio was captured.")
@@ -228,6 +196,20 @@ final class MeetingSessionController: ObservableObject {
     func cancelActiveTranscription() {
         taskManager.cancelAll()
         state = .ready
+    }
+
+    func retryFailedMeeting(id: UUID) {
+        Task {
+            let succeeded = await taskManager.retryFailedTranscription(failedId: id)
+            if succeeded {
+                refreshFailedMeetings()
+            }
+        }
+    }
+
+    func dismissFailedMeeting(id: UUID) {
+        failedManager.removeFailedTranscription(id: id)
+        refreshFailedMeetings()
     }
 
     // MARK: - Subscriptions
@@ -269,5 +251,26 @@ final class MeetingSessionController: ObservableObject {
         taskManager.$lastSavedTitle
             .assign(to: &$lastSavedTitle)
 
+        failedManager.$failedTranscriptions
+            .sink { [weak self] _ in
+                self?.refreshFailedMeetings()
+            }
+            .store(in: &cancellables)
+
+        refreshFailedMeetings()
+    }
+
+    private func refreshFailedMeetings() {
+        failedMeetings = failedManager.failedTranscriptions
+            .sorted(by: { $0.timestamp > $1.timestamp })
+            .map {
+                FailedMeetingItem(
+                    id: $0.id,
+                    timestamp: $0.timestamp,
+                    title: "Failed meeting from \($0.formattedTimestamp)",
+                    errorMessage: $0.shortErrorMessage,
+                    isRetryable: $0.isRetryable
+                )
+            }
     }
 }
