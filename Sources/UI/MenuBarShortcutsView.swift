@@ -1,17 +1,21 @@
 // MenuBarShortcutsView.swift
-// Pill-shaped shortcut badges for the active capture flows.
+// Compact shortcut rows for the two active capture flows.
 
 import AppKit
 
 @MainActor
 final class MenuBarShortcutsView: NSView {
-    private let pill1 = ShortcutPillView()
-    private let pill2 = ShortcutPillView()
+    private let titleLabel = NSTextField(labelWithString: "Shortcuts")
+    private let dictationRow = ShortcutRowView()
+    private let meetingRow = ShortcutRowView()
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        addSubview(pill1)
-        addSubview(pill2)
+        titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = MenuTokens.textPrimaryNS
+        addSubview(titleLabel)
+        addSubview(dictationRow)
+        addSubview(meetingRow)
     }
 
     @available(*, unavailable)
@@ -19,65 +23,70 @@ final class MenuBarShortcutsView: NSView {
 
     override func layout() {
         super.layout()
-        let pill1Size = pill1.fittingSize
-        let pill2Size = pill2.fittingSize
-        let y = (bounds.height - pill1Size.height) / 2
-        pill1.frame = NSRect(x: 0, y: y, width: pill1Size.width, height: pill1Size.height)
-        pill2.frame = NSRect(x: pill1Size.width + 12, y: y, width: pill2Size.width, height: pill2Size.height)
+        let width = bounds.width
+        titleLabel.frame = NSRect(x: 0, y: bounds.height - 16, width: width, height: 16)
+        dictationRow.frame = NSRect(x: 0, y: bounds.height - 16 - 6 - 24, width: width, height: 24)
+        meetingRow.frame = NSRect(x: 0, y: 0, width: width, height: 24)
     }
 
     func update(dictationKey: String, meetingKey: String) {
-        pill1.update(key: dictationKey, label: "Dictation")
-        pill2.update(key: meetingKey, label: "Meetings")
+        dictationRow.update(title: "Dictation", detail: "Paste spoken text", key: dictationKey)
+        meetingRow.update(title: "Meetings", detail: "Transcribe mic and system audio", key: meetingKey)
         needsLayout = true
     }
 
-    var intrinsicHeight: CGFloat { 32 }
+    var intrinsicHeight: CGFloat { 70 }
 }
 
-private final class ShortcutPillView: NSView {
-    private let keyLabel = NSTextField(labelWithString: "")
-    private let nameLabel = NSTextField(labelWithString: "")
+private final class ShortcutRowView: NSView {
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+    private let keyBadge = NSTextField(labelWithString: "")
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.cornerRadius = MenuTokens.pillCornerRadius
-        layer?.backgroundColor = MenuTokens.pillBackgroundNS.cgColor
-        layer?.borderColor = MenuTokens.pillBorderNS.cgColor
+        layer?.cornerRadius = MenuTokens.cardCornerRadius
+        layer?.backgroundColor = MenuTokens.cardBackgroundNS.cgColor
+        layer?.borderColor = MenuTokens.cardBorderNS.cgColor
         layer?.borderWidth = 1
 
-        keyLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
-        keyLabel.textColor = MenuTokens.textPrimaryNS
-        addSubview(keyLabel)
+        titleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        titleLabel.textColor = MenuTokens.textPrimaryNS
+        addSubview(titleLabel)
 
-        nameLabel.font = NSFont.systemFont(ofSize: 11)
-        nameLabel.textColor = MenuTokens.textPrimaryNS
-        addSubview(nameLabel)
+        detailLabel.font = NSFont.systemFont(ofSize: 9)
+        detailLabel.textColor = MenuTokens.textSecondaryNS
+        addSubview(detailLabel)
+
+        keyBadge.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .semibold)
+        keyBadge.textColor = MenuTokens.textPrimaryNS
+        keyBadge.alignment = .center
+        keyBadge.wantsLayer = true
+        keyBadge.layer?.cornerRadius = 6
+        keyBadge.layer?.backgroundColor = MenuTokens.pillBackgroundNS.cgColor
+        keyBadge.layer?.borderWidth = 1
+        keyBadge.layer?.borderColor = MenuTokens.pillBorderNS.cgColor
+        addSubview(keyBadge)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func update(key: String, label: String) {
-        keyLabel.stringValue = key
-        nameLabel.stringValue = label
+    func update(title: String, detail: String, key: String) {
+        titleLabel.stringValue = title
+        detailLabel.stringValue = detail
+        keyBadge.stringValue = key
         needsLayout = true
-        invalidateIntrinsicContentSize()
-    }
-
-    override var fittingSize: NSSize {
-        let kSize = keyLabel.fittingSize
-        let nSize = nameLabel.fittingSize
-        return NSSize(width: kSize.width + 4 + nSize.width + 20, height: max(kSize.height, nSize.height) + 10)
     }
 
     override func layout() {
         super.layout()
-        let kSize = keyLabel.fittingSize
-        let nSize = nameLabel.fittingSize
-        let y = (bounds.height - kSize.height) / 2
-        keyLabel.frame = NSRect(x: 10, y: y, width: kSize.width, height: kSize.height)
-        nameLabel.frame = NSRect(x: 10 + kSize.width + 4, y: y, width: nSize.width, height: nSize.height)
+        let pad: CGFloat = 9
+        let badgeWidth = max(48, keyBadge.fittingSize.width + 14)
+        keyBadge.frame = NSRect(x: bounds.width - pad - badgeWidth, y: 3, width: badgeWidth, height: 18)
+        let textWidth = keyBadge.frame.minX - pad - 8
+        titleLabel.frame = NSRect(x: pad, y: bounds.height - 14, width: textWidth, height: 12)
+        detailLabel.frame = NSRect(x: pad, y: 3, width: textWidth, height: 10)
     }
 }

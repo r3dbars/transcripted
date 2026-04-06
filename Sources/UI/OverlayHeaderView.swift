@@ -1,5 +1,5 @@
 // OverlayHeaderView.swift
-// Header bar for the floating overlay — mode label, waveform, chevron, shortcut hint
+// Header bar for the floating overlay — status label, waveform, shortcut hint
 
 import AppKit
 
@@ -8,11 +8,7 @@ final class OverlayHeaderView: NSView {
     private let modeLabel = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
     let waveformHost = WaveformHostView(frame: .zero)
-    private let chevronButton = NSButton()
     private let shortcutHint = NSTextField(labelWithString: "")
-
-    /// Called when user clicks the chevron to expand/collapse transcript
-    var onToggleTranscript: (() -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -24,7 +20,7 @@ final class OverlayHeaderView: NSView {
 
     private func setupViews() {
         // Mode label
-        modeLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        modeLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
         modeLabel.textColor = OverlayTokens.textSecondary
         modeLabel.isBezeled = false
         modeLabel.isEditable = false
@@ -43,18 +39,8 @@ final class OverlayHeaderView: NSView {
         waveformHost.isHidden = true
         addSubview(waveformHost)
 
-        // Chevron button (hidden by default)
-        chevronButton.bezelStyle = .inline
-        chevronButton.isBordered = false
-        chevronButton.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Expand")
-        chevronButton.contentTintColor = OverlayTokens.textMuted
-        chevronButton.target = self
-        chevronButton.action = #selector(chevronTapped)
-        chevronButton.isHidden = true
-        addSubview(chevronButton)
-
         // Shortcut hint
-        shortcutHint.font = NSFont.systemFont(ofSize: 10)
+        shortcutHint.font = NSFont.systemFont(ofSize: 10, weight: .medium)
         shortcutHint.textColor = OverlayTokens.textMuted
         shortcutHint.isBezeled = false
         shortcutHint.isEditable = false
@@ -98,31 +84,12 @@ final class OverlayHeaderView: NSView {
             height: hintSize.height
         )
 
-        // Chevron — left of shortcut hint (or right edge if no hint)
-        let chevronSize: CGFloat = 20
-        if !chevronButton.isHidden {
-            let chevronX = shortcutHint.stringValue.isEmpty
-                ? bounds.width - pad - chevronSize
-                : shortcutHint.frame.minX - chevronSize - 4
-            chevronButton.frame = NSRect(
-                x: chevronX,
-                y: (h - chevronSize) / 2,
-                width: chevronSize,
-                height: chevronSize
-            )
-        }
-
-        // Waveform — fills space between mode label and chevron/hint
+        // Waveform — fills space between mode label and hint
         if !waveformHost.isHidden {
             let waveLeft = modeLabel.frame.maxX + 8
-            let waveRight: CGFloat
-            if !chevronButton.isHidden {
-                waveRight = chevronButton.frame.minX - 4
-            } else if !shortcutHint.stringValue.isEmpty {
-                waveRight = shortcutHint.frame.minX - 8
-            } else {
-                waveRight = bounds.width - pad
-            }
+            let waveRight: CGFloat = !shortcutHint.stringValue.isEmpty
+                ? shortcutHint.frame.minX - 8
+                : bounds.width - pad
             waveformHost.frame = NSRect(
                 x: waveLeft,
                 y: (h - 20) / 2,
@@ -130,10 +97,6 @@ final class OverlayHeaderView: NSView {
                 height: 20
             )
         }
-    }
-
-    @objc private func chevronTapped() {
-        onToggleTranscript?()
     }
 
     // MARK: - Update Methods
@@ -149,32 +112,25 @@ final class OverlayHeaderView: NSView {
         draftShortcutHint: String,
         dictationShortcutHint: String
     ) {
+        let _ = transcriptExpanded
+        let _ = draftShortcutHint
         // Mode label text + color
         switch (state, mode) {
-        case (.listening, .draft):
-            modeLabel.stringValue = "Draft"
-            modeLabel.textColor = OverlayTokens.textSecondary
         case (.listening, .dictation):
-            modeLabel.stringValue = "Dictate"
-            modeLabel.textColor = OverlayTokens.textSecondary
-        case (.drafting, .dictation):
-            modeLabel.stringValue = "Polishing..."
+            modeLabel.stringValue = "Listening"
             modeLabel.textColor = OverlayTokens.textPrimary
-        case (.drafting, _), (.streaming, _):
-            modeLabel.stringValue = "Drafting..."
-            modeLabel.textColor = OverlayTokens.textSecondary
+        case (.drafting, .dictation):
+            modeLabel.stringValue = "Transcribing"
+            modeLabel.textColor = OverlayTokens.textPrimary
         case (.loading, _):
-            modeLabel.stringValue = "Loading voice model..."
+            modeLabel.stringValue = "Preparing"
             modeLabel.textColor = OverlayTokens.textSecondary
-        case (.review, _):
-            modeLabel.stringValue = "Draft"
-            modeLabel.textColor = OverlayTokens.textSecondary
-        case (.diffFlash, _):
-            modeLabel.stringValue = "Review Edits"
-            modeLabel.textColor = OverlayTokens.accentGreen
         case (.idle, _):
-            modeLabel.stringValue = "Draft"
+            modeLabel.stringValue = "Dictation"
             modeLabel.textColor = OverlayTokens.textMuted
+        default:
+            modeLabel.stringValue = "Dictation"
+            modeLabel.textColor = OverlayTokens.textSecondary
         }
 
         // Spinner visibility
@@ -187,22 +143,20 @@ final class OverlayHeaderView: NSView {
         waveformHost.isHidden = !showWaveform
         waveformHost.isActive = showWaveform
 
-        // Dictation is now intentionally compact: waveform + timer/shortcut
-        // provide enough confidence without opening a live transcript pane.
-        chevronButton.isHidden = !(state == .listening && mode == .draft)
-        let chevronImage = transcriptExpanded ? "chevron.up" : "chevron.down"
-        chevronButton.image = NSImage(systemSymbolName: chevronImage, accessibilityDescription: nil)
-
         // Shortcut hint
         switch (state, mode) {
-        case (.listening, .draft):
-            shortcutHint.stringValue = "\(draftShortcutHint) to stop"
         case (.listening, .dictation):
             shortcutHint.stringValue = "\(dictationShortcutHint) to stop"
+            shortcutHint.textColor = OverlayTokens.textSecondary.withAlphaComponent(0.96)
         case (.loading, _):
-            shortcutHint.stringValue = "Esc to cancel"
+            shortcutHint.stringValue = "Please wait"
+            shortcutHint.textColor = OverlayTokens.textSecondary
+        case (.drafting, .dictation):
+            shortcutHint.stringValue = ""
+            shortcutHint.textColor = OverlayTokens.textMuted
         default:
             shortcutHint.stringValue = ""
+            shortcutHint.textColor = OverlayTokens.textMuted
         }
 
         needsLayout = true

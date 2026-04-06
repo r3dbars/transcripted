@@ -48,6 +48,7 @@ final class WaveformDrawingLayer: CALayer {
     var buffer = WaveformRingBuffer(capacity: 150)
     var lastSampleTime: CFAbsoluteTime = 0
     var currentLevel: Float = 0
+    var tintColor: NSColor = .white
 
     // Bar geometry — matches original SwiftUI waveform
     let barWidth: CGFloat = 2
@@ -105,8 +106,8 @@ final class WaveformDrawingLayer: CALayer {
             )
 
             // Opacity: subtle brightness variation with amplitude
-            let opacity = 0.4 + CGFloat(sampleValue) * 0.45
-            ctx.setFillColor(NSColor.white.withAlphaComponent(opacity).cgColor)
+            let opacity = 0.42 + CGFloat(sampleValue) * 0.48
+            ctx.setFillColor(tintColor.withAlphaComponent(opacity).cgColor)
 
             let path = CGPath(roundedRect: rect, cornerWidth: barCornerRadius, cornerHeight: barCornerRadius, transform: nil)
             ctx.addPath(path)
@@ -130,6 +131,10 @@ final class WaveformHostView: NSView {
         didSet { drawingLayer.currentLevel = level }
     }
 
+    var tintColor: NSColor = .white {
+        didSet { drawingLayer.tintColor = tintColor }
+    }
+
     /// Start/stop the render timer. Stop when not recording to avoid unnecessary GPU work.
     var isActive: Bool = false {
         didSet {
@@ -149,6 +154,7 @@ final class WaveformHostView: NSView {
         super.init(frame: frame)
         wantsLayer = true
         drawingLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2.0
+        drawingLayer.tintColor = tintColor
         drawingLayer.frame = bounds
         layer?.addSublayer(drawingLayer)
     }

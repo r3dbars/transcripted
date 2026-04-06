@@ -62,12 +62,10 @@ final class MeetingOverlayRootView: NSView {
     private let statusDot = NSView()
     private let titleLabel = NSTextField(labelWithString: "Meeting")
     private let timerLabel = NSTextField(labelWithString: "00:00")
-    // Two stacked audio level bars: mic on top (red), system audio on bottom (blue).
-    private let micLevelBar = NSView()
-    private let micLevelFill = NSView()
-    private let systemLevelBar = NSView()
-    private let systemLevelFill = NSView()
-    private let participantsLabel = NSTextField(labelWithString: "")
+    private let micLabel = NSTextField(labelWithString: "Mic")
+    private let systemLabel = NSTextField(labelWithString: "System audio")
+    private let micWaveform = WaveformHostView(frame: .zero)
+    private let systemWaveform = WaveformHostView(frame: .zero)
     private let closeButton = NSButton()
     private let chevronButton = NSButton()
 
@@ -87,6 +85,8 @@ final class MeetingOverlayRootView: NSView {
         layer?.cornerRadius = MeetingOverlayTokens.cornerRadius
         layer?.masksToBounds = true
         layer?.backgroundColor = MeetingOverlayTokens.panelBg.cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = MeetingOverlayTokens.panelStroke.cgColor
 
         // Record status dot (red during recording, orange while prep/transcribe, grey idle).
         statusDot.wantsLayer = true
@@ -94,41 +94,32 @@ final class MeetingOverlayRootView: NSView {
         statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotIdle.cgColor
         addSubview(statusDot)
 
-        titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         titleLabel.textColor = MeetingOverlayTokens.textPrimary
         addSubview(titleLabel)
 
-        timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         timerLabel.textColor = MeetingOverlayTokens.textSecondary
         addSubview(timerLabel)
 
-        // Mic + system audio level bars (stacked). Mic on top (red), system on bottom (blue).
-        for bar in [micLevelBar, systemLevelBar] {
-            bar.wantsLayer = true
-            bar.layer?.cornerRadius = 1.5
-            bar.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
-            addSubview(bar)
-        }
+        micLabel.font = NSFont.systemFont(ofSize: 8, weight: .medium)
+        micLabel.textColor = MeetingOverlayTokens.textSecondary
+        addSubview(micLabel)
 
-        micLevelFill.wantsLayer = true
-        micLevelFill.layer?.cornerRadius = 1.5
-        micLevelFill.layer?.backgroundColor = MeetingOverlayTokens.accentRed.cgColor
-        micLevelBar.addSubview(micLevelFill)
+        systemLabel.font = NSFont.systemFont(ofSize: 8, weight: .medium)
+        systemLabel.textColor = MeetingOverlayTokens.textSecondary
+        addSubview(systemLabel)
 
-        systemLevelFill.wantsLayer = true
-        systemLevelFill.layer?.cornerRadius = 1.5
-        systemLevelFill.layer?.backgroundColor = MeetingOverlayTokens.accentBlue.cgColor
-        systemLevelBar.addSubview(systemLevelFill)
+        micWaveform.tintColor = MeetingOverlayTokens.waveformTint
+        addSubview(micWaveform)
 
-        participantsLabel.font = NSFont.systemFont(ofSize: 11)
-        participantsLabel.textColor = MeetingOverlayTokens.textSecondary
-        participantsLabel.lineBreakMode = .byTruncatingTail
-        addSubview(participantsLabel)
+        systemWaveform.tintColor = MeetingOverlayTokens.waveformTint
+        addSubview(systemWaveform)
 
         // Close/stop button — square X at the right edge.
         if let img = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Stop meeting") {
             closeButton.image = img
-            closeButton.contentTintColor = MeetingOverlayTokens.textSecondary
+            closeButton.contentTintColor = MeetingOverlayTokens.textPrimary
         }
         closeButton.bezelStyle = .inline
         closeButton.isBordered = false
@@ -151,7 +142,7 @@ final class MeetingOverlayRootView: NSView {
         super.layout()
         let pad: CGFloat = 12
         let dotSize = MeetingOverlayTokens.dotSize
-        let headerHeight = MeetingOverlayTokens.panelHeight  // 52 — header row is always this tall
+        let headerHeight = MeetingOverlayTokens.panelHeight
 
         // Header row sits at the top of the view, even when the panel
         // grows to show the expanded transcript area. Using bounds.maxY
@@ -170,7 +161,7 @@ final class MeetingOverlayRootView: NSView {
         titleLabel.frame = NSRect(
             x: titleX,
             y: headerMidY - titleSize.height / 2,
-            width: min(titleSize.width, 140),
+            width: min(titleSize.width, 150),
             height: titleSize.height
         )
 
@@ -201,42 +192,44 @@ final class MeetingOverlayRootView: NSView {
             height: chevronSize
         )
 
-        // Two level bars (mic top, system bottom) fill the horizontal
-        // space between timer and the close button. Participants strip sits beneath.
-        let levelBarX = timerLabel.frame.maxX + 12
+        // Two waveform strips (mic top, system bottom) mirror the dictation
+        // visualizer language, with small source labels for clarity.
+        let labelX = timerLabel.frame.maxX + 12
+        let systemLabelSize = systemLabel.fittingSize
+        let labelWidth = max(24, systemLabelSize.width)
         let levelBarRight = closeButton.frame.minX - 10
+        let levelBarX = labelX + labelWidth + 8
         let levelBarWidth = max(0, levelBarRight - levelBarX)
-        let levelBarHeight: CGFloat = 3
-        let levelBarGap: CGFloat = 1
+        let levelBarHeight: CGFloat = 10
+        let levelBarGap: CGFloat = 2
+        let micY = headerMidY + 1
+        let systemY = headerMidY + 1 - levelBarHeight - levelBarGap
 
-        micLevelBar.frame = NSRect(
+        micLabel.frame = NSRect(
+            x: labelX,
+            y: micY + (levelBarHeight - micLabel.fittingSize.height) / 2,
+            width: labelWidth,
+            height: micLabel.fittingSize.height
+        )
+        systemLabel.frame = NSRect(
+            x: labelX,
+            y: systemY + (levelBarHeight - systemLabel.fittingSize.height) / 2,
+            width: labelWidth,
+            height: systemLabel.fittingSize.height
+        )
+
+        micWaveform.frame = NSRect(
             x: levelBarX,
-            y: headerMidY + 3,
+            y: micY,
             width: levelBarWidth,
             height: levelBarHeight
         )
-        systemLevelBar.frame = NSRect(
+        systemWaveform.frame = NSRect(
             x: levelBarX,
-            y: headerMidY + 3 - levelBarHeight - levelBarGap,
+            y: systemY,
             width: levelBarWidth,
             height: levelBarHeight
         )
-
-        // Participants label sits beneath both level bars.
-        let participantsHeight: CGFloat = 14
-        participantsLabel.frame = NSRect(
-            x: levelBarX,
-            y: headerMidY - participantsHeight - 2,
-            width: levelBarWidth,
-            height: participantsHeight
-        )
-
-        // Fill widths reflect latest levels for each source.
-        let micFillWidth = micLevelBar.bounds.width * CGFloat(currentMicLevel)
-        micLevelFill.frame = NSRect(x: 0, y: 0, width: micFillWidth, height: micLevelBar.bounds.height)
-
-        let systemFillWidth = systemLevelBar.bounds.width * CGFloat(currentSystemLevel)
-        systemLevelFill.frame = NSRect(x: 0, y: 0, width: systemFillWidth, height: systemLevelBar.bounds.height)
 
     }
 
@@ -261,7 +254,7 @@ final class MeetingOverlayRootView: NSView {
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotPrep.cgColor
         case .recording:
             titleLabel.stringValue = "Recording meeting"
-            statusDot.layer?.backgroundColor = MeetingOverlayTokens.accentRed.cgColor
+            statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotRecording.cgColor
         case .transcribing:
             titleLabel.stringValue = "Transcribing…"
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotPrep.cgColor
@@ -276,14 +269,12 @@ final class MeetingOverlayRootView: NSView {
         timerLabel.stringValue = formatDuration(duration)
         currentMicLevel = max(0, min(1, micLevel))
         currentSystemLevel = max(0, min(1, systemLevel))
+        micWaveform.level = currentMicLevel
+        systemWaveform.level = currentSystemLevel
+        let shouldAnimate = state == .recording
+        micWaveform.isActive = shouldAnimate
+        systemWaveform.isActive = shouldAnimate
 
-        if participants.isEmpty {
-            participantsLabel.stringValue = ""
-        } else {
-            participantsLabel.stringValue = participants.joined(separator: ", ")
-        }
-
-        // Chevron glyph tracks expansion state.
         needsLayout = true
     }
 
@@ -304,19 +295,20 @@ final class MeetingOverlayRootView: NSView {
 
 @available(macOS 14.0, *)
 enum MeetingOverlayTokens {
-    static let panelBg       = NSColor.black.withAlphaComponent(0.78)
-    static let accentRed     = NSColor(red: 0.95, green: 0.22, blue: 0.22, alpha: 1.0)   // mic audio
-    static let accentBlue    = NSColor(red: 0.40, green: 0.75, blue: 0.90, alpha: 1.0)   // system audio
-    static let textPrimary   = NSColor.white
-    static let textSecondary = NSColor(white: 0.65, alpha: 1.0)
-    static let dotIdle       = NSColor(white: 0.45, alpha: 1.0)
-    static let dotPrep       = NSColor.systemOrange
+    static let panelBg       = OverlayTokens.panelBg
+    static let panelStroke   = NSColor.white.withAlphaComponent(0.08)
+    static let textPrimary   = OverlayTokens.textPrimary
+    static let textSecondary = OverlayTokens.textSecondary
+    static let waveformTint  = OverlayTokens.textPrimary
+    static let dotIdle       = OverlayTokens.textMuted
+    static let dotPrep       = OverlayTokens.textSecondary
+    static let dotRecording  = NSColor(red: 0.95, green: 0.22, blue: 0.22, alpha: 1.0)
     static let dotSaved      = NSColor.systemGreen
     static let dotError      = NSColor.systemRed
 
     static let panelWidth: CGFloat  = 360
-    static let panelHeight: CGFloat = 52          // collapsed (header row only)
-    static let cornerRadius: CGFloat = 14
+    static let panelHeight: CGFloat = 48
+    static let cornerRadius: CGFloat = OverlayTokens.cornerRadius
     static let dotSize: CGFloat     = 8
 }
 

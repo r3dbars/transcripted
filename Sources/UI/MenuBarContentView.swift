@@ -13,9 +13,6 @@ final class MenuBarContentView: NSView {
     let hotkeyErrorBanner = HotkeyErrorBanner()
     let shortcutsView = MenuBarShortcutsView(frame: .zero)
     let recentMeetingsView = MenuBarRecentMeetingsView(frame: .zero)
-
-    private let settingsButton = NSButton()
-    private var settingsPopover: NSPopover?
     let settingsView = MenuBarSettingsView(frame: .zero)
 
     weak var appState: DraftAppState?
@@ -43,17 +40,7 @@ final class MenuBarContentView: NSView {
         documentView.addSubview(hotkeyErrorBanner)
         documentView.addSubview(shortcutsView)
         documentView.addSubview(recentMeetingsView)
-
-        // Settings gear button (top-right)
-        if let img = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings") {
-            settingsButton.image = img
-            settingsButton.bezelStyle = .inline
-            settingsButton.isBordered = false
-            settingsButton.contentTintColor = MenuTokens.textSecondaryNS
-            settingsButton.target = self
-            settingsButton.action = #selector(toggleSettings)
-        }
-        addSubview(settingsButton)
+        documentView.addSubview(settingsView)
     }
 
     override func layout() {
@@ -62,9 +49,6 @@ final class MenuBarContentView: NSView {
         let w = bounds.width - pad * 2
 
         scrollView.frame = bounds
-
-        // Settings button in top-right corner
-        settingsButton.frame = NSRect(x: bounds.width - 32, y: bounds.height - 32, width: 24, height: 24)
 
         // Layout sections top-to-bottom
         var y: CGFloat = 0
@@ -88,17 +72,23 @@ final class MenuBarContentView: NSView {
             y += bannerH + 4
         }
 
-        // Divider gap + Shortcuts
-        y += 4
+        // Shortcuts
+        y += 2
         let shortcutsH = shortcutsView.intrinsicHeight
         shortcutsView.frame = NSRect(x: pad, y: y, width: w, height: shortcutsH)
         y += shortcutsH + 4
 
-        // Divider gap + Recent Meetings
-        y += 4
+        // Recent transcripts
+        y += 2
         let recentH = recentMeetingsView.intrinsicHeight
         recentMeetingsView.frame = NSRect(x: pad, y: y, width: w, height: recentH)
         y += recentH + 4
+
+        // Settings
+        y += 2
+        let settingsH = settingsView.intrinsicHeight
+        settingsView.frame = NSRect(x: pad, y: y, width: w, height: settingsH)
+        y += settingsH + 4
 
         y += pad
 
@@ -141,38 +131,22 @@ final class MenuBarContentView: NSView {
         }
 
         // Shortcuts
-        y -= 8
+        y -= 6
         let shortcutsH = shortcutsView.intrinsicHeight
         y -= shortcutsH
         shortcutsView.frame = NSRect(x: pad, y: y, width: w, height: shortcutsH)
 
-        // Recent Meetings
-        y -= 8
+        // Recent transcripts
+        y -= 6
         let recentH = recentMeetingsView.intrinsicHeight
         y -= recentH
         recentMeetingsView.frame = NSRect(x: pad, y: y, width: w, height: recentH)
 
-    }
-
-    @objc private func toggleSettings() {
-        if let pop = settingsPopover, pop.isShown {
-            pop.performClose(nil)
-            settingsPopover = nil
-            return
-        }
-
-        let pop = NSPopover()
-        pop.behavior = .transient
-        pop.contentSize = NSSize(width: 280, height: 480)
-
-        let vc = NSViewController()
-        settingsView.appState = appState
-        settingsView.frame = NSRect(x: 0, y: 0, width: 280, height: 480)
-        vc.view = settingsView
-        pop.contentViewController = vc
-
-        pop.show(relativeTo: settingsButton.bounds, of: settingsButton, preferredEdge: .minY)
-        settingsPopover = pop
+        // Settings
+        y -= 6
+        let settingsH = settingsView.intrinsicHeight
+        y -= settingsH
+        settingsView.frame = NSRect(x: pad, y: y, width: w, height: settingsH)
     }
 }
 
@@ -189,8 +163,10 @@ final class HotkeyErrorBanner: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.cornerRadius = 6
-        layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.1).cgColor
+        layer?.cornerRadius = MenuTokens.cardCornerRadius
+        layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.12).cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.systemOrange.withAlphaComponent(0.18).cgColor
         isHidden = true
 
         if let img = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Warning") {
@@ -206,6 +182,7 @@ final class HotkeyErrorBanner: NSView {
         dismissButton.bezelStyle = .inline
         dismissButton.isBordered = false
         dismissButton.font = NSFont.systemFont(ofSize: 11)
+        dismissButton.contentTintColor = MenuTokens.textPrimaryNS
         dismissButton.target = self
         dismissButton.action = #selector(dismiss)
         addSubview(dismissButton)
