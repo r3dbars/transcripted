@@ -110,6 +110,12 @@ enum DraftConstants {
     static let errorDismissDelay: UInt64 = 2_500_000_000  // 2.5 seconds
     static let noSpeechDismissDelay: UInt64 = 800_000_000  // 0.8 seconds — fast dismiss for empty recordings
 
+    // MARK: - Hotkeys
+
+    /// Minimum interval between accepted hotkey actions.
+    /// Prevents rapid repeat presses from racing session state transitions.
+    static let hotkeyActionDebounceInterval: TimeInterval = 0.2
+
     // MARK: - Training Toast
 
     /// Duration to show training toast after accepting an edited draft (nanoseconds)

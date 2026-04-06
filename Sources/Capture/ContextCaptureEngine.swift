@@ -1,12 +1,12 @@
 // ContextCaptureEngine.swift
-// Orchestrates: hotkey toggle → screenshot → session start/stop
+// Orchestrates the active capture flows: meeting hotkey + dictation tap handling.
 
 import AppKit
 import Carbon
 
 // MARK: - Carbon Hotkey Handler (C-level callback)
 
-// Global reference so the C callback can reach the session controller
+// Global reference so the C callback can reach the dictation controller
 private weak var _sharedSessionController: DraftSessionController?
 
 // Global callback for meeting hotkey (id 3). Separate from the session
@@ -14,12 +14,24 @@ private weak var _sharedSessionController: DraftSessionController?
 // Stored on the MainActor and invoked from the Carbon callback via Task.
 private var _sharedMeetingToggle: (() -> Void)?
 
+// Carbon hotkeys can fire back-to-back before Draft finishes updating its
+// session state. Ignore rapid repeats so start/stop/cancel transitions stay
+// single-shot and predictable.
+private var _lastAcceptedHotkeyTime: CFAbsoluteTime = 0
+
+private func shouldAcceptHotkeyAction(now: CFAbsoluteTime = CFAbsoluteTimeGetCurrent()) -> Bool {
+    let elapsed = now - _lastAcceptedHotkeyTime
+    guard elapsed >= DraftConstants.hotkeyActionDebounceInterval else { return false }
+    _lastAcceptedHotkeyTime = now
+    return true
+}
+
 private func hotkeyHandler(
     nextHandler: EventHandlerCallRef?,
     event: EventRef?,
     userData: UnsafeMutableRawPointer?
 )-> OSStatus {
-    // Extract which hotkey fired (id: 1 = ⌥D draft)
+    // Extract which hotkey fired.
     guard let event = event else { return noErr }
     var hotkeyID = EventHotKeyID()
     let status = GetEventParameter(
@@ -32,29 +44,20 @@ private func hotkeyHandler(
         &hotkeyID
     )
     guard status == noErr else { return noErr }
-
-    if hotkeyID.id == 1 {
-        // ⌥D — Draft mode: capture screenshot SYNCHRONOUSLY before focus shifts
-        let frontApp = NSWorkspace.shared.frontmostApplication
-        let imageData: Data? = frontApp.flatMap { ScreenCapture.captureFrontmostWindow(of: $0) }
-
+    guard shouldAcceptHotkeyAction() else {
         Task { @MainActor in
-            guard let session = _sharedSessionController else { return }
-            if session.isDictating {
-                // Cross-mode switch: cancel dictation, start draft
-                session.cancelDictation()
-                session.startSession(imageData: imageData, sourceApp: frontApp)
-            } else if session.isInSession {
-                if session.overlayController?.state == .review {
-                    session.cancelSession()
-                } else {
-                    session.stopSessionAndDraft()
-                }
-            } else {
-                session.startSession(imageData: imageData, sourceApp: frontApp)
-            }
+            EventReporter.shared.capture(
+                level: .info,
+                engine: "capture",
+                event: "hotkey_repeat_ignored",
+                message: "Ignored rapid repeat hotkey press",
+                context: ["hotkey_id": "\(hotkeyID.id)"]
+            )
         }
-    } else if hotkeyID.id == 3 {
+        return noErr
+    }
+
+    if hotkeyID.id == 3 {
         // ⌥M — Meeting mode: toggle meeting recording.
         // No screenshot, no cross-mode switching with draft/dictation.
         Task { @MainActor in
@@ -157,7 +160,6 @@ class ContextCaptureEngine: ObservableObject {
     private let rightOptionDetector = RightOptionTapDetector()
 
     /// Human-readable display strings for current shortcuts (drives MenuBarPanel pills + overlay hints)
-    @Published var draftShortcutDisplay: String = HotkeyPreferences.displayString(for: HotkeyPreferences.draftBinding())
     @Published var dictationShortcutDisplay: String = HotkeyPreferences.rightOptionDictationEnabled() ? "Right ⌥" : HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
     @Published var meetingShortcutDisplay: String = HotkeyPreferences.displayString(for: HotkeyPreferences.meetingBinding())
 
@@ -187,7 +189,7 @@ class ContextCaptureEngine: ObservableObject {
             return
         }
 
-        // Register for kEventHotKeyPressed (draft mode only — dictation uses right-Option tap)
+        // Register for kEventHotKeyPressed (meeting mode only — dictation uses right-Option tap)
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(
             GetApplicationEventTarget(),
@@ -198,7 +200,7 @@ class ContextCaptureEngine: ObservableObject {
             &eventHandlerRef
         )
 
-        // Register draft hotkey from saved preferences (or defaults)
+        // Register meeting hotkey from saved preferences (or defaults)
         registerHotkeysFromPreferences()
 
         // Install right Option tap detector for dictation toggle
@@ -223,7 +225,7 @@ class ContextCaptureEngine: ObservableObject {
         }
     }
 
-    /// Unregisters current draft + meeting hotkeys and re-registers with latest preferences.
+    /// Unregisters current meeting hotkey and re-registers with latest preferences.
     /// Preserves the event handler — only the key+modifier binding changes.
     /// Dictation (right-Option tap) doesn't use Carbon and needs no re-registration.
     private func reRegisterHotkeys() {
@@ -250,25 +252,8 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private func registerHotkeysFromPreferences() {
-        let draftBinding = HotkeyPreferences.draftBinding()
         let meetingBinding = HotkeyPreferences.meetingBinding()
         var errors: [String] = []
-
-        // Draft mode — hotkey ID 1 (Carbon hotkey: modifier + key)
-        let draftHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 1)  // 'DRFT'
-        let draftStatus = RegisterEventHotKey(
-            draftBinding.keyCode,
-            draftBinding.modifiers,
-            draftHotkeyID,
-            GetApplicationEventTarget(),
-            0,
-            &hotkeyRef
-        )
-        if draftStatus != noErr {
-            errors.append("Draft shortcut")
-            EventReporter.shared.capture(level: .error, engine: "capture", event: "hotkey_register_failed",
-                message: "Draft hotkey registration failed", context: ["os_status": "\(draftStatus)"])
-        }
 
         // Meeting mode — hotkey ID 3 (Carbon hotkey: modifier + key)
         let meetingHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 3)  // 'DRFT'
@@ -292,7 +277,6 @@ class ContextCaptureEngine: ObservableObject {
         hotkeyError = errors.isEmpty ? nil : "\(errors.joined(separator: " and ")) failed to register"
 
         // Update display strings
-        draftShortcutDisplay = HotkeyPreferences.displayString(for: draftBinding)
         dictationShortcutDisplay = HotkeyPreferences.rightOptionDictationEnabled()
             ? "Right ⌥"
             : HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
@@ -301,6 +285,17 @@ class ContextCaptureEngine: ObservableObject {
 
     /// Handles a right Option key tap — same routing as ⌥Space (dictation toggle)
     private func handleRightOptionTap() {
+        guard shouldAcceptHotkeyAction() else {
+            EventReporter.shared.capture(
+                level: .info,
+                engine: "capture",
+                event: "hotkey_repeat_ignored",
+                message: "Ignored rapid repeat dictation tap",
+                context: ["hotkey_id": "right_option"]
+            )
+            return
+        }
+
         let frontApp = NSWorkspace.shared.frontmostApplication
 
         guard let session = sessionController else { return }

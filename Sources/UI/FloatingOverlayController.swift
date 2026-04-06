@@ -334,6 +334,7 @@ class FloatingOverlayController {
     }
 
     func toggleTranscript() {
+        guard activeMode == .draft else { return }
         transcriptExpanded.toggle()
         let height = transcriptExpanded ? OverlayTokens.panelMinHeight : OverlayTokens.panelCompactHeight
         resizePanelInstant(to: NSSize(width: OverlayTokens.panelWidth, height: height))

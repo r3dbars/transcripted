@@ -187,8 +187,9 @@ final class OverlayHeaderView: NSView {
         waveformHost.isHidden = !showWaveform
         waveformHost.isActive = showWaveform
 
-        // Chevron visibility (only during listening, not dictation drafting)
-        chevronButton.isHidden = state != .listening
+        // Dictation is now intentionally compact: waveform + timer/shortcut
+        // provide enough confidence without opening a live transcript pane.
+        chevronButton.isHidden = !(state == .listening && mode == .draft)
         let chevronImage = transcriptExpanded ? "chevron.up" : "chevron.down"
         chevronButton.image = NSImage(systemSymbolName: chevronImage, accessibilityDescription: nil)
 

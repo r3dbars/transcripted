@@ -6,28 +6,20 @@ import Carbon
 
 @MainActor
 final class HotkeyRecorderAppKitView: NSView {
-    private var draftRow: ShortcutRecorderRow!
     private var dictationRow: ShortcutRecorderRow!
+    private var meetingRow: ShortcutRecorderRow!
     private let resetButton = NSButton(title: "Reset to Defaults", target: nil, action: nil)
 
     private var keyMonitor: Any?
     private var recordingTarget: RecordingTarget?
 
     enum RecordingTarget {
-        case draft
         case dictation
+        case meeting
     }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-
-        draftRow = ShortcutRecorderRow(label: "Draft") { [weak self] in self?.startRecording(.draft) }
-            resetAction: { [weak self] in
-                self?.stopRecording()
-                HotkeyPreferences.save(draft: HotkeyPreferences.defaultDraft)
-                self?.refreshDisplay()
-            }
-        addSubview(draftRow)
 
         dictationRow = ShortcutRecorderRow(label: "Dictation") { [weak self] in self?.startRecording(.dictation) }
             resetAction: { [weak self] in
@@ -36,6 +28,14 @@ final class HotkeyRecorderAppKitView: NSView {
                 self?.refreshDisplay()
             }
         addSubview(dictationRow)
+
+        meetingRow = ShortcutRecorderRow(label: "Meetings") { [weak self] in self?.startRecording(.meeting) }
+            resetAction: { [weak self] in
+                self?.stopRecording()
+                HotkeyPreferences.save(meeting: HotkeyPreferences.defaultMeeting)
+                self?.refreshDisplay()
+            }
+        addSubview(meetingRow)
 
         resetButton.bezelStyle = .inline
         resetButton.isBordered = false
@@ -54,8 +54,8 @@ final class HotkeyRecorderAppKitView: NSView {
     override func layout() {
         super.layout()
         let rowH: CGFloat = 28
-        draftRow.frame = NSRect(x: 0, y: bounds.height - rowH, width: bounds.width, height: rowH)
-        dictationRow.frame = NSRect(x: 0, y: bounds.height - rowH * 2 - 4, width: bounds.width, height: rowH)
+        dictationRow.frame = NSRect(x: 0, y: bounds.height - rowH, width: bounds.width, height: rowH)
+        meetingRow.frame = NSRect(x: 0, y: bounds.height - rowH * 2 - 4, width: bounds.width, height: rowH)
         let resetSize = resetButton.fittingSize
         resetButton.frame = NSRect(x: (bounds.width - resetSize.width) / 2, y: 0, width: resetSize.width, height: resetSize.height)
     }
@@ -66,17 +66,17 @@ final class HotkeyRecorderAppKitView: NSView {
     }
 
     func refreshDisplay() {
-        let draftBinding = HotkeyPreferences.draftBinding()
         let dictBinding = HotkeyPreferences.dictationBinding()
-        draftRow.update(
-            displayText: recordingTarget == .draft ? "Press shortcut..." : HotkeyPreferences.displayString(for: draftBinding),
-            isRecording: recordingTarget == .draft,
-            isDefault: draftBinding == HotkeyPreferences.defaultDraft
-        )
+        let meetingBinding = HotkeyPreferences.meetingBinding()
         dictationRow.update(
             displayText: recordingTarget == .dictation ? "Press shortcut..." : HotkeyPreferences.displayString(for: dictBinding),
             isRecording: recordingTarget == .dictation,
             isDefault: dictBinding == HotkeyPreferences.defaultDictation
+        )
+        meetingRow.update(
+            displayText: recordingTarget == .meeting ? "Press shortcut..." : HotkeyPreferences.displayString(for: meetingBinding),
+            isRecording: recordingTarget == .meeting,
+            isDefault: meetingBinding == HotkeyPreferences.defaultMeeting
         )
     }
 
@@ -101,8 +101,8 @@ final class HotkeyRecorderAppKitView: NSView {
             guard HotkeyPreferences.isValid(candidate) else { return nil }
 
             switch target {
-            case .draft: HotkeyPreferences.save(draft: candidate)
             case .dictation: HotkeyPreferences.save(dictation: candidate)
+            case .meeting: HotkeyPreferences.save(meeting: candidate)
             }
             self.stopRecording()
             self.refreshDisplay()
