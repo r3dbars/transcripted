@@ -1,5 +1,6 @@
 import XCTest
 @testable import Transcripted
+@testable import TranscriptedCore
 
 /// Integration tests verifying that different artifacts (.md, .json sidecar, index)
 /// produced from the same save operation are CONSISTENT with each other.

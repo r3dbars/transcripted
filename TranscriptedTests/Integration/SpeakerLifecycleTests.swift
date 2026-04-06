@@ -1,6 +1,7 @@
 import XCTest
 import SQLite3
 @testable import Transcripted
+@testable import TranscriptedCore
 
 /// Integration test: full speaker lifecycle using an isolated temp database.
 /// Covers add -> match -> update -> name -> find -> merge -> prune.

@@ -1,5 +1,6 @@
 import XCTest
 @testable import Transcripted
+@testable import TranscriptedCore
 
 /// Integration test: full save chain from TranscriptionResult through to .md, .json sidecar, and index.
 @available(macOS 14.0, *)

@@ -1,5 +1,6 @@
 import XCTest
 @testable import Transcripted
+@testable import TranscriptedCore
 
 @MainActor
 final class FailedTranscriptionManagerTests: XCTestCase {

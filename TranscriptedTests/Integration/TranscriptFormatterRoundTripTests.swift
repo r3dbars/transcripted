@@ -1,5 +1,6 @@
 import XCTest
 @testable import Transcripted
+@testable import TranscriptedCore
 
 /// Integration test: format a TranscriptionResult to markdown and parse it back,
 /// verifying YAML frontmatter values match the input data.

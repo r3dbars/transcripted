@@ -1,6 +1,7 @@
 import XCTest
 import Accelerate
 @testable import Transcripted
+@testable import TranscriptedCore
 
 @available(macOS 14.0, *)
 final class SpeakerEmbeddingMatcherTests: XCTestCase {

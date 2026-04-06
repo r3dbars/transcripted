@@ -1,6 +1,7 @@
 import Foundation
 import Accelerate
 @testable import Transcripted
+@testable import TranscriptedCore
 
 // MARK: - Test Fixtures
 
