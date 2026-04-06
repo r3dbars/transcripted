@@ -1,5 +1,6 @@
 // DraftSessionController.swift
-// Session orchestration for draft mode (Option+D) and dictation mode (Option+Space)
+// Session orchestration for dictation mode plus compatibility stubs for the
+// removed draft mode.
 
 import AppKit
 import Combine
@@ -38,13 +39,9 @@ class DraftSessionController: ObservableObject {
         return (appState, overlayController)
     }
 
-    private var lastCapturedContext: CapturedContext?
     private var sessionSourceApp: NSRunningApplication?
-    private var sessionImageData: Data?
     private var streamingTask: Task<Void, Never>?
-    private var visionTask: Task<Void, Never>?
     private var clipboardRestoreTask: Task<Void, Never>?
-    private var styleRefinementTask: Task<Void, Never>?
     private var sessionTimeoutTask: Task<Void, Never>?
     private var sessionStartTime: CFAbsoluteTime = 0
 
@@ -54,15 +51,9 @@ class DraftSessionController: ObservableObject {
 
     deinit {
         streamingTask?.cancel()
-        visionTask?.cancel()
         clipboardRestoreTask?.cancel()
-        styleRefinementTask?.cancel()
         sessionTimeoutTask?.cancel()
     }
-
-    /// When set, processVision() uses this context directly instead of calling the vision API.
-    /// Used by onboarding to inject a fake conversation without requiring screen recording permission.
-    var overrideContext: CapturedContext?
 
     private func setupInterruptionObserver() {
         guard let appState = appState else { return }
@@ -72,13 +63,7 @@ class DraftSessionController: ObservableObject {
             .sink { [weak self] _ in
                 guard let self = self else { return }
                 if self.isInSession {
-                    // Clean up session state without hiding — let showError handle the dismiss
-                    self.visionTask?.cancel()
-                    self.visionTask = nil
-                    self.streamingTask?.cancel()
-                    self.streamingTask = nil
-                    self.isInSession = false
-                    self.overlayController?.showError("Audio device changed")
+                    self.cancelSession(message: "Draft mode has been removed")
                 } else if self.isDictating {
                     self.isDictating = false
                     self.overlayController?.showError("Audio device changed")
@@ -86,9 +71,8 @@ class DraftSessionController: ObservableObject {
             }
     }
 
-    // MARK: - Draft Mode (Option+D)
+    // MARK: - Removed Draft Mode
 
-    /// Start a new recording session — called on first hotkey press
     func startSession(imageData: Data?, sourceApp: NSRunningApplication?) {
         let _ = imageData
         let _ = sourceApp
@@ -96,64 +80,25 @@ class DraftSessionController: ObservableObject {
         overlayController.showError("Draft mode has been removed")
     }
 
-    /// Actually start recording — called directly from startSession
-    private func beginRecording(imageData: Data?, sourceApp: NSRunningApplication?) {
-        guard let appState = appState, let overlayController = overlayController else { return }
-        guard isInSession else { return }
-
-        overlayController.state = .listening
-
-        guard appState.sttRouter.startRecording() else {
-            appState.logger.log("SESSION | recording failed to start")
-            overlayController.showError("Microphone unavailable")
-            isInSession = false
-            return
-        }
-
-        appState.logger.log("SESSION | started (parakeet, \(appState.sttRouter.inputDeviceName)), voice recording started")
-
-        // Start session timeout — auto-cancel after 5 minutes to prevent stuck sessions
-        installSessionTimeout()
-
-        // No vision task needed — Gemini sees the screenshot image directly.
-        // The sessionImageData stored in startSession() is sent to Gemini at draft time.
-    }
-
-    /// Stop recording and trigger drafting — called on second hotkey press
     func stopSessionAndDraft() {
         guard let (_, overlayController) = readyState() else { return }
-        if isInSession {
-            cancelSession()
-        }
         overlayController.showError("Draft mode has been removed")
     }
 
     func cancelSession() {
-        guard let (appState, overlayController) = readyState() else { return }
-        sessionImageData = nil
-        visionTask?.cancel()
-        visionTask = nil
+        cancelSession(message: "Draft mode has been removed")
+    }
+
+    private func cancelSession(message: String) {
+        guard let (_, overlayController) = readyState() else { return }
         streamingTask?.cancel()
         streamingTask = nil
         clipboardRestoreTask?.cancel()
         clipboardRestoreTask = nil
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
-        if appState.sttRouter.isRecording {
-            appState.sttRouter.cancel()
-        }
-        overlayController.hideWithCancelAnimation()
         isInSession = false
-        appState.logger.log("SESSION | cancelled")
-        EventTracker.track("draft.rejected")
-        #if BETA_BUILD
-        let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
-        BetaTelemetry.shared.sendEvent(
-            type: "draft_cancelled",
-            sourceApp: sessionSourceApp?.bundleIdentifier,
-            payload: ["duration_s": Int(duration)]
-        )
-        #endif
+        overlayController.showError(message)
     }
 
     // MARK: - Dictation Mode (Option+Space)
@@ -167,7 +112,6 @@ class DraftSessionController: ObservableObject {
         sessionStartTime = CFAbsoluteTimeGetCurrent()
         lastCompletedText = nil
 
-        overlayController.activeMode = .dictation
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
 
@@ -199,9 +143,6 @@ class DraftSessionController: ObservableObject {
         guard isDictating, overlayController.state == .listening else { return }
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
-        // Stay compact during transcription — don't expand to full drafting height.
-        // Just update the state for the spinner, keeping the compact panel size.
-        overlayController.transcriptExpanded = false
         overlayController.state = .drafting
 
         appState.sttRouter.stopRecording()
@@ -309,182 +250,6 @@ class DraftSessionController: ObservableObject {
                 self.cancelDictation()
             }
         }
-    }
-
-    private func processVision(imageData: Data?, sourceApp: NSRunningApplication?) async {
-        guard let appState = appState else { return }
-
-        // Use injected context if provided (e.g., onboarding demo)
-        if let override = overrideContext {
-            lastCapturedContext = override
-            overrideContext = nil
-            appState.logger.log("SESSION | using override context — platform=\(override.platform ?? "nil")")
-            return
-        }
-
-        guard let imageData = imageData else {
-            appState.logger.log("SESSION | no screenshot, proceeding voice-only")
-            overlayController?.hasContext = false
-            return
-        }
-
-        do {
-            // OCR only — no LLM call. Raw text goes directly into the drafting prompt.
-            let context = try await LocalVisionExtractor.extractContext(imageData: imageData)
-            lastCapturedContext = context
-            let charCount = context.conversation?.count ?? 0
-            appState.logger.log("SESSION | OCR complete — \(charCount) chars extracted")
-        } catch {
-            appState.logger.log("SESSION | OCR error: \(error.localizedDescription), proceeding voice-only")
-            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "ocr_failed",
-                message: error.localizedDescription)
-            overlayController?.hasContext = false
-        }
-    }
-
-    private func looksLikeRefusal(_ text: String) -> Bool {
-        DraftUtils.looksLikeRefusal(text)
-    }
-
-    /// First Enter in review: if user edited, show diff flash. If no edits, go straight to paste.
-    private func handleReviewConfirm(platform: PlatformFormatter) {
-        guard let overlayController = overlayController else { return }
-        guard isInSession else { return }
-
-        let editedText = overlayController.reviewText
-        let originalDraft = overlayController.originalDraftForComparison
-
-        if DiffSummary.hasSubstantiveEdits(original: originalDraft, edited: editedText) {
-            // User made edits — show diff flash for review
-            let description = DiffSummary.describeEdit(
-                original: originalDraft,
-                edited: editedText,
-                platform: platform.rawValue
-            )
-            overlayController.showDiffFlash(editDescription: "Draft learned: \(description)")
-
-            // Wire second Enter (from diff flash) to actually confirm
-            overlayController.onConfirm = { [weak self] in
-                self?.confirmAndInject(platform: platform)
-            }
-            // Escape from diff flash goes back to review with re-wired closures
-            overlayController.onCancel = { [weak self] in
-                guard let self = self, let oc = self.overlayController else { return }
-                oc.state = .review
-                oc.onConfirm = { [weak self] in
-                    self?.handleReviewConfirm(platform: platform)
-                }
-                oc.onCancel = { [weak self] in
-                    self?.cancelSession()
-                }
-            }
-        } else {
-            // No edits — skip diff flash, go straight to paste
-            confirmAndInject(platform: platform)
-        }
-    }
-
-    /// Called by Enter key in review (no edits) or Enter in diff flash (after edits) — injects text
-    private func confirmAndInject(platform: PlatformFormatter) {
-        guard let appState = appState, let overlayController = overlayController else { return }
-        guard isInSession else { return }
-        sessionTimeoutTask?.cancel()
-        sessionTimeoutTask = nil
-        let editedText = overlayController.reviewText
-        let originalDraft = appState.drafter.originalDraft
-
-        // Surface completed text for observers (e.g., onboarding view)
-        lastCompletedText = editedText
-
-        // Confirm animation, then paste to target app
-        overlayController.hideWithConfirmAnimation { [weak self] in
-            self?.pasteWithClipboardRestore(editedText)
-        }
-        EventTracker.track("draft.accepted", with: [
-            "word_count": "\(editedText.split(whereSeparator: \.isWhitespace).count)",
-            "was_edited": "\(editedText != originalDraft)"
-        ])
-
-        // Record with REAL edit data — but skip refusals to avoid poisoning style training
-        if !looksLikeRefusal(originalDraft) {
-            // Capture voice instructions + vision metadata for richer training signal
-            let voiceInstructions = appState.drafter.lastRawText
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let formalityLevel = lastCapturedContext?.formality
-
-            appState.styleEngine.recordExample(
-                aiDraft: originalDraft,
-                userFinal: editedText,
-                platform: platform.rawValue,
-                userInstructions: voiceInstructions.isEmpty ? nil : voiceInstructions,
-                formality: formalityLevel
-            )
-            appState.feedbackStore.record(
-                rawText: voiceInstructions,
-                draftedText: originalDraft,
-                acceptedText: editedText,
-                action: .paste,
-                exampleCount: appState.styleEngine.exampleCount,
-                formality: formalityLevel,
-                platform: platform.rawValue,
-                conversationContext: lastCapturedContext?.conversation
-            )
-            #if BETA_BUILD
-            let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
-            BetaTelemetry.shared.sendEvent(
-                type: "draft_accepted",
-                sourceApp: sessionSourceApp?.bundleIdentifier,
-                payload: [
-                    "raw_chars": voiceInstructions.count,
-                    "draft_chars": originalDraft.count,
-                    "accepted_chars": editedText.count,
-                    "platform": platform.rawValue,
-                    "was_edited": originalDraft != editedText,
-                    "duration_s": Int(duration),
-                ]
-            )
-            #endif
-        } else {
-            appState.logger.log("STYLE | skipping refusal example — not recording as training data")
-            EventReporter.shared.capture(level: .info, engine: "overlay", event: "refusal_detected",
-                message: "Draft contained refusal pattern — skipping training pair",
-                context: ["draft_length": "\(originalDraft.count)"])
-        }
-
-        // Check if style refinement is needed — deferred by 5 seconds so the model
-        // is free if the user immediately starts another draft session. The task is
-        // cancellable via styleRefinementTask (cancelled in stopSessionAndDraft).
-        if appState.styleEngine.shouldRefineNow(), appState.localInference.isReady {
-            styleRefinementTask?.cancel()
-            styleRefinementTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 5_000_000_000)  // 5 second delay
-                guard !Task.isCancelled else { return }
-                guard let self = self, let appState = self.appState else { return }
-                await appState.styleEngine.regenerateStyleSummary(draftEngine: appState.localInference.draftEngine)
-                appState.logger.log("STYLE | summary updated")
-            }
-        }
-
-        // Show training toast for edited drafts and milestones
-        let wasEdited = DiffSummary.hasSubstantiveEdits(original: originalDraft, edited: editedText)
-        let milestone = DiffSummary.milestoneMessage(exampleCount: appState.styleEngine.exampleCount)
-        if wasEdited && !looksLikeRefusal(originalDraft) {
-            let description = DiffSummary.describeEdit(original: originalDraft, edited: editedText, platform: platform.rawValue)
-            let toastMessage = milestone ?? "Draft learned: \(description)"
-            Task { @MainActor [weak overlayController] in
-                try? await Task.sleep(nanoseconds: 200_000_000)
-                overlayController?.showTrainingToast(toastMessage)
-            }
-        } else if let milestone = milestone {
-            Task { @MainActor [weak overlayController] in
-                try? await Task.sleep(nanoseconds: 200_000_000)
-                overlayController?.showTrainingToast(milestone)
-            }
-        }
-
-        isInSession = false
-        sessionImageData = nil
-        appState.logger.log("SESSION | confirmed and injected (\(editedText.count) chars)")
     }
 
     private func pasteWithClipboardRestore(_ text: String) {

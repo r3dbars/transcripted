@@ -26,10 +26,9 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     let overlayController = FloatingOverlayController()
     let sessionController = DraftSessionController()
     /// Second non-activating panel for meeting mode (Lane C). Distinct from
-    /// the draft overlay so regressions to one can't break the other.
+    /// the dictation overlay so regressions to one can't break the other.
     @available(macOS 14.0, *)
     lazy var meetingOverlayController = MeetingOverlayController()
-    var onboardingController: OnboardingWindowController?
     private var workspaceObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {

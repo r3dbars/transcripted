@@ -178,13 +178,21 @@ final class WaveformHostView: NSView {
 
     private func startTimer() {
         guard renderTimer == nil else { return }
-        renderTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            self?.drawingLayer.setNeedsDisplay()
-        }
+        renderTimer = Timer.scheduledTimer(
+            timeInterval: 1.0 / 30.0,
+            target: self,
+            selector: #selector(handleRenderTick),
+            userInfo: nil,
+            repeats: true
+        )
     }
 
     private func stopTimer() {
         renderTimer?.invalidate()
         renderTimer = nil
+    }
+
+    @objc private func handleRenderTick() {
+        drawingLayer.setNeedsDisplay()
     }
 }

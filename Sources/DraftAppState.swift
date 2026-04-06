@@ -7,15 +7,8 @@ import TranscriptedCore
 
 @MainActor
 class DraftAppState: ObservableObject {
-    let drafter = DraftEngine()
-    let styleEngine = StyleEngine()
-    let promptStore = PromptStore()
-    let feedbackStore = FeedbackStore()
     let logger = AppLogger()
     let contextCapture = ContextCaptureEngine()
-    let analysisEngine = AnalysisEngine()
-    let localInference = LocalInferenceManager()
-    let geminiEngine = GeminiEngine()
     let sttRouter = STTRouter()
     #if BETA_BUILD
     let updateManager = UpdateManager()
@@ -51,9 +44,7 @@ class DraftAppState: ObservableObject {
         // Report app launch to proxy
         BetaTelemetry.shared.sendEvent(
             type: "app_launched",
-            payload: [
-                "style_examples": styleEngine.exampleCount,
-            ]
+            payload: [:]
         )
         #endif
 

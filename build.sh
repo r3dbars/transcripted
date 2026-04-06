@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build Draft - minimal voice-to-text utility
+# Build Draft - local dictation + meeting transcription app
 
 APP_NAME="Draft"
 BUILD_DIR="build"
@@ -20,22 +20,6 @@ if [ -d "$PARAKEET_SRC/Encoder.mlmodelc" ]; then
     cp -R "$PARAKEET_SRC" "$APP_BUNDLE/Contents/Resources/parakeet-models/"
 else
     echo "Parakeet models not found — Parakeet engine will attempt runtime download"
-fi
-
-# Bundle Parakeet EOU streaming model (live transcription display)
-# DownloadUtils nests inside the cache dir as <folderName>/, so check both possible paths
-EOU_SRC="$HOME/Library/Application Support/FluidAudio/Models/parakeet-eou-streaming/320ms"
-if [ -d "$EOU_SRC/streaming_encoder.mlmodelc" ]; then
-    true  # use as-is
-elif [ -d "$EOU_SRC/parakeet-eou-streaming/320ms/streaming_encoder.mlmodelc" ]; then
-    EOU_SRC="$EOU_SRC/parakeet-eou-streaming/320ms"
-fi
-if [ -d "$EOU_SRC/streaming_encoder.mlmodelc" ]; then
-    echo "Bundling Parakeet EOU streaming model..."
-    mkdir -p "$APP_BUNDLE/Contents/Resources/parakeet-models/parakeet-eou-120m-coreml"
-    cp -R "$EOU_SRC/"* "$APP_BUNDLE/Contents/Resources/parakeet-models/parakeet-eou-120m-coreml/"
-else
-    echo "Parakeet EOU model not found — will attempt runtime download"
 fi
 
 # Copy Info.plist
@@ -62,7 +46,7 @@ EOF
 # Unified dependencies (FluidAudio + mlx-swift-lm)
 # Run build-deps.sh first to build these artifacts
 if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ]; then
-    echo "Dependencies not found — required for Parakeet STT + local LLM inference"
+    echo "Dependencies not found — required for Parakeet STT + meeting diarization"
     echo "   Run build-deps.sh first to build dependencies."
     exit 1
 fi

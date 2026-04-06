@@ -11,6 +11,14 @@ import FluidAudio
 import Foundation
 import TranscriptedCore
 
+private extension NSLock {
+    func withLock<T>(_ body: () -> T) -> T {
+        lock()
+        defer { unlock() }
+        return body()
+    }
+}
+
 enum ParakeetModelState {
     case notLoaded
     case downloading(progress: Double)
@@ -526,15 +534,11 @@ class ParakeetEngine: ObservableObject {
             try? await Task.sleep(nanoseconds: DraftConstants.audioWatchdogTimeout)
             guard let self = self, self.isRecording, !Task.isCancelled else { return }
 
-            self.pendingSamplesLock.lock()
-            // Re-check isRecording after lock — recording may have stopped between
-            // the guard above and lock acquisition
-            guard self.isRecording else {
-                self.pendingSamplesLock.unlock()
-                return
+            let sampleCount = self.pendingSamplesLock.withLock {
+                guard self.isRecording else { return -1 }
+                return self.pendingSamples.count + self.sampleBuffer.count
             }
-            let sampleCount = self.pendingSamples.count + self.sampleBuffer.count
-            self.pendingSamplesLock.unlock()
+            guard sampleCount >= 0 else { return }
 
             guard sampleCount == 0 else { return }  // Audio is flowing — all good
 
@@ -543,9 +547,9 @@ class ParakeetEngine: ObservableObject {
                 context: ["audio_device": self.inputDeviceName])
 
             // Full teardown
-            self.streamingSamplesLock.lock()
-            self.streamingSampleBuffer.removeAll(keepingCapacity: true)
-            self.streamingSamplesLock.unlock()
+            self.streamingSamplesLock.withLock {
+                self.streamingSampleBuffer.removeAll(keepingCapacity: true)
+            }
             await self.eouManager?.reset()
             self.audioEngine.inputNode.removeTap(onBus: 0)
             self.audioEngine.stop()
@@ -626,10 +630,10 @@ class ParakeetEngine: ObservableObject {
                 message: "transcribe() called while transcription already in progress")
             return nil
         }
-        pendingSamplesLock.lock()
-        sampleBuffer.append(contentsOf: pendingSamples)
-        pendingSamples.removeAll(keepingCapacity: true)
-        pendingSamplesLock.unlock()
+        pendingSamplesLock.withLock {
+            sampleBuffer.append(contentsOf: pendingSamples)
+            pendingSamples.removeAll(keepingCapacity: true)
+        }
         guard !sampleBuffer.isEmpty else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "no_audio_samples",
                 message: "No audio samples in buffer when transcribe() called")

@@ -9,10 +9,8 @@ struct TestRunner {
         print("Draft Test Suite\n")
 
         testCapturedContext()
-        testPlatformFormatter()
         testRefusalDetection()
         testStyleUtils()
-        testInsightCard()
         testDiffSummary()
 
         print("\n\(totalTests) tests, \(passedTests) passed, \(failedTests) failed")

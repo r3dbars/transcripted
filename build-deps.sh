@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build FluidAudio + mlx-swift-lm as a unified static library for Draft.
+# Build Draft's native speech + meeting dependencies as a unified static library.
 # Resolves shared dependencies (Hub, Tokenizers, Jinja, Crypto, etc.) once
 # to prevent duplicate symbol conflicts.
 #

@@ -1,6 +1,5 @@
 // PermissionsOnboardingView.swift
-// Guided 3-step permissions flow for beta builds.
-// Shown once before style onboarding to ensure all system permissions are granted.
+// Guided 3-step permissions flow for dictation + meeting capture.
 
 import SwiftUI
 import AVFoundation
@@ -16,9 +15,9 @@ struct PermissionsOnboardingView: View {
     @State private var pollTimer: Timer?
 
     private let steps: [(title: String, icon: String, description: String, required: Bool)] = [
-        ("Microphone", "mic.fill", "Draft needs microphone access to hear you speak.", true),
-        ("Accessibility", "hand.raised.fill", "Required for the ⌥D global hotkey to work in any app.", true),
-        ("Screen Recording", "rectangle.on.rectangle", "Reads your screen to understand conversation context for better drafts.", true),
+        ("Microphone", "mic.fill", "Draft needs microphone access for dictation and your side of meetings.", true),
+        ("Accessibility", "hand.raised.fill", "Required for global shortcuts and reliable paste-back into the app you were using.", true),
+        ("Screen Recording", "rectangle.on.rectangle", "Required so meeting capture can access system audio from calls, videos, and other apps.", true),
     ]
 
     var body: some View {
@@ -29,7 +28,7 @@ struct PermissionsOnboardingView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
 
-                Text("Let's set up a few permissions so everything works smoothly.")
+                Text("Let's set up the permissions Draft needs for dictation and meeting capture.")
                     .font(.callout)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)

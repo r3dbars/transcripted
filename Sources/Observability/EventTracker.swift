@@ -66,7 +66,7 @@ final class EventTracker {
     private func send(signal: String, payload: [String: String]) {
         guard let url = URL(string: "https://nom.telemetrydeck.com/v2/") else { return }
 
-        var body: [String: Any] = [
+        let body: [String: Any] = [
             "appID": telemetryAppID,
             "clientUser": userID,
             "sessionID": sessionID,

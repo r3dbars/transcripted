@@ -1,485 +1,77 @@
 # Draft
 
-**Speak rough. Send polished. Sound like you.**
+**Local dictation and meeting transcription for personal context capture.**
 
-Draft is a macOS app that turns your voice into perfectly written messages — in *your* personal writing style. It runs 100% on-device. No cloud. No API keys. No subscriptions.
+Draft is a macOS app with two focused workflows:
 
-![Draft floating over a Slack conversation, composing a reply in your voice](docs/screenshots/hero.png)
+- `Dictation`: speak anywhere and paste the transcription back into the active app
+- `Meetings`: record microphone plus system audio, then save a structured transcript after the meeting ends
 
----
+Draft is local-first, minimal in the UI, and optimized for reliable capture rather than live AI rewriting.
 
-## Why Draft exists
+## Product direction
 
-You know the moment. You're staring at a Slack message, rewriting the same sentence for the third time. Too formal. Too casual. Too long. You know what you *want* to say — you just can't get it to *sound right*.
+Draft is no longer a ghostwriting, style-matching, or AI drafting product.
 
-Here's what's strange: if someone asked you the same question out loud, you'd answer in two seconds flat. Speaking is effortless. Writing is labor.
+The current product is built around:
 
-Draft closes that gap.
+- fast dictation
+- dependable meeting capture
+- clean final transcripts
+- creating useful raw context you can use later with your own tools or agents
 
----
+## Core flows
 
-## Two tools in one
+### Dictation
 
-Most voice-to-text apps do one thing: **dictation**. You speak, they transcribe, done. Apps like [SuperWhisper](https://superwhisper.com), [Wispr Flow](https://wisprflow.ai), and [VoiceInk](https://tryvoiceink.com) are great at this — but that's all they do.
+1. Focus any text field.
+2. Tap the right `Option` key, or use your configured dictation shortcut.
+3. Speak naturally.
+4. Stop dictation.
+5. Draft transcribes locally and pastes the result back into the app you were using.
 
-Draft does dictation *and* something no other tool offers: **AI drafting with full conversation context.**
+### Meetings
 
-| | Dictation Mode | Draft Mode |
-|---|---|---|
-| **Shortcut** | `Option + Space` | `Option + D` |
-| **What it does** | Speak and your words become text | Speak your intent and get a polished message written in your voice |
-| **Context** | None needed | Screenshots the conversation, sees who you're talking to, detects the platform |
-| **Output** | Exact transcription of what you said | A crafted reply that sounds like you wrote it |
-| **Use case** | Filling out forms, writing notes, quick messages where your words are fine as-is | Replying to a Slack thread, composing an email, responding in iMessage |
-| **Speed** | Instant | ~2-4 seconds |
+1. Press `Option + M`.
+2. Draft records microphone audio plus system audio.
+3. Press `Option + M` again when the meeting ends.
+4. Draft runs the offline transcription + diarization pipeline.
+5. The transcript is saved under `~/Library/Application Support/Draft/meetings/transcripts`.
 
-**You get both.** Use dictation when you just want your words typed out. Use drafting when you want the AI to compose a polished message from your rough instructions.
+## Permissions
 
----
+Draft needs three permissions:
 
-## How Dictation Mode works
+- `Microphone`: for dictation and your side of meetings
+- `Accessibility`: for global shortcuts and paste-back
+- `Screen Recording`: so meeting capture can access system audio from calls and media apps
 
-![Dictation Mode — speak and your words are typed](docs/screenshots/dictation-mode.png)
+## Why it exists
 
-Dictation mode is the simplest way to get your voice into any text field on your Mac. It works in every app — Slack, iMessage, Notes, your browser, anywhere you can type.
+If personal agents are going to matter, they need better context than a chat box.
 
-### Step by step
+Draft is meant to capture two of the highest-signal sources of that context:
 
-1. **Click into any text field** — a Slack message box, an email compose window, a Google Doc, anything
-2. **Press `Option + Space`** — a small overlay appears showing Draft is listening
-3. **Speak naturally** — say whatever you want typed out. Draft shows a live transcription as you talk
-4. **Press `Option + Space` again** — Draft pastes the transcription directly into the text field you were in
-5. **Done** — the text is right where you need it. No copy-paste required
+- what you intentionally say through dictation
+- what actually happened in your meetings
 
-### What makes this different from built-in macOS dictation
+That gives you a durable record of what people are asking, deciding, pushing on, and trying to solve.
 
-- **It actually works** — Apple's built-in dictation is slow and often inaccurate. Draft uses Parakeet, a state-of-the-art speech model running locally via CoreML
-- **It's instant** — transcription happens in real-time as you speak, not after a long processing delay
-- **It never leaves your Mac** — your voice audio is processed on-device and discarded. Nothing is uploaded anywhere
-- **It works offline** — no internet connection needed
-- **It pastes automatically** — the text goes directly into whatever app you were using. No extra steps
-
-### When to use dictation
-
-- Writing emails or messages where your own words are exactly what you want
-- Filling out forms or writing notes
-- Any time you'd rather talk than type
-- Jotting down quick thoughts
-
----
-
-## How Draft Mode works
-
-![Draft Mode — speak your intent, get a polished reply](docs/screenshots/draft-mode.png)
-
-Draft mode is the feature that sets Draft apart from every other voice-to-text app. Instead of transcribing exactly what you say, it **reads the conversation you're looking at**, **listens to your intent**, and **writes a complete message in your personal writing style**.
-
-Think of it like having a ghostwriter who knows how you talk, can see the conversation on your screen, and composes the perfect reply in seconds.
-
-### Step by step
-
-1. **Open any messaging app** — Slack, iMessage, email, Discord, Teams, or anything else
-2. **Press `Option + D`** — Draft quietly captures a screenshot of the conversation and starts listening
-3. **Speak your intent** — don't worry about grammar or phrasing. Just say what you mean:
-   - *"Tell them I'm running ten minutes late but I'll bring coffee"*
-   - *"Say that sounds good and ask when they want to meet"*
-   - *"Politely decline the meeting and suggest next week instead"*
-4. **Press `Option + D` again** — Draft stops listening and starts composing. You'll see the message appear word-by-word in a floating overlay
-5. **Review the draft** — read it, edit it if you want, or leave it as-is
-6. **Press `Enter`** — the message is pasted directly into the app you were using
-7. **Or press `Escape`** — cancel and discard the draft. Nothing gets sent
-
-### What happens behind the scenes
-
-When you press `Option + D`, Draft does several things simultaneously:
-
-- **Screenshots the conversation** — it captures what's on your screen so it knows the context
-- **Extracts the conversation** — using Apple's Vision framework (on-device OCR), it reads every message in the thread, who sent what, and the overall tone
-- **Identifies the platform** — it detects whether you're in Slack, iMessage, email, Discord, or Teams, and adjusts formatting accordingly
-- **Gauges the formality** — a casual text to a friend gets a different style than a professional Slack message to your VP
-- **Records your voice** — your spoken instructions are transcribed on-device
-- **Composes the reply** — using all of this context plus your personal writing style profile, the on-device language model writes a message that sounds like you
-
-All of this runs locally on your Mac. Nothing is sent to any server.
-
-### When to use Draft Mode
-
-- Replying to a Slack thread where you need to match the tone
-- Composing an email response when you know what you want to say but not how to phrase it
-- Responding to iMessages quickly without typing
-- Any time you'd rather *describe* what you want to say instead of writing it yourself
-
----
-
-## The floating overlay
-
-Both modes use a floating overlay that appears above your current app. This is an important design detail:
-
-- **Your app stays in focus** — Draft doesn't steal the window. Slack (or whatever you're in) stays frontmost the entire time
-- **Paste goes to the right place** — when you press Enter, the text is pasted into the app you were using, not into Draft
-- **No window switching** — you never have to switch between Draft and your messaging app. The overlay floats on top and disappears when you're done
-
-The overlay shows different things depending on the state:
-
-| State | What you see |
-|-------|-------------|
-| **Listening** | A waveform animation + live transcription of what you're saying |
-| **Composing** | A spinner while the model writes your draft |
-| **Streaming** | Words appearing in real-time as the model generates them |
-| **Review** | The finished draft in an editable text box. Press Enter to send, Escape to cancel |
-
----
-
-## It sees what you see
-
-Most AI writing tools work blind. You paste text in, get text back, paste it somewhere else.
-
-Draft sees the full picture. When you press `Option + D`, it captures a screenshot of the conversation and extracts:
-
-- **The conversation thread** — every message, who said what, in order
-- **Who you're talking to** — pulled from the app's title bar or conversation header
-- **The platform** — Slack, iMessage, email, Discord, Teams
-- **The formality** — friends get casual. Clients get professional
-
-This means Draft knows the difference between "reply to my mom on iMessage" and "reply to the VP on Slack." You don't configure anything. It just looks.
-
----
-
-## Platform-aware formatting
-
-![Same spoken intent, three different outputs for Slack, iMessage, and Email](docs/screenshots/platform-formatting.png)
-
-Different apps expect different formatting. Draft detects the app you're in and adjusts automatically:
-
-| Platform | What changes |
-|----------|-------------|
-| **Slack** | Uses `*bold*` instead of `**bold**`, short paragraphs, no subject lines |
-| **iMessage** | Plain text only, no markdown, brief and conversational |
-| **Email** | Full paragraphs, proper greeting and sign-off, markdown OK |
-| **Discord** | Standard markdown, casual and conversational tone |
-| **Teams** | Standard markdown, clean and professional |
-| **Other apps** | Clean, neutral formatting |
-
-You never pick a mode. Draft reads the bundle ID of the app in focus and adapts.
-
----
-
-## Style learning
-
-![Before and after style learning — generic AI vs. your actual voice](docs/screenshots/style-learning.png)
-
-This is the core idea. Draft doesn't just polish text — it **learns how *you* write** and produces messages that are indistinguishable from ones you'd type yourself.
-
-### How the learning loop works
-
-1. **You accept a draft** — or edit it first, then accept
-2. **Draft saves the pair** — what the AI wrote vs. what you actually sent
-3. **It measures the gap** — how much did you change? What did you remove? What did you rephrase?
-4. **Every few drafts, it updates your profile** — the model analyzes patterns in your edits and refines its understanding of your voice
-
-### What your profile captures
-
-- **Tone** — warm but direct, uses humor sparingly, never stiff
-- **Signature phrases** — actual quotes from your writing: *"honestly though"*, *"yo"*, *"sounds good to me"*
-- **Hard rules** — never uses "utilize," always starts emails with first name only, keeps Slack messages under 3 sentences
-- **Quantitative fingerprint** — average sentence length, emoji frequency, contraction rate, exclamation point habits
-- **Platform differences** — how you write differently in Slack vs. email vs. iMessage
-
-### Graduated refinement
-
-Early on (first 20 drafts), Draft refines your profile every 3 accepted messages — it's learning fast. As the edit distance shrinks (meaning it's getting you right), it slows to every 10. The profile is a living document that adapts as your writing evolves.
-
-### Cold-start onboarding
-
-![Style onboarding — import from iMessages or paste samples](docs/screenshots/onboarding.png)
-
-You don't have to wait 20 drafts to get good results. On first launch, Draft offers two ways to bootstrap your style profile immediately:
-
-- **Import from iMessages** (recommended) — Draft reads your sent messages from iMessage and analyzes them locally to build an instant profile. Requires Full Disk Access permission. Your messages are analyzed on-device and discarded after profile generation.
-- **Paste writing samples** — Copy-paste some of your Slack messages, emails, or texts into a text box. Draft analyzes them locally and builds your profile.
-
-Either way, the analysis runs entirely on your Mac using the local language model. No data leaves your machine.
-
----
-
-## 100% local — nothing leaves your Mac
-
-![Privacy architecture — everything runs on your Mac](docs/screenshots/privacy-architecture.png)
-
-Draft is built on the principle that your voice, your writing style, and your conversations should never leave your computer.
-
-| Component | Technology | Where it runs |
-|-----------|-----------|---------------|
-| **Voice recognition** | Parakeet (CoreML) | On your Mac |
-| **Message drafting** | Qwen 3.5-4B via MLX | On your Mac |
-| **Style learning** | Qwen 3.5-4B via MLX | On your Mac |
-| **Screen reading** | Apple Vision framework | On your Mac |
-| **Conversation analysis** | Qwen 3.5-4B via MLX | On your Mac |
-
-- **No API keys** — you don't need an account with OpenAI, Anthropic, or anyone else
-- **No subscriptions** — Draft is free and open source
-- **No internet required** — Draft works completely offline after the initial model download
-- **No telemetry** — no usage data, analytics, or crash reports are sent anywhere. Debug logs are local files only
-- **Your voice is never recorded** — audio is processed in real-time and discarded. There is no recording saved
-
-### Performance
-
-On Apple Silicon (M1 and later), the on-device language model generates text at approximately 30-50 tokens per second. The first words of a draft appear in about 200 milliseconds. The entire drafting process typically takes 2-4 seconds.
-
----
-
-## Requirements
-
-- **macOS 14 or later** (Sonoma or newer)
-- **Apple Silicon** (M1, M2, M3, M4 — any variant)
-- **Microphone permission** — so Draft can hear you speak
-- **Screen Recording permission** — so Draft can see the conversation you're replying to (Draft Mode only)
-- **~3.1 GB of disk space** — for the speech model (~600MB) and language model (~2.5GB), downloaded once on first launch
-
----
-
-## Installation
-
-### Download the app
-
-Download the latest `.dmg` from [Releases](https://github.com/r3dbars/draft-releases/releases). Open it and drag Draft to your Applications folder.
-
-The DMG is notarized and stapled by Apple — just double-click to open. No right-click workaround needed.
-
-### First launch
-
-When you open Draft for the first time, it will:
-
-1. **Ask for permissions** — microphone and screen recording. Draft walks you through granting these in System Settings
-2. **Download the speech model** (~600MB) — Parakeet, a CoreML model for voice recognition. This happens once
-3. **Download the language model** (~2.5GB) — Qwen 3.5-4B, the model that writes your drafts. This also happens once
-4. **Walk you through the basics** — an interactive onboarding shows you how to use dictation and drafting with a practice conversation
-5. **Optionally import your writing style** — you can import from iMessage or paste writing samples to get personalized results immediately
-
-After setup, Draft lives in your menu bar. The models are cached locally and load automatically on future launches.
-
-![Menubar panel — stats, shortcuts, writing style, and agent insights](docs/screenshots/menubar-panel.png)
-
-### Updating
-
-When a new version is available, Draft will prompt you to update. Updates download and install automatically.
-
----
-
-## Build from source
-
-If you'd like to build Draft yourself:
+## Build
 
 ```bash
-# Clone Draft and Transcripted side-by-side (see Cross-repo dependency below)
-git clone https://github.com/r3dbars/Draft.git
-git clone https://github.com/r3dbars/Transcripted.git
-
-cd Draft
-bash build-deps.sh   # Build FluidAudio + MLX + TranscriptedCore unified deps (~5 min, one-time)
-bash build.sh        # Compile + sign + launch (~5s)
-bash run-tests.sh    # Run 168 pure-function tests (~2s)
+bash build-deps.sh
+bash build.sh
 ```
 
-No Xcode project. No CocoaPods. Just `swiftc`, SPM (used only by `build-deps.sh` to resolve Apple/third-party dependencies), and Apple frameworks.
-
-### Cross-repo dependency: TranscriptedCore
-
-Draft's meeting-mode features consume **TranscriptedCore**, an SPM library extracted from the [Transcripted](https://github.com/r3dbars/Transcripted) repo (tag `extract/core-v1`). `Sources/Meeting/` files in Draft do `import TranscriptedCore` and supply Draft-specific adapters (`MeetingSTTAdapter`, `CoreStoragePaths`) so meeting recordings land under `~/Library/Application Support/Draft/meetings/` with Draft's own Parakeet model path.
-
-`build-deps.sh` discovers a sibling Transcripted checkout at runtime — in order, it checks:
-
-1. `$DRAFT_TRANSCRIPTED_ROOT` (explicit override)
-2. A matching worktree at `Transcripted/.claude/worktrees/<same-name>` (used when both repos are cloned as git worktrees under `.claude/worktrees/`)
-3. `Transcripted/.claude/worktrees/core-extract` (the canonical merge worktree used during extraction)
-4. `<parent>/Transcripted` (the Transcripted main checkout alongside Draft)
-
-If the default `~/code/Draft` + `~/code/Transcripted` layout doesn't match your setup, export `DRAFT_TRANSCRIPTED_ROOT=/path/to/Transcripted` before running `build-deps.sh`.
-
-### What the build scripts do
-
-- **`build-deps.sh`** — Resolves and compiles [FluidAudio 0.7.9](https://github.com/FluidInference/FluidAudio) (speech recognition) and [mlx-swift-lm](https://github.com/ml-explore/mlx-swift-lm) (local inference) **and** TranscriptedCore together in a single SPM graph, producing a unified static library `deps-libs/libDraftDeps.a` plus swiftmodules in `deps-modules/`. The unified graph prevents duplicate-symbol conflicts that would happen if each dependency pulled its own copy of shared packages (Hub, Tokenizers, Crypto). Also compiles the MLX Metal shaders into `deps-libs/mlx.metallib`. Run once; rerun with `--force` after pulling new Core changes or switching Transcripted worktrees.
-- **`build.sh`** — Compiles all Swift source files into a single binary, signs the app bundle, and launches it. Takes about 5 seconds. Uses the cached artifacts from `build-deps.sh` via `-I deps-modules` and `-L deps-libs -lDraftDeps`.
-- **`run-tests.sh`** — Compiles and runs the test suite. 168 pure-function tests covering context parsing, platform formatting, refusal detection, message filtering, style utilities, meeting session state, and more. No XCTest or Xcode required. Runs in about 2 seconds.
-- **`run-integration-smoke.sh`** — Compiles a small smoke-test binary against Draft's full dependency chain and verifies that `TranscriptedCore` types (`CoreStoragePaths`, `AudioResampler`, `DiarizationService`, `SpeakerDatabase`, `FailedTranscriptionManager`, `AppServices`) are reachable from Draft. Run this after any cross-repo change to confirm the library boundary is intact.
-
----
-
-## Keyboard shortcuts
-
-![Keyboard shortcut cheatsheet](docs/screenshots/shortcuts.png)
-
-These are the default shortcuts. You can customize them in Draft's settings (click the menu bar icon, then the gear icon).
-
-### Core shortcuts
-
-| Shortcut | What it does |
-|----------|-------------|
-| **`Option + D`** | **Draft Mode** — press once to start (screenshots + records), press again to generate the draft |
-| **`Option + Space`** | **Dictation Mode** — press once to start recording, press again to transcribe and paste |
-
-### While the overlay is open
-
-| Shortcut | What it does |
-|----------|-------------|
-| **`Enter`** | Accept the draft and paste it into the app you were using |
-| **`Shift + Enter`** | Insert a newline (for editing multi-line drafts) |
-| **`Escape`** | Cancel and close the overlay. Nothing gets pasted |
-
-### Quick reference
-
-```
-Draft Mode:     ⌥D  →  speak your intent  →  ⌥D  →  review  →  Enter
-Dictation Mode: ⌥Space  →  speak  →  ⌥Space  →  text is pasted
-Cancel anytime: Escape
-```
-
----
-
-## Comparison with other tools
-
-| Feature | Draft | SuperWhisper | Wispr Flow | VoiceInk | macOS Dictation |
-|---------|-------|-------------|------------|----------|-----------------|
-| Dictation (voice to text) | Yes | Yes | Yes | Yes | Yes |
-| AI drafting (voice to polished message) | **Yes** | No | No | No | No |
-| Sees your conversation context | **Yes** | No | No | No | No |
-| Learns your writing style | **Yes** | No | Partial | No | No |
-| Platform-aware formatting | **Yes** | No | Partial | No | No |
-| 100% on-device | **Yes** | Partial | No | Partial | Yes |
-| No API keys required | **Yes** | No | No | No | Yes |
-| Free and open source | **Yes** | No | No | Yes (GPL) | N/A |
-| Works offline | **Yes** | Partial | No | Partial | Partial |
-
----
-
-## Architecture
-
-```
-Sources/
-├── Speech/        ← On-device STT (Parakeet CoreML + audio pipeline)
-├── Local/         ← On-device LLM inference (Qwen 3.5-4B via MLX)
-├── Capture/       ← Screenshot, context extraction (Apple Vision OCR), hotkey registration
-├── Draft/         ← Drafting engine + platform formatting
-├── Style/         ← Style learning + refinement scheduling
-├── Prompts/       ← Externalized prompt templates
-├── Feedback/      ← Training pair logging + usage stats
-├── Analysis/      ← Feedback pattern analysis + prompt improvement
-├── Messages/      ← iMessage database reader (onboarding import)
-├── Accessibility/ ← AXUIElement queries for text field positioning
-├── Observability/ ← Structured event logging
-└── UI/            ← Floating overlay, menubar panel, onboarding
-```
-
-~50 files. ~10,000 lines of Swift. Zero third-party runtime dependencies — only Apple frameworks plus FluidAudio and MLX built from source.
-
-Each subfolder has its own `CLAUDE.md` with detailed component documentation — architecture decisions, gotchas, and modification guides.
-
----
-
-## Troubleshooting
-
-### Draft doesn't hear me
-
-- Check that microphone permission is granted: **System Settings > Privacy & Security > Microphone** — Draft should be listed and enabled
-- Check that your input device is working: **System Settings > Sound > Input** — speak and verify the level meter moves
-- If you use a USB audio interface (like BEACN Mic), Draft automatically handles format conversion. If audio still fails, try switching to the built-in microphone temporarily
-
-### Draft doesn't see the conversation
-
-- Check that Screen Recording permission is granted: **System Settings > Privacy & Security > Screen Recording** — Draft should be listed and enabled
-- After granting permission, you may need to restart Draft
-- Note: rebuilding the app from source may invalidate the permission (new code signature). Re-grant it in System Settings
-
-### The model is still loading
-
-On first launch, Draft downloads two models:
-- **Parakeet** (~600MB) — speech recognition
-- **Qwen 3.5-4B** (~2.5GB) — language model
-
-These download once and are cached. If the download is interrupted, restart Draft and it will resume.
-
-The menu bar icon shows an orange dot while models are loading. It turns green when everything is ready.
-
-### The draft doesn't sound like me
-
-Draft gets better over time. Each message you accept (or edit and accept) teaches it more about your writing style. After about 20 accepted drafts, most people notice a significant improvement.
-
-To accelerate this, use the style onboarding: click the menu bar icon and import your iMessages or paste writing samples. This gives Draft a head start.
-
-### Checking the logs
-
-If something isn't working and you want to dig deeper:
+## Tests
 
 ```bash
-# Recent errors
-tail -50 ~/Library/Application\ Support/Draft/events.jsonl | grep '"level":"error"'
-
-# Check a specific engine (parakeet, draft, capture, style, overlay)
-grep '"engine":"parakeet"' ~/Library/Application\ Support/Draft/events.jsonl | tail -20
-
-# Full narrative log
-tail -200 ~/draft-debug.log
+bash run-tests.sh
 ```
 
----
+## Notes
 
-## FAQ
-
-### Is my voice recorded?
-
-No. Audio is processed in real-time by the on-device speech model and discarded immediately. There is no audio recording saved anywhere.
-
-### Does Draft send my data anywhere?
-
-No. Everything runs locally on your Mac — voice recognition, message drafting, style learning, and conversation reading. There are no network calls for any AI functionality. Draft works completely offline.
-
-### Do I need an API key?
-
-No. Draft uses on-device models (Parakeet for speech, Qwen 3.5-4B for text). No API keys, accounts, or subscriptions are needed.
-
-### How much disk space does Draft need?
-
-About 3.1 GB for the two models (downloaded once on first launch), plus the app itself (~50 MB). Your style profile and feedback logs are small text files (typically under 1 MB).
-
-### Does it work with [specific app]?
-
-Draft works in any app with a text field. It has special formatting rules for Slack, iMessage, email, Discord, and Teams. For all other apps, it uses clean, neutral formatting.
-
-### Can I customize the keyboard shortcuts?
-
-Yes. Click the Draft menu bar icon, then the gear icon, and you'll find the shortcut recorder.
-
-### How does style learning work with privacy?
-
-Your writing style profile is stored locally at `~/Library/Application Support/Draft/style.md`. Training pairs (what the AI drafted vs. what you actually sent) are stored in `feedback.jsonl` in the same folder. These files never leave your machine. When Draft refines your profile, it runs the analysis on-device using the local language model.
-
-### What language models does Draft use?
-
-- **Parakeet** — a CoreML speech recognition model from FluidAudio. Runs on the Neural Engine
-- **Qwen 3.5-4B-4bit** — a quantized language model from the [Qwen](https://huggingface.co/Qwen) family, run via [MLX](https://github.com/ml-explore/mlx) on Apple Silicon GPU. This is the model that writes your drafts, refines your style profile, and analyzes feedback patterns
-
----
-
-## Contributing
-
-Draft is open source under the MIT license. Contributions are welcome.
-
-- **Bug reports** — open an issue with steps to reproduce
-- **Feature requests** — open an issue describing the use case
-- **Pull requests** — fork the repo, make your changes, and submit a PR
-
-Before submitting code changes, make sure both build and tests pass:
-
-```bash
-bash build.sh && bash run-tests.sh
-```
-
----
-
-## License
-
-[MIT](LICENSE)
-
----
-
-*Draft is built by [r3dbars](https://github.com/r3dbars).*
+- Speech recognition is powered by local Parakeet models.
+- Meeting transcripts are generated after recording, not from a live streaming transcript UI.
+- If you still see old references to drafting, style learning, or agent-writing behavior elsewhere in the repo, those are legacy cleanup remnants rather than active product features.
