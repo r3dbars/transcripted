@@ -296,11 +296,16 @@ final class MeetingOverlayRootView: NSView {
         let isPreparing = state == .preparing
         statusDot.isHidden = isPreparing
         titleLabel.isHidden = isPreparing
-        timerLabel.isHidden = isPreparing
+        timerLabel.isHidden = isPreparing || state != .recording
         micLabel.isHidden = isPreparing
         systemLabel.isHidden = isPreparing
         micWaveform.isHidden = isPreparing
         systemWaveform.isHidden = isPreparing
+        let showLevels = state == .recording
+        micLabel.isHidden = !showLevels
+        systemLabel.isHidden = !showLevels
+        micWaveform.isHidden = !showLevels
+        systemWaveform.isHidden = !showLevels
         closeButton.isHidden = isPreparing || state != .recording
         chevronButton.isHidden = true
         warmupTitleLabel.isHidden = !isPreparing
@@ -329,10 +334,10 @@ final class MeetingOverlayRootView: NSView {
             titleLabel.stringValue = "Saving transcript"
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotPrep.cgColor
         case .saved:
-            titleLabel.stringValue = "Saved"
+            titleLabel.stringValue = "Saved transcript"
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotSaved.cgColor
         case .error(let message):
-            titleLabel.stringValue = message.isEmpty ? "Error" : message
+            titleLabel.stringValue = displayErrorTitle(for: message)
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotError.cgColor
         }
 
@@ -353,6 +358,24 @@ final class MeetingOverlayRootView: NSView {
         let m = total / 60
         let s = total % 60
         return String(format: "%02d:%02d", m, s)
+    }
+
+    private func displayErrorTitle(for message: String) -> String {
+        let lowercased = message.lowercased()
+
+        if lowercased.contains("system audio is required") || lowercased.contains("screen recording") {
+            return "Turn on Screen Recording"
+        }
+
+        if lowercased.contains("recording too short") || lowercased.contains("at least") {
+            return "Recording was too short"
+        }
+
+        if lowercased.contains("no samples recorded") || lowercased.contains("empty audio") {
+            return "No audio was captured"
+        }
+
+        return "Transcript needs retry"
     }
 
     @objc private func handleClose() {
@@ -536,6 +559,12 @@ final class MeetingOverlayController {
         case .ready:
             // Ready but not recording — hide unless we're already showing a
             // terminal state (saved/error); the auto-hide task handles those.
+            if case .transcribing = state {
+                state = .saved
+                showPanel()
+                scheduleAutoHide(after: 1.5)
+                break
+            }
             if case .saved = state { break }
             if case .error = state { break }
             state = .idle

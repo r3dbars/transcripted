@@ -122,6 +122,9 @@ final class OverlayHeaderView: NSView {
         case (.drafting, .dictation):
             modeLabel.stringValue = "Transcribing"
             modeLabel.textColor = OverlayTokens.textPrimary
+        case (.success, .dictation):
+            modeLabel.stringValue = "Pasted"
+            modeLabel.textColor = OverlayTokens.textPrimary
         case (.loading, _):
             modeLabel.stringValue = "Preparing"
             modeLabel.textColor = OverlayTokens.textSecondary
@@ -148,6 +151,9 @@ final class OverlayHeaderView: NSView {
         case (.listening, .dictation):
             shortcutHint.stringValue = "\(dictationShortcutHint) to stop"
             shortcutHint.textColor = OverlayTokens.textSecondary.withAlphaComponent(0.96)
+        case (.success, .dictation):
+            shortcutHint.stringValue = ""
+            shortcutHint.textColor = OverlayTokens.textMuted
         case (.loading, _):
             shortcutHint.stringValue = "Please wait"
             shortcutHint.textColor = OverlayTokens.textSecondary

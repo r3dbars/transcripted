@@ -47,7 +47,7 @@ final class MeetingSessionController: ObservableObject {
         let id: UUID
         let timestamp: Date
         let title: String
-        let errorMessage: String
+        let subtitle: String
         let isRetryable: Bool
     }
 
@@ -267,10 +267,19 @@ final class MeetingSessionController: ObservableObject {
             .store(in: &cancellables)
 
         taskManager.$lastSavedTranscriptURL
-            .assign(to: &$lastSavedTranscriptURL)
+            .sink { [weak self] url in
+                guard let self else { return }
+                guard let url else {
+                    self.lastSavedTranscriptURL = nil
+                    self.lastSavedTitle = nil
+                    return
+                }
 
-        taskManager.$lastSavedTitle
-            .assign(to: &$lastSavedTitle)
+                let styled = MeetingTranscriptStyler.restyleTranscript(at: url)
+                self.lastSavedTranscriptURL = styled.url
+                self.lastSavedTitle = styled.title
+            }
+            .store(in: &cancellables)
 
         failedManager.$failedTranscriptions
             .sink { [weak self] _ in
@@ -378,14 +387,48 @@ final class MeetingSessionController: ObservableObject {
     private func refreshFailedMeetings() {
         failedMeetings = failedManager.failedTranscriptions
             .sorted(by: { $0.timestamp > $1.timestamp })
-            .map {
+            .map { failed in
                 FailedMeetingItem(
-                    id: $0.id,
-                    timestamp: $0.timestamp,
-                    title: "Failed meeting from \($0.formattedTimestamp)",
-                    errorMessage: $0.shortErrorMessage,
-                    isRetryable: $0.isRetryable
+                    id: failed.id,
+                    timestamp: failed.timestamp,
+                    title: failedMeetingTitle(for: failed),
+                    subtitle: failedMeetingSubtitle(for: failed),
+                    isRetryable: failed.isRetryable
                 )
             }
+    }
+
+    private func failedMeetingTitle(for failed: FailedTranscription) -> String {
+        let message = failed.errorMessage.lowercased()
+
+        if message.contains("system audio is required") || message.contains("screen recording") {
+            return "Turn on Screen Recording"
+        }
+
+        if message.contains("recording too short") || message.contains("at least") {
+            return "Recording was too short"
+        }
+
+        if message.contains("no samples recorded") || message.contains("empty audio") {
+            return "No audio was captured"
+        }
+
+        if message.contains("failed to save") {
+            return "Couldn't save the transcript"
+        }
+
+        return failed.isRetryable ? "Transcript needs retry" : "Recording needs attention"
+    }
+
+    private func failedMeetingSubtitle(for failed: FailedTranscription) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.dateFormat = "MMM d 'at' h:mm a"
+
+        let dateText = formatter.string(from: failed.timestamp)
+        if failed.audioFilesExist() {
+            return "\(dateText) • Audio kept"
+        }
+        return dateText
     }
 }

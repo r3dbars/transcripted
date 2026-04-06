@@ -7,6 +7,12 @@ import Combine
 
 @MainActor
 class DraftSessionController: ObservableObject {
+    private enum DictationPasteOutcome {
+        case pasted
+        case copied(String)
+        case failed(String)
+    }
+
     @Published var isInSession = false
     @Published var isDictating = false
     @Published var lastCompletedText: String?
@@ -178,11 +184,15 @@ class DraftSessionController: ObservableObject {
             guard !Task.isCancelled else { return }
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
-            overlayController.hideWithConfirmAnimation { [weak self] in
-                self?.pasteWithClipboardRestore(text)
+            let pasteOutcome = self.pasteWithClipboardRestore(text)
+            switch pasteOutcome {
+            case .pasted:
+                overlayController.showSuccessAndDismiss()
+            case .copied(let message), .failed(let message):
+                overlayController.showError(message)
             }
             isDictating = false
-            appState.logger.log("DICTATION | pasted \(text.count) chars")
+            appState.logger.log("DICTATION | completed with outcome \(pasteOutcome)")
             EventTracker.track("dictation.completed", with: ["word_count": "\(text.split(whereSeparator: \.isWhitespace).count)"])
             #if BETA_BUILD
             let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
@@ -252,15 +262,16 @@ class DraftSessionController: ObservableObject {
         }
     }
 
-    private func pasteWithClipboardRestore(_ text: String) {
-        guard let appState = appState else { return }
+    private func pasteWithClipboardRestore(_ text: String) -> DictationPasteOutcome {
+        guard let appState = appState else { return .failed("Couldn't paste dictation") }
 
         // Check Accessibility permission BEFORE modifying clipboard
         guard AXIsProcessTrusted() else {
             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
             _ = AXIsProcessTrustedWithOptions(options)
-            appState.logger.log("SESSION | requesting Accessibility permission")
-            return
+            appState.logger.log("DICTATION | Accessibility missing, copying text instead")
+            copyTextToClipboard(text)
+            return .copied("Couldn't paste automatically. Accessibility is off, so the text was copied.")
         }
 
         let pasteboard = NSPasteboard.general
@@ -285,7 +296,8 @@ class DraftSessionController: ObservableObject {
               let vUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false) else {
             EventReporter.shared.capture(level: .error, engine: "overlay", event: "cgevent_create_failed",
                 message: "CGEvent creation returned nil — paste will not work")
-            return
+            appState.logger.log("DICTATION | CGEvent paste failed, keeping text on clipboard")
+            return .copied("Couldn't paste automatically. The text was copied instead.")
         }
         vDown.flags = .maskCommand
         vDown.post(tap: .cghidEventTap)
@@ -318,5 +330,12 @@ class DraftSessionController: ObservableObject {
                 pasteboard.writeObjects(items)
             }
         }
+        return .pasted
+    }
+
+    private func copyTextToClipboard(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
     }
 }

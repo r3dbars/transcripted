@@ -30,9 +30,9 @@ enum MenuTokens {
 
     // Layout
     static let panelWidth: CGFloat       = 360
-    static let panelHeight: CGFloat      = 332
+    static let panelHeight: CGFloat      = 304
     static let sectionSpacing: CGFloat   = 12
-    static let innerPadding: CGFloat     = 14
+    static let innerPadding: CGFloat     = 12
     static let cardCornerRadius: CGFloat = 12
     static let cardPadding: CGFloat      = 12
     static let pillCornerRadius: CGFloat = 8
