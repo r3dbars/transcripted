@@ -21,6 +21,7 @@ struct DraftApp: App {
 class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
+    private var lastExternalApplication: NSRunningApplication?
 
     let appState = DraftAppState()
     let overlayController = FloatingOverlayController()
@@ -69,6 +70,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         pop.contentSize = NSSize(width: MenuTokens.panelWidth, height: MenuTokens.panelHeight)
         pop.behavior = .transient
         pop.delegate = self
+        pop.appearance = NSAppearance(named: .darkAqua)
         popover = pop
 
         // Engine recovery on wake — hotkeys and overlay state
@@ -109,9 +111,12 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     @objc func togglePopover() {
         guard let button = statusItem?.button, let popover = popover else { return }
         if popover.isShown {
-            popover.performClose(nil)
-            popover.contentViewController = nil
+            closePopover()
         } else {
+            if let frontmost = NSWorkspace.shared.frontmostApplication,
+               frontmost.bundleIdentifier != Bundle.main.bundleIdentifier {
+                lastExternalApplication = frontmost
+            }
             // Pure AppKit controller — no long-lived NSHostingController state.
             popover.contentViewController = nil
             if !PermissionsOnboardingView.hasCompleted {
@@ -121,11 +126,20 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                     })
                 )
             } else {
-                popover.contentViewController = MenuBarPanelController(appState: appState)
+                popover.contentViewController = MenuBarPanelController(
+                    appState: appState,
+                    preferredSourceAppProvider: { [weak self] in self?.lastExternalApplication },
+                    dismissPopover: { [weak self] in self?.closePopover() }
+                )
             }
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    private func closePopover() {
+        popover?.performClose(nil)
+        popover?.contentViewController = nil
     }
 
     // MARK: - NSPopoverDelegate

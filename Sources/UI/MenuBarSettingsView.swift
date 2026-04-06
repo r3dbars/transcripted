@@ -1,14 +1,14 @@
 // MenuBarSettingsView.swift
-// Compact settings section embedded directly into the main menubar view.
+// Tiny utility footer for the menubar popover.
 
 import AppKit
 
 @MainActor
 final class MenuBarSettingsView: NSView {
     private let footerLabel = NSTextField(labelWithString: "Runs locally on your Mac")
-    private let resetButton = NSButton(title: "Reset Shortcuts", target: nil, action: nil)
-    private let feedbackButton = NSButton(title: "Send Feedback", target: nil, action: nil)
-    private let quitButton = NSButton(title: "Quit Draft", target: nil, action: nil)
+    private let resetButton = NSButton(title: "Reset shortcuts", target: nil, action: nil)
+    private let feedbackButton = NSButton(title: "Feedback", target: nil, action: nil)
+    private let quitButton = NSButton(title: "Quit", target: nil, action: nil)
 
     weak var appState: DraftAppState?
 
@@ -20,39 +20,33 @@ final class MenuBarSettingsView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    override var isFlipped: Bool { true }
+
     private func setupViews() {
         footerLabel.font = NSFont.systemFont(ofSize: 10)
         footerLabel.textColor = MenuTokens.textMutedNS
         addSubview(footerLabel)
 
-        resetButton.bezelStyle = .inline
-        resetButton.isBordered = false
-        resetButton.font = NSFont.systemFont(ofSize: 10)
-        resetButton.contentTintColor = MenuTokens.textSecondaryNS
+        [resetButton, feedbackButton, quitButton].forEach { button in
+            button.isBordered = false
+            button.bezelStyle = .inline
+            button.font = NSFont.systemFont(ofSize: 10)
+            button.contentTintColor = MenuTokens.textSecondaryNS
+            addSubview(button)
+        }
+
         resetButton.target = self
         resetButton.action = #selector(resetShortcuts)
-        addSubview(resetButton)
-
-        feedbackButton.bezelStyle = .inline
-        feedbackButton.isBordered = false
-        feedbackButton.font = NSFont.systemFont(ofSize: 10)
-        feedbackButton.contentTintColor = MenuTokens.textSecondaryNS
         feedbackButton.target = self
         feedbackButton.action = #selector(sendFeedback)
-        addSubview(feedbackButton)
-
-        quitButton.bezelStyle = .inline
-        quitButton.isBordered = false
-        quitButton.font = NSFont.systemFont(ofSize: 10)
-        quitButton.contentTintColor = MenuTokens.textSecondaryNS
         quitButton.target = self
         quitButton.action = #selector(quitApp)
-        addSubview(quitButton)
     }
 
     override func layout() {
         super.layout()
-        footerLabel.frame = NSRect(x: 0, y: bounds.height - 12, width: bounds.width, height: 12)
+
+        footerLabel.frame = NSRect(x: 0, y: 2, width: 140, height: 12)
 
         let quitSize = quitButton.fittingSize
         quitButton.frame = NSRect(x: bounds.width - quitSize.width, y: 0, width: quitSize.width, height: quitSize.height)
@@ -63,7 +57,7 @@ final class MenuBarSettingsView: NSView {
     }
 
     @objc private func sendFeedback() {
-        guard let appState = appState else { return }
+        guard let appState else { return }
         let logLines = appState.logger.entries.suffix(80).joined(separator: "\n")
         let subject = "Draft Feedback"
         let body = "What happened:\n[describe the issue here]\n\n---\nLogs:\n\(logLines)"
@@ -82,5 +76,5 @@ final class MenuBarSettingsView: NSView {
         NSApplication.shared.terminate(nil)
     }
 
-    var intrinsicHeight: CGFloat { 26 }
+    var intrinsicHeight: CGFloat { 18 }
 }
