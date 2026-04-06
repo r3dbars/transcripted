@@ -70,10 +70,7 @@ final class MeetingOverlayRootView: NSView {
     private let chevronButton = NSButton()
     private let warmupTitleLabel = NSTextField(labelWithString: "Getting Draft ready")
     private let warmupSubtitleLabel = NSTextField(labelWithString: "Loading dictation and meeting models")
-    private let warmupDetailLabel = NSTextField(wrappingLabelWithString: "")
     private let warmupProgress = NSProgressIndicator()
-    private let dictationStatusLabel = NSTextField(labelWithString: "Dictation  Waiting")
-    private let meetingsStatusLabel = NSTextField(labelWithString: "Meetings  Waiting")
     private var currentState: MeetingOverlayController.OverlayState = .idle
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
 
@@ -134,13 +131,6 @@ final class MeetingOverlayRootView: NSView {
         warmupSubtitleLabel.isHidden = true
         addSubview(warmupSubtitleLabel)
 
-        warmupDetailLabel.font = NSFont.systemFont(ofSize: 11)
-        warmupDetailLabel.textColor = MeetingOverlayTokens.textMuted
-        warmupDetailLabel.lineBreakMode = .byWordWrapping
-        warmupDetailLabel.maximumNumberOfLines = 2
-        warmupDetailLabel.isHidden = true
-        addSubview(warmupDetailLabel)
-
         warmupProgress.style = .bar
         warmupProgress.isIndeterminate = false
         warmupProgress.minValue = 0
@@ -149,26 +139,20 @@ final class MeetingOverlayRootView: NSView {
         warmupProgress.isHidden = true
         addSubview(warmupProgress)
 
-        dictationStatusLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        dictationStatusLabel.textColor = MeetingOverlayTokens.textSecondary
-        dictationStatusLabel.isHidden = true
-        addSubview(dictationStatusLabel)
-
-        meetingsStatusLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        meetingsStatusLabel.alignment = .right
-        meetingsStatusLabel.textColor = MeetingOverlayTokens.textSecondary
-        meetingsStatusLabel.isHidden = true
-        addSubview(meetingsStatusLabel)
-
-        // Close/stop button — square X at the right edge.
-        if let img = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Stop meeting") {
-            closeButton.image = img
-            closeButton.contentTintColor = MeetingOverlayTokens.textPrimary
-        }
-        closeButton.bezelStyle = .inline
+        closeButton.attributedTitle = NSAttributedString(
+            string: "Stop",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: MeetingOverlayTokens.textPrimary
+            ]
+        )
         closeButton.isBordered = false
+        closeButton.wantsLayer = true
+        closeButton.layer?.cornerRadius = 8
+        closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
         closeButton.target = self
         closeButton.action = #selector(handleClose)
+        closeButton.isHidden = true
         addSubview(closeButton)
 
         // Chevron is intentionally hidden: meeting overlay is now status-only.
@@ -223,13 +207,14 @@ final class MeetingOverlayRootView: NSView {
             height: timerSize.height
         )
 
-        // Close button pinned to the right of the header.
-        let closeSize: CGFloat = 18
+        // Explicit Stop action while recording.
+        let closeHeight: CGFloat = 22
+        let closeWidth = max(44, closeButton.fittingSize.width + 16)
         closeButton.frame = NSRect(
-            x: bounds.width - pad - closeSize,
-            y: headerMidY - closeSize / 2,
-            width: closeSize,
-            height: closeSize
+            x: bounds.width - pad - closeWidth,
+            y: headerMidY - closeHeight / 2,
+            width: closeWidth,
+            height: closeHeight
         )
 
         // Chevron button remains hidden, but keep a frame for layout stability.
@@ -285,12 +270,9 @@ final class MeetingOverlayRootView: NSView {
         let pad: CGFloat = 16
         let contentWidth = bounds.width - pad * 2
 
-        warmupTitleLabel.frame = NSRect(x: pad, y: bounds.height - 40, width: contentWidth, height: 22)
-        warmupSubtitleLabel.frame = NSRect(x: pad, y: bounds.height - 66, width: contentWidth, height: 18)
-        warmupProgress.frame = NSRect(x: pad, y: bounds.height - 92, width: contentWidth, height: 10)
-        dictationStatusLabel.frame = NSRect(x: pad, y: bounds.height - 118, width: 136, height: 14)
-        meetingsStatusLabel.frame = NSRect(x: bounds.width - pad - 136, y: bounds.height - 118, width: 136, height: 14)
-        warmupDetailLabel.frame = NSRect(x: pad, y: 16, width: contentWidth, height: 26)
+        warmupTitleLabel.frame = NSRect(x: pad, y: bounds.height - 36, width: contentWidth, height: 22)
+        warmupSubtitleLabel.frame = NSRect(x: pad, y: bounds.height - 61, width: contentWidth, height: 18)
+        warmupProgress.frame = NSRect(x: pad, y: 18, width: contentWidth, height: 10)
     }
 
     // MARK: - Update API
@@ -319,22 +301,16 @@ final class MeetingOverlayRootView: NSView {
         systemLabel.isHidden = isPreparing
         micWaveform.isHidden = isPreparing
         systemWaveform.isHidden = isPreparing
-        closeButton.isHidden = isPreparing
+        closeButton.isHidden = isPreparing || state != .recording
         chevronButton.isHidden = true
         warmupTitleLabel.isHidden = !isPreparing
         warmupSubtitleLabel.isHidden = !isPreparing
-        warmupDetailLabel.isHidden = !isPreparing
         warmupProgress.isHidden = !isPreparing
-        dictationStatusLabel.isHidden = !isPreparing
-        meetingsStatusLabel.isHidden = !isPreparing
 
         if isPreparing {
             warmupTitleLabel.stringValue = currentWarmupStatus.title
             warmupSubtitleLabel.stringValue = currentWarmupStatus.subtitle
-            warmupDetailLabel.stringValue = currentWarmupStatus.detail
             warmupProgress.doubleValue = currentWarmupStatus.progress
-            dictationStatusLabel.stringValue = "Dictation  \(currentWarmupStatus.dictationStatus)"
-            meetingsStatusLabel.stringValue = "Meetings  \(currentWarmupStatus.meetingsStatus)"
             needsLayout = true
             return
         }
@@ -350,7 +326,7 @@ final class MeetingOverlayRootView: NSView {
             titleLabel.stringValue = "Recording meeting"
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotRecording.cgColor
         case .transcribing:
-            titleLabel.stringValue = "Transcribing…"
+            titleLabel.stringValue = "Saving transcript"
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotPrep.cgColor
         case .saved:
             titleLabel.stringValue = "Saved"
@@ -389,11 +365,10 @@ final class MeetingOverlayRootView: NSView {
 
 @available(macOS 14.0, *)
 enum MeetingOverlayTokens {
-    static let panelBg       = OverlayTokens.panelBg
+    static let panelBg       = NSColor.black.withAlphaComponent(0.9)
     static let panelStroke   = NSColor.white.withAlphaComponent(0.08)
     static let textPrimary   = OverlayTokens.textPrimary
     static let textSecondary = OverlayTokens.textSecondary
-    static let textMuted     = OverlayTokens.textMuted
     static let waveformTint  = OverlayTokens.textPrimary
     static let dotIdle       = OverlayTokens.textMuted
     static let dotPrep       = OverlayTokens.textSecondary
@@ -403,7 +378,7 @@ enum MeetingOverlayTokens {
 
     static let panelWidth: CGFloat  = 360
     static let panelHeight: CGFloat = 48
-    static let warmupHeight: CGFloat = 146
+    static let warmupHeight: CGFloat = 96
     static let cornerRadius: CGFloat = OverlayTokens.cornerRadius
     static let dotSize: CGFloat     = 8
 }
@@ -642,16 +617,10 @@ final class MeetingOverlayController {
         guard let session = meetingSession else { hidePanel(); return }
         Task { [weak session] in
             guard let session else { return }
-            switch session.state {
-            case .recording:
+            if case .recording = session.state {
                 await session.stopRecording()
-            case .transcribing:
-                session.cancelActiveTranscription()
-            default:
-                break
             }
         }
-        hidePanel()
     }
 
     // MARK: - View push
