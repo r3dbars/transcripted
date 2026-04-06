@@ -303,9 +303,9 @@ class ContextCaptureEngine: ObservableObject {
             session.stopDictationAndPaste()
         } else if session.isInSession {
             session.cancelSession()
-            session.startDictation(sourceApp: frontApp)
+            session.startDictation(sourceApp: frontApp, trigger: .rightOptionTap)
         } else {
-            session.startDictation(sourceApp: frontApp)
+            session.startDictation(sourceApp: frontApp, trigger: .rightOptionTap)
         }
     }
 

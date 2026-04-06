@@ -7,10 +7,41 @@ import Combine
 
 @MainActor
 class DraftSessionController: ObservableObject {
+    enum DictationTrigger: String {
+        case rightOptionTap = "right_option_tap"
+        case menu = "menu"
+        case unknown = "unknown"
+    }
+
     private enum DictationPasteOutcome {
         case pasted
         case copied(String)
         case failed(String)
+
+        var delivery: DictationDelivery {
+            switch self {
+            case .pasted: return .pasted
+            case .copied: return .copied
+            case .failed: return .failed
+            }
+        }
+
+        var diagnosticName: String {
+            switch self {
+            case .pasted: return "pasted"
+            case .copied: return "copied"
+            case .failed: return "failed"
+            }
+        }
+
+        var diagnosticMessage: String {
+            switch self {
+            case .pasted:
+                return "Dictation pasted successfully"
+            case .copied(let message), .failed(let message):
+                return message
+            }
+        }
     }
 
     @Published var isInSession = false
@@ -50,6 +81,7 @@ class DraftSessionController: ObservableObject {
     private var clipboardRestoreTask: Task<Void, Never>?
     private var sessionTimeoutTask: Task<Void, Never>?
     private var sessionStartTime: CFAbsoluteTime = 0
+    private var currentDictationTrigger: DictationTrigger = .unknown
 
     /// Max duration for a listening session before auto-cancel (5 minutes).
     /// Prevents stuck sessions when the user walks away from the computer.
@@ -110,13 +142,28 @@ class DraftSessionController: ObservableObject {
     // MARK: - Dictation Mode (Option+Space)
 
     /// Start dictation — show overlay and begin voice recording (no screenshot/vision)
-    func startDictation(sourceApp: NSRunningApplication?) {
+    func startDictation(sourceApp: NSRunningApplication?, trigger: DictationTrigger = .unknown) {
         guard let (_, overlayController) = readyState() else { return }
         guard !isDictating, !isInSession else { return }
         isDictating = true
         sessionSourceApp = sourceApp
         sessionStartTime = CFAbsoluteTimeGetCurrent()
+        currentDictationTrigger = trigger
         lastCompletedText = nil
+
+        DiagnosticsTrail.record(
+            logger: appState?.logger,
+            engine: "dictation",
+            event: "dictation_started",
+            message: "Dictation started",
+            context: dictationContext(
+                extra: [
+                    "trigger": trigger.rawValue,
+                    "source_app_name": sourceApp?.localizedName ?? "",
+                    "source_app_bundle_id": sourceApp?.bundleIdentifier ?? ""
+                ]
+            )
+        )
 
         overlayController.state = .listening
         overlayController.showPanel(near: sourceApp)
@@ -133,6 +180,14 @@ class DraftSessionController: ObservableObject {
 
         guard appState.sttRouter.startRecording() else {
             appState.logger.log("DICTATION | recording failed to start")
+            DiagnosticsTrail.record(
+                logger: appState.logger,
+                level: .error,
+                engine: "dictation",
+                event: "dictation_recording_failed",
+                message: "Dictation recording failed to start",
+                context: dictationContext(extra: ["audio_device": appState.sttRouter.inputDeviceName])
+            )
             overlayController.showError("Microphone unavailable")
             isDictating = false
             return
@@ -185,6 +240,25 @@ class DraftSessionController: ObservableObject {
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
             let pasteOutcome = self.pasteWithClipboardRestore(text)
+            self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
+            let wordCount = text.split(whereSeparator: \.isWhitespace).count
+            let deliveryLevel: EventLevel = pasteOutcome.delivery == .pasted ? .info : .warning
+            DiagnosticsTrail.record(
+                logger: appState.logger,
+                level: deliveryLevel,
+                engine: "dictation",
+                event: "dictation_delivery_completed",
+                message: pasteOutcome.diagnosticMessage,
+                context: self.dictationContext(
+                    extra: [
+                        "trigger": self.currentDictationTrigger.rawValue,
+                        "delivery": pasteOutcome.diagnosticName,
+                        "chars": "\(text.count)",
+                        "words": "\(wordCount)",
+                        "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000))"
+                    ]
+                )
+            )
             switch pasteOutcome {
             case .pasted:
                 overlayController.showSuccessAndDismiss()
@@ -223,6 +297,19 @@ class DraftSessionController: ObservableObject {
         overlayController.hideWithCancelAnimation()
         isDictating = false
         appState.logger.log("DICTATION | cancelled")
+        DiagnosticsTrail.record(
+            logger: appState.logger,
+            level: .info,
+            engine: "dictation",
+            event: "dictation_cancelled",
+            message: "Dictation cancelled",
+            context: dictationContext(
+                extra: [
+                    "trigger": currentDictationTrigger.rawValue,
+                    "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000))"
+                ]
+            )
+        )
         #if BETA_BUILD
         let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
         BetaTelemetry.shared.sendEvent(
@@ -337,5 +424,53 @@ class DraftSessionController: ObservableObject {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+    }
+
+    private func persistDictationTranscript(text: String, delivery: DictationDelivery) {
+        do {
+            let saved = try DictationTranscriptWriter.save(
+                text: text,
+                sourceApp: sessionSourceApp,
+                delivery: delivery
+            )
+            appState?.logger.log("DICTATION | saved markdown export at \(saved.url.lastPathComponent)")
+            DiagnosticsTrail.record(
+                logger: appState?.logger,
+                engine: "dictation",
+                event: "dictation_export_saved",
+                message: "Saved dictation markdown export",
+                context: dictationContext(
+                    extra: [
+                        "delivery": delivery.rawValue,
+                        "title": saved.title,
+                        "filename": saved.url.lastPathComponent
+                    ]
+                )
+            )
+        } catch {
+            appState?.logger.log("DICTATION | failed to save markdown export: \(error.localizedDescription)")
+            DiagnosticsTrail.record(
+                logger: appState?.logger,
+                level: .warning,
+                engine: "dictation",
+                event: "dictation_export_failed",
+                message: "Failed to save dictation markdown export",
+                context: dictationContext(extra: ["error": error.localizedDescription])
+            )
+        }
+    }
+
+    private func dictationContext(extra: [String: String] = [:]) -> [String: String] {
+        var context: [String: String] = [
+            "source_app_name": sessionSourceApp?.localizedName ?? "",
+            "source_app_bundle_id": sessionSourceApp?.bundleIdentifier ?? "",
+            "audio_device": appState?.sttRouter.inputDeviceName ?? ""
+        ]
+
+        for (key, value) in extra {
+            context[key] = value
+        }
+
+        return context
     }
 }

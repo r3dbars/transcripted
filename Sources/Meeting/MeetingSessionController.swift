@@ -25,6 +25,22 @@ import TranscriptedCore
 @available(macOS 14.0, *)
 @MainActor
 final class MeetingSessionController: ObservableObject {
+    enum StartTrigger: String {
+        case hotkey = "hotkey"
+        case menu = "menu"
+        case unknown = "unknown"
+    }
+
+    enum StopReason: String {
+        case hotkeyToggle = "hotkey_toggle"
+        case overlayStopButton = "overlay_stop_button"
+        case unknown = "unknown"
+    }
+
+    enum TranscriptionCancelReason: String {
+        case unknown = "unknown"
+    }
+
     struct ModelWarmupStatus: Equatable {
         let title: String
         let subtitle: String
@@ -63,7 +79,22 @@ final class MeetingSessionController: ObservableObject {
         case error(String)       // Fatal error — see message
     }
 
-    @Published private(set) var state: State = .idle
+    @Published private(set) var state: State = .idle {
+        didSet {
+            guard state != oldValue else { return }
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "meeting_state_changed",
+                message: "Meeting state changed",
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "from": oldValue.diagnosticName,
+                        "to": state.diagnosticName
+                    ]
+                )
+            )
+        }
+    }
 
     // Pass-throughs for UI convenience (updated via Combine subscriptions below).
     @Published private(set) var isRecording: Bool = false
@@ -75,7 +106,12 @@ final class MeetingSessionController: ObservableObject {
     @Published private(set) var lastSavedTitle: String? = nil
 
     @Published private(set) var failedMeetings: [FailedMeetingItem] = []
-    @Published private(set) var warmupStatus: ModelWarmupStatus = .ready
+    @Published private(set) var warmupStatus: ModelWarmupStatus = .ready {
+        didSet {
+            guard warmupStatus != oldValue else { return }
+            logWarmupStatusChange(from: oldValue, to: warmupStatus)
+        }
+    }
 
     // MARK: - Core services (owned)
 
@@ -91,6 +127,7 @@ final class MeetingSessionController: ObservableObject {
     private let downloader: MeetingModelDownloader
 
     private var cancellables: Set<AnyCancellable> = []
+    private var modelPreparationTask: Task<Result<Void, Error>, Never>?
 
     // MARK: - Init
 
@@ -166,40 +203,135 @@ final class MeetingSessionController: ObservableObject {
     /// Load STT + diarization models. Call once before the first recording.
     /// Transitions state: idle → loadingModels → ready, or → error(String).
     ///
-    func prepareModels() async {
-        state = .loadingModels
-        do {
-            try await downloader.ensureModelsReady()
+    func prepareModels(showLoadingUI: Bool = true) async {
+        if case .ready = state { return }
 
-            state = .ready
-        } catch {
-            state = .error(error.localizedDescription)
+        if showLoadingUI, case .loadingModels = state {
+            if let task = modelPreparationTask {
+                _ = await task.value
+                return
+            }
         }
+
+        if showLoadingUI {
+            state = .loadingModels
+            refreshWarmupStatus()
+        }
+
+        if let task = modelPreparationTask {
+            let result = await task.value
+            applyModelPreparationResult(result, showLoadingUI: showLoadingUI)
+            return
+        }
+
+        let task = Task<Result<Void, Error>, Never> { [downloader] in
+            do {
+                try await downloader.ensureModelsReady()
+                return .success(())
+            } catch {
+                return .failure(error)
+            }
+        }
+
+        modelPreparationTask = task
+        let result = await task.value
+        modelPreparationTask = nil
+        applyModelPreparationResult(result, showLoadingUI: showLoadingUI)
     }
 
     /// Begin a new meeting recording. Requires `state == .ready` (or .idle —
     /// in which case we load models first). Safe to call from UI buttons.
-    func startRecording() async {
-        if state == .idle {
+    func startRecording(trigger: StartTrigger = .unknown) async {
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_start_requested",
+            message: "Meeting start requested",
+            context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+        )
+
+        switch state {
+        case .idle, .loadingModels, .error:
             await prepareModels()
-            guard case .ready = state else { return }
+            guard case .ready = state else {
+                DiagnosticsTrail.record(
+                    level: .warning,
+                    engine: "meeting",
+                    event: "meeting_start_blocked",
+                    message: "Meeting could not start because models were not ready",
+                    context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+                )
+                return
+            }
+        case .ready:
+            break
+        case .recording, .transcribing:
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "meeting_start_ignored",
+                message: "Meeting start ignored because another meeting flow is active",
+                context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+            )
+            return
         }
-        guard case .ready = state else { return }
 
         capture.startRecording()
         state = .recording
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_recording_started",
+            message: "Meeting recording started",
+            context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+        )
     }
 
     /// Stop capture and hand off to the Core pipeline. Returns once the task
     /// has been *started* (not when it completes — observers watch
     /// `displayStatus` / `lastSavedTranscriptURL` for that).
-    func stopRecording() async {
+    func stopRecording(reason: StopReason = .unknown) async {
         guard case .recording = state else { return }
 
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_stop_requested",
+            message: "Meeting stop requested",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "reason": reason.rawValue,
+                    "duration_ms": "\(Int(recordingDuration * 1000))"
+                ]
+            )
+        )
+
         let files = await capture.stopAndAwaitFiles()
+        let healthInfo = capture.healthInfo()
         state = .transcribing
 
+        DiagnosticsTrail.record(
+            level: capture.systemAudioStatus.isWarning ? .warning : .info,
+            engine: "meeting",
+            event: "meeting_recording_stopped",
+            message: "Meeting recording stopped and transcription started",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "reason": reason.rawValue,
+                    "duration_ms": "\(Int(recordingDuration * 1000))",
+                    "mic_file_present": boolString(files.micURL != nil),
+                    "system_file_present": boolString(files.systemURL != nil),
+                    "capture_quality": healthInfo.captureQuality.rawValue,
+                    "audio_gaps": "\(healthInfo.audioGaps)",
+                    "device_switches": "\(healthInfo.deviceSwitches)"
+                ]
+            )
+        )
+
         guard let micURL = files.micURL else {
+            DiagnosticsTrail.record(
+                level: .error,
+                engine: "meeting",
+                event: "meeting_recording_missing_mic_audio",
+                message: "Meeting recording stopped without a microphone file",
+                context: baseDiagnosticsContext(extra: ["reason": reason.rawValue])
+            )
             state = .error("No microphone audio was captured.")
             return
         }
@@ -208,15 +340,22 @@ final class MeetingSessionController: ObservableObject {
             micURL: micURL,
             systemURL: files.systemURL,
             outputFolder: storagePaths.transcripts,
-            healthInfo: capture.healthInfo()
+            healthInfo: healthInfo
         )
     }
 
     /// Cancel any in-progress pipeline. Does not cancel an active recording —
     /// use stopRecording() for that.
-    func cancelActiveTranscription() {
+    func cancelActiveTranscription(reason: TranscriptionCancelReason = .unknown) {
         taskManager.cancelAll()
         state = .ready
+        DiagnosticsTrail.record(
+            level: .warning,
+            engine: "meeting",
+            event: "meeting_transcription_cancelled",
+            message: "Meeting transcription cancelled",
+            context: baseDiagnosticsContext(extra: ["reason": reason.rawValue])
+        )
     }
 
     func retryFailedMeeting(id: UUID) {
@@ -248,17 +387,91 @@ final class MeetingSessionController: ObservableObject {
         capture.$recordingDuration
             .assign(to: &$recordingDuration)
 
+        capture.$systemAudioStatus
+            .removeDuplicates()
+            .sink { [weak self] status in
+                guard let self else { return }
+                let level: EventLevel = status.isWarning ? .warning : .info
+                DiagnosticsTrail.record(
+                    level: level,
+                    engine: "meeting",
+                    event: "system_audio_status_changed",
+                    message: self.systemAudioStatusMessage(for: status),
+                    context: self.baseDiagnosticsContext(
+                        extra: [
+                            "system_audio_status": status.diagnosticName,
+                            "recording": self.boolString(self.isRecording),
+                            "duration_ms": "\(Int(self.recordingDuration * 1000))"
+                        ]
+                    )
+                )
+            }
+            .store(in: &cancellables)
+
         taskManager.$displayStatus
             .sink { [weak self] status in
                 guard let self else { return }
+                let previousStatus = self.displayStatus
                 self.displayStatus = status
                 // Pipeline completion: reset state to .ready for next meeting.
                 if case .transcribing = self.state {
                     switch status {
                     case .transcriptSaved:
+                        DiagnosticsTrail.record(
+                            engine: "meeting",
+                            event: "meeting_transcript_saved",
+                            message: "Meeting transcript saved",
+                            context: self.baseDiagnosticsContext(
+                                extra: [
+                                    "title": self.lastSavedTitle ?? "",
+                                    "transcript_url": self.lastSavedTranscriptURL?.path ?? ""
+                                ]
+                            )
+                        )
                         self.state = .ready
                     case .failed(let message):
+                        DiagnosticsTrail.record(
+                            level: .error,
+                            engine: "meeting",
+                            event: "meeting_transcript_failed",
+                            message: "Meeting transcription failed",
+                            context: self.baseDiagnosticsContext(extra: ["error": message])
+                        )
                         self.state = .error(message)
+                    case .gettingReady:
+                        if previousStatus.diagnosticName != status.diagnosticName {
+                            DiagnosticsTrail.record(
+                                engine: "meeting",
+                                event: "meeting_pipeline_phase",
+                                message: "Meeting pipeline getting ready",
+                                context: self.baseDiagnosticsContext(extra: ["phase": "getting_ready"])
+                            )
+                        }
+                    case .transcribing(let progress):
+                        let previousBucket = Int(previousStatus.progress * 4)
+                        let currentBucket = Int(progress * 4)
+                        if previousStatus.diagnosticName != status.diagnosticName || previousBucket != currentBucket {
+                            DiagnosticsTrail.record(
+                                engine: "meeting",
+                                event: "meeting_pipeline_phase",
+                                message: "Meeting transcription in progress",
+                                context: self.baseDiagnosticsContext(
+                                    extra: [
+                                        "phase": "transcribing",
+                                        "progress_pct": "\(Int(progress * 100))"
+                                    ]
+                                )
+                            )
+                        }
+                    case .finishing:
+                        if previousStatus.diagnosticName != status.diagnosticName {
+                            DiagnosticsTrail.record(
+                                engine: "meeting",
+                                event: "meeting_pipeline_phase",
+                                message: "Meeting transcription finishing",
+                                context: self.baseDiagnosticsContext(extra: ["phase": "finishing"])
+                            )
+                        }
                     default:
                         break
                     }
@@ -278,6 +491,17 @@ final class MeetingSessionController: ObservableObject {
                 let styled = MeetingTranscriptStyler.restyleTranscript(at: url)
                 self.lastSavedTranscriptURL = styled.url
                 self.lastSavedTitle = styled.title
+                DiagnosticsTrail.record(
+                    engine: "meeting",
+                    event: "meeting_transcript_artifact_ready",
+                    message: "Meeting transcript artifact is ready",
+                    context: self.baseDiagnosticsContext(
+                        extra: [
+                            "title": styled.title,
+                            "transcript_url": styled.url.path
+                        ]
+                    )
+                )
             }
             .store(in: &cancellables)
 
@@ -306,6 +530,20 @@ final class MeetingSessionController: ObservableObject {
     private func refreshWarmupStatus() {
         let dictationState = parakeetEngine.modelDownloadState
         let meetingState = diarization.modelState
+        let shouldSurfaceMeetingWarmup: Bool
+
+        switch state {
+        case .loadingModels:
+            shouldSurfaceMeetingWarmup = true
+        case .error:
+            if case .failed = meetingState {
+                shouldSurfaceMeetingWarmup = true
+            } else {
+                shouldSurfaceMeetingWarmup = false
+            }
+        default:
+            shouldSurfaceMeetingWarmup = false
+        }
 
         if case .ready = dictationState, case .ready = meetingState {
             warmupStatus = .ready
@@ -341,6 +579,11 @@ final class MeetingSessionController: ObservableObject {
                 meetingsStatus: "Waiting"
             )
         case .ready:
+            guard shouldSurfaceMeetingWarmup else {
+                warmupStatus = .ready
+                return
+            }
+
             switch meetingState {
             case .ready:
                 warmupStatus = .ready
@@ -382,6 +625,87 @@ final class MeetingSessionController: ObservableObject {
                 meetingsStatus: "Waiting"
             )
         }
+    }
+
+    private func applyModelPreparationResult(_ result: Result<Void, Error>, showLoadingUI: Bool) {
+        switch result {
+        case .success:
+            switch state {
+            case .recording, .transcribing:
+                break
+            default:
+                state = .ready
+            }
+        case .failure(let error):
+            if showLoadingUI {
+                state = .error(error.localizedDescription)
+            }
+        }
+
+        refreshWarmupStatus()
+    }
+
+    private func logWarmupStatusChange(from oldValue: ModelWarmupStatus, to newValue: ModelWarmupStatus) {
+        guard warmupDiagnosticsSignature(for: oldValue) != warmupDiagnosticsSignature(for: newValue) else { return }
+
+        DiagnosticsTrail.record(
+            level: newValue.title.contains("Couldn’t") ? .warning : .info,
+            engine: "meeting",
+            event: "warmup_status_changed",
+            message: newValue.subtitle,
+            context: [
+                "title": newValue.title,
+                "subtitle": newValue.subtitle,
+                "progress_pct": "\(Int(newValue.progress * 100))",
+                "dictation_status": newValue.dictationStatus,
+                "meetings_status": newValue.meetingsStatus
+            ]
+        )
+    }
+
+    private func warmupDiagnosticsSignature(for status: ModelWarmupStatus) -> String {
+        [
+            status.title,
+            status.subtitle,
+            status.dictationStatus,
+            status.meetingsStatus,
+            "\(Int(status.progress * 10))"
+        ].joined(separator: "|")
+    }
+
+    private func baseDiagnosticsContext(extra: [String: String] = [:]) -> [String: String] {
+        var context: [String: String] = [
+            "session_state": state.diagnosticName,
+            "display_status": displayStatus.diagnosticName,
+            "dictation_model_state": parakeetEngine.modelDownloadState.diagnosticName,
+            "meeting_model_state": diarization.modelState.diagnosticName,
+            "system_audio_status": capture.systemAudioStatus.diagnosticName
+        ]
+
+        for (key, value) in extra {
+            context[key] = value
+        }
+
+        return context
+    }
+
+    private func systemAudioStatusMessage(for status: SystemAudioStatus) -> String {
+        switch status {
+        case .unknown:
+            return "System audio status reset"
+        case .healthy:
+            return "System audio capture is healthy"
+        case .reconnecting:
+            return "System audio capture is reconnecting"
+        case .silent:
+            return "System audio capture is silent"
+        case .failed:
+            return "System audio capture failed"
+        }
+    }
+
+    private func boolString(_ value: Bool) -> String {
+        value ? "true" : "false"
     }
 
     private func refreshFailedMeetings() {
@@ -430,5 +754,66 @@ final class MeetingSessionController: ObservableObject {
             return "\(dateText) • Audio kept"
         }
         return dateText
+    }
+}
+
+private extension MeetingSessionController.State {
+    var diagnosticName: String {
+        switch self {
+        case .idle: return "idle"
+        case .loadingModels: return "loading_models"
+        case .ready: return "ready"
+        case .recording: return "recording"
+        case .transcribing: return "transcribing"
+        case .error: return "error"
+        }
+    }
+}
+
+private extension DisplayStatus {
+    var diagnosticName: String {
+        switch self {
+        case .idle: return "idle"
+        case .gettingReady: return "getting_ready"
+        case .transcribing: return "transcribing"
+        case .finishing: return "finishing"
+        case .transcriptSaved: return "transcript_saved"
+        case .failed: return "failed"
+        }
+    }
+}
+
+private extension ParakeetModelState {
+    var diagnosticName: String {
+        switch self {
+        case .notLoaded: return "not_loaded"
+        case .downloading: return "downloading"
+        case .loading: return "loading"
+        case .ready: return "ready"
+        case .failed: return "failed"
+        }
+    }
+}
+
+private extension DiarizationModelState {
+    var diagnosticName: String {
+        switch self {
+        case .notLoaded: return "not_loaded"
+        case .loading: return "loading"
+        case .ready: return "ready"
+        case .failed: return "failed"
+        }
+    }
+}
+
+private extension SystemAudioStatus {
+    var diagnosticName: String {
+        switch self {
+        case .unknown: return "unknown"
+        case .healthy: return "healthy"
+        case .reconnecting: return "reconnecting"
+        case .silent: return "silent"
+        case .failed: return "failed"
+        }
     }
 }

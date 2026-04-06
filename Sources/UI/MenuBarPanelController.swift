@@ -124,7 +124,7 @@ final class MenuBarPanelController: NSViewController {
         let sourceApp = resolvedSourceApp()
         dismissPopover()
         sourceApp?.activate(options: [])
-        session.startDictation(sourceApp: sourceApp)
+        session.startDictation(sourceApp: sourceApp, trigger: .menu)
     }
 
     private func startMeetingFromMenu() {
@@ -133,7 +133,7 @@ final class MenuBarPanelController: NSViewController {
             dismissPopover()
             sourceApp?.activate(options: [])
             Task {
-                await appState.meetingSession.startRecording()
+                await appState.meetingSession.startRecording(trigger: .menu)
             }
         }
     }
