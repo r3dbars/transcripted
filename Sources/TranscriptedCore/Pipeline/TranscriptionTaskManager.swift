@@ -126,6 +126,15 @@ public class TranscriptionTaskManager: ObservableObject {
 
     /// Retry a failed transcription by its ID
     public func retryFailedTranscription(failedId: UUID) async -> Bool {
+        // Guard: reject if a pipeline is already active — same constraint as startTranscription.
+        // Without this guard a retry launched from Settings can run concurrently with a fresh
+        // transcription, causing model contention (both Parakeet and PyAnnote are single-instance;
+        // parallel pipelines cause inference errors and hangs).
+        guard activeTasks.isEmpty else {
+            AppLogger.pipeline.warning("Rejecting retry — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
+            return false
+        }
+
         guard let failed = failedTranscriptionManager.failedTranscriptions.first(where: { $0.id == failedId }) else {
             AppLogger.pipeline.error("Failed transcription not found", ["failedId": "\(failedId)"])
             return false
@@ -145,6 +154,11 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         AppLogger.pipeline.info("Retrying failed transcription", ["failedId": "\(failedId)"])
+
+        // Register a sentinel in activeTasks before the first suspension point so that
+        // startTranscription's `activeTasks.isEmpty` guard blocks until the retry finishes.
+        // The sentinel Task does no work — its presence in the dict is what matters.
+        activeTasks[failedId] = Task {}
 
         await MainActor.run {
             failedTranscriptionManager.incrementRetryCount(id: failedId)
@@ -166,6 +180,7 @@ public class TranscriptionTaskManager: ObservableObject {
 
             await MainActor.run {
                 failedTranscriptionManager.removeFailedTranscription(id: failedId)
+                self.activeTasks.removeValue(forKey: failedId)
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
                 self.populateSavedMetadata(from: transcriptURL)
@@ -178,6 +193,7 @@ public class TranscriptionTaskManager: ObservableObject {
         } catch {
             AppLogger.pipeline.error("Retry failed", ["error": "\(error.localizedDescription)"])
             await MainActor.run {
+                self.activeTasks.removeValue(forKey: failedId)
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
                 self.displayStatus = .failed(message: "Retry failed")
