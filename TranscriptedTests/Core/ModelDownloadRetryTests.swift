@@ -1,5 +1,6 @@
 import XCTest
 @testable import Transcripted
+@testable import TranscriptedCore
 
 final class ModelDownloadRetryTests: XCTestCase {
 

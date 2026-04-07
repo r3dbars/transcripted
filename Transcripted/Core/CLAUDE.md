@@ -27,12 +27,14 @@ The extraction moved these file groups to `Sources/TranscriptedCore/`:
 | Old location (`Transcripted/Core/...`) | New location |
 |---|---|
 | `Audio.swift`, `AudioDeviceRecovery.swift`, `AudioFileManager.swift`, `AudioLevelMonitor.swift`, `SystemAudioCapture.swift`, `SystemAudioProcessTap.swift`, `SystemAudioBufferWriter.swift`, `CoreAudioUtils.swift` | `Sources/TranscriptedCore/Audio/` |
-| `Transcription.swift`, `TranscriptionPipeline.swift`, `TranscriptionPipelineRunner.swift`, `TranscriptionTaskManager.swift`, `SpeakerNamingCoordinator.swift`, `TranscriptionTypes.swift`, `DisplayStatus.swift`, `SpeakerMatchingService.swift` | `Sources/TranscriptedCore/Pipeline/` |
-| `TranscriptSaver.swift`, `TranscriptFormatter.swift`, `TranscriptMetadataBuilder.swift`, `RetroactiveSpeakerUpdater.swift`, `TranscriptScanner.swift`, `TranscriptUtils.swift`, `AgentOutput.swift` | `Sources/TranscriptedCore/Storage/` |
+| `Transcription.swift`, `TranscriptionPipeline.swift`, `TranscriptionPipelineRunner.swift`, `TranscriptionTaskManager.swift` | `Sources/TranscriptedCore/Pipeline/` |
+| `DisplayStatus.swift`, `FailedTranscription.swift`, `TranscriptionTypes.swift`, `TranscriptMetadataBuilder.swift` | `Sources/TranscriptedCore/Models/` |
+| `TranscriptSaver.swift`, `TranscriptFormatter.swift`, `TranscriptScanner.swift`, `AgentOutput.swift` | `Sources/TranscriptedCore/Storage/` |
 | `StatsDatabase.swift`, `StatsDatabaseModels.swift`, `StatsDatabaseQueries.swift`, `StatsService.swift` | `Sources/TranscriptedCore/Stats/` |
-| `ModelDownloadService.swift`, `RecordingValidator.swift`, `FilePermissions.swift`, `FailedTranscription.swift`, `FailedTranscriptionManager.swift`, `AppServices.swift` | `Sources/TranscriptedCore/Services/` |
+| `ModelDownloadService.swift`, `RecordingValidator.swift`, `FailedTranscriptionManager.swift`, `AppServices.swift`, `DiarizationService.swift`, `CoreStoragePaths.swift` | `Sources/TranscriptedCore/Services/` |
+| `SpeakerNamingCoordinator.swift`, `SpeakerMatchingService.swift`, `RetroactiveSpeakerUpdater.swift` | `Sources/TranscriptedCore/Speaker/` |
 | `Logging/AppLogger.swift`, `Logging/FileLogger.swift` | `Sources/TranscriptedCore/Logging/` |
-| `DateFormattingHelper.swift`, `DateParser.swift` | `Sources/TranscriptedCore/Utilities/` |
+| `DateFormattingHelper.swift`, `DateParser.swift`, `FilePermissions.swift`, `TranscriptUtils.swift` | `Sources/TranscriptedCore/Utilities/` |
 
 If an older CLAUDE.md or comment still references `Transcripted/Core/Audio.swift`, `Transcripted/Core/Transcription.swift`, etc., treat it as stale and update the reference to `Sources/TranscriptedCore/...`.
 

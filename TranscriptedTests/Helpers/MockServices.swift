@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 @testable import Transcripted
+@testable import TranscriptedCore
 
 // MARK: - Mock Speaker Store
 
@@ -112,29 +113,24 @@ final class MockSpeakerStore: SpeakerStore {
 
 @available(macOS 14.0, *)
 final class MockStatsStore: StatsStore {
-    var recordings: [(date: String, time: String, durationSeconds: Int, wordCount: Int, speakerCount: Int, processingTimeMs: Int, transcriptPath: String, title: String?)] = []
+    var storedRecordings: [RecordingMetadata] = []
+    var recordSessionCallCount = 0
 
-    var recordTranscriptionCallCount = 0
-
-    func recordTranscription(date: String, time: String, durationSeconds: Int, wordCount: Int, speakerCount: Int, processingTimeMs: Int, transcriptPath: String, title: String?) {
-        recordTranscriptionCallCount += 1
-        recordings.append((date, time, durationSeconds, wordCount, speakerCount, processingTimeMs, transcriptPath, title))
+    func recordSession(_ metadata: RecordingMetadata) {
+        recordSessionCallCount += 1
+        storedRecordings.append(metadata)
     }
 
-    func totalRecordingCount() -> Int {
-        recordings.count
+    func getTotalRecordingsCount() -> Int {
+        storedRecordings.count
     }
 
-    func totalDurationSeconds() -> Int {
-        recordings.reduce(0) { $0 + $1.durationSeconds }
+    func getRecordings(from startDate: Date, to endDate: Date) -> [RecordingMetadata] {
+        storedRecordings.filter { $0.date >= startDate && $0.date <= endDate }
     }
 
-    func recordingsForDate(_ date: String) -> [RecordingMetadata] {
-        []
-    }
-
-    func dailyActivity(from startDate: String, to endDate: String) -> [DailyActivity] {
-        []
+    func recordingExists(transcriptPath: String) -> Bool {
+        storedRecordings.contains { $0.transcriptPath == transcriptPath }
     }
 }
 
