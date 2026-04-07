@@ -269,6 +269,10 @@ public class Audio: ObservableObject {
     // channel at 44.1/48/96 kHz). System buffers arrive in the aggregate-
     // device format (typically stereo at 48 kHz). Callers are responsible
     // for any downmix/resample they need.
+    //
+    // Copy semantics:
+    //   onMicPCMBuffer  — raw reference from the CoreAudio tap; caller MUST copy before async dispatch.
+    //   onSystemPCMBuffer — already deep-copied (bufferListNoCopy semantics); safe to retain as-is.
     public var onMicPCMBuffer: ((AVAudioPCMBuffer) -> Void)?
     public var onSystemPCMBuffer: ((AVAudioPCMBuffer) -> Void)?
 
