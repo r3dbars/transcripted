@@ -3,7 +3,7 @@
 **Authors:** draft-mapper (owner), transcripted-mapper (contributor)
 **Status:** v6 for human review — end of Phase 0. Phase 2 execution starts only after human sign-off.
 **Inputs:** [draft-inventory.md](draft-inventory.md), [transcripted-inventory.md](transcripted-inventory.md)
-**Worktree:** `/Users/redbars/redbars/code/Draft/.claude/worktrees/transcripted-merge` on `feat/transcripted-merge`
+**Worktree:** `<draft-worktree>/transcripted-merge` on `feat/transcripted-merge`
 
 **v6 changes (since v5 / commit `4b02f3a`):**
 
@@ -51,7 +51,7 @@
 - **§0 zero LLM overlap confirmed** — transcripted-mapper confirmed Transcripted has zero LLM calls in the entire codebase. Draft's Gemini 3 Flash REST/SSE and MLX (Qwen 3.5-4B-4bit) paths are therefore purely additive with no drafting overlap to resolve.
 - **§0 side benefit** — Merge also removes a 54 MB unversioned binary from the Transcripted git history (FluidAudio rebuild lane).
 
-All paths below are absolute unless otherwise noted. File path format: `<repo-root>/<relative>` where repo roots are `~/redbars/code/Draft/` and `~/redbars/code/Transcripted/`.
+All paths below are absolute unless otherwise noted. File path format: `<repo-root>/<relative>` where repo roots are `<draft-root>/` and `<transcripted-root>/`.
 
 ---
 
@@ -62,7 +62,7 @@ All paths below are absolute unless otherwise noted. File path format: `<repo-ro
 **Shape of the merge:**
 
 1. **Extract `Sources/TranscriptedCore/` inside the Transcripted repo** as a new SPM library target alongside the existing Xcode app target. Transcripted's app delegate keeps using it via `@testable` style imports; nothing ships-breaking for Transcripted.
-2. **Draft adopts `Package.swift`** (a first for Draft — see §2) and depends on TranscriptedCore via **local path** pointing at `~/redbars/code/Transcripted/`. Draft's existing `swiftc`-driven `build.sh` remains, but calls `swift build` as a pre-step to produce the Core artifact and its module.
+2. **Draft adopts `Package.swift`** (a first for Draft — see §2) and depends on TranscriptedCore via **local path** pointing at `<transcripted-root>/`. Draft's existing `swiftc`-driven `build.sh` remains, but calls `swift build` as a pre-step to produce the Core artifact and its module.
 3. **FluidAudio is consolidated** onto Draft's existing `deps-libs/libDraftDeps.a` unified static library. Transcripted's committed `libFluidAudioAll.a` + `fluidaudio-modules/` are retired in favor of Draft's `build-fluidaudio.sh` output (assuming version alignment per Open Question §6.2).
 4. **Draft's `Sources/Speech/` stays** — its ParakeetEngine is optimized for short dictation (≤30s) and fast overlay streaming, which is a different use case from Transcripted's long-audio `ParakeetService`. Both can coexist in the same binary linking one FluidAudio.
 5. **Transcripted's audio capture stack is the authoritative source** for Draft's new meeting mode. Draft has no dual-stream capture today.
@@ -78,10 +78,10 @@ All paths below are absolute unless otherwise noted. File path format: `<repo-ro
 
 ### 1.1 Target shape
 
-Create a new SPM library target `TranscriptedCore` inside `~/redbars/code/Transcripted/`, coexisting with the existing `Transcripted.xcodeproj`:
+Create a new SPM library target `TranscriptedCore` inside `<transcripted-root>/`, coexisting with the existing `Transcripted.xcodeproj`:
 
 ```
-~/redbars/code/Transcripted/
+<transcripted-root>/
 ├── Transcripted.xcodeproj/          # existing app target — unchanged
 ├── Transcripted/                    # existing app sources — most files stay
 ├── Package.swift                    # NEW — declares TranscriptedCore library
@@ -105,7 +105,7 @@ Create a new SPM library target `TranscriptedCore` inside `~/redbars/code/Transc
 
 ### 1.2 File list — what moves into `Sources/TranscriptedCore/`
 
-Derived directly from transcripted-inventory.md §3 tiers. Paths on the left are current locations inside `~/redbars/code/Transcripted/Transcripted/`; paths on the right are the final `Sources/TranscriptedCore/<subdir>/<file>` destinations.
+Derived directly from transcripted-inventory.md §3 tiers. Paths on the left are current locations inside `<transcripted-root>/Transcripted/`; paths on the right are the final `Sources/TranscriptedCore/<subdir>/<file>` destinations.
 
 #### 1.2.1 Tier A — zero-surgery moves (24 files)
 
@@ -280,7 +280,7 @@ Tier C audio capture keeps its genuine `@available(macOS 14.2, *)` gate for `Aud
 
 **Important v2 correction:** Draft's `.deps-build/Package.swift` is **not a standalone file** — it is regenerated via heredoc by `build-deps.sh` on every run (`rm -rf "$DEPS_BUILD"` on line 27, followed by a `cat > "$DEPS_BUILD/Package.swift" <<'EOF' ... EOF` block). Manual edits to `.deps-build/Package.swift` are wiped on the next `bash build-deps.sh --force`. The correct intervention point is the heredoc **inside `build-deps.sh`**.
 
-**Edit: `~/redbars/code/Draft/build-deps.sh` — modify the heredoc that generates `.deps-build/Package.swift`**
+**Edit: `<draft-root>/build-deps.sh` — modify the heredoc that generates `.deps-build/Package.swift`**
 
 Inside the existing `cat > "$DEPS_BUILD/Package.swift" <<'EOF' ... EOF` block, add the TranscriptedCore dependency and product. **v5 addition:** include a leading warning comment so the "do not edit the generated file" rule lives with the code, not just the plan:
 
@@ -315,8 +315,8 @@ let package = Package(
 
 **Local path vs git URL — our choice and rationale:**
 
-- ✅ **`.package(path: "../../Transcripted")`** (local path, resolved against the `.deps-build/` dir → `~/redbars/code/Transcripted/`).
-  - **Why:** Both repos live side-by-side in `~/redbars/code/`. Local path means instant iteration — edit a Core file in Transcripted, rebuild Draft, done. No push/pull loop while Phase 2 lanes are in flight.
+- ✅ **`.package(path: "../../Transcripted")`** (local path, resolved against the `.deps-build/` dir → `<transcripted-root>/`).
+  - **Why:** Both repos live side-by-side in the same local workspace. Local path means instant iteration — edit a Core file in Transcripted, rebuild Draft, done. No push/pull loop while Phase 2 lanes are in flight.
   - **Why not git URL pinned to `feat/extract-core`:** would force every Core tweak through a push-and-resolve cycle. Hurts velocity during Phase 2. Also risks partially-merged work being inaccessible to one side or the other.
 - 🔁 **Promote to git URL later** — once the merge stabilizes (Phase 3+), switch to `.package(url: "https://github.com/r3dbars/Transcripted.git", branch: "main")` so CI builds of Draft can run without a co-checked-out Transcripted repo. That's a 1-line future change.
 
@@ -608,7 +608,7 @@ let profiles = db.allSpeakers().sorted { $0.lastSeen > $1.lastSeen }
 ### 4.1 FluidAudio consolidation — the single biggest build decision
 
 **Current state (per inventories + transcripted-mapper follow-up):**
-- **Draft** builds FluidAudio from source via `~/redbars/code/Draft/build-fluidaudio.sh` (legacy) and `build-deps.sh` (current) → `deps-libs/libDraftDeps.a` (unified static lib containing FluidAudio + mlx-swift-lm + deps). FluidAudio version: **0.7.9** (from the heredoc inside `build-deps.sh`). Metallib + .swiftmodules go into `deps-libs/` / `deps-modules/`.
+- **Draft** builds FluidAudio from source via `<draft-root>/build-fluidaudio.sh` (legacy) and `build-deps.sh` (current) → `deps-libs/libDraftDeps.a` (unified static lib containing FluidAudio + mlx-swift-lm + deps). FluidAudio version: **0.7.9** (from the heredoc inside `build-deps.sh`). Metallib + .swiftmodules go into `deps-libs/` / `deps-modules/`.
 - **Transcripted** ships a **committed, unversioned** `fluidaudio-libs/libFluidAudioAll.a` (~54 MB) + `fluidaudio-modules/` with 18 prebuilt `.swiftmodule` bundles. **There is no `Package.resolved`, no commit message pinning the upstream revision, and no record of which FluidAudio tag produced the binary.** (Confirmed by transcripted-mapper after reviewing the Transcripted repo directly.) Separately, `TranscriptedCLI/` links against a different artifact (`-lFluidAudioCLI`) which is ALSO unversioned. This is not a version mismatch with Draft — it is unknown provenance.
 
 **Four strategy options** (from transcripted-inventory.md §11.7):
@@ -635,7 +635,7 @@ The "FluidAudio version alignment" uncertainty that was Open Question §6.2 in v
 
 ```swift
 // swift-tools-version:5.9
-// ~/redbars/code/Transcripted/Package.swift   (NEW — alongside the existing Xcode project)
+// <transcripted-root>/Package.swift   (NEW — alongside the existing Xcode project)
 import PackageDescription
 
 let package = Package(
@@ -688,11 +688,11 @@ let package = Package(
 
 ### 4.3 `build-deps.sh` changes
 
-Draft's `~/redbars/code/Draft/build-deps.sh` (not shown in §1.6 of draft-inventory but assumed standard) builds `deps-libs/libDraftDeps.a` from the sidecar SPM workspace. We add TranscriptedCore to that workspace's dependency list (already shown in §2.2). **No new script required** — TranscriptedCore piggybacks on the existing Shim → release build pattern.
+Draft's `<draft-root>/build-deps.sh` (not shown in §1.6 of draft-inventory but assumed standard) builds `deps-libs/libDraftDeps.a` from the sidecar SPM workspace. We add TranscriptedCore to that workspace's dependency list (already shown in §2.2). **No new script required** — TranscriptedCore piggybacks on the existing Shim → release build pattern.
 
 ### 4.4 Info.plist and entitlements changes in Draft
 
-Meeting capture requires additional permissions and strings. Edits to `~/redbars/code/Draft/Info.plist`:
+Meeting capture requires additional permissions and strings. Edits to `<draft-root>/Info.plist`:
 
 ```diff
    <key>NSMicrophoneUsageDescription</key>
@@ -708,7 +708,7 @@ Meeting capture requires additional permissions and strings. Edits to `~/redbars
 
 **No `NSSystemAdministrationUsageDescription` is needed** — CoreAudio process tap API (macOS 14.2+) only requires `NSAudioCaptureUsageDescription`.
 
-Edits to `~/redbars/code/Draft/build.sh` entitlements heredoc (lines 45–58):
+Edits to `<draft-root>/build.sh` entitlements heredoc (lines 45–58):
 
 ```diff
      <key>com.apple.security.device.audio-input</key>
@@ -792,7 +792,7 @@ Four ownership lanes. Each lane owns a disjoint set of directories + files. **No
 
 ### 5.1 Lane A — `core-extractor` (owns Transcripted repo changes)
 
-**Directory boundary:** everything inside `~/redbars/code/Transcripted/` EXCEPT `Transcripted/UI/`, `Transcripted/Design/`, `Transcripted/Onboarding/`, `TranscriptedTests/UI/`, and Tools/ packages (those stay untouched).
+**Directory boundary:** everything inside `<transcripted-root>/` EXCEPT `Transcripted/UI/`, `Transcripted/Design/`, `Transcripted/Onboarding/`, `TranscriptedTests/UI/`, and Tools/ packages (those stay untouched).
 
 **Work items (in order, v4):**
 
@@ -827,7 +827,7 @@ Four ownership lanes. Each lane owns a disjoint set of directories + files. **No
 
 ### 5.2 Lane B — `draft-integrator` (owns Draft Package.swift + build plumbing + `Sources/Meeting/` wiring)
 
-**Directory boundary:** `~/redbars/code/Draft/.deps-build/Package.swift`, `~/redbars/code/Draft/build.sh`, `~/redbars/code/Draft/build-deps.sh`, `~/redbars/code/Draft/Info.plist`, `~/redbars/code/Draft/Sources/Meeting/` (new), `~/redbars/code/Draft/Sources/Speech/AudioResampler.swift` (delete — replaced by Core's), `~/redbars/code/Draft/Sources/DraftPaths.swift` (extend with `meetingSupportDir`).
+**Directory boundary:** `<draft-root>/.deps-build/Package.swift`, `<draft-root>/build.sh`, `<draft-root>/build-deps.sh`, `<draft-root>/Info.plist`, `<draft-root>/Sources/Meeting/` (new), `<draft-root>/Sources/Speech/AudioResampler.swift` (delete — replaced by Core's), `<draft-root>/Sources/DraftPaths.swift` (extend with `meetingSupportDir`).
 
 **Work items:**
 
@@ -850,7 +850,7 @@ Four ownership lanes. Each lane owns a disjoint set of directories + files. **No
 
 ### 5.3 Lane C — `meeting-ui` (owns Draft's UI additions for meeting mode)
 
-**Directory boundary:** `~/redbars/code/Draft/Sources/UI/MeetingOverlayController.swift` (new), `~/redbars/code/Draft/Sources/UI/SpeakerNamingSheet.swift` (new), `~/redbars/code/Draft/Sources/UI/MenuBarPanel.swift` (edit — add meetings section), `~/redbars/code/Draft/Sources/HotkeyPreferences.swift` (edit — add meeting hotkey default), `~/redbars/code/Draft/Sources/Capture/ContextCaptureEngine.swift` (edit — register third hotkey ID for meeting mode).
+**Directory boundary:** `<draft-root>/Sources/UI/MeetingOverlayController.swift` (new), `<draft-root>/Sources/UI/SpeakerNamingSheet.swift` (new), `<draft-root>/Sources/UI/MenuBarPanel.swift` (edit — add meetings section), `<draft-root>/Sources/HotkeyPreferences.swift` (edit — add meeting hotkey default), `<draft-root>/Sources/Capture/ContextCaptureEngine.swift` (edit — register third hotkey ID for meeting mode).
 
 **Work items:**
 
@@ -869,7 +869,7 @@ Four ownership lanes. Each lane owns a disjoint set of directories + files. **No
 
 ### 5.4 Lane D — `build-plumbing` (owns FluidAudio consolidation + Transcripted's build-artifact retirement)
 
-**Directory boundary:** `~/redbars/code/Draft/build-deps.sh` (edit the heredoc to add TranscriptedCore — see §2.2), `~/redbars/code/Transcripted/fluidaudio-libs/` (rebuild then delete), `~/redbars/code/Transcripted/fluidaudio-modules/` (rebuild then delete), `~/redbars/code/Transcripted/Transcripted.xcodeproj/project.pbxproj` (edit — repoint `LIBRARY_SEARCH_PATHS` + `SWIFT_INCLUDE_PATHS`), any new `build-transcripted.sh` helper at Transcripted root.
+**Directory boundary:** `<draft-root>/build-deps.sh` (edit the heredoc to add TranscriptedCore — see §2.2), `<transcripted-root>/fluidaudio-libs/` (rebuild then delete), `<transcripted-root>/fluidaudio-modules/` (rebuild then delete), `<transcripted-root>/Transcripted.xcodeproj/project.pbxproj` (edit — repoint `LIBRARY_SEARCH_PATHS` + `SWIFT_INCLUDE_PATHS`), any new `build-transcripted.sh` helper at Transcripted root.
 
 **Work items — Phase 2.0 (prerequisite, runs FIRST, blocks Lane A):**
 

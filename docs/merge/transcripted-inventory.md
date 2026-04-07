@@ -1,6 +1,6 @@
 # Transcripted Repo Inventory
 
-Read-only recon of `~/redbars/code/Transcripted` for the Draft ↔ Transcripted merge. Produced by `transcripted-mapper` on 2026-04-04. Current branch in Transcripted: `docs/claude-md-sync-20260404`, tip `6ff2e98` (post v0.5.2). All file paths below are relative to the Transcripted repo root unless stated absolute.
+Read-only recon of `<transcripted-root>` for the Draft ↔ Transcripted merge. Produced by `transcripted-mapper` on 2026-04-04. Current branch in Transcripted: `docs/claude-md-sync-20260404`, tip `6ff2e98` (post v0.5.2). All file paths below are relative to the Transcripted repo root unless stated absolute.
 
 **Most important deliverable: §3 "TranscriptedCore file list" and §11 "Extraction blockers."** Everything else in this document is framing for those two.
 
@@ -11,7 +11,7 @@ Read-only recon of `~/redbars/code/Transcripted` for the Draft ↔ Transcripted 
 Transcripted is an **Xcode project**, not an SPM package. The app target is `Transcripted` (menu-bar macOS 26 / Tahoe app, `.accessory` activation policy). Alongside it are three standalone Swift packages under `Tools/` that deliberately do not link the app target.
 
 ```
-~/redbars/code/Transcripted/
+<transcripted-root>/
 ├── Transcripted.xcodeproj/               # Main Xcode project (Swift 6 toolchain)
 │   ├── project.pbxproj                   # Links libFluidAudioAll.a + SWIFT_INCLUDE_PATHS
 │   └── xcshareddata/
@@ -856,7 +856,7 @@ All three have hard-coded file paths. If Draft also touches these via Core (via 
 
 ## Hand-off notes for draft-mapper
 
-- I read exhaustively from `~/redbars/code/Transcripted` only and wrote only this file. No Draft-side files touched.
+- I read exhaustively from `<transcripted-root>` only and wrote only this file. No Draft-side files touched.
 - **Expected overlap with Draft** — ask Draft for its equivalents; these are the areas where merge-plan.md will need collision-resolution sections:
   - **Audio capture**: Transcripted has a full dual-stream (mic + system audio, macOS 14.2+ CoreAudio process taps) capture layer in `Core/Audio.swift` + `Core/SystemAudioCapture.swift` (~1,400 LOC across 8 files, all NOT @MainActor). If Draft has its own, these stay out of Core.
   - **Speaker DB / matching**: `Services/SpeakerDatabase.swift` (SQLite, utility queue) + `SpeakerEmbeddingMatcher` + `SpeakerProfileMerger` + `EmbeddingClusterer`. If Draft has its own speaker store, one wins and the other is deleted.

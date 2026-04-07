@@ -14,7 +14,7 @@ Same directory as `feedback.jsonl` and `prompts.json`. Claude Code reads this fi
 
 - `EventReporter.swift` (~162 lines) — Centralized JSONL event writer + Sentry stub (details below)
 - `BetaTelemetry.swift` (~159 lines) — `#if BETA_BUILD` gated: batched event shipping to proxy Worker, incremental log/events.jsonl upload (60s timer), synchronous quit-time flush, crash-safe offset tracking, log redaction (paths, tokens)
-- `UpdateManager.swift` (~225 lines) — DMG download, mount, staged app replacement with backup/rollback, version comparison via Info.plist, user-facing update prompts, team ID verification (XG6WL66WUQ)
+- `UpdateManager.swift` (~225 lines) — DMG download, mount, staged app replacement with backup/rollback, version comparison via Info.plist, user-facing update prompts, team ID verification against the current app signature
 - `AppLogger.swift` (~110 lines) — Debug logger writing to `~/draft-debug.log` with timestamps, actor-isolated file writer, throttled logging, log rotation (>500KB → last 1000 lines), session separators
 - `JSONLWriter.swift` (~38 lines) — Shared actor for append-only JSONL file writes. Reuses FileHandle across appends to avoid open/seek/close overhead per write. Used by FeedbackStore and AnalysisEngine.
 

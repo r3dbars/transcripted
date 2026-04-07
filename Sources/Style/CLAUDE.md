@@ -193,6 +193,6 @@ After modifying StyleEngine, verify with these checks:
 - **No-edit detection:** Accept without editing -> `AI_DRAFT` equals `USER_SENT`, edit distance = 0 (or near 0)
 - **Graduated frequency:** Check debug log for `STYLE | refinement triggered at N examples` — should fire at 3, 6, 9... (early) then 10, 20... (stabilized)
 - **Recency window:** During refinement, only the last 20 examples should be sent to the local LLM (check prompt size in console if debugging)
-- **Onboarding:** Reset with `defaults delete com.justinbetker.draft style-onboarding-completed` -> relaunch -> onboarding should appear. After completing, style.md should have profile but NO raw pasted text
+- **Onboarding:** Reset with `defaults delete <draft-bundle-id> style-onboarding-completed` -> relaunch -> onboarding should appear. After completing, style.md should have profile but NO raw pasted text
 - **Debug monitoring:** `tail -f ~/draft-debug.log | grep STYLE` shows all style events in real time
 - **Inspect style.md directly:** `cat ~/Library/Application\ Support/Draft/style.md` to see current profile + examples

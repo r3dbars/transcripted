@@ -23,9 +23,18 @@ APP_NAME="Draft"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 DMG_NAME="Draft-${USER_NAME}.dmg"
-SIGNING_IDENTITY="${SIGNING_IDENTITY:-Developer ID Application: Justin Betker (XG6WL66WUQ)}"
+SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
+SIGNING_DISPLAY_NAME=""
+NOTARY_PROFILE="${NOTARY_PROFILE:-draft-notary}"
 BETA_CONFIG_PATH="Sources/API/BetaConfig.swift"
 BETA_CONFIG_BACKUP="$(mktemp -t draft-beta-config)"
+
+if [ -z "$SIGNING_IDENTITY" ]; then
+    SIGNING_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | awk '{print $2}')
+    SIGNING_DISPLAY_NAME=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
+else
+    SIGNING_DISPLAY_NAME="$SIGNING_IDENTITY"
+fi
 
 echo "🔨 Building Draft Beta for $USER_NAME (token: $BETA_TOKEN)..."
 
@@ -130,7 +139,13 @@ if [ $COMPILE_STATUS -ne 0 ]; then
 fi
 
 # Sign with Developer ID + hardened runtime
-echo "Signing with Developer ID..."
+if [ -z "$SIGNING_IDENTITY" ]; then
+    echo "❌ No Developer ID Application certificate found."
+    echo "   Set SIGNING_IDENTITY explicitly or install a Developer ID certificate."
+    exit 1
+fi
+
+echo "Signing with: ${SIGNING_DISPLAY_NAME:-$SIGNING_IDENTITY}"
 codesign --force --deep \
     --sign "$SIGNING_IDENTITY" \
     --options runtime \
@@ -173,10 +188,10 @@ echo "Signing DMG..."
 codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$BUILD_DIR/$DMG_NAME"
 
 # Notarize (only with Developer ID — Apple Development certs can't be notarized)
-if [[ "$SIGNING_IDENTITY" == Developer\ ID* ]]; then
+if [[ "${SIGNING_DISPLAY_NAME:-$SIGNING_IDENTITY}" == Developer\ ID* ]]; then
     echo "Submitting for notarization (this takes 1-5 minutes)..."
     xcrun notarytool submit "$BUILD_DIR/$DMG_NAME" \
-        --keychain-profile "draft-notary" \
+        --keychain-profile "$NOTARY_PROFILE" \
         --wait
 
     # Staple
