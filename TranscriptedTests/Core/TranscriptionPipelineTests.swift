@@ -1,5 +1,6 @@
 import XCTest
 @testable import Transcripted
+@testable import TranscriptedCore
 
 @available(macOS 26.0, *)
 final class TranscriptionPipelineTests: XCTestCase {

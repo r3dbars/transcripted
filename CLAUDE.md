@@ -9,13 +9,13 @@ Menu bar-only macOS app for real-time system audio transcription. Pipeline: Core
 - **UI**: Floating pill (Dynamic Island style) + Settings window + Onboarding window
 - **Core library**: `Sources/TranscriptedCore/` — Swift Package (Package.swift at repo root) that contains the audio/transcription/stats/speaker pipeline. The Transcripted app target and Draft's Sources/Meeting/ both consume it as a library.
 - **Dependencies**: Sparkle (auto-updates), FluidAudio 0.7.9 via SPM (AsrManager, DiarizerManager, OfflineDiarizerManager — phase 2.0 retired the 123MB committed binaries in favor of package resolution)
-- **Protocols**: 6 service protocols in `Sources/TranscriptedCore/Protocols/` (SpeechToTextEngine, DiarizationEngine, SpeakerStore, TranscriptStorage, AudioCaptureEngine, StatsStore) — Core is UI- and STT-agnostic; embedders supply concrete conformers
+- **Protocols**: 7 service protocols in `Sources/TranscriptedCore/Protocols/` (SpeechToTextEngine, DiarizationEngine, SpeakerStore, TranscriptStorage, AudioCaptureEngine, StatsStore, TranscriptNotifier) — Core is UI-, notification-, and STT-agnostic; embedders supply concrete conformers
 - **Embedder adapters**: `Transcripted/Services/ParakeetEngineAdapter.swift` (SpeechToTextEngine via FluidAudio), `Transcripted/Services/TranscriptedNotificationsAdapter.swift` (TranscriptNotifier via UNUserNotificationCenter). Draft supplies its own adapters in `Sources/Meeting/`.
 
 ## Folder Map
 - **Sources/TranscriptedCore/** — The extracted SPM library. Subfolders: Audio/, Pipeline/, Storage/, Speaker/, Stats/, Services/, Models/, Protocols/, Utilities/, Logging/. This is where the transcription pipeline, audio capture, stats DB, speaker DB, and transcript saver live. Consumed by both Transcripted and Draft.
 - **Tests/TranscriptedCoreTests/** — SPM test target (5 smoke tests). Run via `swift test` from repo root.
-- **Transcripted/** (app target, ~75 files) — macOS app shell that consumes TranscriptedCore:
+- **Transcripted/** (app target, ~86 Swift files) — macOS app shell that consumes TranscriptedCore:
   - **Core/** (11 files): app-target coordinators — `NotificationCoordinator`, `HotkeyManager`, `MenuBarManager`, `WindowCoordinator`, `RecordingCoordinator`, `AppDelegateDebug`, plus small UI-side helpers (`Clipboard`, `TranscriptExporter`, `TranscriptStore`, `SystemSettingsHelper`, `DiagnosticExporter`). Audio/transcription/stats/speaker code lives in `Sources/TranscriptedCore/`, NOT here.
   - **Services/** (3 files): embedder adapters — `ParakeetEngineAdapter` (wraps FluidAudio for `SpeechToTextEngine`), `TranscriptedNotificationsAdapter` (wraps `UNUserNotificationCenter` for `TranscriptNotifier`), `MeetingDetector` (Zoom/Teams/Webex auto-start). The bulk of pre-extraction ML services (ParakeetService, DiarizationService, SpeakerDatabase, EmbeddingClusterer, AudioResampler, etc.) moved to `Sources/TranscriptedCore/`.
   - **UI/FloatingPanel/**, **UI/Settings/**, **Onboarding/**, **Design/** — unchanged by extraction.
@@ -64,10 +64,10 @@ User presses Cmd+Shift+R (global hotkey)
 - **Transcripted/TranscriptedApp.swift**: @main struct + slim AppDelegate coordinator. Constructs `TranscriptionTaskManager` with embedder adapters (`ParakeetEngineAdapter`, `TranscriptedNotificationsAdapter`) and Core services (`DiarizationService`, `SpeakerDatabase.shared`).
 - **AppDelegate extensions** (in `Transcripted/Core/`): MenuBarManager, HotkeyManager, NotificationCoordinator, WindowCoordinator, RecordingCoordinator, AppDelegateDebug
 - **Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift**: Task queue (extensions: SpeakerNamingCoordinator, TranscriptionPipelineRunner). Init takes `notifier: TranscriptNotifier? = nil` — embedders pass a concrete adapter, tests/CLI pass nil.
-- **Sources/TranscriptedCore/Pipeline/DisplayStatus.swift**: DisplayStatus enum + TranscriptionTask struct
+- **Sources/TranscriptedCore/Models/DisplayStatus.swift**: DisplayStatus enum + TranscriptionTask struct
 - **Sources/TranscriptedCore/Audio/Audio.swift**: CoreAudio capture (extensions: AudioDeviceRecovery, AudioLevelMonitor, AudioFileManager)
 - **Sources/TranscriptedCore/Pipeline/Transcription.swift**: @MainActor pipeline (extensions: TranscriptionPipeline, SpeakerMatchingService)
-- **Sources/TranscriptedCore/Protocols/**: 6 service protocols (SpeechToTextEngine, DiarizationEngine, SpeakerStore, TranscriptStorage, AudioCaptureEngine, StatsStore)
+- **Sources/TranscriptedCore/Protocols/**: 7 service protocols (SpeechToTextEngine, DiarizationEngine, SpeakerStore, TranscriptStorage, AudioCaptureEngine, StatsStore, TranscriptNotifier)
 - **Transcripted/Services/ParakeetEngineAdapter.swift**: app-target conformer for `SpeechToTextEngine` wrapping FluidAudio's `AsrManager`.
 - **Transcripted/Services/TranscriptedNotificationsAdapter.swift**: app-target conformer for `TranscriptNotifier` wrapping `UNUserNotificationCenter`. Sets `categoryIdentifier = "TRANSCRIPT_SAVED"` so `NotificationCoordinator`'s "Show in Finder" action button fires.
 
@@ -98,10 +98,10 @@ Every folder with ≥2 Swift files has its own CLAUDE.md with file index, refere
 | Path | Scope |
 |------|-------|
 | `CLAUDE.md` (this file) | Architecture overview, pipeline, entry points |
-| `Sources/TranscriptedCore/CLAUDE.md` | Extracted library: audio, transcription, stats, storage, protocols |
-| `Tools/TranscriptedMCP/CLAUDE.md` | MCP server: 5 tools, index schema, build/test, Claude Desktop setup |
 | `Transcripted/Core/CLAUDE.md` | App-target coordinators only (NotificationCoordinator, HotkeyManager, etc.) |
+| `Tools/TranscriptedMCP/CLAUDE.md` | MCP server: 5 tools, index schema, build/test, Claude Desktop setup |
 | `Transcripted/Services/CLAUDE.md` | Embedder adapters (ParakeetEngineAdapter, TranscriptedNotificationsAdapter) + MeetingDetector |
+| `Transcripted/Services/Protocols/CLAUDE.md` | Historical note: app-target Protocols/ folder now only contains docs; real protocol definitions live in `Sources/TranscriptedCore/Protocols/` |
 | `Transcripted/Design/CLAUDE.md` | All token values (colors, spacing, radius, typography, animations) |
 | `Transcripted/Design/Colors/CLAUDE.md` | Complete color reference with hex/HSB values |
 | `Transcripted/Design/Components/CLAUDE.md` | PremiumButton, PremiumCard, BenefitCard, QuickTipRow, AnimatedIcon specs |

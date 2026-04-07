@@ -1,5 +1,6 @@
 import XCTest
 @testable import Transcripted
+@testable import TranscriptedCore
 
 /// Integration test: AgentOutput round-trip -- write JSON sidecar and index, read back, verify structure.
 @available(macOS 14.0, *)

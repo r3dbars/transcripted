@@ -1,6 +1,6 @@
 # Services Folder (App Target)
 
-Embedder adapters that conform to TranscriptedCore protocols, plus the meeting auto-detection scanner. 3 Swift files + `Protocols/` subdirectory.
+Embedder adapters that conform to TranscriptedCore protocols, plus the meeting auto-detection scanner. 3 Swift files + a historical `Protocols/` docs stub.
 
 **IMPORTANT**: Prior to merge-plan Phase 2 Lane A extraction, this folder held 16 files including `ParakeetService`, `DiarizationService`, `SpeakerDatabase`, `SpeakerEmbeddingMatcher`, `SpeakerProfile*`, `EmbeddingClusterer`, `AudioResampler`, `SpeakerClipExtractor`. The ML-heavy code moved to `Sources/TranscriptedCore/` as a Swift Package. What remains here is only the glue between Core's protocols and concrete platform APIs (FluidAudio, UserNotifications) plus the NSWorkspace-based meeting detector.
 
@@ -14,7 +14,7 @@ Embedder adapters that conform to TranscriptedCore protocols, plus the meeting a
 
 ## Protocols/ subdirectory
 
-Historical: `Transcripted/Services/Protocols/` used to hold the 6 Core protocols. Those protocol definitions moved to `Sources/TranscriptedCore/Protocols/` as part of the extraction. If a `Protocols/` folder still exists here it contains only app-target-specific shims or is empty.
+Historical: `Transcripted/Services/Protocols/` used to hold the Core protocol definitions. Those definitions moved to `Sources/TranscriptedCore/Protocols/` as part of the extraction. The folder still exists here only because it has its own `CLAUDE.md`; there are no app-target protocol source files left in it.
 
 ## Pipeline Order (reference)
 
@@ -78,6 +78,6 @@ If older CLAUDE.md or comments reference these paths, they've moved:
 | `EmbeddingClusterer.swift` | `Sources/TranscriptedCore/Speaker/EmbeddingClusterer.swift` |
 | `AudioResampler.swift` | `Sources/TranscriptedCore/Audio/AudioResampler.swift` |
 | `SpeakerClipExtractor.swift` | `Sources/TranscriptedCore/Speaker/SpeakerClipExtractor.swift` |
-| `Protocols/SpeechToTextEngine.swift` + 5 others | `Sources/TranscriptedCore/Protocols/` |
+| `Protocols/SpeechToTextEngine.swift` + peers (including `TranscriptNotifier`) | `Sources/TranscriptedCore/Protocols/` |
 
-See `Sources/TranscriptedCore/CLAUDE.md` (or the per-subfolder CLAUDE.md files under `Sources/TranscriptedCore/`) for full details on the moved code.
+There is no umbrella `Sources/TranscriptedCore/CLAUDE.md` in the repo today; use the root `CLAUDE.md` plus the app-target folder guides when tracing the extraction boundaries.

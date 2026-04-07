@@ -1,5 +1,6 @@
 import XCTest
 @testable import Transcripted
+@testable import TranscriptedCore
 
 /// Tests that throw weird, hostile, and boundary data at the transcript save pipeline
 /// and speaker name variant logic to verify no crashes or corruption.

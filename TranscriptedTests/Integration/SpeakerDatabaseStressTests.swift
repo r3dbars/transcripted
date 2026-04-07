@@ -1,6 +1,7 @@
 import XCTest
 import Accelerate
 @testable import Transcripted
+@testable import TranscriptedCore
 
 /// Stress tests that exercise the speaker database under load: high speaker counts,
 /// bulk matching, merge operations at scale, and mathematical correctness of embeddings.

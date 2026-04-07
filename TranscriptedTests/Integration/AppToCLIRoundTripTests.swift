@@ -1,5 +1,6 @@
 import XCTest
 @testable import Transcripted
+@testable import TranscriptedCore
 
 /// Integration test: Save transcripts through the app's real TranscriptSaver + AgentOutput code,
 /// then validate the output using the same checks the CLI tool's validators perform.
