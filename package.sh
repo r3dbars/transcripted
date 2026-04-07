@@ -1,11 +1,11 @@
 #!/bin/bash
-# Package Draft.app into a distributable DMG
+# Package Transcripted.app into a distributable DMG
 
-APP_NAME="Draft"
+APP_NAME="Transcripted"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
-DMG_NAME="Draft.dmg"
-DMG_VOLUME="Draft"
+DMG_NAME="Transcripted.dmg"
+DMG_VOLUME="Transcripted"
 STAGING_DIR="$BUILD_DIR/dmg-staging"
 
 # Verify build exists
@@ -14,7 +14,7 @@ if [ ! -d "$APP_BUNDLE" ]; then
     exit 1
 fi
 
-echo "📦 Packaging Draft.dmg..."
+echo "📦 Packaging Transcripted.dmg..."
 
 # Clean previous artifacts
 rm -f "$BUILD_DIR/$DMG_NAME"

@@ -107,7 +107,7 @@ class DraftSessionController: ObservableObject {
             .sink { [weak self] _ in
                 guard let self = self else { return }
                 if self.isInSession {
-                    self.cancelSession(message: "Draft mode has been removed")
+                    self.cancelSession(message: "Message drafting has been removed")
                 } else if self.isDictating {
                     self.isDictating = false
                     self.overlayController?.showError("Audio device changed")
@@ -121,16 +121,16 @@ class DraftSessionController: ObservableObject {
         let _ = imageData
         let _ = sourceApp
         guard let (_, overlayController) = readyState() else { return }
-        overlayController.showError("Draft mode has been removed")
+        overlayController.showError("Message drafting has been removed")
     }
 
     func stopSessionAndDraft() {
         guard let (_, overlayController) = readyState() else { return }
-        overlayController.showError("Draft mode has been removed")
+        overlayController.showError("Message drafting has been removed")
     }
 
     func cancelSession() {
-        cancelSession(message: "Draft mode has been removed")
+        cancelSession(message: "Message drafting has been removed")
     }
 
     private func cancelSession(message: String) {
@@ -409,10 +409,8 @@ class DraftSessionController: ObservableObject {
         case .loading: return "loading"
         case .listening: return "listening"
         case .drafting: return "drafting"
-        case .success: return "success"
         case .streaming: return "streaming"
         case .review: return "review"
-        case .diffFlash: return "diff_flash"
         }
     }
 

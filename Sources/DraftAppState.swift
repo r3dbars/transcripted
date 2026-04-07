@@ -76,7 +76,7 @@ class DraftAppState: ObservableObject {
             ]
         }
         EventReporter.shared.capture(level: .info, engine: "app", event: "app_launched",
-            message: "Draft initialized for dictation and meetings")
+            message: "Transcripted initialized for dictation and meetings")
     }
 
     #if BETA_BUILD

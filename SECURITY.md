@@ -2,21 +2,28 @@
 
 ## Privacy Architecture
 
-Transcripted processes all audio **100% locally** on your Mac. No audio, transcripts, or speaker data is ever sent to external servers. There are no API keys, no cloud services, and no analytics.
+Transcripted keeps its core workflows on-device:
 
-Data stored locally:
+- dictation runs locally on your Mac
+- meeting capture and transcription stay local
+- transcripts and feedback data are written to local files you control
+
+Current builds still use Draft-named application-support paths for compatibility
+while the Transcripted brand rollout settles.
+
+Data stored locally today:
 
 | Data | Location | Format |
 |------|----------|--------|
-| Transcripts | `~/Documents/Transcripted/` | Markdown |
-| Speaker voice fingerprints | `~/Documents/Transcripted/speakers.sqlite` | SQLite |
-| Recording statistics | `~/Documents/Transcripted/stats.sqlite` | SQLite |
-| Speaker clips | `~/Documents/Transcripted/speaker_clips/` | WAV |
-| Failed queue | `~/Documents/Transcripted/failed_transcriptions.json` | JSON |
-| Application logs | `~/Library/Logs/Transcripted/app.jsonl` | JSON Lines |
-| Qwen model cache | `~/Library/Caches/models/mlx-community/` | MLX 4-bit |
+| Meeting transcripts | `~/Library/Application Support/Draft/meetings/transcripts/` | Markdown |
+| App events | `~/Library/Application Support/Draft/events.jsonl` | JSON Lines |
+| Feedback log | `~/Library/Application Support/Draft/feedback.jsonl` | JSON Lines |
+| Style profile | `~/Library/Application Support/Draft/style.md` | Markdown |
+| Prompt overrides | `~/Library/Application Support/Draft/prompts.json` | JSON |
+| Model cache | `~/Library/Caches/models/mlx-community/` | MLX / CoreML |
 
-Audio recordings are deleted after successful transcription.
+Beta builds can optionally contact the update/log proxy for update checks and
+diagnostics shipping. Core dictation and transcription do not require cloud APIs.
 
 ## Supported Versions
 
@@ -41,11 +48,12 @@ We will acknowledge your report within 48 hours and aim to provide a fix within 
 
 ## Scope
 
-Given that Transcripted is a local-only application, the primary security concerns are:
+Given that Transcripted is local-first software, the primary security concerns are:
 
 - **Audio capture permissions** — ensuring the app only captures audio when the user intends
-- **Local data protection** — transcript and speaker database file permissions
+- **Accessibility and paste-back safety** — ensuring automation targets the app the user intended
+- **Local data protection** — transcript and feedback file permissions
 - **Model integrity** — ensuring downloaded ML models haven't been tampered with
 - **Memory safety** — preventing audio buffer overflows or use-after-free in CoreAudio callbacks
 
-Out of scope: network-based attacks (the app makes no network requests after initial model download).
+Out of scope: generic hosted-service attacks. Transcripted does not depend on cloud APIs for its core product workflows.

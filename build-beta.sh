@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build Draft for beta distribution
+# Build Transcripted for beta distribution
 # Usage: ./build-beta.sh <beta-token> <user-name>
 # Example: ./build-beta.sh draft-beta-nate Nate
 #
@@ -20,15 +20,15 @@ if [ -z "$BETA_TOKEN" ]; then
     exit 1
 fi
 
-APP_NAME="Draft"
+APP_NAME="Transcripted"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
-DMG_NAME="Draft-${USER_NAME}.dmg"
+DMG_NAME="Transcripted-${USER_NAME}.dmg"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
 SIGNING_DISPLAY_NAME=""
 NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 BETA_CONFIG_PATH="Sources/API/BetaConfig.swift"
-BETA_CONFIG_BACKUP="$(mktemp -t draft-beta-config)"
+BETA_CONFIG_BACKUP="$(mktemp -t transcripted-beta-config)"
 
 if [ -z "$SIGNING_IDENTITY" ]; then
     SIGNING_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | awk '{print $2}')
@@ -37,7 +37,7 @@ else
     SIGNING_DISPLAY_NAME="$SIGNING_IDENTITY"
 fi
 
-echo "🔨 Building Draft Beta for $USER_NAME (token: $BETA_TOKEN)..."
+echo "🔨 Building Transcripted Beta for $USER_NAME (token: $BETA_TOKEN)..."
 
 # Clean app bundle only (preserve previously built DMGs)
 rm -rf "$APP_BUNDLE"
@@ -58,7 +58,7 @@ fi
 cp Info.plist "$APP_BUNDLE/Contents/"
 
 # Create entitlements (hardened runtime compatible)
-cat > "$BUILD_DIR/Draft.entitlements" << 'EOF'
+cat > "$BUILD_DIR/Transcripted.entitlements" << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -151,7 +151,7 @@ codesign --force --deep \
     --sign "$SIGNING_IDENTITY" \
     --options runtime \
     --timestamp \
-    --entitlements "$BUILD_DIR/Draft.entitlements" \
+    --entitlements "$BUILD_DIR/Transcripted.entitlements" \
     "$APP_BUNDLE" 2>&1
 
 if [ $? -ne 0 ]; then
@@ -171,12 +171,12 @@ if [ -f "assets/dmg-background.png" ]; then
 fi
 
 create-dmg \
-    --volname "Draft Beta" \
+    --volname "Transcripted Beta" \
     --window-pos 200 120 \
     --window-size 600 400 \
     --icon-size 100 \
-    --icon "Draft.app" 175 190 \
-    --hide-extension "Draft.app" \
+    --icon "Transcripted.app" 175 190 \
+    --hide-extension "Transcripted.app" \
     --app-drop-link 425 190 \
     --no-internet-enable \
     $DMG_BG_FLAGS \

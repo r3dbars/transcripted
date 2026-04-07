@@ -50,7 +50,7 @@ final class MeetingSessionController: ObservableObject {
         let meetingsStatus: String
 
         static let ready = ModelWarmupStatus(
-            title: "Draft is ready",
+            title: "Transcripted is ready",
             subtitle: "Dictation and meetings are available",
             detail: "",
             progress: 1.0,
@@ -553,7 +553,7 @@ final class MeetingSessionController: ObservableObject {
         switch dictationState {
         case .downloading(let progress):
             warmupStatus = ModelWarmupStatus(
-                title: "Getting Draft ready",
+                title: "Getting Transcripted ready",
                 subtitle: "Downloading the dictation model",
                 detail: "This can take a minute or two on first launch.",
                 progress: max(0.08, min(0.62, 0.08 + progress * 0.54)),
@@ -562,7 +562,7 @@ final class MeetingSessionController: ObservableObject {
             )
         case .loading:
             warmupStatus = ModelWarmupStatus(
-                title: "Getting Draft ready",
+                title: "Getting Transcripted ready",
                 subtitle: "Preparing dictation",
                 detail: "Loading the local voice model into memory.",
                 progress: 0.68,
@@ -571,7 +571,7 @@ final class MeetingSessionController: ObservableObject {
             )
         case .failed(let message):
             warmupStatus = ModelWarmupStatus(
-                title: "Couldn’t load Draft",
+                title: "Couldn’t load Transcripted",
                 subtitle: "The dictation model failed to load",
                 detail: message,
                 progress: 0,
@@ -598,7 +598,7 @@ final class MeetingSessionController: ObservableObject {
                 )
             case .loading:
                 warmupStatus = ModelWarmupStatus(
-                    title: "Getting Draft ready",
+                    title: "Getting Transcripted ready",
                     subtitle: "Loading meeting transcription",
                     detail: "Preparing speaker diarization and meeting understanding.",
                     progress: 0.86,
@@ -607,7 +607,7 @@ final class MeetingSessionController: ObservableObject {
                 )
             case .notLoaded:
                 warmupStatus = ModelWarmupStatus(
-                    title: "Getting Draft ready",
+                    title: "Getting Transcripted ready",
                     subtitle: "Preparing meeting transcription",
                     detail: "Setting up speaker diarization and meeting transcription.",
                     progress: 0.76,
@@ -617,7 +617,7 @@ final class MeetingSessionController: ObservableObject {
             }
         case .notLoaded:
             warmupStatus = ModelWarmupStatus(
-                title: "Getting Draft ready",
+                title: "Getting Transcripted ready",
                 subtitle: "Preparing dictation",
                 detail: "Loading dictation and meeting models.",
                 progress: 0.05,

@@ -6,9 +6,9 @@ Thanks for your interest in contributing to Transcripted! This guide will help y
 
 ### Prerequisites
 
-- macOS 14.2+ (Sonoma)
-- Xcode 15+
-- Swift 5.9+
+- macOS 14+
+- Xcode command line tools
+- Apple Silicon
 
 ### Getting Started
 
@@ -18,24 +18,26 @@ Thanks for your interest in contributing to Transcripted! This guide will help y
    cd transcripted
    ```
 
-2. Open the project in Xcode:
+2. Build dependencies and the app:
    ```bash
-   open Transcripted.xcodeproj
+   bash build-deps.sh
+   bash build.sh
    ```
 
-3. Set your **Development Team** in Xcode: select the Transcripted target → Signing & Capabilities → change the Team to your own Apple Developer account. The project ships with an empty team ID.
-
-4. Build and run (Cmd+R).
-
-5. On first launch, models will download from HuggingFace (~600MB for Parakeet, plus Sortformer). This requires an internet connection.
-
-### FluidAudio
-
-The FluidAudio static library (`fluidaudio-libs/libFluidAudioAll.a`) is pre-built and included in the repo. If you need to rebuild it:
+3. Run the test suite:
 
 ```bash
-./scripts/build-fluidaudio.sh
+bash run-tests.sh
 ```
+
+If you touch meeting integration or `TranscriptedCore`, also run:
+
+```bash
+bash run-integration-smoke.sh
+```
+
+On first launch, models may download from HuggingFace if they are not already
+cached locally.
 
 ## Making Changes
 
@@ -59,15 +61,16 @@ refactor/description # Code refactoring
 
 ### Architecture
 
-The codebase is organized into layers:
+The codebase is organized around the current Transcripted app:
 
-| Layer | Directory | Responsibility |
-|-------|-----------|---------------|
-| Core | `Transcripted/Core/` | Audio capture, transcription pipeline, data persistence |
-| Services | `Transcripted/Services/` | ML models (Parakeet, Sortformer, Qwen), speaker database |
-| UI | `Transcripted/UI/` | Floating panel, settings window |
-| Design | `Transcripted/Design/` | Design tokens, shared components |
-| Onboarding | `Transcripted/Onboarding/` | First-run experience |
+| Area | Directory | Responsibility |
+|------|-----------|----------------|
+| App entry + state | `Sources/` | app lifecycle, hotkeys, paths, shared state |
+| Dictation + formatting | `Sources/Draft/` | dictation cleanup, formatting, draft utilities |
+| Meeting pipeline | `Sources/Meeting/` | meeting recording, model warmup, transcript flow |
+| UI | `Sources/UI/` | overlay, menubar, onboarding |
+| Local inference | `Sources/Local/` | on-device MLX model integration |
+| Shared meeting core | `Sources/TranscriptedCore/` | extracted meeting/transcription library |
 
 ### Threading
 
@@ -75,23 +78,26 @@ Transcripted has strict threading rules due to CoreAudio's real-time requirement
 
 | Component | Thread | Notes |
 |-----------|--------|-------|
-| Audio, Transcription, TaskManager | `@MainActor` | UI-bound state |
-| PillStateManager, all Services | `@MainActor` | UI-bound state |
-| SystemAudioCapture | `DispatchQueue` + `NSLock` | Real-time audio I/O |
-| SpeakerDatabase, StatsDatabase | Serial `DispatchQueue` | Sync reads, async writes |
-| CoreAudio I/O callbacks | Real-time thread | **No I/O, locks, allocations, or ObjC calls** |
+| Session controllers + UI state | `@MainActor` | UI-bound state |
+| Audio capture internals | `DispatchQueue` + `NSLock` | Real-time audio I/O |
+| Local model access | actor / managed async tasks | serialized model use |
+| CoreAudio I/O callbacks | real-time thread | **No I/O, locks, allocations, or ObjC calls** |
 
 CoreAudio I/O callbacks run on real-time threads. Buffers are deep-copied before async dispatch — never processed in-place.
 
 ### Testing
 
-Run tests via Xcode (Cmd+U) or from the command line:
+Run the default test suite from the command line:
 
 ```bash
-xcodebuild -project Transcripted.xcodeproj -scheme Transcripted test
+bash run-tests.sh
 ```
 
-If you're adding new functionality, please add tests where practical. Test files mirror the source structure under `TranscriptedTests/`.
+If you're changing meeting integration or `TranscriptedCore`, also run:
+
+```bash
+bash run-integration-smoke.sh
+```
 
 ## Submitting a Pull Request
 
@@ -108,7 +114,7 @@ Open a GitHub issue with:
 - macOS version
 - Steps to reproduce
 - Expected vs actual behavior
-- Relevant logs from `~/Library/Logs/Transcripted/app.jsonl`
+- Relevant logs from `~/Library/Application Support/Draft/events.jsonl`
 
 ## Questions?
 

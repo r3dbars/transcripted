@@ -148,10 +148,10 @@ enum DiffSummary {
     /// Returns a celebration message for milestone example counts, or nil if not a milestone.
     static func milestoneMessage(exampleCount: Int) -> String? {
         switch exampleCount {
-        case 5:   return "5 examples learned — Draft is finding your voice"
+        case 5:   return "5 examples learned — Transcripted is finding your voice"
         case 10:  return "10 examples — your style profile is taking shape"
-        case 20:  return "20 examples — Draft is getting good at this"
-        case 50:  return "50 examples — Draft writes like you now"
+        case 20:  return "20 examples — Transcripted is getting good at this"
+        case 50:  return "50 examples — Transcripted writes like you now"
         case 100: return "100 examples — master level style matching"
         default:  return nil
         }

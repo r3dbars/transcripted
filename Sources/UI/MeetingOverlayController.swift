@@ -68,7 +68,7 @@ final class MeetingOverlayRootView: NSView {
     private let systemWaveform = WaveformHostView(frame: .zero)
     private let closeButton = NSButton()
     private let chevronButton = NSButton()
-    private let warmupTitleLabel = NSTextField(labelWithString: "Getting Draft ready")
+    private let warmupTitleLabel = NSTextField(labelWithString: "Getting Transcripted ready")
     private let warmupSubtitleLabel = NSTextField(labelWithString: "Loading dictation and meeting models")
     private let warmupProgress = NSProgressIndicator()
     private var currentState: MeetingOverlayController.OverlayState = .idle

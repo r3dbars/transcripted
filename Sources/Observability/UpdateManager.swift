@@ -22,7 +22,7 @@ final class UpdateManager: ObservableObject {
 
     private let cacheDir: URL = {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Draft")
+            .appendingPathComponent("Transcripted")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }()
@@ -79,8 +79,8 @@ final class UpdateManager: ObservableObject {
         let mountPoint = try await mountDMG(at: dmgPath)
         defer { unmountDMG(mountPoint: mountPoint) }
 
-        // Find Draft.app on mounted volume
-        let volumeApp = mountPoint.appendingPathComponent("Draft.app")
+        // Find Transcripted.app on mounted volume
+        let volumeApp = mountPoint.appendingPathComponent("Transcripted.app")
         guard fm.fileExists(atPath: volumeApp.path) else {
             throw UpdateError.appNotFoundOnDMG
         }
@@ -89,7 +89,7 @@ final class UpdateManager: ObservableObject {
         try verifyCodeSignature(at: volumeApp)
 
         // Stage the app
-        let stagedApp = cacheDir.appendingPathComponent("Draft-staged.app")
+        let stagedApp = cacheDir.appendingPathComponent("Transcripted-staged.app")
         try? fm.removeItem(at: stagedApp)
         try fm.copyItem(at: volumeApp, to: stagedApp)
 
@@ -99,7 +99,7 @@ final class UpdateManager: ObservableObject {
         }
         let currentURL = URL(fileURLWithPath: currentApp)
         let parentDir = currentURL.deletingLastPathComponent()
-        let backupURL = parentDir.appendingPathComponent("Draft.app.old")
+        let backupURL = parentDir.appendingPathComponent("Transcripted.app.old")
 
         // Atomic replace: rename current → .old, move staged → current
         try? fm.removeItem(at: backupURL)
@@ -132,7 +132,7 @@ final class UpdateManager: ObservableObject {
         } catch {
             // App was replaced successfully but relaunch failed — don't terminate
             // or user loses the app entirely. They can restart manually.
-            state = .failed("Update installed but relaunch failed — please restart Draft manually")
+            state = .failed("Update installed but relaunch failed — please restart Transcripted manually")
         }
     }
 
@@ -275,7 +275,7 @@ final class UpdateManager: ObservableObject {
             switch self {
             case .downloadFailed: return "Failed to download update"
             case .mountFailed: return "Failed to mount DMG"
-            case .appNotFoundOnDMG: return "Draft.app not found on disk image"
+            case .appNotFoundOnDMG: return "Transcripted.app not found on disk image"
             case .signatureInvalid: return "Update failed code signature verification"
             case .cannotLocateCurrentApp: return "Cannot locate current app bundle"
             case .replaceFailed(let detail): return "Replace failed: \(detail)"

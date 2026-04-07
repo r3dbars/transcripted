@@ -107,7 +107,7 @@ final class CrashReporter {
                     "version": ProcessInfo.processInfo.operatingSystemVersionString
                 ],
                 "app": [
-                    "app_name": "Draft",
+                    "app_name": "Transcripted",
                     "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
                 ]
             ]
@@ -124,7 +124,7 @@ final class CrashReporter {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(
-            "Sentry sentry_version=7,sentry_key=\(publicKey),sentry_client=draft/1.0",
+            "Sentry sentry_version=7,sentry_key=\(publicKey),sentry_client=transcripted/1.0",
             forHTTPHeaderField: "X-Sentry-Auth"
         )
         request.httpBody = body

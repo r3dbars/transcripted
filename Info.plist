@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Draft</string>
+    <string>Transcripted</string>
     <key>CFBundleIdentifier</key>
     <string>com.justinbetker.draft</string>
     <key>CFBundleVersion</key>
@@ -13,16 +13,16 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
-    <string>Draft</string>
+    <string>Transcripted</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Draft needs microphone access to transcribe your voice into text and to capture meeting audio for transcription.</string>
+    <string>Transcripted needs microphone access for dictation and to capture your side of meetings.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Draft uses speech recognition to convert your voice to text.</string>
+    <string>Transcripted uses speech recognition to turn your voice into text.</string>
     <key>NSScreenCaptureUsageDescription</key>
-    <string>Draft captures your screen to extract conversation context for smarter message drafting.</string>
+    <string>Transcripted needs screen recording access so meeting capture can access system audio from calls, videos, and other apps.</string>
     <key>NSAudioCaptureUsageDescription</key>
-    <string>Draft records system audio (other apps playing sound) so meetings on Zoom, Meet, FaceTime, and similar apps can be transcribed alongside your microphone.</string>
+    <string>Transcripted records system audio alongside your microphone so meetings can be transcribed locally on your Mac.</string>
 </dict>
 </plist>

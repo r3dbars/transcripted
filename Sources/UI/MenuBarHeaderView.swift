@@ -5,7 +5,7 @@ import AppKit
 
 @MainActor
 final class MenuBarHeaderView: NSView {
-    private let titleLabel = NSTextField(labelWithString: "Draft")
+    private let titleLabel = NSTextField(labelWithString: "Transcripted")
     private let statusDot = NSView()
     private let statusLabel = NSTextField(labelWithString: "Ready")
     private let progressBar = NSProgressIndicator()
