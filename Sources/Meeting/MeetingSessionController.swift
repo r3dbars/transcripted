@@ -360,7 +360,10 @@ final class MeetingSessionController: ObservableObject {
 
     func retryFailedMeeting(id: UUID) {
         Task {
-            let succeeded = await taskManager.retryFailedTranscription(failedId: id)
+            let succeeded = await taskManager.retryFailedTranscription(
+                failedId: id,
+                outputFolder: storagePaths.transcripts
+            )
             if succeeded {
                 refreshFailedMeetings()
             }
