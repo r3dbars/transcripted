@@ -1,11 +1,11 @@
 // MenuBarModelDownloadView.swift
-// Warm-up progress card for Draft's local dictation and meeting models
+// Warm-up progress card for Transcripted's local dictation and meeting models
 
 import AppKit
 
 @MainActor
 final class MenuBarModelDownloadView: NSView {
-    private let titleLabel = NSTextField(labelWithString: "Getting Draft ready")
+    private let titleLabel = NSTextField(labelWithString: "Getting Transcripted ready")
     private let subtitleLabel = NSTextField(labelWithString: "Loading dictation and meeting models")
     private let progressBar = NSProgressIndicator()
     private let statusLabel = NSTextField(labelWithString: "")

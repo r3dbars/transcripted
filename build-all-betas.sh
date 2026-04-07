@@ -38,4 +38,4 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "Done! Built: $BUILT, Failed: $FAILED"
 echo ""
 echo "DMGs in build/:"
-ls -lh build/Draft-*.dmg 2>/dev/null || echo "No DMGs found"
+ls -lh build/Transcripted-*.dmg 2>/dev/null || echo "No DMGs found"

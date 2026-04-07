@@ -59,11 +59,11 @@ final class MenuBarSettingsView: NSView {
     @objc private func sendFeedback() {
         guard let appState else { return }
         let logLines = appState.logger.entries.suffix(80).joined(separator: "\n")
-        let subject = "Draft Feedback"
+        let subject = "Transcripted Feedback"
         let body = "What happened:\n[describe the issue here]\n\n---\nLogs:\n\(logLines)"
         let encodedSubject = subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? subject
         let encodedBody = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        if let url = URL(string: "mailto:hi@draftapp.com?subject=\(encodedSubject)&body=\(encodedBody)") {
+        if let url = URL(string: "mailto:hi@transcripted.app?subject=\(encodedSubject)&body=\(encodedBody)") {
             NSWorkspace.shared.open(url)
         }
     }

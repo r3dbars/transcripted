@@ -15,7 +15,7 @@ struct PermissionsOnboardingView: View {
     @State private var pollTimer: Timer?
 
     private let steps: [(title: String, icon: String, description: String, required: Bool)] = [
-        ("Microphone", "mic.fill", "Draft needs microphone access for dictation and your side of meetings.", true),
+        ("Microphone", "mic.fill", "Transcripted needs microphone access for dictation and your side of meetings.", true),
         ("Accessibility", "hand.raised.fill", "Required for global shortcuts and reliable paste-back into the app you were using.", true),
         ("Screen Recording", "rectangle.on.rectangle", "Required so meeting capture can access system audio from calls, videos, and other apps.", true),
     ]
@@ -24,11 +24,11 @@ struct PermissionsOnboardingView: View {
         VStack(spacing: 0) {
             // Header
             VStack(spacing: 8) {
-                Text("Welcome to Draft")
+                Text("Welcome to Transcripted")
                     .font(.title2)
                     .fontWeight(.semibold)
 
-                Text("Let's set up the permissions Draft needs for dictation and meeting capture.")
+                Text("Let's set up the permissions Transcripted needs for dictation and meeting capture.")
                     .font(.callout)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)

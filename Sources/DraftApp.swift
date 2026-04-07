@@ -60,7 +60,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // Set up menubar status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "mic.and.signal.meter", accessibilityDescription: "Draft")
+            button.image = NSImage(systemSymbolName: "mic.and.signal.meter", accessibilityDescription: "Transcripted")
             button.action = #selector(togglePopover)
             button.target = self
         }

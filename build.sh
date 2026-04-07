@@ -1,11 +1,11 @@
 #!/bin/bash
-# Build Draft - local dictation + meeting transcription app
+# Build Transcripted - local dictation + meeting transcription app
 
-APP_NAME="Draft"
+APP_NAME="Transcripted"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 
-echo "Building Draft..."
+echo "Building Transcripted..."
 
 # Clean
 rm -rf "$BUILD_DIR"
@@ -26,7 +26,7 @@ fi
 cp Info.plist "$APP_BUNDLE/Contents/"
 
 # Create entitlements
-cat > "$BUILD_DIR/Draft.entitlements" << 'EOF'
+cat > "$BUILD_DIR/Transcripted.entitlements" << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -108,7 +108,7 @@ SIGN_NAME=$(security find-identity -v -p codesigning 2>/dev/null | grep "Develop
 if [ -n "$SIGN_HASH" ]; then
     echo "Signing with: $SIGN_NAME ($SIGN_HASH)"
     if ! codesign --force --deep --sign "$SIGN_HASH" \
-        --entitlements "$BUILD_DIR/Draft.entitlements" \
+        --entitlements "$BUILD_DIR/Transcripted.entitlements" \
         "$APP_BUNDLE"; then
         echo "Codesign failed — aborting build"
         exit 1
@@ -116,7 +116,7 @@ if [ -n "$SIGN_HASH" ]; then
 else
     echo "No Developer ID found — signing ad-hoc (permissions may not persist)"
     codesign --force --deep --sign - \
-        --entitlements "$BUILD_DIR/Draft.entitlements" \
+        --entitlements "$BUILD_DIR/Transcripted.entitlements" \
         "$APP_BUNDLE" 2>&1
 fi
 
@@ -129,5 +129,5 @@ if codesign -dv "$APP_BUNDLE" 2>&1 | grep -q "Signature=adhoc"; then
 fi
 
 echo "Build complete!"
-echo "Launching Draft..."
+echo "Launching Transcripted..."
 open "$APP_BUNDLE"

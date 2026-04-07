@@ -30,7 +30,7 @@ final class OverlayToolbarView: NSView {
         editedDot.isHidden = true
         leftContainer.addSubview(editedDot)
 
-        // "edited . teaching Draft" label
+        // "edited . teaching Transcripted" label
         editedLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
         editedLabel.textColor = OverlayTokens.accentGreen
         editedLabel.isBezeled = false
@@ -85,7 +85,7 @@ final class OverlayToolbarView: NSView {
             if hasEdits {
                 editedDot.isHidden = false
                 editedLabel.isHidden = false
-                editedLabel.stringValue = "edited \u{00B7} teaching Draft"
+                editedLabel.stringValue = "edited \u{00B7} teaching Transcripted"
                 voiceOnlyLabel.isHidden = true
             } else if !hasContext {
                 editedDot.isHidden = true

@@ -1,34 +1,16 @@
-# Draft
+# Transcripted
 
-This public repository keeps the **`transcripted`** name for now, but the product
-on `main` is **Draft**.
+Transcripted is private voice context for your Mac.
 
-Draft is a Mac app for two things:
+Dictate into any app, record meetings locally, and keep searchable spoken
+context that can feed your personal AI agent.
 
-- dictation
-- meeting transcription
-
-It keeps both workflows local on your Mac.
-
-## Important transition note
-
-The old standalone Transcripted app is preserved on:
-
-- branch: `legacy/transcripted-standalone`
-- tag: `pre-draft-takeover-2026-04-06`
-
-This repo cutover uses the **manual migration** path:
-
-- existing Transcripted installs do **not** auto-upgrade into Draft
-- Draft should be treated as a **new install**
-- permissions and settings do not carry over automatically
-
-## What Draft does
+## What it does
 
 ### Dictation
 
-Click into any text field, start dictation, speak, and Draft pastes the text back
-into the app you were using.
+Click into any text field, start dictation, speak, and Transcripted pastes the
+text back into the app you were already using.
 
 Useful for:
 
@@ -39,8 +21,8 @@ Useful for:
 
 ### Meetings
 
-Start a meeting recording, let Draft capture your mic and system audio, and when
-you stop it, Draft saves a transcript.
+Start a meeting recording, let Transcripted capture your mic and system audio,
+and when you stop it, Transcripted saves a local transcript.
 
 Useful when you want to keep track of:
 
@@ -49,13 +31,36 @@ Useful when you want to keep track of:
 - what questions came up
 - what needs to happen next
 
-Meeting transcripts are saved here:
+Meeting transcripts are currently saved here:
 
 `~/Library/Application Support/Draft/meetings/transcripts`
 
+That Draft-named storage path stays in place for now so the rebrand does not
+break existing local data.
+
+### Agent-ready voice context
+
+A lot of your best context lives in your voice, not just in typed chat boxes.
+
+Transcripted keeps that context local on your Mac so your personal AI agent can
+work from what actually happened in your messages, calls, and meetings.
+
+## Important transition note
+
+The old standalone Transcripted app is preserved on:
+
+- branch: `legacy/transcripted-standalone`
+- tag: `pre-draft-takeover-2026-04-06`
+
+This repo cutover uses the manual migration path:
+
+- existing Transcripted installs do not auto-upgrade into the new app
+- Transcripted should currently be treated as a new install
+- permissions and settings do not carry over automatically
+
 ## Privacy
 
-Draft is local-first.
+Transcripted is local-first.
 
 - your dictation stays on your Mac
 - your meeting recordings stay on your Mac
@@ -80,8 +85,6 @@ If you touch meeting integration or `TranscriptedCore`, also run:
 bash run-integration-smoke.sh
 ```
 
-## In Short
+## In short
 
-Draft is a simple Mac app for capturing spoken context.
-
-You can use it to dictate into any app and to save transcripts of your meetings.
+Transcripted is a Mac app for dictation, meetings, and private voice context.
