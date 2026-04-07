@@ -381,6 +381,10 @@ public class Audio: ObservableObject {
         // This allows users who skipped permission during onboarding to grant it at record time
         let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         if microphoneStatus == .notDetermined {
+            // Mark startup as in-flight before the async system prompt returns so
+            // repeated start taps cannot race into multiple concurrent start flows.
+            isStarting = true
+
             AVCaptureDevice.requestAccess(for: .audio) { granted in
                 DispatchQueue.main.async {
                     if granted {
@@ -388,10 +392,8 @@ public class Audio: ObservableObject {
                         self.startAudioCaptureAsync()
                     } else {
                         // Permission denied
-                        DispatchQueue.main.async {
-                            self.error = "Microphone permission required. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted, then try again."
-                            self.isStarting = false
-                        }
+                        self.error = "Microphone permission required. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted, then try again."
+                        self.isStarting = false
                     }
                 }
             }

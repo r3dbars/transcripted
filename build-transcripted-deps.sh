@@ -37,6 +37,22 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$SCRIPT_DIR"
 
+# Resolve the main checkout even when this script is running from a detached git
+# worktree under /tmp. `git rev-parse --git-common-dir` points at the shared
+# .git dir for the primary checkout, which lets us recover the real sibling repo
+# layout (e.g. ~/code/Transcripted next to ~/code/Draft).
+PRIMARY_CODE_PARENT=""
+if COMMON_GIT_DIR="$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null)"; then
+    case "$COMMON_GIT_DIR" in
+        /*) ;;
+        *) COMMON_GIT_DIR="$REPO_ROOT/$COMMON_GIT_DIR" ;;
+    esac
+    if [ -d "$COMMON_GIT_DIR" ]; then
+        PRIMARY_REPO_ROOT="$(cd "$COMMON_GIT_DIR/.." && pwd)"
+        PRIMARY_CODE_PARENT="$(cd "$PRIMARY_REPO_ROOT/.." && pwd)"
+    fi
+fi
+
 log() { echo "[build-transcripted-deps] $*"; }
 
 # ---------------------------------------------------------------------------
@@ -92,7 +108,11 @@ if [ -z "$DRAFT_ROOT" ]; then
             CODE_PARENT="$(cd "$REPO_CONTAINER/.." && pwd)"
             ;;
         *)
-            CODE_PARENT="$(cd "$REPO_ROOT/.." && pwd)"
+            if [ -n "$PRIMARY_CODE_PARENT" ]; then
+                CODE_PARENT="$PRIMARY_CODE_PARENT"
+            else
+                CODE_PARENT="$(cd "$REPO_ROOT/.." && pwd)"
+            fi
             ;;
     esac
     try_draft_root "$CODE_PARENT/Draft/.claude/worktrees/transcripted-merge" && \
@@ -101,6 +121,14 @@ fi
 
 # (4) Draft main checkout
 if [ -z "$DRAFT_ROOT" ]; then
+    if [ -z "$CODE_PARENT" ]; then
+        if [ -n "$PRIMARY_CODE_PARENT" ]; then
+            CODE_PARENT="$PRIMARY_CODE_PARENT"
+        else
+            CODE_PARENT="$(cd "$REPO_ROOT/.." && pwd)"
+        fi
+    fi
+
     try_draft_root "$CODE_PARENT/Draft" && \
         log "Matched Draft main checkout: $DRAFT_ROOT"
 fi
