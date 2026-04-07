@@ -31,6 +31,8 @@ enum MenuTokens {
     static let secondaryButtonPressedNS = NSColor.white.withAlphaComponent(0.10)
     static let secondaryButtonBorderNS = NSColor.white.withAlphaComponent(0.10)
     static let recentHoverNS = NSColor.white.withAlphaComponent(0.05)
+    static let savedBackgroundNS = NSColor.systemGreen.withAlphaComponent(0.14)
+    static let savedBorderNS = NSColor.systemGreen.withAlphaComponent(0.24)
     static let failedBackgroundNS = NSColor.systemOrange.withAlphaComponent(0.14)
     static let failedBorderNS = NSColor.systemOrange.withAlphaComponent(0.24)
 
@@ -61,7 +63,8 @@ enum MenuTokens {
     static let cardCornerRadius: CGFloat = 12
     static let actionRowHeight: CGFloat = 46
     static let recentRowHeight: CGFloat = 40
-    static let failedRowHeight: CGFloat = 42
+    static let savedRowHeight: CGFloat = 54
+    static let failedRowHeight: CGFloat = 62
     static let badgeHeight: CGFloat = 22
     static let secondaryButtonSize: CGFloat = 28
     static let secondaryButtonCornerRadius: CGFloat = 8

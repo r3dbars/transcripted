@@ -63,8 +63,11 @@ final class MeetingSessionController: ObservableObject {
         let id: UUID
         let timestamp: Date
         let title: String
-        let subtitle: String
+        let detail: String
+        let meta: String
         let isRetryable: Bool
+        let isRetrying: Bool
+        let hasAudioFiles: Bool
     }
 
     // MARK: - Published state (for meeting UI bindings)
@@ -128,6 +131,7 @@ final class MeetingSessionController: ObservableObject {
 
     private var cancellables: Set<AnyCancellable> = []
     private var modelPreparationTask: Task<Result<Void, Error>, Never>?
+    private var retryingFailedMeetingIDs: Set<UUID> = []
 
     // MARK: - Init
 
@@ -359,16 +363,31 @@ final class MeetingSessionController: ObservableObject {
     }
 
     func retryFailedMeeting(id: UUID) {
-        Task {
-            let succeeded = await taskManager.retryFailedTranscription(failedId: id)
-            if succeeded {
-                refreshFailedMeetings()
-            }
+        guard !retryingFailedMeetingIDs.contains(id) else { return }
+
+        retryingFailedMeetingIDs.insert(id)
+        refreshFailedMeetings()
+
+        Task { [weak self] in
+            guard let self else { return }
+            _ = await self.taskManager.retryFailedTranscription(
+                failedId: id,
+                outputFolder: self.storagePaths.transcripts
+            )
+            self.retryingFailedMeetingIDs.remove(id)
+            self.refreshFailedMeetings()
         }
     }
 
     func dismissFailedMeeting(id: UUID) {
+        retryingFailedMeetingIDs.remove(id)
         failedManager.removeFailedTranscription(id: id)
+        refreshFailedMeetings()
+    }
+
+    func deleteFailedMeeting(id: UUID) {
+        retryingFailedMeetingIDs.remove(id)
+        failedManager.deleteFailedTranscription(id: id)
         refreshFailedMeetings()
     }
 
@@ -709,15 +728,21 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func refreshFailedMeetings() {
-        failedMeetings = failedManager.failedTranscriptions
+        let failedTranscriptions = failedManager.failedTranscriptions
+        retryingFailedMeetingIDs.formIntersection(Set(failedTranscriptions.map(\.id)))
+
+        failedMeetings = failedTranscriptions
             .sorted(by: { $0.timestamp > $1.timestamp })
             .map { failed in
                 FailedMeetingItem(
                     id: failed.id,
                     timestamp: failed.timestamp,
                     title: failedMeetingTitle(for: failed),
-                    subtitle: failedMeetingSubtitle(for: failed),
-                    isRetryable: failed.isRetryable
+                    detail: failedMeetingDetail(for: failed),
+                    meta: failedMeetingMeta(for: failed),
+                    isRetryable: failed.isRetryable,
+                    isRetrying: retryingFailedMeetingIDs.contains(failed.id),
+                    hasAudioFiles: failed.audioFilesExist()
                 )
             }
     }
@@ -741,19 +766,53 @@ final class MeetingSessionController: ObservableObject {
             return "Couldn't save the transcript"
         }
 
-        return failed.isRetryable ? "Transcript needs retry" : "Recording needs attention"
+        return failed.isRetryable ? "Transcript needs another pass" : "Recording needs attention"
     }
 
-    private func failedMeetingSubtitle(for failed: FailedTranscription) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale.current
-        formatter.dateFormat = "MMM d 'at' h:mm a"
+    private func failedMeetingDetail(for failed: FailedTranscription) -> String {
+        let message = failed.errorMessage.lowercased()
 
-        let dateText = formatter.string(from: failed.timestamp)
-        if failed.audioFilesExist() {
-            return "\(dateText) • Audio kept"
+        if message.contains("system audio is required") || message.contains("screen recording") {
+            return "Turn on Screen Recording in System Settings, then retry the meeting."
         }
-        return dateText
+
+        if message.contains("recording too short") || message.contains("at least") {
+            return "Keep the meeting running a little longer before stopping the capture."
+        }
+
+        if message.contains("no samples recorded") || message.contains("empty audio") {
+            return "The source audio was kept, but there was not enough signal to transcribe."
+        }
+
+        if message.contains("failed to save") {
+            return failed.shortErrorMessage
+        }
+
+        return failed.shortErrorMessage
+    }
+
+    private func failedMeetingMeta(for failed: FailedTranscription) -> String {
+        var parts = [failed.formattedTimestamp]
+
+        if failed.audioFilesExist() {
+            let sizeText = failed.formattedFileSize
+            if sizeText == "Unknown" {
+                parts.append("Audio kept")
+            } else {
+                parts.append("\(sizeText) kept")
+            }
+        }
+
+        if failed.retryCount > 0 {
+            let attempts = failed.retryCount == 1 ? "1 retry" : "\(failed.retryCount) retries"
+            parts.append(attempts)
+        }
+
+        if retryingFailedMeetingIDs.contains(failed.id) {
+            parts.append("Retrying now")
+        }
+
+        return parts.joined(separator: " • ")
     }
 }
 
