@@ -36,11 +36,11 @@ final class MenuBarPanelController: NSViewController {
         contentView = content
         view.appearance = NSAppearance(named: .darkAqua)
 
-        refreshAll()
+        refresh()
         setupSubscriptions()
     }
 
-    private func refreshAll() {
+    func refresh() {
         guard let content = contentView else { return }
         let warmupStatus = appState.meetingSession.warmupStatus
         let isReady = warmupStatus == .ready
@@ -83,7 +83,7 @@ final class MenuBarPanelController: NSViewController {
         appState.meetingSession.$warmupStatus
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.refreshAll()
+                self?.refresh()
             }
             .store(in: &subscriptions)
 
@@ -91,14 +91,14 @@ final class MenuBarPanelController: NSViewController {
             .combineLatest(appState.contextCapture.$meetingShortcutDisplay)
             .receive(on: RunLoop.main)
             .sink { [weak self] _, _ in
-                self?.refreshAll()
+                self?.refresh()
             }
             .store(in: &subscriptions)
 
         appState.contextCapture.$hotkeyError
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.refreshAll()
+                self?.refresh()
             }
             .store(in: &subscriptions)
 
@@ -106,17 +106,22 @@ final class MenuBarPanelController: NSViewController {
             appState.meetingSession.$lastSavedTranscriptURL
                 .receive(on: RunLoop.main)
                 .sink { [weak self] _ in
-                    self?.refreshAll()
+                    self?.refresh()
                 }
                 .store(in: &subscriptions)
 
             appState.meetingSession.$failedMeetings
                 .receive(on: RunLoop.main)
                 .sink { [weak self] _ in
-                    self?.refreshAll()
+                    self?.refresh()
                 }
                 .store(in: &subscriptions)
         }
+    }
+
+    func prepareForClose() {
+        contentView?.shortcutsView.cancelEditing()
+        contentView?.settingsView.dismissTransientUI()
     }
 
     private func startDictationFromMenu() {

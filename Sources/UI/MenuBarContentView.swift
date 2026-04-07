@@ -13,7 +13,6 @@ final class MenuBarContentView: NSView {
     let recentMeetingsView = MenuBarRecentMeetingsView(frame: .zero)
     let settingsView = MenuBarSettingsView(frame: .zero)
 
-    private let actionsDivider = NSView()
     private let recentsDivider = NSView()
     private let footerDivider = NSView()
 
@@ -44,7 +43,7 @@ final class MenuBarContentView: NSView {
         scrollView.documentView = documentView
         addSubview(scrollView)
 
-        [actionsDivider, recentsDivider, footerDivider].forEach {
+        [recentsDivider, footerDivider].forEach {
             $0.wantsLayer = true
             $0.layer?.backgroundColor = MenuTokens.sectionDividerNS.cgColor
             documentView.addSubview($0)
@@ -69,8 +68,6 @@ final class MenuBarContentView: NSView {
         let headerHeight = headerView.intrinsicHeight
         headerView.frame = NSRect(x: pad, y: y, width: width, height: headerHeight)
         y += headerHeight + MenuTokens.sectionSpacing
-
-        actionsDivider.frame = NSRect(x: pad, y: y - (MenuTokens.sectionSpacing / 2), width: width, height: dividerHeight)
 
         let shortcutsHeight = shortcutsView.intrinsicHeight
         shortcutsView.frame = NSRect(x: pad, y: y, width: width, height: shortcutsHeight)

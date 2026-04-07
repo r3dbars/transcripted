@@ -24,6 +24,12 @@ enum MenuTokens {
     static let actionBorderNS = NSColor.white.withAlphaComponent(0.08)
     static let badgeBackgroundNS = NSColor.white.withAlphaComponent(0.08)
     static let badgeBorderNS = NSColor.white.withAlphaComponent(0.12)
+    static let symbolBackgroundNS = NSColor.white.withAlphaComponent(0.05)
+    static let symbolBorderNS = NSColor.white.withAlphaComponent(0.08)
+    static let secondaryButtonBackgroundNS = NSColor.white.withAlphaComponent(0.02)
+    static let secondaryButtonHoverNS = NSColor.white.withAlphaComponent(0.07)
+    static let secondaryButtonPressedNS = NSColor.white.withAlphaComponent(0.10)
+    static let secondaryButtonBorderNS = NSColor.white.withAlphaComponent(0.10)
     static let recentHoverNS = NSColor.white.withAlphaComponent(0.05)
     static let failedBackgroundNS = NSColor.systemOrange.withAlphaComponent(0.14)
     static let failedBorderNS = NSColor.systemOrange.withAlphaComponent(0.24)
@@ -48,15 +54,19 @@ enum MenuTokens {
 
     // Layout
     static let panelWidth: CGFloat = 360
-    static let panelHeight: CGFloat = 384
-    static let innerPadding: CGFloat = 16
-    static let sectionSpacing: CGFloat = 14
-    static let surfaceCornerRadius: CGFloat = 14
+    static let panelHeight: CGFloat = 408
+    static let innerPadding: CGFloat = 14
+    static let sectionSpacing: CGFloat = 8
+    static let surfaceCornerRadius: CGFloat = 16
     static let cardCornerRadius: CGFloat = 12
-    static let actionRowHeight: CGFloat = 50
+    static let actionRowHeight: CGFloat = 46
     static let recentRowHeight: CGFloat = 40
     static let failedRowHeight: CGFloat = 42
-    static let badgeHeight: CGFloat = 24
+    static let badgeHeight: CGFloat = 22
+    static let secondaryButtonSize: CGFloat = 28
+    static let secondaryButtonCornerRadius: CGFloat = 8
+    static let secondaryButtonIconPointSize: CGFloat = 11
+    static let symbolWellSize: CGFloat = 26
     static let statusDotSize: CGFloat = 6
     static let compactStyleLines = 4
 }

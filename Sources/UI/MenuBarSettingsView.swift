@@ -1,16 +1,35 @@
 // MenuBarSettingsView.swift
-// Tiny utility footer for the menubar popover.
+// Compact utility footer for the menubar popover.
 
 import AppKit
 
 @MainActor
 final class MenuBarSettingsView: NSView {
-    private let footerLabel = NSTextField(labelWithString: "Runs locally on your Mac")
-    private let resetButton = NSButton(title: "Reset shortcuts", target: nil, action: nil)
-    private let feedbackButton = NSButton(title: "Feedback", target: nil, action: nil)
-    private let quitButton = NSButton(title: "Quit", target: nil, action: nil)
+    private let connectAgentButton = MenuOutlineButton(
+        title: "Connect your agent",
+        symbolName: "sparkles",
+        accessibilityLabel: "Connect your agent",
+        toolTip: "Connect your agent"
+    )
+    private let feedbackButton = MenuIconButton(
+        symbolName: "bubble.left",
+        accessibilityLabel: "Send feedback",
+        toolTip: "Send feedback"
+    )
+    private let quitButton = MenuIconButton(
+        symbolName: "power",
+        accessibilityLabel: "Quit Transcripted",
+        toolTip: "Quit Transcripted"
+    )
 
     weak var appState: DraftAppState?
+    private lazy var connectPopover: NSPopover = {
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = true
+        popover.contentViewController = MenuAgentConnectPopoverController()
+        return popover
+    }()
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -23,20 +42,12 @@ final class MenuBarSettingsView: NSView {
     override var isFlipped: Bool { true }
 
     private func setupViews() {
-        footerLabel.font = NSFont.systemFont(ofSize: 10)
-        footerLabel.textColor = MenuTokens.textMutedNS
-        addSubview(footerLabel)
+        connectAgentButton.target = self
+        connectAgentButton.action = #selector(toggleConnectPopover)
+        addSubview(connectAgentButton)
 
-        [resetButton, feedbackButton, quitButton].forEach { button in
-            button.isBordered = false
-            button.bezelStyle = .inline
-            button.font = NSFont.systemFont(ofSize: 10)
-            button.contentTintColor = MenuTokens.textSecondaryNS
-            addSubview(button)
-        }
+        [feedbackButton, quitButton].forEach { addSubview($0) }
 
-        resetButton.target = self
-        resetButton.action = #selector(resetShortcuts)
         feedbackButton.target = self
         feedbackButton.action = #selector(sendFeedback)
         quitButton.target = self
@@ -46,14 +57,17 @@ final class MenuBarSettingsView: NSView {
     override func layout() {
         super.layout()
 
-        footerLabel.frame = NSRect(x: 0, y: 2, width: 140, height: 12)
+        let buttonSize = MenuTokens.secondaryButtonSize
+        quitButton.frame = NSRect(x: bounds.width - buttonSize, y: 0, width: buttonSize, height: buttonSize)
+        feedbackButton.frame = NSRect(
+            x: quitButton.frame.minX - 8 - buttonSize,
+            y: 0,
+            width: buttonSize,
+            height: buttonSize
+        )
 
-        let quitSize = quitButton.fittingSize
-        quitButton.frame = NSRect(x: bounds.width - quitSize.width, y: 0, width: quitSize.width, height: quitSize.height)
-        let feedbackSize = feedbackButton.fittingSize
-        feedbackButton.frame = NSRect(x: quitButton.frame.minX - 14 - feedbackSize.width, y: 0, width: feedbackSize.width, height: feedbackSize.height)
-        let resetSize = resetButton.fittingSize
-        resetButton.frame = NSRect(x: feedbackButton.frame.minX - 14 - resetSize.width, y: 0, width: resetSize.width, height: resetSize.height)
+        let connectWidth = min(max(150, connectAgentButton.fittingSize.width), max(0, feedbackButton.frame.minX - 12))
+        connectAgentButton.frame = NSRect(x: 0, y: 0, width: connectWidth, height: buttonSize)
     }
 
     @objc private func sendFeedback() {
@@ -68,13 +82,21 @@ final class MenuBarSettingsView: NSView {
         }
     }
 
-    @objc private func resetShortcuts() {
-        HotkeyPreferences.resetToDefaults()
-    }
-
     @objc private func quitApp() {
         NSApplication.shared.terminate(nil)
     }
 
-    var intrinsicHeight: CGFloat { 18 }
+    @objc private func toggleConnectPopover() {
+        if connectPopover.isShown {
+            connectPopover.performClose(nil)
+            return
+        }
+        connectPopover.show(relativeTo: connectAgentButton.bounds, of: connectAgentButton, preferredEdge: .maxY)
+    }
+
+    func dismissTransientUI() {
+        connectPopover.performClose(nil)
+    }
+
+    var intrinsicHeight: CGFloat { MenuTokens.secondaryButtonSize }
 }

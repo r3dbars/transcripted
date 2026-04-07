@@ -22,6 +22,11 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
     private var lastExternalApplication: NSRunningApplication?
+    private lazy var menuPanelController = MenuBarPanelController(
+        appState: appState,
+        preferredSourceAppProvider: { [weak self] in self?.lastExternalApplication },
+        dismissPopover: { [weak self] in self?.closePopover() }
+    )
 
     let appState = DraftAppState()
     let overlayController = FloatingOverlayController()
@@ -117,20 +122,18 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                frontmost.bundleIdentifier != Bundle.main.bundleIdentifier {
                 lastExternalApplication = frontmost
             }
-            // Pure AppKit controller — no long-lived NSHostingController state.
-            popover.contentViewController = nil
             if !PermissionsOnboardingView.hasCompleted {
                 popover.contentViewController = NSHostingController(
-                    rootView: PermissionsOnboardingView(onComplete: {
+                    rootView: PermissionsOnboardingView(onComplete: { [weak self] in
                         PermissionsOnboardingView.markCompleted()
+                        guard let self else { return }
+                        self.menuPanelController.refresh()
+                        self.popover?.contentViewController = self.menuPanelController
                     })
                 )
             } else {
-                popover.contentViewController = MenuBarPanelController(
-                    appState: appState,
-                    preferredSourceAppProvider: { [weak self] in self?.lastExternalApplication },
-                    dismissPopover: { [weak self] in self?.closePopover() }
-                )
+                menuPanelController.refresh()
+                popover.contentViewController = menuPanelController
             }
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
@@ -138,13 +141,19 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func closePopover() {
+        menuPanelController.prepareForClose()
         popover?.performClose(nil)
-        popover?.contentViewController = nil
+        if popover?.contentViewController !== menuPanelController {
+            popover?.contentViewController = nil
+        }
     }
 
     // MARK: - NSPopoverDelegate
 
     func popoverDidClose(_ notification: Notification) {
-        popover?.contentViewController = nil  // Release controller + Combine subscriptions
+        menuPanelController.prepareForClose()
+        if popover?.contentViewController !== menuPanelController {
+            popover?.contentViewController = nil
+        }
     }
 }

@@ -62,7 +62,7 @@ final class MenuBarRecentMeetingsView: NSView {
     override var isFlipped: Bool { true }
 
     private func setupViews() {
-        headerLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        headerLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         headerLabel.textColor = MenuTokens.textPrimaryNS
         addSubview(headerLabel)
 
@@ -144,7 +144,16 @@ private final class RecentMeetingRowView: NSView {
     private let item: RecentMeetingItem
     private let titleLabel = NSTextField(labelWithString: "")
     private let dateLabel = NSTextField(labelWithString: "")
-    private let moreButton = NSButton(title: "⋯", target: nil, action: nil)
+    private let copyButton = MenuIconButton(
+        symbolName: "doc.on.doc",
+        accessibilityLabel: "Copy transcript",
+        toolTip: "Copy transcript"
+    )
+    private let showButton = MenuIconButton(
+        symbolName: "folder",
+        accessibilityLabel: "Show in Finder",
+        toolTip: "Show in Finder"
+    )
     private let divider = NSView()
     private let showsDivider: Bool
     private var trackingAreaRef: NSTrackingArea?
@@ -189,13 +198,13 @@ private final class RecentMeetingRowView: NSView {
         dateLabel.textColor = MenuTokens.textSecondaryNS
         addSubview(dateLabel)
 
-        moreButton.isBordered = false
-        moreButton.bezelStyle = .inline
-        moreButton.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        moreButton.contentTintColor = MenuTokens.textSecondaryNS
-        moreButton.target = self
-        moreButton.action = #selector(showMenu)
-        addSubview(moreButton)
+        [copyButton, showButton].forEach { addSubview($0) }
+
+        copyButton.target = self
+        copyButton.action = #selector(copyTranscript)
+
+        showButton.target = self
+        showButton.action = #selector(showInFinder)
 
         divider.wantsLayer = true
         divider.layer?.backgroundColor = MenuTokens.sectionDividerNS.cgColor
@@ -228,7 +237,7 @@ private final class RecentMeetingRowView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard !moreButton.frame.contains(point) else {
+        guard !copyButton.frame.contains(point), !showButton.frame.contains(point) else {
             super.mouseDown(with: event)
             return
         }
@@ -237,9 +246,22 @@ private final class RecentMeetingRowView: NSView {
 
     override func layout() {
         super.layout()
-        let moreWidth = max(24, moreButton.fittingSize.width + 8)
-        moreButton.frame = NSRect(x: bounds.width - moreWidth, y: 8, width: moreWidth, height: 24)
-        let textWidth = bounds.width - moreButton.frame.width - 12
+        let buttonSize = MenuTokens.secondaryButtonSize
+        copyButton.frame = NSRect(
+            x: bounds.width - buttonSize,
+            y: (bounds.height - buttonSize) / 2,
+            width: buttonSize,
+            height: buttonSize
+        )
+
+        showButton.frame = NSRect(
+            x: copyButton.frame.minX - 8 - buttonSize,
+            y: (bounds.height - buttonSize) / 2,
+            width: buttonSize,
+            height: buttonSize
+        )
+
+        let textWidth = max(0, showButton.frame.minX - 12)
         titleLabel.frame = NSRect(x: 0, y: 6, width: textWidth, height: 14)
         dateLabel.frame = NSRect(x: 0, y: 21, width: textWidth, height: 12)
         divider.frame = NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
@@ -249,15 +271,6 @@ private final class RecentMeetingRowView: NSView {
         NSSize(width: NSView.noIntrinsicMetric, height: MenuTokens.recentRowHeight)
     }
 
-    @objc private func showMenu() {
-        let menu = NSMenu()
-        let copyItem = menu.addItem(withTitle: "Copy transcript", action: #selector(copyTranscript), keyEquivalent: "")
-        copyItem.target = self
-        let revealItem = menu.addItem(withTitle: "Show in Finder", action: #selector(showInFinder), keyEquivalent: "")
-        revealItem.target = self
-        menu.popUp(positioning: nil, at: NSPoint(x: moreButton.frame.minX, y: moreButton.frame.maxY), in: self)
-    }
-
     @objc private func copyTranscript() {
         guard let text = MeetingTranscriptStyler.transcriptBody(at: item.transcriptURL) else { return }
         let pasteboard = NSPasteboard.general
@@ -265,13 +278,11 @@ private final class RecentMeetingRowView: NSView {
         pasteboard.setString(text, forType: .string)
 
         resetTask?.cancel()
-        moreButton.title = "Copied"
-        needsLayout = true
+        copyButton.setSymbol("checkmark", accessibilityLabel: "Transcript copied", tintOverride: MenuTokens.statusGreenNS)
         resetTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard let self, !Task.isCancelled else { return }
-            self.moreButton.title = "⋯"
-            self.needsLayout = true
+            self.copyButton.setSymbol("doc.on.doc", accessibilityLabel: "Copy transcript")
         }
     }
 
