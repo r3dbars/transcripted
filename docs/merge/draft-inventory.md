@@ -555,7 +555,7 @@ Xcode project, **no** Tuist/XcodeGen. Dependencies are reached exclusively throu
 **Backend (separate process, not linked into the Swift binary):**
 - `backend/` — Cloudflare Worker in TypeScript. `wrangler.toml` name `draft-proxy`,
   D1 binding `DB` (`draft-beta-db`), vars `LATEST_VERSION = "1.0.1"`,
-  `DOWNLOAD_URL_BASE = "https://github.com/r3dbars/Draft/releases/download/v1.0.1"`. Single
+  `DOWNLOAD_URL_BASE = "https://github.com/r3dbars/transcripted/releases/download/v1.0.1"`. Single
   entry file `src/index.ts`. Used only by BetaTelemetry + UpdateManager.
 
 ---
