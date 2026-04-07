@@ -1,22 +1,23 @@
 #!/bin/bash
 # Build Transcripted for beta distribution
 # Usage: ./build-beta.sh <beta-token> <user-name>
-# Example: ./build-beta.sh draft-beta-nate Nate
+# Example: ./build-beta.sh transcripted-beta-nate Nate
 #
 # Prerequisites:
 # - Developer ID Application certificate installed
 # - Notarization credentials stored locally via xcrun notarytool
 # - NOTARY_PROFILE set to the local keychain profile name for notarytool
-# - brew install create-dmg
+# - optional: brew install create-dmg for the custom DMG layout
 
 set -e
 
 BETA_TOKEN="$1"
 USER_NAME="${2:-beta}"
+SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 
 if [ -z "$BETA_TOKEN" ]; then
     echo "Usage: ./build-beta.sh <beta-token> <user-name>"
-    echo "Example: ./build-beta.sh draft-beta-nate Nate"
+    echo "Example: ./build-beta.sh transcripted-beta-nate Nate"
     exit 1
 fi
 
@@ -30,12 +31,14 @@ NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 BETA_CONFIG_PATH="Sources/API/BetaConfig.swift"
 BETA_CONFIG_BACKUP="$(mktemp -t transcripted-beta-config)"
 
-if [ -z "$SIGNING_IDENTITY" ]; then
-    SIGNING_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | awk '{print $2}')
-    SIGNING_DISPLAY_NAME=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
-else
-    SIGNING_DISPLAY_NAME="$SIGNING_IDENTITY"
-fi
+cleanup() {
+    if [ -f "$BETA_CONFIG_BACKUP" ]; then
+        cp "$BETA_CONFIG_BACKUP" "$BETA_CONFIG_PATH"
+        rm -f "$BETA_CONFIG_BACKUP"
+    fi
+}
+
+trap cleanup EXIT
 
 echo "🔨 Building Transcripted Beta for $USER_NAME (token: $BETA_TOKEN)..."
 
@@ -82,13 +85,14 @@ EOF
 # Inject the user's beta token
 echo "Injecting token for $USER_NAME..."
 cp "$BETA_CONFIG_PATH" "$BETA_CONFIG_BACKUP"
-trap 'mv "$BETA_CONFIG_BACKUP" "$BETA_CONFIG_PATH" 2>/dev/null || true' EXIT
 sed -i '' "s/BETA_TOKEN_PLACEHOLDER/$BETA_TOKEN/" "$BETA_CONFIG_PATH"
 
-# Unified dependency check
-if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ]; then
-    echo "❌ Dependencies not found — required for Parakeet STT + meeting diarization"
-    echo "   Run build-deps.sh first to build dependencies."
+# Unified dependencies (FluidAudio + mlx-swift-lm)
+TRANSCRIPTED_CORE_MODULE="deps-modules/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
+if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ]; then
+    echo "❌ Dependencies missing or stale — required for beta builds"
+    echo "   Missing module: $TRANSCRIPTED_CORE_MODULE"
+    echo "   Run build-deps.sh --force first to rebuild dependencies."
     exit 1
 fi
 echo "Dependencies found"
@@ -97,9 +101,10 @@ DEPS_MODULE_FLAGS="-Ideps-modules"
 for dir in deps-modules/*/; do
     [ -d "$dir" ] && DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
 done
+
 DEPS_FLAGS="$DEPS_MODULE_FLAGS -Ldeps-libs -lDraftDeps -framework CoreML -framework CoreAudio"
 
-# MLX searches for mlx.metallib next to the binary first (Contents/MacOS/)
+# Bundle Metal libraries if present
 for metallib in deps-libs/*.metallib; do
     [ -f "$metallib" ] && cp "$metallib" "$APP_BUNDLE/Contents/MacOS/"
 done
@@ -124,6 +129,7 @@ swiftc \
     -framework Vision \
     -framework MetalPerformanceShaders \
     -framework MetalPerformanceShadersGraph \
+    -lsqlite3 \
     -lc++ \
     $DEPS_FLAGS \
     $SOURCE_FILES \
@@ -139,57 +145,90 @@ if [ $COMPILE_STATUS -ne 0 ]; then
     exit 1
 fi
 
-# Sign with Developer ID + hardened runtime
 if [ -z "$SIGNING_IDENTITY" ]; then
-    echo "❌ No Developer ID Application certificate found."
-    echo "   Set SIGNING_IDENTITY explicitly or install a Developer ID certificate."
-    exit 1
+    SIGNING_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | awk '{print $2}')
+    SIGNING_DISPLAY_NAME=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
+else
+    SIGNING_DISPLAY_NAME="$SIGNING_IDENTITY"
 fi
 
-echo "Signing with: ${SIGNING_DISPLAY_NAME:-$SIGNING_IDENTITY}"
-codesign --force --deep \
-    --sign "$SIGNING_IDENTITY" \
-    --options runtime \
-    --timestamp \
-    --entitlements "$BUILD_DIR/Transcripted.entitlements" \
-    "$APP_BUNDLE" 2>&1
-
-if [ $? -ne 0 ]; then
-    echo "❌ Signing failed! Make sure you have a Developer ID Application certificate."
-    echo "   Open Xcode → Settings → Accounts → Manage Certificates"
-    exit 1
+if [ -n "$SIGNING_IDENTITY" ]; then
+    echo "Signing with: ${SIGNING_DISPLAY_NAME:-$SIGNING_IDENTITY}"
+    if ! codesign --force --deep \
+        --sign "$SIGNING_IDENTITY" \
+        --options runtime \
+        --timestamp \
+        --entitlements "$BUILD_DIR/Transcripted.entitlements" \
+        "$APP_BUNDLE" 2>&1; then
+        echo "❌ Signing failed! Make sure you have a valid Developer ID Application certificate."
+        echo "   Open Xcode → Settings → Accounts → Manage Certificates"
+        exit 1
+    fi
+else
+    echo "⚠️  No Developer ID found — signing ad-hoc for local smoke testing"
+    codesign --force --deep \
+        --sign - \
+        --entitlements "$BUILD_DIR/Transcripted.entitlements" \
+        "$APP_BUNDLE" 2>&1
 fi
 
 # Create DMG
 echo "Creating DMG..."
 rm -f "$BUILD_DIR/$DMG_NAME"
 
-# Check for custom background
-DMG_BG_FLAGS=""
-if [ -f "assets/dmg-background.png" ]; then
-    DMG_BG_FLAGS="--background assets/dmg-background.png"
+if command -v create-dmg >/dev/null 2>&1; then
+    # Check for custom background
+    DMG_BG_FLAGS=""
+    if [ -f "assets/dmg-background.png" ]; then
+        DMG_BG_FLAGS="--background assets/dmg-background.png"
+    fi
+
+    create-dmg \
+        --volname "Transcripted Beta" \
+        --window-pos 200 120 \
+        --window-size 600 400 \
+        --icon-size 100 \
+        --icon "Transcripted.app" 175 190 \
+        --hide-extension "Transcripted.app" \
+        --app-drop-link 425 190 \
+        --no-internet-enable \
+        $DMG_BG_FLAGS \
+        "$BUILD_DIR/$DMG_NAME" \
+        "$APP_BUNDLE" \
+        2>&1 || true  # create-dmg returns non-zero on "already exists" even after rm
+else
+    echo "⚠️  create-dmg not found — using hdiutil fallback"
+    STAGING_DIR="$BUILD_DIR/dmg-staging"
+    rm -rf "$STAGING_DIR"
+    mkdir -p "$STAGING_DIR"
+    cp -R "$APP_BUNDLE" "$STAGING_DIR/"
+    ln -s /Applications "$STAGING_DIR/Applications"
+    hdiutil create \
+        -volname "Transcripted Beta" \
+        -srcfolder "$STAGING_DIR" \
+        -ov \
+        -format UDZO \
+        "$BUILD_DIR/$DMG_NAME" 2>&1
+    rm -rf "$STAGING_DIR"
 fi
 
-create-dmg \
-    --volname "Transcripted Beta" \
-    --window-pos 200 120 \
-    --window-size 600 400 \
-    --icon-size 100 \
-    --icon "Transcripted.app" 175 190 \
-    --hide-extension "Transcripted.app" \
-    --app-drop-link 425 190 \
-    --no-internet-enable \
-    $DMG_BG_FLAGS \
-    "$BUILD_DIR/$DMG_NAME" \
-    "$APP_BUNDLE" \
-    2>&1 || true  # create-dmg returns non-zero on "already exists" even after rm
+if [ ! -f "$BUILD_DIR/$DMG_NAME" ]; then
+    echo "❌ DMG creation failed!"
+    exit 1
+fi
 
 # Sign the DMG
-echo "Signing DMG..."
-codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$BUILD_DIR/$DMG_NAME"
+if [ -n "$SIGNING_IDENTITY" ]; then
+    echo "Signing DMG..."
+    codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$BUILD_DIR/$DMG_NAME"
+else
+    echo "⚠️  Skipping DMG signature (no Developer ID available)"
+fi
 
 # Notarize (only with Developer ID — Apple Development certs can't be notarized)
-if [[ "${SIGNING_DISPLAY_NAME:-$SIGNING_IDENTITY}" == Developer\ ID* ]]; then
+if [ "$SKIP_NOTARIZATION" = "1" ]; then
+    echo "⚠️  Skipping notarization (SKIP_NOTARIZATION=1)"
+elif [[ "$SIGNING_DISPLAY_NAME" == Developer\ ID* ]]; then
     if [ -z "$NOTARY_PROFILE" ]; then
         echo "❌ NOTARY_PROFILE is not set."
         echo "   Store credentials with: xcrun notarytool store-credentials <profile-name> ..."

@@ -1,5 +1,5 @@
-// Draft Beta Proxy — Cloudflare Worker
-// Sits between the Draft app and the Anthropic API.
+// Transcripted Beta Proxy — Cloudflare Worker
+// Sits between the Transcripted app and the Anthropic API.
 // Validates per-user beta tokens, streams responses transparently,
 // logs usage to D1, and supports telemetry + config endpoints.
 
@@ -10,7 +10,7 @@ interface Env {
   BETA_MESSAGE?: string;
   LATEST_VERSION?: string;
   DOWNLOAD_URL?: string;       // Legacy single-URL (unused if DOWNLOAD_URL_BASE is set)
-  DOWNLOAD_URL_BASE?: string;  // Per-user: base + /Draft-{Name}.dmg
+  DOWNLOAD_URL_BASE?: string;  // Per-user: base + /Transcripted-{Name}.dmg
 }
 
 interface User {
@@ -206,9 +206,9 @@ async function handleConfig(
   env: Env,
   user: User
 ): Promise<Response> {
-  // Per-user download URL: base + /Draft-{Name}.dmg
+  // Per-user download URL: base + /Transcripted-{Name}.dmg
   const downloadUrl = env.DOWNLOAD_URL_BASE
-    ? `${env.DOWNLOAD_URL_BASE}/Draft-${user.name}.dmg`
+    ? `${env.DOWNLOAD_URL_BASE}/Transcripted-${user.name}.dmg`
     : env.DOWNLOAD_URL ?? null;
 
   return new Response(
@@ -351,7 +351,7 @@ export default {
 
     // Health check
     if (method === "GET" && path === "/") {
-      return new Response(JSON.stringify({ status: "ok", service: "draft-proxy" }), {
+      return new Response(JSON.stringify({ status: "ok", service: "transcripted-proxy" }), {
         headers: { "Content-Type": "application/json" },
       });
     }
