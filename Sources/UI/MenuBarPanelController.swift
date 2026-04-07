@@ -8,6 +8,7 @@ import Combine
 final class MenuBarPanelController: NSViewController {
     private let appState: DraftAppState
     private let dismissPopover: () -> Void
+    private let openSettingsWindow: () -> Void
     private let preferredSourceAppProvider: () -> NSRunningApplication?
     private var contentView: MenuBarContentView?
     private var subscriptions = Set<AnyCancellable>()
@@ -15,10 +16,12 @@ final class MenuBarPanelController: NSViewController {
     init(
         appState: DraftAppState,
         preferredSourceAppProvider: @escaping () -> NSRunningApplication?,
+        openSettingsWindow: @escaping () -> Void,
         dismissPopover: @escaping () -> Void
     ) {
         self.appState = appState
         self.preferredSourceAppProvider = preferredSourceAppProvider
+        self.openSettingsWindow = openSettingsWindow
         self.dismissPopover = dismissPopover
         super.init(nibName: nil, bundle: nil)
     }
@@ -32,6 +35,7 @@ final class MenuBarPanelController: NSViewController {
         content.settingsView.appState = appState
         content.shortcutsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
         content.shortcutsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
+        content.settingsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu() }
         view = content
         contentView = content
         view.appearance = NSAppearance(named: .darkAqua)
@@ -141,6 +145,11 @@ final class MenuBarPanelController: NSViewController {
                 await appState.meetingSession.startRecording(trigger: .menu)
             }
         }
+    }
+
+    private func openSettingsFromMenu() {
+        dismissPopover()
+        openSettingsWindow()
     }
 
     private func resolvedSourceApp() -> NSRunningApplication? {

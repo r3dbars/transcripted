@@ -11,6 +11,11 @@ final class MenuBarSettingsView: NSView {
         accessibilityLabel: "Connect your agent",
         toolTip: "Connect your agent"
     )
+    private let settingsButton = MenuIconButton(
+        symbolName: "gearshape",
+        accessibilityLabel: "Open settings",
+        toolTip: "Open settings"
+    )
     private let feedbackButton = MenuIconButton(
         symbolName: "bubble.left",
         accessibilityLabel: "Send feedback",
@@ -23,6 +28,7 @@ final class MenuBarSettingsView: NSView {
     )
 
     weak var appState: DraftAppState?
+    var onOpenSettings: (() -> Void)?
     private lazy var connectPopover: NSPopover = {
         let popover = NSPopover()
         popover.behavior = .transient
@@ -46,8 +52,10 @@ final class MenuBarSettingsView: NSView {
         connectAgentButton.action = #selector(toggleConnectPopover)
         addSubview(connectAgentButton)
 
-        [feedbackButton, quitButton].forEach { addSubview($0) }
+        [settingsButton, feedbackButton, quitButton].forEach { addSubview($0) }
 
+        settingsButton.target = self
+        settingsButton.action = #selector(openSettings)
         feedbackButton.target = self
         feedbackButton.action = #selector(sendFeedback)
         quitButton.target = self
@@ -65,8 +73,14 @@ final class MenuBarSettingsView: NSView {
             width: buttonSize,
             height: buttonSize
         )
+        settingsButton.frame = NSRect(
+            x: feedbackButton.frame.minX - 8 - buttonSize,
+            y: 0,
+            width: buttonSize,
+            height: buttonSize
+        )
 
-        let connectWidth = min(max(150, connectAgentButton.fittingSize.width), max(0, feedbackButton.frame.minX - 12))
+        let connectWidth = min(max(150, connectAgentButton.fittingSize.width), max(0, settingsButton.frame.minX - 12))
         connectAgentButton.frame = NSRect(x: 0, y: 0, width: connectWidth, height: buttonSize)
     }
 
@@ -84,6 +98,10 @@ final class MenuBarSettingsView: NSView {
 
     @objc private func quitApp() {
         NSApplication.shared.terminate(nil)
+    }
+
+    @objc private func openSettings() {
+        onOpenSettings?()
     }
 
     @objc private func toggleConnectPopover() {

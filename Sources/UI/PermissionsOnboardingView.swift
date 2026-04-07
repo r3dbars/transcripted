@@ -149,24 +149,9 @@ struct PermissionsOnboardingView: View {
     }
 
     private func checkAllPermissions() {
-        micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-        accessibilityGranted = AXIsProcessTrusted()
-        screenRecordingGranted = checkScreenRecording()
-    }
-
-    private func checkScreenRecording() -> Bool {
-        // CGPreflightScreenCaptureAccess is available macOS 15+
-        if #available(macOS 15.0, *) {
-            return CGPreflightScreenCaptureAccess()
-        }
-        // Fallback: attempt a test capture of the main display
-        let testImage = CGWindowListCreateImage(
-            CGRect(x: 0, y: 0, width: 1, height: 1),
-            .optionOnScreenOnly,
-            kCGNullWindowID,
-            [.nominalResolution]
-        )
-        return testImage != nil
+        micGranted = TranscriptedPermissionAccess.isGranted(.microphone)
+        accessibilityGranted = TranscriptedPermissionAccess.isGranted(.accessibility)
+        screenRecordingGranted = TranscriptedPermissionAccess.isGranted(.screenRecording)
     }
 
     // MARK: - Polling
@@ -215,25 +200,11 @@ struct PermissionsOnboardingView: View {
     private func openSettingsForStep(_ step: Int) {
         switch step {
         case 0:
-            // Request microphone directly
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
-                Task { @MainActor in
-                    micGranted = granted
-                }
-            }
+            TranscriptedPermissionAccess.openSettings(for: .microphone)
         case 1:
-            // Accessibility — must open System Settings
-            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-                NSWorkspace.shared.open(url)
-            }
+            TranscriptedPermissionAccess.openSettings(for: .accessibility)
         case 2:
-            // Screen Recording
-            if #available(macOS 15.0, *) {
-                CGRequestScreenCaptureAccess()
-            }
-            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-                NSWorkspace.shared.open(url)
-            }
+            TranscriptedPermissionAccess.openSettings(for: .screenRecording)
         default:
             break
         }

@@ -22,9 +22,11 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
     private var lastExternalApplication: NSRunningApplication?
+    private lazy var settingsWindowController = TranscriptedSettingsWindowController()
     private lazy var menuPanelController = MenuBarPanelController(
         appState: appState,
         preferredSourceAppProvider: { [weak self] in self?.lastExternalApplication },
+        openSettingsWindow: { [weak self] in self?.showSettingsWindow() },
         dismissPopover: { [weak self] in self?.closePopover() }
     )
 
@@ -147,6 +149,10 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if popover?.contentViewController !== menuPanelController {
             popover?.contentViewController = nil
         }
+    }
+
+    private func showSettingsWindow() {
+        settingsWindowController.present()
     }
 
     // MARK: - NSPopoverDelegate
