@@ -36,6 +36,8 @@ final class MenuBarPanelController: NSViewController {
         content.shortcutsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
         content.shortcutsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
         content.settingsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu() }
+        content.settingsView.onOpenAgentConnect = { [weak self] in self?.contentView?.showAgentConnectPage() }
+        content.agentConnectView.onBack = { [weak self] in self?.contentView?.showMainPage() }
         view = content
         contentView = content
         view.appearance = NSAppearance(named: .darkAqua)
@@ -125,6 +127,7 @@ final class MenuBarPanelController: NSViewController {
 
     func prepareForClose() {
         contentView?.shortcutsView.cancelEditing()
+        contentView?.showMainPage()
         contentView?.settingsView.dismissTransientUI()
     }
 

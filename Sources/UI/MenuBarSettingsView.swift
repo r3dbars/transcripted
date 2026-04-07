@@ -29,13 +29,7 @@ final class MenuBarSettingsView: NSView {
 
     weak var appState: DraftAppState?
     var onOpenSettings: (() -> Void)?
-    private lazy var connectPopover: NSPopover = {
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.animates = true
-        popover.contentViewController = MenuAgentConnectPopoverController()
-        return popover
-    }()
+    var onOpenAgentConnect: (() -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -49,7 +43,7 @@ final class MenuBarSettingsView: NSView {
 
     private func setupViews() {
         connectAgentButton.target = self
-        connectAgentButton.action = #selector(toggleConnectPopover)
+        connectAgentButton.action = #selector(openAgentConnect)
         addSubview(connectAgentButton)
 
         [settingsButton, feedbackButton, quitButton].forEach { addSubview($0) }
@@ -66,22 +60,23 @@ final class MenuBarSettingsView: NSView {
         super.layout()
 
         let buttonSize = MenuTokens.secondaryButtonSize
-        quitButton.frame = NSRect(x: bounds.width - buttonSize, y: 0, width: buttonSize, height: buttonSize)
+        let buttonY: CGFloat = 7
+        quitButton.frame = NSRect(x: bounds.width - buttonSize, y: buttonY, width: buttonSize, height: buttonSize)
         feedbackButton.frame = NSRect(
             x: quitButton.frame.minX - 8 - buttonSize,
-            y: 0,
+            y: buttonY,
             width: buttonSize,
             height: buttonSize
         )
         settingsButton.frame = NSRect(
             x: feedbackButton.frame.minX - 8 - buttonSize,
-            y: 0,
+            y: buttonY,
             width: buttonSize,
             height: buttonSize
         )
 
         let connectWidth = min(max(150, connectAgentButton.fittingSize.width), max(0, settingsButton.frame.minX - 12))
-        connectAgentButton.frame = NSRect(x: 0, y: 0, width: connectWidth, height: buttonSize)
+        connectAgentButton.frame = NSRect(x: 0, y: buttonY, width: connectWidth, height: buttonSize)
     }
 
     @objc private func sendFeedback() {
@@ -104,17 +99,11 @@ final class MenuBarSettingsView: NSView {
         onOpenSettings?()
     }
 
-    @objc private func toggleConnectPopover() {
-        if connectPopover.isShown {
-            connectPopover.performClose(nil)
-            return
-        }
-        connectPopover.show(relativeTo: connectAgentButton.bounds, of: connectAgentButton, preferredEdge: .maxY)
+    @objc private func openAgentConnect() {
+        onOpenAgentConnect?()
     }
 
-    func dismissTransientUI() {
-        connectPopover.performClose(nil)
-    }
+    func dismissTransientUI() {}
 
-    var intrinsicHeight: CGFloat { MenuTokens.secondaryButtonSize }
+    var intrinsicHeight: CGFloat { MenuTokens.secondaryButtonSize + 8 }
 }

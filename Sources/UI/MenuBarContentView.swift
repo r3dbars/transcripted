@@ -5,6 +5,11 @@ import AppKit
 
 @MainActor
 final class MenuBarContentView: NSView {
+    enum Page {
+        case main
+        case agentConnect
+    }
+
     private let scrollView = NSScrollView()
     private let documentView = FlippedMenuDocumentView()
 
@@ -12,9 +17,11 @@ final class MenuBarContentView: NSView {
     let shortcutsView = MenuBarShortcutsView(frame: .zero)
     let recentMeetingsView = MenuBarRecentMeetingsView(frame: .zero)
     let settingsView = MenuBarSettingsView(frame: .zero)
+    let agentConnectView = MenuAgentConnectPageView(frame: .zero)
 
     private let recentsDivider = NSView()
     private let footerDivider = NSView()
+    private var currentPage: Page = .main
 
     weak var appState: DraftAppState?
 
@@ -53,6 +60,8 @@ final class MenuBarContentView: NSView {
         documentView.addSubview(shortcutsView)
         documentView.addSubview(recentMeetingsView)
         documentView.addSubview(settingsView)
+        documentView.addSubview(agentConnectView)
+        updatePageVisibility()
     }
 
     override func layout() {
@@ -62,9 +71,15 @@ final class MenuBarContentView: NSView {
 
         let pad = MenuTokens.innerPadding
         let width = bounds.width - pad * 2
+        if currentPage == .agentConnect {
+            let contentHeight = agentConnectView.intrinsicHeight
+            agentConnectView.frame = NSRect(x: pad, y: pad, width: width, height: contentHeight)
+            documentView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(contentHeight + pad * 2, bounds.height))
+            return
+        }
+
         let dividerHeight: CGFloat = 1
         var y = pad
-
         let headerHeight = headerView.intrinsicHeight
         headerView.frame = NSRect(x: pad, y: y, width: width, height: headerHeight)
         y += headerHeight + MenuTokens.sectionSpacing
@@ -86,6 +101,33 @@ final class MenuBarContentView: NSView {
         y += footerHeight + pad
 
         documentView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(y, bounds.height))
+    }
+
+    func showMainPage() {
+        currentPage = .main
+        updatePageVisibility()
+        scrollToTop()
+        needsLayout = true
+    }
+
+    func showAgentConnectPage() {
+        currentPage = .agentConnect
+        updatePageVisibility()
+        scrollToTop()
+        needsLayout = true
+    }
+
+    private func updatePageVisibility() {
+        let isMain = currentPage == .main
+        [headerView, shortcutsView, recentMeetingsView, settingsView, recentsDivider, footerDivider].forEach {
+            $0.isHidden = !isMain
+        }
+        agentConnectView.isHidden = isMain
+    }
+
+    private func scrollToTop() {
+        scrollView.contentView.scroll(to: .zero)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 }
 
