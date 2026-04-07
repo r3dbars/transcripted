@@ -13,6 +13,7 @@ struct TestRunner {
         testStyleUtils()
         testDiffSummary()
         testMeetingTranscriptStyler()
+        testDictationTranscriptWriter()
 
         print("\n\(totalTests) tests, \(passedTests) passed, \(failedTests) failed")
         if failedTests > 0 {
