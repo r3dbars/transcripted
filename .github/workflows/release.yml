@@ -1,116 +1,14 @@
-name: Release
+name: Release (disabled pending Draft public release pipeline)
 
 on:
-  push:
-    tags:
-      - 'v*'
-
-permissions:
-  contents: write
-
-env:
-  APP_NAME: Transcripted
-  SCHEME: Transcripted
-  BUNDLE_ID: com.transcripted.app
+  workflow_dispatch:
 
 jobs:
-  build-and-release:
-    runs-on: macos-15
+  disabled:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Select Xcode 26.3
-        run: sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
-
-      - name: Extract version from tag
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
-
-      - name: Free disk space
+      - name: Explain disabled state
         run: |
-          echo "Disk before:"
-          df -h /
-          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes || true
-          sudo rm -rf ~/Library/Developer/Xcode/DerivedData || true
-          sudo rm -rf /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform || true
-          sudo rm -rf /Applications/Xcode.app/Contents/Developer/Platforms/WatchOS.platform || true
-          sudo rm -rf /Applications/Xcode.app/Contents/Developer/Platforms/tvOS.platform || true
-          echo "Disk after:"
-          df -h /
-
-      - name: Install Apple certificate
-        env:
-          DEVELOPER_ID_CERT: ${{ secrets.DEVELOPER_ID_CERT }}
-          DEVELOPER_ID_PASSWORD: ${{ secrets.DEVELOPER_ID_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ github.run_id }}
-        run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          CERT_PATH=$RUNNER_TEMP/certificate.p12
-          echo -n "$DEVELOPER_ID_CERT" | base64 --decode -o $CERT_PATH
-          security import $CERT_PATH -P "$DEVELOPER_ID_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security list-keychain -d user -s $KEYCHAIN_PATH
-
-      - name: Build Release
-        run: |
-          xcodebuild -project ${{ env.APP_NAME }}.xcodeproj \
-            -scheme ${{ env.SCHEME }} \
-            -configuration Release \
-            -derivedDataPath build \
-            -destination "generic/platform=macOS" \
-            ARCHS=arm64 \
-            ONLY_ACTIVE_ARCH=NO \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Developer ID Application" \
-            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }} \
-            MARKETING_VERSION=${{ steps.version.outputs.version }} \
-            CURRENT_PROJECT_VERSION=${{ steps.version.outputs.version }}
-
-      - name: Locate app bundle
-        id: app
-        run: |
-          APP_PATH=$(find build/Build/Products/Release -name "*.app" -maxdepth 1 | head -1)
-          echo "path=$APP_PATH" >> $GITHUB_OUTPUT
-
-      - name: Free build intermediates
-        run: |
-          rm -rf build/Build/Intermediates.noindex
-          rm -rf build/SourcePackages
-          df -h /
-
-      - name: Create ZIP
-        run: |
-          ditto -c -k --sequesterRsrc --keepParent \
-            "${{ steps.app.outputs.path }}" \
-            "${{ env.APP_NAME }}-${{ steps.version.outputs.version }}.zip"
-          ls -lh *.zip
-
-      - name: Notarize ZIP
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-        run: |
-          xcrun notarytool submit "${{ env.APP_NAME }}-${{ steps.version.outputs.version }}.zip" \
-            --apple-id "$APPLE_ID" \
-            --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_APP_PASSWORD" \
-            --wait
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          gh release create "v${VERSION}" \
-            --title "Transcripted v${VERSION}" \
-            --generate-notes \
-            "${{ env.APP_NAME }}-${VERSION}.zip"
-
-      - name: Cleanup keychain
-        if: always()
-        run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
+          echo "The legacy Transcripted release workflow is intentionally disabled on main."
+          echo "This repo now ships Draft on main, and a new public release pipeline must be"
+          echo "reviewed before any post-cutover tag is used."

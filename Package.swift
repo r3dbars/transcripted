@@ -2,22 +2,18 @@
 import PackageDescription
 import Foundation
 
-// TranscriptedCore — SPM library target extracted from Transcripted.
+// TranscriptedCore — shared library target co-hosted with Draft.
 //
 // Consumed by:
-//   1. Draft (via path: dependency) — see Draft/Package.swift
-//   2. Transcripted.xcodeproj app target (via "Add Package Dependency" on local path)
+//   1. Draft's meeting integration via build-deps.sh
+//   2. `swift test` for the TranscriptedCore smoke tests in this repo
 //
 // Binary dependency layout:
-//   .deps-libs/libDraftDeps.a        — prebuilt mega-library (FluidAudio 0.7.9 + MLX + deps)
-//   .deps-modules/*.swiftmodule      — Swift interface files for FluidAudio et al.
-//   .deps-modules/FastClusterWrapper — C header for fast-cluster C++ wrapper
-//   .deps-modules/MachTaskSelfWrapper — C header for mach_task_self helper
-//   .deps-modules/yyjson             — C header for yyjson JSON parser
-//
-// Both .deps-libs and .deps-modules are symlinks pointing at Draft's build artifacts:
-//   .deps-libs    -> ../../../../Draft/deps-libs
-//   .deps-modules -> ../../../../Draft/deps-modules
+//   deps-libs/libDraftDeps.a          — prebuilt mega-library (FluidAudio 0.7.9 + MLX + deps)
+//   deps-modules/*.swiftmodule        — Swift interface files for FluidAudio et al.
+//   deps-modules/FastClusterWrapper   — C header for fast-cluster C++ wrapper
+//   deps-modules/MachTaskSelfWrapper  — C header for mach_task_self helper
+//   deps-modules/yyjson               — C header for yyjson JSON parser
 //
 // `#filePath` resolves to Package.swift's absolute location on disk, so the -I/-L
 // flags work whether swiftc is invoked from the package root (`swift test`) or from
@@ -42,15 +38,15 @@ let package = Package(
             path: "Sources/TranscriptedCore",
             swiftSettings: [
                 .unsafeFlags([
-                    "-I", "\(repoRoot)/.deps-modules",
-                    "-I", "\(repoRoot)/.deps-modules/FastClusterWrapper",
-                    "-I", "\(repoRoot)/.deps-modules/MachTaskSelfWrapper",
-                    "-I", "\(repoRoot)/.deps-modules/yyjson",
+                    "-I", "\(repoRoot)/deps-modules",
+                    "-I", "\(repoRoot)/deps-modules/FastClusterWrapper",
+                    "-I", "\(repoRoot)/deps-modules/MachTaskSelfWrapper",
+                    "-I", "\(repoRoot)/deps-modules/yyjson",
                 ]),
             ],
             linkerSettings: [
                 .unsafeFlags([
-                    "-L\(repoRoot)/.deps-libs",
+                    "-L\(repoRoot)/deps-libs",
                     "-lDraftDeps",
                     "-lc++",
                 ]),
@@ -72,17 +68,17 @@ let package = Package(
                 // @testable import TranscriptedCore transitively re-exports FluidAudio/MLX
                 // module interfaces, so the test target needs the same -I search paths.
                 .unsafeFlags([
-                    "-I", "\(repoRoot)/.deps-modules",
-                    "-I", "\(repoRoot)/.deps-modules/FastClusterWrapper",
-                    "-I", "\(repoRoot)/.deps-modules/MachTaskSelfWrapper",
-                    "-I", "\(repoRoot)/.deps-modules/yyjson",
+                    "-I", "\(repoRoot)/deps-modules",
+                    "-I", "\(repoRoot)/deps-modules/FastClusterWrapper",
+                    "-I", "\(repoRoot)/deps-modules/MachTaskSelfWrapper",
+                    "-I", "\(repoRoot)/deps-modules/yyjson",
                 ]),
             ],
             linkerSettings: [
                 // Mirror Core target linker flags so the xctest binary can resolve
                 // FluidAudio symbols pulled in through @testable.
                 .unsafeFlags([
-                    "-L\(repoRoot)/.deps-libs",
+                    "-L\(repoRoot)/deps-libs",
                     "-lDraftDeps",
                     "-lc++",
                 ]),
