@@ -24,6 +24,8 @@ BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 DMG_NAME="Draft-${USER_NAME}.dmg"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-Developer ID Application: r3dbars (<team-id>)}"
+BETA_CONFIG_PATH="Sources/API/BetaConfig.swift"
+BETA_CONFIG_BACKUP="$(mktemp -t draft-beta-config)"
 
 echo "🔨 Building Draft Beta for $USER_NAME (token: $BETA_TOKEN)..."
 
@@ -69,20 +71,32 @@ EOF
 
 # Inject the user's beta token
 echo "Injecting token for $USER_NAME..."
-sed -i '' "s/BETA_TOKEN_PLACEHOLDER/$BETA_TOKEN/" Sources/API/BetaConfig.swift
+cp "$BETA_CONFIG_PATH" "$BETA_CONFIG_BACKUP"
+trap 'mv "$BETA_CONFIG_BACKUP" "$BETA_CONFIG_PATH" 2>/dev/null || true' EXIT
+sed -i '' "s/BETA_TOKEN_PLACEHOLDER/$BETA_TOKEN/" "$BETA_CONFIG_PATH"
 
-# FluidAudio check
-if [ ! -f "fluidaudio-libs/libFluidAudioAll.a" ] || [ ! -d "fluidaudio-modules/FluidAudio.swiftmodule" ]; then
-    echo "❌ FluidAudio not found — required for Parakeet STT engine"
-    echo "   Run build-fluidaudio.sh first to build FluidAudio."
-    git checkout Sources/API/BetaConfig.swift 2>/dev/null
+# Unified dependency check
+if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ]; then
+    echo "❌ Dependencies not found — required for Parakeet STT + meeting diarization"
+    echo "   Run build-deps.sh first to build dependencies."
     exit 1
 fi
-echo "FluidAudio found"
-FLUID_FLAGS="-Ifluidaudio-modules -Ifluidaudio-modules/FastClusterWrapper -Ifluidaudio-modules/MachTaskSelfWrapper -Ifluidaudio-modules/yyjson -Lfluidaudio-libs -lFluidAudioAll -framework CoreML -framework CoreAudio"
+echo "Dependencies found"
+
+DEPS_MODULE_FLAGS="-Ideps-modules"
+for dir in deps-modules/*/; do
+    [ -d "$dir" ] && DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
+done
+DEPS_FLAGS="$DEPS_MODULE_FLAGS -Ldeps-libs -lDraftDeps -framework CoreML -framework CoreAudio"
+
+# MLX searches for mlx.metallib next to the binary first (Contents/MacOS/)
+for metallib in deps-libs/*.metallib; do
+    [ -f "$metallib" ] && cp "$metallib" "$APP_BUNDLE/Contents/MacOS/"
+done
 
 # Compile with BETA_BUILD flag
 echo "Compiling (beta build)..."
+SOURCE_FILES=$(find Sources -name '*.swift' -not -path 'Sources/TranscriptedCore/*')
 swiftc \
     -O \
     -D BETA_BUILD \
@@ -97,19 +111,18 @@ swiftc \
     -framework Metal \
     -framework MetalKit \
     -framework Accelerate \
-    -lsqlite3 \
+    -framework Vision \
+    -framework MetalPerformanceShaders \
+    -framework MetalPerformanceShadersGraph \
     -lc++ \
-    $FLUID_FLAGS \
-    $(find Sources -name '*.swift') \
+    $DEPS_FLAGS \
+    $SOURCE_FILES \
     -parse-as-library \
     -target arm64-apple-macos14.0 \
     -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
     2>&1
 
 COMPILE_STATUS=$?
-
-# Restore BetaConfig.swift to placeholder (regardless of compile result)
-git checkout Sources/API/BetaConfig.swift 2>/dev/null
 
 if [ $COMPILE_STATUS -ne 0 ]; then
     echo "❌ Build failed!"
