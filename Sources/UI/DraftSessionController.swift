@@ -9,6 +9,7 @@ import Combine
 class DraftSessionController: ObservableObject {
     enum DictationTrigger: String {
         case rightOptionTap = "right_option_tap"
+        case keyboardShortcut = "keyboard_shortcut"
         case menu = "menu"
         case unknown = "unknown"
     }
