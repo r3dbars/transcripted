@@ -22,6 +22,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
     private var lastExternalApplication: NSRunningApplication?
+    private lazy var settingsWindowController = TranscriptedSettingsWindowController()
 
     let appState = DraftAppState()
     let overlayController = FloatingOverlayController()
@@ -129,6 +130,8 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 popover.contentViewController = MenuBarPanelController(
                     appState: appState,
                     preferredSourceAppProvider: { [weak self] in self?.lastExternalApplication },
+                    openSettingsWindow: { [weak self] in self?.showSettingsWindow() },
+                    openAgentConnectWindow: { [weak self] in self?.showAgentConnectWindow() },
                     dismissPopover: { [weak self] in self?.closePopover() }
                 )
             }
@@ -140,6 +143,14 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func closePopover() {
         popover?.performClose(nil)
         popover?.contentViewController = nil
+    }
+
+    private func showSettingsWindow() {
+        settingsWindowController.present()
+    }
+
+    private func showAgentConnectWindow() {
+        AgentConnectionWindowCoordinator.shared.show(for: nil)
     }
 
     // MARK: - NSPopoverDelegate

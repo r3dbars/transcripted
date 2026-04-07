@@ -253,6 +253,8 @@ private final class RecentMeetingRowView: NSView {
         let menu = NSMenu()
         let copyItem = menu.addItem(withTitle: "Copy transcript", action: #selector(copyTranscript), keyEquivalent: "")
         copyItem.target = self
+        let connectItem = menu.addItem(withTitle: "Connect your agent", action: #selector(connectAgent), keyEquivalent: "")
+        connectItem.target = self
         let revealItem = menu.addItem(withTitle: "Show in Finder", action: #selector(showInFinder), keyEquivalent: "")
         revealItem.target = self
         menu.popUp(positioning: nil, at: NSPoint(x: moreButton.frame.minX, y: moreButton.frame.maxY), in: self)
@@ -277,6 +279,10 @@ private final class RecentMeetingRowView: NSView {
 
     @objc private func showInFinder() {
         NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
+    }
+
+    @objc private func connectAgent() {
+        AgentConnectionWindowCoordinator.shared.show(for: item)
     }
 }
 
