@@ -12,28 +12,28 @@ old standalone Transcripted app on:
 
 ## High-Level Layout
 
-```
+```text
 Sources/
-├── DraftApp.swift
-├── DraftAppState.swift
-├── DraftPaths.swift
-├── DraftConstants.swift
-├── HotkeyPreferences.swift
-├── API/
-├── Accessibility/
-├── Analysis/
-├── Capture/
-├── Dictation/
-├── Draft/
-├── Feedback/
-├── Local/
-├── Meeting/
-├── Observability/
-├── Prompts/
-├── Speech/
-├── Style/
-├── TranscriptedCore/    ← shared meeting/transcription core kept in-repo
-└── UI/
+|- DraftApp.swift
+|- DraftAppState.swift
+|- DraftPaths.swift
+|- DraftConstants.swift
+|- HotkeyPreferences.swift
+|- API/
+|- Accessibility/
+|- Analysis/
+|- Capture/
+|- Dictation/
+|- Draft/
+|- Feedback/
+|- Local/
+|- Meeting/
+|- Observability/
+|- Prompts/
+|- Speech/
+|- Style/
+|- TranscriptedCore/    <- shared meeting/transcription core kept in-repo
+`- UI/
 Tests/
 SmokeTests/
 backend/
@@ -41,7 +41,7 @@ build.sh
 build-deps.sh
 run-tests.sh
 run-integration-smoke.sh
-Package.swift            ← SPM package for TranscriptedCore smoke tests only
+Package.swift            <- SPM package for TranscriptedCore smoke tests only
 ```
 
 ## Build and Test
@@ -51,6 +51,7 @@ bash build-deps.sh
 bash build.sh
 bash run-tests.sh
 bash run-integration-smoke.sh
+swift test
 ```
 
 Rules:
@@ -58,7 +59,7 @@ Rules:
 1. After changing Swift source, run `bash build.sh` and `bash run-tests.sh`.
 2. If you change `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash run-integration-smoke.sh`.
 3. `build.sh` builds the Draft app.
-4. `Package.swift` exists only so `Sources/TranscriptedCore/` can still be tested as a standalone library surface.
+4. `Package.swift` exists so `Sources/TranscriptedCore/` can still be tested as a standalone library surface.
 
 ## TranscriptedCore
 
