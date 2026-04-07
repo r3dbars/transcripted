@@ -48,6 +48,7 @@ class FloatingOverlayController {
     }
     /// Closure for Escape during non-review states (listening/drafting/streaming)
     var onEscapeDuringSession: (() -> Void)?
+    var onStopListening: (() -> Void)?
 
     // MARK: - Panel & Views
 
@@ -109,6 +110,9 @@ class FloatingOverlayController {
         // Pure AppKit root view (replaces NSHostingView — no AttributeGraph, no AG corruption)
         let rootView = OverlayRootView(frame: panel.contentView?.bounds ?? .zero)
         rootView.autoresizingMask = [.width, .height]
+        rootView.headerView.onStopRequested = { [weak self] in
+            self?.onStopListening?()
+        }
         panel.contentView?.addSubview(rootView, positioned: .above, relativeTo: blurView)
         self.rootView = rootView
 

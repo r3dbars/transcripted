@@ -29,13 +29,41 @@ private func shouldAcceptHotkeyAction(now: CFAbsoluteTime = CFAbsoluteTimeGetCur
 @MainActor
 private func routeDictationToggle(sourceApp: NSRunningApplication?, trigger: DraftSessionController.DictationTrigger) {
     guard let session = _sharedSessionController else { return }
+    DiagnosticsTrail.record(
+        logger: session.appState?.logger,
+        engine: "capture",
+        event: "dictation_toggle_requested",
+        message: "Dictation toggle requested",
+        context: [
+            "trigger": trigger.rawValue,
+            "source_app_name": sourceApp?.localizedName ?? "",
+            "source_app_bundle_id": sourceApp?.bundleIdentifier ?? "",
+            "session_state": session.isDictating ? "dictating" : (session.isInSession ? "drafting" : "idle"),
+            "overlay_state": overlayStateName(session.overlayController?.state)
+        ]
+    )
     if session.isDictating {
-        session.stopDictationAndPaste()
+        session.stopDictationAndPaste(trigger: trigger)
     } else if session.isInSession {
         session.cancelSession()
         session.startDictation(sourceApp: sourceApp, trigger: trigger)
     } else {
         session.startDictation(sourceApp: sourceApp, trigger: trigger)
+    }
+}
+
+@MainActor
+private func overlayStateName(_ state: FloatingOverlayController.OverlayState?) -> String {
+    guard let state else { return "unknown" }
+    switch state {
+    case .idle: return "idle"
+    case .loading: return "loading"
+    case .listening: return "listening"
+    case .drafting: return "drafting"
+    case .success: return "success"
+    case .streaming: return "streaming"
+    case .review: return "review"
+    case .diffFlash: return "diff_flash"
     }
 }
 
@@ -112,6 +140,7 @@ private final class RightOptionTapDetector {
 
     /// Called on MainActor when a valid right Option tap is detected
     var onTap: (() -> Void)?
+    var onInteraction: ((String, [String: String]) -> Void)?
 
     func install() {
         // --- flagsChanged monitors (detect right Option press/release) ---
@@ -126,11 +155,17 @@ private final class RightOptionTapDetector {
         // --- keyDown monitors (detect other keys pressed while right Option held) ---
         globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] _ in
             if self?.rightOptionDownTime != nil {
+                if self?.otherKeyPressed == false {
+                    self?.onInteraction?("right_option_chord_detected", [:])
+                }
                 self?.otherKeyPressed = true
             }
         }
         localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if self?.rightOptionDownTime != nil {
+                if self?.otherKeyPressed == false {
+                    self?.onInteraction?("right_option_chord_detected", [:])
+                }
                 self?.otherKeyPressed = true
             }
             return event
@@ -146,13 +181,21 @@ private final class RightOptionTapDetector {
             // Right Option just pressed
             rightOptionDownTime = Date()
             otherKeyPressed = false
+            onInteraction?("right_option_pressed", [:])
         } else if !optionDown, let downTime = rightOptionDownTime {
             // Right Option just released — check if it was a tap
             let elapsed = Date().timeIntervalSince(downTime)
             rightOptionDownTime = nil
 
             let maxTapDuration = maxTapDurationProvider?() ?? startTapDuration
-            if elapsed <= maxTapDuration && !otherKeyPressed {
+            let accepted = elapsed <= maxTapDuration && !otherKeyPressed
+            onInteraction?("right_option_released", [
+                "elapsed_ms": "\(Int(elapsed * 1000))",
+                "max_tap_ms": "\(Int(maxTapDuration * 1000))",
+                "other_key_pressed": "\(otherKeyPressed)",
+                "accepted": "\(accepted)"
+            ])
+            if accepted {
                 onTap?()
             }
         }
@@ -229,6 +272,9 @@ class ContextCaptureEngine: ObservableObject {
         rightOptionDetector.maxTapDurationProvider = { [weak self] in
             self?.sessionController?.isDictating == true ? 1.0 : 0.35
         }
+        rightOptionDetector.onInteraction = { [weak self] event, context in
+            self?.recordRightOptionInteraction(event: event, context: context)
+        }
         if HotkeyPreferences.rightOptionDictationEnabled() {
             rightOptionDetector.onTap = { [weak self] in
                 Task { @MainActor [weak self] in
@@ -267,6 +313,9 @@ class ContextCaptureEngine: ObservableObject {
         rightOptionDetector.remove()
         rightOptionDetector.maxTapDurationProvider = { [weak self] in
             self?.sessionController?.isDictating == true ? 1.0 : 0.35
+        }
+        rightOptionDetector.onInteraction = { [weak self] event, context in
+            self?.recordRightOptionInteraction(event: event, context: context)
         }
         if HotkeyPreferences.rightOptionDictationEnabled() {
             rightOptionDetector.onTap = { [weak self] in
@@ -328,12 +377,17 @@ class ContextCaptureEngine: ObservableObject {
     /// Handles a right Option key tap — same routing as ⌥Space (dictation toggle)
     private func handleRightOptionTap() {
         guard shouldAcceptHotkeyAction() else {
-            EventReporter.shared.capture(
+            DiagnosticsTrail.record(
+                logger: sessionController?.appState?.logger,
                 level: .info,
                 engine: "capture",
                 event: "hotkey_repeat_ignored",
                 message: "Ignored rapid repeat dictation tap",
-                context: ["hotkey_id": "right_option"]
+                context: [
+                    "hotkey_id": "right_option",
+                    "session_state": sessionController?.isDictating == true ? "dictating" : (sessionController?.isInSession == true ? "drafting" : "idle"),
+                    "overlay_state": overlayStateName(sessionController?.overlayController?.state)
+                ]
             )
             return
         }
@@ -342,13 +396,26 @@ class ContextCaptureEngine: ObservableObject {
 
         guard let session = sessionController else { return }
         if session.isDictating {
-            session.stopDictationAndPaste()
+            session.stopDictationAndPaste(trigger: .rightOptionTap)
         } else if session.isInSession {
             session.cancelSession()
             session.startDictation(sourceApp: frontApp, trigger: .rightOptionTap)
         } else {
             session.startDictation(sourceApp: frontApp, trigger: .rightOptionTap)
         }
+    }
+
+    private func recordRightOptionInteraction(event: String, context: [String: String]) {
+        DiagnosticsTrail.record(
+            logger: sessionController?.appState?.logger,
+            engine: "capture",
+            event: event,
+            message: "Right Option dictation interaction",
+            context: context.merging([
+                "session_state": sessionController?.isDictating == true ? "dictating" : (sessionController?.isInSession == true ? "drafting" : "idle"),
+                "overlay_state": overlayStateName(sessionController?.overlayController?.state)
+            ]) { current, _ in current }
+        )
     }
 
     deinit {

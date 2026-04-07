@@ -9,6 +9,8 @@ final class OverlayHeaderView: NSView {
     private let spinner = NSProgressIndicator()
     let waveformHost = WaveformHostView(frame: .zero)
     private let shortcutHint = NSTextField(labelWithString: "")
+    private let stopButton = NSButton(title: "Stop", target: nil, action: nil)
+    var onStopRequested: (() -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -48,6 +50,16 @@ final class OverlayHeaderView: NSView {
         shortcutHint.alignment = .right
         shortcutHint.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         addSubview(shortcutHint)
+
+        stopButton.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+        stopButton.bezelStyle = .rounded
+        stopButton.controlSize = .small
+        stopButton.isBordered = true
+        stopButton.isHidden = true
+        stopButton.target = self
+        stopButton.action = #selector(stopButtonPressed)
+        stopButton.toolTip = "Stop dictation"
+        addSubview(stopButton)
     }
 
     override func layout() {
@@ -56,6 +68,7 @@ final class OverlayHeaderView: NSView {
         let h = bounds.height
         let labelSize = modeLabel.fittingSize
         let hintSize = shortcutHint.fittingSize
+        let stopSize = stopButton.fittingSize
 
         // Mode label — left aligned, vertically centered
         modeLabel.frame = NSRect(
@@ -76,20 +89,42 @@ final class OverlayHeaderView: NSView {
             )
         }
 
-        // Shortcut hint — right aligned
-        shortcutHint.frame = NSRect(
-            x: bounds.width - pad - hintSize.width,
-            y: (h - hintSize.height) / 2,
-            width: hintSize.width,
-            height: hintSize.height
-        )
+        var rightEdge = bounds.width - pad
+        if !stopButton.isHidden {
+            stopButton.frame = NSRect(
+                x: rightEdge - stopSize.width,
+                y: (h - stopSize.height) / 2,
+                width: stopSize.width,
+                height: stopSize.height
+            )
+            rightEdge = stopButton.frame.minX - 8
+        } else {
+            stopButton.frame = .zero
+        }
+
+        if !shortcutHint.stringValue.isEmpty {
+            let hintWidth = min(hintSize.width, max(0, rightEdge - pad))
+            shortcutHint.frame = NSRect(
+                x: max(pad, rightEdge - hintWidth),
+                y: (h - hintSize.height) / 2,
+                width: hintWidth,
+                height: hintSize.height
+            )
+        } else {
+            shortcutHint.frame = .zero
+        }
 
         // Waveform — fills space between mode label and hint
         if !waveformHost.isHidden {
             let waveLeft = modeLabel.frame.maxX + 8
-            let waveRight: CGFloat = !shortcutHint.stringValue.isEmpty
-                ? shortcutHint.frame.minX - 8
-                : bounds.width - pad
+            let waveRight: CGFloat
+            if !shortcutHint.stringValue.isEmpty {
+                waveRight = shortcutHint.frame.minX - 8
+            } else if !stopButton.isHidden {
+                waveRight = stopButton.frame.minX - 8
+            } else {
+                waveRight = bounds.width - pad
+            }
             waveformHost.frame = NSRect(
                 x: waveLeft,
                 y: (h - 20) / 2,
@@ -100,6 +135,11 @@ final class OverlayHeaderView: NSView {
     }
 
     // MARK: - Update Methods
+
+    @objc
+    private func stopButtonPressed() {
+        onStopRequested?()
+    }
 
     func updateWaveformLevel(_ level: Float) {
         waveformHost.level = level
@@ -145,11 +185,12 @@ final class OverlayHeaderView: NSView {
         let showWaveform = state == .listening
         waveformHost.isHidden = !showWaveform
         waveformHost.isActive = showWaveform
+        stopButton.isHidden = !(state == .listening && mode == .dictation)
 
         // Shortcut hint
         switch (state, mode) {
         case (.listening, .dictation):
-            shortcutHint.stringValue = "\(dictationShortcutHint) to stop"
+            shortcutHint.stringValue = dictationShortcutHint
             shortcutHint.textColor = OverlayTokens.textSecondary.withAlphaComponent(0.96)
         case (.success, .dictation):
             shortcutHint.stringValue = ""
