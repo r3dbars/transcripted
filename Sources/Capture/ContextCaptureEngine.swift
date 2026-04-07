@@ -26,6 +26,19 @@ private func shouldAcceptHotkeyAction(now: CFAbsoluteTime = CFAbsoluteTimeGetCur
     return true
 }
 
+@MainActor
+private func routeDictationToggle(sourceApp: NSRunningApplication?, trigger: DraftSessionController.DictationTrigger) {
+    guard let session = _sharedSessionController else { return }
+    if session.isDictating {
+        session.stopDictationAndPaste()
+    } else if session.isInSession {
+        session.cancelSession()
+        session.startDictation(sourceApp: sourceApp, trigger: trigger)
+    } else {
+        session.startDictation(sourceApp: sourceApp, trigger: trigger)
+    }
+}
+
 private func hotkeyHandler(
     nextHandler: EventHandlerCallRef?,
     event: EventRef?,
@@ -57,14 +70,18 @@ private func hotkeyHandler(
         return noErr
     }
 
-    if hotkeyID.id == 3 {
+    if hotkeyID.id == 2 {
+        let frontApp = NSWorkspace.shared.frontmostApplication
+        Task { @MainActor in
+            routeDictationToggle(sourceApp: frontApp, trigger: .keyboardShortcut)
+        }
+    } else if hotkeyID.id == 3 {
         // ⌥M — Meeting mode: toggle meeting recording.
         // No screenshot, no cross-mode switching with draft/dictation.
         Task { @MainActor in
             _sharedMeetingToggle?()
         }
     }
-    // Dictation (hotkey ID 2) is no longer Carbon — handled by right-Option tap monitors
     return noErr
 }
 
@@ -86,8 +103,12 @@ private final class RightOptionTapDetector {
     /// Right Option keyCode (kVK_RightOption = 0x3D = 61)
     private let kRightOptionKeyCode: UInt16 = 61
 
-    /// Maximum hold duration to count as a "tap" (not a hold)
-    private let maxTapDuration: TimeInterval = 0.35
+    /// Maximum hold duration to count as a "tap" for starting dictation.
+    private let startTapDuration: TimeInterval = 0.35
+
+    /// While dictation is already active, be more forgiving about how long the
+    /// user holds Right Option before releasing to stop.
+    var maxTapDurationProvider: (() -> TimeInterval)?
 
     /// Called on MainActor when a valid right Option tap is detected
     var onTap: (() -> Void)?
@@ -130,6 +151,7 @@ private final class RightOptionTapDetector {
             let elapsed = Date().timeIntervalSince(downTime)
             rightOptionDownTime = nil
 
+            let maxTapDuration = maxTapDurationProvider?() ?? startTapDuration
             if elapsed <= maxTapDuration && !otherKeyPressed {
                 onTap?()
             }
@@ -189,7 +211,7 @@ class ContextCaptureEngine: ObservableObject {
             return
         }
 
-        // Register for kEventHotKeyPressed (meeting mode only — dictation uses right-Option tap)
+        // Register for kEventHotKeyPressed (dictation fallback + meeting mode)
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(
             GetApplicationEventTarget(),
@@ -204,6 +226,9 @@ class ContextCaptureEngine: ObservableObject {
         registerHotkeysFromPreferences()
 
         // Install right Option tap detector for dictation toggle
+        rightOptionDetector.maxTapDurationProvider = { [weak self] in
+            self?.sessionController?.isDictating == true ? 1.0 : 0.35
+        }
         if HotkeyPreferences.rightOptionDictationEnabled() {
             rightOptionDetector.onTap = { [weak self] in
                 Task { @MainActor [weak self] in
@@ -225,9 +250,8 @@ class ContextCaptureEngine: ObservableObject {
         }
     }
 
-    /// Unregisters current meeting hotkey and re-registers with latest preferences.
-    /// Preserves the event handler — only the key+modifier binding changes.
-    /// Dictation (right-Option tap) doesn't use Carbon and needs no re-registration.
+    /// Unregisters current dictation/meeting hotkeys and re-registers with latest preferences.
+    /// Preserves the event handler — only the key+modifier bindings change.
     private func reRegisterHotkeys() {
         if let ref = hotkeyRef {
             UnregisterEventHotKey(ref)
@@ -241,6 +265,9 @@ class ContextCaptureEngine: ObservableObject {
 
         // Re-evaluate right Option tap detector
         rightOptionDetector.remove()
+        rightOptionDetector.maxTapDurationProvider = { [weak self] in
+            self?.sessionController?.isDictating == true ? 1.0 : 0.35
+        }
         if HotkeyPreferences.rightOptionDictationEnabled() {
             rightOptionDetector.onTap = { [weak self] in
                 Task { @MainActor [weak self] in
@@ -252,8 +279,25 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private func registerHotkeysFromPreferences() {
+        let dictationBinding = HotkeyPreferences.dictationBinding()
         let meetingBinding = HotkeyPreferences.meetingBinding()
         var errors: [String] = []
+
+        // Dictation fallback shortcut — hotkey ID 2
+        let dictationHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 2)  // 'DRFT'
+        let dictationStatus = RegisterEventHotKey(
+            dictationBinding.keyCode,
+            dictationBinding.modifiers,
+            dictationHotkeyID,
+            GetApplicationEventTarget(),
+            0,
+            &hotkeyRef
+        )
+        if dictationStatus != noErr {
+            errors.append("Dictation shortcut")
+            EventReporter.shared.capture(level: .error, engine: "capture", event: "hotkey_register_failed",
+                message: "Dictation hotkey registration failed", context: ["os_status": "\(dictationStatus)"])
+        }
 
         // Meeting mode — hotkey ID 3 (Carbon hotkey: modifier + key)
         let meetingHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 3)  // 'DRFT'
@@ -270,8 +314,6 @@ class ContextCaptureEngine: ObservableObject {
             EventReporter.shared.capture(level: .error, engine: "capture", event: "hotkey_register_failed",
                 message: "Meeting hotkey registration failed", context: ["os_status": "\(meetingStatus)"])
         }
-
-        // Dictation uses right-Option tap (NSEvent monitors, not Carbon) — no registration needed here
 
         // Surface registration failures to the user via MenuBarPanel
         hotkeyError = errors.isEmpty ? nil : "\(errors.joined(separator: " and ")) failed to register"
