@@ -41,5 +41,5 @@ Rules:
 This repo takeover uses the **manual migration** path:
 
 - existing Transcripted installs do not auto-upgrade into Draft
-- Draft remains `com.justinbetker.draft`
+- Draft keeps its current bundle identifier on `main`
 - legacy Transcripted update/release plumbing is intentionally not active on `main`

@@ -3,7 +3,7 @@
 **Authors:** draft-mapper (owner), transcripted-mapper (contributor)
 **Status:** v6 for human review — end of Phase 0. Phase 2 execution starts only after human sign-off.
 **Inputs:** [draft-inventory.md](draft-inventory.md), [transcripted-inventory.md](transcripted-inventory.md)
-**Worktree:** `<draft-root>/.claude/worktrees/transcripted-merge` on `feat/transcripted-merge`
+**Worktree:** `<draft-worktree>/transcripted-merge` on `feat/transcripted-merge`
 
 **v6 changes (since v5 / commit `4b02f3a`):**
 
@@ -316,7 +316,7 @@ let package = Package(
 **Local path vs git URL — our choice and rationale:**
 
 - ✅ **`.package(path: "../../Transcripted")`** (local path, resolved against the `.deps-build/` dir → `<transcripted-root>/`).
-  - **Why:** Both repos live side-by-side in `~/redbars/code/`. Local path means instant iteration — edit a Core file in Transcripted, rebuild Draft, done. No push/pull loop while Phase 2 lanes are in flight.
+  - **Why:** Both repos live side-by-side in the same local workspace. Local path means instant iteration — edit a Core file in Transcripted, rebuild Draft, done. No push/pull loop while Phase 2 lanes are in flight.
   - **Why not git URL pinned to `feat/extract-core`:** would force every Core tweak through a push-and-resolve cycle. Hurts velocity during Phase 2. Also risks partially-merged work being inaccessible to one side or the other.
 - 🔁 **Promote to git URL later** — once the merge stabilizes (Phase 3+), switch to `.package(url: "https://github.com/r3dbars/Transcripted.git", branch: "main")` so CI builds of Draft can run without a co-checked-out Transcripted repo. That's a 1-line future change.
 

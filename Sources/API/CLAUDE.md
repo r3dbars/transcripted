@@ -9,7 +9,7 @@ The local MLX pipeline (`Sources/Local/`) is still used for style refinement, an
 ## Key Files
 
 - `GeminiEngine.swift` (~220 lines) — Swift actor wrapping the Gemini REST API. Streaming via SSE (`streamGenerateContent?alt=sse`), multimodal support (inline image parts), API key management via Keychain. Returns `AsyncThrowingStream<String, Error>` matching MLXEngine's interface.
-- `KeychainHelper.swift` (~40 lines) — Minimal macOS Keychain wrapper (save/load/delete) using Security framework. Service identifier: `com.justinbetker.draft`.
+- `KeychainHelper.swift` (~40 lines) — Minimal macOS Keychain wrapper (save/load/delete) using Security framework. Service identifier matches the app's current bundle identifier.
 - `BetaConfig.swift` (~25 lines) — `#if BETA_BUILD` gated config: per-user token, proxy URL, app version, update URL. Unrelated to Gemini.
 
 ## GeminiEngine

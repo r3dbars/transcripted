@@ -90,3 +90,6 @@ fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
 iOSInjectionProject/
+
+# Local CLI scratch transcripts / terminal captures
+Tools/TranscriptedCLI/*.txt

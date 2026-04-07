@@ -29,7 +29,7 @@ Draft/
 ├── build-all-betas.sh       # Drives multiple beta builds
 ├── package.sh               # DMG packaging
 ├── run-tests.sh             # Compiles pure-function tests with swiftc
-├── Info.plist               # Bundle ID com.justinbetker.draft, 1.0.2, macOS 14.0+
+├── Info.plist               # Current Draft bundle identifier, 1.0.2, macOS 14.0+
 ├── CLAUDE.md                # Project-level guide (29K — partially stale re: Messages/)
 ├── README.md                # 23K user-facing readme
 └── LICENSE
@@ -94,7 +94,7 @@ Public surface: `@Published var insights: [InsightCard]`, `@Published var isAnal
   - `GeminiError` enum (`noAPIKey`, `networkError`, `apiError(Int, String)`, `parseError`, `cancelled`).
   - Model: `gemini-3-flash`, base URL `https://generativelanguage.googleapis.com/v1beta`.
 - `KeychainHelper.swift` (43 lines) — `enum` with `save`/`load`/`delete` via Security framework.
-  Service id `com.justinbetker.draft`. Keychain key `"gemini-api-key"`.
+  Service id matches the current Draft bundle identifier. Keychain key `"gemini-api-key"`.
 - `BetaConfig.swift` (~25 lines) — `#if BETA_BUILD` gated: per-user token, proxy URL, app version,
   update URL. Not Gemini-related.
 
@@ -188,7 +188,7 @@ Drafting (`DraftSessionController`) calls Gemini 3 Flash directly.
 - `BetaTelemetry.swift` (~260 lines) — `#if BETA_BUILD` gated. Batched event shipping to proxy Worker,
   incremental log/events.jsonl upload (60 s timer), quit-time flush, crash-safe offset tracking, log redaction.
 - `UpdateManager.swift` (~225 lines) — DMG download, mount, staged app replacement with backup/rollback,
-  version comparison via Info.plist, user-facing update prompts, team ID verification (`<team-id>`).
+  version comparison via Info.plist, user-facing update prompts, team ID verification against the current app signature.
 
 ### 2.9 `Sources/Prompts/` — Externalized prompt store
 
@@ -644,7 +644,7 @@ small, and revisit Option B as a separate follow-up.
    `.deps-build/Package.swift`, not create a new root manifest.
 6. **No CLI target in Draft** — every engine is `@MainActor`. If Transcripted exposes a CLI that wants
    to share `ParakeetEngine` code, we need a refactor step to pull STT out of the main-actor hierarchy.
-7. **Bundle ID `com.justinbetker.draft`** is reused for the Keychain service and UserDefaults suite —
+7. **The current Draft bundle identifier** is reused for the Keychain service and UserDefaults suite —
    any TranscriptedCore code reading from Keychain must pick a distinct service.
 8. **DraftPaths writes everything to `~/Library/Application Support/Draft/`** — prompts.json, style.md,
    feedback.jsonl, events.jsonl, suggestion_log.jsonl. If Transcripted wants its own dir, add a new

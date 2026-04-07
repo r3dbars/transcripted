@@ -34,7 +34,7 @@ Run tiers in order. Stop and enter the fix loop if Tier 0 fails. Run independent
 ### Tier 0 — Build Verification
 
 ```bash
-cd <transcripted-root> && xcodebuild -project Transcripted.xcodeproj -scheme Transcripted -configuration Debug build CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO 2>&1
+cd /path/to/transcripted && xcodebuild -project Transcripted.xcodeproj -scheme Transcripted -configuration Debug build CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO 2>&1
 ```
 
 If FluidAudio module errors occur, run `scripts/build-fluidaudio.sh --force` and copy artifacts:

@@ -209,10 +209,43 @@ final class UpdateManager: ObservableObject {
 
         let infoData = infoPipe.fileHandleForReading.readDataToEndOfFile()
         let infoText = String(data: infoData, encoding: .utf8) ?? ""
-        let expectedTeamID = "<team-id>"
+        let expectedTeamID = try currentTeamIdentifier()
         guard infoText.contains("TeamIdentifier=\(expectedTeamID)") else {
             throw UpdateError.signatureInvalid
         }
+    }
+
+    private func currentTeamIdentifier() throws -> String {
+        let infoText = try codeSignatureInfo(for: Bundle.main.bundleURL)
+        guard let teamLine = infoText.split(separator: "\n").first(where: { $0.hasPrefix("TeamIdentifier=") }) else {
+            throw UpdateError.signatureInvalid
+        }
+
+        let teamID = teamLine.replacingOccurrences(of: "TeamIdentifier=", with: "")
+        guard !teamID.isEmpty else {
+            throw UpdateError.signatureInvalid
+        }
+
+        return teamID
+    }
+
+    private func codeSignatureInfo(for appURL: URL) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        process.arguments = ["-d", "--verbose=2", appURL.path]
+        let outputPipe = Pipe()
+        process.standardOutput = Pipe()
+        process.standardError = outputPipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            throw UpdateError.signatureInvalid
+        }
+
+        let output = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        return String(data: output, encoding: .utf8) ?? ""
     }
 
     // MARK: - Relaunch

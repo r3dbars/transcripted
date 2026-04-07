@@ -78,7 +78,7 @@ Important implications:
 This repo takeover uses the **manual migration** path:
 
 - existing Transcripted installs do **not** auto-upgrade into Draft
-- Draft remains `com.justinbetker.draft`
+- Draft keeps its current bundle identifier on `main`
 - old Transcripted release/update plumbing is intentionally disabled on `main`
 
 If you need the old standalone Transcripted app, use the legacy branch or tag above.
