@@ -42,7 +42,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         CrashReporter.setup()
 
         // Dock icon + menubar
-        NSApp.setActivationPolicy(.regular)
+        NSApp.setActivationPolicy(.accessory)
 
         // Wire session controller
         sessionController.appState = appState
@@ -66,6 +66,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem?.button {
             button.image = NSImage(systemSymbolName: "mic.and.signal.meter", accessibilityDescription: "Transcripted")
+            button.toolTip = "Transcripted"
             button.action = #selector(togglePopover)
             button.target = self
         }

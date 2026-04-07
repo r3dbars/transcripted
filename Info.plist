@@ -4,6 +4,8 @@
 <dict>
     <key>CFBundleName</key>
     <string>Transcripted</string>
+    <key>CFBundleDisplayName</key>
+    <string>Transcripted</string>
     <key>CFBundleIdentifier</key>
     <string>com.justinbetker.draft</string>
     <key>CFBundleVersion</key>
@@ -16,6 +18,8 @@
     <string>Transcripted</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
+    <key>LSUIElement</key>
+    <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Transcripted needs microphone access for dictation and to capture your side of meetings.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
