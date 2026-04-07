@@ -50,13 +50,20 @@ public class Transcription: ObservableObject {
     private var hasInitialized = false
 
     /// Initialize local models. Call once at app startup.
+    /// Retries remain possible after a failed initialization attempt.
     public func initializeModels() async {
         guard !hasInitialized else {
             AppLogger.transcription.debug("Models already initialized, skipping")
             return
         }
-        hasInitialized = true
+
         await parakeet.initialize()
         await diarization.initialize()
+
+        if parakeet.isReady, diarization.isReady {
+            hasInitialized = true
+        } else {
+            AppLogger.transcription.warning("Model initialization incomplete, allowing future retry")
+        }
     }
 }
