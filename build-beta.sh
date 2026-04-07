@@ -5,7 +5,8 @@
 #
 # Prerequisites:
 # - Developer ID Application certificate installed
-# - Notarization credentials stored: xcrun notarytool store-credentials "Draft-Notarize" ...
+# - Notarization credentials stored locally via xcrun notarytool
+# - NOTARY_PROFILE set to the local keychain profile name for notarytool
 # - brew install create-dmg
 
 set -e
@@ -25,7 +26,7 @@ APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 DMG_NAME="Draft-${USER_NAME}.dmg"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
 SIGNING_DISPLAY_NAME=""
-NOTARY_PROFILE="${NOTARY_PROFILE:-draft-notary}"
+NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 BETA_CONFIG_PATH="Sources/API/BetaConfig.swift"
 BETA_CONFIG_BACKUP="$(mktemp -t draft-beta-config)"
 
@@ -189,6 +190,13 @@ codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$BUILD_DIR/$DMG_NAME"
 
 # Notarize (only with Developer ID — Apple Development certs can't be notarized)
 if [[ "${SIGNING_DISPLAY_NAME:-$SIGNING_IDENTITY}" == Developer\ ID* ]]; then
+    if [ -z "$NOTARY_PROFILE" ]; then
+        echo "❌ NOTARY_PROFILE is not set."
+        echo "   Store credentials with: xcrun notarytool store-credentials <profile-name> ..."
+        echo "   Then run: NOTARY_PROFILE=<profile-name> ./build-beta.sh <beta-token> <user-name>"
+        exit 1
+    fi
+
     echo "Submitting for notarization (this takes 1-5 minutes)..."
     xcrun notarytool submit "$BUILD_DIR/$DMG_NAME" \
         --keychain-profile "$NOTARY_PROFILE" \
