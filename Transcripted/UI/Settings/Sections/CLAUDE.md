@@ -1,68 +1,70 @@
 # Settings Sections
 
-7 section views composing the settings dashboard. Each is a self-contained SwiftUI view rendered inside a SettingsSectionCard. All @MainActor.
+7 section views composing the settings dashboard. Each is a self-contained SwiftUI view rendered inside a `SettingsSectionCard`. All `@MainActor`.
 
 ## File Index
 
 | File | Section Title | Purpose |
 |------|---------------|---------|
 | `StatsSection.swift` | "ALL TIME" | Total recordings + hours, Open Folder + Refresh buttons |
-| `FailedTranscriptionsSection.swift` | "FAILED TRANSCRIPTIONS" | Failed list with retry/delete, "Retry All" button (conditional) |
+| `FailedTranscriptionsSection.swift` | "FAILED TRANSCRIPTIONS" | Failed list with retry/delete, "Retry All" button |
 | `SpeakersSection.swift` | "VOICE FINGERPRINTS" | Speaker list: play clip, edit name inline, delete with confirmation |
-| `ProfileSection.swift` | "PROFILE" | User name TextField, save location path picker |
+| `ProfileSection.swift` | "PROFILE" | User name text field, save location path picker |
 | `MeetingDetectionSection.swift` | "MEETING DETECTION" | Auto-record toggle, supported apps info |
-| `AIServicesSection.swift` | "AI SERVICES" | Parakeet + Sortformer status badges, "100% local" info |
-| `TroubleshootingSection.swift` | "TROUBLESHOOTING" | Permission status rows (mic + screen recording with Fix buttons), data location rows (Transcripts, Logs, Model Cache with Open in Finder), reset actions (Re-run Onboarding, Reset All Settings with confirmation) |
+| `AIServicesSection.swift` | "AI SERVICES" | Parakeet + Sortformer status badges, local-only info |
+| `TroubleshootingSection.swift` | "TROUBLESHOOTING" | Permission rows, data locations, onboarding reset, full settings reset |
 
 ## Section Details
 
 ### StatsSection
-- Displays: total recording count, total hours (formatted)
-- Buttons: "Open Folder" (reveals in Finder), "Refresh" (reloads stats)
-- Data source: StatsService (aggregates from StatsDatabase)
+- Displays total recording count and total hours
+- Buttons: **Open Folder** and **Refresh**
+- Data source: `StatsService`
 
-### FailedTranscriptionsSection (conditional — only shown when failures exist)
-- Shows first 3 failures with error message + retry/delete buttons per item
-- "Retry All" button at bottom
-- "Clear" button to remove all permanent failures
-- Data source: FailedTranscriptionManager
+### FailedTranscriptionsSection
+- Rendered only when failures exist
+- Shows the first few failures with retry/delete actions
+- Includes **Retry All** and **Clear** actions
+- Data source: `FailedTranscriptionManager`
 
-### SpeakersSection (collapsible)
-- Speaker list with avatar (first letter circle, "?" fallback), display name, call count
-- Inline edit: tap name → TextField → commit on Return
-  - → SpeakerDatabase.setDisplayName(id:, name:, source: "user_manual")
-  - → TranscriptSaver.retroactivelyUpdateSpeaker(dbId:, newName:) (defined in RetroactiveSpeakerUpdater.swift)
-- Delete: click → "Delete?" confirm → "Yes"
-  - → SpeakerClipExtractor.deletePersistedClip(for:)
-  - → SpeakerDatabase.deleteSpeaker(id:)
-- Play: toggle clip via ClipAudioPlayer (one at a time)
-- Delayed reload: `DispatchQueue.main.asyncAfter(deadline: .now() + 0.1)` after DB writes
-- Single `editingId: UUID?` — only one speaker editable at a time
+### SpeakersSection
+- Collapsible list of speaker profiles
+- Inline rename flow writes through `SpeakerDatabase.shared.setDisplayName(...)`
+- Retroactive transcript updates flow through `TranscriptSaver.retroactivelyUpdateSpeaker(...)`
+- Delete flow removes persisted clips via `SpeakerClipExtractor.deletePersistedClip(for:)`
+- Delayed reload pattern uses `DispatchQueue.main.asyncAfter(deadline: .now() + 0.1)` after DB writes
+- Single `editingId: UUID?` means only one speaker can be edited at a time
 
 ### ProfileSection
-- "Your Name" text field (placeholder: "Enter your name") → @AppStorage("userName")
-- "Save Location" path picker → @AppStorage("transcriptSaveLocation")
-- Default path: ~/Documents/Transcripted/
+- `@AppStorage("userName")`
+- `@AppStorage("transcriptSaveLocation")`
+- Default save path is `~/Documents/Transcripted/`
 
 ### MeetingDetectionSection
-- Toggle: "Auto-Record Meetings" → @AppStorage("autoRecordMeetings")
-- Description: "Starts recording when Zoom, Teams, Webex, FaceTime, or Loom is active"
-- Trigger info: "after 5s of active call audio. Stops 15s after audio drops."
-- Browser note: "Browser meetings (Google Meet, Teams web) require manual start."
+- Toggle: `@AppStorage("autoRecordMeetings")`
+- Covers Zoom, Teams, Webex, FaceTime, and Loom
+- Notes browser meetings still require manual start
 
 ### AIServicesSection
-- Static display (no user interaction beyond info)
-- Models: "Parakeet TDT V3" (ASR) + "Sortformer" (streaming diarization)
-- Both show "local" badge: 10pt medium, panelTextMuted, panelCharcoalSurface bg, 4pt radius
-- Info text: "100% local transcription. No cloud API, no internet, no cost."
-- Requirements: "English only · macOS 14.2+ · 16 GB RAM recommended"
+- Static informational section
+- Shows Parakeet TDT V3 and Sortformer as local models
+- Copy emphasizes fully local processing and hardware requirements
 
 ### TroubleshootingSection
-- **Permission Status group**: Rows for Microphone (`AVCaptureDevice.authorizationStatus`) and Screen Recording (`CGWindowListCopyWindowInfo` side-effect check). Granted shows green checkmark; denied shows error/warning icon + "Fix" button that opens System Settings deep link via `x-apple.systempreferences:` URL
-- **Data Locations group**: Rows for Transcripts, Logs (`~/Library/Logs/Transcripted`), and Model Cache (`~/Library/Caches/models/mlx-community`). Each has "Open in Finder" button; creates directory if missing
-- **Reset group**: "Re-run Onboarding" (calls `OnboardingState.resetOnboarding()`, shows onboarding window) + "Reset All Settings" (clears all UserDefaults for bundle, restarts onboarding, does NOT delete transcripts) with destructive confirmation alert
-- `@available(macOS 26.0, *)` — macOS 26+ only
-- Paths shortened to `~`-relative via `shortenedPath()` helper
+- **Permission Status**
+  - Microphone uses `AVCaptureDevice.authorizationStatus(for: .audio)`
+  - Screen recording uses `CGPreflightScreenCaptureAccess()`
+  - Missing permissions show a **Fix** button that opens the matching System Settings deep link via `SystemSettingsHelper`
+- **Data Locations**
+  - Transcripts path comes from `transcriptSaveLocation` or `TranscriptSaver.defaultSaveDirectory`
+  - Logs: `~/Library/Logs/Transcripted`
+  - Model Cache: `~/Library/Caches/models/mlx-community`
+  - "Open in Finder" creates the directory first if needed
+- **Reset**
+  - **Re-run Onboarding** calls `OnboardingState.resetOnboarding()` and opens a fresh onboarding window
+  - **Reset All Settings** clears the app's `UserDefaults` persistent domain, then launches onboarding
+  - Reset does **not** delete transcripts or speaker data
+- The whole section is `@available(macOS 26.0, *)`
 
 ## @AppStorage Keys Used by Sections
 | Key | Section | Type | Default |
@@ -72,13 +74,14 @@
 | `autoRecordMeetings` | Meeting Detection | Bool | false |
 
 ## Relationships
-- All sections rendered by: SettingsContainerView.swift (parent)
-- Reusable components from: Components/ (SettingsSectionCard, SettingsToggleRow, SettingsTextField, SettingsPathRow)
-- Speaker operations use: SpeakerDatabase, SpeakerClipExtractor, RetroactiveSpeakerUpdater (Core/)
-- Stats from: StatsService → StatsDatabase (Core/)
-- TroubleshootingSection uses: OnboardingState.resetOnboarding() + OnboardingWindowController (Onboarding/), TranscriptSaver.defaultSaveDirectory (Core/)
+- All sections are rendered by `SettingsContainerView.swift`
+- Reusable components live in `Transcripted/UI/Settings/Components/`
+- Speaker operations use `SpeakerDatabase`, `SpeakerClipExtractor`, and `TranscriptSaver`
+- Stats come from `StatsService`
+- Troubleshooting reset flow reaches into `OnboardingState` and `OnboardingWindowController`
 
 ## Gotchas
-- FailedTranscriptionsSection only appears when FailedTranscriptionManager has items
-- Speaker edit uses single `editingId` — can't edit two names simultaneously
-- `enableUISounds` is read via `UserDefaults.standard.object(forKey:)` (not @AppStorage) to distinguish "never set" vs "explicitly disabled"
+- `FailedTranscriptionsSection` disappears entirely when there are no failures
+- `enableUISounds` is handled in the parent settings container via `UserDefaults`, not `@AppStorage`
+- `TroubleshootingSection` launches onboarding directly through `NSApp.delegate as? AppDelegate`
+- Older docs mentioning `CGWindowListCopyWindowInfo` screen-recording detection are stale

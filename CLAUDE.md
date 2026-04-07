@@ -14,12 +14,12 @@ Menu bar-only macOS app for real-time system audio transcription. Pipeline: Core
 
 ## Folder Map
 - **Sources/TranscriptedCore/** — The extracted SPM library. Subfolders: Audio/, Pipeline/, Storage/, Speaker/, Stats/, Services/, Models/, Protocols/, Utilities/, Logging/. This is where the transcription pipeline, audio capture, stats DB, speaker DB, and transcript saver live. Consumed by both Transcripted and Draft.
-- **Tests/TranscriptedCoreTests/** — SPM test target (5 smoke tests). Run via `swift test` from repo root.
+- **Tests/TranscriptedCoreTests/** — SPM test target (1 XCTest file, 5 smoke tests). Run via `swift test` from repo root.
 - **Transcripted/** (app target, ~86 Swift files) — macOS app shell that consumes TranscriptedCore:
   - **Core/** (11 files): app-target coordinators — `NotificationCoordinator`, `HotkeyManager`, `MenuBarManager`, `WindowCoordinator`, `RecordingCoordinator`, `AppDelegateDebug`, plus small UI-side helpers (`Clipboard`, `TranscriptExporter`, `TranscriptStore`, `SystemSettingsHelper`, `DiagnosticExporter`). Audio/transcription/stats/speaker code lives in `Sources/TranscriptedCore/`, NOT here.
   - **Services/** (3 files): embedder adapters — `ParakeetEngineAdapter` (wraps FluidAudio for `SpeechToTextEngine`), `TranscriptedNotificationsAdapter` (wraps `UNUserNotificationCenter` for `TranscriptNotifier`), `MeetingDetector` (Zoom/Teams/Webex auto-start). The bulk of pre-extraction ML services (ParakeetService, DiarizationService, SpeakerDatabase, EmbeddingClusterer, AudioResampler, etc.) moved to `Sources/TranscriptedCore/`.
   - **UI/FloatingPanel/**, **UI/Settings/**, **Onboarding/**, **Design/** — unchanged by extraction.
-- **Tools/TranscriptedQA/** (22 files): QA testing CLI tool, health checks, transcript/database/index/log validation, fixture generation, round-trip testing, stress testing
+- **Tools/TranscriptedQA/** (23 Swift files including `Package.swift`; 22 source/test files): QA testing CLI tool, health checks, transcript/database/index/log validation, fixture generation, round-trip testing, stress testing
 
 ## Build & Test
 ```bash
@@ -36,7 +36,7 @@ xcodebuild -project Transcripted.xcodeproj -scheme Transcripted test
 ## Critical Rules
 1. **No I/O in CoreAudio callbacks** - Real-time audio thread cannot do file/network/lock operations
 2. **Audio.swift and SystemAudioCapture.swift are NOT @MainActor** - They manage AVAudioEngine/CoreAudio which require synchronous access from audio threads. They dispatch UI updates to main thread explicitly.
-3. **All other services are @MainActor** - ParakeetEngineAdapter, DiarizationService, Transcription, TranscriptionTaskManager (exception: SpeakerDatabase uses dedicated utility queue instead)
+3. **All other core services are @MainActor** - ParakeetEngineAdapter, DiarizationService, Transcription, and TranscriptionTaskManager all run on the main actor (exception: SpeakerDatabase uses a dedicated utility queue instead)
 4. **Core is a library — do not import app-target types into it** — `Sources/TranscriptedCore/` must not reference anything in `Transcripted/`. Cross the boundary via protocols in `Sources/TranscriptedCore/Protocols/` and supply conformers in the embedder.
 5. **Never commit to main** - Always create feature branches: `feat/description`, `fix/description`
 6. **Branch naming**: `feat/{issue-id}-{slug}` or `fix/{issue-id}-{slug}`
@@ -73,7 +73,7 @@ User presses Cmd+Shift+R (global hotkey)
 
 ## Threading Model
 - **Audio thread**: Audio.swift + SystemAudioCapture.swift (NOT @MainActor, sync audio access)
-- **Main thread**: All UI, Transcription, TaskManager, ParakeetService, DiarizationService
+- **Main thread**: All UI, Transcription, TranscriptionTaskManager, ParakeetEngineAdapter, DiarizationService
 - **Utility queue**: SpeakerDatabase (thread-safe SQLite via `DispatchQueue(label: "com.transcripted.speakerdb", qos: .utility)`)
 - **Serial queue**: TranscriptSaver file updates, StatsDatabase writes
 - **Cross-thread**: Audio dispatches UI updates via `DispatchQueue.main.async`
@@ -93,7 +93,7 @@ User presses Cmd+Shift+R (global hotkey)
 - **Download resilience**: All downloads use `ModelDownloadService` with HuggingFace mirror fallback (`hf-mirror.com`), retry with exponential backoff, and structured error classification
 
 ## CLAUDE.md Navigation
-Every folder with ≥2 Swift files has its own CLAUDE.md with file index, reference data, and gotchas.
+Major app-facing folders have CLAUDE.md guides with file indexes, reference data, and gotchas. `Sources/TranscriptedCore/` subfolders and some test folders are still covered from this root guide rather than having per-folder docs.
 
 | Path | Scope |
 |------|-------|
@@ -110,8 +110,8 @@ Every folder with ≥2 Swift files has its own CLAUDE.md with file index, refere
 | `Transcripted/UI/Settings/CLAUDE.md` | @AppStorage keys, window config, speaker operations |
 | `Transcripted/UI/Settings/Sections/CLAUDE.md` | 7 section views with per-section detail |
 | `Transcripted/UI/Settings/Components/CLAUDE.md` | CoralToggle, button styles, input components |
-| `Transcripted/Onboarding/CLAUDE.md` | 6-step flow, OnboardingState properties, integration |
-| `Transcripted/Onboarding/Steps/CLAUDE.md` | Preview, Permissions, ModelSetup, HowItWorks, TestRecording step implementations |
+| `Transcripted/Onboarding/CLAUDE.md` | 4-step flow, OnboardingState properties, integration |
+| `Transcripted/Onboarding/Steps/CLAUDE.md` | Welcome, Preview, Permissions, and ModelSetup step implementations |
 | `Tools/TranscriptedQA/CLAUDE.md` | QA CLI tool, health checks, transcript validation, database/index/log validation |
 
 **Single-file folders** (covered by parent CLAUDE.md):
@@ -121,9 +121,9 @@ Every folder with ≥2 Swift files has its own CLAUDE.md with file index, refere
 - `UI/FailedTranscriptionsView.swift` — Standalone window for failed transcription management (600x400 min)
 
 ## Tools (external CLI utilities)
-- **Tools/TranscriptedMCP/** (7 source + 4 test Swift files): MCP server (`transcripted-mcp`) for querying transcripts from Claude Desktop or any MCP-compatible client. Exposes 5 read-only tools: `list_meetings` (metadata + participants), `read_meeting` (full transcript content), `search` (full-text with optional speaker/date filters), `who_is` (person profile — meeting history, speaking stats, co-speakers, quotes), `recap` (structured day/week digest with previews). Uses a local SQLite index rebuilt from JSON sidecars. File watcher auto-indexes new transcripts. Data dir: `~/Documents/Transcripted` or `$TRANSCRIPTED_DATA_DIR`. Dependencies: `swift-sdk` MCP library (v0.12.0), `libsqlite3`. See `Tools/TranscriptedMCP/CLAUDE.md`.
-- **Tools/TranscriptedQA/** (22 Swift files): Standalone Swift CLI (`transcripted-qa`) for validating on-disk artifacts. Subcommands: `validate-all` (default), `validate-transcripts`, `validate-database`, `validate-logs`, `validate-artifacts`, `validate-index`, `check-health`, `generate-fixtures`, `round-trip`, `stress-test`. Validators: TranscriptValidator, SpeakerDBValidator, StatsDBValidator, JSONSidecarValidator, IndexValidator, LogValidator, HealthChecker. Generators: TestDataGenerator. Uses `ArgumentParser`. See `Tools/TranscriptedQA/CLAUDE.md`.
-- **Tools/TranscriptedCLI/** (5 Swift files): Standalone Swift CLI (`transcripted-cli`) for offline diarization via FluidAudio. Entry: `TranscriptedCLI.swift` (ArgumentParser root). Subcommands: `diarize` (single file, `DiarizeCommand.swift`), `batch` (directory, `BatchCommand.swift`). Shared: `ConfigLoader.swift` (JSON config -> OfflineDiarizerConfig), `RTTMWriter.swift` (RTTM + JSON output).
+- **Tools/TranscriptedMCP/** (7 source + 4 test Swift files, plus `Package.swift`): MCP server (`transcripted-mcp`) for querying transcripts from Claude Desktop or any MCP-compatible client. Exposes 5 read-only tools: `list_meetings` (metadata + participants), `read_meeting` (full transcript content), `search` (full-text with optional speaker/date filters), `who_is` (person profile — meeting history, speaking stats, co-speakers, quotes), `recap` (structured day/week digest with previews). Uses a local SQLite index rebuilt from JSON sidecars. File watcher auto-indexes new transcripts. Data dir: `~/Documents/Transcripted` or `$TRANSCRIPTED_DATA_DIR`. Dependencies: `swift-sdk` MCP library (v0.12.0), `libsqlite3`. See `Tools/TranscriptedMCP/CLAUDE.md`.
+- **Tools/TranscriptedQA/** (22 source/test Swift files, plus `Package.swift`): Standalone Swift CLI (`transcripted-qa`) for validating on-disk artifacts. Subcommands: `validate-all` (default), `validate-transcripts`, `validate-database`, `validate-logs`, `validate-artifacts`, `validate-index`, `check-health`, `generate-fixtures`, `round-trip`, `stress-test`. Validators: TranscriptValidator, SpeakerDBValidator, StatsDBValidator, JSONSidecarValidator, IndexValidator, LogValidator, HealthChecker. Generators: TestDataGenerator. Uses `ArgumentParser`. See `Tools/TranscriptedQA/CLAUDE.md`.
+- **Tools/TranscriptedCLI/** (5 source Swift files, plus `Package.swift`): Standalone Swift CLI (`transcripted-cli`) for offline diarization via FluidAudio. Entry: `TranscriptedCLI.swift` (ArgumentParser root). Subcommands: `diarize` (single file, `DiarizeCommand.swift`), `batch` (directory, `BatchCommand.swift`). Shared: `ConfigLoader.swift` (JSON config -> OfflineDiarizerConfig), `RTTMWriter.swift` (RTTM + JSON output).
 
 ## Cross-Repo Dependency (Draft consumes TranscriptedCore)
 

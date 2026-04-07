@@ -1,83 +1,69 @@
 # Onboarding Steps
 
-6 SwiftUI views implementing individual onboarding steps. Hosted by OnboardingContainerView.swift (parent). WelcomeStep, PreviewStep, and HowItWorksStep are stateless; PermissionsStep, ModelSetupStep, and TestRecordingStep use `@Bindable var state: OnboardingState`.
+6 SwiftUI views live in this folder, but the current onboarding flow uses only 4 of them. Hosted by `OnboardingContainerView.swift` (parent). `WelcomeStep` and `PreviewStep` are stateless. `PermissionsStep` and `ModelSetupStep` use `@Bindable var state: OnboardingState`.
 
 ## File Index
 
-| File | Step | canProceed |
+| File | Live Step? | Purpose |
+|------|------------|---------|
+| `WelcomeStep.swift` | Yes, step 1 | Welcome screen with value-prop benefit cards |
+| `PreviewStep.swift` | Yes, step 2 | Sample transcript preview with staggered reveal |
+| `PermissionsStep.swift` | Yes, step 3 | Requests microphone and screen recording access |
+| `ModelSetupStep.swift` | Yes, step 4 | Downloads and initializes local AI models |
+| `HowItWorksStep.swift` | Legacy | Older explainer step, not referenced by the current container |
+| `TestRecordingStep.swift` | Legacy | Older guided recording demo, not referenced by the current container |
+
+## Live Step Order
+
+| Step | File | canProceed |
 |------|------|------------|
-| `WelcomeStep.swift` | 1. Welcome | Always true |
-| `PreviewStep.swift` | 2. Preview | Always true |
-| `PermissionsStep.swift` | 3. Permissions | Only when microphoneGranted (mic REQUIRED) |
-| `ModelSetupStep.swift` | 4. Model Setup | Only when parakeetReady AND diarizationReady |
-| `HowItWorksStep.swift` | 5. How It Works | Always true |
-| `TestRecordingStep.swift` | 6. Test Recording | Only when testRecordingPhase == .complete |
+| 1 | `WelcomeStep.swift` | Always true |
+| 2 | `PreviewStep.swift` | Always true |
+| 3 | `PermissionsStep.swift` | Only when `microphoneGranted` |
+| 4 | `ModelSetupStep.swift` | Only when `parakeetReady && diarizationReady` |
 
 ## Step Details
 
-### WelcomeStep (Step 1)
-- Value proposition with benefit cards showing what Transcripted does
-- Dark theme matching the floating pill aesthetic
-- No user action required, always canProceed
+### WelcomeStep
+- Value proposition with 3 benefit cards
+- Messaging focuses on local transcription, speaker identification, and privacy
+- No user action required
 
-### PreviewStep (Step 2)
-- Sample transcript showing a realistic meeting conversation
-- 6 transcript lines with staggered reveal (0.2s per line)
-- Two speakers: Sarah (recordingCoral) and Mike (processingPurple)
-- Delivers "aha moment" — shows what Transcripted produces before asking for permissions
-- No user action required, always canProceed
+### PreviewStep
+- Shows 6 transcript lines with staggered reveal (`0.2s` between lines)
+- Demo speakers: Sarah (`recordingCoral`) and Mike (`processingPurple`)
+- Delivers the "aha" moment before asking for permissions
 
-### PermissionsStep (Step 3)
-- 2 simple PermissionRow components (Draft-style HStack layout):
-  - **Microphone** (required): mic.fill icon. Requests via `AVCaptureDevice.requestAccess(for: .audio)`
-  - **Screen Recording** (recommended): rectangle.inset.filled.and.person.filled icon. Opens System Settings
-- 4 status states per row: notRequested (Grant button), pending (spinner), granted (checkmark), denied (Settings button)
-- Denied state shows guidance text: "Microphone access wasn't granted. Tap 'Try Again' to see the permission prompt, or open Settings to enable it manually."
-- Amber warning callout when screen recording not granted: explains system audio won't capture other participants without it
-- Continue button DISABLED until mic permission granted (canProceed = microphoneGranted)
-- No "Continue without mic" bypass
+### PermissionsStep
+- 2 `PermissionRow`s:
+  - **Microphone Access** (required)
+  - **Screen Recording** (recommended)
+- Microphone row supports 4 states: `notRequested`, `pending`, `granted`, `denied`
+- Denied microphone state shows both **Try Again** and **Settings** buttons
+- Screen recording row opens System Settings because there is no direct request API
+- Shows an amber warning callout when screen recording is still missing
+- Continue button remains disabled until mic permission is granted
 
-### ModelSetupStep (Step 4)
-- Downloads 2 models in parallel (`async let`):
-  - **Parakeet**: ~483MB expected (ASR model)
-  - **Diarization**: ~36MB expected (speaker separation)
-- Auto-starts download on `.onAppear` (no manual trigger)
-- Progress monitoring: polls model directories every 500ms, caps at 0.99 until CoreML compilation finishes
-- Download speed + ETA display when speed > 1KB/s
-- Auto-advance: when modelsReady, container auto-completes after 1.5s
-- Error handling: structured error card with retry button
-- Success message when both models ready
-
-### HowItWorksStep (Step 5)
-- Explains where the app lives (menu bar pill above dock), the global hotkey, and transcript save path
-- 3 InfoCards: "Lives in your menu bar", HotkeyCard (interactive), "Transcripts saved to: ~/Documents/Transcripted/"
-- Simple opacity fade-in animation; no user action required, always canProceed
-- `@available(macOS 26.0, *)`
-
-### TestRecordingStep (Step 6)
-- 8-screen guided product demo (`DemoScreen` enum: meetPill, hoverExpand, duringRecording, letsRecord, liveRecording, processing, result, ready)
-- Live mic level monitoring (smoothedMicLevel), countdown timer, silence detection
-- Drives a real test recording via OnboardingState (`startTestRecording()`, `stopTestRecording()`)
-- Auto-polls transcription result; canProceed only when `testRecordingPhase == .complete`
-- `@available(macOS 26.0, *)`
+### ModelSetupStep
+- Downloads 2 models in parallel:
+  - **Speech Recognition**: Parakeet TDT V3
+  - **Speaker Diarization**: PyAnnote
+- Auto-starts `state.loadModels()` on appear when models are not already ready
+- Displays progress, phase text, speed, ETA, and structured error states
+- When both models are ready, shows a success banner and the container auto-completes after 1.5s
 
 ## Shared Dependencies
-- `@Bindable var state: OnboardingState` — NOT `@ObservedObject` (because `@Observable` macro)
-- Design components: BenefitCard (from Design/Components/)
-- Colors: panelCharcoal, panelCharcoalElevated, panelCharcoalSurface, panelTextPrimary/Secondary/Muted, recordingCoral, attentionGreen, errorRed
-- Typography: .displayMedium/.displayLarge (titles), .bodyLarge (subtitles)
+- `@Bindable var state: OnboardingState` for stateful steps
+- Benefit cards from `Transcripted/Design/Components/`
+- Colors: `panelCharcoal`, `panelCharcoalElevated`, `panelCharcoalSurface`, `panelTextPrimary`, `panelTextSecondary`, `panelTextMuted`, `recordingCoral`, `processingPurple`, `attentionGreen`, `warningAmber`, `errorRed`
 
 ## Relationships
-- Parent: `OnboardingContainerView.swift` (handles step switching, navigation buttons, auto-advance)
-- State: `OnboardingState.swift` (step progression, permission status, model readiness, test recording)
-- Window: `OnboardingWindow.swift` (NSWindowController, 640x560)
+- Parent: `OnboardingContainerView.swift`
+- State: `OnboardingState.swift`
+- Window: `OnboardingWindow.swift`
 
 ## Gotchas
-- `@Bindable` not `@ObservedObject` — OnboardingState uses `@Observable` macro, not ObservableObject
-- ModelSetupStep auto-starts download on `.onAppear` — no user action needed
-- Screen recording detection uses official `CGPreflightScreenCaptureAccess()` API
-- Progress capped at 0.99 to prevent premature "100%" display before CoreML compilation
-- Model errors are concatenated with "\n" (both errors show if both models fail)
-- The app does NOT initialize (no menus, no audio, no floating panel) until onboarding completes
-- Microphone permission is REQUIRED — users cannot proceed without granting it
-- TestRecordingStep requires min 8 seconds of recording before stop is valid
+- The folder still contains 2 legacy views from the old 6-step flow
+- `PermissionsStep` calls `state.checkPermissions()` on appear so the UI refreshes after returning from System Settings
+- `ModelSetupStep` does not require a manual "Download" click
+- The app does not initialize until the live 4-step onboarding completes
