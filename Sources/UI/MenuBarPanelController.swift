@@ -9,6 +9,7 @@ final class MenuBarPanelController: NSViewController {
     private let appState: DraftAppState
     private let dismissPopover: () -> Void
     private let openSettingsWindow: () -> Void
+    private let openAgentConnectWindow: () -> Void
     private let preferredSourceAppProvider: () -> NSRunningApplication?
     private var contentView: MenuBarContentView?
     private var subscriptions = Set<AnyCancellable>()
@@ -17,11 +18,13 @@ final class MenuBarPanelController: NSViewController {
         appState: DraftAppState,
         preferredSourceAppProvider: @escaping () -> NSRunningApplication?,
         openSettingsWindow: @escaping () -> Void,
+        openAgentConnectWindow: @escaping () -> Void,
         dismissPopover: @escaping () -> Void
     ) {
         self.appState = appState
         self.preferredSourceAppProvider = preferredSourceAppProvider
         self.openSettingsWindow = openSettingsWindow
+        self.openAgentConnectWindow = openAgentConnectWindow
         self.dismissPopover = dismissPopover
         super.init(nibName: nil, bundle: nil)
     }
@@ -36,8 +39,7 @@ final class MenuBarPanelController: NSViewController {
         content.shortcutsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
         content.shortcutsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
         content.settingsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu() }
-        content.settingsView.onOpenAgentConnect = { [weak self] in self?.contentView?.showAgentConnectPage() }
-        content.agentConnectView.onBack = { [weak self] in self?.contentView?.showMainPage() }
+        content.settingsView.onOpenAgentConnect = { [weak self] in self?.openAgentConnectFromMenu() }
         view = content
         contentView = content
         view.appearance = NSAppearance(named: .darkAqua)
@@ -170,6 +172,11 @@ final class MenuBarPanelController: NSViewController {
     private func openSettingsFromMenu() {
         dismissPopover()
         openSettingsWindow()
+    }
+
+    private func openAgentConnectFromMenu() {
+        dismissPopover()
+        openAgentConnectWindow()
     }
 
     private func resolvedSourceApp() -> NSRunningApplication? {
