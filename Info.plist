@@ -2,31 +2,27 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDevelopmentRegion</key>
-	<parameter name="string">$(DEVELOPMENT_LANGUAGE)</string>
-	<key>CFBundleExecutable</key>
-	<string>$(EXECUTABLE_NAME)</string>
-	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
-	<key>CFBundleName</key>
-	<string>Transcripted</string>
-	<key>CFBundlePackageType</key>
-	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
-	<key>CFBundleShortVersionString</key>
-	<string>$(MARKETING_VERSION)</string>
-	<key>CFBundleVersion</key>
-	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>LSUIElement</key>
-	<true/>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Transcripted requires microphone access to transcribe your speech to text.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Transcripted uses on-device speech recognition to convert your voice to text privately and securely.</string>
-	<key>NSAppleEventsUsageDescription</key>
-	<string>Transcripted requires permission to register global hotkeys for quick access to speech transcription.</string>
-	<key>NSAudioCaptureUsageDescription</key>
-	<string>Transcripted captures system audio to transcribe meeting participants and other audio playing on your Mac.</string>
+    <key>CFBundleName</key>
+    <string>Draft</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.justinbetker.draft</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.2</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.2</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>Draft</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Draft needs microphone access to transcribe your voice into text and to capture meeting audio for transcription.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Draft uses speech recognition to convert your voice to text.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Draft captures your screen to extract conversation context for smarter message drafting.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Draft records system audio (other apps playing sound) so meetings on Zoom, Meet, FaceTime, and similar apps can be transcribed alongside your microphone.</string>
 </dict>
 </plist>

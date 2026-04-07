@@ -22,10 +22,10 @@ What actually happened.
 
 **Environment**
 - macOS version:
-- Transcripted version/commit:
+- Draft version/commit:
 - Audio source (mic, Zoom, Meet, etc.):
 
 **Diagnostics**
-Please attach the diagnostic zip. You can generate one from the menu bar: **Transcripted > Report a Bug...** (this auto-exports to your Desktop).
+If you have logs, screenshots, or exported diagnostics, attach them here.
 
-If you opened this issue via the app, the zip should already be on your Desktop — just drag it here.
+If this report is about the old standalone Transcripted app, please say so and include the legacy ref you were using (`legacy/transcripted-standalone` or `pre-draft-takeover-2026-04-06`).
