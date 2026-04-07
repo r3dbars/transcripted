@@ -14,11 +14,13 @@ swiftc \
     Tests/RefusalDetectionTests.swift \
     Tests/StyleUtilsTests.swift \
     Tests/DiffSummaryTests.swift \
+    Tests/MeetingTranscriptStylerTests.swift \
     Sources/Capture/CapturedContext.swift \
     Sources/Draft/DraftUtils.swift \
     Sources/Style/StyleUtils.swift \
     Sources/DraftConstants.swift \
     Sources/Draft/DiffSummary.swift \
+    Sources/Meeting/MeetingTranscriptStyler.swift \
     -framework AppKit \
     -parse-as-library \
     -o build/tests \

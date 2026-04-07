@@ -10,6 +10,19 @@ struct RecentMeetingItem {
     let transcriptURL: URL
 }
 
+struct LatestSavedMeetingItem {
+    let title: String
+    let subtitle: String
+    let transcriptURL: URL
+
+    static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.dateFormat = "MMM d 'at' h:mm a"
+        return formatter
+    }()
+}
+
 @MainActor
 enum RecentMeetingsScanner {
     static func loadRecent(limit: Int = 3) -> [RecentMeetingItem] {
@@ -62,7 +75,7 @@ final class MenuBarRecentMeetingsView: NSView {
     override var isFlipped: Bool { true }
 
     private func setupViews() {
-        headerLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        headerLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         headerLabel.textColor = MenuTokens.textPrimaryNS
         addSubview(headerLabel)
 
@@ -100,26 +113,39 @@ final class MenuBarRecentMeetingsView: NSView {
     }
 
     func update(
+        latestSavedMeeting: LatestSavedMeetingItem?,
         meetings: [RecentMeetingItem],
         failedMeetings: [MeetingSessionController.FailedMeetingItem],
         onRetryFailedMeeting: @escaping (UUID) -> Void,
+        onDeleteFailedMeeting: @escaping (UUID) -> Void,
         onDismissFailedMeeting: @escaping (UUID) -> Void
     ) {
         listContainer.subviews.forEach { $0.removeFromSuperview() }
         rowViews.removeAll()
 
+        let visibleMeetings: [RecentMeetingItem]
+        if let latestSavedMeeting {
+            let row = LatestSavedMeetingRowView(item: latestSavedMeeting)
+            listContainer.addSubview(row)
+            rowViews.append(row)
+            visibleMeetings = meetings.filter { $0.transcriptURL.standardizedFileURL != latestSavedMeeting.transcriptURL.standardizedFileURL }
+        } else {
+            visibleMeetings = meetings
+        }
+
         for failed in failedMeetings {
             let row = FailedMeetingRowView(
                 item: failed,
                 onRetry: { onRetryFailedMeeting(failed.id) },
+                onDelete: { onDeleteFailedMeeting(failed.id) },
                 onDismiss: { onDismissFailedMeeting(failed.id) }
             )
             listContainer.addSubview(row)
             rowViews.append(row)
         }
 
-        for (index, item) in meetings.enumerated() {
-            let row = RecentMeetingRowView(item: item, showsDivider: index < meetings.count - 1)
+        for (index, item) in visibleMeetings.enumerated() {
+            let row = RecentMeetingRowView(item: item, showsDivider: index < visibleMeetings.count - 1)
             listContainer.addSubview(row)
             rowViews.append(row)
         }
@@ -140,11 +166,192 @@ private final class FlippedRecentMeetingsContainer: NSView {
 }
 
 @MainActor
+private func copyTranscriptBody(from url: URL) -> Bool {
+    guard let text = MeetingTranscriptStyler.transcriptBody(at: url) else { return false }
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    pasteboard.setString(text, forType: .string)
+    return true
+}
+
+@MainActor
+private final class LatestSavedMeetingRowView: NSView {
+    private let item: LatestSavedMeetingItem
+    private let badgeLabel = NSTextField(labelWithString: "Latest saved")
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let subtitleLabel = NSTextField(labelWithString: "")
+    private let openButton = MenuIconButton(
+        symbolName: "arrow.up.right.square",
+        accessibilityLabel: "Open transcript",
+        toolTip: "Open transcript"
+    )
+    private let copyButton = MenuIconButton(
+        symbolName: "doc.on.doc",
+        accessibilityLabel: "Copy transcript",
+        toolTip: "Copy transcript"
+    )
+    private let showButton = MenuIconButton(
+        symbolName: "folder",
+        accessibilityLabel: "Show in Finder",
+        toolTip: "Show in Finder"
+    )
+    private var resetTask: Task<Void, Never>?
+    private var trackingAreaRef: NSTrackingArea?
+
+    init(item: LatestSavedMeetingItem) {
+        self.item = item
+        super.init(frame: .zero)
+        setupViews()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var isFlipped: Bool { true }
+
+    deinit {
+        resetTask?.cancel()
+    }
+
+    private func setupViews() {
+        wantsLayer = true
+        layer?.cornerRadius = 12
+        layer?.backgroundColor = MenuTokens.savedBackgroundNS.cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = MenuTokens.savedBorderNS.cgColor
+
+        badgeLabel.font = NSFont.systemFont(ofSize: 9, weight: .semibold)
+        badgeLabel.textColor = MenuTokens.statusGreenNS
+        addSubview(badgeLabel)
+
+        titleLabel.stringValue = item.title
+        titleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        titleLabel.textColor = MenuTokens.textPrimaryNS
+        titleLabel.lineBreakMode = .byTruncatingTail
+        addSubview(titleLabel)
+
+        subtitleLabel.stringValue = item.subtitle
+        subtitleLabel.font = NSFont.systemFont(ofSize: 9)
+        subtitleLabel.textColor = MenuTokens.textSecondaryNS
+        subtitleLabel.lineBreakMode = .byTruncatingTail
+        addSubview(subtitleLabel)
+
+        [openButton, copyButton, showButton].forEach { addSubview($0) }
+
+        openButton.target = self
+        openButton.action = #selector(openTranscript)
+        copyButton.target = self
+        copyButton.action = #selector(copyTranscript)
+        showButton.target = self
+        showButton.action = #selector(showInFinder)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaRef {
+            removeTrackingArea(trackingAreaRef)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingAreaRef = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        layer?.backgroundColor = MenuTokens.savedBorderNS.cgColor
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        layer?.backgroundColor = MenuTokens.savedBackgroundNS.cgColor
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard !openButton.frame.contains(point),
+              !copyButton.frame.contains(point),
+              !showButton.frame.contains(point) else {
+            super.mouseDown(with: event)
+            return
+        }
+
+        NSWorkspace.shared.open(item.transcriptURL)
+    }
+
+    override func layout() {
+        super.layout()
+
+        let buttonSize = MenuTokens.secondaryButtonSize
+        let buttonY = (bounds.height - buttonSize) / 2
+
+        showButton.frame = NSRect(
+            x: bounds.width - buttonSize,
+            y: buttonY,
+            width: buttonSize,
+            height: buttonSize
+        )
+        copyButton.frame = NSRect(
+            x: showButton.frame.minX - 8 - buttonSize,
+            y: buttonY,
+            width: buttonSize,
+            height: buttonSize
+        )
+        openButton.frame = NSRect(
+            x: copyButton.frame.minX - 8 - buttonSize,
+            y: buttonY,
+            width: buttonSize,
+            height: buttonSize
+        )
+
+        let textWidth = max(0, openButton.frame.minX - 12)
+        badgeLabel.frame = NSRect(x: 10, y: 7, width: textWidth - 10, height: 11)
+        titleLabel.frame = NSRect(x: 10, y: 20, width: textWidth - 10, height: 14)
+        subtitleLabel.frame = NSRect(x: 10, y: 35, width: textWidth - 10, height: 12)
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: MenuTokens.savedRowHeight)
+    }
+
+    @objc private func openTranscript() {
+        NSWorkspace.shared.open(item.transcriptURL)
+    }
+
+    @objc private func copyTranscript() {
+        guard copyTranscriptBody(from: item.transcriptURL) else { return }
+
+        resetTask?.cancel()
+        copyButton.setSymbol("checkmark", accessibilityLabel: "Transcript copied", tintOverride: MenuTokens.statusGreenNS)
+        resetTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.copyButton.setSymbol("doc.on.doc", accessibilityLabel: "Copy transcript")
+        }
+    }
+
+    @objc private func showInFinder() {
+        NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
+    }
+}
+
+@MainActor
 private final class RecentMeetingRowView: NSView {
     private let item: RecentMeetingItem
     private let titleLabel = NSTextField(labelWithString: "")
     private let dateLabel = NSTextField(labelWithString: "")
-    private let moreButton = NSButton(title: "⋯", target: nil, action: nil)
+    private let copyButton = MenuIconButton(
+        symbolName: "doc.on.doc",
+        accessibilityLabel: "Copy transcript",
+        toolTip: "Copy transcript"
+    )
+    private let showButton = MenuIconButton(
+        symbolName: "folder",
+        accessibilityLabel: "Show in Finder",
+        toolTip: "Show in Finder"
+    )
     private let divider = NSView()
     private let showsDivider: Bool
     private var trackingAreaRef: NSTrackingArea?
@@ -189,13 +396,13 @@ private final class RecentMeetingRowView: NSView {
         dateLabel.textColor = MenuTokens.textSecondaryNS
         addSubview(dateLabel)
 
-        moreButton.isBordered = false
-        moreButton.bezelStyle = .inline
-        moreButton.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        moreButton.contentTintColor = MenuTokens.textSecondaryNS
-        moreButton.target = self
-        moreButton.action = #selector(showMenu)
-        addSubview(moreButton)
+        [copyButton, showButton].forEach { addSubview($0) }
+
+        copyButton.target = self
+        copyButton.action = #selector(copyTranscript)
+
+        showButton.target = self
+        showButton.action = #selector(showInFinder)
 
         divider.wantsLayer = true
         divider.layer?.backgroundColor = MenuTokens.sectionDividerNS.cgColor
@@ -228,7 +435,7 @@ private final class RecentMeetingRowView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard !moreButton.frame.contains(point) else {
+        guard !copyButton.frame.contains(point), !showButton.frame.contains(point) else {
             super.mouseDown(with: event)
             return
         }
@@ -237,9 +444,22 @@ private final class RecentMeetingRowView: NSView {
 
     override func layout() {
         super.layout()
-        let moreWidth = max(24, moreButton.fittingSize.width + 8)
-        moreButton.frame = NSRect(x: bounds.width - moreWidth, y: 8, width: moreWidth, height: 24)
-        let textWidth = bounds.width - moreButton.frame.width - 12
+        let buttonSize = MenuTokens.secondaryButtonSize
+        copyButton.frame = NSRect(
+            x: bounds.width - buttonSize,
+            y: (bounds.height - buttonSize) / 2,
+            width: buttonSize,
+            height: buttonSize
+        )
+
+        showButton.frame = NSRect(
+            x: copyButton.frame.minX - 8 - buttonSize,
+            y: (bounds.height - buttonSize) / 2,
+            width: buttonSize,
+            height: buttonSize
+        )
+
+        let textWidth = max(0, showButton.frame.minX - 12)
         titleLabel.frame = NSRect(x: 0, y: 6, width: textWidth, height: 14)
         dateLabel.frame = NSRect(x: 0, y: 21, width: textWidth, height: 12)
         divider.frame = NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
@@ -249,29 +469,15 @@ private final class RecentMeetingRowView: NSView {
         NSSize(width: NSView.noIntrinsicMetric, height: MenuTokens.recentRowHeight)
     }
 
-    @objc private func showMenu() {
-        let menu = NSMenu()
-        let copyItem = menu.addItem(withTitle: "Copy transcript", action: #selector(copyTranscript), keyEquivalent: "")
-        copyItem.target = self
-        let revealItem = menu.addItem(withTitle: "Show in Finder", action: #selector(showInFinder), keyEquivalent: "")
-        revealItem.target = self
-        menu.popUp(positioning: nil, at: NSPoint(x: moreButton.frame.minX, y: moreButton.frame.maxY), in: self)
-    }
-
     @objc private func copyTranscript() {
-        guard let text = MeetingTranscriptStyler.transcriptBody(at: item.transcriptURL) else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        guard copyTranscriptBody(from: item.transcriptURL) else { return }
 
         resetTask?.cancel()
-        moreButton.title = "Copied"
-        needsLayout = true
+        copyButton.setSymbol("checkmark", accessibilityLabel: "Transcript copied", tintOverride: MenuTokens.statusGreenNS)
         resetTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard let self, !Task.isCancelled else { return }
-            self.moreButton.title = "⋯"
-            self.needsLayout = true
+            self.copyButton.setSymbol("doc.on.doc", accessibilityLabel: "Copy transcript")
         }
     }
 
@@ -284,16 +490,29 @@ private final class RecentMeetingRowView: NSView {
 private final class FailedMeetingRowView: NSView {
     private let item: MeetingSessionController.FailedMeetingItem
     private let onRetry: () -> Void
+    private let onDelete: () -> Void
     private let onDismiss: () -> Void
 
     private let titleLabel = NSTextField(labelWithString: "")
-    private let subtitleLabel = NSTextField(labelWithString: "")
-    private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
-    private let dismissButton = NSButton(title: "Dismiss", target: nil, action: nil)
+    private let detailLabel = NSTextField(labelWithString: "")
+    private let metaLabel = NSTextField(labelWithString: "")
+    private let retryButton = MenuOutlineButton(
+        title: "Retry",
+        symbolName: "arrow.clockwise",
+        accessibilityLabel: "Retry failed meeting",
+        toolTip: "Retry failed meeting"
+    )
+    private let secondaryButton = MenuOutlineButton(title: "Dismiss")
 
-    init(item: MeetingSessionController.FailedMeetingItem, onRetry: @escaping () -> Void, onDismiss: @escaping () -> Void) {
+    init(
+        item: MeetingSessionController.FailedMeetingItem,
+        onRetry: @escaping () -> Void,
+        onDelete: @escaping () -> Void,
+        onDismiss: @escaping () -> Void
+    ) {
         self.item = item
         self.onRetry = onRetry
+        self.onDelete = onDelete
         self.onDismiss = onDismiss
         super.init(frame: .zero)
         setupViews()
@@ -316,39 +535,70 @@ private final class FailedMeetingRowView: NSView {
         titleLabel.textColor = MenuTokens.textPrimaryNS
         addSubview(titleLabel)
 
-        subtitleLabel.stringValue = item.subtitle
-        subtitleLabel.font = NSFont.systemFont(ofSize: 9)
-        subtitleLabel.textColor = MenuTokens.textSecondaryNS
-        addSubview(subtitleLabel)
+        detailLabel.stringValue = item.detail
+        detailLabel.font = NSFont.systemFont(ofSize: 9.5)
+        detailLabel.textColor = MenuTokens.textSecondaryNS
+        detailLabel.lineBreakMode = .byTruncatingTail
+        addSubview(detailLabel)
 
-        retryButton.isBordered = false
-        retryButton.bezelStyle = .inline
-        retryButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
-        retryButton.contentTintColor = MenuTokens.textPrimaryNS
+        metaLabel.stringValue = item.meta
+        metaLabel.font = NSFont.systemFont(ofSize: 9)
+        metaLabel.textColor = MenuTokens.textMutedNS
+        metaLabel.lineBreakMode = .byTruncatingTail
+        addSubview(metaLabel)
+
         retryButton.target = self
         retryButton.action = #selector(retry)
-        retryButton.isEnabled = item.isRetryable
         addSubview(retryButton)
 
-        dismissButton.isBordered = false
-        dismissButton.bezelStyle = .inline
-        dismissButton.font = NSFont.systemFont(ofSize: 10)
-        dismissButton.contentTintColor = MenuTokens.textSecondaryNS
-        dismissButton.target = self
-        dismissButton.action = #selector(dismiss)
-        addSubview(dismissButton)
+        secondaryButton.target = self
+        secondaryButton.action = #selector(secondaryAction)
+        addSubview(secondaryButton)
+
+        if item.hasAudioFiles {
+            secondaryButton.title = "Delete"
+            secondaryButton.setSymbol("trash", accessibilityLabel: "Delete kept audio")
+            secondaryButton.toolTip = "Delete kept audio"
+        } else {
+            secondaryButton.title = "Dismiss"
+            secondaryButton.setSymbol("xmark", accessibilityLabel: "Dismiss failed meeting")
+            secondaryButton.toolTip = "Dismiss failed meeting"
+        }
+
+        retryButton.title = item.isRetrying ? "Retrying..." : "Retry"
+        retryButton.setSymbol(item.isRetrying ? "arrow.trianglehead.2.clockwise.rotate.90" : "arrow.clockwise", accessibilityLabel: "Retry failed meeting")
+        retryButton.isEnabled = item.isRetryable && !item.isRetrying
+        retryButton.isHidden = !item.isRetryable && !item.isRetrying
     }
 
     override func layout() {
         super.layout()
         let pad: CGFloat = 10
-        let dismissSize = dismissButton.fittingSize
-        dismissButton.frame = NSRect(x: bounds.width - pad - dismissSize.width, y: 13, width: dismissSize.width, height: dismissSize.height)
-        let retrySize = retryButton.fittingSize
-        retryButton.frame = NSRect(x: dismissButton.frame.minX - 12 - retrySize.width, y: 13, width: retrySize.width, height: retrySize.height)
-        let textWidth = retryButton.frame.minX - pad - 12
-        titleLabel.frame = NSRect(x: pad, y: 8, width: textWidth, height: 13)
-        subtitleLabel.frame = NSRect(x: pad, y: 22, width: textWidth, height: 11)
+        let secondarySize = secondaryButton.fittingSize
+        secondaryButton.frame = NSRect(
+            x: bounds.width - pad - secondarySize.width,
+            y: bounds.height - pad - secondarySize.height,
+            width: secondarySize.width,
+            height: secondarySize.height
+        )
+
+        if retryButton.isHidden {
+            retryButton.frame = .zero
+        } else {
+            let retrySize = retryButton.fittingSize
+            retryButton.frame = NSRect(
+                x: secondaryButton.frame.minX - 8 - retrySize.width,
+                y: bounds.height - pad - retrySize.height,
+                width: retrySize.width,
+                height: retrySize.height
+            )
+        }
+
+        let rightEdge = retryButton.isHidden ? secondaryButton.frame.minX : retryButton.frame.minX
+        let textWidth = max(0, rightEdge - pad - 10)
+        titleLabel.frame = NSRect(x: pad, y: 8, width: textWidth, height: 14)
+        detailLabel.frame = NSRect(x: pad, y: 23, width: textWidth, height: 12)
+        metaLabel.frame = NSRect(x: pad, y: 38, width: textWidth, height: 11)
     }
 
     override var intrinsicContentSize: NSSize {
@@ -359,7 +609,11 @@ private final class FailedMeetingRowView: NSView {
         onRetry()
     }
 
-    @objc private func dismiss() {
-        onDismiss()
+    @objc private func secondaryAction() {
+        if item.hasAudioFiles {
+            onDelete()
+        } else {
+            onDismiss()
+        }
     }
 }

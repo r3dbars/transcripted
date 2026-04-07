@@ -125,7 +125,7 @@ public class TranscriptionTaskManager: ObservableObject {
     }
 
     /// Retry a failed transcription by its ID
-    public func retryFailedTranscription(failedId: UUID) async -> Bool {
+    public func retryFailedTranscription(failedId: UUID, outputFolder: URL) async -> Bool {
         // Guard: reject if a pipeline is already active — same constraint as startTranscription.
         // Without this guard a retry launched from Settings can run concurrently with a fresh
         // transcription, causing model contention (both Parakeet and PyAnnote are single-instance;
@@ -171,7 +171,7 @@ public class TranscriptionTaskManager: ObservableObject {
             let transcriptURL = try await transcribeWithSpeakerIdentification(
                 micURL: failed.micAudioURL,
                 systemURL: failed.systemAudioURL,
-                outputFolder: TranscriptSaver.defaultSaveDirectory,
+                outputFolder: outputFolder,
                 taskId: failedId,
                 healthInfo: nil
             )

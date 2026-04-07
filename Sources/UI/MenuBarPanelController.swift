@@ -8,6 +8,7 @@ import Combine
 final class MenuBarPanelController: NSViewController {
     private let appState: DraftAppState
     private let dismissPopover: () -> Void
+    private let openSettingsWindow: () -> Void
     private let preferredSourceAppProvider: () -> NSRunningApplication?
     private var contentView: MenuBarContentView?
     private var subscriptions = Set<AnyCancellable>()
@@ -15,10 +16,12 @@ final class MenuBarPanelController: NSViewController {
     init(
         appState: DraftAppState,
         preferredSourceAppProvider: @escaping () -> NSRunningApplication?,
+        openSettingsWindow: @escaping () -> Void,
         dismissPopover: @escaping () -> Void
     ) {
         self.appState = appState
         self.preferredSourceAppProvider = preferredSourceAppProvider
+        self.openSettingsWindow = openSettingsWindow
         self.dismissPopover = dismissPopover
         super.init(nibName: nil, bundle: nil)
     }
@@ -32,15 +35,18 @@ final class MenuBarPanelController: NSViewController {
         content.settingsView.appState = appState
         content.shortcutsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
         content.shortcutsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
+        content.settingsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu() }
+        content.settingsView.onOpenAgentConnect = { [weak self] in self?.contentView?.showAgentConnectPage() }
+        content.agentConnectView.onBack = { [weak self] in self?.contentView?.showMainPage() }
         view = content
         contentView = content
         view.appearance = NSAppearance(named: .darkAqua)
 
-        refreshAll()
+        refresh()
         setupSubscriptions()
     }
 
-    private func refreshAll() {
+    func refresh() {
         guard let content = contentView else { return }
         let warmupStatus = appState.meetingSession.warmupStatus
         let isReady = warmupStatus == .ready
@@ -58,10 +64,14 @@ final class MenuBarPanelController: NSViewController {
 
         if #available(macOS 14.0, *) {
             content.recentMeetingsView.update(
+                latestSavedMeeting: latestSavedMeetingItem(),
                 meetings: RecentMeetingsScanner.loadRecent(),
                 failedMeetings: appState.meetingSession.failedMeetings,
                 onRetryFailedMeeting: { [weak self] id in
                     self?.appState.meetingSession.retryFailedMeeting(id: id)
+                },
+                onDeleteFailedMeeting: { [weak self] id in
+                    self?.appState.meetingSession.deleteFailedMeeting(id: id)
                 },
                 onDismissFailedMeeting: { [weak self] id in
                     self?.appState.meetingSession.dismissFailedMeeting(id: id)
@@ -69,9 +79,11 @@ final class MenuBarPanelController: NSViewController {
             )
         } else {
             content.recentMeetingsView.update(
+                latestSavedMeeting: nil,
                 meetings: RecentMeetingsScanner.loadRecent(),
                 failedMeetings: [],
                 onRetryFailedMeeting: { _ in },
+                onDeleteFailedMeeting: { _ in },
                 onDismissFailedMeeting: { _ in }
             )
         }
@@ -83,7 +95,7 @@ final class MenuBarPanelController: NSViewController {
         appState.meetingSession.$warmupStatus
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.refreshAll()
+                self?.refresh()
             }
             .store(in: &subscriptions)
 
@@ -91,14 +103,14 @@ final class MenuBarPanelController: NSViewController {
             .combineLatest(appState.contextCapture.$meetingShortcutDisplay)
             .receive(on: RunLoop.main)
             .sink { [weak self] _, _ in
-                self?.refreshAll()
+                self?.refresh()
             }
             .store(in: &subscriptions)
 
         appState.contextCapture.$hotkeyError
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.refreshAll()
+                self?.refresh()
             }
             .store(in: &subscriptions)
 
@@ -106,17 +118,34 @@ final class MenuBarPanelController: NSViewController {
             appState.meetingSession.$lastSavedTranscriptURL
                 .receive(on: RunLoop.main)
                 .sink { [weak self] _ in
-                    self?.refreshAll()
+                    self?.refresh()
                 }
                 .store(in: &subscriptions)
 
             appState.meetingSession.$failedMeetings
                 .receive(on: RunLoop.main)
                 .sink { [weak self] _ in
-                    self?.refreshAll()
+                    self?.refresh()
                 }
                 .store(in: &subscriptions)
         }
+    }
+
+    func prepareForClose() {
+        contentView?.shortcutsView.cancelEditing()
+        contentView?.showMainPage()
+        contentView?.settingsView.dismissTransientUI()
+    }
+
+    private func latestSavedMeetingItem() -> LatestSavedMeetingItem? {
+        guard let transcriptURL = appState.meetingSession.lastSavedTranscriptURL else { return nil }
+
+        let values = try? transcriptURL.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
+        let date = values?.contentModificationDate ?? values?.creationDate ?? Date()
+        let title = appState.meetingSession.lastSavedTitle
+            ?? transcriptURL.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " ")
+
+        return LatestSavedMeetingItem(title: title, subtitle: "Saved \(LatestSavedMeetingItem.dateFormatter.string(from: date))", transcriptURL: transcriptURL)
     }
 
     private func startDictationFromMenu() {
@@ -136,6 +165,11 @@ final class MenuBarPanelController: NSViewController {
                 await appState.meetingSession.startRecording(trigger: .menu)
             }
         }
+    }
+
+    private func openSettingsFromMenu() {
+        dismissPopover()
+        openSettingsWindow()
     }
 
     private func resolvedSourceApp() -> NSRunningApplication? {

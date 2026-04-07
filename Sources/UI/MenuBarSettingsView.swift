@@ -1,16 +1,35 @@
 // MenuBarSettingsView.swift
-// Tiny utility footer for the menubar popover.
+// Compact utility footer for the menubar popover.
 
 import AppKit
 
 @MainActor
 final class MenuBarSettingsView: NSView {
-    private let footerLabel = NSTextField(labelWithString: "Runs locally on your Mac")
-    private let resetButton = NSButton(title: "Reset shortcuts", target: nil, action: nil)
-    private let feedbackButton = NSButton(title: "Feedback", target: nil, action: nil)
-    private let quitButton = NSButton(title: "Quit", target: nil, action: nil)
+    private let connectAgentButton = MenuOutlineButton(
+        title: "Connect your agent",
+        symbolName: "sparkles",
+        accessibilityLabel: "Connect your agent",
+        toolTip: "Connect your agent"
+    )
+    private let settingsButton = MenuIconButton(
+        symbolName: "gearshape",
+        accessibilityLabel: "Open settings",
+        toolTip: "Open settings"
+    )
+    private let feedbackButton = MenuIconButton(
+        symbolName: "bubble.left",
+        accessibilityLabel: "Send feedback",
+        toolTip: "Send feedback"
+    )
+    private let quitButton = MenuIconButton(
+        symbolName: "power",
+        accessibilityLabel: "Quit Transcripted",
+        toolTip: "Quit Transcripted"
+    )
 
     weak var appState: DraftAppState?
+    var onOpenSettings: (() -> Void)?
+    var onOpenAgentConnect: (() -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -23,20 +42,14 @@ final class MenuBarSettingsView: NSView {
     override var isFlipped: Bool { true }
 
     private func setupViews() {
-        footerLabel.font = NSFont.systemFont(ofSize: 10)
-        footerLabel.textColor = MenuTokens.textMutedNS
-        addSubview(footerLabel)
+        connectAgentButton.target = self
+        connectAgentButton.action = #selector(openAgentConnect)
+        addSubview(connectAgentButton)
 
-        [resetButton, feedbackButton, quitButton].forEach { button in
-            button.isBordered = false
-            button.bezelStyle = .inline
-            button.font = NSFont.systemFont(ofSize: 10)
-            button.contentTintColor = MenuTokens.textSecondaryNS
-            addSubview(button)
-        }
+        [settingsButton, feedbackButton, quitButton].forEach { addSubview($0) }
 
-        resetButton.target = self
-        resetButton.action = #selector(resetShortcuts)
+        settingsButton.target = self
+        settingsButton.action = #selector(openSettings)
         feedbackButton.target = self
         feedbackButton.action = #selector(sendFeedback)
         quitButton.target = self
@@ -46,14 +59,24 @@ final class MenuBarSettingsView: NSView {
     override func layout() {
         super.layout()
 
-        footerLabel.frame = NSRect(x: 0, y: 2, width: 140, height: 12)
+        let buttonSize = MenuTokens.secondaryButtonSize
+        let buttonY: CGFloat = 7
+        quitButton.frame = NSRect(x: bounds.width - buttonSize, y: buttonY, width: buttonSize, height: buttonSize)
+        feedbackButton.frame = NSRect(
+            x: quitButton.frame.minX - 8 - buttonSize,
+            y: buttonY,
+            width: buttonSize,
+            height: buttonSize
+        )
+        settingsButton.frame = NSRect(
+            x: feedbackButton.frame.minX - 8 - buttonSize,
+            y: buttonY,
+            width: buttonSize,
+            height: buttonSize
+        )
 
-        let quitSize = quitButton.fittingSize
-        quitButton.frame = NSRect(x: bounds.width - quitSize.width, y: 0, width: quitSize.width, height: quitSize.height)
-        let feedbackSize = feedbackButton.fittingSize
-        feedbackButton.frame = NSRect(x: quitButton.frame.minX - 14 - feedbackSize.width, y: 0, width: feedbackSize.width, height: feedbackSize.height)
-        let resetSize = resetButton.fittingSize
-        resetButton.frame = NSRect(x: feedbackButton.frame.minX - 14 - resetSize.width, y: 0, width: resetSize.width, height: resetSize.height)
+        let connectWidth = min(max(150, connectAgentButton.fittingSize.width), max(0, settingsButton.frame.minX - 12))
+        connectAgentButton.frame = NSRect(x: 0, y: buttonY, width: connectWidth, height: buttonSize)
     }
 
     @objc private func sendFeedback() {
@@ -68,13 +91,19 @@ final class MenuBarSettingsView: NSView {
         }
     }
 
-    @objc private func resetShortcuts() {
-        HotkeyPreferences.resetToDefaults()
-    }
-
     @objc private func quitApp() {
         NSApplication.shared.terminate(nil)
     }
 
-    var intrinsicHeight: CGFloat { 18 }
+    @objc private func openSettings() {
+        onOpenSettings?()
+    }
+
+    @objc private func openAgentConnect() {
+        onOpenAgentConnect?()
+    }
+
+    func dismissTransientUI() {}
+
+    var intrinsicHeight: CGFloat { MenuTokens.secondaryButtonSize + 8 }
 }

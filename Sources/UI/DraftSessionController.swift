@@ -7,6 +7,8 @@ import Combine
 
 @MainActor
 class DraftSessionController: ObservableObject {
+    private static let removedDraftModeMessage = "This build of Transcripted supports dictation and meetings only."
+
     enum DictationTrigger: String {
         case rightOptionTap = "right_option_tap"
         case keyboardShortcut = "keyboard_shortcut"
@@ -107,7 +109,7 @@ class DraftSessionController: ObservableObject {
             .sink { [weak self] _ in
                 guard let self = self else { return }
                 if self.isInSession {
-                    self.cancelSession(message: "Message drafting has been removed")
+                    self.cancelSession(message: Self.removedDraftModeMessage)
                 } else if self.isDictating {
                     self.isDictating = false
                     self.overlayController?.showError("Audio device changed")
@@ -121,16 +123,16 @@ class DraftSessionController: ObservableObject {
         let _ = imageData
         let _ = sourceApp
         guard let (_, overlayController) = readyState() else { return }
-        overlayController.showError("Message drafting has been removed")
+        overlayController.showError(Self.removedDraftModeMessage)
     }
 
     func stopSessionAndDraft() {
         guard let (_, overlayController) = readyState() else { return }
-        overlayController.showError("Message drafting has been removed")
+        overlayController.showError(Self.removedDraftModeMessage)
     }
 
     func cancelSession() {
-        cancelSession(message: "Message drafting has been removed")
+        cancelSession(message: Self.removedDraftModeMessage)
     }
 
     private func cancelSession(message: String) {
