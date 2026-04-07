@@ -65,6 +65,7 @@ class ParakeetEngine: ObservableObject {
     private var asrManager: AsrManager?
     private var audioWatchdogTask: Task<Void, Never>?
     private var asrManagerReady = false
+    private var didReceiveAudioSamples = false
 
     var isModelLoaded: Bool { asrManagerReady }
 
@@ -411,6 +412,7 @@ class ParakeetEngine: ObservableObject {
         }
 
         recordingInterrupted = false
+        didReceiveAudioSamples = false
         sampleBuffer.removeAll(keepingCapacity: true)
         sampleBuffer.reserveCapacity(Int(nativeSampleRate * Double(DraftConstants.audioBufferCapacitySeconds)))
 
@@ -429,6 +431,19 @@ class ParakeetEngine: ObservableObject {
             guard let self = self,
                   let channelData = buffer.floatChannelData?[0] else { return }
             let frameLength = Int(buffer.frameLength)
+
+            if !self.didReceiveAudioSamples && frameLength > 0 {
+                self.didReceiveAudioSamples = true
+                Task { @MainActor in
+                    EventReporter.shared.capture(level: .info, engine: "parakeet", event: "audio_samples_detected",
+                        message: "Audio samples started flowing",
+                        context: [
+                            "audio_device": self.inputDeviceName,
+                            "sample_rate": "\(self.nativeSampleRate)",
+                            "frames": "\(frameLength)"
+                        ])
+                }
+            }
 
             // Consumer 1: optional live streaming display (currently disabled).
             if self.liveDisplayEnabled, let eou = self.eouManager {

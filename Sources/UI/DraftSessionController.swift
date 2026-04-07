@@ -10,6 +10,7 @@ class DraftSessionController: ObservableObject {
     enum DictationTrigger: String {
         case rightOptionTap = "right_option_tap"
         case keyboardShortcut = "keyboard_shortcut"
+        case overlayButton = "overlay_button"
         case menu = "menu"
         case unknown = "unknown"
     }
@@ -63,6 +64,10 @@ class DraftSessionController: ObservableObject {
                 } else if self.isDictating {
                     self.cancelDictation()
                 }
+            }
+            overlayController?.onStopListening = { [weak self] in
+                guard let self = self, self.isDictating else { return }
+                self.stopDictationAndPaste(trigger: .overlayButton)
             }
         }
     }
@@ -200,9 +205,57 @@ class DraftSessionController: ObservableObject {
     }
 
     /// Stop dictation and paste — Parakeet batch transcription
-    func stopDictationAndPaste() {
+    func stopDictationAndPaste(trigger: DictationTrigger = .unknown) {
         guard let (appState, overlayController) = readyState() else { return }
-        guard isDictating, overlayController.state == .listening else { return }
+        DiagnosticsTrail.record(
+            logger: appState.logger,
+            engine: "dictation",
+            event: "dictation_stop_requested",
+            message: "Dictation stop requested",
+            context: dictationContext(
+                extra: [
+                    "trigger": trigger.rawValue,
+                    "overlay_state": overlayStateName(overlayController.state),
+                    "stt_recording": "\(appState.sttRouter.isRecording)"
+                ]
+            )
+        )
+        guard isDictating else {
+            DiagnosticsTrail.record(
+                logger: appState.logger,
+                level: .info,
+                engine: "dictation",
+                event: "dictation_stop_ignored",
+                message: "Ignored dictation stop because no dictation session was active",
+                context: dictationContext(
+                    extra: [
+                        "trigger": trigger.rawValue,
+                        "overlay_state": overlayStateName(overlayController.state),
+                        "stt_recording": "\(appState.sttRouter.isRecording)"
+                    ]
+                )
+            )
+            return
+        }
+
+        let canStopRecording = overlayController.state == .listening || appState.sttRouter.isRecording
+        guard canStopRecording else {
+            DiagnosticsTrail.record(
+                logger: appState.logger,
+                level: .warning,
+                engine: "dictation",
+                event: "dictation_stop_ignored",
+                message: "Ignored dictation stop because recording was no longer active",
+                context: dictationContext(
+                    extra: [
+                        "trigger": trigger.rawValue,
+                        "overlay_state": overlayStateName(overlayController.state),
+                        "stt_recording": "\(appState.sttRouter.isRecording)"
+                    ]
+                )
+            )
+            return
+        }
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
         overlayController.state = .drafting
@@ -347,6 +400,17 @@ class DraftSessionController: ObservableObject {
                     message: "Dictation auto-cancelled after 5 minutes")
                 self.cancelDictation()
             }
+        }
+    }
+
+    private func overlayStateName(_ state: FloatingOverlayController.OverlayState) -> String {
+        switch state {
+        case .idle: return "idle"
+        case .loading: return "loading"
+        case .listening: return "listening"
+        case .drafting: return "drafting"
+        case .streaming: return "streaming"
+        case .review: return "review"
         }
     }
 
