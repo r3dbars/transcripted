@@ -1,6 +1,16 @@
 import Foundation
 import MCP
 
+private func defaultTranscriptedTranscriptsDirectory() -> URL {
+    let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support", isDirectory: true)
+    return appSupport
+        .appendingPathComponent("Draft", isDirectory: true)
+        .appendingPathComponent("meetings", isDirectory: true)
+        .appendingPathComponent("transcripts", isDirectory: true)
+}
+
 @main
 struct TranscriptedMCP {
     static func main() async throws {
@@ -8,8 +18,7 @@ struct TranscriptedMCP {
             if let override = ProcessInfo.processInfo.environment["TRANSCRIPTED_DATA_DIR"] {
                 return URL(fileURLWithPath: override)
             }
-            return FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Documents/Transcripted")
+            return defaultTranscriptedTranscriptsDirectory()
         }()
 
         log("Starting transcripted-mcp v1.0.0")
