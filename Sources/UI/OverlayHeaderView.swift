@@ -9,7 +9,7 @@ final class OverlayHeaderView: NSView {
     private let spinner = NSProgressIndicator()
     let waveformHost = WaveformHostView(frame: .zero)
     private let shortcutHint = NSTextField(labelWithString: "")
-    private let stopButton = NSButton(title: "Stop", target: nil, action: nil)
+    private let stopButton = NSButton(title: "Done", target: nil, action: nil)
     var onStopRequested: (() -> Void)?
 
     override init(frame: NSRect) {
@@ -58,7 +58,7 @@ final class OverlayHeaderView: NSView {
         stopButton.isHidden = true
         stopButton.target = self
         stopButton.action = #selector(stopButtonPressed)
-        stopButton.toolTip = "Stop dictation"
+        stopButton.toolTip = "Finish dictation"
         addSubview(stopButton)
     }
 
@@ -191,8 +191,8 @@ final class OverlayHeaderView: NSView {
         // Shortcut hint
         switch (state, mode) {
         case (.listening, .dictation):
-            shortcutHint.stringValue = dictationShortcutHint
-            shortcutHint.textColor = OverlayTokens.textSecondary.withAlphaComponent(0.96)
+            shortcutHint.stringValue = ""
+            shortcutHint.textColor = OverlayTokens.textMuted
         case (.success, .dictation):
             shortcutHint.stringValue = ""
             shortcutHint.textColor = OverlayTokens.textMuted
