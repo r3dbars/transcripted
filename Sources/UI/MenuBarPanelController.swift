@@ -6,7 +6,7 @@ import Combine
 
 @MainActor
 final class MenuBarPanelController: NSViewController {
-    private let appState: DraftAppState
+    private let appState: TranscriptedAppState
     private let dismissPopover: () -> Void
     private let openSettingsWindow: () -> Void
     private let openAgentConnectWindow: () -> Void
@@ -15,7 +15,7 @@ final class MenuBarPanelController: NSViewController {
     private var subscriptions = Set<AnyCancellable>()
 
     init(
-        appState: DraftAppState,
+        appState: TranscriptedAppState,
         preferredSourceAppProvider: @escaping () -> NSRunningApplication?,
         openSettingsWindow: @escaping () -> Void,
         openAgentConnectWindow: @escaping () -> Void,

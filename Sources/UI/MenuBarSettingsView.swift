@@ -28,7 +28,7 @@ final class MenuBarSettingsView: NSView {
         toolTip: "Quit Transcripted"
     )
 
-    weak var appState: DraftAppState?
+    weak var appState: TranscriptedAppState?
     var onOpenSettings: (() -> Void)?
     var onOpenAgentConnect: (() -> Void)?
 

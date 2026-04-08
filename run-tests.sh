@@ -106,7 +106,7 @@ APP_SOURCES=(
     "Sources/Dictation/DictationStoragePaths.swift"
     "Sources/Dictation/DictationAgentOutput.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"
-    "Sources/DraftConstants.swift"
+    "Sources/TranscriptedConstants.swift"
     "Sources/Draft/DiffSummary.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/TranscriptedCore/Models/TranscriptionTypes.swift"

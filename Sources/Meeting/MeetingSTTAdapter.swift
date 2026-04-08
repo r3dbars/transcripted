@@ -1,5 +1,5 @@
 // MeetingSTTAdapter.swift
-// Thin conformer that lets Draft's ParakeetEngine plug into TranscriptedCore's
+// Thin conformer that lets Transcripted's ParakeetEngine plug into TranscriptedCore's
 // SpeechToTextEngine protocol for the Meeting pipeline. Owned by Lane B per
 // merge-plan.md §3.2 — STTRouter wraps recording lifecycle and has no raw-samples
 // entry point, so we bypass it and adapt ParakeetEngine directly.
@@ -17,7 +17,7 @@ import TranscriptedCore
 @MainActor
 final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
 
-    /// The Draft-owned Parakeet engine instance. Shared with STTRouter — there is
+    /// The app-owned Parakeet engine instance. Shared with STTRouter — there is
     /// only one AsrManager per process, and both the drafting flow and the meeting
     /// pipeline route through it. Caller is responsible for keeping this alive.
     private let engine: ParakeetEngine
@@ -44,7 +44,7 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
         try await engine.transcribeSamples(samples, source: source)
     }
 
-    /// No-op for the adapter: ParakeetEngine.cleanup() is owned by DraftAppState's
+    /// No-op for the adapter: ParakeetEngine.cleanup() is owned by TranscriptedAppState's
     /// shutdown path. Tearing down the CoreML models here would break the drafting
     /// flow that still holds a reference to `engine`.
     func cleanup() {

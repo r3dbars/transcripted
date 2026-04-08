@@ -4,7 +4,7 @@
 
 - `main` is the Draft-derived Transcripted product.
 - The current app on `main` supports **dictation** and **meetings**.
-- The older draft / ghostwriting flow is not active on `main`. `DraftSessionController` keeps compatibility stubs for removed draft-mode entry points.
+- The older draft / ghostwriting flow is not active on `main`. `DictationSessionController` keeps compatibility stubs for removed draft-mode entry points.
 - `Sources/TranscriptedCore/` is an in-repo library consumed through `Sources/Meeting/`. Keep it as a library boundary.
 - `build.sh` builds the app target. The root `Package.swift` exists for `TranscriptedCore` package tests and smoke coverage, not as the main app build.
 

@@ -16,8 +16,8 @@
 
 ## End-to-end flow
 
-1. `Sources/DraftApp.swift` wires `MeetingSessionController` into `MeetingOverlayController`, the menubar, and the `⌥M` hotkey.
-2. `Sources/DraftAppState.swift` starts background model warmup through `meetingSession.prepareModels(showLoadingUI: false)`.
+1. `Sources/TranscriptedApp.swift` wires `MeetingSessionController` into `MeetingOverlayController`, the menubar, and the `⌥M` hotkey.
+2. `Sources/TranscriptedAppState.swift` starts background model warmup through `meetingSession.prepareModels(showLoadingUI: false)`.
 3. `MeetingSessionController.startRecording(...)` uses `MeetingCaptureBridge` to start core audio capture into Draft-owned scratch paths.
 4. `MeetingSessionController.stopRecording(...)` awaits mic/system audio files from the bridge.
 5. `TranscriptionTaskManager.startTranscription(...)` runs the core diarize → transcribe → save pipeline.
@@ -27,7 +27,7 @@
 ## Key invariants
 
 - `TranscriptedCore` owns the reusable pipeline. App code in this directory should prefer adapters and protocol seams over direct core edits.
-- `MeetingSTTAdapter.cleanup()` is intentionally a no-op. `DraftAppState` owns `ParakeetEngine` lifecycle for the whole app.
+- `MeetingSTTAdapter.cleanup()` is intentionally a no-op. `TranscriptedAppState` owns `ParakeetEngine` lifecycle for the whole app.
 - Meeting storage must stay under Draft app-support paths, not `TranscriptedCore.default` standalone paths.
 - Live PCM handlers installed through `MeetingCaptureBridge` run on capture threads. Keep them real-time safe.
 

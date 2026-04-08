@@ -412,7 +412,7 @@ enum MeetingOverlayTokens {
 /// @Published state, and pushes updates to `MeetingOverlayRootView`.
 ///
 /// Also forwards the ⌥M hotkey intent (toggle meeting recording) through its
-/// `toggleFromHotkey()` method — wired by the `DraftAppDelegate` onto
+/// `toggleFromHotkey()` method — wired by the `TranscriptedAppDelegate` onto
 /// `ContextCaptureEngine.onMeetingToggle`.
 @available(macOS 14.0, *)
 @MainActor
@@ -446,7 +446,7 @@ final class MeetingOverlayController {
     // MARK: - Dependencies
 
     /// The session controller the overlay reflects and forwards hotkey events to.
-    /// Set once by `DraftAppDelegate` during app launch.
+    /// Set once by `TranscriptedAppDelegate` during app launch.
     weak var meetingSession: MeetingSessionController?
 
     // MARK: - Setup

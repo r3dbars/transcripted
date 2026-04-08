@@ -1,4 +1,4 @@
-// DraftApp.swift
+// TranscriptedApp.swift
 // Menubar app for local dictation + meeting transcription
 
 import SwiftUI
@@ -7,8 +7,8 @@ import Carbon
 import TranscriptedCore
 
 @main
-struct DraftApp: App {
-    @NSApplicationDelegateAdaptor(DraftAppDelegate.self) var appDelegate
+struct TranscriptedApp: App {
+    @NSApplicationDelegateAdaptor(TranscriptedAppDelegate.self) var appDelegate
 
     var body: some Scene {
         Settings { EmptyView() }
@@ -18,7 +18,7 @@ struct DraftApp: App {
 // MARK: - App Delegate
 
 @MainActor
-class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
     private var lastExternalApplication: NSRunningApplication?
@@ -32,9 +32,9 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         dismissPopover: { [weak self] in self?.closePopover() }
     )
 
-    let appState = DraftAppState()
+    let appState = TranscriptedAppState()
     let overlayController = FloatingOverlayController()
-    let sessionController = DraftSessionController()
+    let sessionController = DictationSessionController()
     /// Second non-activating panel for meeting mode (Lane C). Distinct from
     /// the dictation overlay so regressions to one can't break the other.
     @available(macOS 14.0, *)

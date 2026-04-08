@@ -1,11 +1,10 @@
-// Draft by Red Bar — Constants
-// DraftConstants.swift
+// TranscriptedConstants.swift
 // Centralized configuration constants — timeouts, thresholds, limits, buffer sizes.
 // Animation durations and UI dimensions stay in their respective files (OverlayTokens, etc.)
 
 import Foundation
 
-enum DraftConstants {
+enum TranscriptedConstants {
 
     // MARK: - Versioning
 

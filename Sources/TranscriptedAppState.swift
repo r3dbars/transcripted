@@ -1,4 +1,4 @@
-// DraftAppState.swift
+// TranscriptedAppState.swift
 // Centralized engine ownership — lives in AppDelegate, survives window cycles
 
 import SwiftUI
@@ -6,7 +6,7 @@ import ServiceManagement
 import TranscriptedCore
 
 @MainActor
-class DraftAppState: ObservableObject {
+class TranscriptedAppState: ObservableObject {
     let logger = AppLogger()
     let contextCapture = ContextCaptureEngine()
     let sttRouter = STTRouter()

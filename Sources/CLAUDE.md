@@ -9,10 +9,10 @@
 
 Important entry points:
 
-- `DraftApp.swift` — app entry point, menubar wiring, popover, overlay setup
-- `DraftAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, and lazy `MeetingSessionController`
+- `TranscriptedApp.swift` — app entry point, menubar wiring, popover, overlay setup
+- `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, and lazy `MeetingSessionController`
 - `Capture/ContextCaptureEngine.swift` — right-option dictation handling, keyboard hotkeys, meeting hotkey routing
-- `UI/DraftSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
+- `UI/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
 - `Meeting/MeetingSessionController.swift` — Draft-side bridge into `TranscriptedCore`
 - `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter
 

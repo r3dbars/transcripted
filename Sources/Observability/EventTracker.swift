@@ -11,7 +11,7 @@
 //   4. EventTracker is ready — call sites are already in place
 //
 // SIGNALS TRACKED:
-//   app.launched              DraftAppState.initialize()
+//   app.launched              TranscriptedAppState.initialize()
 //   dictation.completed       After Whisper transcription is pasted
 //   draft.shown               When the review overlay appears
 //   draft.accepted            After confirmed inject (paste)
