@@ -9,7 +9,7 @@ struct AgentConnectionContext {
     let prompt: String
 
     init(meetingTitle: String?, meetingDate: Date?, transcriptURL: URL?) {
-        let draftFolderURL = FileManager.default.draftAppSupportDir
+        let draftFolderURL = FileManager.default.transcriptedAppSupportDir
         try? FileManager.default.createDirectory(at: draftFolderURL, withIntermediateDirectories: true)
 
         let meetingsFolderURL = MeetingStoragePaths.transcriptsFolder
@@ -201,7 +201,7 @@ struct AgentConnectionWindowView: View {
                     }
                     .buttonStyle(AgentConnectionPrimaryButtonStyle())
 
-                    Button("Open Draft folder") {
+                    Button("Open Transcripted folder") {
                         viewModel.openDraftFolder()
                     }
                     .buttonStyle(AgentConnectionSecondaryButtonStyle())

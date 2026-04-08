@@ -58,7 +58,7 @@ struct TranscriptedSettingsView: View {
                     StorageRow(title: "Dictation transcripts", url: DictationStoragePaths.transcriptsFolder)
                     StorageRow(title: "App logs", url: logsFolder)
 
-                    Text("Compatibility note: Transcripted currently stores its app-support data inside the existing Draft-named Application Support folder on disk so this beta can coexist with earlier builds.")
+                    Text("Transcripted stores its app-support data in its own Application Support folder on disk.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

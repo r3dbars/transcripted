@@ -21,11 +21,11 @@ final class BetaTelemetry {
     private static let maxChunkBytes: Int = 64 * 1024  // 64KB per file per cycle
 
     private var debugLogURL: URL {
-        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("draft-debug.log")
+        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("transcripted-debug.log")
     }
 
     private var eventsURL: URL {
-        FileManager.default.draftAppSupportDir.appendingPathComponent("events.jsonl")
+        FileManager.default.transcriptedAppSupportDir.appendingPathComponent("events.jsonl")
     }
 
     // MARK: - Discrete events (fire-and-forget, unchanged)

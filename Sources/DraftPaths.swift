@@ -4,22 +4,25 @@
 import Foundation
 
 extension FileManager {
-    /// ~/Library/Application Support/Draft/ — safe fallback if system API returns empty.
-    var draftAppSupportDir: URL {
+    /// ~/Library/Application Support/Transcripted/ — safe fallback if system API returns empty.
+    var transcriptedAppSupportDir: URL {
         let appSupport = urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        return appSupport.appendingPathComponent("Draft", isDirectory: true)
+        return appSupport.appendingPathComponent("Transcripted", isDirectory: true)
     }
 
-    /// ~/Library/Application Support/Draft/meetings/ — isolated from Transcripted's ~/Documents/Transcripted
-    /// so the two apps can coexist on one machine without touching each other's transcripts,
-    /// speakers DB, stats, or failed-transcription queue. See merge-plan.md §6.5 Option B.
+    /// Compatibility alias while the rest of the app finishes renaming internals.
+    var draftAppSupportDir: URL {
+        transcriptedAppSupportDir
+    }
+
+    /// ~/Library/Application Support/Transcripted/meetings/
     var meetingSupportDir: URL {
-        draftAppSupportDir.appendingPathComponent("meetings", isDirectory: true)
+        transcriptedAppSupportDir.appendingPathComponent("meetings", isDirectory: true)
     }
 
-    /// ~/Library/Application Support/Draft/dictations/
+    /// ~/Library/Application Support/Transcripted/dictations/
     var dictationSupportDir: URL {
-        draftAppSupportDir.appendingPathComponent("dictations", isDirectory: true)
+        transcriptedAppSupportDir.appendingPathComponent("dictations", isDirectory: true)
     }
 }
