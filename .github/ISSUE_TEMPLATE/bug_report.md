@@ -1,31 +1,33 @@
 ---
 name: Bug Report
-about: Report something that isn't working correctly
+about: Something broke while recording, dictating, or working with saved transcripts
 title: ''
 labels: bug
 assignees: ''
 ---
 
-**Describe the bug**
-A clear description of what's happening.
+**What were you trying to do?**
+A short plain-English description is perfect. Example: "I was dictating into
+Notes" or "I stopped a meeting recording and the transcript never saved."
 
-**Steps to reproduce**
+**What happened?**
+What did the app do?
+
+**What did you expect instead?**
+What should have happened?
+
+**How can we reproduce it?**
 1. ...
 2. ...
 3. ...
 
-**Expected behavior**
-What you expected to happen.
-
-**Actual behavior**
-What actually happened.
-
 **Environment**
 - macOS version:
-- Draft version/commit:
+- App version/commit:
+- Flow: meeting capture / dictation / something else
 - Audio source (mic, Zoom, Meet, etc.):
 
-**Diagnostics**
-If you have logs, screenshots, or exported diagnostics, attach them here.
+**Anything helpful to attach**
+Logs, screenshots, exported diagnostics, or the saved transcript if it helps.
 
 If this report is about the old standalone Transcripted app, please say so and include the legacy ref you were using (`legacy/transcripted-standalone` or `pre-draft-takeover-2026-04-06`).

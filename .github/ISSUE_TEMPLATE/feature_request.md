@@ -1,21 +1,21 @@
 ---
 name: Feature Request
-about: Suggest an idea for Draft
+about: Suggest a better way to capture spoken context on Mac
 title: ''
 labels: enhancement
 assignees: ''
 ---
 
-**Problem**
-What problem does this solve? What's frustrating about the current behavior?
+**What's the job to be done?**
+What are you trying to capture, remember, or hand off to your agent?
 
-**Proposed solution**
-How should it work?
+**What's awkward today?**
+Where does the current flow break down?
 
-**Alternatives considered**
-Any other approaches you've thought about.
+**What would feel better?**
+Describe the simplest version of the fix or feature.
 
-**Additional context**
-Screenshots, links, or other relevant info.
+**Anything else?**
+Examples, screenshots, links, or things we should avoid.
 
 If this request is specifically about the old standalone Transcripted app, say that explicitly so it can be triaged against the legacy branch/tag instead of Draft-first `main`.

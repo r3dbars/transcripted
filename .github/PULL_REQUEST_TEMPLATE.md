@@ -1,17 +1,18 @@
-## Summary
+## Why
 
-<!-- What does this PR do and why? -->
+<!-- What problem does this change solve? -->
 
-## Changes
+## What changed
 
 -
 
-## Test plan
+## How I checked it
 
-- [ ] Builds without warnings
-- [ ] Tests pass
-- [ ] Manually tested:
+- [ ] `bash build.sh`
+- [ ] `bash run-tests.sh`
+- [ ] `bash run-integration-smoke.sh` if I touched `Sources/Meeting/` or `Sources/TranscriptedCore/`
+- [ ] Manual check:
 
-## Related issues
+## Notes
 
-<!-- Closes #123 -->
+<!-- Related issues, follow-ups, screenshots, or legacy-branch impact -->

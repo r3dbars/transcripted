@@ -1,6 +1,18 @@
 # Contributing to Transcripted
 
-Thanks for your interest in contributing to Transcripted! This guide will help you get set up and contributing quickly.
+Thanks for helping out.
+
+Quick repo orientation before you jump in:
+
+- `main` is the new Transcripted direction built from the Draft codebase
+- the old standalone Transcripted app is preserved on `legacy/transcripted-standalone`
+  and `pre-draft-takeover-2026-04-06`
+- some folders and local storage paths still use `Draft` names while the
+  transition settles
+
+The short version of the product story is simple: this repo is building a local
+Mac app that captures spoken context and saves it in files your own tools and
+agents can use.
 
 ## Development Setup
 
@@ -13,12 +25,14 @@ Thanks for your interest in contributing to Transcripted! This guide will help y
 ### Getting Started
 
 1. Fork the repo and clone your fork:
+
    ```bash
    git clone https://github.com/YOUR_USERNAME/transcripted.git
    cd transcripted
    ```
 
 2. Build dependencies and the app:
+
    ```bash
    bash build-deps.sh
    bash build.sh
@@ -26,15 +40,15 @@ Thanks for your interest in contributing to Transcripted! This guide will help y
 
 3. Run the test suite:
 
-```bash
-bash run-tests.sh
-```
+   ```bash
+   bash run-tests.sh
+   ```
 
 If you touch meeting integration or `TranscriptedCore`, also run:
 
-```bash
-bash run-integration-smoke.sh
-```
+   ```bash
+   bash run-integration-smoke.sh
+   ```
 
 On first launch, models may download from HuggingFace if they are not already
 cached locally.
@@ -61,16 +75,20 @@ refactor/description # Code refactoring
 
 ### Architecture
 
-The codebase is organized around the current Transcripted app:
+The codebase is organized around the current app direction. Some folders still
+carry `Draft` names, but they are part of the same product:
 
 | Area | Directory | Responsibility |
 |------|-----------|----------------|
-| App entry + state | `Sources/` | app lifecycle, hotkeys, paths, shared state |
-| Dictation + formatting | `Sources/Draft/` | dictation cleanup, formatting, draft utilities |
-| Meeting pipeline | `Sources/Meeting/` | meeting recording, model warmup, transcript flow |
+| App shell + shared state | `Sources/` | app lifecycle, hotkeys, paths, shared state |
+| Dictation flow | `Sources/Draft/` | dictation cleanup, formatting, Draft-named utilities still in use |
+| Meeting capture | `Sources/Meeting/` | meeting recording, model warmup, transcript flow |
 | UI | `Sources/UI/` | overlay, menubar, onboarding |
 | Local inference | `Sources/Local/` | on-device MLX model integration |
-| Shared meeting core | `Sources/TranscriptedCore/` | extracted meeting/transcription library |
+| Shared transcription core | `Sources/TranscriptedCore/` | extracted meeting/transcription library |
+
+`Sources/TranscriptedCore/` should stay a library boundary. Keep Draft app UI
+types and app-specific behavior out of that module.
 
 ### Threading
 
@@ -116,6 +134,10 @@ Open a GitHub issue with:
 - Expected vs actual behavior
 - Relevant logs from `~/Library/Application Support/Draft/events.jsonl`
 
+If the report is about the old standalone Transcripted app, please say that
+explicitly so it can be triaged against the legacy ref instead of `main`.
+
 ## Questions?
 
-Open a GitHub issue for questions or discussion. We're happy to help you get oriented in the codebase.
+Open a GitHub issue for questions or discussion. We're happy to help you get
+oriented.
