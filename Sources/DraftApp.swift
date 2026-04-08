@@ -22,6 +22,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
     private var lastExternalApplication: NSRunningApplication?
+    private var hasPresentedInitialOnboarding = false
     private lazy var settingsWindowController = TranscriptedSettingsWindowController()
     private lazy var menuPanelController = MenuBarPanelController(
         appState: appState,
@@ -95,6 +96,8 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         workspaceObservers.append(wakeRecoveryObserver)
 
+        presentInitialOnboardingIfNeeded()
+
         // Initialize engines
         Task { @MainActor in
             await appState.initialize()
@@ -158,6 +161,16 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private func showAgentConnectWindow() {
         AgentConnectionWindowCoordinator.shared.show()
+    }
+
+    private func presentInitialOnboardingIfNeeded() {
+        guard !PermissionsOnboardingView.hasCompleted, !hasPresentedInitialOnboarding else { return }
+        hasPresentedInitialOnboarding = true
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, self.popover?.isShown != true, !PermissionsOnboardingView.hasCompleted else { return }
+            self.togglePopover()
+        }
     }
 
     // MARK: - NSPopoverDelegate

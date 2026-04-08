@@ -1,5 +1,5 @@
 // PermissionsOnboardingView.swift
-// Guided 3-step permissions flow for dictation + meeting capture.
+// First-run checklist for the permissions needed to start using Transcripted.
 
 import SwiftUI
 import AVFoundation
@@ -8,143 +8,129 @@ import ApplicationServices
 struct PermissionsOnboardingView: View {
     var onComplete: () -> Void
 
-    @State private var currentStep = 0
     @State private var micGranted = false
     @State private var accessibilityGranted = false
     @State private var screenRecordingGranted = false
     @State private var pollTimer: Timer?
 
-    private let steps: [(title: String, icon: String, description: String, required: Bool)] = [
-        ("Microphone", "mic.fill", "Transcripted needs microphone access for dictation and your side of meetings.", true),
-        ("Accessibility", "hand.raised.fill", "Required for global shortcuts and reliable paste-back into the app you were using.", true),
-        ("Screen Recording", "rectangle.on.rectangle", "Required so meeting capture can access system audio from calls, videos, and other apps.", true),
-    ]
-
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text("Welcome to Transcripted")
-                    .font(.title2)
-                    .fontWeight(.semibold)
+                    .font(.title3.weight(.semibold))
 
-                Text("Let's set up the permissions Transcripted needs for dictation and meeting capture.")
+                Text("Turn on two quick permissions and you can start dictating into any app right away. Meeting audio can wait until you need it.")
                     .font(.callout)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 20)
-            }
-            .padding(.top, 28)
-            .padding(.bottom, 20)
+                    .foregroundStyle(MenuTokens.textSecondary)
 
-            // Step indicators
-            HStack(spacing: 12) {
-                ForEach(0..<steps.count, id: \.self) { i in
-                    Circle()
-                        .fill(stepColor(for: i))
-                        .frame(width: 10, height: 10)
+                HStack(spacing: 8) {
+                    FeaturePill(icon: "mic.fill", title: "Dictation first")
+                    FeaturePill(icon: "record.circle.fill", title: "Meetings later")
                 }
             }
-            .padding(.bottom, 24)
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 14)
 
-            // Current step
-            if currentStep < steps.count {
-                let step = steps[currentStep]
-                VStack(spacing: 16) {
-                    Image(systemName: step.icon)
-                        .font(.system(size: 40))
-                        .foregroundColor(.accentColor)
+            Divider()
+                .overlay(MenuTokens.cardBorder)
 
-                    Text(step.title)
-                        .font(.title3)
-                        .fontWeight(.medium)
-
-                    Text(step.description)
-                        .font(.callout)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 30)
-
-                    if !step.required {
-                        Text("This is optional — you can skip it.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(TranscriptedPermissionKind.allCases) { kind in
+                        PermissionSetupCard(
+                            kind: kind,
+                            granted: isGranted(kind),
+                            action: { TranscriptedPermissionAccess.openSettings(for: kind) }
+                        )
                     }
 
-                    Spacer().frame(height: 8)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("What happens next")
+                            .font(.subheadline.weight(.semibold))
 
-                    // Status indicator
-                    if isStepGranted(currentStep) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                            Text("Granted")
-                                .font(.callout)
-                                .foregroundColor(.green)
-                        }
+                        QuickStartRow(
+                            icon: "mic.fill",
+                            title: "Dictation",
+                            detail: "Use the Dictation button or your shortcut to speak into any app."
+                        )
+
+                        QuickStartRow(
+                            icon: "record.circle.fill",
+                            title: "Meetings",
+                            detail: screenRecordingGranted
+                                ? "Meeting audio is ready too."
+                                : "You can enable Screen Recording later when you want call audio from Zoom, Meet, or other apps."
+                        )
                     }
-
-                    // Action buttons
-                    HStack(spacing: 12) {
-                        if !step.required {
-                            Button("Skip") {
-                                advanceStep()
-                            }
-                            .buttonStyle(.bordered)
-                        }
-
-                        if !isStepGranted(currentStep) {
-                            Button("Open System Settings") {
-                                openSettingsForStep(currentStep)
-                            }
-                            .buttonStyle(.borderedProminent)
-                        }
-
-                        if isStepGranted(currentStep) {
-                            Button("Continue") {
-                                advanceStep()
-                            }
-                            .buttonStyle(.borderedProminent)
-                        }
-                    }
+                    .padding(14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(MenuTokens.cardBackground)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(MenuTokens.cardBorder, lineWidth: 1)
+                            )
+                    )
                 }
-                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
             }
 
-            Spacer()
+            Divider()
+                .overlay(MenuTokens.cardBorder)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text(footerMessage)
+                    .font(.caption)
+                    .foregroundStyle(MenuTokens.textSecondary)
+
+                Button(continueButtonTitle) {
+                    completeOnboarding()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!hasRequiredPermissions)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
         }
         .frame(width: MenuTokens.panelWidth, height: MenuTokens.panelHeight)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(MenuTokens.cardBackground)
         .onAppear {
             checkAllPermissions()
             startPolling()
-            // Auto-advance past already-granted steps
-            autoAdvancePastGranted()
         }
         .onDisappear {
             stopPolling()
         }
     }
 
-    // MARK: - Step Colors
-
-    private func stepColor(for index: Int) -> Color {
-        if index < currentStep {
-            return .green
-        } else if index == currentStep {
-            return .accentColor
-        }
-        return Color.secondary.opacity(0.3)
+    private var hasRequiredPermissions: Bool {
+        micGranted && accessibilityGranted
     }
 
-    // MARK: - Permission Checks
+    private var continueButtonTitle: String {
+        screenRecordingGranted ? "Continue to Transcripted" : "Continue without meeting audio"
+    }
 
-    private func isStepGranted(_ step: Int) -> Bool {
-        switch step {
-        case 0: return micGranted
-        case 1: return accessibilityGranted
-        case 2: return screenRecordingGranted
-        default: return false
+    private var footerMessage: String {
+        if hasRequiredPermissions {
+            return screenRecordingGranted
+                ? "Everything is ready. You can start dictating or record meetings from the menu."
+                : "Dictation is ready now. You can add meeting audio later from Settings."
+        }
+
+        return "Allow microphone and accessibility first. Those are the two pieces Transcripted needs to start dictating into other apps."
+    }
+
+    private func isGranted(_ kind: TranscriptedPermissionKind) -> Bool {
+        switch kind {
+        case .microphone:
+            return micGranted
+        case .accessibility:
+            return accessibilityGranted
+        case .screenRecording:
+            return screenRecordingGranted
         }
     }
 
@@ -153,8 +139,6 @@ struct PermissionsOnboardingView: View {
         accessibilityGranted = TranscriptedPermissionAccess.isGranted(.accessibility)
         screenRecordingGranted = TranscriptedPermissionAccess.isGranted(.screenRecording)
     }
-
-    // MARK: - Polling
 
     private func startPolling() {
         pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
@@ -169,48 +153,11 @@ struct PermissionsOnboardingView: View {
         pollTimer = nil
     }
 
-    // MARK: - Navigation
-
-    private func advanceStep() {
-        if currentStep < steps.count - 1 {
-            currentStep += 1
-            // Auto-advance past already-granted steps
-            autoAdvancePastGranted()
-        } else {
-            // All steps done
-            stopPolling()
-            onComplete()
-        }
+    private func completeOnboarding() {
+        guard hasRequiredPermissions else { return }
+        stopPolling()
+        onComplete()
     }
-
-    private func autoAdvancePastGranted() {
-        // Skip steps that are already granted (and required)
-        while currentStep < steps.count && isStepGranted(currentStep) && steps[currentStep].required {
-            currentStep += 1
-        }
-        // If we advanced past all steps, complete
-        if currentStep >= steps.count {
-            stopPolling()
-            onComplete()
-        }
-    }
-
-    // MARK: - Open Settings
-
-    private func openSettingsForStep(_ step: Int) {
-        switch step {
-        case 0:
-            TranscriptedPermissionAccess.openSettings(for: .microphone)
-        case 1:
-            TranscriptedPermissionAccess.openSettings(for: .accessibility)
-        case 2:
-            TranscriptedPermissionAccess.openSettings(for: .screenRecording)
-        default:
-            break
-        }
-    }
-
-    // MARK: - Static Helpers
 
     static var hasCompleted: Bool {
         UserDefaults.standard.bool(forKey: "permissionsOnboardingCompleted")
@@ -218,5 +165,148 @@ struct PermissionsOnboardingView: View {
 
     static func markCompleted() {
         UserDefaults.standard.set(true, forKey: "permissionsOnboardingCompleted")
+    }
+}
+
+private struct FeaturePill: View {
+    let icon: String
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+            Text(title)
+                .font(.caption.weight(.medium))
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(MenuTokens.pillBackground)
+                .overlay(
+                    Capsule().stroke(MenuTokens.pillBorder, lineWidth: 1)
+                )
+        )
+    }
+}
+
+private struct PermissionSetupCard: View {
+    let kind: TranscriptedPermissionKind
+    let granted: Bool
+    let action: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(MenuTokens.pillBackground)
+                        .frame(width: 34, height: 34)
+
+                    Image(systemName: kind.icon)
+                        .font(.system(size: 14, weight: .semibold))
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Text(kind.title)
+                            .font(.subheadline.weight(.semibold))
+
+                        RequirementBadge(title: kind.isRequiredOnFirstLaunch ? "Required" : "Optional")
+                    }
+
+                    Text(kind.summary)
+                        .font(.caption)
+                        .foregroundStyle(MenuTokens.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                StatusBadge(granted: granted)
+            }
+
+            if !granted {
+                Button(kind.onboardingActionTitle, action: action)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(MenuTokens.cardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(MenuTokens.cardBorder, lineWidth: 1)
+                )
+        )
+    }
+}
+
+private struct RequirementBadge: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(MenuTokens.textMuted)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(
+                Capsule()
+                    .fill(MenuTokens.pillBackground)
+                    .overlay(
+                        Capsule().stroke(MenuTokens.pillBorder, lineWidth: 1)
+                    )
+            )
+    }
+}
+
+private struct StatusBadge: View {
+    let granted: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: granted ? "checkmark.circle.fill" : "circle.dashed")
+                .font(.caption.weight(.semibold))
+            Text(granted ? "Ready" : "Pending")
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundStyle(granted ? MenuTokens.statusGreen : MenuTokens.textMuted)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(MenuTokens.pillBackground)
+                .overlay(
+                    Capsule().stroke(MenuTokens.pillBorder, lineWidth: 1)
+                )
+        )
+    }
+}
+
+private struct QuickStartRow: View {
+    let icon: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(MenuTokens.textSecondary)
+                .frame(width: 16)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(MenuTokens.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
