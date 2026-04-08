@@ -51,7 +51,8 @@ enum DateParser {
 
         case "end of month", "eom":
             guard let nextMonth = calendar.date(byAdding: .month, value: 1, to: now) else { return nil }
-            let startOfNextMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: nextMonth))!
+            // Security: avoid force-unwrap; calendar.date(from:) can return nil for malformed components
+            guard let startOfNextMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: nextMonth)) else { return nil }
             return calendar.date(byAdding: .day, value: -1, to: startOfNextMonth)
 
         case "next week":

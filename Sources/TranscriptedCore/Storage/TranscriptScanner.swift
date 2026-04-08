@@ -107,7 +107,9 @@ public enum TranscriptScanner {
                     guard parts.count == 2 else { continue }
 
                     let key = String(parts[0]).trimmingCharacters(in: .whitespaces)
-                    let value = String(parts[1]).trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "\"", with: "")
+                    // Security: trim only surrounding quotes rather than stripping all quotes (avoids mangling embedded escaped-quote values)
+                    let value = String(parts[1]).trimmingCharacters(in: .whitespaces)
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
 
                     switch key {
                     case "date":
