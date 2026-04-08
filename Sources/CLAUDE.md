@@ -13,7 +13,7 @@ Important entry points:
 - `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, and lazy `MeetingSessionController`
 - `Capture/ContextCaptureEngine.swift` — right-option dictation handling, keyboard hotkeys, meeting hotkey routing
 - `UI/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
-- `Meeting/MeetingSessionController.swift` — Draft-side bridge into `TranscriptedCore`
+- `Meeting/MeetingSessionController.swift` — app-side bridge into `TranscriptedCore`
 - `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter
 
 ## Directory map
@@ -23,7 +23,7 @@ Important entry points:
 - `Capture/` — hotkeys, context parsing, capture routing
 - `Dictation/` — dictation transcript persistence
 - `Draft/` — small pure utilities retained from the older draft flow
-- `Meeting/` — Draft-side meeting bridge and transcript restyling
+- `Meeting/` — app-side meeting bridge and transcript restyling
 - `Observability/` — events, debug log, telemetry, beta updater, crash reporting
 - `Speech/` — Parakeet STT and router
 - `Style/` — pure text heuristics retained from the older style-learning system

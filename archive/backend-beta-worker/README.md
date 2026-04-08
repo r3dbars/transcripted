@@ -2,7 +2,7 @@
 
 ## What this directory is
 
-`backend/` contains the legacy beta proxy and telemetry backend. It is a Cloudflare Worker, not part of the macOS app build.
+`archive/backend-beta-worker/` contains the legacy beta proxy and telemetry backend. It is a Cloudflare Worker, not part of the macOS app build.
 
 The current app's core dictation and meeting flows do not depend on this directory. It matters for beta-only update / telemetry / proxy paths.
 
@@ -38,7 +38,7 @@ The Worker expects bindings / secrets such as:
 ## Local commands
 
 ```bash
-cd backend
+cd archive/backend-beta-worker
 npm install
 npm run dev
 npm run deploy

@@ -2,7 +2,7 @@
 
 ## What this directory does
 
-`Sources/Meeting/` is the Draft-side adapter layer for the meeting feature. It keeps app-specific UI, storage, and `ParakeetEngine` ownership outside `TranscriptedCore` while reusing the core transcription pipeline.
+`Sources/Meeting/` is the app-side adapter layer for the meeting feature. It keeps app-specific UI, storage, and `ParakeetEngine` ownership outside `TranscriptedCore` while reusing the core transcription pipeline.
 
 ## Files
 
@@ -11,14 +11,14 @@
 - `MeetingModelDownloader.swift` — loads Parakeet and diarization models together
 - `MeetingSTTAdapter.swift` — adapts Draft's `ParakeetEngine` to `TranscriptedCore.SpeechToTextEngine`
 - `MeetingSessionController.swift` — top-level meeting state machine, model warmup, capture start/stop, failed-meeting actions, transcript restyling
-- `MeetingStoragePaths.swift` — Draft-specific meeting storage layout
+- `MeetingStoragePaths.swift` — current meeting storage layout under the Draft-named compatibility root
 - `MeetingTranscriptStyler.swift` — restyles saved transcripts and renames files after save
 
 ## End-to-end flow
 
 1. `Sources/TranscriptedApp.swift` wires `MeetingSessionController` into `MeetingOverlayController`, the menubar, and the `⌥M` hotkey.
 2. `Sources/TranscriptedAppState.swift` starts background model warmup through `meetingSession.prepareModels(showLoadingUI: false)`.
-3. `MeetingSessionController.startRecording(...)` uses `MeetingCaptureBridge` to start core audio capture into Draft-owned scratch paths.
+3. `MeetingSessionController.startRecording(...)` uses `MeetingCaptureBridge` to start core audio capture into app-owned scratch paths.
 4. `MeetingSessionController.stopRecording(...)` awaits mic/system audio files from the bridge.
 5. `TranscriptionTaskManager.startTranscription(...)` runs the core diarize → transcribe → save pipeline.
 6. A subscription on `taskManager.$lastSavedTranscriptURL` calls `MeetingTranscriptStyler.restyleTranscript(...)` and updates the "recent meetings" UI state.
@@ -28,7 +28,7 @@
 
 - `TranscriptedCore` owns the reusable pipeline. App code in this directory should prefer adapters and protocol seams over direct core edits.
 - `MeetingSTTAdapter.cleanup()` is intentionally a no-op. `TranscriptedAppState` owns `ParakeetEngine` lifecycle for the whole app.
-- Meeting storage must stay under Draft app-support paths, not `TranscriptedCore.default` standalone paths.
+- Meeting storage must stay under the current Draft-named app-support paths, not `TranscriptedCore.default` standalone paths.
 - Live PCM handlers installed through `MeetingCaptureBridge` run on capture threads. Keep them real-time safe.
 
 ## Storage

@@ -38,7 +38,7 @@ Meeting transcripts are currently saved here:
 
 That Draft-named path stays in place for now so local data does not break
 during the transition.
-The MCP and QA tools default to the same Draft app-support tree, with meeting
+The MCP and QA tools default to the same Draft-named app-support tree, with meeting
 artifacts under `~/Library/Application Support/Draft/meetings` and transcripts
 inside that folder's `transcripts/` subdirectory.
 
@@ -91,8 +91,8 @@ transcription do not depend on cloud APIs.
 
 ## What this repo is
 
-`main` currently carries the Draft app codebase, which is becoming the new
-Transcripted direction.
+`main` currently carries the app codebase that came from Draft and now powers
+Transcripted.
 
 The old standalone Transcripted app is preserved on:
 

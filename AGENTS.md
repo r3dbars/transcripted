@@ -2,7 +2,7 @@
 
 ## Current repo truth
 
-- `main` is the Draft-derived Transcripted product.
+- `main` is the current Transcripted product, derived from the earlier Draft codebase.
 - The current app on `main` supports **dictation** and **meetings**.
 - The older draft / ghostwriting flow is not active on `main`. `DictationSessionController` keeps compatibility stubs for removed draft-mode entry points.
 - `Sources/TranscriptedCore/` is an in-repo library consumed through `Sources/Meeting/`. Keep it as a library boundary.
@@ -24,14 +24,14 @@
 
 - `Sources/` — app shell, hotkeys, speech, dictation UI, meeting bridge, shared app paths
 - `Sources/Dictation/` — markdown persistence for completed dictations
-- `Sources/Meeting/` — Draft-side bridge into `TranscriptedCore`
+- `Sources/Meeting/` — app-side bridge into `TranscriptedCore`
 - `Sources/TranscriptedCore/` — reusable meeting transcription library
 - `Tests/` — fast custom Swift test runner plus `TranscriptedCore` package tests
 - `SmokeTests/` — integration smoke for the bundled core library seam
 - `Tools/TranscriptedCLI/` — standalone offline diarization CLI
 - `Tools/TranscriptedMCP/` — read-only MCP server for saved meeting artifacts
 - `Tools/TranscriptedQA/` — artifact validation CLI
-- `backend/` — legacy beta proxy / telemetry backend
+- `archive/backend-beta-worker/` — archived beta proxy / telemetry backend
 
 ## Documentation status
 
@@ -48,8 +48,11 @@ Current source-of-truth docs:
 - `Sources/TranscriptedCore/CLAUDE.md`
 - `Tests/README.md`
 - `docs/storage-paths.md`
-- `backend/README.md`
 - `Tools/TranscriptedCLI/CLAUDE.md`
+
+Beta/distribution-only docs:
+
+- `archive/backend-beta-worker/README.md`
 
 Historical or planning-heavy docs:
 
@@ -80,7 +83,7 @@ Rules:
 ## Testing gotchas
 
 - `run-tests.sh` is a custom `swiftc` runner, not XCTest.
-- Adding a file under `Tests/` is not enough by itself; the file must also be wired into both `run-tests.sh` and `Tests/TestRunner.swift`.
+- Adding a root `Tests/*Tests.swift` file is not enough by itself; it must be registered in `Tests/FastTests.manifest`.
 - Some test files in `Tests/` are historical and are not currently compiled by `run-tests.sh`. `Tests/README.md` calls these out.
 
 ## Storage

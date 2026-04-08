@@ -23,8 +23,8 @@ historical, and which local doc to read before editing a subsystem.
   App bootstrap and initialization order.
 - `Sources/*/CLAUDE.md`
   Local subsystem docs.
-- `backend/CLAUDE.md`
-  Beta worker contract.
+- `archive/backend-beta-worker/CLAUDE.md`
+  Archived beta worker contract.
 - `Tools/*/CLAUDE.md`
   Standalone tool package docs where present.
 - `docs/archive/`
@@ -47,11 +47,11 @@ distinct:
 - `bash build.sh`
   The authoritative app build.
 - `bash run-tests.sh`
-  Curated fast tests for Draft-facing logic.
+  Curated fast tests for app-facing logic.
 - `swift test`
   SPM tests for `TranscriptedCore`.
 - `bash run-integration-smoke.sh`
-  Draft/Core integration smoke.
+  App/Core integration smoke.
 
 Rule of thumb:
 
@@ -64,11 +64,11 @@ Rule of thumb:
 - `Sources/CLAUDE.md`
   App boot order and shared state wiring.
 - `Sources/Meeting/CLAUDE.md`
-  Draft/Core bridge, meeting storage, runtime lifecycle.
+  App/Core bridge, meeting storage, runtime lifecycle.
 - `Sources/TranscriptedCore/CLAUDE.md`
   Library boundary, pipeline layout, embedder seams.
-- `backend/CLAUDE.md`
-  Beta worker endpoints and data model.
+- `archive/backend-beta-worker/CLAUDE.md`
+  Archived beta worker endpoints and data model.
 - `Tools/TranscriptedCLI/CLAUDE.md`
   Standalone diarization CLI.
 
