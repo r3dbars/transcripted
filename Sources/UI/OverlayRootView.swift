@@ -78,10 +78,10 @@ final class OverlayRootView: NSView {
         let dividerH = OverlayTokens.dividerHeight
         let showContent = shouldShowContent()
 
-        // Header at top
-        headerView.frame = NSRect(x: 0, y: bounds.height - headerH, width: w, height: headerH)
-
         if showContent {
+            // Header at top when content is visible underneath it.
+            headerView.frame = NSRect(x: 0, y: bounds.height - headerH, width: w, height: headerH)
+
             // Top divider below header
             topDivider.frame = NSRect(x: 0, y: bounds.height - headerH - dividerH, width: w, height: dividerH)
             topDivider.isHidden = false
@@ -100,6 +100,9 @@ final class OverlayRootView: NSView {
                 subview.frame = contentContainer.bounds
             }
         } else {
+            // Compact state: let the header occupy the full height so its contents can sit
+            // perfectly centered within the pill.
+            headerView.frame = bounds
             topDivider.isHidden = true
             bottomDivider.isHidden = true
             contentContainer.isHidden = true
