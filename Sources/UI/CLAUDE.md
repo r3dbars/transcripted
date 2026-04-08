@@ -53,6 +53,15 @@ Draft-mode UI is not an active product path in this worktree.
 - `MenuIconButton.swift` — icon-only button style for menubar items
 - `MenuOutlineButton.swift` — outlined button style for menubar actions
 - `MenuTokens.swift` — design tokens for menubar views
+- `AgentConnectionWindowController.swift`
+- `AgentConnectionGuide.swift`
+- `AgentConnectionWindowView.swift` — main standalone agent-connect window
+
+The current agent-connect surfaces should keep one simple mental model:
+
+- start with the folder prompt
+- offer MCP as the better supported-agent path
+- keep CLI guidance clearly marked as advanced
 
 ### Settings and Onboarding
 

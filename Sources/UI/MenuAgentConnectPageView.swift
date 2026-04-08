@@ -16,34 +16,34 @@ final class MenuAgentConnectPageView: NSView {
     )
     private let titleLabel = NSTextField(labelWithString: "Connect your agent")
     private let subtitleLabel = NSTextField(wrappingLabelWithString:
-        "Point your agent at local Transcripted transcripts on this Mac."
+        "Start with a simple prompt, then use MCP or the CLI if you want a deeper connection."
     )
-    private let starterPromptLabel = NSTextField(labelWithString: "Starter prompt")
+    private let starterPromptLabel = NSTextField(labelWithString: "Start here")
     private let folderRow = AgentConnectInfoRowView(
         symbolName: "folder",
-        title: "Data source",
-        body: "Meetings and dictations are both available in this local folder."
+        title: "Show your folders",
+        body: "Meetings and dictations are both saved locally on this Mac."
     )
     private let promptRow = AgentConnectInfoRowView(
         symbolName: "text.quote",
-        title: "Copy starter prompt",
-        body: "Paste this into Claude, Codex, or any local agent."
+        title: "Works with any agent",
+        body: "Copy a simple folder-based prompt for Claude, Codex, ChatGPT, or any local agent."
     )
-    private let howToLabel = NSTextField(labelWithString: "How to use it")
+    private let howToLabel = NSTextField(labelWithString: "Other ways to connect")
     private let stepOneRow = AgentConnectInfoRowView(
         symbolName: "1.circle",
-        title: "1. Copy",
-        body: "Copy the starter prompt."
+        title: "1. Start with the prompt",
+        body: "This is the simplest setup and the right default for most people."
     )
     private let stepTwoRow = AgentConnectInfoRowView(
         symbolName: "2.circle",
-        title: "2. Paste",
-        body: "Paste it into your agent's prompt."
+        title: "2. Use MCP if supported",
+        body: "Supported agents can connect directly with read-only Transcripted tools."
     )
     private let stepThreeRow = AgentConnectInfoRowView(
         symbolName: "3.circle",
-        title: "3. Ask",
-        body: "Ask for summaries, action items, or decisions."
+        title: "3. Use the CLI if you're advanced",
+        body: "The CLI is best for scripts, automation, and offline audio work."
     )
 
     private let showFolderButton = MenuOutlineButton(
@@ -172,13 +172,13 @@ final class MenuAgentConnectPageView: NSView {
     }
 
     @objc private func showDraftFolder() {
-        NSWorkspace.shared.activateFileViewerSelecting([AgentConnectGuide.draftFolder])
+        NSWorkspace.shared.activateFileViewerSelecting([AgentConnectionGuide.appSupportFolder])
     }
 
     @objc private func copyStarterPrompt() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(AgentConnectGuide.starterPrompt(), forType: .string)
+        pasteboard.setString(AgentConnectionGuide.starterPrompt(filename: nil), forType: .string)
 
         resetTask?.cancel()
         copyPromptButton.title = "Copied"
@@ -189,39 +189,6 @@ final class MenuAgentConnectPageView: NSView {
             self.copyPromptButton.title = "Copy starter prompt"
             self.copyPromptButton.setSymbol("doc.on.doc", accessibilityLabel: "Copy starter prompt")
         }
-    }
-}
-
-private enum AgentConnectGuide {
-    static var draftFolder: URL {
-        let url = FileManager.default.transcriptedAppSupportDir
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
-
-    static var meetingsFolder: URL {
-        let url = MeetingStoragePaths.transcriptsFolder
-        AgentOutput.writeAgentReadme(to: url)
-        return url
-    }
-
-    static var dictationsFolder: URL {
-        DictationStoragePaths.transcriptsFolder
-    }
-
-    static func starterPrompt() -> String {
-        let meetingPrompt = AgentOutput.clipboardPrompt(folder: meetingsFolder, filename: nil)
-        return """
-        \(meetingPrompt)
-
-        You also have dictation transcripts here:
-        \(dictationsFolder.path)
-
-        Prompt:
-        Use the folder at this path for both:
-        - meetings: \(meetingsFolder.path)
-        - dictations: \(dictationsFolder.path)
-        """
     }
 }
 
