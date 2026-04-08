@@ -1,66 +1,43 @@
 import AppKit
 import SwiftUI
-import TranscriptedCore
 
 struct AgentConnectionContext {
-    let draftFolderURL: URL
+    let appSupportFolderURL: URL
     let meetingsFolderURL: URL
     let dictationsFolderURL: URL
-    let prompt: String
+    let starterPrompt: String
+    let mcpSetupText: String
+    let mcpConfigExample: String
+    let cliSummary: String
+    let cliExamples: String
 
     init(meetingTitle: String?, meetingDate: Date?, transcriptURL: URL?) {
-        let draftFolderURL = FileManager.default.transcriptedAppSupportDir
-        try? FileManager.default.createDirectory(at: draftFolderURL, withIntermediateDirectories: true)
-
-        let meetingsFolderURL = MeetingStoragePaths.transcriptsFolder
-        let dictationsFolderURL = DictationStoragePaths.transcriptsFolder
-        AgentOutput.writeAgentReadme(to: meetingsFolderURL)
-
         let filename = transcriptURL?.deletingPathExtension().lastPathComponent
 
         _ = meetingTitle
         _ = meetingDate
 
-        self.draftFolderURL = draftFolderURL
-        self.meetingsFolderURL = meetingsFolderURL
-        self.dictationsFolderURL = dictationsFolderURL
-        self.prompt = Self.makePrompt(
-            meetingsFolderURL: meetingsFolderURL,
-            dictationsFolderURL: dictationsFolderURL,
-            filename: filename
-        )
+        self.appSupportFolderURL = AgentConnectionGuide.appSupportFolder
+        self.meetingsFolderURL = AgentConnectionGuide.meetingsFolder
+        self.dictationsFolderURL = AgentConnectionGuide.dictationsFolder
+        self.starterPrompt = AgentConnectionGuide.starterPrompt(filename: filename)
+        self.mcpSetupText = AgentConnectionGuide.mcpSetupText
+        self.mcpConfigExample = AgentConnectionGuide.mcpConfigExample
+        self.cliSummary = AgentConnectionGuide.cliSummary
+        self.cliExamples = AgentConnectionGuide.cliExamples
     }
+}
 
-    private static func makePrompt(
-        meetingsFolderURL: URL,
-        dictationsFolderURL: URL,
-        filename: String?
-    ) -> String {
-        var prompt = """
-        I use Transcripted on my Mac.
-
-        Meetings folder:
-        \(meetingsFolderURL.path)
-
-        Dictations folder:
-        \(dictationsFolderURL.path)
-
-        Read AGENT.md and transcripted.json in the meetings folder if they exist.
-        Then help me summarize, search, and organize my transcripts.
-        """
-
-        if let filename {
-            prompt += "\n\nIf helpful, start with this meeting:\n\(filename).json"
-        }
-
-        return prompt
-    }
+private enum AgentConnectionCopyItem: Hashable {
+    case prompt
+    case mcp
+    case cli
 }
 
 @MainActor
 final class AgentConnectionViewModel: ObservableObject {
     @Published var context: AgentConnectionContext
-    @Published var promptCopied = false
+    @Published private var copiedItem: AgentConnectionCopyItem?
 
     private var resetTask: Task<Void, Never>?
 
@@ -72,22 +49,38 @@ final class AgentConnectionViewModel: ObservableObject {
         resetTask?.cancel()
     }
 
-    func copyPrompt() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(context.prompt, forType: .string)
-
-        promptCopied = true
-        resetTask?.cancel()
-        resetTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            guard let self, !Task.isCancelled else { return }
-            self.promptCopied = false
-        }
+    func copyStarterPrompt() {
+        copy(context.starterPrompt, as: .prompt)
     }
 
-    func openDraftFolder() {
-        NSWorkspace.shared.open(context.draftFolderURL)
+    func copyMCPSetup() {
+        copy(
+            """
+            \(context.mcpSetupText)
+
+            \(context.mcpConfigExample)
+            """,
+            as: .mcp
+        )
+    }
+
+    func copyCLIExamples() {
+        copy(
+            """
+            \(context.cliSummary)
+
+            \(context.cliExamples)
+            """,
+            as: .cli
+        )
+    }
+
+    fileprivate func copyLabel(for item: AgentConnectionCopyItem, default title: String) -> String {
+        copiedItem == item ? "Copied" : title
+    }
+
+    func openAppSupportFolder() {
+        NSWorkspace.shared.open(context.appSupportFolderURL)
     }
 
     func reveal(_ url: URL?) {
@@ -105,6 +98,19 @@ final class AgentConnectionViewModel: ObservableObject {
         return FileManager.default.fileExists(atPath: url.path)
     }
 
+    private func copy(_ value: String, as item: AgentConnectionCopyItem) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(value, forType: .string)
+
+        copiedItem = item
+        resetTask?.cancel()
+        resetTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.copiedItem = nil
+        }
+    }
 }
 
 @MainActor
@@ -120,15 +126,16 @@ struct AgentConnectionWindowView: View {
                 .frame(height: 1)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    promptSection
-                    stepsSection
+                VStack(alignment: .leading, spacing: 22) {
+                    startHereSection
+                    mcpSection
+                    cliSection
                     foldersSection
                 }
                 .padding(20)
             }
         }
-        .frame(minWidth: 620, minHeight: 560)
+        .frame(minWidth: 680, minHeight: 620)
         .background(AgentConnectionTheme.background)
     }
 
@@ -139,7 +146,7 @@ struct AgentConnectionWindowView: View {
                     .fill(AgentConnectionTheme.badge)
                     .frame(width: 36, height: 36)
 
-                Image(systemName: "terminal")
+                Image(systemName: "sparkles.rectangle.stack")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(AgentConnectionTheme.accent)
             }
@@ -149,7 +156,7 @@ struct AgentConnectionWindowView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(AgentConnectionTheme.textPrimary)
 
-                Text("Copy the prompt below, then ask your agent about your meetings or dictations.")
+                Text("Start with the copy-paste prompt. If your agent supports MCP, you can give it a direct read-only connection too.")
                     .font(.system(size: 12))
                     .foregroundStyle(AgentConnectionTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -162,50 +169,112 @@ struct AgentConnectionWindowView: View {
         .background(AgentConnectionTheme.background)
     }
 
-    private var promptSection: some View {
+    private var startHereSection: some View {
         AgentConnectionSectionCard(
-            title: "Copy this prompt"
+            title: "Start here",
+            subtitle: "Works with Claude, Codex, ChatGPT, or any agent that can read local files."
         ) {
-            VStack(alignment: .leading, spacing: 14) {
-                Text(viewModel.context.prompt)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(AgentConnectionTheme.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-                    .padding(14)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(AgentConnectionTheme.promptBackground)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(AgentConnectionTheme.divider, lineWidth: 1)
-                )
+            AgentConnectionBodyText("This is the simplest setup and the best default for most people. Give your agent the folders once, then ask normal questions.")
 
-                HStack(spacing: 10) {
-                    Button(viewModel.promptCopied ? "Prompt copied" : "Copy prompt") {
-                        viewModel.copyPrompt()
-                    }
-                    .buttonStyle(AgentConnectionPrimaryButtonStyle())
+            AgentConnectionCodeBlock(text: viewModel.context.starterPrompt)
 
-                    Button("Open folder") {
-                        viewModel.openDraftFolder()
-                    }
-                    .buttonStyle(AgentConnectionSecondaryButtonStyle())
+            HStack(spacing: 10) {
+                Button(viewModel.copyLabel(for: .prompt, default: "Copy prompt")) {
+                    viewModel.copyStarterPrompt()
                 }
+                .buttonStyle(AgentConnectionPrimaryButtonStyle())
+
+                Button("Open Transcripted folder") {
+                    viewModel.openAppSupportFolder()
+                }
+                .buttonStyle(AgentConnectionSecondaryButtonStyle())
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Good first asks")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AgentConnectionTheme.textPrimary)
+
+                ForEach(Array(AgentConnectionGuide.starterExamples.enumerated()), id: \.offset) { index, example in
+                    AgentConnectionInfoRow(
+                        symbolName: "\(index + 1).circle.fill",
+                        title: example,
+                        detail: "Paste the prompt above first, then ask this directly."
+                    )
+                }
+            }
+        }
+    }
+
+    private var mcpSection: some View {
+        AgentConnectionSectionCard(
+            title: "Best on supported agents",
+            subtitle: "MCP gives your agent direct read-only tools instead of making it browse files by hand."
+        ) {
+            AgentConnectionBodyText(viewModel.context.mcpSetupText)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("What the Transcripted MCP server gives you")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AgentConnectionTheme.textPrimary)
+
+                ForEach(Array(AgentConnectionGuide.mcpHighlights.enumerated()), id: \.offset) { index, highlight in
+                    AgentConnectionInfoRow(
+                        symbolName: index == 0 ? "wand.and.stars" : "checkmark.circle.fill",
+                        title: highlight,
+                        detail: "Read-only access to the local context Transcripted already saved on this Mac."
+                    )
+                }
+            }
+
+            AgentConnectionCodeBlock(text: viewModel.context.mcpConfigExample)
+
+            HStack(spacing: 10) {
+                Button(viewModel.copyLabel(for: .mcp, default: "Copy MCP example")) {
+                    viewModel.copyMCPSetup()
+                }
+                .buttonStyle(AgentConnectionPrimaryButtonStyle())
+
+                Button("Show meetings folder") {
+                    viewModel.reveal(viewModel.context.meetingsFolderURL)
+                }
+                .buttonStyle(AgentConnectionSecondaryButtonStyle())
+            }
+        }
+    }
+
+    private var cliSection: some View {
+        AgentConnectionSectionCard(
+            title: "Advanced CLI",
+            subtitle: "Use the terminal when you want scripts, automation, or offline audio work."
+        ) {
+            AgentConnectionBodyText(viewModel.context.cliSummary)
+
+            AgentConnectionCodeBlock(text: viewModel.context.cliExamples)
+
+            HStack(spacing: 10) {
+                Button(viewModel.copyLabel(for: .cli, default: "Copy CLI examples")) {
+                    viewModel.copyCLIExamples()
+                }
+                .buttonStyle(AgentConnectionPrimaryButtonStyle())
+
+                Button("Show dictations folder") {
+                    viewModel.reveal(viewModel.context.dictationsFolderURL)
+                }
+                .buttonStyle(AgentConnectionSecondaryButtonStyle())
             }
         }
     }
 
     private var foldersSection: some View {
         AgentConnectionSectionCard(
-            title: "Your folders"
+            title: "Your folders",
+            subtitle: "All three paths above work from the same local Transcripted data."
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 AgentConnectionFileRow(
                     name: "Meetings",
-                    detail: "Meeting transcripts saved by Transcripted.",
+                    detail: "Structured meeting transcripts, markdown files, and AGENT.md live here.",
                     path: viewModel.context.meetingsFolderURL.path,
                     isAvailable: viewModel.fileExists(viewModel.context.meetingsFolderURL),
                     actionTitle: "Reveal"
@@ -215,39 +284,13 @@ struct AgentConnectionWindowView: View {
 
                 AgentConnectionFileRow(
                     name: "Dictations",
-                    detail: "Dictation transcripts saved by Transcripted.",
+                    detail: "Saved dictation days and entries live here.",
                     path: viewModel.context.dictationsFolderURL.path,
                     isAvailable: viewModel.fileExists(viewModel.context.dictationsFolderURL),
                     actionTitle: "Reveal"
                 ) {
                     viewModel.reveal(viewModel.context.dictationsFolderURL)
                 }
-            }
-        }
-    }
-
-    private var stepsSection: some View {
-        AgentConnectionSectionCard(
-            title: "How it works"
-        ) {
-            VStack(alignment: .leading, spacing: 14) {
-                AgentConnectionStepRow(
-                    number: 1,
-                    title: "Copy the prompt",
-                    detail: "Use the button above."
-                )
-
-                AgentConnectionStepRow(
-                    number: 2,
-                    title: "Paste it into your agent",
-                    detail: "This points the agent to your folders."
-                )
-
-                AgentConnectionStepRow(
-                    number: 3,
-                    title: "Ask for help",
-                    detail: "Try summaries, search, action items, or note cleanup."
-                )
             }
         }
     }
@@ -311,6 +354,73 @@ private struct AgentConnectionSectionCard<Content: View>: View {
     }
 }
 
+private struct AgentConnectionBodyText: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(AgentConnectionTheme.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct AgentConnectionCodeBlock: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 12, design: .monospaced))
+            .foregroundStyle(AgentConnectionTheme.textPrimary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(AgentConnectionTheme.promptBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(AgentConnectionTheme.divider, lineWidth: 1)
+            )
+    }
+}
+
+private struct AgentConnectionInfoRow: View {
+    let symbolName: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbolName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AgentConnectionTheme.accent)
+                .frame(width: 24, height: 24)
+                .background(
+                    Circle()
+                        .fill(AgentConnectionTheme.badge)
+                )
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AgentConnectionTheme.textPrimary)
+
+                Text(detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(AgentConnectionTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
 private struct AgentConnectionFileRow: View {
     let name: String
     let detail: String
@@ -349,36 +459,6 @@ private struct AgentConnectionFileRow: View {
             Button(actionTitle, action: action)
                 .buttonStyle(AgentConnectionSecondaryButtonStyle())
                 .disabled(!isAvailable)
-        }
-    }
-}
-
-private struct AgentConnectionStepRow: View {
-    let number: Int
-    let title: String
-    let detail: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text("\(number)")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(AgentConnectionTheme.accent)
-                .frame(width: 24, height: 24)
-                .background(
-                    Circle()
-                        .fill(AgentConnectionTheme.badge)
-                )
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(AgentConnectionTheme.textPrimary)
-
-                Text(detail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(AgentConnectionTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
     }
 }
