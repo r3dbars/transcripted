@@ -4,18 +4,18 @@
 
 `Sources/TranscriptedCore/` is the reusable meeting transcription library embedded in this repo. It is consumed by Draft through `Sources/Meeting/`, and it can also be tested as a standalone Swift package through the root `Package.swift`.
 
-## Subsystems
+## Subsystems (59 Swift files)
 
-- `Audio/` — mic + system audio capture, recovery, resampling, level metering
-- `Logging/` — shared loggers and JSONL file logging
-- `Models/` — public data types like `TranscriptionResult`, `DisplayStatus`, and metadata builders
-- `Pipeline/` — transcription orchestration and task queue
-- `Protocols/` — host-injected seams such as `SpeechToTextEngine`, `DiarizationEngine`, `SpeakerStore`, `TranscriptNotifier`
-- `Services/` — DI container, model download, path indirection, recording validation, diarization
-- `Speaker/` — speaker DB, matching, clip extraction, naming helpers
-- `Stats/` — recording stats database and service
-- `Storage/` — transcript save, scanner, formatter, JSON sidecars
-- `Utilities/` — date helpers, permissions, transcript utility functions
+- `Audio/` (9 files) — mic + system audio capture, device recovery, resampling, level metering, process tap, buffer writer
+- `Logging/` (2 files) — shared app logger and JSONL file logger
+- `Models/` (4 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, metadata builders
+- `Pipeline/` (4 files) — transcription orchestration, pipeline runner, and task queue
+- `Protocols/` (7 files) — host-injected seams: `SpeechToTextEngine`, `DiarizationEngine`, `SpeakerStore`, `TranscriptNotifier`, `AudioCaptureEngine`, `StatsStore`, `TranscriptStorage`
+- `Services/` (7 files) — DI container (`AppServices`), model download, path indirection, recording validation, diarization, failed transcription manager
+- `Speaker/` (10 files) — speaker DB, embedding matching/clustering, clip extraction, naming policy/coordinator, profile merging, retroactive updater
+- `Stats/` (4 files) — recording stats database, models, queries, and service
+- `Storage/` (4 files) — transcript save, scanner, formatter, JSON sidecar output
+- `Utilities/` (4 files) — date helpers, permissions, transcript utility functions
 
 ## The seams embedders should know
 
