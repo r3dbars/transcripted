@@ -13,6 +13,7 @@ struct TestRunner {
         testStyleUtils()
         testDiffSummary()
         testMeetingTranscriptStyler()
+        testSpeakerNamingPolicy()
         testDictationTranscriptWriter()
 
         print("\n\(totalTests) tests, \(passedTests) passed, \(failedTests) failed")

@@ -15,6 +15,7 @@ swiftc \
     Tests/StyleUtilsTests.swift \
     Tests/DiffSummaryTests.swift \
     Tests/MeetingTranscriptStylerTests.swift \
+    Tests/SpeakerNamingPolicyTests.swift \
     Tests/DictationTranscriptWriterTests.swift \
     Sources/Capture/CapturedContext.swift \
     Sources/Draft/DraftUtils.swift \
@@ -25,6 +26,9 @@ swiftc \
     Sources/DraftConstants.swift \
     Sources/Draft/DiffSummary.swift \
     Sources/Meeting/MeetingTranscriptStyler.swift \
+    Sources/TranscriptedCore/Models/TranscriptionTypes.swift \
+    Sources/TranscriptedCore/Speaker/SpeakerProfile.swift \
+    Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift \
     -framework AppKit \
     -parse-as-library \
     -o build/tests \
