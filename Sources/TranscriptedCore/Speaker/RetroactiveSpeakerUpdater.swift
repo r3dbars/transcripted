@@ -91,8 +91,12 @@ extension TranscriptSaver {
         guard !updates.isEmpty else { return true }
 
         return fileUpdateQueue.sync {
-            guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
-                AppLogger.pipeline.error("Failed to read transcript for name update", ["path": transcriptURL.path])
+            // Resolve the actual file path — the transcript may have been renamed
+            // by MeetingTranscriptStyler between save and naming completion.
+            let resolvedURL = resolveTranscriptURL(transcriptURL, updates: updates)
+
+            guard var content = try? String(contentsOf: resolvedURL, encoding: .utf8) else {
+                AppLogger.pipeline.error("Failed to read transcript for name update", ["path": resolvedURL.path])
                 return false
             }
 
@@ -108,12 +112,12 @@ extension TranscriptSaver {
 
             // Atomic write back
             do {
-                try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
-                AppLogger.pipeline.info("Updated speaker names in transcript", ["path": transcriptURL.lastPathComponent, "updates": "\(updates.count)"])
+                try content.write(to: resolvedURL, atomically: true, encoding: .utf8)
+                AppLogger.pipeline.info("Updated speaker names in transcript", ["path": resolvedURL.lastPathComponent, "updates": "\(updates.count)"])
 
                 // Update JSON sidecar
                 updateAgentJSON(
-                    transcriptURL: transcriptURL,
+                    transcriptURL: resolvedURL,
                     updates: updates,
                     speakerStore: speakerStore
                 )
@@ -124,6 +128,34 @@ extension TranscriptSaver {
                 return false
             }
         }
+    }
+
+    /// Resolve a transcript URL that may have been renamed by MeetingTranscriptStyler.
+    /// Falls back to scanning the parent directory for a .md file containing a matching speaker db_id.
+    static func resolveTranscriptURL(_ url: URL, updates: [SpeakerNameUpdate]) -> URL {
+        if FileManager.default.fileExists(atPath: url.path) { return url }
+
+        AppLogger.pipeline.info("Transcript not at expected path, scanning for renamed file", ["expected": url.lastPathComponent])
+
+        let dir = url.deletingLastPathComponent()
+        guard let firstId = updates.first?.persistentSpeakerId.uuidString,
+              let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+                .filter({ $0.pathExtension == "md" }) else {
+            return url
+        }
+
+        // Read only the YAML frontmatter (first 2 KB) of each file to find the match
+        for file in files {
+            guard let handle = try? FileHandle(forReadingFrom: file) else { continue }
+            let header = handle.readData(ofLength: 2048)
+            try? handle.close()
+            guard let text = String(data: header, encoding: .utf8),
+                  text.contains(firstId) else { continue }
+            AppLogger.pipeline.info("Resolved renamed transcript", ["from": url.lastPathComponent, "to": file.lastPathComponent])
+            return file
+        }
+
+        return url
     }
 
     /// Replace all occurrences of a speaker name throughout a transcript's YAML and body.

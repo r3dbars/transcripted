@@ -66,7 +66,6 @@ final class MenuBarPanelController: NSViewController {
 
         if #available(macOS 14.0, *) {
             content.recentMeetingsView.update(
-                latestSavedMeeting: latestSavedMeetingItem(),
                 meetings: RecentMeetingsScanner.loadRecent(),
                 failedMeetings: appState.meetingSession.failedMeetings,
                 onRetryFailedMeeting: { [weak self] id in
@@ -81,7 +80,6 @@ final class MenuBarPanelController: NSViewController {
             )
         } else {
             content.recentMeetingsView.update(
-                latestSavedMeeting: nil,
                 meetings: RecentMeetingsScanner.loadRecent(),
                 failedMeetings: [],
                 onRetryFailedMeeting: { _ in },
@@ -137,17 +135,6 @@ final class MenuBarPanelController: NSViewController {
         contentView?.shortcutsView.cancelEditing()
         contentView?.showMainPage()
         contentView?.settingsView.dismissTransientUI()
-    }
-
-    private func latestSavedMeetingItem() -> LatestSavedMeetingItem? {
-        guard let transcriptURL = appState.meetingSession.lastSavedTranscriptURL else { return nil }
-
-        let values = try? transcriptURL.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
-        let date = values?.contentModificationDate ?? values?.creationDate ?? Date()
-        let title = appState.meetingSession.lastSavedTitle
-            ?? transcriptURL.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " ")
-
-        return LatestSavedMeetingItem(title: title, subtitle: "Saved \(LatestSavedMeetingItem.dateFormatter.string(from: date))", transcriptURL: transcriptURL)
     }
 
     private func startDictationFromMenu() {
