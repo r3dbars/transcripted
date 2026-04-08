@@ -286,7 +286,7 @@ public final class StatsService: ObservableObject {
 extension StatsService {
 
     /// Create a RecordingMetadata from local transcription result
-    public static func createMetadata(
+    public nonisolated static func createMetadata(
         from result: TranscriptionResult,
         transcriptPath: String?,
         title: String?

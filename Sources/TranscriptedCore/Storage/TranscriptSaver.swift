@@ -115,7 +115,9 @@ public class TranscriptSaver {
         directory: URL? = nil,
         meetingTitle: String? = nil,
         healthInfo: RecordingHealthInfo? = nil,
-        notifier: TranscriptNotifier? = nil
+        notifier: TranscriptNotifier? = nil,
+        speakerStore: (any SpeakerStore)? = nil,
+        statsStore: (any StatsStore)? = nil
     ) -> URL? {
         let saveDir = directory ?? defaultSaveDirectory
 
@@ -161,7 +163,10 @@ public class TranscriptSaver {
                         to: saveDir,
                         stem: stem
                     )
-                    try AgentOutput.writeIndex(to: saveDir, speakerDB: SpeakerDatabase.shared)
+                    try AgentOutput.writeIndex(
+                        to: saveDir,
+                        speakerStore: speakerStore ?? SpeakerDatabase.shared
+                    )
                     AgentOutput.writeAgentReadme(to: saveDir)
                 } catch {
                     AppLogger.pipeline.error("Agent output failed", ["error": error.localizedDescription])
@@ -183,14 +188,12 @@ public class TranscriptSaver {
             }
 
             // Record to stats database (outside queue — dispatches to MainActor)
-            Task { @MainActor in
-                let metadata = StatsService.createMetadata(
-                    from: result,
-                    transcriptPath: savedURL.path,
-                    title: meetingTitle
-                )
-                await StatsService.shared.recordSession(metadata)
-            }
+            let metadata = StatsService.createMetadata(
+                from: result,
+                transcriptPath: savedURL.path,
+                title: meetingTitle
+            )
+            (statsStore ?? StatsDatabase.shared).recordSession(metadata)
         }
 
         return savedURL

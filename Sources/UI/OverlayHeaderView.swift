@@ -181,29 +181,24 @@ final class OverlayHeaderView: NSView {
 
     func update(
         state: FloatingOverlayController.OverlayState,
-        mode: FloatingOverlayController.SessionMode,
-        transcriptExpanded: Bool,
-        draftShortcutHint: String,
         dictationShortcutHint: String,
         loadingTitle: String?
     ) {
-        let _ = transcriptExpanded
-        let _ = draftShortcutHint
         // Mode label text + color
-        switch (state, mode) {
-        case (.listening, .dictation):
+        switch state {
+        case .listening:
             modeLabel.stringValue = "Listening"
             modeLabel.textColor = OverlayTokens.textPrimary
-        case (.drafting, .dictation):
+        case .drafting:
             modeLabel.stringValue = "Transcribing"
             modeLabel.textColor = OverlayTokens.textPrimary
-        case (.success, .dictation):
+        case .success:
             modeLabel.stringValue = "Pasted"
             modeLabel.textColor = OverlayTokens.textPrimary
-        case (.loading, _):
+        case .loading:
             modeLabel.stringValue = loadingTitle ?? "Loading dictation"
             modeLabel.textColor = OverlayTokens.textSecondary
-        case (.idle, _):
+        case .idle:
             modeLabel.stringValue = "Dictation"
             modeLabel.textColor = OverlayTokens.textMuted
         default:
@@ -220,20 +215,20 @@ final class OverlayHeaderView: NSView {
         let showWaveform = state == .listening
         waveformHost.isHidden = !showWaveform
         waveformHost.isActive = showWaveform
-        stopButton.isHidden = !(state == .listening && mode == .dictation)
+        stopButton.isHidden = state != .listening
 
         // Shortcut hint
-        switch (state, mode) {
-        case (.listening, .dictation):
+        switch state {
+        case .listening:
             shortcutHint.stringValue = ""
             shortcutHint.textColor = OverlayTokens.textMuted
-        case (.success, .dictation):
+        case .success:
             shortcutHint.stringValue = ""
             shortcutHint.textColor = OverlayTokens.textMuted
-        case (.loading, _):
+        case .loading:
             shortcutHint.stringValue = "Cancel: \(dictationShortcutHint)"
             shortcutHint.textColor = OverlayTokens.textSecondary
-        case (.drafting, .dictation):
+        case .drafting:
             shortcutHint.stringValue = ""
             shortcutHint.textColor = OverlayTokens.textMuted
         default:

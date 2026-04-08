@@ -9,4 +9,4 @@ Older docs described an `AnalysisEngine` / `InsightCard` prompt-improvement loop
 ## Agent notes
 
 - Treat references to `AnalysisEngine`, `InsightCard`, or automatic prompt rewriting as historical unless those types are reintroduced in code.
-- `Tests/InsightCardTests.swift` still exists, but it is not part of the current `run-tests.sh` wiring.
+- The old `InsightCard` test file has been removed from the current fast suite along with the stale analysis loop references.

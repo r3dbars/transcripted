@@ -1,6 +1,6 @@
 #!/bin/bash
-# run-tests.sh — Compile and run Draft's test suite
-# Only compiles the source files needed by tests (no SwiftUI, Combine, FluidAudio, etc.)
+# run-tests.sh — Compile and run Transcripted's fast utility test suite
+# Only compiles the source files needed by the current pure-function tests.
 
 set -e
 

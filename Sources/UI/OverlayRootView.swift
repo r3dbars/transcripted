@@ -39,7 +39,6 @@ final class OverlayRootView: NSView {
     // MARK: - State tracking
 
     private var currentState: FloatingOverlayController.OverlayState = .idle
-    private var currentMode: FloatingOverlayController.SessionMode = .dictation
     private var currentErrorMessage: String = ""
 
     // MARK: - Init
@@ -118,29 +117,19 @@ final class OverlayRootView: NSView {
 
     func updateForState(
         _ state: FloatingOverlayController.OverlayState,
-        mode: FloatingOverlayController.SessionMode,
-        transcriptExpanded: Bool,
-        hasContext: Bool,
-        draftShortcutHint: String,
         dictationShortcutHint: String,
         errorMessage: String,
         loadingPresentation: FloatingOverlayController.LoadingPresentation,
         loadingElapsedSeconds: Int,
         isTranscribing: Bool,
-        liveTranscript: String,
-        originalDraft: String,
-        reviewText: String
+        liveTranscript: String
     ) {
         currentState = state
-        currentMode = mode
         currentErrorMessage = errorMessage
 
         // Update header
         headerView.update(
             state: state,
-            mode: mode,
-            transcriptExpanded: transcriptExpanded,
-            draftShortcutHint: draftShortcutHint,
             dictationShortcutHint: dictationShortcutHint,
             loadingTitle: state == .loading ? loadingPresentation.title : nil
         )

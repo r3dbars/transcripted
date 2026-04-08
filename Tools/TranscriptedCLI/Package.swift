@@ -1,7 +1,12 @@
 // swift-tools-version: 5.9
+import Foundation
 import PackageDescription
 
-let repoRoot = "../.."
+let repoRoot = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()
+    .deletingLastPathComponent()
+    .deletingLastPathComponent()
+    .path
 
 let package = Package(
     name: "TranscriptedCLI",
@@ -18,15 +23,15 @@ let package = Package(
             path: "Sources/TranscriptedCLI",
             swiftSettings: [
                 .unsafeFlags([
-                    "-I", "\(repoRoot)/.deps-modules",
-                    "-I", "\(repoRoot)/.deps-modules/FastClusterWrapper",
-                    "-I", "\(repoRoot)/.deps-modules/MachTaskSelfWrapper",
-                    "-I", "\(repoRoot)/.deps-modules/yyjson",
+                    "-I", "\(repoRoot)/deps-modules",
+                    "-I", "\(repoRoot)/deps-modules/FastClusterWrapper",
+                    "-I", "\(repoRoot)/deps-modules/MachTaskSelfWrapper",
+                    "-I", "\(repoRoot)/deps-modules/yyjson",
                 ]),
             ],
             linkerSettings: [
                 .unsafeFlags([
-                    "-L\(repoRoot)/.deps-libs",
+                    "-L\(repoRoot)/deps-libs",
                     "-lDraftDeps",
                     "-lc++",
                 ]),

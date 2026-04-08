@@ -4,7 +4,7 @@ struct HealthChecker {
     let dataPath: URL
 
     init(dataPath: URL? = nil) {
-        self.dataPath = dataPath ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Transcripted")
+        self.dataPath = dataPath ?? transcriptedMeetingDirectory()
     }
 
     func validate() -> [ValidationResult] {
@@ -23,7 +23,7 @@ struct HealthChecker {
         }
 
         // Logs directory
-        let logsDir = home.appendingPathComponent("Library/Logs/Transcripted")
+        let logsDir = dataPath.deletingLastPathComponent().appendingPathComponent("logs", isDirectory: true)
         if fm.fileExists(atPath: logsDir.path) {
             results.append(.pass("health/logs-dir", target: logsDir.path))
         } else {

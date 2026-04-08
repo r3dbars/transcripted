@@ -29,6 +29,14 @@ enum MeetingTranscriptStyler {
     }()
 
     static func restyleTranscript(at url: URL) -> StyledMeetingTranscript {
+        styledTranscript(at: url, persistChanges: true)
+    }
+
+    static func displayTranscript(at url: URL) -> StyledMeetingTranscript {
+        styledTranscript(at: url, persistChanges: false)
+    }
+
+    private static func styledTranscript(at url: URL, persistChanges: Bool) -> StyledMeetingTranscript {
         guard let raw = try? String(contentsOf: url, encoding: .utf8),
               let document = parseDocument(raw, fallbackURL: url) else {
             return StyledMeetingTranscript(
@@ -38,6 +46,10 @@ enum MeetingTranscriptStyler {
         }
 
         let title = buildTitle(for: document)
+        guard persistChanges else {
+            return StyledMeetingTranscript(url: url, title: title)
+        }
+
         let frontmatter = renderFrontmatter(lines: document.frontmatterLines, title: title)
         let body = renderBody(document: document, title: title)
         let updated = frontmatter + "\n\n" + body + "\n"
