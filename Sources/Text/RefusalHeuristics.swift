@@ -1,11 +1,11 @@
-// DraftUtils.swift
-// Extracted pure utility functions for testability
+// RefusalHeuristics.swift
+// Extracted pure utility functions for testability.
 
 import Foundation
 
-enum DraftUtils {
-    /// Detect if a draft is the AI refusing/asking for clarification rather than an actual message.
-    /// Used to prevent poisoning the style profile with non-message training pairs.
+enum RefusalHeuristics {
+    /// Detect if text is the model refusing or asking for clarification rather
+    /// than producing an actual message.
     static func looksLikeRefusal(_ text: String) -> Bool {
         let lower = text.lowercased()
         let refusalPhrases = [

@@ -22,7 +22,7 @@ Important entry points:
 - `API/` — beta-only config currently; older API docs are historical
 - `Capture/` — hotkeys, context parsing, capture routing
 - `Dictation/` — dictation transcript persistence
-- `Draft/` — small pure utilities retained from the older draft flow
+- `Text/` — small pure text utilities retained from the earlier drafting flow
 - `Meeting/` — app-side meeting bridge and transcript restyling
 - `Observability/` — events, debug log, telemetry, beta updater, crash reporting
 - `Speech/` — Parakeet STT and router

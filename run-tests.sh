@@ -100,14 +100,14 @@ EOF
 
 APP_SOURCES=(
     "Sources/Capture/CapturedContext.swift"
-    "Sources/Draft/DraftUtils.swift"
+    "Sources/Text/RefusalHeuristics.swift"
     "Sources/Style/StyleUtils.swift"
     "Sources/DraftPaths.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
     "Sources/Dictation/DictationAgentOutput.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"
     "Sources/TranscriptedConstants.swift"
-    "Sources/Draft/DiffSummary.swift"
+    "Sources/Text/DiffSummary.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/TranscriptedCore/Models/TranscriptionTypes.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerProfile.swift"

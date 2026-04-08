@@ -2,7 +2,7 @@
 # Format: <TestFile.swift>:<top-level entry function>
 
 CapturedContextTests.swift:testCapturedContext
-RefusalDetectionTests.swift:testRefusalDetection
+RefusalHeuristicsTests.swift:testRefusalHeuristics
 StyleUtilsTests.swift:testStyleUtils
 DiffSummaryTests.swift:testDiffSummary
 MeetingTranscriptStylerTests.swift:testMeetingTranscriptStyler

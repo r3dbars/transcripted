@@ -1,6 +1,6 @@
 // HotkeyPreferences.swift
 // Data model, persistence, display, and validation for customizable keyboard shortcuts.
-// Stateless enum — follows DraftUtils/StyleUtils pattern for testability.
+// Stateless enum — follows RefusalHeuristics/StyleUtils patterns for testability.
 
 import Carbon
 import AppKit
