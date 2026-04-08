@@ -35,7 +35,7 @@
 
 ## Documentation status
 
-The repo has both current docs and historical docs from the pre-takeover / draft-mode codebase.
+The repo has both current docs and historical docs from the earlier drafting-focused codebase.
 
 Current source-of-truth docs:
 

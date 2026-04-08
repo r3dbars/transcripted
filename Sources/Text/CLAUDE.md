@@ -12,7 +12,7 @@ earlier drafting flow.
 
 ## Agent notes
 
-- The product-level draft mode is removed on `main`; `Sources/UI/DictationSessionController.swift` now handles dictation only and returns a fixed message from removed draft-mode methods.
+- The product-level drafting mode is removed on `main`; `Sources/UI/DictationSessionController.swift` now handles dictation only and returns a fixed message from removed draft-mode methods.
 - `DiffSummary` is still used by `Sources/UI/OverlayDiffStripView.swift` and `Sources/UI/OverlayReviewView.swift`.
 - `RefusalHeuristics.looksLikeRefusal(...)` is still covered by tests, but it belongs to the older ghostwriting domain and is not a live top-level product flow on `main`.
 

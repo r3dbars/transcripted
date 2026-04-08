@@ -2,7 +2,7 @@
 // Privacy-first usage analytics via TelemetryDeck's HTTP API — no SDK, no dependencies.
 //
 // TelemetryDeck is built for Apple developers: no IP storage, no PII, server-side
-// hashing of the user identifier. Matches Draft's local-first privacy positioning.
+// hashing of the user identifier. Matches the app's local-first privacy positioning.
 //
 // SETUP:
 //   1. Create a free TelemetryDeck account at telemetrydeck.com

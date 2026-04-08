@@ -726,7 +726,7 @@ class ParakeetEngine: ObservableObject {
     /// Used by `MeetingSTTAdapter` to satisfy Core's `SpeechToTextEngine` protocol:
     /// Core's TranscriptionPipeline owns its own recording (mic + system audio files via
     /// `Audio.swift`), extracts 16kHz samples per speaker segment, and calls this method
-    /// once per segment. This is distinct from Draft's drafting flow, which uses
+    /// once per segment. This is distinct from the app's regular dictation flow, which uses
     /// `startRecording()` / `transcribe()` to capture and transcribe in one shot.
     ///
     /// - Parameters:

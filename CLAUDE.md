@@ -12,7 +12,7 @@ The old standalone Transcripted app is preserved on:
 - `legacy/transcripted-standalone`
 - `pre-draft-takeover-2026-04-06`
 
-The older draft / ghostwriting flow does not live on `main` anymore. `DictationSessionController` still exposes compatibility stubs for removed draft-mode entry points.
+The older drafting / ghostwriting flow does not live on `main` anymore. `DictationSessionController` still exposes compatibility stubs for removed draft-mode entry points.
 
 ## First reads
 
