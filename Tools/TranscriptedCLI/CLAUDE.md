@@ -1,34 +1,69 @@
 # TranscriptedCLI
 
-## What this tool does
+`Tools/TranscriptedCLI/` is a standalone Swift package for command-line access
+to Transcripted context and offline diarization.
 
-`Tools/TranscriptedCLI/` is a standalone Swift package for offline diarization. It does not build or run the app target.
+It does not build or run the app target.
 
-## Commands
+## Command Groups
+
+### Local Context
+
+- `transcripted-cli context-recent` — list recent meetings and dictations
+- `transcripted-cli context-search <query>` — search across saved meetings and
+  dictations
+- `transcripted-cli list-dictations` — list saved dictation day files
+- `transcripted-cli read-dictation <filename>` — read one dictation day or one
+  entry
+
+By default these commands read:
+
+- meetings: `~/Library/Application Support/Draft/meetings/transcripts`
+- dictations: `~/Library/Application Support/Draft/dictations/transcripts`
+
+They also honor:
+
+- `--data-dir`
+- `--meetings-dir`
+- `--dictations-dir`
+- `TRANSCRIPTED_DATA_DIR`
+- `TRANSCRIPTED_MEETINGS_DIR`
+- `TRANSCRIPTED_DICTATIONS_DIR`
+
+### Offline Audio
 
 - `transcripted-cli diarize <audio>` — diarize one file, output RTTM or JSON
-- `transcripted-cli batch <directory>` — diarize every matching audio file in a directory
+- `transcripted-cli batch <directory>` — diarize matching audio files in a
+  directory
 
 ## Files
 
-- `Package.swift` — Swift package manifest; links against repo-level dependency artifacts in `.deps-libs/` and `.deps-modules/`
-- `Sources/TranscriptedCLI/TranscriptedCLI.swift` — `@main` entry point
-- `Sources/TranscriptedCLI/DiarizeCommand.swift` — single-file command
-- `Sources/TranscriptedCLI/BatchCommand.swift` — directory command
-- `Sources/TranscriptedCLI/ConfigLoader.swift` — JSON-to-`OfflineDiarizerConfig` loader
-- `Sources/TranscriptedCLI/RTTMWriter.swift` — RTTM output formatter
+| File | Purpose |
+|------|---------|
+| `Package.swift` | Swift package manifest; links against repo dependency artifacts |
+| `TranscriptedCLI.swift` | `@main` command root and subcommand registration |
+| `ContextCommands.swift` | CLI entry points for recent/search/dictation commands |
+| `ContextStore.swift` | Shared file-loading and filtering logic for local context |
+| `ContextModels.swift` | Codable models used by the context commands |
+| `DiarizeCommand.swift` | Single-file diarization command |
+| `BatchCommand.swift` | Directory diarization command |
+| `ConfigLoader.swift` | JSON-to-`OfflineDiarizerConfig` loader |
+| `RTTMWriter.swift` | RTTM output formatter |
 
-## Build and run
+## Build And Run
 
 ```bash
 cd Tools/TranscriptedCLI
 swift build
-swift run transcripted-cli diarize /path/to/audio.wav
-swift run transcripted-cli batch /path/to/folder --ext wav
+swift run transcripted-cli context-recent
+swift run transcripted-cli context-search "roadmap"
+swift run transcripted-cli diarize /path/to/audio.wav --json
 ```
 
-## Agent notes
+## Gotchas
 
-- This package depends on repo-level prebuilt FluidAudio artifacts. If those are missing, build the repo dependencies first.
-- The CLI is about diarization only. It does not use the app UI, app storage paths, or the `MeetingSessionController` bridge layer.
-- Changes here should be checked independently from app builds.
+- the context commands and the diarization commands serve different users; do
+  not describe the whole package as diarization-only
+- the diarization commands depend on repo-level artifacts, so run
+  `bash build-deps.sh` first when those are missing
+- changes here should be verified independently from the app build

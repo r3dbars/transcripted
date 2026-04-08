@@ -44,9 +44,18 @@ status.
 - `MenuBarRecentMeetingsView.swift`
 - `MenuBarSettingsView.swift`
 - `MenuAgentConnectPageView.swift`
+- `AgentConnectionWindowController.swift`
+- `AgentConnectionWindowView.swift`
+- `AgentConnectionGuide.swift`
 
 The current popover is organized around header, shortcuts, recent meetings, and
 footer/settings actions.
+
+The agent-connect surfaces should keep one simple mental model:
+
+- start with the folder prompt
+- offer MCP as the better supported-agent path
+- keep CLI guidance clearly marked as advanced
 
 ### Settings And Onboarding
 
