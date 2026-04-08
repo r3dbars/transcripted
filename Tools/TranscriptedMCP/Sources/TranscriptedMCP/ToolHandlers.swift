@@ -471,7 +471,7 @@ private func handleSearchContext(params: CallTool.Parameters, index: TranscriptI
         maxItems: count
     )
 
-    hydrateMeetingTitles(in: &results.results, meetingsDir: meetingsDir)
+    hydrateMeetingTitles(in: &results.results, kind: \.kind, filename: \.filename, title: \.title, meetingsDir: meetingsDir)
 
     if results.results.isEmpty {
         return .init(content: [.text(text: "No context found for \"\(query)\".")])
@@ -488,7 +488,7 @@ private func handleRecentContext(params: CallTool.Parameters, index: TranscriptI
     let dateTo = params.arguments?["date_to"]?.stringValue
 
     var result = try index.listRecentContext(kind: kind, count: count, dateFrom: dateFrom, dateTo: dateTo)
-    hydrateMeetingTitles(in: &result.items, meetingsDir: meetingsDir)
+    hydrateMeetingTitles(in: &result.items, kind: \.kind, filename: \.filename, title: \.title, meetingsDir: meetingsDir)
 
     if result.items.isEmpty {
         return .init(content: [.text(text: "No recent context found.")])
@@ -601,15 +601,15 @@ private func meetingTitle(for filename: String, meetingsDir: URL) -> String {
     return extractTitle(from: content) ?? filename
 }
 
-private func hydrateMeetingTitles(in results: inout [ContextSearchGroup], meetingsDir: URL) {
-    for index in results.indices where results[index].kind == .meeting {
-        results[index].title = meetingTitle(for: results[index].filename, meetingsDir: meetingsDir)
-    }
-}
-
-private func hydrateMeetingTitles(in items: inout [RecentContextItem], meetingsDir: URL) {
-    for index in items.indices where items[index].kind == .meeting {
-        items[index].title = meetingTitle(for: items[index].filename, meetingsDir: meetingsDir)
+private func hydrateMeetingTitles<T>(
+    in collection: inout [T],
+    kind: KeyPath<T, ContextKind>,
+    filename: KeyPath<T, String>,
+    title: WritableKeyPath<T, String>,
+    meetingsDir: URL
+) {
+    for index in collection.indices where collection[index][keyPath: kind] == .meeting {
+        collection[index][keyPath: title] = meetingTitle(for: collection[index][keyPath: filename], meetingsDir: meetingsDir)
     }
 }
 

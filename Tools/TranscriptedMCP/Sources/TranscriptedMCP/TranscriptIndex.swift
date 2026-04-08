@@ -498,22 +498,28 @@ final class TranscriptIndex: @unchecked Sendable {
                 bind(stmt: stmt, index: Int32(i + 1), value: binding)
             }
 
-            var days: [DictationDaySummary] = []
+            // Collect raw day rows before fetching per-entry details.
+            struct RawDayRow {
+                let filename: String
+                let date: String
+                let datetime: String
+                let entryCount: Int
+                let wordCount: Int
+            }
+            var rawDays: [RawDayRow] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
-                days.append(DictationDaySummary(
+                rawDays.append(RawDayRow(
                     filename: colText(stmt, 0),
                     date: colText(stmt, 1),
                     datetime: colText(stmt, 2),
                     entryCount: Int(sqlite3_column_int64(stmt, 3)),
-                    wordCount: Int(sqlite3_column_int64(stmt, 4)),
-                    sourceApps: [],
-                    titles: []
+                    wordCount: Int(sqlite3_column_int64(stmt, 4))
                 ))
             }
 
-            guard !days.isEmpty else { return [] }
+            guard !rawDays.isEmpty else { return [] }
 
-            let filenames = days.map(\.filename)
+            let filenames = rawDays.map(\.filename)
             let placeholders = filenames.map { _ in "?" }.joined(separator: ", ")
             let detailsSQL = """
                 SELECT filename, title, source_app_name
@@ -522,45 +528,39 @@ final class TranscriptIndex: @unchecked Sendable {
                 ORDER BY created_at DESC
             """
 
-            var detailStmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, detailsSQL, -1, &detailStmt, nil) == SQLITE_OK else {
-                return days
-            }
-            defer { sqlite3_finalize(detailStmt) }
-
-            for (i, filename) in filenames.enumerated() {
-                sqlite3_bind_text(detailStmt, Int32(i + 1), (filename as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            }
-
             var titlesByDay: [String: [String]] = [:]
             var appsByDay: [String: Set<String>] = [:]
 
-            while sqlite3_step(detailStmt) == SQLITE_ROW {
-                let filename = colText(detailStmt, 0)
-                let title = colText(detailStmt, 1)
-                let sourceApp = colText(detailStmt, 2)
-
-                if !titlesByDay[filename, default: []].contains(title) {
-                    titlesByDay[filename, default: []].append(title)
+            var detailStmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, detailsSQL, -1, &detailStmt, nil) == SQLITE_OK {
+                defer { sqlite3_finalize(detailStmt) }
+                for (i, filename) in filenames.enumerated() {
+                    sqlite3_bind_text(detailStmt, Int32(i + 1), (filename as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 }
-                if !sourceApp.isEmpty {
-                    appsByDay[filename, default: []].insert(sourceApp)
+                while sqlite3_step(detailStmt) == SQLITE_ROW {
+                    let filename = colText(detailStmt, 0)
+                    let title = colText(detailStmt, 1)
+                    let sourceApp = colText(detailStmt, 2)
+                    if !titlesByDay[filename, default: []].contains(title) {
+                        titlesByDay[filename, default: []].append(title)
+                    }
+                    if !sourceApp.isEmpty {
+                        appsByDay[filename, default: []].insert(sourceApp)
+                    }
                 }
             }
 
-            for index in days.indices {
-                days[index] = DictationDaySummary(
-                    filename: days[index].filename,
-                    date: days[index].date,
-                    datetime: days[index].datetime,
-                    entryCount: days[index].entryCount,
-                    wordCount: days[index].wordCount,
-                    sourceApps: Array(appsByDay[days[index].filename, default: []]).sorted(),
-                    titles: titlesByDay[days[index].filename] ?? []
+            return rawDays.map { row in
+                DictationDaySummary(
+                    filename: row.filename,
+                    date: row.date,
+                    datetime: row.datetime,
+                    entryCount: row.entryCount,
+                    wordCount: row.wordCount,
+                    sourceApps: Array(appsByDay[row.filename, default: []]).sorted(),
+                    titles: titlesByDay[row.filename] ?? []
                 )
             }
-
-            return days
         }
     }
 
