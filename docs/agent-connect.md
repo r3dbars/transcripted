@@ -82,7 +82,7 @@ Example Claude Desktop config:
 Notes:
 
 - `transcripted-mcp` communicates over stdio, not HTTP.
-- By default it reads Transcripted data from the Draft app-support folders.
+- By default it reads Transcripted data from the current Draft-named app-support folders.
 - If needed, override paths with `TRANSCRIPTED_DATA_DIR`,
   `TRANSCRIPTED_MEETINGS_DIR`, `TRANSCRIPTED_DICTATIONS_DIR`, and
   `TRANSCRIPTED_INDEX_DIR`.

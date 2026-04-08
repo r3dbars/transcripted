@@ -2,10 +2,10 @@ import Foundation
 
 // MARK: - Dependency Injection Container
 // Holds all service instances for loose coupling. Core is STT-agnostic —
-// each app target (Transcripted standalone, Draft) constructs its own
+// each app target (Transcripted standalone, the embedded app) constructs its own
 // AppServices by passing a SpeechToTextEngine conformer it owns
 // (ParakeetEngineAdapter in Transcripted standalone; MeetingSTTAdapter in
-// Draft's Sources/Meeting/).
+// `Sources/Meeting/` in this repo).
 //
 // Diarization, stats, and the speaker store still default to Core's
 // concrete implementations via empty extensions (see Step 8 wiring).

@@ -359,9 +359,8 @@ class ParakeetEngine: ObservableObject {
 
         configRecoveryTask = Task { @MainActor [weak self] in
             // Wait for CoreAudio to finish settling the new device graph.
-            try? await Task.sleep(nanoseconds: DraftConstants.audioRecoveryDelay)
+            try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
             guard !Task.isCancelled, let self = self else { return }
-
             do {
                 let newFormat = self.audioEngine.inputNode.outputFormat(forBus: 0)
                 guard newFormat.sampleRate > 0, newFormat.channelCount > 0 else {
@@ -440,7 +439,7 @@ class ParakeetEngine: ObservableObject {
         // Re-warm after a delay to let audio hardware reinitialize.
         // Retry once if the first attempt fails (CoreAudio may need more time).
         Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: DraftConstants.audioRewarmDelay)
+            try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRewarmDelay)
             guard let self = self else { return }
             self.prewarm()
 
@@ -467,7 +466,7 @@ class ParakeetEngine: ObservableObject {
         recordingInterrupted = false
         didReceiveAudioSamples = false
         sampleBuffer.removeAll(keepingCapacity: true)
-        sampleBuffer.reserveCapacity(Int(nativeSampleRate * Double(DraftConstants.audioBufferCapacitySeconds)))
+        sampleBuffer.reserveCapacity(Int(nativeSampleRate * Double(TranscriptedConstants.audioBufferCapacitySeconds)))
 
         let inputNode = audioEngine.inputNode
         let nativeFormat = inputNode.outputFormat(forBus: 0)
@@ -480,7 +479,7 @@ class ParakeetEngine: ObservableObject {
             return false
         }
 
-        inputNode.installTap(onBus: 0, bufferSize: DraftConstants.audioTapBufferSize, format: monoFormat) { [weak self] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: monoFormat) { [weak self] buffer, _ in
             guard let self = self,
                   let channelData = buffer.floatChannelData?[0] else { return }
             let frameLength = Int(buffer.frameLength)
@@ -527,7 +526,7 @@ class ParakeetEngine: ObservableObject {
             // Enforce hard cap — keep only the most recent audioBufferCapacitySeconds of audio.
             // Amortized compaction: trim once per second of overflow rather than on every tap
             // callback, to avoid O(n) memmoves at ~47Hz.
-            let maxSamples = Int(self.nativeSampleRate) * DraftConstants.audioBufferCapacitySeconds
+            let maxSamples = Int(self.nativeSampleRate) * TranscriptedConstants.audioBufferCapacitySeconds
             if self.pendingSamples.count > maxSamples + Int(self.nativeSampleRate) {
                 self.pendingSamples.removeFirst(self.pendingSamples.count - maxSamples)
             }
@@ -535,7 +534,7 @@ class ParakeetEngine: ObservableObject {
 
             // Consumer 3: Audio level metering (~20Hz throttled)
             let now = CFAbsoluteTimeGetCurrent()
-            guard now - self.lastLevelUpdate > DraftConstants.audioMeteringInterval else { return }
+            guard now - self.lastLevelUpdate > TranscriptedConstants.audioMeteringInterval else { return }
             self.lastLevelUpdate = now
 
             var sumOfSquares: Float = 0
@@ -545,7 +544,7 @@ class ParakeetEngine: ObservableObject {
             }
             let rms = sqrt(sumOfSquares / Float(max(1, frameLength)))
             let dB = rms > 0.0001 ? 20.0 * log10(rms) : -60.0
-            let normalized = max(0.0, min(1.0, (dB - DraftConstants.audioLevelFloorDB) / (DraftConstants.audioLevelCeilingDB - DraftConstants.audioLevelFloorDB)))
+            let normalized = max(0.0, min(1.0, (dB - TranscriptedConstants.audioLevelFloorDB) / (TranscriptedConstants.audioLevelCeilingDB - TranscriptedConstants.audioLevelFloorDB)))
 
             Task { @MainActor [weak self] in
                 self?.audioLevel = normalized
@@ -599,7 +598,7 @@ class ParakeetEngine: ObservableObject {
     private func startAudioWatchdog() {
         audioWatchdogTask?.cancel()
         audioWatchdogTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: DraftConstants.audioWatchdogTimeout)
+            try? await Task.sleep(nanoseconds: TranscriptedConstants.audioWatchdogTimeout)
             guard let self = self, self.isRecording, !Task.isCancelled else { return }
 
             let sampleCount = self.pendingSamplesLock.withLock {
@@ -626,7 +625,7 @@ class ParakeetEngine: ObservableObject {
             self.audioLevel = 0
 
             // Brief delay for hardware to reinitialize
-            try? await Task.sleep(nanoseconds: DraftConstants.audioRecoveryDelay)
+            try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
             guard !Task.isCancelled else { return }
 
             // Retry once — isRecoveryAttempt prevents another watchdog
@@ -779,7 +778,7 @@ class ParakeetEngine: ObservableObject {
     /// Used by `MeetingSTTAdapter` to satisfy Core's `SpeechToTextEngine` protocol:
     /// Core's TranscriptionPipeline owns its own recording (mic + system audio files via
     /// `Audio.swift`), extracts 16kHz samples per speaker segment, and calls this method
-    /// once per segment. This is distinct from Draft's drafting flow, which uses
+    /// once per segment. This is distinct from the app's regular dictation flow, which uses
     /// `startRecording()` / `transcribe()` to capture and transcribe in one shot.
     ///
     /// - Parameters:

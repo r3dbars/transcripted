@@ -8,7 +8,7 @@ import Foundation
 /// writers) takes a `CoreStoragePaths` instance at init and uses it to resolve
 /// concrete URLs.
 ///
-/// This allows embedders (e.g. the Draft app) to redirect all Core output to a
+/// This allows embedders (e.g. the app in this repo) to redirect all Core output to a
 /// different location without patching Core internals. The standalone
 /// Transcripted app uses `.default` which mirrors the historic layout.
 public struct CoreStoragePaths: Sendable {

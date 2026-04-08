@@ -97,7 +97,7 @@ final class MenuAgentConnectPageView: NSView {
         addSubview(backButton)
 
         showFolderButton.target = self
-        showFolderButton.action = #selector(showDraftFolder)
+        showFolderButton.action = #selector(showAppSupportFolder)
         addSubview(showFolderButton)
 
         copyPromptButton.target = self
@@ -171,7 +171,7 @@ final class MenuAgentConnectPageView: NSView {
         onBack?()
     }
 
-    @objc private func showDraftFolder() {
+    @objc private func showAppSupportFolder() {
         NSWorkspace.shared.activateFileViewerSelecting([AgentConnectionGuide.appSupportFolder])
     }
 

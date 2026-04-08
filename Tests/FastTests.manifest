@@ -1,0 +1,12 @@
+# Fast test manifest
+# Format: <TestFile.swift>:<top-level entry function>
+
+CapturedContextTests.swift:testCapturedContext
+RefusalHeuristicsTests.swift:testRefusalHeuristics
+StyleUtilsTests.swift:testStyleUtils
+DiffSummaryTests.swift:testDiffSummary
+MeetingTranscriptStylerTests.swift:testMeetingTranscriptStyler
+SpeakerNamingPolicyTests.swift:testSpeakerNamingPolicy
+DictationTranscriptWriterTests.swift:testDictationTranscriptWriter
+DictationAgentOutputTests.swift:testDictationAgentOutput
+DictationSoundsTests.swift:testDictationSounds

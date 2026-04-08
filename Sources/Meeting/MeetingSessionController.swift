@@ -1,11 +1,11 @@
 // MeetingSessionController.swift
-// Top-level @MainActor ObservableObject that wires TranscriptedCore into Draft.
+// Top-level @MainActor ObservableObject that wires TranscriptedCore into the app.
 // Owns Core's DI container (AppServices), the capture bridge, the task manager,
-// and the model downloader. Exposes @Published state for Draft's meeting UI to
+// and the model downloader. Exposes @Published state for the meeting UI to
 // bind against.
 //
 // Boot sequence:
-//   1. init() constructs all Core services with Draft-flavored CoreStoragePaths
+//   1. init() constructs all Core services with app-owned CoreStoragePaths
 //      so transcripts, speakers DB, stats DB, failed-queue, clips, and logs all
 //      live under ~/Library/Application Support/Draft/meetings/.
 //   2. prepareModels() loads Parakeet + PyAnnote/WeSpeaker/Sortformer. Safe to
@@ -136,9 +136,9 @@ final class MeetingSessionController: ObservableObject {
 
     // MARK: - Init
 
-    /// Construct the full Core stack with Draft storage isolation.
+    /// Construct the full Core stack with app-owned storage isolation.
     ///
-    /// - Parameter parakeet: Draft's existing ParakeetEngine instance. Shared
+    /// - Parameter parakeet: The app's shared ParakeetEngine instance. Shared
     ///   with STTRouter so we do not spin up a second AsrManager.
     init(parakeet: ParakeetEngine) {
         self.parakeetEngine = parakeet
@@ -146,7 +146,7 @@ final class MeetingSessionController: ObservableObject {
         // tries to write to it. MeetingStoragePaths.root is idempotent.
         _ = MeetingStoragePaths.root
 
-        // Build a Draft-flavored CoreStoragePaths. Every Core component that
+        // Build app-owned CoreStoragePaths. Every Core component that
         // accepts a `paths:` parameter gets this instance so nothing leaks to
         // ~/Documents/Transcripted.
         self.storagePaths = CoreStoragePaths(
@@ -161,17 +161,17 @@ final class MeetingSessionController: ObservableObject {
         )
 
         // Capture bridge owns an `Audio` instance with our storage paths so
-        // raw mic/system WAV captures land in the Draft scratch folder.
+        // raw mic/system WAV captures land in the app scratch folder.
         self.capture = MeetingCaptureBridge(audio: Audio(paths: storagePaths))
 
-        // STT: wrap Draft's ParakeetEngine in the Core-facing adapter.
+        // STT: wrap the app's ParakeetEngine in the Core-facing adapter.
         self.sttAdapter = MeetingSTTAdapter(engine: parakeet)
 
         // Diarization: Core's concrete DiarizationService already conforms to
         // DiarizationEngine via an empty extension (see DiarizationService.swift).
         self.diarization = DiarizationService()
 
-        // Speaker store: Draft-owned SQLite file under meetings/.
+        // Speaker store: app-owned SQLite file under meetings/.
         self.speakerDatabase = SpeakerDatabase(path: storagePaths.speakerDB.path)
         self.statsDatabase = StatsDatabase(path: storagePaths.statsDB.path)
 
@@ -179,7 +179,7 @@ final class MeetingSessionController: ObservableObject {
         // under our meetings directory, not ~/Documents/Transcripted.
         // TODO: Phase 2 ships without failed-transcription recovery for meeting
         // mode — we construct the manager because TranscriptionTaskManager
-        // requires it, but nothing in Draft currently drains the failed queue
+        // requires it, but nothing in the app currently drains the failed queue
         // or exposes retry UI. Follow-up work lands in a later phase.
         self.failedManager = FailedTranscriptionManager(paths: storagePaths)
 

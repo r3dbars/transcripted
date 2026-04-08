@@ -23,7 +23,7 @@ final class MenuBarContentView: NSView {
     private let footerDivider = NSView()
     private var currentPage: Page = .main
 
-    weak var appState: DraftAppState?
+    weak var appState: TranscriptedAppState?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
