@@ -1,35 +1,54 @@
-# Sources Root
+# Sources overview
 
-## What This Contains
+## Current runtime
 
-Top-level app bootstrap and shared configuration for the Draft-first app that now lives in `r3dbars/transcripted`.
+`Sources/` is the app target. On `main`, the app is centered on:
 
-Current root Swift files: **5**
+- dictation capture and paste-back
+- meeting capture, transcription, and transcript browsing
 
-| File | Purpose |
-|---|---|
-| `DraftApp.swift` | App entry point, scene setup, and top-level boot orchestration |
-| `DraftAppState.swift` | Shared app state container used across the app lifecycle |
-| `DraftConstants.swift` | Cross-cutting constants and static configuration values |
-| `DraftPaths.swift` | Filesystem paths and data-location helpers |
-| `HotkeyPreferences.swift` | User-configurable hotkey preferences and persistence |
+Important entry points:
 
-## Current Source Layout
+- `DraftApp.swift` — app entry point, menubar wiring, popover, overlay setup
+- `DraftAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, and lazy `MeetingSessionController`
+- `Capture/ContextCaptureEngine.swift` — right-option dictation handling, keyboard hotkeys, meeting hotkey routing
+- `UI/DraftSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
+- `Meeting/MeetingSessionController.swift` — Draft-side bridge into `TranscriptedCore`
+- `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter
 
-`Sources/` currently contains **122** Swift files total, grouped roughly like this:
-- `Accessibility/` — AX helpers
-- `API/` — currently only `BetaConfig.swift`
-- `Capture/` — screenshot/context capture
-- `Dictation/` — dictation session plumbing
-- `Draft/` — pure draft/diff helpers
-- `Meeting/` — meeting capture and review pipeline
-- `Observability/` — logging, telemetry, crash/update hooks
-- `Speech/` — Parakeet STT wrapper
-- `Style/` — style-learning utilities
-- `UI/` — AppKit views/controllers
+## Directory map
 
-Historical placeholder directories like `Analysis/`, `Feedback/`, `Local/`, and `Prompts/` still have CLAUDE docs checked in, but currently have no live Swift files on `main`.
+- `Accessibility/` — AX helpers for overlay positioning
+- `API/` — beta-only config currently; older API docs are historical
+- `Capture/` — hotkeys, context parsing, capture routing
+- `Dictation/` — dictation transcript persistence
+- `Draft/` — small pure utilities retained from the older draft flow
+- `Meeting/` — Draft-side meeting bridge and transcript restyling
+- `Observability/` — events, debug log, telemetry, beta updater, crash reporting
+- `Speech/` — Parakeet STT and router
+- `Style/` — pure text heuristics retained from the older style-learning system
+- `TranscriptedCore/` — shared library boundary
+- `UI/` — menubar, overlays, settings, recent meetings, speaker naming
 
-## Gotchas
-- The old standalone Transcripted architecture docs are stale for `main`; use this file plus the active subdirectory CLAUDE docs.
-- If you are looking for the current onboarding flow, it now lives in `Sources/UI/PermissionsOnboardingView.swift`, not an older multi-step onboarding tree.
+## Read before editing
+
+- touching dictation persistence: `Sources/Dictation/CLAUDE.md`
+- touching meeting flow: `Sources/Meeting/CLAUDE.md`
+- touching core library or meeting pipeline internals: `Sources/TranscriptedCore/CLAUDE.md`
+- touching STT / recording lifecycle: `Sources/Speech/CLAUDE.md`
+- touching tests or package boundaries: `Tests/README.md`
+
+## Placeholder subdirectories
+
+Some subdirectories now exist mainly as placeholders or retained utility areas.
+Their local docs call this out directly:
+
+- `API/`
+- `Analysis/`
+- `Feedback/`
+- `Local/`
+- `Prompts/`
+- parts of `Draft/` and `Style/`
+
+Prefer the local doc plus the actual Swift file list before assuming an older
+Draft-era subsystem is still live.

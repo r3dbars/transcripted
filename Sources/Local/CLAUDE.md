@@ -1,11 +1,13 @@
-# Local
+# Local directory
 
-## Current State
+## Current status
 
-This directory is currently a **documentation-only placeholder** on `main`.
+No Swift sources currently live in `Sources/Local/` on `main`.
 
-Current Swift files: **0**
+Older docs in this directory described an `MLXEngine`, local OCR helpers, and a local inference manager. Those sources are not present in the current tree.
 
-## Notes
-- Prior local-inference documentation in this folder does not match the current Draft-first tree.
-- On-device inference and OCR responsibilities are currently represented through other active modules, not live Swift files here.
+## Agent notes
+
+- Do not assume a local LLM or OCR pipeline is available on `main` just because older markdown mentions it.
+- If you need current STT behavior, read `Sources/Speech/CLAUDE.md`.
+- If you need current meeting transcription behavior, read `Sources/Meeting/CLAUDE.md` and `Sources/TranscriptedCore/CLAUDE.md`.

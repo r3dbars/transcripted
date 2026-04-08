@@ -1,11 +1,12 @@
-# Analysis
+# Analysis directory
 
-## Current State
+## Current status
 
-This directory is currently a **documentation-only placeholder** on `main`.
+No Swift sources currently live in `Sources/Analysis/` on `main`.
 
-Current Swift files: **0**
+Older docs described an `AnalysisEngine` / `InsightCard` prompt-improvement loop. That code is not present in the current tree.
 
-## Notes
-- Historical analysis-engine code is not present in this directory on the current branch.
-- If analysis-related logic returns here later, update this doc alongside the first restored Swift file.
+## Agent notes
+
+- Treat references to `AnalysisEngine`, `InsightCard`, or automatic prompt rewriting as historical unless those types are reintroduced in code.
+- `Tests/InsightCardTests.swift` still exists, but it is not part of the current `run-tests.sh` wiring.

@@ -1,15 +1,21 @@
-# Style
+# Style utilities
 
-## What This Contains
+## Current status
 
-Small pure utilities for style-learning and style-application behavior.
+`Sources/Style/` currently contains only `StyleUtils.swift`.
 
-Current Swift files: **1**
+Older docs describing `StyleEngine`, onboarding flows, and `style.md` refinement do not match the current tree on `main`.
 
-| File | Purpose |
-|---|---|
-| `StyleUtils.swift` | Pure helper functions extracted from style-learning logic for reuse and testability |
+## Current file
 
-## Notes
-- The current branch does not have a larger multi-file style engine in this directory.
-- Keep this doc small unless style logic expands again.
+- `StyleUtils.swift` — pure helpers for refinement scheduling, edit-distance heuristics, and extracting recent example text from a historical `style.md` shape
+
+## Agent notes
+
+- This directory is now utility-only. There is no live `StyleEngine` source here.
+- `Sources/Draft/DiffSummary.swift` reuses `StyleUtils.wordEditDistance(...)`.
+- If you change these heuristics, update the tests.
+
+## Test coverage
+
+- `Tests/StyleUtilsTests.swift`
