@@ -26,7 +26,7 @@ swiftc \
     Sources/DraftConstants.swift \
     Sources/Draft/DiffSummary.swift \
     Sources/Meeting/MeetingTranscriptStyler.swift \
-    Sources/UI/DictationSounds.swift \
+    Sources/UI/AppSoundPlayer.swift \
     -framework AppKit \
     -parse-as-library \
     -o build/tests \

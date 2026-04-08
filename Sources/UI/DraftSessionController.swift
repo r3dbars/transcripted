@@ -201,7 +201,7 @@ class DraftSessionController: ObservableObject {
             return
         }
         appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
-        DictationSounds.play(.start)
+        AppSoundPlayer.shared.play(.dictationStart)
 
         // Start session timeout — auto-cancel after 5 minutes to prevent stuck sessions
         installSessionTimeout()
@@ -262,7 +262,6 @@ class DraftSessionController: ObservableObject {
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
         overlayController.state = .drafting
-        DictationSounds.play(.stop)
 
         appState.sttRouter.stopRecording()
         streamingTask?.cancel()
@@ -289,7 +288,7 @@ class DraftSessionController: ObservableObject {
                 appState.logger.log("DICTATION | no transcription, cancelling")
                 EventReporter.shared.capture(level: .warning, engine: "overlay", event: "no_voice_input",
                     message: "Dictation transcription empty")
-                DictationSounds.play(.noSpeech)
+                AppSoundPlayer.shared.play(.noSpeech)
                 overlayController.showNoSpeechAndDismiss()
                 isDictating = false
                 return
@@ -320,10 +319,9 @@ class DraftSessionController: ObservableObject {
             )
             switch pasteOutcome {
             case .pasted:
-                DictationSounds.play(.pasted)
+                AppSoundPlayer.shared.play(.dictationDelivered)
                 overlayController.showSuccessAndDismiss()
             case .copied(let message), .failed(let message):
-                DictationSounds.play(.error)
                 overlayController.showError(message)
             }
             isDictating = false
@@ -355,7 +353,7 @@ class DraftSessionController: ObservableObject {
         if appState.sttRouter.isRecording {
             appState.sttRouter.cancel()
         }
-        DictationSounds.play(.cancel)
+        AppSoundPlayer.shared.play(.dictationCancelled)
         overlayController.hideWithCancelAnimation()
         isDictating = false
         appState.logger.log("DICTATION | cancelled")

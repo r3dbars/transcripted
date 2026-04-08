@@ -447,6 +447,7 @@ final class MeetingSessionController: ObservableObject {
                                 ]
                             )
                         )
+                        AppSoundPlayer.shared.play(.meetingTranscriptComplete)
                         self.state = .ready
                     case .failed(let message):
                         DiagnosticsTrail.record(

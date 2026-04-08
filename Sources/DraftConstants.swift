@@ -110,6 +110,16 @@ enum DraftConstants {
     static let errorDismissDelay: UInt64 = 2_500_000_000  // 2.5 seconds
     static let noSpeechDismissDelay: UInt64 = 800_000_000  // 0.8 seconds — fast dismiss for empty recordings
 
+    // MARK: - Feedback Sounds
+
+    /// Output volume for short overlay confirmation cues
+    static let overlayCueVolume: Float = 0.7
+
+    /// Bundled filenames for app feedback cues (stored in Resources/Sounds/)
+    static let listeningStartSoundFileName = "dictation-start.mp3"
+    static let dictationDeliveredSoundFileName = "dictation-delivered.mp3"
+    static let meetingTranscriptCompleteSoundFileName = "meeting-transcript-complete.mp3"
+
     // MARK: - Hotkeys
 
     /// Minimum interval between accepted hotkey actions.
