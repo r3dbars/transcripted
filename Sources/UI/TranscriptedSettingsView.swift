@@ -3,6 +3,7 @@ import AppKit
 
 struct TranscriptedSettingsView: View {
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
+    @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var permissionStates = PermissionSnapshot.current()
 
     var body: some View {
@@ -32,6 +33,23 @@ struct TranscriptedSettingsView: View {
                     Text(rightOptionEnabled
                         ? "A quick tap of the right Option key will also start dictation."
                         : "Dictation will only use the configured keyboard shortcut."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                SettingsSection(title: "Feedback", detail: "Use subtle macOS system sounds to confirm dictation state changes.") {
+                    Toggle("Play dictation feedback sounds", isOn: Binding(
+                        get: { uiSoundsEnabled },
+                        set: { newValue in
+                            uiSoundsEnabled = newValue
+                            UISoundPreferences.setEnabled(newValue)
+                        }
+                    ))
+
+                    Text(uiSoundsEnabled
+                        ? "Transcripted will play quiet cues when dictation starts, stops, completes, or ends with no speech."
+                        : "Dictation sounds are off."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -70,6 +88,7 @@ struct TranscriptedSettingsView: View {
         .onAppear {
             refreshPermissions()
             rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
+            uiSoundsEnabled = UISoundPreferences.isEnabled()
         }
     }
 

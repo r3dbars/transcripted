@@ -201,6 +201,7 @@ class DraftSessionController: ObservableObject {
             return
         }
         appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
+        DictationSounds.play(.start)
 
         // Start session timeout — auto-cancel after 5 minutes to prevent stuck sessions
         installSessionTimeout()
@@ -261,6 +262,7 @@ class DraftSessionController: ObservableObject {
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
         overlayController.state = .drafting
+        DictationSounds.play(.stop)
 
         appState.sttRouter.stopRecording()
         streamingTask?.cancel()
@@ -287,6 +289,7 @@ class DraftSessionController: ObservableObject {
                 appState.logger.log("DICTATION | no transcription, cancelling")
                 EventReporter.shared.capture(level: .warning, engine: "overlay", event: "no_voice_input",
                     message: "Dictation transcription empty")
+                DictationSounds.play(.noSpeech)
                 overlayController.showNoSpeechAndDismiss()
                 isDictating = false
                 return
@@ -317,8 +320,10 @@ class DraftSessionController: ObservableObject {
             )
             switch pasteOutcome {
             case .pasted:
+                DictationSounds.play(.pasted)
                 overlayController.showSuccessAndDismiss()
             case .copied(let message), .failed(let message):
+                DictationSounds.play(.error)
                 overlayController.showError(message)
             }
             isDictating = false
@@ -350,6 +355,7 @@ class DraftSessionController: ObservableObject {
         if appState.sttRouter.isRecording {
             appState.sttRouter.cancel()
         }
+        DictationSounds.play(.cancel)
         overlayController.hideWithCancelAnimation()
         isDictating = false
         appState.logger.log("DICTATION | cancelled")
