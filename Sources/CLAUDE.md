@@ -30,6 +30,10 @@ Important entry points:
 - `TranscriptedCore/` — shared library boundary
 - `UI/` — menubar, overlays, settings, recent meetings, speaker naming
 
+The historical planning docs that used to live alongside older placeholder
+areas were moved under `docs/archive/` so the source tree reads more like the
+live app surface and less like a half-finished subsystem map.
+
 ## Read before editing
 
 - touching dictation persistence: `Sources/Dictation/CLAUDE.md`
@@ -37,18 +41,6 @@ Important entry points:
 - touching core library or meeting pipeline internals: `Sources/TranscriptedCore/CLAUDE.md`
 - touching STT / recording lifecycle: `Sources/Speech/CLAUDE.md`
 - touching tests or package boundaries: `Tests/README.md`
-
-## Placeholder subdirectories
-
-Some subdirectories now exist mainly as placeholders or retained utility areas.
-Their local docs call this out directly:
-
-- `API/`
-- `Analysis/`
-- `Feedback/`
-- `Local/`
-- `Prompts/`
-- parts of `Draft/` and `Style/`
 
 Prefer the local doc plus the actual Swift file list before assuming an older
 Draft-era subsystem is still live.

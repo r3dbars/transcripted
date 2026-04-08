@@ -57,5 +57,5 @@ Rules:
 ## Documentation status
 
 Most repo-level docs have now been resynced to the current dictation +
-meetings codebase. Historical context still lives mainly under `docs/merge/`,
-`docs/todo/`, and the old `.claude` QA skill.
+meetings codebase. Historical context now lives mainly under `docs/archive/`
+and the old `.claude` QA skill.

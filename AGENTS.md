@@ -53,13 +53,12 @@ Current source-of-truth docs:
 
 Historical or planning-heavy docs:
 
-- `docs/merge/`
-- `docs/todo/`
+- `docs/archive/`
 - `.claude/skills/transcripted-qa/SKILL.md`
 
-Some `Sources/*/CLAUDE.md` files now intentionally document that the directory
-is a placeholder or a retained utility area rather than a live subsystem. Treat
-those notes as current.
+The remaining `Sources/*/CLAUDE.md` files describe either live subsystems or
+small retained utility areas. The historical merge/todo docs now live under
+`docs/archive/`, and the old placeholder-only source docs were removed.
 
 ## Build and test
 

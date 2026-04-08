@@ -27,10 +27,8 @@ historical, and which local doc to read before editing a subsystem.
   Beta worker contract.
 - `Tools/*/CLAUDE.md`
   Standalone tool package docs where present.
-- `docs/merge/`
-  Historical merge/extraction planning docs.
-- `docs/todo/`
-  Historical notes or future-facing backlog material.
+- `docs/archive/`
+  Historical merge/todo docs and other archived planning notes.
 
 ## What To Trust Most
 
@@ -39,7 +37,7 @@ When docs disagree, prefer:
 1. current repo-level docs
 2. current source files
 3. current local `CLAUDE.md` files whose file lists match the tree
-4. `docs/merge/` and `docs/todo/` only as context
+4. `docs/archive/` only as context
 
 ## Validation Layers
 
@@ -78,8 +76,7 @@ Rule of thumb:
 
 Treat these as reference, not source of truth for runtime behavior on `main`:
 
-- `docs/merge/*`
-- `docs/todo/code-review.md`
+- `docs/archive/*`
 - older cloud/API references in comments or outdated docs
 
 ## When To Update Docs
