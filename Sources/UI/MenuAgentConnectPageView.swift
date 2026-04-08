@@ -110,6 +110,7 @@ final class MenuAgentConnectPageView: NSView {
 
         let pad: CGFloat = 0
         let width = bounds.width - pad * 2
+        let inlineButtonSpacing: CGFloat = 8
         var y: CGFloat = 0
 
         let backWidth = max(72, backButton.fittingSize.width)
@@ -125,20 +126,24 @@ final class MenuAgentConnectPageView: NSView {
         starterPromptLabel.frame = NSRect(x: pad, y: y, width: width, height: 16)
         y += 22
 
-        promptRow.frame = NSRect(x: pad, y: y, width: width, height: AgentConnectInfoRowView.height)
+        let copyPromptWidth = max(132, copyPromptButton.fittingSize.width)
+        let promptRowWidth = max(180, width - copyPromptWidth - inlineButtonSpacing)
+        promptRow.frame = NSRect(x: pad, y: y, width: promptRowWidth, height: AgentConnectInfoRowView.height)
         copyPromptButton.frame = NSRect(
-            x: bounds.width - copyPromptButton.fittingSize.width,
+            x: promptRow.frame.maxX + inlineButtonSpacing,
             y: y + 14,
-            width: max(132, copyPromptButton.fittingSize.width),
+            width: copyPromptWidth,
             height: MenuTokens.secondaryButtonSize
         )
         y += AgentConnectInfoRowView.height + 14
 
-        folderRow.frame = NSRect(x: pad, y: y, width: width, height: AgentConnectInfoRowView.height)
+        let showFolderWidth = max(130, showFolderButton.fittingSize.width)
+        let folderRowWidth = max(180, width - showFolderWidth - inlineButtonSpacing)
+        folderRow.frame = NSRect(x: pad, y: y, width: folderRowWidth, height: AgentConnectInfoRowView.height)
         showFolderButton.frame = NSRect(
-            x: bounds.width - showFolderButton.fittingSize.width,
+            x: folderRow.frame.maxX + inlineButtonSpacing,
             y: y + 14,
-            width: max(130, showFolderButton.fittingSize.width),
+            width: showFolderWidth,
             height: MenuTokens.secondaryButtonSize
         )
         y += AgentConnectInfoRowView.height + 18
