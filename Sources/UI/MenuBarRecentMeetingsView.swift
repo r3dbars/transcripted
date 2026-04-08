@@ -190,11 +190,6 @@ private final class LatestSavedMeetingRowView: NSView {
         accessibilityLabel: "Copy transcript",
         toolTip: "Copy transcript"
     )
-    private let connectButton = MenuIconButton(
-        symbolName: "sparkles",
-        accessibilityLabel: "Connect your agent",
-        toolTip: "Connect your agent"
-    )
     private let showButton = MenuIconButton(
         symbolName: "folder",
         accessibilityLabel: "Show in Finder",
@@ -241,12 +236,10 @@ private final class LatestSavedMeetingRowView: NSView {
         subtitleLabel.lineBreakMode = .byTruncatingTail
         addSubview(subtitleLabel)
 
-        [openButton, connectButton, copyButton, showButton].forEach { addSubview($0) }
+        [openButton, copyButton, showButton].forEach { addSubview($0) }
 
         openButton.target = self
         openButton.action = #selector(openTranscript)
-        connectButton.target = self
-        connectButton.action = #selector(connectAgent)
         copyButton.target = self
         copyButton.action = #selector(copyTranscript)
         showButton.target = self
@@ -279,7 +272,6 @@ private final class LatestSavedMeetingRowView: NSView {
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         guard !openButton.frame.contains(point),
-              !connectButton.frame.contains(point),
               !copyButton.frame.contains(point),
               !showButton.frame.contains(point) else {
             super.mouseDown(with: event)
@@ -307,14 +299,8 @@ private final class LatestSavedMeetingRowView: NSView {
             width: buttonSize,
             height: buttonSize
         )
-        connectButton.frame = NSRect(
-            x: copyButton.frame.minX - 8 - buttonSize,
-            y: buttonY,
-            width: buttonSize,
-            height: buttonSize
-        )
         openButton.frame = NSRect(
-            x: connectButton.frame.minX - 8 - buttonSize,
+            x: copyButton.frame.minX - 8 - buttonSize,
             y: buttonY,
             width: buttonSize,
             height: buttonSize
@@ -349,14 +335,6 @@ private final class LatestSavedMeetingRowView: NSView {
     @objc private func showInFinder() {
         NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
     }
-
-    @objc private func connectAgent() {
-        AgentConnectionWindowCoordinator.shared.show(
-            meetingTitle: item.title,
-            meetingDate: nil,
-            transcriptURL: item.transcriptURL
-        )
-    }
 }
 
 @MainActor
@@ -364,11 +342,6 @@ private final class RecentMeetingRowView: NSView {
     private let item: RecentMeetingItem
     private let titleLabel = NSTextField(labelWithString: "")
     private let dateLabel = NSTextField(labelWithString: "")
-    private let connectButton = MenuIconButton(
-        symbolName: "sparkles",
-        accessibilityLabel: "Connect your agent",
-        toolTip: "Connect your agent"
-    )
     private let copyButton = MenuIconButton(
         symbolName: "doc.on.doc",
         accessibilityLabel: "Copy transcript",
@@ -423,9 +396,7 @@ private final class RecentMeetingRowView: NSView {
         dateLabel.textColor = MenuTokens.textSecondaryNS
         addSubview(dateLabel)
 
-        [connectButton, copyButton, showButton].forEach { addSubview($0) }
-        connectButton.target = self
-        connectButton.action = #selector(connectAgent)
+        [copyButton, showButton].forEach { addSubview($0) }
         copyButton.target = self
         copyButton.action = #selector(copyTranscript)
 
@@ -463,8 +434,7 @@ private final class RecentMeetingRowView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard !connectButton.frame.contains(point),
-              !copyButton.frame.contains(point),
+        guard !copyButton.frame.contains(point),
               !showButton.frame.contains(point) else {
             super.mouseDown(with: event)
             return
@@ -489,14 +459,7 @@ private final class RecentMeetingRowView: NSView {
             height: buttonSize
         )
 
-        connectButton.frame = NSRect(
-            x: showButton.frame.minX - 8 - buttonSize,
-            y: (bounds.height - buttonSize) / 2,
-            width: buttonSize,
-            height: buttonSize
-        )
-
-        let textWidth = max(0, connectButton.frame.minX - 12)
+        let textWidth = max(0, showButton.frame.minX - 12)
         titleLabel.frame = NSRect(x: 0, y: 6, width: textWidth, height: 14)
         dateLabel.frame = NSRect(x: 0, y: 21, width: textWidth, height: 12)
         divider.frame = NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
@@ -520,10 +483,6 @@ private final class RecentMeetingRowView: NSView {
 
     @objc private func showInFinder() {
         NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
-    }
-
-    @objc private func connectAgent() {
-        AgentConnectionWindowCoordinator.shared.show(for: item)
     }
 }
 
