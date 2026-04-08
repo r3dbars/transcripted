@@ -179,10 +179,20 @@ ALL_BUILD_DIRS=$(find . -maxdepth 1 -name "*.build" -type d | grep -v "Shim.buil
 echo "Build directories found:"
 echo "$ALL_BUILD_DIRS" | while read -r dir; do echo "  $dir"; done
 
-# Archive all .o files
+# Archive all .o files into libDraftDeps.a (includes TranscriptedCore — used by build.sh which
+# excludes Sources/TranscriptedCore from its swiftc invocation to avoid name-collision issues).
 find $ALL_BUILD_DIRS -name "*.o" -print0 | xargs -0 ar rcs "$DEPS_LIBS/libDraftDeps.a"
 OBJ_COUNT=$(ar t "$DEPS_LIBS/libDraftDeps.a" | wc -l | tr -d ' ')
 echo "  $OBJ_COUNT object files archived"
+
+# Also create libExternalDeps.a — same as libDraftDeps.a but without TranscriptedCore objects.
+# Package.swift links against this for `swift test`, which compiles TranscriptedCore from
+# source via SPM. Using libDraftDeps.a there causes duplicate-symbol linker errors because
+# Core appears in both the SPM-compiled objects and the static archive.
+EXTERNAL_DIRS=$(find . -maxdepth 1 -name "*.build" -type d | grep -v "Shim.build" | grep -v "TranscriptedCore.build" | sort)
+find $EXTERNAL_DIRS -name "*.o" -print0 | xargs -0 ar rcs "$DEPS_LIBS/libExternalDeps.a"
+EXT_COUNT=$(ar t "$DEPS_LIBS/libExternalDeps.a" | wc -l | tr -d ' ')
+echo "  $EXT_COUNT object files archived (external-only, no TranscriptedCore)"
 
 # --- Swift modules ---
 echo "Copying Swift modules..."

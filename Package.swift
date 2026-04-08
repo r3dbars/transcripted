@@ -47,7 +47,7 @@ let package = Package(
             linkerSettings: [
                 .unsafeFlags([
                     "-L\(repoRoot)/deps-libs",
-                    "-lDraftDeps",
+                    "-lExternalDeps",
                     "-lc++",
                 ]),
                 .linkedFramework("Metal"),
@@ -79,7 +79,7 @@ let package = Package(
                 // FluidAudio symbols pulled in through @testable.
                 .unsafeFlags([
                     "-L\(repoRoot)/deps-libs",
-                    "-lDraftDeps",
+                    "-lExternalDeps",
                     "-lc++",
                 ]),
                 .linkedFramework("Metal"),
