@@ -26,11 +26,11 @@ final class AppSoundPlayer {
             switch self {
             case .dictationStart:
                 return DraftConstants.listeningStartSoundFileName
-            case .dictationDelivered:
+            case .noSpeech:
                 return DraftConstants.dictationDeliveredSoundFileName
             case .meetingTranscriptComplete:
                 return DraftConstants.meetingTranscriptCompleteSoundFileName
-            case .dictationCancelled, .noSpeech:
+            case .dictationCancelled, .dictationDelivered:
                 return nil
             }
         }
@@ -40,11 +40,11 @@ final class AppSoundPlayer {
             case .dictationStart:
                 return "Pop"
             case .dictationDelivered:
-                return "Tink"
+                return "Funk"
             case .dictationCancelled:
                 return "Basso"
             case .noSpeech:
-                return "Funk"
+                return "Tink"
             case .meetingTranscriptComplete:
                 return "Glass"
             }
