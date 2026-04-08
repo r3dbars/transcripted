@@ -150,7 +150,8 @@ final class OverlayHeaderView: NSView {
         mode: FloatingOverlayController.SessionMode,
         transcriptExpanded: Bool,
         draftShortcutHint: String,
-        dictationShortcutHint: String
+        dictationShortcutHint: String,
+        loadingTitle: String?
     ) {
         let _ = transcriptExpanded
         let _ = draftShortcutHint
@@ -166,7 +167,7 @@ final class OverlayHeaderView: NSView {
             modeLabel.stringValue = "Pasted"
             modeLabel.textColor = OverlayTokens.textPrimary
         case (.loading, _):
-            modeLabel.stringValue = "Preparing"
+            modeLabel.stringValue = loadingTitle ?? "Loading dictation"
             modeLabel.textColor = OverlayTokens.textSecondary
         case (.idle, _):
             modeLabel.stringValue = "Dictation"
@@ -196,7 +197,7 @@ final class OverlayHeaderView: NSView {
             shortcutHint.stringValue = ""
             shortcutHint.textColor = OverlayTokens.textMuted
         case (.loading, _):
-            shortcutHint.stringValue = "Please wait"
+            shortcutHint.stringValue = "Cancel: \(dictationShortcutHint)"
             shortcutHint.textColor = OverlayTokens.textSecondary
         case (.drafting, .dictation):
             shortcutHint.stringValue = ""
