@@ -82,11 +82,13 @@ extension Transcription {
             var micEnergyPerFrame = [Float](repeating: 0, count: micFrameCount)
 
             micSamples.withUnsafeBufferPointer { ptr in
+                // Security: guard against nil baseAddress (empty buffer) before pointer arithmetic
+                guard let baseAddr = ptr.baseAddress else { return }
                 for i in 0..<micFrameCount {
                     let start = i * micFrameSize
                     var sumSquares: Float = 0
-                    vDSP_dotpr(ptr.baseAddress! + start, 1,
-                               ptr.baseAddress! + start, 1,
+                    vDSP_dotpr(baseAddr + start, 1,
+                               baseAddr + start, 1,
                                &sumSquares,
                                vDSP_Length(micFrameSize))
                     micEnergyPerFrame[i] = sqrt(sumSquares / Float(micFrameSize))
@@ -535,6 +537,8 @@ extension Transcription {
         var isVoiced = [Bool](repeating: false, count: totalFrames)
 
         samples.withUnsafeBufferPointer { ptr in
+            // Security: guard against nil baseAddress (empty buffer) before pointer arithmetic
+            guard let baseAddr = ptr.baseAddress else { return }
             for i in 0..<totalFrames {
                 let start = i * hopSamples
                 let end = min(start + frameSamples, samples.count)
@@ -542,8 +546,8 @@ extension Transcription {
                 guard count > 0 else { continue }
 
                 var sumSquares: Float = 0
-                vDSP_dotpr(ptr.baseAddress! + start, 1,
-                           ptr.baseAddress! + start, 1,
+                vDSP_dotpr(baseAddr + start, 1,
+                           baseAddr + start, 1,
                            &sumSquares,
                            vDSP_Length(count))
                 let rms = sqrt(sumSquares / Float(count))
