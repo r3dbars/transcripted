@@ -3,33 +3,57 @@ import SwiftUI
 import TranscriptedCore
 
 struct AgentConnectionContext {
-    let meetingTitle: String?
-    let meetingDate: Date?
-    let transcriptsFolderURL: URL
-    let agentReadmeURL: URL
-    let indexURL: URL
-    let transcriptMarkdownURL: URL?
-    let transcriptJSONURL: URL?
+    let draftFolderURL: URL
+    let meetingsFolderURL: URL
+    let dictationsFolderURL: URL
     let prompt: String
 
     init(meetingTitle: String?, meetingDate: Date?, transcriptURL: URL?) {
-        let transcriptsFolderURL = MeetingStoragePaths.transcriptsFolder
-        try? FileManager.default.createDirectory(at: transcriptsFolderURL, withIntermediateDirectories: true)
-        AgentOutput.writeAgentReadme(to: transcriptsFolderURL)
-        let transcriptMarkdownURL = transcriptURL
-        let transcriptJSONURL = transcriptMarkdownURL?
-            .deletingPathExtension()
-            .appendingPathExtension("json")
-        let filename = transcriptMarkdownURL?.deletingPathExtension().lastPathComponent
+        let draftFolderURL = FileManager.default.transcriptedAppSupportDir
+        try? FileManager.default.createDirectory(at: draftFolderURL, withIntermediateDirectories: true)
 
-        self.meetingTitle = meetingTitle
-        self.meetingDate = meetingDate
-        self.transcriptsFolderURL = transcriptsFolderURL
-        self.agentReadmeURL = transcriptsFolderURL.appendingPathComponent("AGENT.md")
-        self.indexURL = transcriptsFolderURL.appendingPathComponent("transcripted.json")
-        self.transcriptMarkdownURL = transcriptMarkdownURL
-        self.transcriptJSONURL = transcriptJSONURL
-        self.prompt = AgentOutput.clipboardPrompt(folder: transcriptsFolderURL, filename: filename)
+        let meetingsFolderURL = MeetingStoragePaths.transcriptsFolder
+        let dictationsFolderURL = DictationStoragePaths.transcriptsFolder
+        AgentOutput.writeAgentReadme(to: meetingsFolderURL)
+
+        let filename = transcriptURL?.deletingPathExtension().lastPathComponent
+
+        _ = meetingTitle
+        _ = meetingDate
+
+        self.draftFolderURL = draftFolderURL
+        self.meetingsFolderURL = meetingsFolderURL
+        self.dictationsFolderURL = dictationsFolderURL
+        self.prompt = Self.makePrompt(
+            meetingsFolderURL: meetingsFolderURL,
+            dictationsFolderURL: dictationsFolderURL,
+            filename: filename
+        )
+    }
+
+    private static func makePrompt(
+        meetingsFolderURL: URL,
+        dictationsFolderURL: URL,
+        filename: String?
+    ) -> String {
+        var prompt = """
+        I use Transcripted on my Mac.
+
+        Meetings folder:
+        \(meetingsFolderURL.path)
+
+        Dictations folder:
+        \(dictationsFolderURL.path)
+
+        Read AGENT.md and transcripted.json in the meetings folder if they exist.
+        Then help me summarize, search, and organize my transcripts.
+        """
+
+        if let filename {
+            prompt += "\n\nIf helpful, start with this meeting:\n\(filename).json"
+        }
+
+        return prompt
     }
 }
 
@@ -62,8 +86,8 @@ final class AgentConnectionViewModel: ObservableObject {
         }
     }
 
-    func openTranscriptsFolder() {
-        NSWorkspace.shared.open(context.transcriptsFolderURL)
+    func openDraftFolder() {
+        NSWorkspace.shared.open(context.draftFolderURL)
     }
 
     func reveal(_ url: URL?) {
@@ -81,21 +105,6 @@ final class AgentConnectionViewModel: ObservableObject {
         return FileManager.default.fileExists(atPath: url.path)
     }
 
-    var selectedTranscriptName: String {
-        context.meetingTitle ?? "Any saved meeting transcript"
-    }
-
-    var meetingDateText: String? {
-        guard let meetingDate = context.meetingDate else { return nil }
-        return Self.dateFormatter.string(from: meetingDate)
-    }
-
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }()
 }
 
 @MainActor
@@ -112,15 +121,14 @@ struct AgentConnectionWindowView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    summarySection
                     promptSection
-                    filesSection
                     stepsSection
+                    foldersSection
                 }
                 .padding(20)
             }
         }
-        .frame(minWidth: 620, minHeight: 620)
+        .frame(minWidth: 620, minHeight: 560)
         .background(AgentConnectionTheme.background)
     }
 
@@ -141,98 +149,31 @@ struct AgentConnectionWindowView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(AgentConnectionTheme.textPrimary)
 
-                Text("Open a real setup page instead of a tiny menu. Everything below points your agent at the local Transcripted meeting data on this Mac.")
+                Text("Copy the prompt below, then ask your agent about your meetings or dictations.")
                     .font(.system(size: 12))
                     .foregroundStyle(AgentConnectionTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer()
-
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("Transcript folder")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(AgentConnectionTheme.textMuted)
-                    .textCase(.uppercase)
-
-                Text(viewModel.context.transcriptsFolderURL.lastPathComponent)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(AgentConnectionTheme.textPrimary)
-            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
         .background(AgentConnectionTheme.background)
     }
 
-    private var summarySection: some View {
-        AgentConnectionSectionCard(
-            title: "Suggested starting point",
-            subtitle: "This is the transcript you launched the flow from."
-        ) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(viewModel.selectedTranscriptName)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(AgentConnectionTheme.textPrimary)
-
-                        if let meetingDateText = viewModel.meetingDateText {
-                            Text(meetingDateText)
-                                .font(.system(size: 11))
-                                .foregroundStyle(AgentConnectionTheme.textSecondary)
-                        }
-                    }
-
-                    Spacer()
-
-                    Text("Local only")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(AgentConnectionTheme.accent)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(AgentConnectionTheme.badge)
-                        )
-                }
-
-                if let transcriptJSONURL = viewModel.context.transcriptJSONURL {
-                    AgentConnectionPathRow(
-                        title: transcriptJSONURL.lastPathComponent,
-                        detail: "Structured sidecar with speakers, utterances, and metadata.",
-                        path: transcriptJSONURL.path,
-                        isAvailable: viewModel.fileExists(transcriptJSONURL)
-                    )
-                }
-
-                if let transcriptMarkdownURL = viewModel.context.transcriptMarkdownURL {
-                    AgentConnectionPathRow(
-                        title: transcriptMarkdownURL.lastPathComponent,
-                        detail: "Readable markdown transcript for quick manual inspection.",
-                        path: transcriptMarkdownURL.path,
-                        isAvailable: viewModel.fileExists(transcriptMarkdownURL)
-                    )
-                }
-            }
-        }
-    }
-
     private var promptSection: some View {
         AgentConnectionSectionCard(
-            title: "Starter prompt",
-            subtitle: "Copy this into Codex, Claude, or another agent so it reads the right files first."
+            title: "Copy this prompt"
         ) {
             VStack(alignment: .leading, spacing: 14) {
-                ScrollView {
-                    Text(viewModel.context.prompt)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(AgentConnectionTheme.textPrimary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                        .padding(14)
-                }
-                .frame(minHeight: 132)
+                Text(viewModel.context.prompt)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(AgentConnectionTheme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .padding(14)
                 .background(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(AgentConnectionTheme.promptBackground)
@@ -248,8 +189,8 @@ struct AgentConnectionWindowView: View {
                     }
                     .buttonStyle(AgentConnectionPrimaryButtonStyle())
 
-                    Button("Open transcripts folder") {
-                        viewModel.openTranscriptsFolder()
+                    Button("Open folder") {
+                        viewModel.openDraftFolder()
                     }
                     .buttonStyle(AgentConnectionSecondaryButtonStyle())
                 }
@@ -257,40 +198,29 @@ struct AgentConnectionWindowView: View {
         }
     }
 
-    private var filesSection: some View {
+    private var foldersSection: some View {
         AgentConnectionSectionCard(
-            title: "Files your agent should inspect",
-            subtitle: "These are the core artifacts behind the connect flow."
+            title: "Your folders"
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 AgentConnectionFileRow(
-                    name: "AGENT.md",
-                    detail: "Schema and conventions for Transcripted meeting exports.",
-                    path: viewModel.context.agentReadmeURL.path,
-                    isAvailable: viewModel.fileExists(viewModel.context.agentReadmeURL),
+                    name: "Meetings",
+                    detail: "Meeting transcripts saved by Transcripted.",
+                    path: viewModel.context.meetingsFolderURL.path,
+                    isAvailable: viewModel.fileExists(viewModel.context.meetingsFolderURL),
                     actionTitle: "Reveal"
                 ) {
-                    viewModel.reveal(viewModel.context.agentReadmeURL)
+                    viewModel.reveal(viewModel.context.meetingsFolderURL)
                 }
 
                 AgentConnectionFileRow(
-                    name: "transcripted.json",
-                    detail: "Root index of every saved transcript in the folder.",
-                    path: viewModel.context.indexURL.path,
-                    isAvailable: viewModel.fileExists(viewModel.context.indexURL),
+                    name: "Dictations",
+                    detail: "Dictation transcripts saved by Transcripted.",
+                    path: viewModel.context.dictationsFolderURL.path,
+                    isAvailable: viewModel.fileExists(viewModel.context.dictationsFolderURL),
                     actionTitle: "Reveal"
                 ) {
-                    viewModel.reveal(viewModel.context.indexURL)
-                }
-
-                AgentConnectionFileRow(
-                    name: viewModel.context.transcriptJSONURL?.lastPathComponent ?? "Selected transcript sidecar",
-                    detail: "Recommended first transcript to load for this session.",
-                    path: viewModel.context.transcriptJSONURL?.path ?? "Saved next to the selected .md transcript",
-                    isAvailable: viewModel.fileExists(viewModel.context.transcriptJSONURL),
-                    actionTitle: "Reveal"
-                ) {
-                    viewModel.reveal(viewModel.context.transcriptJSONURL)
+                    viewModel.reveal(viewModel.context.dictationsFolderURL)
                 }
             }
         }
@@ -298,26 +228,25 @@ struct AgentConnectionWindowView: View {
 
     private var stepsSection: some View {
         AgentConnectionSectionCard(
-            title: "How to use it",
-            subtitle: "The window stays open while you explore. Close it when you are done."
+            title: "How it works"
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 AgentConnectionStepRow(
                     number: 1,
-                    title: "Read the contract",
-                    detail: "Start with AGENT.md so the agent understands the export format and speaker IDs."
+                    title: "Copy the prompt",
+                    detail: "Use the button above."
                 )
 
                 AgentConnectionStepRow(
                     number: 2,
-                    title: "Load the index",
-                    detail: "Read transcripted.json to find the saved meetings and pick the right transcript."
+                    title: "Paste it into your agent",
+                    detail: "This points the agent to your folders."
                 )
 
                 AgentConnectionStepRow(
                     number: 3,
-                    title: "Open the selected transcript JSON",
-                    detail: "Use the sidecar for structured speaker turns, timestamps, and transcript text."
+                    title: "Ask for help",
+                    detail: "Try summaries, search, action items, or note cleanup."
                 )
             }
         }
@@ -339,12 +268,12 @@ private enum AgentConnectionTheme {
 
 private struct AgentConnectionSectionCard<Content: View>: View {
     let title: String
-    let subtitle: String
+    let subtitle: String?
     let content: Content
 
     init(
         title: String,
-        subtitle: String,
+        subtitle: String? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
@@ -354,15 +283,16 @@ private struct AgentConnectionSectionCard<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(AgentConnectionTheme.textMuted)
-                .tracking(0.8)
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(AgentConnectionTheme.textPrimary)
 
-            Text(subtitle)
-                .font(.system(size: 12))
-                .foregroundStyle(AgentConnectionTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(AgentConnectionTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             VStack(alignment: .leading, spacing: 14) {
                 content
@@ -377,38 +307,6 @@ private struct AgentConnectionSectionCard<Content: View>: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(AgentConnectionTheme.divider, lineWidth: 1)
             )
-        }
-    }
-}
-
-private struct AgentConnectionPathRow: View {
-    let title: String
-    let detail: String
-    let path: String
-    let isAvailable: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(AgentConnectionTheme.textPrimary)
-
-                if !isAvailable {
-                    Text("Missing")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(AgentConnectionTheme.missing)
-                }
-            }
-
-            Text(detail)
-                .font(.system(size: 11))
-                .foregroundStyle(AgentConnectionTheme.textSecondary)
-
-            Text(path)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(AgentConnectionTheme.textMuted)
-                .textSelection(.enabled)
         }
     }
 }

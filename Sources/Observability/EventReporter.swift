@@ -41,7 +41,7 @@ private actor EventFileWriter {
     }()
 
     init() {
-        let storageDir = FileManager.default.draftAppSupportDir
+        let storageDir = FileManager.default.transcriptedAppSupportDir
         fileURL = storageDir.appendingPathComponent("events.jsonl")
 
         // Ensure directory exists

@@ -25,7 +25,7 @@ final class BetaTelemetry {
     }
 
     private var eventsURL: URL {
-        FileManager.default.draftAppSupportDir.appendingPathComponent("events.jsonl")
+        FileManager.default.transcriptedAppSupportDir.appendingPathComponent("events.jsonl")
     }
 
     // MARK: - Discrete events (fire-and-forget, unchanged)

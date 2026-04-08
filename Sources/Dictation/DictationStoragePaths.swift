@@ -1,5 +1,5 @@
 // DictationStoragePaths.swift
-// Draft-owned storage layout for dictation markdown exports.
+// Draft-backed storage layout for dictation markdown exports.
 
 import Foundation
 

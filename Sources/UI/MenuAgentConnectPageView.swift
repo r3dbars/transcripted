@@ -16,60 +16,47 @@ final class MenuAgentConnectPageView: NSView {
     )
     private let titleLabel = NSTextField(labelWithString: "Connect your agent")
     private let subtitleLabel = NSTextField(wrappingLabelWithString:
-        "Point your agent at your local Draft data with one copy or one click."
+        "Point your agent at local Transcripted transcripts on this Mac."
     )
-
-    private let methodsLabel = NSTextField(labelWithString: "Ways to connect")
+    private let starterPromptLabel = NSTextField(labelWithString: "Starter prompt")
     private let folderRow = AgentConnectInfoRowView(
         symbolName: "folder",
-        title: "Recommended: local folder mode",
-        body: "Point your agent at the Draft folder for meetings, dictations, and logs."
+        title: "Data source",
+        body: "Meetings and dictations are both available in this local folder."
     )
     private let promptRow = AgentConnectInfoRowView(
         symbolName: "text.quote",
-        title: "Prompt-first setup",
-        body: "Copy a starter prompt for Claude, Codex, or any local agent."
+        title: "Copy starter prompt",
+        body: "Paste this into Claude, Codex, or any local agent."
     )
-    private let futureRow = AgentConnectInfoRowView(
-        symbolName: "terminal",
-        title: "CLI + MCP, coming later",
-        body: "CLI and MCP are planned for direct local workflows."
+    private let howToLabel = NSTextField(labelWithString: "How to use it")
+    private let stepOneRow = AgentConnectInfoRowView(
+        symbolName: "1.circle",
+        title: "1. Copy",
+        body: "Copy the starter prompt."
+    )
+    private let stepTwoRow = AgentConnectInfoRowView(
+        symbolName: "2.circle",
+        title: "2. Paste",
+        body: "Paste it into your agent's prompt."
+    )
+    private let stepThreeRow = AgentConnectInfoRowView(
+        symbolName: "3.circle",
+        title: "3. Ask",
+        body: "Ask for summaries, action items, or decisions."
     )
 
     private let showFolderButton = MenuOutlineButton(
-        title: "Show Draft folder",
+        title: "Show Transcripted folder",
         symbolName: "folder",
-        accessibilityLabel: "Show Draft folder",
-        toolTip: "Show Draft folder"
+        accessibilityLabel: "Show Transcripted folder",
+        toolTip: "Show Transcripted folder"
     )
     private let copyPromptButton = MenuOutlineButton(
         title: "Copy starter prompt",
         symbolName: "doc.on.doc",
         accessibilityLabel: "Copy starter prompt",
         toolTip: "Copy starter prompt"
-    )
-
-    private let skillsLabel = NSTextField(labelWithString: "Suggested skills")
-    private let skillRows: [AgentConnectInfoRowView] = [
-        AgentConnectInfoRowView(
-            symbolName: "checklist",
-            title: "Action-item extraction",
-            body: "Pull owners, deadlines, and follow-ups."
-        ),
-        AgentConnectInfoRowView(
-            symbolName: "person.2",
-            title: "People + project memory",
-            body: "Track people and decisions across meetings."
-        ),
-        AgentConnectInfoRowView(
-            symbolName: "books.vertical",
-            title: "Second-brain summaries",
-            body: "Build daily notes from meetings and dictations."
-        )
-    ]
-
-    private let footerNoteLabel = NSTextField(wrappingLabelWithString:
-        "This is your starting point for agent setup. Expand later with CLI, MCP, and skill packs."
     )
 
     private var resetTask: Task<Void, Never>?
@@ -95,22 +82,15 @@ final class MenuAgentConnectPageView: NSView {
 
         subtitleLabel.font = NSFont.systemFont(ofSize: 11)
         subtitleLabel.textColor = MenuTokens.textSecondaryNS
-        subtitleLabel.maximumNumberOfLines = 2
+        subtitleLabel.maximumNumberOfLines = 3
         addSubview(subtitleLabel)
 
-        [methodsLabel, skillsLabel].forEach { label in
+        [starterPromptLabel, howToLabel].forEach { label in
             label.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
             label.textColor = MenuTokens.textPrimaryNS
             addSubview(label)
         }
-
-        footerNoteLabel.font = NSFont.systemFont(ofSize: 10)
-        footerNoteLabel.textColor = MenuTokens.textMutedNS
-        footerNoteLabel.maximumNumberOfLines = 2
-        addSubview(footerNoteLabel)
-
-        [folderRow, promptRow, futureRow].forEach { addSubview($0) }
-        skillRows.forEach { addSubview($0) }
+        [promptRow, folderRow, stepOneRow, stepTwoRow, stepThreeRow].forEach { addSubview($0) }
 
         backButton.target = self
         backButton.action = #selector(goBack)
@@ -130,6 +110,7 @@ final class MenuAgentConnectPageView: NSView {
 
         let pad: CGFloat = 0
         let width = bounds.width - pad * 2
+        let inlineButtonSpacing: CGFloat = 8
         var y: CGFloat = 0
 
         let backWidth = max(72, backButton.fittingSize.width)
@@ -142,41 +123,48 @@ final class MenuAgentConnectPageView: NSView {
         subtitleLabel.frame = NSRect(x: pad, y: y, width: width, height: 42)
         y += 54
 
-        methodsLabel.frame = NSRect(x: pad, y: y, width: width, height: 16)
+        starterPromptLabel.frame = NSRect(x: pad, y: y, width: width, height: 16)
         y += 22
 
-        [folderRow, promptRow, futureRow].forEach { row in
-            let rowHeight = row.intrinsicContentSize.height
-            row.frame = NSRect(x: pad, y: y, width: width, height: rowHeight)
-            y += rowHeight + 8
-        }
-
-        let buttonHeight = MenuTokens.secondaryButtonSize
-        let showWidth = max(118, showFolderButton.fittingSize.width)
-        let copyWidth = max(132, copyPromptButton.fittingSize.width)
-        copyPromptButton.frame = NSRect(x: bounds.width - copyWidth, y: y + 2, width: copyWidth, height: buttonHeight)
-        showFolderButton.frame = NSRect(
-            x: copyPromptButton.frame.minX - 8 - showWidth,
-            y: y + 2,
-            width: showWidth,
-            height: buttonHeight
+        let copyPromptWidth = max(132, copyPromptButton.fittingSize.width)
+        let promptRowWidth = max(180, width - copyPromptWidth - inlineButtonSpacing)
+        promptRow.frame = NSRect(x: pad, y: y, width: promptRowWidth, height: AgentConnectInfoRowView.height)
+        copyPromptButton.frame = NSRect(
+            x: promptRow.frame.maxX + inlineButtonSpacing,
+            y: y + 14,
+            width: copyPromptWidth,
+            height: MenuTokens.secondaryButtonSize
         )
-        y += buttonHeight + 18
+        y += AgentConnectInfoRowView.height + 14
 
-        skillsLabel.frame = NSRect(x: pad, y: y, width: width, height: 16)
+        let showFolderWidth = max(130, showFolderButton.fittingSize.width)
+        let folderRowWidth = max(180, width - showFolderWidth - inlineButtonSpacing)
+        folderRow.frame = NSRect(x: pad, y: y, width: folderRowWidth, height: AgentConnectInfoRowView.height)
+        showFolderButton.frame = NSRect(
+            x: folderRow.frame.maxX + inlineButtonSpacing,
+            y: y + 14,
+            width: showFolderWidth,
+            height: MenuTokens.secondaryButtonSize
+        )
+        y += AgentConnectInfoRowView.height + 18
+
+        howToLabel.frame = NSRect(x: pad, y: y, width: width, height: 16)
         y += 22
 
-        skillRows.forEach { row in
+        [stepOneRow, stepTwoRow, stepThreeRow].forEach { row in
             let rowHeight = row.intrinsicContentSize.height
             row.frame = NSRect(x: pad, y: y, width: width, height: rowHeight)
             y += rowHeight + 8
         }
 
-        footerNoteLabel.frame = NSRect(x: pad, y: y + 2, width: width, height: 26)
+        y += 4
     }
 
     var intrinsicHeight: CGFloat {
-        MenuTokens.secondaryButtonSize + 14 + 22 + 24 + 42 + 16 + 22 + (56 * 3) + (8 * 2) + MenuTokens.secondaryButtonSize + 16 + 16 + 22 + (56 * 3) + (8 * 2) + 26
+        MenuTokens.secondaryButtonSize + 14 + 22 + 24 + 42 + 16 + 22 +
+        (AgentConnectInfoRowView.height + 14) +
+        (AgentConnectInfoRowView.height + 18) +
+        22 + (AgentConnectInfoRowView.height + 8) * 3 + 12
     }
 
     @objc private func goBack() {
@@ -206,7 +194,7 @@ final class MenuAgentConnectPageView: NSView {
 
 private enum AgentConnectGuide {
     static var draftFolder: URL {
-        let url = FileManager.default.draftAppSupportDir
+        let url = FileManager.default.transcriptedAppSupportDir
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
@@ -226,23 +214,13 @@ private enum AgentConnectGuide {
         return """
         \(meetingPrompt)
 
-        Transcripted also saves dictation exports here:
+        You also have dictation transcripts here:
         \(dictationsFolder.path)
 
-        Best local setup:
-        - Open this Draft folder in your agent tool: \(draftFolder.path)
-        - Use meetings/transcripts for structured meeting history
-        - Use dictations/transcripts for quick notes and pasted dictation history
-
-        Help me use Transcripted as a second brain:
-        - summarize meetings
-        - extract action items and follow-ups
-        - track people, projects, and decisions over time
-        - build context across my saved transcripts and dictations
-
-        Future setup:
-        - a local CLI for agent workflows
-        - an MCP server for Claude Desktop, Claude Code, and similar tools
+        Prompt:
+        Use the folder at this path for both:
+        - meetings: \(meetingsFolder.path)
+        - dictations: \(dictationsFolder.path)
         """
     }
 }
@@ -282,7 +260,7 @@ private final class AgentConnectInfoRowView: NSView {
         bodyLabel.stringValue = body
         bodyLabel.font = NSFont.systemFont(ofSize: 10)
         bodyLabel.textColor = MenuTokens.textSecondaryNS
-        bodyLabel.maximumNumberOfLines = 1
+        bodyLabel.maximumNumberOfLines = 2
         addSubview(bodyLabel)
     }
 
@@ -302,6 +280,10 @@ private final class AgentConnectInfoRowView: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: 56)
+        NSSize(width: NSView.noIntrinsicMetric, height: Self.height)
+    }
+
+    static var height: CGFloat {
+        56
     }
 }

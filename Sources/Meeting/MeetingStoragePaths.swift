@@ -1,6 +1,6 @@
 // MeetingStoragePaths.swift
-// Draft-owned storage layout for the Meeting feature.
-// Isolates Draft meeting artifacts from Transcripted's ~/Documents/Transcripted
+// Draft-backed storage layout for the Meeting feature.
+// Isolates meeting artifacts from Transcripted's ~/Documents/Transcripted
 // so both apps can coexist without clobbering each other's databases.
 // See merge-plan.md §6.5 Option B.
 

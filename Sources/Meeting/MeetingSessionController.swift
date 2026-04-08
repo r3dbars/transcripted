@@ -155,7 +155,7 @@ final class MeetingSessionController: ObservableObject {
             failedQueue: MeetingStoragePaths.root.appendingPathComponent("failed_transcriptions.json"),
             speakerClips: MeetingStoragePaths.speakerClipsFolder,
             audioCaptures: MeetingStoragePaths.recordingsScratch,
-            logs: FileManager.default.draftAppSupportDir
+            logs: FileManager.default.transcriptedAppSupportDir
                 .appendingPathComponent("logs", isDirectory: true)
         )
 

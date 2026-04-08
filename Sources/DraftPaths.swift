@@ -4,22 +4,27 @@
 import Foundation
 
 extension FileManager {
-    /// ~/Library/Application Support/Draft/ — safe fallback if system API returns empty.
-    var draftAppSupportDir: URL {
+    /// Transcripted-facing compatibility helper.
+    /// Current main still keeps app-support data under Draft's existing folder
+    /// until a deliberate migration path exists.
+    var transcriptedAppSupportDir: URL {
         let appSupport = urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
         return appSupport.appendingPathComponent("Draft", isDirectory: true)
     }
 
-    /// ~/Library/Application Support/Draft/meetings/ — isolated from Transcripted's ~/Documents/Transcripted
-    /// so the two apps can coexist on one machine without touching each other's transcripts,
-    /// speakers DB, stats, or failed-transcription queue. See merge-plan.md §6.5 Option B.
+    /// Legacy alias while older code still refers to the Draft-named root.
+    var draftAppSupportDir: URL {
+        transcriptedAppSupportDir
+    }
+
+    /// ~/Library/Application Support/Draft/meetings/
     var meetingSupportDir: URL {
-        draftAppSupportDir.appendingPathComponent("meetings", isDirectory: true)
+        transcriptedAppSupportDir.appendingPathComponent("meetings", isDirectory: true)
     }
 
     /// ~/Library/Application Support/Draft/dictations/
     var dictationSupportDir: URL {
-        draftAppSupportDir.appendingPathComponent("dictations", isDirectory: true)
+        transcriptedAppSupportDir.appendingPathComponent("dictations", isDirectory: true)
     }
 }
