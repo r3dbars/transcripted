@@ -7,6 +7,7 @@ import Foundation
 struct SavedDictationTranscript {
     let url: URL
     let title: String
+    let sidecarURL: URL?
 }
 
 enum DictationDelivery: String {
@@ -109,7 +110,21 @@ enum DictationTranscriptWriter {
         }
 
         try body.write(to: url, atomically: true, encoding: .utf8)
-        return SavedDictationTranscript(url: url, title: title)
+
+        let sidecarURL = try? DictationAgentOutput.appendEntry(
+            title: title,
+            text: normalizedText,
+            sourceAppName: sourceAppName,
+            sourceAppBundleId: sourceBundleID.isEmpty ? nil : sourceBundleID,
+            delivery: delivery,
+            wordCount: wordCount,
+            characterCount: characterCount,
+            createdAt: createdAt,
+            markdownURL: url,
+            directory: folder
+        )
+
+        return SavedDictationTranscript(url: url, title: title, sidecarURL: sidecarURL)
     }
 
     static func dailyFileURL(for date: Date, in directory: URL) -> URL {

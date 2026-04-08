@@ -56,6 +56,43 @@ func writeFixture(_ data: Data, filename: String, to directory: URL) throws {
     try data.write(to: path)
 }
 
+func makeDictationDayJSON(
+    date: String = "2026-04-07",
+    markdownFilename: String = "Dictations_2026-04-07.md",
+    entries: [(id: String, createdAt: String, title: String, text: String, sourceAppName: String, delivery: String)] = [
+        ("dictation-20260407-091500-000", "2026-04-07T09:15:00-0500", "Morning note", "Ship the follow-up note to product today", "Slack", "copied"),
+        ("dictation-20260407-183000-000", "2026-04-07T18:30:00-0500", "Evening note", "Remember to send the recap before dinner", "Mail", "pasted"),
+    ]
+) -> Data {
+    let dictationEntries = entries.map { entry in
+        [
+            "id": entry.id,
+            "created_at": entry.createdAt,
+            "title": entry.title,
+            "text": entry.text,
+            "source_app_name": entry.sourceAppName,
+            "source_app_bundle_id": "com.example.\(entry.sourceAppName.lowercased())",
+            "delivery": entry.delivery,
+            "word_count": entry.text.split(whereSeparator: \.isWhitespace).count,
+            "character_count": entry.text.count
+        ] as [String: Any]
+    }
+
+    let json: [String: Any] = [
+        "version": "1.0",
+        "capture_type": "dictation_day",
+        "date": date,
+        "markdown_filename": markdownFilename,
+        "entry_count": dictationEntries.count,
+        "word_count": dictationEntries.reduce(0) { partialResult, item in
+            partialResult + ((item["word_count"] as? Int) ?? 0)
+        },
+        "entries": dictationEntries
+    ]
+
+    return try! JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
+}
+
 func makeTempDir() -> URL {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
