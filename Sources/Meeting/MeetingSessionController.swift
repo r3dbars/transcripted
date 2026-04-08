@@ -1,13 +1,13 @@
 // MeetingSessionController.swift
-// Top-level @MainActor ObservableObject that wires TranscriptedCore into Transcripted.
+// Top-level @MainActor ObservableObject that wires TranscriptedCore into Draft.
 // Owns Core's DI container (AppServices), the capture bridge, the task manager,
-// and the model downloader. Exposes @Published state for Transcripted's meeting UI to
+// and the model downloader. Exposes @Published state for Draft's meeting UI to
 // bind against.
 //
 // Boot sequence:
-//   1. init() constructs all Core services with Transcripted-flavored CoreStoragePaths
+//   1. init() constructs all Core services with Draft-flavored CoreStoragePaths
 //      so transcripts, speakers DB, stats DB, failed-queue, clips, and logs all
-//      live under ~/Library/Application Support/Transcripted/meetings/.
+//      live under ~/Library/Application Support/Draft/meetings/.
 //   2. prepareModels() loads Parakeet + PyAnnote/WeSpeaker/Sortformer. Safe to
 //      call multiple times — each engine is idempotent.
 //   3. startRecording() begins capture via MeetingCaptureBridge.

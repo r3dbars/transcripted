@@ -4,32 +4,26 @@
 import Foundation
 
 extension FileManager {
-    /// Prefer the legacy Draft-named folder when it already exists so upgrades keep
-    /// seeing the same on-disk data. Fresh installs use ~/Library/Application Support/Transcripted/.
+    /// Transcripted-facing compatibility helper.
+    /// Current main still keeps app-support data under Draft's existing folder
+    /// until a deliberate migration path exists.
     var transcriptedAppSupportDir: URL {
         let appSupport = urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        let transcriptedDir = appSupport.appendingPathComponent("Transcripted", isDirectory: true)
-        let legacyDraftDir = appSupport.appendingPathComponent("Draft", isDirectory: true)
-
-        if fileExists(atPath: legacyDraftDir.path) {
-            return legacyDraftDir
-        }
-
-        return transcriptedDir
+        return appSupport.appendingPathComponent("Draft", isDirectory: true)
     }
 
-    /// Compatibility alias while the rest of the app finishes renaming internals.
+    /// Legacy alias while older code still refers to the Draft-named root.
     var draftAppSupportDir: URL {
         transcriptedAppSupportDir
     }
 
-    /// ~/Library/Application Support/{Draft|Transcripted}/meetings/
+    /// ~/Library/Application Support/Draft/meetings/
     var meetingSupportDir: URL {
         transcriptedAppSupportDir.appendingPathComponent("meetings", isDirectory: true)
     }
 
-    /// ~/Library/Application Support/{Draft|Transcripted}/dictations/
+    /// ~/Library/Application Support/Draft/dictations/
     var dictationSupportDir: URL {
         transcriptedAppSupportDir.appendingPathComponent("dictations", isDirectory: true)
     }

@@ -1,6 +1,6 @@
 // MeetingStoragePaths.swift
-// Transcripted-owned storage layout for the Meeting feature.
-// Isolates Transcripted meeting artifacts from Transcripted's ~/Documents/Transcripted
+// Draft-backed storage layout for the Meeting feature.
+// Isolates meeting artifacts from Transcripted's ~/Documents/Transcripted
 // so both apps can coexist without clobbering each other's databases.
 // See merge-plan.md §6.5 Option B.
 
@@ -8,14 +8,14 @@ import Foundation
 
 /// Absolute file/folder locations for meeting transcripts, speaker DB, stats DB,
 /// failed-queue, speaker clips, and logs. All live under
-/// `~/Library/Application Support/Transcripted/meetings/`.
+/// `~/Library/Application Support/Draft/meetings/`.
 ///
 /// Each property is computed (never cached) so that the directories exist on the
 /// next read even if the user manually deleted them between sessions. Each call
 /// creates missing parent directories with `withIntermediateDirectories: true`.
 enum MeetingStoragePaths {
 
-    /// Root: `~/Library/Application Support/Transcripted/meetings/`
+    /// Root: `~/Library/Application Support/Draft/meetings/`
     static var root: URL {
         let url = FileManager.default.meetingSupportDir
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
