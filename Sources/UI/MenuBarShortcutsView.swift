@@ -100,12 +100,17 @@ final class MenuBarShortcutsView: NSView {
     func update(dictationKey: String, meetingKey: String, isEnabled: Bool) {
         rowsEnabled = isEnabled
         resetButton.isEnabled = isEnabled && recordingTarget == nil
-        resetHintLabel.alphaValue = isEnabled ? 1.0 : 0.55
+        resetHintLabel.alphaValue = isEnabled ? 1.0 : 0.72
+        resetHintLabel.stringValue = isEnabled
+            ? "Click a shortcut badge to edit"
+            : "Shortcuts unlock when Transcripted finishes loading"
 
         dictationRow.update(
             symbolName: "mic.fill",
             title: "Dictation",
-            subtitle: recordingTarget == .dictation ? "Press shortcut…" : "Paste spoken text anywhere",
+            subtitle: recordingTarget == .dictation
+                ? "Press shortcut…"
+                : (isEnabled ? "Paste spoken text anywhere" : "Local voice model is still loading"),
             key: recordingTarget == .dictation ? "Type keys" : dictationKey,
             isEditing: recordingTarget == .dictation,
             isEnabled: isEnabled
@@ -114,7 +119,9 @@ final class MenuBarShortcutsView: NSView {
         meetingRow.update(
             symbolName: "record.circle.fill",
             title: "Record meeting",
-            subtitle: recordingTarget == .meeting ? "Press shortcut…" : "Capture mic and system audio",
+            subtitle: recordingTarget == .meeting
+                ? "Press shortcut…"
+                : (isEnabled ? "Capture mic and system audio" : "Meeting tools unlock after startup warmup"),
             key: recordingTarget == .meeting ? "Type keys" : meetingKey,
             isEditing: recordingTarget == .meeting,
             isEnabled: isEnabled
