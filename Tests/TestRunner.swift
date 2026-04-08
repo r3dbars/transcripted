@@ -6,7 +6,7 @@ import Foundation
 @main
 struct TestRunner {
     static func main() {
-        print("Draft Test Suite\n")
+        print("Transcripted Fast Test Suite\n")
 
         testCapturedContext()
         testRefusalDetection()
