@@ -9,7 +9,8 @@ final class MenuBarSettingsView: NSView {
         title: "Connect your agent",
         symbolName: "sparkles",
         accessibilityLabel: "Connect your agent",
-        toolTip: "Connect your agent"
+        toolTip: "Connect your agent",
+        style: .accent
     )
     private let settingsButton = MenuIconButton(
         symbolName: "gearshape",

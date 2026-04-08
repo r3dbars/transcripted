@@ -5,9 +5,15 @@ import AppKit
 
 @MainActor
 final class MenuOutlineButton: NSButton {
+    enum Style {
+        case standard
+        case accent
+    }
+
     private var trackingAreaRef: NSTrackingArea?
     private var symbolName: String?
     private var symbolLabel: String?
+    private let style: Style
     private var isHovering = false { didSet { updateAppearance() } }
     private var isPressing = false { didSet { updateAppearance() } }
 
@@ -22,7 +28,14 @@ final class MenuOutlineButton: NSButton {
         didSet { updateAppearance() }
     }
 
-    init(title: String, symbolName: String? = nil, accessibilityLabel: String? = nil, toolTip: String? = nil) {
+    init(
+        title: String,
+        symbolName: String? = nil,
+        accessibilityLabel: String? = nil,
+        toolTip: String? = nil,
+        style: Style = .standard
+    ) {
+        self.style = style
         self.symbolName = symbolName
         self.symbolLabel = accessibilityLabel
         super.init(frame: .zero)
@@ -81,11 +94,11 @@ final class MenuOutlineButton: NSButton {
                     pointSize: MenuTokens.secondaryButtonIconPointSize,
                     weight: .semibold
                 )
-            )
+        )
     }
 
-    private func updateTitleAppearance() {
-        let color = isEnabled ? MenuTokens.textPrimaryNS : MenuTokens.textMutedNS
+    private func updateTitleAppearance(contentColor: NSColor? = nil) {
+        let color = contentColor ?? (isEnabled ? MenuTokens.textPrimaryNS : MenuTokens.textMutedNS)
         attributedTitle = NSAttributedString(
             string: title,
             attributes: [
@@ -104,17 +117,27 @@ final class MenuOutlineButton: NSButton {
             backgroundColor = MenuTokens.actionDisabledNS
             borderColor = MenuTokens.sectionDividerNS
             contentColor = MenuTokens.textMutedNS
-        } else if isPressing {
-            backgroundColor = MenuTokens.secondaryButtonPressedNS
-            borderColor = MenuTokens.secondaryButtonBorderNS
-            contentColor = MenuTokens.textPrimaryNS
-        } else if isHovering {
-            backgroundColor = MenuTokens.secondaryButtonHoverNS
-            borderColor = MenuTokens.secondaryButtonBorderNS
-            contentColor = MenuTokens.textPrimaryNS
         } else {
-            backgroundColor = MenuTokens.secondaryButtonBackgroundNS
-            borderColor = MenuTokens.secondaryButtonBorderNS
+            switch style {
+            case .standard:
+                if isPressing {
+                    backgroundColor = MenuTokens.secondaryButtonPressedNS
+                } else if isHovering {
+                    backgroundColor = MenuTokens.secondaryButtonHoverNS
+                } else {
+                    backgroundColor = MenuTokens.secondaryButtonBackgroundNS
+                }
+                borderColor = MenuTokens.secondaryButtonBorderNS
+            case .accent:
+                if isPressing {
+                    backgroundColor = MenuTokens.accentButtonPressedNS
+                } else if isHovering {
+                    backgroundColor = MenuTokens.accentButtonHoverNS
+                } else {
+                    backgroundColor = MenuTokens.accentButtonBackgroundNS
+                }
+                borderColor = MenuTokens.accentButtonBorderNS
+            }
             contentColor = MenuTokens.textPrimaryNS
         }
 
@@ -122,7 +145,7 @@ final class MenuOutlineButton: NSButton {
         layer?.borderColor = borderColor.cgColor
         contentTintColor = contentColor
         alphaValue = isEnabled ? 1.0 : 0.55
-        updateTitleAppearance()
+        updateTitleAppearance(contentColor: contentColor)
     }
 
     override func updateTrackingAreas() {
