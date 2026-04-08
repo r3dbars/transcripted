@@ -364,6 +364,11 @@ private final class RecentMeetingRowView: NSView {
     private let item: RecentMeetingItem
     private let titleLabel = NSTextField(labelWithString: "")
     private let dateLabel = NSTextField(labelWithString: "")
+    private let connectButton = MenuIconButton(
+        symbolName: "sparkles",
+        accessibilityLabel: "Connect your agent",
+        toolTip: "Connect your agent"
+    )
     private let copyButton = MenuIconButton(
         symbolName: "doc.on.doc",
         accessibilityLabel: "Copy transcript",
@@ -418,7 +423,9 @@ private final class RecentMeetingRowView: NSView {
         dateLabel.textColor = MenuTokens.textSecondaryNS
         addSubview(dateLabel)
 
-        [copyButton, showButton].forEach { addSubview($0) }
+        [connectButton, copyButton, showButton].forEach { addSubview($0) }
+        connectButton.target = self
+        connectButton.action = #selector(connectAgent)
         copyButton.target = self
         copyButton.action = #selector(copyTranscript)
 
@@ -456,7 +463,8 @@ private final class RecentMeetingRowView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard !copyButton.frame.contains(point),
+        guard !connectButton.frame.contains(point),
+              !copyButton.frame.contains(point),
               !showButton.frame.contains(point) else {
             super.mouseDown(with: event)
             return
@@ -481,7 +489,14 @@ private final class RecentMeetingRowView: NSView {
             height: buttonSize
         )
 
-        let textWidth = max(0, showButton.frame.minX - 12)
+        connectButton.frame = NSRect(
+            x: showButton.frame.minX - 8 - buttonSize,
+            y: (bounds.height - buttonSize) / 2,
+            width: buttonSize,
+            height: buttonSize
+        )
+
+        let textWidth = max(0, connectButton.frame.minX - 12)
         titleLabel.frame = NSRect(x: 0, y: 6, width: textWidth, height: 14)
         dateLabel.frame = NSRect(x: 0, y: 21, width: textWidth, height: 12)
         divider.frame = NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
@@ -505,6 +520,10 @@ private final class RecentMeetingRowView: NSView {
 
     @objc private func showInFinder() {
         NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
+    }
+
+    @objc private func connectAgent() {
+        AgentConnectionWindowCoordinator.shared.show(for: item)
     }
 }
 
