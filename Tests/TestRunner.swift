@@ -13,6 +13,7 @@ struct TestRunner {
         testStyleUtils()
         testDiffSummary()
         testMeetingTranscriptStyler()
+        testSpeakerNamingPolicy()
         testDictationTranscriptWriter()
         testDictationSounds()
 

@@ -10,6 +10,7 @@
 // "keep the generic Speaker N labels").
 
 import AppKit
+import AVFoundation
 import Combine
 import TranscriptedCore
 
@@ -223,7 +224,7 @@ final class SpeakerNamingContentView: NSView {
         // Layout rows inside the document view (flipped coordinates — rows
         // stack top-down, but we lay them out using bottom-up math since the
         // document view is not flipped).
-        let rowHeight: CGFloat = 88
+        let rowHeight: CGFloat = 112
         let rowSpacing: CGFloat = 10
         let docHeight = max(
             scrollView.frame.height,
@@ -273,10 +274,13 @@ final class SpeakerRowView: NSView {
     private let entry: SpeakerNamingEntry
     private let labelField = NSTextField(labelWithString: "")
     private let sampleField = NSTextField(wrappingLabelWithString: "")
+    private let detailField = NSTextField(labelWithString: "")
     private let nameField = NSTextField(string: "")
+    private let playButton = NSButton(title: "Play clip", target: nil, action: nil)
     private let confirmButton = NSButton(title: "Confirm", target: nil, action: nil)
 
     private var userConfirmed: Bool = false
+    private var audioPlayer: AVAudioPlayer?
 
     init(entry: SpeakerNamingEntry) {
         self.entry = entry
@@ -295,7 +299,7 @@ final class SpeakerRowView: NSView {
         layer?.borderWidth = 1
 
         if let current = entry.currentName, !current.isEmpty {
-            labelField.stringValue = "Is this \(current)?"
+            labelField.stringValue = "Possible match: \(current)"
         } else {
             labelField.stringValue = "Speaker \(entry.sortformerSpeakerId)"
         }
@@ -310,12 +314,22 @@ final class SpeakerRowView: NSView {
         sampleField.lineBreakMode = .byTruncatingTail
         addSubview(sampleField)
 
+        detailField.font = NSFont.systemFont(ofSize: 10)
+        detailField.textColor = NSColor.tertiaryLabelColor
+        detailField.stringValue = detailText(for: entry)
+        addSubview(detailField)
+
         nameField.placeholderString = "Enter name"
         nameField.font = NSFont.systemFont(ofSize: 12)
         if let current = entry.currentName {
             nameField.stringValue = current
         }
         addSubview(nameField)
+
+        playButton.bezelStyle = .inline
+        playButton.target = self
+        playButton.action = #selector(handlePlay)
+        addSubview(playButton)
 
         confirmButton.bezelStyle = .inline
         confirmButton.target = self
@@ -328,6 +342,7 @@ final class SpeakerRowView: NSView {
         super.layout()
         let pad: CGFloat = 12
         let w = bounds.width - pad * 2
+        let rowGap: CGFloat = 6
 
         labelField.frame = NSRect(
             x: pad,
@@ -337,12 +352,28 @@ final class SpeakerRowView: NSView {
         )
         sampleField.frame = NSRect(
             x: pad,
-            y: labelField.frame.minY - 26,
+            y: labelField.frame.minY - 28,
             width: w,
             height: 24
         )
+        detailField.frame = NSRect(
+            x: pad,
+            y: sampleField.frame.minY - 18,
+            width: w,
+            height: 14
+        )
 
         let fieldH: CGFloat = 22
+        let playSize = playButton.fittingSize
+        let playWidth = max(72, playSize.width + 12)
+        playButton.frame = NSRect(
+            x: pad,
+            y: pad,
+            width: playWidth,
+            height: fieldH
+        )
+
+        let rightInset: CGFloat
         if !confirmButton.isHidden {
             let btnSize = confirmButton.fittingSize
             let btnW = max(80, btnSize.width)
@@ -352,15 +383,56 @@ final class SpeakerRowView: NSView {
                 width: btnW,
                 height: fieldH
             )
-            nameField.frame = NSRect(
-                x: pad,
-                y: pad,
-                width: confirmButton.frame.minX - pad - 8,
-                height: fieldH
-            )
+            rightInset = confirmButton.frame.minX - 8
         } else {
-            nameField.frame = NSRect(x: pad, y: pad, width: w, height: fieldH)
+            rightInset = bounds.width - pad
         }
+
+        nameField.frame = NSRect(
+            x: playButton.frame.maxX + rowGap,
+            y: pad,
+            width: max(0, rightInset - (playButton.frame.maxX + rowGap)),
+            height: fieldH
+        )
+    }
+
+    deinit {
+        audioPlayer?.stop()
+    }
+
+    private func detailText(for entry: SpeakerNamingEntry) -> String {
+        if let current = entry.currentName, let similarity = entry.matchSimilarity {
+            return "Listen to the clip to confirm \(current) (\(Int((similarity * 100).rounded()))% voice match)."
+        }
+        if let current = entry.currentName {
+            return "Listen to the clip to confirm or correct \(current)."
+        }
+        return "Listen to the clip, then type the speaker's name."
+    }
+
+    @objc private func handlePlay() {
+        if let audioPlayer, audioPlayer.isPlaying {
+            audioPlayer.stop()
+            audioPlayer.currentTime = 0
+            playButton.title = "Play clip"
+            return
+        }
+
+        do {
+            let player = try AVAudioPlayer(contentsOf: entry.clipURL)
+            audioPlayer = player
+            player.delegate = self
+            player.prepareToPlay()
+            player.play()
+            playButton.title = "Stop"
+        } catch {
+            NSSound.beep()
+            playButton.title = "Play clip"
+        }
+    }
+
+    private func resetPlaybackUI() {
+        playButton.title = "Play clip"
     }
 
     @objc private func handleConfirm() {
@@ -400,5 +472,20 @@ final class SpeakerRowView: NSView {
             newName: typed,
             action: action
         )
+    }
+}
+
+@available(macOS 14.0, *)
+extension SpeakerRowView: AVAudioPlayerDelegate {
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Task { @MainActor [weak self] in
+            self?.resetPlaybackUI()
+        }
+    }
+
+    nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        Task { @MainActor [weak self] in
+            self?.resetPlaybackUI()
+        }
     }
 }

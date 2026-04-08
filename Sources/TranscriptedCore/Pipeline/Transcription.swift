@@ -2,27 +2,6 @@ import Foundation
 @preconcurrency import AVFoundation
 import Accelerate
 
-/// Maps speaker labels to identified names from voice fingerprint matching
-public struct SpeakerMapping {
-    public let speakerId: String           // "0", "1", "2" for speaker IDs
-    public var identifiedName: String?     // "John Smith" or nil if unidentified
-    public var confidence: SpeakerConfidence?
-
-    /// Display name: uses identified name if available, otherwise "Speaker X"
-    public var displayName: String {
-        if let name = identifiedName {
-            return confidence == .medium ? "\(name)?" : name
-        }
-        return "Speaker \(speakerId)"
-    }
-
-    public init(speakerId: String, identifiedName: String? = nil, confidence: SpeakerConfidence? = nil) {
-        self.speakerId = speakerId
-        self.identifiedName = identifiedName
-        self.confidence = confidence
-    }
-}
-
 // MARK: - Transcription Service (Local Pipeline)
 
 @available(macOS 14.0, *)
