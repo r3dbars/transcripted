@@ -105,7 +105,21 @@ enum DictationAgentOutput {
             characterCount: characterCount
         )
 
-        var entries = (loadDay(from: sidecarURL)?.entries ?? []).filter { $0.id != entry.id }
+        // Guard against silent data loss: if the sidecar exists but can't be decoded
+        // (corrupted JSON), throw rather than falling back to [] and discarding all prior entries.
+        let existingEntries: [AgentDictationEntry]
+        if FileManager.default.fileExists(atPath: sidecarURL.path) {
+            guard let existing = loadDay(from: sidecarURL) else {
+                throw CocoaError(.coderInvalidValue, userInfo: [
+                    NSURLErrorKey: sidecarURL,
+                    NSLocalizedDescriptionKey: "Corrupted dictation sidecar: \(sidecarURL.lastPathComponent)"
+                ])
+            }
+            existingEntries = existing.entries
+        } else {
+            existingEntries = []
+        }
+        var entries = existingEntries.filter { $0.id != entry.id }
         entries.append(entry)
         entries.sort { $0.createdAt < $1.createdAt }
 
