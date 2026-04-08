@@ -97,8 +97,7 @@ public final class StatsService: ObservableObject {
         calculateStreaks()
 
         // Get recent transcripts
-        let allRecordings = database.getAllRecordings()
-        recentTranscripts = Array(allRecordings.prefix(3))
+        recentTranscripts = database.getRecentRecordings(limit: 3)
 
         // Update motivational message
         updateMotivationalMessage()
