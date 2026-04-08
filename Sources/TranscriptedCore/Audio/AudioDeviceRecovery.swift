@@ -1,6 +1,5 @@
 import Foundation
 @preconcurrency import AVFoundation
-import AppKit
 import CoreAudio
 import QuartzCore
 
