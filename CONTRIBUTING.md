@@ -11,8 +11,8 @@ Quick repo orientation before you jump in:
   transition settles
 
 The short version of the product story is simple: this repo is building a local
-Mac app that captures spoken context and saves it in files your own tools and
-agents can use.
+Mac app for dictation and meeting capture that saves useful artifacts in files
+your own tools and agents can use.
 
 ## Development Setup
 
@@ -53,6 +53,10 @@ If you touch meeting integration or `TranscriptedCore`, also run:
 On first launch, models may download from HuggingFace if they are not already
 cached locally.
 
+Build note: `build.sh` is the authoritative app build and uses raw `swiftc`.
+`Package.swift` exists for `TranscriptedCore` compilation/testing and is not
+the main app build.
+
 ## Making Changes
 
 ### Branch Naming
@@ -81,11 +85,11 @@ carry `Draft` names, but they are part of the same product:
 | Area | Directory | Responsibility |
 |------|-----------|----------------|
 | App shell + shared state | `Sources/` | app lifecycle, hotkeys, paths, shared state |
-| Dictation flow | `Sources/Draft/` | dictation cleanup, formatting, Draft-named utilities still in use |
+| Dictation capture and storage | `Sources/Speech/`, `Sources/Dictation/`, `Sources/Capture/` | speech capture, trigger routing, saved dictation transcripts |
 | Meeting capture | `Sources/Meeting/` | meeting recording, model warmup, transcript flow |
-| UI | `Sources/UI/` | overlay, menubar, onboarding |
-| Local inference | `Sources/Local/` | on-device MLX model integration |
+| UI | `Sources/UI/` | dictation overlay, meeting overlay, menubar, settings, permissions onboarding |
 | Shared transcription core | `Sources/TranscriptedCore/` | extracted meeting/transcription library |
+| Draft-era utility leftovers | `Sources/Draft/`, `Sources/Style/` | small pure helpers still covered by tests |
 
 `Sources/TranscriptedCore/` should stay a library boundary. Keep Draft app UI
 types and app-specific behavior out of that module.
@@ -98,7 +102,6 @@ Transcripted has strict threading rules due to CoreAudio's real-time requirement
 |-----------|--------|-------|
 | Session controllers + UI state | `@MainActor` | UI-bound state |
 | Audio capture internals | `DispatchQueue` + `NSLock` | Real-time audio I/O |
-| Local model access | actor / managed async tasks | serialized model use |
 | CoreAudio I/O callbacks | real-time thread | **No I/O, locks, allocations, or ObjC calls** |
 
 CoreAudio I/O callbacks run on real-time threads. Buffers are deep-copied before async dispatch — never processed in-place.
@@ -116,6 +119,10 @@ If you're changing meeting integration or `TranscriptedCore`, also run:
 ```bash
 bash run-integration-smoke.sh
 ```
+
+`run-tests.sh` is curated rather than discovery-based. If you add a new test
+file or move a source file that the test script compiles directly, update
+`run-tests.sh` in the same change.
 
 ## Submitting a Pull Request
 

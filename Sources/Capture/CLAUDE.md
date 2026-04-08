@@ -1,16 +1,47 @@
-# Capture
+# Capture Directory
 
-## What This Contains
+## What This Does
 
-Screenshot and context-capture primitives used to build structured context for Draft.
+`Sources/Capture/` owns the active global-trigger layer for:
 
-Current Swift files: **2**
+- dictation start/stop
+- meeting start/stop
+- optional right-Option tap dictation
 
-| File | Purpose |
-|---|---|
-| `CapturedContext.swift` | Shared structured model for captured screenshot/OCR context |
-| `ContextCaptureEngine.swift` | Orchestrates active capture flows for meeting and dictation capture |
+It no longer owns a live screenshot-driven draft mode.
 
-## Notes
-- This directory is narrower than older docs that described a larger capture subsystem.
-- Prefer this folder for context extraction, not speech transcription or UI state.
+## Key Files
+
+- `ContextCaptureEngine.swift` — Carbon hotkey registration, hotkey debounce,
+  right-Option tap detection, and routing into dictation or meeting handlers
+- `CapturedContext.swift` — legacy structured screenshot-context helper retained
+  for tests and compatibility code; not the center of the current runtime path
+
+## Current Hotkey Flow
+
+- Hotkey id `2` routes dictation toggles into `DraftSessionController`
+- Hotkey id `3` routes meeting toggles through the app-provided meeting closure
+- Rapid repeats are ignored using `DraftConstants.hotkeyActionDebounceInterval`
+- Right-Option tap can act as an alternate dictation trigger
+
+## Guardrails
+
+- Keep the C-level Carbon callback tiny and bounce into `@MainActor` work
+- Keep meeting routing separate from dictation routing
+- Do not reintroduce screenshot/OCR assumptions here unless the source files
+  come back in the same change
+
+## Verification
+
+After changing this directory:
+
+```bash
+bash build.sh
+bash run-tests.sh
+```
+
+Manual checks:
+
+- dictation hotkey starts and stops dictation
+- meeting hotkey toggles meeting capture
+- rapid repeat presses are ignored cleanly

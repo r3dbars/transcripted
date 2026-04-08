@@ -1,11 +1,12 @@
-# Feedback
+# Feedback directory
 
-## Current State
+## Current status
 
-This directory is currently a **documentation-only placeholder** on `main`.
+No Swift sources currently live in `Sources/Feedback/` on `main`.
 
-Current Swift files: **0**
+Older docs described a `FeedbackStore` and usage-stat logging path that are not present in the current source tree.
 
-## Notes
-- Older `FeedbackStore`-style docs are stale for the current branch.
-- If feedback persistence returns here, update this file when the first Swift source lands.
+## Agent notes
+
+- Do not assume `feedback.jsonl` is a live product dependency on `main` just because older docs mention it.
+- Verify against current `Sources/Observability/` and `docs/storage-paths.md` before adding or reading new persisted files.

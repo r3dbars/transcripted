@@ -1,16 +1,33 @@
-# Speech
+# Speech Directory
 
-## What This Contains
+## What This Does
 
-Speech-to-text integration centered on the local Parakeet pipeline.
+`Sources/Speech/` owns the app's live dictation speech path.
 
-Current Swift files: **2**
+## Key Files
 
-| File | Purpose |
-|---|---|
-| `ParakeetEngine.swift` | FluidAudio/CoreML-backed Parakeet TDT V3 transcription engine |
-| `STTRouter.swift` | Thin routing layer that currently forwards to Parakeet |
+- `ParakeetEngine.swift` — app-owned Parakeet STT engine, recording control,
+  live transcript state, model initialization, and audio-device handling
+- `STTRouter.swift` — small main-actor wrapper used by the rest of the app
 
-## Notes
-- This directory is now intentionally small.
-- Route all current STT traffic through `STTRouter` instead of calling engine details from unrelated modules.
+## Current Notes
+
+- This directory powers dictation
+- The meeting pipeline reuses the same app-owned `ParakeetEngine` through
+  `Sources/Meeting/MeetingSTTAdapter.swift`
+- Do not assume a separate local-LLM drafting path exists in this tree
+
+## Verification
+
+After changing speech code:
+
+```bash
+bash build.sh
+bash run-tests.sh
+```
+
+Manual checks:
+
+- dictation can start and stop cleanly
+- live transcript updates while listening
+- device changes do not leave the app stuck

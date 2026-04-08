@@ -1,22 +1,40 @@
-# Observability
+# Observability Directory
 
-## What This Contains
+## What This Does
 
-Logging, telemetry, diagnostics, crash reporting, and update wiring for the current Draft-first app.
+This directory contains the app's logging, diagnostics, crash reporting,
+optional beta shipping, and update plumbing.
 
-Current Swift files: **8**
+## Key Files
 
-| File | Purpose |
-|---|---|
-| `AppLogger.swift` | Central application logging entry point |
-| `BetaTelemetry.swift` | Beta-specific telemetry helpers |
-| `CrashReporter.swift` | Crash-report capture / submission hooks |
-| `DiagnosticsTrail.swift` | Diagnostics trail / breadcrumb-style runtime tracing |
-| `EventReporter.swift` | Event-level observability surface |
-| `EventTracker.swift` | Event tracking coordination helpers |
-| `JSONLWriter.swift` | JSONL persistence for structured logging output |
-| `UpdateManager.swift` | Update-check and update-flow coordination |
+- `AppLogger.swift` — developer-facing debug log writer
+- `EventReporter.swift` — structured event capture
+- `JSONLWriter.swift` — shared append-only JSONL writer
+- `DiagnosticsTrail.swift` — lightweight high-signal diagnostics helper
+- `CrashReporter.swift` — crash reporting setup
+- `EventTracker.swift` — lightweight analytics hook
+- `BetaTelemetry.swift` — beta-only log/event shipping
+- `UpdateManager.swift` — beta updater flow
 
-## Notes
-- This folder is the current home for operational instrumentation on `main`.
-- Keep event tracking and on-disk logging aligned with `EventReporter.swift`, `EventTracker.swift`, and `JSONLWriter.swift`.
+## Current Notes
+
+- Treat this directory as shared infrastructure for the current dictation +
+  meetings app
+- Do not assume older draft/style/analysis event flows are still active just
+  because they appear in historical docs or event logs
+- `build.sh` and beta behavior can affect logs, signing, and permissions during
+  local testing
+
+## Verification
+
+After changing observability code:
+
+```bash
+bash build.sh
+bash run-tests.sh
+```
+
+Useful files while testing:
+
+- `~/draft-debug.log`
+- `~/Library/Application Support/Draft/events.jsonl`

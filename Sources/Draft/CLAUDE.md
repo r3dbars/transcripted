@@ -1,16 +1,21 @@
-# Draft
+# Draft utilities
 
-## What This Contains
+## Current status
 
-Pure draft-processing helpers that support review and diff presentation.
+`Sources/Draft/` no longer contains the live draft / ghostwriting pipeline. The current directory holds small pure utilities that survived the transition.
 
-Current Swift files: **2**
+## Files
 
-| File | Purpose |
-|---|---|
-| `DiffSummary.swift` | Word-level diff computation and edit-summary helpers |
-| `DraftUtils.swift` | Small pure utility helpers extracted for testability |
+- `DiffSummary.swift` — pure word-level diff helpers used by overlay review UI
+- `DraftUtils.swift` — refusal-phrase heuristic retained as a pure utility
 
-## Notes
-- There is no longer a large `DraftEngine` implementation in this directory on `main`.
-- Treat this folder as pure helper logic, not app-state orchestration.
+## Agent notes
+
+- The product-level draft mode is removed on `main`; `Sources/UI/DraftSessionController.swift` now handles dictation only and returns a fixed message from removed draft-mode methods.
+- `DiffSummary` is still used by `Sources/UI/OverlayDiffStripView.swift` and `Sources/UI/OverlayReviewView.swift`.
+- `DraftUtils.looksLikeRefusal(...)` is still covered by tests, but it belongs to the older ghostwriting domain and is not a live top-level product flow on `main`.
+
+## Test coverage
+
+- `Tests/DiffSummaryTests.swift`
+- `Tests/RefusalDetectionTests.swift`

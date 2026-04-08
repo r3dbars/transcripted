@@ -1,50 +1,34 @@
-# Draft in `r3dbars/transcripted`
+# Transcripted in `r3dbars/transcripted`
 
-## What This Repo Is
+## What this repo is
 
-This public repo now carries the **Draft** product on `main` while preserving the
-old standalone Transcripted app on:
+`main` is the Draft-derived Transcripted app. The active product on `main` is a macOS menubar app for:
 
-- tag: `pre-draft-takeover-2026-04-06`
-- branch: `legacy/transcripted-standalone`
+- dictation
+- meeting capture and local transcription
 
-`main` is Draft-first. The legacy Transcripted app does **not** live on `main`.
+The old standalone Transcripted app is preserved on:
 
-## High-Level Layout
+- `legacy/transcripted-standalone`
+- `pre-draft-takeover-2026-04-06`
 
-```text
-Sources/
-|- DraftApp.swift
-|- DraftAppState.swift
-|- DraftPaths.swift
-|- DraftConstants.swift
-|- HotkeyPreferences.swift
-|- API/
-|- Accessibility/
-|- Analysis/
-|- Capture/
-|- Dictation/
-|- Draft/
-|- Feedback/
-|- Local/
-|- Meeting/
-|- Observability/
-|- Prompts/
-|- Speech/
-|- Style/
-|- TranscriptedCore/    <- shared meeting/transcription core kept in-repo
-`- UI/
-Tests/
-SmokeTests/
-backend/
-build.sh
-build-deps.sh
-run-tests.sh
-run-integration-smoke.sh
-Package.swift            <- SPM package for TranscriptedCore smoke tests only
-```
+The older draft / ghostwriting flow does not live on `main` anymore. `DraftSessionController` still exposes compatibility stubs for removed draft-mode entry points.
 
-## Build and Test
+## First reads
+
+Read these before making assumptions about the codebase:
+
+1. `README.md`
+2. `AGENTS.md`
+3. `docs/agent-onboarding.md`
+4. `Sources/CLAUDE.md`
+5. `Sources/Dictation/CLAUDE.md`
+6. `Sources/Meeting/CLAUDE.md`
+7. `Sources/TranscriptedCore/CLAUDE.md`
+8. `Tests/README.md`
+9. `docs/storage-paths.md`
+
+## Build and test
 
 ```bash
 bash build-deps.sh
@@ -58,27 +42,20 @@ Rules:
 
 1. After changing Swift source, run `bash build.sh` and `bash run-tests.sh`.
 2. If you change `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash run-integration-smoke.sh`.
-3. `build.sh` builds the Draft app.
-4. `Package.swift` exists so `Sources/TranscriptedCore/` can still be tested as a standalone library surface.
+3. If you change `Package.swift` or the public `TranscriptedCore` seam, also run `swift test`.
+4. `Sources/TranscriptedCore/` is a library boundary. Do not compile it directly into the Draft app target.
 
-## TranscriptedCore
+## Current architecture
 
-`Sources/TranscriptedCore/` is the shared meeting/transcription core extracted from
-Transcripted and now co-hosted in this repo. Draft consumes it through
-`Sources/Meeting/`.
+- `Sources/DraftApp.swift` wires the menubar app, popover, dictation overlay, and meeting overlay.
+- `Sources/DraftAppState.swift` owns app-wide services: `STTRouter`, `ContextCaptureEngine`, and the lazily built `MeetingSessionController`.
+- `Sources/UI/DraftSessionController.swift` now handles dictation only. Removed draft-mode entry points surface a fixed error message.
+- `Sources/Meeting/` adapts app-owned pieces like `ParakeetEngine` into `TranscriptedCore`.
+- `Sources/TranscriptedCore/` contains the reusable meeting transcription library.
+- Root `Package.swift` exists so `TranscriptedCore` can be tested as a standalone package surface.
 
-Important implications:
+## Documentation status
 
-1. `Sources/TranscriptedCore/` is a library boundary. Do not couple it to Draft UI types.
-2. `build.sh` must **not** compile `Sources/TranscriptedCore/` directly into the Draft app target.
-3. `build-deps.sh` builds a unified dependency archive and inlines `TranscriptedCore` from this repo when present.
-
-## Cutover Notes
-
-This repo takeover uses the **manual migration** path:
-
-- existing Transcripted installs do **not** auto-upgrade into Draft
-- Draft keeps its current bundle identifier on `main`
-- old Transcripted release/update plumbing is intentionally disabled on `main`
-
-If you need the old standalone Transcripted app, use the legacy branch or tag above.
+Most repo-level docs have now been resynced to the current dictation +
+meetings codebase. Historical context still lives mainly under `docs/merge/`,
+`docs/todo/`, and the old `.claude` QA skill.

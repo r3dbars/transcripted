@@ -1,45 +1,95 @@
-# Draft in `r3dbars/transcripted`
+# Transcripted Agent Guide
 
-## Repo Truth
+## Current repo truth
 
-`main` is the **Draft** product.
+- `main` is the Draft-derived Transcripted product.
+- The current app on `main` supports **dictation** and **meetings**.
+- The older draft / ghostwriting flow is not active on `main`. `DraftSessionController` keeps compatibility stubs for removed draft-mode entry points.
+- `Sources/TranscriptedCore/` is an in-repo library consumed through `Sources/Meeting/`. Keep it as a library boundary.
+- `build.sh` builds the app target. The root `Package.swift` exists for `TranscriptedCore` package tests and smoke coverage, not as the main app build.
 
-The old standalone Transcripted app is preserved on:
+## Read this first
 
-- `legacy/transcripted-standalone`
-- `pre-draft-takeover-2026-04-06`
+1. `README.md`
+2. `AGENTS.md`
+3. `docs/agent-onboarding.md`
+4. `Sources/CLAUDE.md`
+5. `Sources/Dictation/CLAUDE.md` when touching dictation persistence
+6. `Sources/Meeting/CLAUDE.md` when touching meeting capture or meeting UI
+7. `Sources/TranscriptedCore/CLAUDE.md` when touching the shared library
+8. `Tests/README.md`
+9. `docs/storage-paths.md`
 
-Do not treat `main` as a dual-app repo.
+## Directory map
 
-## Main Areas
+- `Sources/` — app shell, hotkeys, speech, dictation UI, meeting bridge, shared app paths
+- `Sources/Dictation/` — markdown persistence for completed dictations
+- `Sources/Meeting/` — Draft-side bridge into `TranscriptedCore`
+- `Sources/TranscriptedCore/` — reusable meeting transcription library
+- `Tests/` — fast custom Swift test runner plus `TranscriptedCore` package tests
+- `SmokeTests/` — integration smoke for the bundled core library seam
+- `Tools/TranscriptedCLI/` — standalone offline diarization CLI
+- `Tools/TranscriptedMCP/` — read-only MCP server for saved meeting artifacts
+- `Tools/TranscriptedQA/` — artifact validation CLI
+- `backend/` — legacy beta proxy / telemetry backend
 
-- `Sources/` — Draft app code
-- `Sources/Meeting/` — Draft-to-TranscriptedCore bridge
-- `Sources/TranscriptedCore/` — shared meeting/transcription library
-- `Tests/` — Draft fast test suite
-- `SmokeTests/` — TranscriptedCore integration smoke
-- `backend/` — Draft beta backend
+## Documentation status
 
-## Build Commands
+The repo has both current docs and historical docs from the pre-takeover / draft-mode codebase.
+
+Current source-of-truth docs:
+
+- `AGENTS.md`
+- `CLAUDE.md`
+- `docs/agent-onboarding.md`
+- `Sources/CLAUDE.md`
+- `Sources/Dictation/CLAUDE.md`
+- `Sources/Meeting/CLAUDE.md`
+- `Sources/TranscriptedCore/CLAUDE.md`
+- `Tests/README.md`
+- `docs/storage-paths.md`
+- `backend/README.md`
+- `Tools/TranscriptedCLI/CLAUDE.md`
+
+Historical or planning-heavy docs:
+
+- `docs/merge/`
+- `docs/todo/`
+- `.claude/skills/transcripted-qa/SKILL.md`
+
+Some `Sources/*/CLAUDE.md` files now intentionally document that the directory
+is a placeholder or a retained utility area rather than a live subsystem. Treat
+those notes as current.
+
+## Build and test
 
 ```bash
 bash build-deps.sh
 bash build.sh
 bash run-tests.sh
 bash run-integration-smoke.sh
+swift test
 ```
 
 Rules:
 
 1. After changing Swift source, run `bash build.sh` and `bash run-tests.sh`.
 2. If you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash run-integration-smoke.sh`.
-3. `build.sh` builds the Draft app only.
-4. `Sources/TranscriptedCore/` must stay a library boundary; do not compile it directly into the Draft app target.
+3. If you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam, also run `swift test`.
+4. `build.sh` must not compile `Sources/TranscriptedCore/` directly into the app target.
 
-## Migration Assumption
+## Testing gotchas
 
-This repo takeover uses the **manual migration** path:
+- `run-tests.sh` is a custom `swiftc` runner, not XCTest.
+- Adding a file under `Tests/` is not enough by itself; the file must also be wired into both `run-tests.sh` and `Tests/TestRunner.swift`.
+- Some test files in `Tests/` are historical and are not currently compiled by `run-tests.sh`. `Tests/README.md` calls these out.
 
-- existing Transcripted installs do not auto-upgrade into Draft
-- Draft keeps its current bundle identifier on `main`
-- legacy Transcripted update/release plumbing is intentionally not active on `main`
+## Storage
+
+Current persisted data on `main` uses Draft-named compatibility roots:
+
+- app support root: `~/Library/Application Support/Draft/`
+- dictations: `~/Library/Application Support/Draft/dictations/`
+- meetings: `~/Library/Application Support/Draft/meetings/`
+
+See `docs/storage-paths.md` for the full map, including `TranscriptedCore` standalone defaults.
