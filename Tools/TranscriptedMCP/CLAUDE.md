@@ -12,6 +12,7 @@ Standalone MCP server (`transcripted-mcp`) for querying Transcripted meeting dat
 | `TranscriptLoader.swift` | Loads `.md` transcript files from disk for `read_meeting` |
 | `Models.swift` | All Codable input/output structs (AgentTranscript, MeetingSummary, SearchResult, SpeakerHistoryResult, etc.) and `MCPIndexError` |
 | `NameVariants.swift` | Speaker name fuzzy-matching — `Mike` finds `Michael`, handles nicknames and first-name-only lookups |
+| `DataDirectories.swift` | Resolves meeting and dictation data directories from env vars or defaults; provides the list of directories to watch |
 | `FileWatcher.swift` | `DispatchSource`-based directory watcher; calls back with changed URL for incremental index updates |
 
 ## Test Files (Tests/TranscriptedMCPTests/)

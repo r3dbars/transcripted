@@ -6,10 +6,11 @@
 
 ## Files
 
-- `MeetingSessionController.swift` — top-level meeting state machine, model warmup, capture start/stop, failed-meeting actions, transcript restyling
+- `FailedMeetingPresentation.swift` — maps `FailedTranscription` into `FailedMeetingItem` view-models with human-readable titles and retry metadata
 - `MeetingCaptureBridge.swift` — `@MainActor` wrapper around core `Audio`, converts callback-based stop into `async`
-- `MeetingSTTAdapter.swift` — adapts Draft's `ParakeetEngine` to `TranscriptedCore.SpeechToTextEngine`
 - `MeetingModelDownloader.swift` — loads Parakeet and diarization models together
+- `MeetingSTTAdapter.swift` — adapts Draft's `ParakeetEngine` to `TranscriptedCore.SpeechToTextEngine`
+- `MeetingSessionController.swift` — top-level meeting state machine, model warmup, capture start/stop, failed-meeting actions, transcript restyling
 - `MeetingStoragePaths.swift` — Draft-specific meeting storage layout
 - `MeetingTranscriptStyler.swift` — restyles saved transcripts and renames files after save
 

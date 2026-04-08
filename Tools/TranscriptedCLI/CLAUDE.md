@@ -2,12 +2,13 @@
 
 ## What this tool does
 
-`Tools/TranscriptedCLI/` is a standalone Swift package for offline diarization. It does not build or run the app target.
+`Tools/TranscriptedCLI/` is a standalone Swift package for offline diarization and local context queries. It does not build or run the app target.
 
 ## Commands
 
 - `transcripted-cli diarize <audio>` — diarize one file, output RTTM or JSON
 - `transcripted-cli batch <directory>` — diarize every matching audio file in a directory
+- `transcripted-cli context-recent` — list recent meetings and dictations from saved local context
 
 ## Files
 
@@ -17,6 +18,9 @@
 - `Sources/TranscriptedCLI/BatchCommand.swift` — directory command
 - `Sources/TranscriptedCLI/ConfigLoader.swift` — JSON-to-`OfflineDiarizerConfig` loader
 - `Sources/TranscriptedCLI/RTTMWriter.swift` — RTTM output formatter
+- `Sources/TranscriptedCLI/ContextCommands.swift` — `context-recent` subcommand for querying saved meetings and dictations
+- `Sources/TranscriptedCLI/ContextModels.swift` — Codable models for CLI context queries (transcripts, speakers, dictation entries)
+- `Sources/TranscriptedCLI/ContextStore.swift` — resolves meeting and dictation data directories and loads context from disk
 
 ## Build and run
 
@@ -30,5 +34,5 @@ swift run transcripted-cli batch /path/to/folder --ext wav
 ## Agent notes
 
 - This package depends on repo-level prebuilt FluidAudio artifacts. If those are missing, build the repo dependencies first.
-- The CLI is about diarization only. It does not use the app UI, app storage paths, or the `MeetingSessionController` bridge layer.
+- The CLI covers diarization and local context queries. It does not use the app UI or the `MeetingSessionController` bridge layer.
 - Changes here should be checked independently from app builds.

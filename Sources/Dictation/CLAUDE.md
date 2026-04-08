@@ -6,6 +6,7 @@
 
 ## Files
 
+- `DictationAgentOutput.swift` — Codable models (`AgentDictationDay`, `AgentDictationEntry`) for the JSON sidecar written alongside each day's markdown
 - `DictationStoragePaths.swift` — Draft-named storage root for dictation artifacts
 - `DictationTranscriptWriter.swift` — groups completed dictations into one markdown file per day
 
