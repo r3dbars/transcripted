@@ -164,9 +164,11 @@ public final class StatsDatabase {
 
         // Create indexes for common queries
         let createDateIndex = "CREATE INDEX IF NOT EXISTS idx_recordings_date ON recordings(date);"
+        let createDateTimeIndex = "CREATE INDEX IF NOT EXISTS idx_recordings_date_time ON recordings(date DESC, time DESC);"
         executeSQL(createRecordingsTable)
         executeSQL(createDailyActivityTable)
         executeSQL(createDateIndex)
+        executeSQL(createDateTimeIndex)
     }
 
     func executeSQL(_ sql: String) {
@@ -263,6 +265,41 @@ public final class StatsDatabase {
             }
         } else {
             AppLogger.stats.error("Failed to prepare getAllRecordings", ["sqlite_error": dbErrorMessage()])
+        }
+
+        sqlite3_finalize(statement)
+        return recordings
+    }
+
+    /// Get the most recent recordings without materializing the full table.
+    public func getRecentRecordings(limit: Int) -> [RecordingMetadata] {
+        guard limit > 0 else { return [] }
+        return queue.sync {
+            getRecentRecordingsImpl(limit: limit)
+        }
+    }
+
+    private func getRecentRecordingsImpl(limit: Int) -> [RecordingMetadata] {
+        var recordings: [RecordingMetadata] = []
+
+        let sql = """
+        SELECT id, date, time, duration_seconds, word_count, speaker_count, processing_time_ms, transcript_path, title
+        FROM recordings
+        ORDER BY date DESC, time DESC
+        LIMIT ?;
+        """
+        var statement: OpaquePointer?
+
+        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
+            sqlite3_bind_int(statement, 1, Int32(limit))
+
+            while sqlite3_step(statement) == SQLITE_ROW {
+                if let recording = recordingMetadataFromRow(statement) {
+                    recordings.append(recording)
+                }
+            }
+        } else {
+            AppLogger.stats.error("Failed to prepare getRecentRecordings", ["sqlite_error": dbErrorMessage()])
         }
 
         sqlite3_finalize(statement)
