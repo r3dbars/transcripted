@@ -61,7 +61,11 @@ extension TranscriptionTaskManager {
 
             // Update the saved transcript file with real names
             if !updates.isEmpty {
-                TranscriptSaver.updateSpeakerNames(transcriptURL: transcriptURL, updates: updates)
+                TranscriptSaver.updateSpeakerNames(
+                    transcriptURL: transcriptURL,
+                    updates: updates,
+                    speakerStore: speakerDB
+                )
             }
 
             // Clean up clips and audio files

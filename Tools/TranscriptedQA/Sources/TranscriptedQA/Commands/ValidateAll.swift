@@ -11,16 +11,17 @@ struct ValidateAll: ParsableCommand {
 
     func run() throws {
         let dir = pathOpts.resolvedPath
-        let home = FileManager.default.homeDirectoryForCurrentUser
+        let transcriptsDir = transcriptedTranscriptDirectory(relativeTo: dir)
+        let logsPath = transcriptedLogFilePath(relativeTo: dir)
 
         var results: [ValidationResult] = []
 
-        results += TranscriptValidator(directory: dir).validate()
-        results += JSONSidecarValidator(directory: dir).validate()
+        results += TranscriptValidator(directory: transcriptsDir).validate()
+        results += JSONSidecarValidator(directory: transcriptsDir).validate()
         results += SpeakerDBValidator(dbPath: dir.appendingPathComponent("speakers.sqlite").path).validate()
         results += StatsDBValidator(dbPath: dir.appendingPathComponent("stats.sqlite").path).validate()
-        results += LogValidator(logPath: home.appendingPathComponent("Library/Logs/Transcripted/app.jsonl").path).validate()
-        results += IndexValidator(directory: dir).validate()
+        results += LogValidator(logPath: logsPath).validate()
+        results += IndexValidator(directory: transcriptsDir).validate()
         results += HealthChecker(dataPath: dir).validate()
 
         try runValidation(results: results, format: formatOpts.format)

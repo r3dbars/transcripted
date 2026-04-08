@@ -204,7 +204,7 @@ public enum AgentOutput {
     }
 
     /// Rebuild the root index file by scanning existing JSON sidecars.
-    public static func writeIndex(to folder: URL, speakerDB: SpeakerDatabase) throws {
+    public static func writeIndex(to folder: URL, speakerStore: any SpeakerStore) throws {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])
             .filter({ $0.pathExtension == "json" && $0.lastPathComponent != "transcripted.json" && $0.lastPathComponent != "failed_transcriptions.json" }) else {
@@ -237,7 +237,7 @@ public enum AgentOutput {
         }
 
         // Known speakers from database
-        let allSpeakers = speakerDB.allSpeakers()
+        let allSpeakers = speakerStore.allSpeakers()
         let knownSpeakers = allSpeakers.compactMap { profile -> AgentKnownSpeaker? in
             guard let name = profile.displayName else { return nil }
             return AgentKnownSpeaker(

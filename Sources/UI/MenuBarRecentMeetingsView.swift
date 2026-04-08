@@ -49,7 +49,7 @@ enum RecentMeetingsScanner {
                 .sorted(by: { $0.date > $1.date })
                 .prefix(limit)
                 .map { entry in
-                    let styled = MeetingTranscriptStyler.restyleTranscript(at: entry.url)
+                    let styled = MeetingTranscriptStyler.displayTranscript(at: entry.url)
                     return RecentMeetingItem(title: styled.title, date: entry.date, transcriptURL: styled.url)
                 }
         )

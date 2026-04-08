@@ -38,6 +38,9 @@ Meeting transcripts are currently saved here:
 
 That Draft-named path stays in place for now so local data does not break
 during the transition.
+The MCP and QA tools default to the same Draft app-support tree, with meeting
+artifacts under `~/Library/Application Support/Draft/meetings` and transcripts
+inside that folder's `transcripts/` subdirectory.
 
 ### Dictate into any app
 
@@ -98,6 +101,9 @@ This transition is manual for now:
 bash build-deps.sh
 bash build.sh
 ```
+
+`build-deps.sh` creates the `deps-libs/` and `deps-modules/` artifacts that the
+local tool packages expect.
 
 ## Tests
 
