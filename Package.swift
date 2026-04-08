@@ -9,7 +9,8 @@ import Foundation
 //   2. `swift test` for the TranscriptedCore smoke tests in this repo
 //
 // Binary dependency layout:
-//   deps-libs/libDraftDeps.a          — prebuilt mega-library (FluidAudio 0.7.9 + MLX + deps)
+//   deps-libs/libDraftDeps.a          — prebuilt mega-library (FluidAudio 0.7.9 + MLX + deps + TranscriptedCore)
+//   deps-libs/libExternalDeps.a       — external-only archive for SPM tests (no TranscriptedCore objects)
 //   deps-modules/*.swiftmodule        — Swift interface files for FluidAudio et al.
 //   deps-modules/FastClusterWrapper   — C header for fast-cluster C++ wrapper
 //   deps-modules/MachTaskSelfWrapper  — C header for mach_task_self helper
@@ -47,7 +48,7 @@ let package = Package(
             linkerSettings: [
                 .unsafeFlags([
                     "-L\(repoRoot)/deps-libs",
-                    "-lDraftDeps",
+                    "-lExternalDeps",
                     "-lc++",
                 ]),
                 .linkedFramework("Metal"),
@@ -79,7 +80,7 @@ let package = Package(
                 // FluidAudio symbols pulled in through @testable.
                 .unsafeFlags([
                     "-L\(repoRoot)/deps-libs",
-                    "-lDraftDeps",
+                    "-lExternalDeps",
                     "-lc++",
                 ]),
                 .linkedFramework("Metal"),
