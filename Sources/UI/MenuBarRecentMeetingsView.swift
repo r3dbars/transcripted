@@ -424,7 +424,6 @@ private final class RecentMeetingRowView: NSView {
         addSubview(dateLabel)
 
         [connectButton, copyButton, showButton].forEach { addSubview($0) }
-
         connectButton.target = self
         connectButton.action = #selector(connectAgent)
         copyButton.target = self

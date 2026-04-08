@@ -125,7 +125,7 @@ extension TranscriptSaver {
             yaml += "\nspeakers:"
             for key in sortedSpeakerKeys {
                 guard let mapping = speakerMappings[key] else { continue }
-                let name = mapping.identifiedName ?? "Unknown"
+                let name = mapping.displayName
                 let confidence = mapping.confidence?.rawValue ?? "unknown"
                 let source = speakerSources[mapping.speakerId] ?? "unknown"
                 yaml += "\n  - id: \"\(Self.escapeYAML(mapping.speakerId))\""

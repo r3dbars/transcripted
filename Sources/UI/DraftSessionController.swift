@@ -85,6 +85,7 @@ class DraftSessionController: ObservableObject {
     }
 
     private var sessionSourceApp: NSRunningApplication?
+    private var startupTask: Task<Void, Never>?
     private var streamingTask: Task<Void, Never>?
     private var clipboardRestoreTask: Task<Void, Never>?
     private var sessionTimeoutTask: Task<Void, Never>?
@@ -96,6 +97,7 @@ class DraftSessionController: ObservableObject {
     private static let sessionTimeoutNanos: UInt64 = 5 * 60 * 1_000_000_000
 
     deinit {
+        startupTask?.cancel()
         streamingTask?.cancel()
         clipboardRestoreTask?.cancel()
         sessionTimeoutTask?.cancel()
@@ -151,7 +153,7 @@ class DraftSessionController: ObservableObject {
 
     /// Start dictation — show overlay and begin voice recording (no screenshot/vision)
     func startDictation(sourceApp: NSRunningApplication?, trigger: DictationTrigger = .unknown) {
-        guard let (_, overlayController) = readyState() else { return }
+        guard let (appState, overlayController) = readyState() else { return }
         guard !isDictating, !isInSession else { return }
         isDictating = true
         sessionSourceApp = sourceApp
@@ -160,7 +162,7 @@ class DraftSessionController: ObservableObject {
         lastCompletedText = nil
 
         DiagnosticsTrail.record(
-            logger: appState?.logger,
+            logger: appState.logger,
             engine: "dictation",
             event: "dictation_started",
             message: "Dictation started",
@@ -173,10 +175,14 @@ class DraftSessionController: ObservableObject {
             )
         )
 
-        overlayController.state = .listening
-        overlayController.showPanel(near: sourceApp)
+        if appState.sttRouter.isModelLoaded {
+            overlayController.state = .listening
+            overlayController.showPanel(near: sourceApp)
+            beginDictationRecording(sourceApp: sourceApp)
+            return
+        }
 
-        beginDictationRecording(sourceApp: sourceApp)
+        startDictationAfterWarmup(sourceApp: sourceApp)
     }
 
     /// Actually start dictation recording — called directly from startDictation
@@ -201,6 +207,7 @@ class DraftSessionController: ObservableObject {
             return
         }
         appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
+        AppSoundPlayer.shared.play(.dictationStart)
 
         // Start session timeout — auto-cancel after 5 minutes to prevent stuck sessions
         installSessionTimeout()
@@ -239,6 +246,10 @@ class DraftSessionController: ObservableObject {
             )
             return
         }
+        if overlayController.state == .loading && !appState.sttRouter.isRecording {
+            cancelDictation()
+            return
+        }
 
         let canStopRecording = overlayController.state == .listening || appState.sttRouter.isRecording
         guard canStopRecording else {
@@ -260,17 +271,19 @@ class DraftSessionController: ObservableObject {
         }
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
-        overlayController.state = .drafting
 
         appState.sttRouter.stopRecording()
         streamingTask?.cancel()
         streamingTask = Task {
-            // Wait for voice model if still loading
+            // Surface model warmup honestly instead of calling it "Transcribing"
+            // before the local dictation model is actually ready.
             if !appState.sttRouter.isModelLoaded {
                 appState.logger.log("DICTATION | waiting for voice model before transcribe…")
+                self.updateLoadingOverlay(sourceApp: self.sessionSourceApp)
                 for _ in 0..<DraftConstants.modelLoadMaxIterations {
                     guard !Task.isCancelled else { return }
                     if appState.sttRouter.isModelLoaded { break }
+                    self.updateLoadingOverlay(sourceApp: self.sessionSourceApp)
                     try? await Task.sleep(nanoseconds: DraftConstants.modelLoadPollInterval)
                 }
                 guard appState.sttRouter.isModelLoaded else {
@@ -280,6 +293,7 @@ class DraftSessionController: ObservableObject {
                     return
                 }
             }
+            overlayController.state = .drafting
             let voiceText = await appState.sttRouter.transcribe()
             guard !Task.isCancelled else { return }
 
@@ -287,6 +301,7 @@ class DraftSessionController: ObservableObject {
                 appState.logger.log("DICTATION | no transcription, cancelling")
                 EventReporter.shared.capture(level: .warning, engine: "overlay", event: "no_voice_input",
                     message: "Dictation transcription empty")
+                AppSoundPlayer.shared.play(.noSpeech)
                 overlayController.showNoSpeechAndDismiss()
                 isDictating = false
                 return
@@ -317,6 +332,7 @@ class DraftSessionController: ObservableObject {
             )
             switch pasteOutcome {
             case .pasted:
+                AppSoundPlayer.shared.play(.dictationDelivered)
                 overlayController.showSuccessAndDismiss()
             case .copied(let message), .failed(let message):
                 overlayController.showError(message)
@@ -341,6 +357,8 @@ class DraftSessionController: ObservableObject {
     /// Cancel dictation without pasting
     func cancelDictation() {
         guard let (appState, overlayController) = readyState() else { return }
+        startupTask?.cancel()
+        startupTask = nil
         streamingTask?.cancel()
         streamingTask = nil
         clipboardRestoreTask?.cancel()
@@ -350,6 +368,7 @@ class DraftSessionController: ObservableObject {
         if appState.sttRouter.isRecording {
             appState.sttRouter.cancel()
         }
+        AppSoundPlayer.shared.play(.dictationCancelled)
         overlayController.hideWithCancelAnimation()
         isDictating = false
         appState.logger.log("DICTATION | cancelled")
@@ -377,6 +396,97 @@ class DraftSessionController: ObservableObject {
     }
 
     // MARK: - Private
+
+    private func startDictationAfterWarmup(sourceApp: NSRunningApplication?) {
+        guard let appState = appState, let overlayController = overlayController else { return }
+
+        startupTask?.cancel()
+        updateLoadingOverlay(sourceApp: sourceApp)
+
+        startupTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            for _ in 0..<DraftConstants.modelLoadMaxIterations {
+                guard !Task.isCancelled, self.isDictating else { return }
+
+                let modelState = appState.sttRouter.parakeetEngine.modelDownloadState
+                self.updateLoadingOverlay(sourceApp: sourceApp, modelState: modelState)
+
+                switch modelState {
+                case .ready:
+                    self.startupTask = nil
+                    guard self.isDictating else { return }
+                    overlayController.state = .listening
+                    self.resizePanelToCompact()
+                    self.beginDictationRecording(sourceApp: sourceApp)
+                    return
+                case .failed(let message):
+                    self.startupTask = nil
+                    self.isDictating = false
+                    overlayController.showError("Dictation couldn't start: \(message)")
+                    return
+                default:
+                    break
+                }
+
+                try? await Task.sleep(nanoseconds: DraftConstants.modelLoadPollInterval)
+            }
+
+            guard !Task.isCancelled else { return }
+            self.startupTask = nil
+            self.isDictating = false
+            overlayController.showError("Dictation is still loading. Please try again in a moment.")
+        }
+    }
+
+    private func updateLoadingOverlay(
+        sourceApp: NSRunningApplication?,
+        modelState: ParakeetModelState? = nil
+    ) {
+        guard let appState = appState else { return }
+        let presentation = loadingPresentation(for: modelState ?? appState.sttRouter.parakeetEngine.modelDownloadState)
+        overlayController?.showLoadingState(near: sourceApp, presentation: presentation)
+    }
+
+    private func loadingPresentation(for modelState: ParakeetModelState) -> FloatingOverlayController.LoadingPresentation {
+        switch modelState {
+        case .notLoaded:
+            return .init(
+                title: "Starting dictation",
+                detail: "Transcripted is waking up the local voice model before it starts listening.",
+                progress: 0.08,
+                status: "Preparing local model"
+            )
+        case .downloading(let progress):
+            return .init(
+                title: "Downloading dictation model",
+                detail: "Transcripted is downloading the on-device voice model needed for local dictation.",
+                progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
+                status: "\(Int(progress * 100))% complete"
+            )
+        case .loading:
+            return .init(
+                title: "Loading dictation",
+                detail: "Transcripted has the model files and is loading them into memory. Recording starts automatically when it finishes.",
+                progress: 0.92,
+                status: "Almost ready"
+            )
+        case .ready:
+            return .init(
+                title: "Starting dictation",
+                detail: "The local voice model is ready. Opening the microphone now.",
+                progress: 1.0,
+                status: "Starting microphone"
+            )
+        case .failed(let message):
+            return .init(
+                title: "Dictation couldn't start",
+                detail: message,
+                progress: 0,
+                status: "Model load failed"
+            )
+        }
+    }
 
     /// Shrink the panel to compact (header-only) height without animation.
     /// Called after loading → listening transition to undo showLoadingState()'s expansion.

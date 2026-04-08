@@ -84,9 +84,10 @@ extension TranscriptionTaskManager {
 
         for sid in speakerIds {
             if let entry = dbKnowledge.first(where: { $0.speakerId == sid }) {
-                let canAutoAccept = entry.profile.displayName != nil
-                    && entry.similarity > 0.88
-                    && entry.profile.callCount > 4
+                let canAutoAccept = SpeakerNamingPolicy.shouldAutoAccept(
+                    profile: entry.profile,
+                    similarity: entry.similarity
+                )
                 if canAutoAccept {
                     autoAcceptedIds.insert(sid)
                 } else {
@@ -106,17 +107,21 @@ extension TranscriptionTaskManager {
         // Auto-accept known speakers: populate mappings from DB without showing naming UI
         var identifiedSpeakers: [IdentifiedSpeaker] = []
         for entry in dbKnowledge {
-            guard let name = entry.profile.displayName else { continue }
             let key = "system_\(entry.speakerId)"
-            let confidence: SpeakerConfidence = entry.similarity > 0.85 && entry.profile.callCount > 3 ? .high : .medium
-            speakerMappings[key] = SpeakerMapping(
+            let mapping = SpeakerNamingPolicy.initialMapping(
                 speakerId: entry.speakerId,
-                identifiedName: name,
-                confidence: confidence
+                profile: entry.profile,
+                similarity: entry.similarity
             )
-            speakerSources[entry.speakerId] = "db"
+            speakerMappings[key] = mapping
+            speakerSources[entry.speakerId] = autoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"
 
-            if autoAcceptedIds.contains(entry.speakerId) {
+            if autoAcceptedIds.contains(entry.speakerId),
+               let name = entry.profile.displayName {
+                let confidence = SpeakerNamingPolicy.confidence(
+                    similarity: entry.similarity,
+                    callCount: entry.profile.callCount
+                )
                 identifiedSpeakers.append(IdentifiedSpeaker(
                     name: name,
                     speakerId: entry.speakerId,
@@ -143,6 +148,13 @@ extension TranscriptionTaskManager {
             if let pid = utterance.persistentSpeakerId, speakerDbIds[sid] == nil {
                 speakerDbIds[sid] = pid
             }
+        }
+
+        // Keep placeholder labels tied to persistent speaker UUIDs so later confirmation,
+        // retroactive renames, and agent sidecars can update the same person cleanly.
+        for sid in speakerDbIds.keys where speakerMappings["system_\(sid)"] == nil {
+            speakerMappings["system_\(sid)"] = SpeakerMapping(speakerId: sid)
+            speakerSources[sid] = "db_pending"
         }
 
         // Phase 2: Save transcript with speaker names
