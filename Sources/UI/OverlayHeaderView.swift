@@ -72,8 +72,8 @@ final class OverlayHeaderView: NSView {
         let isCenteredListeningLayout = !waveformHost.isHidden && !stopButton.isHidden && shortcutHint.stringValue.isEmpty && spinner.isHidden
 
         if isCenteredListeningLayout {
-            let spacing: CGFloat = 10
-            let preferredWaveWidth: CGFloat = 150
+            let spacing: CGFloat = 8
+            let preferredWaveWidth: CGFloat = 126
             let availableWaveWidth = max(0, bounds.width - pad * 2 - labelSize.width - stopSize.width - spacing * 2)
             let waveWidth = min(preferredWaveWidth, availableWaveWidth)
             let groupWidth = labelSize.width + spacing + waveWidth + spacing + stopSize.width
