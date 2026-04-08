@@ -69,6 +69,40 @@ final class OverlayHeaderView: NSView {
         let labelSize = modeLabel.fittingSize
         let hintSize = shortcutHint.fittingSize
         let stopSize = stopButton.fittingSize
+        let isCenteredListeningLayout = !waveformHost.isHidden && !stopButton.isHidden && shortcutHint.stringValue.isEmpty && spinner.isHidden
+
+        if isCenteredListeningLayout {
+            let spacing: CGFloat = 10
+            let preferredWaveWidth: CGFloat = 150
+            let availableWaveWidth = max(0, bounds.width - pad * 2 - labelSize.width - stopSize.width - spacing * 2)
+            let waveWidth = min(preferredWaveWidth, availableWaveWidth)
+            let groupWidth = labelSize.width + spacing + waveWidth + spacing + stopSize.width
+            let groupOriginX = max(pad, (bounds.width - groupWidth) / 2)
+
+            modeLabel.frame = NSRect(
+                x: groupOriginX,
+                y: (h - labelSize.height) / 2,
+                width: labelSize.width,
+                height: labelSize.height
+            )
+
+            waveformHost.frame = NSRect(
+                x: modeLabel.frame.maxX + spacing,
+                y: (h - 20) / 2,
+                width: waveWidth,
+                height: 20
+            )
+
+            stopButton.frame = NSRect(
+                x: waveformHost.frame.maxX + spacing,
+                y: (h - stopSize.height) / 2,
+                width: stopSize.width,
+                height: stopSize.height
+            )
+
+            shortcutHint.frame = .zero
+            return
+        }
 
         // Mode label — left aligned, vertically centered
         modeLabel.frame = NSRect(
