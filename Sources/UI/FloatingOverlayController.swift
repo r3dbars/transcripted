@@ -7,6 +7,20 @@ import Combine
 
 @MainActor
 class FloatingOverlayController {
+    struct LoadingPresentation {
+        let title: String
+        let detail: String
+        let progress: Double
+        let status: String
+
+        static let initial = LoadingPresentation(
+            title: "Loading dictation",
+            detail: "Transcripted is getting the local voice model ready.",
+            progress: 0.08,
+            status: "Starting up"
+        )
+    }
+
     enum SessionMode {
         case dictation
     }
@@ -44,6 +58,9 @@ class FloatingOverlayController {
     var streamingText: String = ""
     var errorMessage: String = ""
     var loadingElapsedSeconds: Int = 0 {
+        didSet { pushStateToViews() }
+    }
+    var loadingPresentation: LoadingPresentation = .initial {
         didSet { pushStateToViews() }
     }
     /// Closure for Escape during non-review states (listening/drafting/streaming)
@@ -168,6 +185,7 @@ class FloatingOverlayController {
             draftShortcutHint: "",
             dictationShortcutHint: dictationShortcutHint,
             errorMessage: errorMessage,
+            loadingPresentation: loadingPresentation,
             loadingElapsedSeconds: loadingElapsedSeconds,
             isTranscribing: sttRouter?.isTranscribing ?? false,
             liveTranscript: sttRouter?.liveTranscript ?? "",
@@ -192,9 +210,15 @@ class FloatingOverlayController {
         errorMessage = ""
 
         let rawTargetRect = sourceApp.flatMap { AccessibilityBridge.focusedTextFieldRect(for: $0) }
-        let initialHeight = (state == .listening || state == .idle || state == .success)
-            ? OverlayTokens.panelCompactHeight
-            : OverlayTokens.panelMinHeight
+        let initialHeight: CGFloat
+        switch state {
+        case .listening, .idle, .success:
+            initialHeight = OverlayTokens.panelCompactHeight
+        case .loading:
+            initialHeight = OverlayTokens.panelLoadingHeight
+        default:
+            initialHeight = OverlayTokens.panelMinHeight
+        }
         let panelSize = NSSize(width: OverlayTokens.panelWidth, height: initialHeight)
 
         // Validate the accessibility rect — terminal emulators report oversized text areas
@@ -357,27 +381,42 @@ class FloatingOverlayController {
     private var loadingTimerTask: Task<Void, Never>?
     private var successDismissTask: Task<Void, Never>?
 
-    func showLoadingState() {
+    func showLoadingState(near sourceApp: NSRunningApplication? = nil, presentation: LoadingPresentation? = nil) {
         errorDismissTask?.cancel()
         errorMessage = ""
-        loadingElapsedSeconds = 0
+        if let presentation {
+            loadingPresentation = presentation
+        }
+        let enteringLoading = state != .loading
+        if enteringLoading {
+            loadingElapsedSeconds = 0
+        }
         state = .loading
         if !isVisible {
-            showPanel(near: nil)
+            showPanel(near: sourceApp)
         }
-        resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
-        loadingTimerTask?.cancel()
-        loadingTimerTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                guard let self = self, !Task.isCancelled, self.state == .loading else { break }
-                self.loadingElapsedSeconds += 1
+        let loadingSize = NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
+        if enteringLoading {
+            resizePanel(to: loadingSize)
+        } else {
+            resizePanelInstant(to: loadingSize)
+        }
+        if enteringLoading || loadingTimerTask == nil {
+            loadingTimerTask?.cancel()
+            loadingTimerTask = Task { @MainActor [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    guard let self = self, !Task.isCancelled, self.state == .loading else { break }
+                    self.loadingElapsedSeconds += 1
+                }
             }
         }
     }
 
     func showError(_ message: String) {
         errorDismissTask?.cancel()
+        loadingTimerTask?.cancel()
+        loadingTimerTask = nil
         errorMessage = message
         state = .drafting
         resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
@@ -457,6 +496,7 @@ class FloatingOverlayController {
         reviewText = ""
         streamingText = ""
         errorMessage = ""
+        loadingPresentation = .initial
     }
 
     // MARK: - System Wake Recovery & Periodic AG Refresh

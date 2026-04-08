@@ -26,10 +26,21 @@ final class OverlayRootView: NSView {
         return v
     }
 
+    private var _loadingView: OverlayLoadingView?
+    var loadingView: OverlayLoadingView {
+        if let v = _loadingView { return v }
+        let v = OverlayLoadingView(frame: .zero)
+        v.isHidden = true
+        contentContainer.addSubview(v)
+        _loadingView = v
+        return v
+    }
+
     // MARK: - State tracking
 
     private var currentState: FloatingOverlayController.OverlayState = .idle
     private var currentMode: FloatingOverlayController.SessionMode = .dictation
+    private var currentErrorMessage: String = ""
 
     // MARK: - Init
 
@@ -96,8 +107,8 @@ final class OverlayRootView: NSView {
     }
 
     private func shouldShowContent() -> Bool {
-        if currentState == .idle { return false }
-        return currentState == .drafting
+        if currentState == .loading { return true }
+        return currentState == .drafting && !currentErrorMessage.isEmpty
     }
 
     // MARK: - State Updates
@@ -110,6 +121,7 @@ final class OverlayRootView: NSView {
         draftShortcutHint: String,
         dictationShortcutHint: String,
         errorMessage: String,
+        loadingPresentation: FloatingOverlayController.LoadingPresentation,
         loadingElapsedSeconds: Int,
         isTranscribing: Bool,
         liveTranscript: String,
@@ -118,6 +130,7 @@ final class OverlayRootView: NSView {
     ) {
         currentState = state
         currentMode = mode
+        currentErrorMessage = errorMessage
 
         // Update header
         headerView.update(
@@ -125,17 +138,28 @@ final class OverlayRootView: NSView {
             mode: mode,
             transcriptExpanded: transcriptExpanded,
             draftShortcutHint: draftShortcutHint,
-            dictationShortcutHint: dictationShortcutHint
+            dictationShortcutHint: dictationShortcutHint,
+            loadingTitle: state == .loading ? loadingPresentation.title : nil
         )
 
-        // Determine if content area should be visible
-        let showContent = state == .drafting && !errorMessage.isEmpty
+        let showLoading = state == .loading
+        let showError = state == .drafting && !errorMessage.isEmpty
+        let showContent = showLoading || showError
 
         contentContainer.isHidden = !showContent
 
+        _loadingView?.isHidden = true
         _draftingView?.isHidden = true
 
-        if showContent {
+        if showLoading {
+            loadingView.isHidden = false
+            loadingView.update(
+                presentation: loadingPresentation,
+                elapsedSeconds: loadingElapsedSeconds
+            )
+        }
+
+        if showError {
             draftingView.isHidden = false
             let statusText = isTranscribing ? "Transcribing..." : "Processing..."
             draftingView.update(
@@ -155,9 +179,13 @@ final class OverlayRootView: NSView {
 
 @MainActor
 final class OverlayLoadingView: NSView {
-    private let spinner = NSProgressIndicator()
-    private let titleLabel = NSTextField(labelWithString: "Preparing voice model...")
-    private let elapsedLabel = NSTextField(labelWithString: "")
+    private let titleLabel = NSTextField(labelWithString: "Loading dictation")
+    private let detailLabel = NSTextField(wrappingLabelWithString: "")
+    private let progressBar = NSProgressIndicator()
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let elapsedLabel = NSTextField(labelWithString: "First launch can take a minute or two.")
+
+    override var isFlipped: Bool { true }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -168,59 +196,62 @@ final class OverlayLoadingView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func setupViews() {
-        spinner.style = .spinning
-        spinner.controlSize = .regular
-        spinner.isIndeterminate = true
-        spinner.startAnimation(nil)
-        addSubview(spinner)
-
         titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-        titleLabel.textColor = OverlayTokens.textSecondary
+        titleLabel.textColor = OverlayTokens.textPrimary
         titleLabel.isBezeled = false
         titleLabel.isEditable = false
         titleLabel.drawsBackground = false
-        titleLabel.alignment = .center
         addSubview(titleLabel)
+
+        detailLabel.font = NSFont.systemFont(ofSize: 11)
+        detailLabel.textColor = OverlayTokens.textSecondary
+        detailLabel.maximumNumberOfLines = 2
+        addSubview(detailLabel)
+
+        progressBar.style = .bar
+        progressBar.isIndeterminate = false
+        progressBar.minValue = 0
+        progressBar.maxValue = 1
+        progressBar.doubleValue = 0
+        addSubview(progressBar)
+
+        statusLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        statusLabel.textColor = OverlayTokens.textSecondary
+        addSubview(statusLabel)
 
         elapsedLabel.font = NSFont.systemFont(ofSize: 11)
         elapsedLabel.textColor = OverlayTokens.textMuted
         elapsedLabel.isBezeled = false
         elapsedLabel.isEditable = false
         elapsedLabel.drawsBackground = false
-        elapsedLabel.alignment = .center
         addSubview(elapsedLabel)
     }
 
     override func layout() {
         super.layout()
-        let cx = bounds.midX
-        let cy = bounds.midY
-        let spinSize: CGFloat = 24
-        let titleSize = titleLabel.fittingSize
-        let elapsedSize = elapsedLabel.fittingSize
+        let pad: CGFloat = 14
+        let contentWidth = max(0, bounds.width - pad * 2)
 
-        let totalHeight = spinSize + 12 + titleSize.height + (elapsedLabel.isHidden ? 0 : 8 + elapsedSize.height)
-        var y = cy + totalHeight / 2
-
-        y -= spinSize
-        spinner.frame = NSRect(x: cx - spinSize / 2, y: y, width: spinSize, height: spinSize)
-        y -= 12 + titleSize.height
-        titleLabel.frame = NSRect(x: 0, y: y, width: bounds.width, height: titleSize.height)
-
-        if !elapsedLabel.isHidden {
-            y -= 8 + elapsedSize.height
-            elapsedLabel.frame = NSRect(x: 0, y: y, width: bounds.width, height: elapsedSize.height)
-        }
+        titleLabel.frame = NSRect(x: pad, y: 10, width: contentWidth, height: 16)
+        detailLabel.frame = NSRect(x: pad, y: 30, width: contentWidth, height: 28)
+        progressBar.frame = NSRect(x: pad, y: 64, width: contentWidth, height: 8)
+        statusLabel.frame = NSRect(x: pad, y: 76, width: contentWidth, height: 12)
+        elapsedLabel.frame = NSRect(x: pad, y: 88, width: contentWidth, height: 12)
     }
 
-    func update(elapsedSeconds: Int) {
+    func update(
+        presentation: FloatingOverlayController.LoadingPresentation,
+        elapsedSeconds: Int
+    ) {
+        titleLabel.stringValue = presentation.title
+        detailLabel.stringValue = presentation.detail
+        progressBar.doubleValue = presentation.progress
+        statusLabel.stringValue = presentation.status
         if elapsedSeconds > 0 {
-            elapsedLabel.stringValue = "This may take a moment on first launch (\(elapsedSeconds)s)"
-            elapsedLabel.isHidden = false
+            elapsedLabel.stringValue = "First launch can take a minute or two. \(elapsedSeconds)s elapsed."
         } else {
-            elapsedLabel.isHidden = true
+            elapsedLabel.stringValue = "First launch can take a minute or two."
         }
-        spinner.startAnimation(nil)
         needsLayout = true
     }
 }

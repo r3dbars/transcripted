@@ -16,24 +16,24 @@ final class MenuAgentConnectPageView: NSView {
     )
     private let titleLabel = NSTextField(labelWithString: "Connect your agent")
     private let subtitleLabel = NSTextField(wrappingLabelWithString:
-        "Bring Transcripted into Claude, Codex, or another local agent with a simple local-folder setup today, then grow into CLI and MCP flows later."
+        "Point your agent at your local Draft data with one copy or one click."
     )
 
     private let methodsLabel = NSTextField(labelWithString: "Ways to connect")
     private let folderRow = AgentConnectInfoRowView(
         symbolName: "folder",
         title: "Recommended: local folder mode",
-        body: "Point your agent at the Draft folder on this Mac for meetings, dictations, prompts, and logs."
+        body: "Point your agent at the Draft folder for meetings, dictations, and logs."
     )
     private let promptRow = AgentConnectInfoRowView(
         symbolName: "text.quote",
         title: "Prompt-first setup",
-        body: "Copy a starter prompt for Claude, Codex, or Claude Code so the agent immediately knows where Transcripted stores context."
+        body: "Copy a starter prompt for Claude, Codex, or any local agent."
     )
     private let futureRow = AgentConnectInfoRowView(
         symbolName: "terminal",
         title: "CLI + MCP, coming later",
-        body: "We can grow this into a Transcripted CLI and MCP flow for Claude Desktop, Claude Code, and other agent tools."
+        body: "CLI and MCP are planned for direct local workflows."
     )
 
     private let showFolderButton = MenuOutlineButton(
@@ -54,22 +54,22 @@ final class MenuAgentConnectPageView: NSView {
         AgentConnectInfoRowView(
             symbolName: "checklist",
             title: "Action-item extraction",
-            body: "Teach your agent to pull owners, deadlines, and follow-ups from every meeting transcript."
+            body: "Pull owners, deadlines, and follow-ups."
         ),
         AgentConnectInfoRowView(
             symbolName: "person.2",
             title: "People + project memory",
-            body: "Use persistent speaker IDs and saved dictations to keep running context on people, projects, and decisions."
+            body: "Track people and decisions across meetings."
         ),
         AgentConnectInfoRowView(
             symbolName: "books.vertical",
             title: "Second-brain summaries",
-            body: "Ask the agent to merge meetings and quick dictations into daily briefings, project notes, and research context."
+            body: "Build daily notes from meetings and dictations."
         )
     ]
 
     private let footerNoteLabel = NSTextField(wrappingLabelWithString:
-        "This page is the home for agent setup. We can keep expanding it with CLI install steps, MCP instructions, and downloadable skills."
+        "This is your starting point for agent setup. Expand later with CLI, MCP, and skill packs."
     )
 
     private var resetTask: Task<Void, Never>?
@@ -95,7 +95,7 @@ final class MenuAgentConnectPageView: NSView {
 
         subtitleLabel.font = NSFont.systemFont(ofSize: 11)
         subtitleLabel.textColor = MenuTokens.textSecondaryNS
-        subtitleLabel.maximumNumberOfLines = 3
+        subtitleLabel.maximumNumberOfLines = 2
         addSubview(subtitleLabel)
 
         [methodsLabel, skillsLabel].forEach { label in
@@ -172,11 +172,11 @@ final class MenuAgentConnectPageView: NSView {
             y += rowHeight + 8
         }
 
-        footerNoteLabel.frame = NSRect(x: pad, y: y + 2, width: width, height: 28)
+        footerNoteLabel.frame = NSRect(x: pad, y: y + 2, width: width, height: 26)
     }
 
     var intrinsicHeight: CGFloat {
-        MenuTokens.secondaryButtonSize + 14 + 22 + 26 + 42 + 54 + 16 + 22 + (64 * 3) + (8 * 2) + MenuTokens.secondaryButtonSize + 18 + 16 + 22 + (64 * 3) + (8 * 2) + 30
+        MenuTokens.secondaryButtonSize + 14 + 22 + 24 + 42 + 16 + 22 + (56 * 3) + (8 * 2) + MenuTokens.secondaryButtonSize + 16 + 16 + 22 + (56 * 3) + (8 * 2) + 26
     }
 
     @objc private func goBack() {
@@ -282,7 +282,7 @@ private final class AgentConnectInfoRowView: NSView {
         bodyLabel.stringValue = body
         bodyLabel.font = NSFont.systemFont(ofSize: 10)
         bodyLabel.textColor = MenuTokens.textSecondaryNS
-        bodyLabel.maximumNumberOfLines = 2
+        bodyLabel.maximumNumberOfLines = 1
         addSubview(bodyLabel)
     }
 
@@ -302,6 +302,6 @@ private final class AgentConnectInfoRowView: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: 64)
+        NSSize(width: NSView.noIntrinsicMetric, height: 56)
     }
 }
