@@ -25,6 +25,11 @@ fi
 # Copy Info.plist
 cp Info.plist "$APP_BUNDLE/Contents/"
 
+# Copy bundled app resources (custom sounds, etc.) when present
+if [ -d "Resources" ]; then
+    cp -R Resources/. "$APP_BUNDLE/Contents/Resources/"
+fi
+
 # Create entitlements
 cat > "$BUILD_DIR/Transcripted.entitlements" << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>

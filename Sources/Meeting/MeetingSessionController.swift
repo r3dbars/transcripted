@@ -447,6 +447,7 @@ final class MeetingSessionController: ObservableObject {
                                 ]
                             )
                         )
+                        AppSoundPlayer.shared.play(.meetingTranscriptComplete)
                         self.state = .ready
                     case .failed(let message):
                         DiagnosticsTrail.record(
@@ -573,8 +574,8 @@ final class MeetingSessionController: ObservableObject {
         case .downloading(let progress):
             warmupStatus = ModelWarmupStatus(
                 title: "Getting Transcripted ready",
-                subtitle: "Downloading the dictation model",
-                detail: "This can take a minute or two on first launch.",
+                subtitle: "Downloading local dictation model",
+                detail: "Transcripted is downloading the on-device voice model used for dictation. This can take a minute or two on first launch.",
                 progress: max(0.08, min(0.62, 0.08 + progress * 0.54)),
                 dictationStatus: "Downloading \(Int(progress * 100))%",
                 meetingsStatus: "Waiting"
@@ -582,16 +583,16 @@ final class MeetingSessionController: ObservableObject {
         case .loading:
             warmupStatus = ModelWarmupStatus(
                 title: "Getting Transcripted ready",
-                subtitle: "Preparing dictation",
-                detail: "Loading the local voice model into memory.",
+                subtitle: "Loading local dictation model",
+                detail: "Transcripted has the model files and is loading dictation into memory.",
                 progress: 0.68,
                 dictationStatus: "Loading",
                 meetingsStatus: "Waiting"
             )
         case .failed(let message):
             warmupStatus = ModelWarmupStatus(
-                title: "Couldn’t load Transcripted",
-                subtitle: "The dictation model failed to load",
+                title: "Couldn’t start dictation",
+                subtitle: "The local dictation model failed to load",
                 detail: message,
                 progress: 0,
                 dictationStatus: "Failed",
@@ -619,7 +620,7 @@ final class MeetingSessionController: ObservableObject {
                 warmupStatus = ModelWarmupStatus(
                     title: "Getting Transcripted ready",
                     subtitle: "Loading meeting transcription",
-                    detail: "Preparing speaker diarization and meeting understanding.",
+                    detail: "Dictation is ready. Transcripted is still warming up meeting transcription in the background.",
                     progress: 0.86,
                     dictationStatus: "Ready",
                     meetingsStatus: "Loading"
@@ -628,7 +629,7 @@ final class MeetingSessionController: ObservableObject {
                 warmupStatus = ModelWarmupStatus(
                     title: "Getting Transcripted ready",
                     subtitle: "Preparing meeting transcription",
-                    detail: "Setting up speaker diarization and meeting transcription.",
+                    detail: "Dictation is ready. Meeting transcription is still starting up.",
                     progress: 0.76,
                     dictationStatus: "Ready",
                     meetingsStatus: "Starting"
@@ -637,8 +638,8 @@ final class MeetingSessionController: ObservableObject {
         case .notLoaded:
             warmupStatus = ModelWarmupStatus(
                 title: "Getting Transcripted ready",
-                subtitle: "Preparing dictation",
-                detail: "Loading dictation and meeting models.",
+                subtitle: "Starting local dictation",
+                detail: "Transcripted is waking up the on-device dictation model.",
                 progress: 0.05,
                 dictationStatus: "Starting",
                 meetingsStatus: "Waiting"

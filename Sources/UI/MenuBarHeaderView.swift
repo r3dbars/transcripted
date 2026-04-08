@@ -9,6 +9,7 @@ final class MenuBarHeaderView: NSView {
     private let statusDot = NSView()
     private let statusLabel = NSTextField(labelWithString: "Ready")
     private let progressBar = NSProgressIndicator()
+    private let detailLabel = NSTextField(wrappingLabelWithString: "")
     private let warningIconView = NSImageView()
     private let warningLabel = NSTextField(wrappingLabelWithString: "")
 
@@ -44,6 +45,11 @@ final class MenuBarHeaderView: NSView {
         progressBar.maxValue = 1
         addSubview(progressBar)
 
+        detailLabel.font = NSFont.systemFont(ofSize: 10)
+        detailLabel.textColor = MenuTokens.textSecondaryNS
+        detailLabel.maximumNumberOfLines = 2
+        addSubview(detailLabel)
+
         if let image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Warning") {
             warningIconView.image = image
             warningIconView.contentTintColor = MenuTokens.statusOrangeNS
@@ -71,14 +77,16 @@ final class MenuBarHeaderView: NSView {
         statusLabel.frame = NSRect(x: dotSize + 8, y: statusY, width: bounds.width - dotSize - 8, height: 14)
 
         progressBar.isHidden = isReady
+        detailLabel.isHidden = isReady
         if !isReady {
             progressBar.frame = NSRect(x: 0, y: 50, width: bounds.width, height: 8)
+            detailLabel.frame = NSRect(x: 0, y: 62, width: bounds.width, height: 26)
         }
 
         warningIconView.isHidden = !hasWarning
         warningLabel.isHidden = !hasWarning
         if hasWarning {
-            let warningY: CGFloat = isReady ? 50 : 66
+            let warningY: CGFloat = isReady ? 50 : 94
             warningIconView.frame = NSRect(x: 0, y: warningY + 1, width: 12, height: 12)
             warningLabel.frame = NSRect(x: 18, y: warningY - 1, width: bounds.width - 18, height: 26)
         }
@@ -92,6 +100,7 @@ final class MenuBarHeaderView: NSView {
         statusDot.layer?.backgroundColor = (isReady ? MenuTokens.statusGreenNS : MenuTokens.statusOrangeNS).cgColor
         statusLabel.stringValue = isReady ? "Ready" : warmupStatus.subtitle
         progressBar.doubleValue = warmupStatus.progress
+        detailLabel.stringValue = isReady ? "" : warmupStatus.detail
         warningLabel.stringValue = hotkeyError ?? ""
 
         needsLayout = true
@@ -102,8 +111,8 @@ final class MenuBarHeaderView: NSView {
         let isReady = currentWarmupStatus == .ready
         let hasWarning = currentHotkeyError?.isEmpty == false
         if hasWarning {
-            return isReady ? 78 : 94
+            return isReady ? 78 : 122
         }
-        return isReady ? 46 : 62
+        return isReady ? 46 : 90
     }
 }

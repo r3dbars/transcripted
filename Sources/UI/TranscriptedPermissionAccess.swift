@@ -9,6 +9,26 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var icon: String {
+        switch self {
+        case .microphone:
+            return "mic.fill"
+        case .accessibility:
+            return "hand.raised.fill"
+        case .screenRecording:
+            return "rectangle.on.rectangle"
+        }
+    }
+
+    var isRequiredOnFirstLaunch: Bool {
+        switch self {
+        case .microphone, .accessibility:
+            return true
+        case .screenRecording:
+            return false
+        }
+    }
+
     var title: String {
         switch self {
         case .microphone:
@@ -25,9 +45,20 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         case .microphone:
             return "Needed for dictation and your side of meetings."
         case .accessibility:
-            return "Needed for global shortcuts and reliable paste-back."
+            return "Needed for global shortcuts and pasting text back into the app you were using."
         case .screenRecording:
-            return "Needed to capture system audio during meetings."
+            return "Optional for meeting capture. Needed when you want call audio from other apps."
+        }
+    }
+
+    var onboardingActionTitle: String {
+        switch self {
+        case .microphone:
+            return "Allow microphone"
+        case .accessibility:
+            return "Allow accessibility"
+        case .screenRecording:
+            return "Enable meeting audio"
         }
     }
 }
@@ -47,25 +78,32 @@ enum TranscriptedPermissionAccess {
     static func openSettings(for kind: TranscriptedPermissionKind) {
         switch kind {
         case .microphone:
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
-                guard !granted else { return }
-                Task { @MainActor in
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
-                        NSWorkspace.shared.open(url)
+            switch AVCaptureDevice.authorizationStatus(for: .audio) {
+            case .authorized:
+                break
+            case .notDetermined:
+                AVCaptureDevice.requestAccess(for: .audio) { granted in
+                    guard !granted else { return }
+                    Task { @MainActor in
+                        openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
                     }
                 }
+            case .denied, .restricted:
+                openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+            @unknown default:
+                openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
             }
         case .accessibility:
-            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-                NSWorkspace.shared.open(url)
+            if !AXIsProcessTrusted() {
+                let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+                _ = AXIsProcessTrustedWithOptions(options)
             }
+            openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
         case .screenRecording:
             if #available(macOS 15.0, *) {
-                CGRequestScreenCaptureAccess()
+                _ = CGRequestScreenCaptureAccess()
             }
-            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-                NSWorkspace.shared.open(url)
-            }
+            openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
         }
     }
 
@@ -81,5 +119,12 @@ enum TranscriptedPermissionAccess {
             [.nominalResolution]
         )
         return testImage != nil
+    }
+
+    private static func openSystemSettings(_ urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        Task { @MainActor in
+            NSWorkspace.shared.open(url)
+        }
     }
 }
