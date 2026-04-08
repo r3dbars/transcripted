@@ -26,11 +26,13 @@ final class AppSoundPlayer {
             switch self {
             case .dictationStart:
                 return TranscriptedConstants.listeningStartSoundFileName
+            case .dictationDelivered:
+                return TranscriptedConstants.dictationDeliveredSoundFileName
             case .noSpeech:
                 return TranscriptedConstants.dictationDeliveredSoundFileName
             case .meetingTranscriptComplete:
                 return TranscriptedConstants.meetingTranscriptCompleteSoundFileName
-            case .dictationCancelled, .dictationDelivered:
+            case .dictationCancelled:
                 return nil
             }
         }
@@ -38,7 +40,7 @@ final class AppSoundPlayer {
         var fallbackSystemSoundName: String {
             switch self {
             case .dictationStart:
-                return "Pop"
+                return "Funk"
             case .dictationDelivered:
                 return "Funk"
             case .dictationCancelled:

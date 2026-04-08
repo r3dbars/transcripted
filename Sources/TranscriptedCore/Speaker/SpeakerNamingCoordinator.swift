@@ -59,10 +59,14 @@ extension TranscriptionTaskManager {
             // Re-run duplicate detection now that profiles have been updated
             speakerDB.mergeDuplicates()
 
+            // Resolve the transcript URL — the file may have been renamed by
+            // MeetingTranscriptStyler between save and naming completion.
+            let resolvedURL = TranscriptSaver.resolveTranscriptURL(transcriptURL, updates: updates)
+
             // Update the saved transcript file with real names
             if !updates.isEmpty {
                 TranscriptSaver.updateSpeakerNames(
-                    transcriptURL: transcriptURL,
+                    transcriptURL: resolvedURL,
                     updates: updates,
                     speakerStore: speakerDB
                 )
@@ -75,12 +79,15 @@ extension TranscriptionTaskManager {
 
             AppLogger.pipeline.info("Speaker naming complete", [
                 "named": "\(updates.count)",
-                "transcript": transcriptURL.lastPathComponent
+                "transcript": resolvedURL.lastPathComponent
             ])
 
-            // Only UI state updates on the main thread
+            // Re-populate metadata with the resolved URL so the Combine
+            // subscription in MeetingSessionController fires a restyle —
+            // this updates the title to include speaker names (e.g.,
+            // "Meeting with Nate Bucher and Steven Smith").
             await MainActor.run {
-                self?.populateSavedMetadata(from: transcriptURL)
+                self?.populateSavedMetadata(from: resolvedURL)
                 self?.displayStatus = .transcriptSaved
                 self?.scheduleStatusReset(delay: 8)
             }

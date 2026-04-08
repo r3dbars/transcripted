@@ -60,6 +60,12 @@ class ParakeetEngine: ObservableObject {
     // Cached format for makePCMBuffer — always 16kHz mono, no need to recreate per chunk
     private let eouPCMFormat = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)
     private var configChangeObserver: NSObjectProtocol?
+    private var configChangeDebounceTask: Task<Void, Never>?
+    private var configRecoveryTask: Task<Void, Never>?
+    /// Tracks whether a recording was active when the first config change in a
+    /// burst arrived. Subsequent changes during recovery inherit this flag so
+    /// the final recovery attempt knows to restart recording.
+    private var configChangeWasRecording = false
 
     // FluidAudio ASR
     private var asrManager: AsrManager?
@@ -306,18 +312,19 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func handleAudioConfigChange() {
-        guard isEnginePrewarmed else { return }
+        // Track whether any config change in the current burst interrupted a
+        // recording. Once set, subsequent changes in the same burst inherit it.
+        if isRecording {
+            configChangeWasRecording = true
+        }
 
-        let wasRecording = isRecording
+        // Immediately tear down anything that's running — the system has
+        // already stopped the engine internally before posting this notification,
+        // so the tap and prewarm state are stale.
+        audioWatchdogTask?.cancel()
+        audioWatchdogTask = nil
 
-        // Stop the engine FIRST — disconnects from hardware before we touch
-        // inputNode. When a USB device is yanked, accessing audioEngine.inputNode
-        // while the hardware graph is partially torn down can throw an ObjC
-        // exception that the system swallows, corrupting heap metadata.
-        audioEngine.stop()
-        isEnginePrewarmed = false
-
-        if wasRecording {
+        if isRecording {
             streamingSamplesLock.lock()
             streamingSampleBuffer.removeAll(keepingCapacity: true)
             streamingSamplesLock.unlock()
@@ -327,32 +334,77 @@ class ParakeetEngine: ObservableObject {
             audioLevel = 0
         }
 
-        // Always interrupt if a recording was active — don't try to auto-restart.
-        // The new audio pipeline may look functional but silently produce no samples
-        // (e.g., USB dock unplug), leaving the overlay stuck in listening state.
-        if wasRecording {
-            recordingInterrupted = true
-            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_interrupted",
-                message: "Recording interrupted by device change", context: ["audio_device": inputDeviceName])
-        }
+        audioEngine.stop()
+        isEnginePrewarmed = false
 
-        // Re-warm the engine on the new device after a brief delay to let
-        // CoreAudio finish tearing down the old device graph. Without this,
-        // accessing inputNode immediately can throw an ObjC exception that
-        // kills the process without a crash report.
-        Task { @MainActor [weak self] in
+        // Cancel any in-flight recovery — the latest device change wins.
+        // Bluetooth disconnect/reconnect fires multiple notifications over
+        // 500-1500ms; each cancels the previous recovery so only the final
+        // stable device state gets a recovery attempt.
+        configChangeDebounceTask?.cancel()
+        configRecoveryTask?.cancel()
+
+        configChangeDebounceTask = Task { @MainActor [weak self] in
+            // 250ms debounce — long enough to coalesce rapid BT notifications,
+            // short enough that dictation recovery feels responsive.
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled, let self = self else { return }
+            self.attemptDeviceRecovery()
+        }
+    }
+
+    private func attemptDeviceRecovery() {
+        let shouldRestartRecording = configChangeWasRecording
+        configChangeWasRecording = false
+
+        configRecoveryTask = Task { @MainActor [weak self] in
+            // Wait for CoreAudio to finish settling the new device graph.
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-            guard let self = self else { return }
+            guard !Task.isCancelled, let self = self else { return }
             do {
                 let newFormat = self.audioEngine.inputNode.outputFormat(forBus: 0)
+                guard newFormat.sampleRate > 0, newFormat.channelCount > 0 else {
+                    throw NSError(domain: "ParakeetEngine", code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "Invalid audio format after device change (\(newFormat.sampleRate)Hz, \(newFormat.channelCount)ch)"])
+                }
                 self.nativeSampleRate = newFormat.sampleRate
                 print("🔄 PARAKEET | audio device changed → \(self.inputDeviceName) (\(newFormat.sampleRate)Hz), re-warming")
                 self.audioEngine.prepare()
                 try self.audioEngine.start()
                 self.isEnginePrewarmed = true
                 print("🔥 PARAKEET | engine re-warmed after device change")
+
+                guard !Task.isCancelled else { return }
+
+                // If we were recording, try to restart on the new device.
+                // The watchdog (via isRecoveryAttempt=false) catches silent
+                // failures where the device looks functional but produces no
+                // samples. The watchdog gets one retry before giving up.
+                if shouldRestartRecording {
+                    if self.startRecording() {
+                        print("✅ PARAKEET | recording recovered on new device (\(self.inputDeviceName))")
+                        EventReporter.shared.capture(level: .info, engine: "parakeet",
+                            event: "recording_recovered_device_change",
+                            message: "Recording recovered after device change",
+                            context: ["audio_device": self.inputDeviceName, "sample_rate": "\(self.nativeSampleRate)"])
+                    } else {
+                        self.recordingInterrupted = true
+                        EventReporter.shared.capture(level: .warning, engine: "parakeet",
+                            event: "recording_interrupted",
+                            message: "Recording could not restart after device change",
+                            context: ["audio_device": self.inputDeviceName])
+                    }
+                }
             } catch {
-                EventReporter.shared.capture(level: .error, engine: "parakeet", event: "device_change_rewarm_failed",
+                if shouldRestartRecording {
+                    self.recordingInterrupted = true
+                    EventReporter.shared.capture(level: .warning, engine: "parakeet",
+                        event: "recording_interrupted",
+                        message: "Recording interrupted — engine rewarm failed after device change",
+                        context: ["audio_device": self.inputDeviceName, "error": error.localizedDescription])
+                }
+                EventReporter.shared.capture(level: .error, engine: "parakeet",
+                    event: "device_change_rewarm_failed",
                     message: error.localizedDescription, context: ["audio_device": self.inputDeviceName])
             }
         }

@@ -10,18 +10,6 @@ struct RecentMeetingItem {
     let transcriptURL: URL
 }
 
-struct LatestSavedMeetingItem {
-    let title: String
-    let subtitle: String
-    let transcriptURL: URL
-
-    static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale.current
-        formatter.dateFormat = "MMM d 'at' h:mm a"
-        return formatter
-    }()
-}
 
 @MainActor
 enum RecentMeetingsScanner {
@@ -113,7 +101,6 @@ final class MenuBarRecentMeetingsView: NSView {
     }
 
     func update(
-        latestSavedMeeting: LatestSavedMeetingItem?,
         meetings: [RecentMeetingItem],
         failedMeetings: [MeetingSessionController.FailedMeetingItem],
         onRetryFailedMeeting: @escaping (UUID) -> Void,
@@ -122,16 +109,6 @@ final class MenuBarRecentMeetingsView: NSView {
     ) {
         listContainer.subviews.forEach { $0.removeFromSuperview() }
         rowViews.removeAll()
-
-        let visibleMeetings: [RecentMeetingItem]
-        if let latestSavedMeeting {
-            let row = LatestSavedMeetingRowView(item: latestSavedMeeting)
-            listContainer.addSubview(row)
-            rowViews.append(row)
-            visibleMeetings = meetings.filter { $0.transcriptURL.standardizedFileURL != latestSavedMeeting.transcriptURL.standardizedFileURL }
-        } else {
-            visibleMeetings = meetings
-        }
 
         for failed in failedMeetings {
             let row = FailedMeetingRowView(
@@ -144,8 +121,8 @@ final class MenuBarRecentMeetingsView: NSView {
             rowViews.append(row)
         }
 
-        for (index, item) in visibleMeetings.enumerated() {
-            let row = RecentMeetingRowView(item: item, showsDivider: index < visibleMeetings.count - 1)
+        for (index, item) in meetings.enumerated() {
+            let row = RecentMeetingRowView(item: item, showsDivider: index < meetings.count - 1)
             listContainer.addSubview(row)
             rowViews.append(row)
         }
@@ -172,169 +149,6 @@ private func copyTranscriptBody(from url: URL) -> Bool {
     pasteboard.clearContents()
     pasteboard.setString(text, forType: .string)
     return true
-}
-
-@MainActor
-private final class LatestSavedMeetingRowView: NSView {
-    private let item: LatestSavedMeetingItem
-    private let badgeLabel = NSTextField(labelWithString: "Latest saved")
-    private let titleLabel = NSTextField(labelWithString: "")
-    private let subtitleLabel = NSTextField(labelWithString: "")
-    private let openButton = MenuIconButton(
-        symbolName: "arrow.up.right.square",
-        accessibilityLabel: "Open transcript",
-        toolTip: "Open transcript"
-    )
-    private let copyButton = MenuIconButton(
-        symbolName: "doc.on.doc",
-        accessibilityLabel: "Copy transcript",
-        toolTip: "Copy transcript"
-    )
-    private let showButton = MenuIconButton(
-        symbolName: "folder",
-        accessibilityLabel: "Show in Finder",
-        toolTip: "Show in Finder"
-    )
-    private var resetTask: Task<Void, Never>?
-    private var trackingAreaRef: NSTrackingArea?
-
-    init(item: LatestSavedMeetingItem) {
-        self.item = item
-        super.init(frame: .zero)
-        setupViews()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override var isFlipped: Bool { true }
-
-    deinit {
-        resetTask?.cancel()
-    }
-
-    private func setupViews() {
-        wantsLayer = true
-        layer?.cornerRadius = 12
-        layer?.backgroundColor = MenuTokens.savedBackgroundNS.cgColor
-        layer?.borderWidth = 1
-        layer?.borderColor = MenuTokens.savedBorderNS.cgColor
-
-        badgeLabel.font = NSFont.systemFont(ofSize: 9, weight: .semibold)
-        badgeLabel.textColor = MenuTokens.statusGreenNS
-        addSubview(badgeLabel)
-
-        titleLabel.stringValue = item.title
-        titleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        titleLabel.textColor = MenuTokens.textPrimaryNS
-        titleLabel.lineBreakMode = .byTruncatingTail
-        addSubview(titleLabel)
-
-        subtitleLabel.stringValue = item.subtitle
-        subtitleLabel.font = NSFont.systemFont(ofSize: 9)
-        subtitleLabel.textColor = MenuTokens.textSecondaryNS
-        subtitleLabel.lineBreakMode = .byTruncatingTail
-        addSubview(subtitleLabel)
-
-        [openButton, copyButton, showButton].forEach { addSubview($0) }
-
-        openButton.target = self
-        openButton.action = #selector(openTranscript)
-        copyButton.target = self
-        copyButton.action = #selector(copyTranscript)
-        showButton.target = self
-        showButton.action = #selector(showInFinder)
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingAreaRef {
-            removeTrackingArea(trackingAreaRef)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        trackingAreaRef = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        layer?.backgroundColor = MenuTokens.savedBorderNS.cgColor
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        layer?.backgroundColor = MenuTokens.savedBackgroundNS.cgColor
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        guard !openButton.frame.contains(point),
-              !copyButton.frame.contains(point),
-              !showButton.frame.contains(point) else {
-            super.mouseDown(with: event)
-            return
-        }
-
-        NSWorkspace.shared.open(item.transcriptURL)
-    }
-
-    override func layout() {
-        super.layout()
-
-        let buttonSize = MenuTokens.secondaryButtonSize
-        let buttonY = (bounds.height - buttonSize) / 2
-
-        showButton.frame = NSRect(
-            x: bounds.width - buttonSize,
-            y: buttonY,
-            width: buttonSize,
-            height: buttonSize
-        )
-        copyButton.frame = NSRect(
-            x: showButton.frame.minX - 8 - buttonSize,
-            y: buttonY,
-            width: buttonSize,
-            height: buttonSize
-        )
-        openButton.frame = NSRect(
-            x: copyButton.frame.minX - 8 - buttonSize,
-            y: buttonY,
-            width: buttonSize,
-            height: buttonSize
-        )
-
-        let textWidth = max(0, openButton.frame.minX - 12)
-        badgeLabel.frame = NSRect(x: 10, y: 7, width: textWidth - 10, height: 11)
-        titleLabel.frame = NSRect(x: 10, y: 20, width: textWidth - 10, height: 14)
-        subtitleLabel.frame = NSRect(x: 10, y: 35, width: textWidth - 10, height: 12)
-    }
-
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: MenuTokens.savedRowHeight)
-    }
-
-    @objc private func openTranscript() {
-        NSWorkspace.shared.open(item.transcriptURL)
-    }
-
-    @objc private func copyTranscript() {
-        guard copyTranscriptBody(from: item.transcriptURL) else { return }
-
-        resetTask?.cancel()
-        copyButton.setSymbol("checkmark", accessibilityLabel: "Transcript copied", tintOverride: MenuTokens.statusGreenNS)
-        resetTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-            guard let self, !Task.isCancelled else { return }
-            self.copyButton.setSymbol("doc.on.doc", accessibilityLabel: "Copy transcript")
-        }
-    }
-
-    @objc private func showInFinder() {
-        NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
-    }
 }
 
 @MainActor
