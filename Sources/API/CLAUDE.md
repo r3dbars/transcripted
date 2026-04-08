@@ -1,46 +1,17 @@
-# API Directory — Beta Build Configuration
+# API directory
 
-## What This Directory Is
+## Current status
 
-On current `main`, this directory is small and beta-only.
+`Sources/API/` currently contains only `BetaConfig.swift`.
 
-It does **not** hold the active drafting/runtime API implementation. The main
-app is local-first for dictation and meetings. This directory currently exists
-to hold `BETA_BUILD` configuration that points beta-only code at the backend
-worker.
+The older `GeminiEngine` / `KeychainHelper` documentation that used to live here does not match the current tree on `main`.
 
-## Current Files
+## Current file
 
-- `BetaConfig.swift`
-  Baked-in beta constants such as the per-user token placeholder, proxy base
-  URL, and app version string.
+- `BetaConfig.swift` — `#if BETA_BUILD` constants for the beta proxy token, proxy base URL, app version, and update URL
 
-## How It Fits Together
+## Agent notes
 
-- `Sources/API/BetaConfig.swift` provides compile-time constants for beta code
-  paths.
-- `backend/src/index.ts` implements the worker those paths talk to.
-- Local dictation and local meeting transcription do not depend on this
-  directory in non-beta builds.
-
-## Important Constraints
-
-- treat this directory as beta/distribution plumbing, not core product logic
-- keep `#if BETA_BUILD` boundaries intact for beta-only settings
-- if you change any backend contract value here, verify the corresponding
-  behavior in `backend/CLAUDE.md` and `backend/src/index.ts`
-
-## Verification
-
-After modifying files in this directory:
-
-```bash
-bash build.sh
-bash run-tests.sh
-```
-
-For beta-specific contract changes, also inspect:
-
-```bash
-sed -n '1,260p' backend/src/index.ts
-```
+- Core dictation and meeting flows on `main` do not depend on a live app-side API client in this directory.
+- If you need network or beta-backend context, read `backend/README.md` and the beta-only files under `Sources/Observability/`.
+- Verify any old references to `GeminiEngine`, API keys, or chat-drafting HTTP paths against the actual source tree before changing code.

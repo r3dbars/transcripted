@@ -1,56 +1,63 @@
-# Meeting Directory
+# Meeting bridge
 
-## What This Does
+## What this directory does
 
-`Sources/Meeting/` is the app-side bridge between Transcripted's current macOS
-UI and the reusable `TranscriptedCore` library.
+`Sources/Meeting/` is the Draft-side adapter layer for the meeting feature. It keeps app-specific UI, storage, and `ParakeetEngine` ownership outside `TranscriptedCore` while reusing the core transcription pipeline.
 
-## Key Files
+## Files
 
-- `MeetingSessionController.swift` — main app-facing meeting subsystem; owns
-  the core DI container, task manager, model warmup, failed-meeting list, and
-  published UI state
-- `MeetingCaptureBridge.swift` — wraps `TranscriptedCore.Audio` for main-actor
-  UI consumption and turns the completion callback into an async await point
-- `MeetingSTTAdapter.swift` — adapts app-owned `ParakeetEngine` to
-  `TranscriptedCore.SpeechToTextEngine`
-- `MeetingModelDownloader.swift` — coordinates Parakeet + diarization model
-  readiness
-- `MeetingStoragePaths.swift` — isolates meeting data under
-  `~/Library/Application Support/Draft/meetings/`
-- `MeetingTranscriptStyler.swift` — rewrites saved transcript presentation and
-  renames artifacts when needed
+- `MeetingSessionController.swift` — top-level meeting state machine, model warmup, capture start/stop, failed-meeting actions, transcript restyling
+- `MeetingCaptureBridge.swift` — `@MainActor` wrapper around core `Audio`, converts callback-based stop into `async`
+- `MeetingSTTAdapter.swift` — adapts Draft's `ParakeetEngine` to `TranscriptedCore.SpeechToTextEngine`
+- `MeetingModelDownloader.swift` — loads Parakeet and diarization models together
+- `MeetingStoragePaths.swift` — Draft-specific meeting storage layout
+- `MeetingTranscriptStyler.swift` — restyles saved transcripts and renames files after save
 
-## Architecture
+## End-to-end flow
 
-`MeetingSessionController` builds a Draft-flavored `CoreStoragePaths`, then
-constructs:
+1. `Sources/DraftApp.swift` wires `MeetingSessionController` into `MeetingOverlayController`, the menubar, and the `⌥M` hotkey.
+2. `Sources/DraftAppState.swift` starts background model warmup through `meetingSession.prepareModels(showLoadingUI: false)`.
+3. `MeetingSessionController.startRecording(...)` uses `MeetingCaptureBridge` to start core audio capture into Draft-owned scratch paths.
+4. `MeetingSessionController.stopRecording(...)` awaits mic/system audio files from the bridge.
+5. `TranscriptionTaskManager.startTranscription(...)` runs the core diarize → transcribe → save pipeline.
+6. A subscription on `taskManager.$lastSavedTranscriptURL` calls `MeetingTranscriptStyler.restyleTranscript(...)` and updates the "recent meetings" UI state.
+7. Failed meetings can be retried, deleted, or dismissed from the menubar recent-meetings section.
 
-1. `MeetingCaptureBridge`
-2. `MeetingSTTAdapter`
-3. `DiarizationService`
-4. `SpeakerDatabase`
-5. `FailedTranscriptionManager`
-6. `AppServices`
-7. `TranscriptionTaskManager`
-8. `MeetingModelDownloader`
+## Key invariants
 
-That keeps app-specific wiring, storage choices, and UI-facing state in
-`Sources/Meeting/` while the transcription pipeline itself stays in
-`Sources/TranscriptedCore/`.
+- `TranscriptedCore` owns the reusable pipeline. App code in this directory should prefer adapters and protocol seams over direct core edits.
+- `MeetingSTTAdapter.cleanup()` is intentionally a no-op. `DraftAppState` owns `ParakeetEngine` lifecycle for the whole app.
+- Meeting storage must stay under Draft app-support paths, not `TranscriptedCore.default` standalone paths.
+- Live PCM handlers installed through `MeetingCaptureBridge` run on capture threads. Keep them real-time safe.
 
-## Guardrails
+## Storage
 
-- Keep Draft/UI types out of `TranscriptedCore`
-- Keep app-specific storage policy in `MeetingStoragePaths`, not inside core
-- Reuse the app's single `ParakeetEngine`; do not spin up a second STT engine
+Meeting artifacts live under `~/Library/Application Support/Draft/meetings/`:
 
-## Verification
+- `transcripts/`
+- `speakers.sqlite`
+- `stats.sqlite`
+- `failed_transcriptions.json`
+- `speaker_clips/`
+- `recordings/`
 
-After changing this directory:
+Core logging for the embedded meeting pipeline is redirected to `~/Library/Application Support/Draft/logs/`.
 
-```bash
-bash build.sh
-bash run-tests.sh
-bash run-integration-smoke.sh
-```
+See `docs/storage-paths.md` for the full map.
+
+## Test and verification
+
+- `bash build.sh`
+- `bash run-tests.sh`
+- `bash run-integration-smoke.sh`
+
+Relevant direct coverage:
+
+- `Tests/MeetingTranscriptStylerTests.swift`
+- `Tests/SpeakerNamingPolicyTests.swift`
+- `SmokeTests/CoreIntegrationSmoke.swift`
+
+## Agent notes
+
+- `MeetingSessionController` is the right place for app-level meeting behavior. If a change belongs to the reusable library, move down into `Sources/TranscriptedCore/`.
+- The menubar's recent-meetings UI is part of the meeting feature surface. Meeting changes often require checking `Sources/UI/MenuBarRecentMeetingsView.swift` and `Sources/UI/MeetingOverlayController.swift`.

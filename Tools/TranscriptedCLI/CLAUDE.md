@@ -1,72 +1,34 @@
 # TranscriptedCLI
 
-## What This Package Is
+## What this tool does
 
-`Tools/TranscriptedCLI/` is a standalone Swift package for offline diarization
-workflows built directly on FluidAudio.
-
-It is separate from the main app and separate from `TranscriptedCore`.
+`Tools/TranscriptedCLI/` is a standalone Swift package for offline diarization. It does not build or run the app target.
 
 ## Commands
 
-- `transcripted-cli diarize`
-  Run offline diarization on a single audio file and emit RTTM or JSON.
-- `transcripted-cli batch`
-  Run offline diarization across a directory of audio files and write RTTM
-  outputs for each file.
+- `transcripted-cli diarize <audio>` — diarize one file, output RTTM or JSON
+- `transcripted-cli batch <directory>` — diarize every matching audio file in a directory
 
-## Key Files
+## Files
 
-- `Package.swift`
-  Standalone package definition with ArgumentParser plus the dependency archive
-  include/link pattern.
-- `TranscriptedCLI.swift`
-  Root command registration.
-- `DiarizeCommand.swift`
-  Single-file diarization flow.
-- `BatchCommand.swift`
-  Directory batch flow.
-- `ConfigLoader.swift`
-  Maps a JSON file into `OfflineDiarizerConfig`.
-- `RTTMWriter.swift`
-  Converts diarization segments into RTTM output.
+- `Package.swift` — Swift package manifest; links against repo-level dependency artifacts in `.deps-libs/` and `.deps-modules/`
+- `Sources/TranscriptedCLI/TranscriptedCLI.swift` — `@main` entry point
+- `Sources/TranscriptedCLI/DiarizeCommand.swift` — single-file command
+- `Sources/TranscriptedCLI/BatchCommand.swift` — directory command
+- `Sources/TranscriptedCLI/ConfigLoader.swift` — JSON-to-`OfflineDiarizerConfig` loader
+- `Sources/TranscriptedCLI/RTTMWriter.swift` — RTTM output formatter
 
-## Build Assumptions
-
-This package expects repo-root dependency artifacts to exist in:
-
-- `.deps-libs/`
-- `.deps-modules/`
-
-CLI failures are often missing build artifacts rather than source-level errors.
-
-## Typical Usage
+## Build and run
 
 ```bash
 cd Tools/TranscriptedCLI
-swift run transcripted-cli diarize /path/to/audio.m4a --json
+swift build
+swift run transcripted-cli diarize /path/to/audio.wav
 swift run transcripted-cli batch /path/to/folder --ext wav
 ```
 
-Optional flags:
+## Agent notes
 
-- `--config`
-- `--models-dir`
-- `--output`
-- `--output-dir`
-
-## What This Package Does Not Do
-
-- it does not import app UI code
-- it does not save Markdown transcripts
-- it does not use `TranscriptedCore`
-- it does not participate in the app's meeting storage layout
-
-## When To Update This Doc
-
-Update this file if you change:
-
-- command names or flags
-- required dependency artifact locations
-- output formats
-- the package's relationship to the main app or `TranscriptedCore`
+- This package depends on repo-level prebuilt FluidAudio artifacts. If those are missing, build the repo dependencies first.
+- The CLI is about diarization only. It does not use the app UI, app storage paths, or the `MeetingSessionController` bridge layer.
+- Changes here should be checked independently from app builds.
