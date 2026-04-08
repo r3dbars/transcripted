@@ -37,20 +37,20 @@ struct AgentConnectionContext {
         filename: String?
     ) -> String {
         var prompt = """
-        I use Transcripted locally on my Mac.
+        I use Transcripted on my Mac.
 
-        My transcript folders are:
-        - Meetings: \(meetingsFolderURL.path)
-        - Dictations: \(dictationsFolderURL.path)
+        Meetings folder:
+        \(meetingsFolderURL.path)
 
-        Please read those folders first and help me work with my transcripts.
-        If AGENT.md exists in the meetings folder, read it first.
-        If transcripted.json exists, use it as the index of saved meeting transcripts.
-        Then use the relevant .md and .json transcript files.
+        Dictations folder:
+        \(dictationsFolderURL.path)
+
+        Read AGENT.md and transcripted.json in the meetings folder if they exist.
+        Then help me summarize, search, and organize my transcripts.
         """
 
         if let filename {
-            prompt += "\n\nIf helpful, start with: \(filename).json"
+            prompt += "\n\nIf helpful, start with this meeting:\n\(filename).json"
         }
 
         return prompt
@@ -149,24 +149,13 @@ struct AgentConnectionWindowView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(AgentConnectionTheme.textPrimary)
 
-                Text("Your agent can read your local meetings and dictations on this Mac.")
+                Text("Copy the prompt below, then ask your agent about your meetings or dictations.")
                     .font(.system(size: 12))
                     .foregroundStyle(AgentConnectionTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer()
-
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("Saved locally")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(AgentConnectionTheme.textMuted)
-                    .textCase(.uppercase)
-
-                Text(viewModel.context.draftFolderURL.lastPathComponent)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(AgentConnectionTheme.textPrimary)
-            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -175,8 +164,7 @@ struct AgentConnectionWindowView: View {
 
     private var promptSection: some View {
         AgentConnectionSectionCard(
-            title: "Starter prompt",
-            subtitle: "Copy this into Codex, Claude, or another agent."
+            title: "Copy this prompt"
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 Text(viewModel.context.prompt)
@@ -201,7 +189,7 @@ struct AgentConnectionWindowView: View {
                     }
                     .buttonStyle(AgentConnectionPrimaryButtonStyle())
 
-                    Button("Open Transcripted folder") {
+                    Button("Open folder") {
                         viewModel.openDraftFolder()
                     }
                     .buttonStyle(AgentConnectionSecondaryButtonStyle())
@@ -212,13 +200,12 @@ struct AgentConnectionWindowView: View {
 
     private var foldersSection: some View {
         AgentConnectionSectionCard(
-            title: "What your agent can read",
-            subtitle: "These are the two folders Transcripted saves for you."
+            title: "Your folders"
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 AgentConnectionFileRow(
                     name: "Meetings",
-                    detail: "Recorded meetings from the app.",
+                    detail: "Meeting transcripts saved by Transcripted.",
                     path: viewModel.context.meetingsFolderURL.path,
                     isAvailable: viewModel.fileExists(viewModel.context.meetingsFolderURL),
                     actionTitle: "Reveal"
@@ -228,7 +215,7 @@ struct AgentConnectionWindowView: View {
 
                 AgentConnectionFileRow(
                     name: "Dictations",
-                    detail: "Dictation notes and quick captures from the app.",
+                    detail: "Dictation transcripts saved by Transcripted.",
                     path: viewModel.context.dictationsFolderURL.path,
                     isAvailable: viewModel.fileExists(viewModel.context.dictationsFolderURL),
                     actionTitle: "Reveal"
@@ -241,26 +228,25 @@ struct AgentConnectionWindowView: View {
 
     private var stepsSection: some View {
         AgentConnectionSectionCard(
-            title: "How to use it",
-            subtitle: "Three quick steps."
+            title: "How it works"
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 AgentConnectionStepRow(
                     number: 1,
                     title: "Copy the prompt",
-                    detail: "Use the copy button above."
+                    detail: "Use the button above."
                 )
 
                 AgentConnectionStepRow(
                     number: 2,
                     title: "Paste it into your agent",
-                    detail: "This tells the agent where your meetings and dictations live."
+                    detail: "This points the agent to your folders."
                 )
 
                 AgentConnectionStepRow(
                     number: 3,
                     title: "Ask for help",
-                    detail: "Try summaries, action items, follow-ups, decisions, or note cleanup."
+                    detail: "Try summaries, search, action items, or note cleanup."
                 )
             }
         }
@@ -282,12 +268,12 @@ private enum AgentConnectionTheme {
 
 private struct AgentConnectionSectionCard<Content: View>: View {
     let title: String
-    let subtitle: String
+    let subtitle: String?
     let content: Content
 
     init(
         title: String,
-        subtitle: String,
+        subtitle: String? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
@@ -299,12 +285,14 @@ private struct AgentConnectionSectionCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(AgentConnectionTheme.textMuted)
+                .foregroundStyle(AgentConnectionTheme.textPrimary)
 
-            Text(subtitle)
-                .font(.system(size: 12))
-                .foregroundStyle(AgentConnectionTheme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(AgentConnectionTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             VStack(alignment: .leading, spacing: 14) {
                 content
