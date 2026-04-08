@@ -2,7 +2,7 @@
 
 ## What This Directory Owns
 
-`backend/` is a standalone Cloudflare Worker used for beta/distribution support.
+`archive/backend-beta-worker/` is a standalone Cloudflare Worker used for beta/distribution support.
 
 It is not in the Swift compile graph. Local meeting and dictation functionality
 on `main` does not depend on this worker.
@@ -62,7 +62,7 @@ The worker stores usage and telemetry metadata, not user meeting transcripts.
 Typical commands:
 
 ```bash
-cd backend
+cd archive/backend-beta-worker
 npm install
 npm run dev
 ```

@@ -20,7 +20,7 @@ final class SpeakerNamingSheet {
 
     /// One-shot presenter that watches the task manager's `speakerNamingRequest`
     /// and shows a sheet whenever a new request arrives. Created once at app
-    /// launch by `DraftAppDelegate` and kept alive for the app lifetime.
+    /// launch by `TranscriptedAppDelegate` and kept alive for the app lifetime.
     static let shared = SpeakerNamingSheet()
 
     private var subscription: AnyCancellable?

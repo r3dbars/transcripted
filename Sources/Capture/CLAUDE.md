@@ -19,9 +19,9 @@ It no longer owns a live screenshot-driven draft mode.
 
 ## Current Hotkey Flow
 
-- Hotkey id `2` routes dictation toggles into `DraftSessionController`
+- Hotkey id `2` routes dictation toggles into `DictationSessionController`
 - Hotkey id `3` routes meeting toggles through the app-provided meeting closure
-- Rapid repeats are ignored using `DraftConstants.hotkeyActionDebounceInterval`
+- Rapid repeats are ignored using `TranscriptedConstants.hotkeyActionDebounceInterval`
 - Right-Option tap can act as an alternate dictation trigger
 
 ## Guardrails

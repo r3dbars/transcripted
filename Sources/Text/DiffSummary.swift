@@ -17,7 +17,8 @@ enum DiffSummary {
 
     // MARK: - Word-Level Diff
 
-    /// Compute word-level diff operations between the original AI draft and the user's edited version.
+    /// Compute word-level diff operations between the original generated text
+    /// and the user's edited version.
     /// Uses Swift stdlib CollectionDifference with .inferringMoves() to detect replacements.
     static func computeWordDiff(original: String, edited: String) -> [DiffOp] {
         let oldWords = tokenize(original)

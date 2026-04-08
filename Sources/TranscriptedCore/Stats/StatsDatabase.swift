@@ -41,7 +41,7 @@ public final class StatsDatabase {
     }
 
     /// Public initializer that accepts a custom SQLite path.
-    /// Used by tests and by embedders (e.g. the Draft app) that want to store the stats
+    /// Used by tests and by embedders (e.g. the app in this repo) that want to store the stats
     /// database outside the default `CoreStoragePaths.default` layout.
     public init(path: String) {
         dbPath = URL(fileURLWithPath: path)

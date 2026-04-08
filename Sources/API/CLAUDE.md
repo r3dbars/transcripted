@@ -13,5 +13,5 @@ The older `GeminiEngine` / `KeychainHelper` documentation that used to live here
 ## Agent notes
 
 - Core dictation and meeting flows on `main` do not depend on a live app-side API client in this directory.
-- If you need network or beta-backend context, read `backend/README.md` and the beta-only files under `Sources/Observability/`.
+- If you need network or beta-backend context, read `archive/backend-beta-worker/README.md` and the beta-only files under `Sources/Observability/`.
 - Verify any old references to `GeminiEngine`, API keys, or chat-drafting HTTP paths against the actual source tree before changing code.

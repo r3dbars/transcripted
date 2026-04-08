@@ -25,11 +25,11 @@ final class AppSoundPlayer {
         var bundledFileName: String? {
             switch self {
             case .dictationStart:
-                return DraftConstants.listeningStartSoundFileName
+                return TranscriptedConstants.listeningStartSoundFileName
             case .noSpeech:
-                return DraftConstants.dictationDeliveredSoundFileName
+                return TranscriptedConstants.dictationDeliveredSoundFileName
             case .meetingTranscriptComplete:
-                return DraftConstants.meetingTranscriptCompleteSoundFileName
+                return TranscriptedConstants.meetingTranscriptCompleteSoundFileName
             case .dictationCancelled, .dictationDelivered:
                 return nil
             }
@@ -59,7 +59,7 @@ final class AppSoundPlayer {
         var loadedSounds: [Cue: NSSound] = [:]
         for cue in Cue.allCases {
             guard let sound = Self.loadSound(for: cue) else { continue }
-            sound.volume = DraftConstants.overlayCueVolume
+            sound.volume = TranscriptedConstants.overlayCueVolume
             loadedSounds[cue] = sound
         }
         sounds = loadedSounds

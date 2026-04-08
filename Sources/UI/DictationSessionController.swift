@@ -1,4 +1,4 @@
-// DraftSessionController.swift
+// DictationSessionController.swift
 // Session orchestration for dictation mode plus compatibility stubs for the
 // removed draft mode.
 
@@ -6,7 +6,7 @@ import AppKit
 import Combine
 
 @MainActor
-class DraftSessionController: ObservableObject {
+class DictationSessionController: ObservableObject {
     private static let removedDraftModeMessage = "This build of Transcripted supports dictation and meetings only."
 
     enum DictationTrigger: String {
@@ -54,7 +54,7 @@ class DraftSessionController: ObservableObject {
 
     private var interruptionSubscription: AnyCancellable?
 
-    var appState: DraftAppState? {
+    var appState: TranscriptedAppState? {
         didSet { setupInterruptionObserver() }
     }
     var overlayController: FloatingOverlayController? {
@@ -75,7 +75,7 @@ class DraftSessionController: ObservableObject {
     }
 
     /// Unwrap both required dependencies or log a warning and return nil.
-    private func readyState() -> (DraftAppState, FloatingOverlayController)? {
+    private func readyState() -> (TranscriptedAppState, FloatingOverlayController)? {
         guard let appState = appState, let overlayController = overlayController else {
             EventReporter.shared.capture(level: .warning, engine: "overlay", event: "session_not_wired",
                 message: "appState or overlayController not set")
@@ -280,11 +280,11 @@ class DraftSessionController: ObservableObject {
             if !appState.sttRouter.isModelLoaded {
                 appState.logger.log("DICTATION | waiting for voice model before transcribe…")
                 self.updateLoadingOverlay(sourceApp: self.sessionSourceApp)
-                for _ in 0..<DraftConstants.modelLoadMaxIterations {
+                for _ in 0..<TranscriptedConstants.modelLoadMaxIterations {
                     guard !Task.isCancelled else { return }
                     if appState.sttRouter.isModelLoaded { break }
                     self.updateLoadingOverlay(sourceApp: self.sessionSourceApp)
-                    try? await Task.sleep(nanoseconds: DraftConstants.modelLoadPollInterval)
+                    try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
                 }
                 guard appState.sttRouter.isModelLoaded else {
                     appState.logger.log("DICTATION | voice model failed to load for transcription")
@@ -406,7 +406,7 @@ class DraftSessionController: ObservableObject {
         startupTask = Task { @MainActor [weak self] in
             guard let self else { return }
 
-            for _ in 0..<DraftConstants.modelLoadMaxIterations {
+            for _ in 0..<TranscriptedConstants.modelLoadMaxIterations {
                 guard !Task.isCancelled, self.isDictating else { return }
 
                 let modelState = appState.sttRouter.parakeetEngine.modelDownloadState
@@ -429,7 +429,7 @@ class DraftSessionController: ObservableObject {
                     break
                 }
 
-                try? await Task.sleep(nanoseconds: DraftConstants.modelLoadPollInterval)
+                try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
             }
 
             guard !Task.isCancelled else { return }
@@ -580,8 +580,8 @@ class DraftSessionController: ObservableObject {
         clipboardRestoreTask?.cancel()
         clipboardRestoreTask = Task { @MainActor in
             let startTime = CFAbsoluteTimeGetCurrent()
-            while CFAbsoluteTimeGetCurrent() - startTime < DraftConstants.clipboardRestoreTimeout {
-                try? await Task.sleep(nanoseconds: DraftConstants.clipboardPollInterval)
+            while CFAbsoluteTimeGetCurrent() - startTime < TranscriptedConstants.clipboardRestoreTimeout {
+                try? await Task.sleep(nanoseconds: TranscriptedConstants.clipboardPollInterval)
                 if pasteboard.changeCount != changeCountAfterSet { break }
             }
             pasteboard.clearContents()
