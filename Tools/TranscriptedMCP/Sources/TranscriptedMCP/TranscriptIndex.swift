@@ -7,8 +7,8 @@ final class TranscriptIndex: @unchecked Sendable {
     private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     private let indexPath: URL
 
-    init(dataDir: URL) throws {
-        self.indexPath = dataDir.appendingPathComponent("mcp_index.sqlite")
+    init(indexDir: URL) throws {
+        self.indexPath = indexDir.appendingPathComponent("mcp_index.sqlite")
         try queue.sync { try self.openAndSetup() }
     }
 
@@ -95,6 +95,56 @@ final class TranscriptIndex: @unchecked Sendable {
         """)
 
         exec("""
+            CREATE TABLE IF NOT EXISTS dictation_days (
+                filename TEXT PRIMARY KEY,
+                date TEXT NOT NULL,
+                datetime TEXT NOT NULL,
+                markdown_filename TEXT NOT NULL,
+                entry_count INTEGER NOT NULL,
+                word_count INTEGER NOT NULL,
+                json_modified_at REAL NOT NULL
+            )
+        """)
+
+        exec("""
+            CREATE TABLE IF NOT EXISTS dictation_entries (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                entry_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                source_app_name TEXT NOT NULL,
+                source_app_bundle_id TEXT,
+                delivery TEXT NOT NULL,
+                word_count INTEGER NOT NULL,
+                character_count INTEGER NOT NULL,
+                text TEXT NOT NULL
+            )
+        """)
+
+        exec("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS dictation_entries_fts USING fts5(
+                text, title, source_app_name,
+                content='dictation_entries', content_rowid='rowid',
+                tokenize='porter unicode61'
+            )
+        """)
+
+        exec("""
+            CREATE TRIGGER IF NOT EXISTS dictation_entries_ai AFTER INSERT ON dictation_entries BEGIN
+                INSERT INTO dictation_entries_fts(rowid, text, title, source_app_name)
+                VALUES (new.rowid, new.text, new.title, new.source_app_name);
+            END
+        """)
+
+        exec("""
+            CREATE TRIGGER IF NOT EXISTS dictation_entries_ad AFTER DELETE ON dictation_entries BEGIN
+                INSERT INTO dictation_entries_fts(dictation_entries_fts, rowid, text, title, source_app_name)
+                VALUES ('delete', old.rowid, old.text, old.title, old.source_app_name);
+            END
+        """)
+
+        exec("""
             CREATE VIRTUAL TABLE IF NOT EXISTS utterances_fts USING fts5(
                 text, speaker_name,
                 content='utterances', content_rowid='rowid',
@@ -120,13 +170,22 @@ final class TranscriptIndex: @unchecked Sendable {
         exec("CREATE INDEX IF NOT EXISTS idx_meeting_speakers_name ON meeting_speakers(speaker_name COLLATE NOCASE)")
         exec("CREATE INDEX IF NOT EXISTS idx_meeting_speakers_persistent_id ON meeting_speakers(persistent_speaker_id)")
         exec("CREATE INDEX IF NOT EXISTS idx_utterances_filename ON utterances(filename)")
+        exec("CREATE INDEX IF NOT EXISTS idx_dictation_days_date ON dictation_days(date)")
+        exec("CREATE INDEX IF NOT EXISTS idx_dictation_entries_filename ON dictation_entries(filename)")
+        exec("CREATE INDEX IF NOT EXISTS idx_dictation_entries_created_at ON dictation_entries(created_at)")
     }
 
     // MARK: - Reconciliation
 
-    func reconcile(dataDir: URL) throws {
+    func reconcile(meetingsDir: URL, dictationsDir: URL) throws {
         try queue.sync {
-            let diskFiles = TranscriptLoader.enumerateSidecars(in: dataDir)
+            let diskFiles: [ContextSidecarFile]
+            if meetingsDir.standardizedFileURL == dictationsDir.standardizedFileURL {
+                diskFiles = TranscriptLoader.enumerateSidecars(in: meetingsDir)
+            } else {
+                diskFiles = TranscriptLoader.enumerateSidecars(in: meetingsDir)
+                    + TranscriptLoader.enumerateSidecars(in: dictationsDir)
+            }
             let diskMap = Dictionary(uniqueKeysWithValues: diskFiles.map {
                 ($0.url.deletingPathExtension().lastPathComponent, $0)
             })
@@ -137,10 +196,10 @@ final class TranscriptIndex: @unchecked Sendable {
             for (filename, info) in diskMap {
                 if let indexedMod = indexed[filename] {
                     if abs(info.modDate - indexedMod) > 0.001 {
-                        try reindex(file: info.url, filename: filename)
+                        try reindex(file: info.url, filename: filename, kind: info.kind)
                     }
                 } else {
-                    try indexOne(file: info.url, filename: filename, modDate: info.modDate)
+                    try indexOne(file: info.url, filename: filename, modDate: info.modDate, kind: info.kind)
                 }
             }
 
@@ -153,15 +212,21 @@ final class TranscriptIndex: @unchecked Sendable {
 
     func indexSingleFile(_ url: URL) throws {
         try queue.sync {
+            guard let kind = TranscriptLoader.sidecarKind(for: url) else { return }
             let filename = url.deletingPathExtension().lastPathComponent
-            try reindex(file: url, filename: filename)
+            try reindex(file: url, filename: filename, kind: kind)
         }
     }
 
     private func getIndexedModDates() throws -> [String: TimeInterval] {
         var result: [String: TimeInterval] = [:]
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT filename, json_modified_at FROM meetings", -1, &stmt, nil) == SQLITE_OK else {
+        let sql = """
+            SELECT filename, json_modified_at FROM meetings
+            UNION ALL
+            SELECT filename, json_modified_at FROM dictation_days
+        """
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             throw MCPIndexError.queryFailed(dbError())
         }
         defer { sqlite3_finalize(stmt) }
@@ -173,8 +238,17 @@ final class TranscriptIndex: @unchecked Sendable {
         return result
     }
 
-    private func indexOne(file url: URL, filename: String, modDate: TimeInterval) throws {
-        guard let transcript = TranscriptLoader.load(url) else { return }
+    private func indexOne(file url: URL, filename: String, modDate: TimeInterval, kind: ContextSidecarKind) throws {
+        switch kind {
+        case .meeting:
+            try indexMeeting(file: url, filename: filename, modDate: modDate)
+        case .dictationDay:
+            try indexDictationDay(file: url, filename: filename, modDate: modDate)
+        }
+    }
+
+    private func indexMeeting(file url: URL, filename: String, modDate: TimeInterval) throws {
+        guard let transcript = TranscriptLoader.loadMeeting(url) else { return }
         let speakers = TranscriptLoader.speakerLookup(from: transcript)
 
         let dateOnly = String(transcript.recording.date.prefix(10))
@@ -220,11 +294,56 @@ final class TranscriptIndex: @unchecked Sendable {
         log("Indexed: \(filename) (\(transcript.utterances.count) utterances)")
     }
 
-    private func reindex(file url: URL, filename: String) throws {
+    private func indexDictationDay(file url: URL, filename: String, modDate: TimeInterval) throws {
+        guard let day = TranscriptLoader.loadDictationDay(url) else { return }
+
+        let latestEntryDate = day.entries.last?.createdAt ?? "\(day.date)T00:00:00+0000"
+
+        exec("BEGIN EXCLUSIVE")
+        var committed = false
+        defer { if !committed { exec("ROLLBACK") } }
+
+        bindExec(
+            "INSERT OR REPLACE INTO dictation_days (filename, date, datetime, markdown_filename, entry_count, word_count, json_modified_at) VALUES (?,?,?,?,?,?,?)",
+            bindings: [
+                .text(filename),
+                .text(day.date),
+                .text(latestEntryDate),
+                .text(day.markdownFilename),
+                .int(day.entryCount),
+                .int(day.wordCount),
+                .double(modDate)
+            ]
+        )
+
+        for entry in day.entries {
+            bindExec(
+                "INSERT INTO dictation_entries (filename, entry_id, title, created_at, source_app_name, source_app_bundle_id, delivery, word_count, character_count, text) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                bindings: [
+                    .text(filename),
+                    .text(entry.id),
+                    .text(entry.title),
+                    .text(entry.createdAt),
+                    .text(entry.sourceAppName),
+                    entry.sourceAppBundleId.map { .text($0) } ?? .null,
+                    .text(entry.delivery),
+                    .int(entry.wordCount),
+                    .int(entry.characterCount),
+                    .text(entry.text)
+                ]
+            )
+        }
+
+        exec("COMMIT")
+        committed = true
+        log("Indexed dictation day: \(filename) (\(day.entries.count) entries)")
+    }
+
+    private func reindex(file url: URL, filename: String, kind: ContextSidecarKind) throws {
         try removeFromIndex(filename: filename)
         let modDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey])
             .contentModificationDate?.timeIntervalSince1970) ?? Date().timeIntervalSince1970
-        try indexOne(file: url, filename: filename, modDate: modDate)
+        try indexOne(file: url, filename: filename, modDate: modDate, kind: kind)
     }
 
     private func removeFromIndex(filename: String) throws {
@@ -234,6 +353,8 @@ final class TranscriptIndex: @unchecked Sendable {
         bindExec("DELETE FROM utterances WHERE filename = ?", bindings: [.text(filename)])
         bindExec("DELETE FROM meeting_speakers WHERE filename = ?", bindings: [.text(filename)])
         bindExec("DELETE FROM meetings WHERE filename = ?", bindings: [.text(filename)])
+        bindExec("DELETE FROM dictation_entries WHERE filename = ?", bindings: [.text(filename)])
+        bindExec("DELETE FROM dictation_days WHERE filename = ?", bindings: [.text(filename)])
         exec("COMMIT")
         committed = true
     }
@@ -328,7 +449,11 @@ final class TranscriptIndex: @unchecked Sendable {
                     .replacingOccurrences(of: "_", with: " ")
                     .replacingOccurrences(of: "-", with: ":")
                 return MeetingSearchGroup(
-                    meetingTitle: title, meetingDate: g.date, filename: filename, snippets: g.snippets
+                    meetingTitle: title,
+                    meetingDate: g.date,
+                    meetingDateTime: g.datetime,
+                    filename: filename,
+                    snippets: g.snippets
                 )
             }
 
@@ -338,6 +463,306 @@ final class TranscriptIndex: @unchecked Sendable {
                 truncated: totalMeetings > maxMeetings
             )
         }
+    }
+
+    func listDictationDays(count: Int, dateFrom: String? = nil, dateTo: String? = nil) throws -> [DictationDaySummary] {
+        return try queue.sync {
+            let limit = max(1, min(count, 50))
+
+            var sql = "SELECT filename, date, datetime, entry_count, word_count FROM dictation_days"
+            var bindings: [SQLBinding] = []
+            var conditions: [String] = []
+
+            if let dateFrom = dateFrom {
+                conditions.append("date >= ?")
+                bindings.append(.text(dateFrom))
+            }
+            if let dateTo = dateTo {
+                conditions.append("date <= ?")
+                bindings.append(.text(dateTo))
+            }
+
+            if !conditions.isEmpty {
+                sql += " WHERE " + conditions.joined(separator: " AND ")
+            }
+            sql += " ORDER BY datetime DESC LIMIT ?"
+            bindings.append(.int(limit))
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw MCPIndexError.queryFailed(dbError())
+            }
+            defer { sqlite3_finalize(stmt) }
+
+            for (i, binding) in bindings.enumerated() {
+                bind(stmt: stmt, index: Int32(i + 1), value: binding)
+            }
+
+            var days: [DictationDaySummary] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                days.append(DictationDaySummary(
+                    filename: colText(stmt, 0),
+                    date: colText(stmt, 1),
+                    datetime: colText(stmt, 2),
+                    entryCount: Int(sqlite3_column_int64(stmt, 3)),
+                    wordCount: Int(sqlite3_column_int64(stmt, 4)),
+                    sourceApps: [],
+                    titles: []
+                ))
+            }
+
+            guard !days.isEmpty else { return [] }
+
+            let filenames = days.map(\.filename)
+            let placeholders = filenames.map { _ in "?" }.joined(separator: ", ")
+            let detailsSQL = """
+                SELECT filename, title, source_app_name
+                FROM dictation_entries
+                WHERE filename IN (\(placeholders))
+                ORDER BY created_at DESC
+            """
+
+            var detailStmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, detailsSQL, -1, &detailStmt, nil) == SQLITE_OK else {
+                return days
+            }
+            defer { sqlite3_finalize(detailStmt) }
+
+            for (i, filename) in filenames.enumerated() {
+                sqlite3_bind_text(detailStmt, Int32(i + 1), (filename as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            }
+
+            var titlesByDay: [String: [String]] = [:]
+            var appsByDay: [String: Set<String>] = [:]
+
+            while sqlite3_step(detailStmt) == SQLITE_ROW {
+                let filename = colText(detailStmt, 0)
+                let title = colText(detailStmt, 1)
+                let sourceApp = colText(detailStmt, 2)
+
+                if !titlesByDay[filename, default: []].contains(title) {
+                    titlesByDay[filename, default: []].append(title)
+                }
+                if !sourceApp.isEmpty {
+                    appsByDay[filename, default: []].insert(sourceApp)
+                }
+            }
+
+            for index in days.indices {
+                days[index] = DictationDaySummary(
+                    filename: days[index].filename,
+                    date: days[index].date,
+                    datetime: days[index].datetime,
+                    entryCount: days[index].entryCount,
+                    wordCount: days[index].wordCount,
+                    sourceApps: Array(appsByDay[days[index].filename, default: []]).sorted(),
+                    titles: titlesByDay[days[index].filename] ?? []
+                )
+            }
+
+            return days
+        }
+    }
+
+    func searchDictationEntries(query: String, dateFrom: String?, dateTo: String?, maxItems: Int = 10) throws -> [ContextSearchGroup] {
+        return try queue.sync {
+            let tokens = query.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+            let ftsQuery = tokens.map { "\"\($0.replacingOccurrences(of: "\"", with: ""))\"" }.joined(separator: " ")
+
+            var sql = """
+                SELECT e.filename, e.entry_id, e.title, e.created_at, e.text, e.source_app_name, e.delivery, d.date
+                FROM dictation_entries_fts
+                JOIN dictation_entries e ON e.rowid = dictation_entries_fts.rowid
+                JOIN dictation_days d ON d.filename = e.filename
+                WHERE dictation_entries_fts MATCH ?
+            """
+            var bindings: [SQLBinding] = [.text(ftsQuery)]
+
+            if let dateFrom = dateFrom {
+                sql += " AND d.date >= ?"
+                bindings.append(.text(dateFrom))
+            }
+            if let dateTo = dateTo {
+                sql += " AND d.date <= ?"
+                bindings.append(.text(dateTo))
+            }
+
+            sql += " ORDER BY rank LIMIT 200"
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw MCPIndexError.queryFailed(dbError())
+            }
+            defer { sqlite3_finalize(stmt) }
+
+            for (i, binding) in bindings.enumerated() {
+                bind(stmt: stmt, index: Int32(i + 1), value: binding)
+            }
+
+            var results: [ContextSearchGroup] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                results.append(ContextSearchGroup(
+                    kind: .dictation,
+                    title: colText(stmt, 2),
+                    filename: colText(stmt, 0),
+                    entryId: colText(stmt, 1),
+                    date: colText(stmt, 7),
+                    datetime: colText(stmt, 3),
+                    snippets: [
+                        ContextSearchSnippet(
+                            text: colText(stmt, 4),
+                            speaker: nil,
+                            speakerId: nil,
+                            timestamp: nil,
+                            sourceAppName: colText(stmt, 5),
+                            delivery: colText(stmt, 6)
+                        )
+                    ]
+                ))
+            }
+
+            return Array(results.prefix(maxItems))
+        }
+    }
+
+    func listRecentDictationEntries(count: Int, dateFrom: String? = nil, dateTo: String? = nil) throws -> [RecentContextItem] {
+        return try queue.sync {
+            let limit = max(1, min(count, 50))
+            var sql = """
+                SELECT e.filename, e.entry_id, e.title, e.created_at, e.text, e.word_count, e.source_app_name, e.delivery, d.date
+                FROM dictation_entries e
+                JOIN dictation_days d ON d.filename = e.filename
+            """
+            var bindings: [SQLBinding] = []
+            var conditions: [String] = []
+
+            if let dateFrom = dateFrom {
+                conditions.append("d.date >= ?")
+                bindings.append(.text(dateFrom))
+            }
+            if let dateTo = dateTo {
+                conditions.append("d.date <= ?")
+                bindings.append(.text(dateTo))
+            }
+
+            if !conditions.isEmpty {
+                sql += " WHERE " + conditions.joined(separator: " AND ")
+            }
+            sql += " ORDER BY e.created_at DESC LIMIT ?"
+            bindings.append(.int(limit))
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw MCPIndexError.queryFailed(dbError())
+            }
+            defer { sqlite3_finalize(stmt) }
+
+            for (i, binding) in bindings.enumerated() {
+                bind(stmt: stmt, index: Int32(i + 1), value: binding)
+            }
+
+            var items: [RecentContextItem] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                items.append(RecentContextItem(
+                    kind: .dictation,
+                    title: colText(stmt, 2),
+                    filename: colText(stmt, 0),
+                    entryId: colText(stmt, 1),
+                    date: colText(stmt, 8),
+                    datetime: colText(stmt, 3),
+                    preview: String(colText(stmt, 4).prefix(220)),
+                    wordCount: Int(sqlite3_column_int64(stmt, 5)),
+                    speakers: nil,
+                    sourceAppName: colText(stmt, 6),
+                    delivery: colText(stmt, 7)
+                ))
+            }
+
+            return items
+        }
+    }
+
+    func searchContext(query: String, speaker: String?, kind: ContextKind, dateFrom: String?, dateTo: String?, maxItems: Int = 10) throws -> ContextSearchResult {
+        var combined: [ContextSearchGroup] = []
+
+        if kind != .dictation {
+            let meetings = try searchUtterances(
+                query: query,
+                speaker: speaker,
+                dateFrom: dateFrom,
+                dateTo: dateTo,
+                maxMeetings: maxItems,
+                snippetsPerMeeting: 3
+            )
+            combined.append(contentsOf: meetings.results.map {
+                ContextSearchGroup(
+                    kind: .meeting,
+                    title: $0.meetingTitle,
+                    filename: $0.filename,
+                    entryId: nil,
+                    date: $0.meetingDate,
+                    datetime: $0.meetingDateTime,
+                    snippets: $0.snippets.map {
+                        ContextSearchSnippet(
+                            text: $0.text,
+                            speaker: $0.speaker,
+                            speakerId: $0.speakerId,
+                            timestamp: $0.timestamp,
+                            sourceAppName: nil,
+                            delivery: nil
+                        )
+                    }
+                )
+            })
+        }
+
+        if kind != .meeting, speaker == nil {
+            combined.append(contentsOf: try searchDictationEntries(
+                query: query,
+                dateFrom: dateFrom,
+                dateTo: dateTo,
+                maxItems: maxItems
+            ))
+        }
+
+        combined.sort { $0.datetime > $1.datetime }
+        let total = combined.count
+
+        return ContextSearchResult(
+            results: Array(combined.prefix(maxItems)),
+            totalItemsMatched: total,
+            truncated: total > maxItems
+        )
+    }
+
+    func listRecentContext(kind: ContextKind, count: Int, dateFrom: String? = nil, dateTo: String? = nil) throws -> RecentContextResult {
+        var items: [RecentContextItem] = []
+
+        if kind != .dictation {
+            let meetings = try listMeetings(count: count, dateFrom: dateFrom, dateTo: dateTo)
+            items.append(contentsOf: meetings.map {
+                RecentContextItem(
+                    kind: .meeting,
+                    title: $0.title ?? $0.filename,
+                    filename: $0.filename,
+                    entryId: nil,
+                    date: $0.date,
+                    datetime: $0.datetime,
+                    preview: $0.speakers.map(\.name).joined(separator: ", "),
+                    wordCount: $0.wordCount,
+                    speakers: $0.speakers.map(\.name),
+                    sourceAppName: nil,
+                    delivery: nil
+                )
+            })
+        }
+
+        if kind != .meeting {
+            items.append(contentsOf: try listRecentDictationEntries(count: count, dateFrom: dateFrom, dateTo: dateTo))
+        }
+
+        items.sort { $0.datetime > $1.datetime }
+        return RecentContextResult(items: Array(items.prefix(max(1, min(count, 50)))))
     }
 
     func getSpeakerHistory(speaker: String) throws -> SpeakerHistoryResult {

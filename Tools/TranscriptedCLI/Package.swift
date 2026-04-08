@@ -18,15 +18,15 @@ let package = Package(
             path: "Sources/TranscriptedCLI",
             swiftSettings: [
                 .unsafeFlags([
-                    "-I", "\(repoRoot)/.deps-modules",
-                    "-I", "\(repoRoot)/.deps-modules/FastClusterWrapper",
-                    "-I", "\(repoRoot)/.deps-modules/MachTaskSelfWrapper",
-                    "-I", "\(repoRoot)/.deps-modules/yyjson",
+                    "-I", "\(repoRoot)/deps-modules",
+                    "-I", "\(repoRoot)/deps-modules/FastClusterWrapper",
+                    "-I", "\(repoRoot)/deps-modules/MachTaskSelfWrapper",
+                    "-I", "\(repoRoot)/deps-modules/yyjson",
                 ]),
             ],
             linkerSettings: [
                 .unsafeFlags([
-                    "-L\(repoRoot)/.deps-libs",
+                    "-L\(repoRoot)/deps-libs",
                     "-lDraftDeps",
                     "-lc++",
                 ]),

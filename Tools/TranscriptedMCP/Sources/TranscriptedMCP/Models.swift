@@ -59,6 +59,50 @@ struct AgentUtterance: Codable {
     }
 }
 
+struct AgentDictationDay: Codable {
+    let version: String
+    let captureType: String
+    let date: String
+    let markdownFilename: String
+    let entryCount: Int
+    let wordCount: Int
+    let entries: [AgentDictationEntry]
+
+    enum CodingKeys: String, CodingKey {
+        case version
+        case captureType = "capture_type"
+        case date
+        case markdownFilename = "markdown_filename"
+        case entryCount = "entry_count"
+        case wordCount = "word_count"
+        case entries
+    }
+}
+
+struct AgentDictationEntry: Codable {
+    let id: String
+    let createdAt: String
+    let title: String
+    let text: String
+    let sourceAppName: String
+    let sourceAppBundleId: String?
+    let delivery: String
+    let wordCount: Int
+    let characterCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case createdAt = "created_at"
+        case title
+        case text
+        case sourceAppName = "source_app_name"
+        case sourceAppBundleId = "source_app_bundle_id"
+        case delivery
+        case wordCount = "word_count"
+        case characterCount = "character_count"
+    }
+}
+
 // MARK: - MCP Response Types
 
 struct GroupedSearchResult: Codable {
@@ -76,12 +120,14 @@ struct GroupedSearchResult: Codable {
 struct MeetingSearchGroup: Codable {
     let meetingTitle: String
     let meetingDate: String
+    let meetingDateTime: String
     let filename: String
     let snippets: [SearchSnippet]
 
     enum CodingKeys: String, CodingKey {
         case meetingTitle = "meeting_title"
         case meetingDate = "meeting_date"
+        case meetingDateTime = "meeting_datetime"
         case filename
         case snippets
     }
@@ -175,6 +221,96 @@ struct MeetingSpeaker: Codable {
         case persistentSpeakerId = "persistent_speaker_id"
         case wordCount = "word_count"
         case speakingSeconds = "speaking_seconds"
+    }
+}
+
+enum ContextKind: String, Codable {
+    case meeting
+    case dictation
+    case all
+}
+
+struct DictationDaySummary: Codable {
+    let filename: String
+    let date: String
+    let datetime: String
+    let entryCount: Int
+    let wordCount: Int
+    let sourceApps: [String]
+    let titles: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case filename, date, datetime, titles
+        case entryCount = "entry_count"
+        case wordCount = "word_count"
+        case sourceApps = "source_apps"
+    }
+}
+
+struct ContextSearchResult: Codable {
+    var results: [ContextSearchGroup]
+    let totalItemsMatched: Int
+    let truncated: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case results
+        case totalItemsMatched = "total_items_matched"
+        case truncated
+    }
+}
+
+struct ContextSearchGroup: Codable {
+    let kind: ContextKind
+    var title: String
+    let filename: String
+    let entryId: String?
+    let date: String
+    let datetime: String
+    let snippets: [ContextSearchSnippet]
+
+    enum CodingKeys: String, CodingKey {
+        case kind, title, filename, date, datetime, snippets
+        case entryId = "entry_id"
+    }
+}
+
+struct ContextSearchSnippet: Codable {
+    let text: String
+    let speaker: String?
+    let speakerId: String?
+    let timestamp: String?
+    let sourceAppName: String?
+    let delivery: String?
+
+    enum CodingKeys: String, CodingKey {
+        case text, speaker, timestamp, delivery
+        case speakerId = "speaker_id"
+        case sourceAppName = "source_app_name"
+    }
+}
+
+struct RecentContextResult: Codable {
+    var items: [RecentContextItem]
+}
+
+struct RecentContextItem: Codable {
+    let kind: ContextKind
+    var title: String
+    let filename: String
+    let entryId: String?
+    let date: String
+    let datetime: String
+    let preview: String
+    let wordCount: Int
+    let speakers: [String]?
+    let sourceAppName: String?
+    let delivery: String?
+
+    enum CodingKeys: String, CodingKey {
+        case kind, title, filename, date, datetime, preview, speakers, delivery
+        case entryId = "entry_id"
+        case wordCount = "word_count"
+        case sourceAppName = "source_app_name"
     }
 }
 

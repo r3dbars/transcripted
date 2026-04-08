@@ -8,7 +8,7 @@ final class TranscriptIndexTests: XCTestCase {
     override func setUp() {
         super.setUp()
         tempDir = makeTempDir()
-        index = try! TranscriptIndex(dataDir: tempDir)
+        index = try! TranscriptIndex(indexDir: tempDir)
     }
 
     override func tearDown() {
@@ -32,7 +32,7 @@ final class TranscriptIndexTests: XCTestCase {
             ("system_0", 0.0, 5.0, "Let's discuss the product roadmap"),
         ])
         try writeFixture(fixture, filename: "Call_2026-03-29_10-00-00", to: tempDir)
-        try index.reconcile(dataDir: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         let results = try index.searchUtterances(query: "roadmap", speaker: nil, dateFrom: nil, dateTo: nil)
         XCTAssertEqual(results.results.count, 1)
@@ -45,7 +45,7 @@ final class TranscriptIndexTests: XCTestCase {
             ("mic_0", 0.0, 3.0, "We were designing the new feature"),
         ])
         try writeFixture(fixture, filename: "Call_2026-03-29_10-00-00", to: tempDir)
-        try index.reconcile(dataDir: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         // "design" should match "designing" via porter stemming
         let results = try index.searchUtterances(query: "design", speaker: nil, dateFrom: nil, dateTo: nil)
@@ -58,7 +58,7 @@ final class TranscriptIndexTests: XCTestCase {
             ("mic_0", 5.0, 10.0, "I agree about the product"),
         ])
         try writeFixture(fixture, filename: "Call_2026-03-29_10-00-00", to: tempDir)
-        try index.reconcile(dataDir: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         let results = try index.searchUtterances(query: "product", speaker: "Jenny", dateFrom: nil, dateTo: nil)
         XCTAssertEqual(results.results.count, 1)
@@ -75,7 +75,7 @@ final class TranscriptIndexTests: XCTestCase {
         ])
         try writeFixture(fixture1, filename: "Call_2026-03-28_10-00-00", to: tempDir)
         try writeFixture(fixture2, filename: "Call_2026-03-30_10-00-00", to: tempDir)
-        try index.reconcile(dataDir: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         let results = try index.searchUtterances(query: "meeting", speaker: nil, dateFrom: "2026-03-29", dateTo: nil)
         XCTAssertEqual(results.results.count, 1)
@@ -85,19 +85,19 @@ final class TranscriptIndexTests: XCTestCase {
     func testReconcileRemovesDeletedFiles() throws {
         let fixture = makeFixtureJSON(utterances: [("mic_0", 0.0, 3.0, "Temporary")])
         try writeFixture(fixture, filename: "Call_2026-03-29_10-00-00", to: tempDir)
-        try index.reconcile(dataDir: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
 
         try FileManager.default.removeItem(at: tempDir.appendingPathComponent("Call_2026-03-29_10-00-00.json"))
-        try index.reconcile(dataDir: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 0)
     }
 
     func testMalformedJSONIsSkipped() throws {
         try "not json".data(using: .utf8)!.write(to: tempDir.appendingPathComponent("Call_2026-03-29_10-00-00.json"))
-        try index.reconcile(dataDir: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         let results = try index.listRecentMeetings(count: 10)
         XCTAssertTrue(results.isEmpty)
@@ -108,7 +108,7 @@ final class TranscriptIndexTests: XCTestCase {
             ("mic_0", 0.0, 5.0, "The C++ implementation is ready"),
         ])
         try writeFixture(fixture, filename: "Call_2026-03-29_10-00-00", to: tempDir)
-        try index.reconcile(dataDir: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         // These should not crash even with FTS5 special chars
         _ = try index.searchUtterances(query: "C++", speaker: nil, dateFrom: nil, dateTo: nil)
@@ -128,7 +128,7 @@ final class TranscriptIndexTests: XCTestCase {
             ("system_0", 20.0, 25.0, "The roadmap review is next week"),
         ])
         try writeFixture(fixture, filename: "Call_2026-03-29_10-00-00", to: tempDir)
-        try index.reconcile(dataDir: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         let results = try index.searchUtterances(query: "roadmap", speaker: nil, dateFrom: nil, dateTo: nil, snippetsPerMeeting: 3)
         XCTAssertEqual(results.results.count, 1) // One meeting
@@ -143,7 +143,7 @@ final class TranscriptIndexTests: XCTestCase {
     func testListRecentMeetingsIncludesSpeakers() throws {
         let fixture = makeFixtureJSON()
         try writeFixture(fixture, filename: "Call_2026-03-29_10-00-00", to: tempDir)
-        try index.reconcile(dataDir: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         let meetings = try index.listRecentMeetings(count: 10)
         XCTAssertEqual(meetings.count, 1)
@@ -153,7 +153,7 @@ final class TranscriptIndexTests: XCTestCase {
     func testGetSpeakerHistoryByName() throws {
         let fixture = makeFixtureJSON()
         try writeFixture(fixture, filename: "Call_2026-03-29_10-00-00", to: tempDir)
-        try index.reconcile(dataDir: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         let history = try index.getSpeakerHistory(speaker: "Jenny")
         XCTAssertEqual(history.meetingCount, 1)
@@ -163,7 +163,7 @@ final class TranscriptIndexTests: XCTestCase {
     func testGetSpeakerHistoryByUUID() throws {
         let fixture = makeFixtureJSON()
         try writeFixture(fixture, filename: "Call_2026-03-29_10-00-00", to: tempDir)
-        try index.reconcile(dataDir: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         let history = try index.getSpeakerHistory(speaker: "80FB272B-6061-4FC4-8408-3F7A974C59DB")
         XCTAssertEqual(history.meetingCount, 1)
@@ -172,5 +172,40 @@ final class TranscriptIndexTests: XCTestCase {
     func testGetSpeakerHistoryUnknownSpeaker() throws {
         let history = try index.getSpeakerHistory(speaker: "Nonexistent Person")
         XCTAssertEqual(history.meetingCount, 0)
+    }
+
+    func testListDictationDays() throws {
+        try writeFixture(makeDictationDayJSON(), filename: "Dictations_2026-04-07", to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let days = try index.listDictationDays(count: 10)
+        XCTAssertEqual(days.count, 1)
+        XCTAssertEqual(days[0].entryCount, 2)
+        XCTAssertTrue(days[0].sourceApps.contains("Slack"))
+    }
+
+    func testSearchContextReturnsMeetingsAndDictations() throws {
+        try writeFixture(makeFixtureJSON(utterances: [
+            ("system_0", 0.0, 5.0, "Roadmap meeting update"),
+        ]), filename: "Call_2026-03-29_10-00-00", to: tempDir)
+        try writeFixture(makeDictationDayJSON(entries: [
+            ("dictation-20260407-091500-000", "2026-04-07T09:15:00-0500", "Roadmap note", "Remember the roadmap follow-up after the meeting", "Slack", "copied"),
+        ]), filename: "Dictations_2026-04-07", to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let results = try index.searchContext(query: "roadmap", speaker: nil, kind: .all, dateFrom: nil, dateTo: nil, maxItems: 10)
+        XCTAssertEqual(results.results.count, 2)
+        XCTAssertEqual(results.results.first?.kind, .dictation)
+        XCTAssertEqual(results.results.last?.kind, .meeting)
+    }
+
+    func testRecentContextIncludesDictationEntries() throws {
+        try writeFixture(makeFixtureJSON(date: "2026-03-29T10:00:00-0500"), filename: "Call_2026-03-29_10-00-00", to: tempDir)
+        try writeFixture(makeDictationDayJSON(), filename: "Dictations_2026-04-07", to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let result = try index.listRecentContext(kind: .all, count: 10)
+        XCTAssertEqual(result.items.count, 3)
+        XCTAssertEqual(result.items.first?.kind, .dictation)
     }
 }

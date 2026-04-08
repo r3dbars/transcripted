@@ -15,6 +15,7 @@ struct TestRunner {
         testMeetingTranscriptStyler()
         testSpeakerNamingPolicy()
         testDictationTranscriptWriter()
+        testDictationAgentOutput()
         testDictationSounds()
 
         print("\n\(totalTests) tests, \(passedTests) passed, \(failedTests) failed")

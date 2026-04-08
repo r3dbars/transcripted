@@ -17,12 +17,14 @@ swiftc \
     Tests/MeetingTranscriptStylerTests.swift \
     Tests/SpeakerNamingPolicyTests.swift \
     Tests/DictationTranscriptWriterTests.swift \
+    Tests/DictationAgentOutputTests.swift \
     Tests/DictationSoundsTests.swift \
     Sources/Capture/CapturedContext.swift \
     Sources/Draft/DraftUtils.swift \
     Sources/Style/StyleUtils.swift \
     Sources/DraftPaths.swift \
     Sources/Dictation/DictationStoragePaths.swift \
+    Sources/Dictation/DictationAgentOutput.swift \
     Sources/Dictation/DictationTranscriptWriter.swift \
     Sources/DraftConstants.swift \
     Sources/Draft/DiffSummary.swift \
