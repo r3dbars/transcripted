@@ -97,10 +97,12 @@ final class OverlayListeningView: NSView {
 
     func updatePlaceholder(mode: FloatingOverlayController.SessionMode,
                            draftHint: String, dictationHint: String) {
+        let _ = draftHint
+        let _ = dictationHint
         if mode == .dictation {
-            placeholderLabel.stringValue = "Recording... press \(dictationHint) to stop"
+            placeholderLabel.stringValue = "Listening..."
         } else {
-            placeholderLabel.stringValue = "Recording... press \(draftHint) to stop"
+            placeholderLabel.stringValue = "Listening..."
         }
     }
 }

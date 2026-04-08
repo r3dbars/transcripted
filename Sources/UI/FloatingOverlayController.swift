@@ -210,16 +210,7 @@ class FloatingOverlayController {
         errorMessage = ""
 
         let rawTargetRect = sourceApp.flatMap { AccessibilityBridge.focusedTextFieldRect(for: $0) }
-        let initialHeight: CGFloat
-        switch state {
-        case .listening, .idle, .success:
-            initialHeight = OverlayTokens.panelCompactHeight
-        case .loading:
-            initialHeight = OverlayTokens.panelLoadingHeight
-        default:
-            initialHeight = OverlayTokens.panelMinHeight
-        }
-        let panelSize = NSSize(width: OverlayTokens.panelWidth, height: initialHeight)
+        let panelSize = preferredPanelSize(for: state)
 
         // Validate the accessibility rect — terminal emulators report oversized text areas
         let mousePos = NSEvent.mouseLocation
@@ -299,7 +290,7 @@ class FloatingOverlayController {
     }
 
     func resizePanelToCompact() {
-        resizePanelInstant(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelCompactHeight))
+        resizePanelInstant(to: NSSize(width: OverlayTokens.panelCompactWidth, height: OverlayTokens.panelCompactHeight))
     }
 
     // MARK: - Hide Animations
@@ -534,8 +525,10 @@ class FloatingOverlayController {
     private func resizePanelInstant(to size: NSSize) {
         guard let panel = panel else { return }
         var frame = panel.frame
+        let widthDelta = size.width - frame.size.width
         let heightDelta = size.height - frame.size.height
         frame.size = size
+        frame.origin.x -= widthDelta / 2
         frame.origin.y -= heightDelta
         panel.setFrame(frame, display: true, animate: false)
     }
@@ -543,9 +536,24 @@ class FloatingOverlayController {
     private func resizePanel(to size: NSSize) {
         guard let panel = panel else { return }
         var frame = panel.frame
+        let widthDelta = size.width - frame.size.width
         let heightDelta = size.height - frame.size.height
         frame.size = size
+        frame.origin.x -= widthDelta / 2
         frame.origin.y -= heightDelta
         panel.setFrame(frame, display: true, animate: true)
+    }
+
+    private func preferredPanelSize(for state: OverlayState) -> NSSize {
+        switch state {
+        case .loading:
+            return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
+        case .drafting where !errorMessage.isEmpty:
+            return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight)
+        case .idle, .listening, .drafting, .success:
+            return NSSize(width: OverlayTokens.panelCompactWidth, height: OverlayTokens.panelCompactHeight)
+        default:
+            return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight)
+        }
     }
 }
