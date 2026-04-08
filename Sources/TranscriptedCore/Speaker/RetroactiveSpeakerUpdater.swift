@@ -65,7 +65,7 @@ extension TranscriptSaver {
                 ["dbId": dbIdString, "name": newName, "files": "\(updatedCount)"])
 
             // Rebuild agent index
-            try? AgentOutput.writeIndex(to: dir, speakerDB: SpeakerDatabase.shared)
+            try? AgentOutput.writeIndex(to: dir, speakerStore: SpeakerDatabase.shared)
         }
     }
 
@@ -83,7 +83,11 @@ extension TranscriptSaver {
     ///   - updates: Speaker name updates from the naming flow
     /// - Returns: true if the file was updated successfully
     @discardableResult
-    public static func updateSpeakerNames(transcriptURL: URL, updates: [SpeakerNameUpdate]) -> Bool {
+    public static func updateSpeakerNames(
+        transcriptURL: URL,
+        updates: [SpeakerNameUpdate],
+        speakerStore: (any SpeakerStore)? = nil
+    ) -> Bool {
         guard !updates.isEmpty else { return true }
 
         return fileUpdateQueue.sync {
@@ -108,7 +112,11 @@ extension TranscriptSaver {
                 AppLogger.pipeline.info("Updated speaker names in transcript", ["path": transcriptURL.lastPathComponent, "updates": "\(updates.count)"])
 
                 // Update JSON sidecar
-                updateAgentJSON(transcriptURL: transcriptURL, updates: updates)
+                updateAgentJSON(
+                    transcriptURL: transcriptURL,
+                    updates: updates,
+                    speakerStore: speakerStore
+                )
 
                 return true
             } catch {
@@ -235,7 +243,11 @@ extension TranscriptSaver {
     }
 
     /// Update the JSON sidecar when speaker names change.
-    private static func updateAgentJSON(transcriptURL: URL, updates: [SpeakerNameUpdate]) {
+    private static func updateAgentJSON(
+        transcriptURL: URL,
+        updates: [SpeakerNameUpdate],
+        speakerStore: (any SpeakerStore)?
+    ) {
         let stem = transcriptURL.deletingPathExtension().lastPathComponent
         let jsonURL = transcriptURL.deletingLastPathComponent().appendingPathComponent("\(stem).json")
         guard FileManager.default.fileExists(atPath: jsonURL.path),
@@ -274,6 +286,9 @@ extension TranscriptSaver {
 
         // Rebuild index
         let folder = transcriptURL.deletingLastPathComponent()
-        try? AgentOutput.writeIndex(to: folder, speakerDB: SpeakerDatabase.shared)
+        try? AgentOutput.writeIndex(
+            to: folder,
+            speakerStore: speakerStore ?? SpeakerDatabase.shared
+        )
     }
 }

@@ -64,6 +64,7 @@ extension TranscriptionTaskManager {
         // Build DB knowledge snapshot: what do we already know about these speakers?
         let speakerIds = Array(result.systemSpeakerIds).sorted()
         let speakerDB = await MainActor.run { transcription.speakerDB }
+        let statsStore = await MainActor.run { self.statsStore }
         var dbKnowledge: [(speakerId: String, profile: SpeakerProfile, similarity: Double)] = []
 
         for utterance in result.systemUtterances {
@@ -170,7 +171,9 @@ extension TranscriptionTaskManager {
             speakerDbIds: speakerDbIds,
             directory: outputFolder,
             healthInfo: healthInfo,
-            notifier: notifier
+            notifier: notifier,
+            speakerStore: speakerDB,
+            statsStore: statsStore
         ) else {
             throw PipelineError.saveFailed(detail: "Could not write transcript to \(outputFolder.lastPathComponent)")
         }

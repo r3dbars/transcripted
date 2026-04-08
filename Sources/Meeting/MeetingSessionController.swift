@@ -127,6 +127,7 @@ final class MeetingSessionController: ObservableObject {
     private let diarization: DiarizationService
     private let sttAdapter: MeetingSTTAdapter
     private let speakerDatabase: SpeakerDatabase
+    private let statsDatabase: StatsDatabase
     private let downloader: MeetingModelDownloader
 
     private var cancellables: Set<AnyCancellable> = []
@@ -172,6 +173,7 @@ final class MeetingSessionController: ObservableObject {
 
         // Speaker store: Draft-owned SQLite file under meetings/.
         self.speakerDatabase = SpeakerDatabase(path: storagePaths.speakerDB.path)
+        self.statsDatabase = StatsDatabase(path: storagePaths.statsDB.path)
 
         // Failed-queue manager: takes CoreStoragePaths so its JSON file lives
         // under our meetings directory, not ~/Documents/Transcripted.
@@ -193,7 +195,8 @@ final class MeetingSessionController: ObservableObject {
             failedTranscriptionManager: failedManager,
             speechToText: services.speechToText,
             diarization: services.diarization,
-            speakerStore: services.speakerStore
+            speakerStore: services.speakerStore,
+            statsStore: statsDatabase
         )
 
         // Model downloader — coordinates Parakeet + PyAnnote readiness.
@@ -735,85 +738,11 @@ final class MeetingSessionController: ObservableObject {
         failedMeetings = failedTranscriptions
             .sorted(by: { $0.timestamp > $1.timestamp })
             .map { failed in
-                FailedMeetingItem(
-                    id: failed.id,
-                    timestamp: failed.timestamp,
-                    title: failedMeetingTitle(for: failed),
-                    detail: failedMeetingDetail(for: failed),
-                    meta: failedMeetingMeta(for: failed),
-                    isRetryable: failed.isRetryable,
-                    isRetrying: retryingFailedMeetingIDs.contains(failed.id),
-                    hasAudioFiles: failed.audioFilesExist()
+                FailedMeetingPresentation.item(
+                    from: failed,
+                    isRetrying: retryingFailedMeetingIDs.contains(failed.id)
                 )
             }
-    }
-
-    private func failedMeetingTitle(for failed: FailedTranscription) -> String {
-        let message = failed.errorMessage.lowercased()
-
-        if message.contains("system audio is required") || message.contains("screen recording") {
-            return "Turn on Screen Recording"
-        }
-
-        if message.contains("recording too short") || message.contains("at least") {
-            return "Recording was too short"
-        }
-
-        if message.contains("no samples recorded") || message.contains("empty audio") {
-            return "No audio was captured"
-        }
-
-        if message.contains("failed to save") {
-            return "Couldn't save the transcript"
-        }
-
-        return failed.isRetryable ? "Transcript needs another pass" : "Recording needs attention"
-    }
-
-    private func failedMeetingDetail(for failed: FailedTranscription) -> String {
-        let message = failed.errorMessage.lowercased()
-
-        if message.contains("system audio is required") || message.contains("screen recording") {
-            return "Turn on Screen Recording in System Settings, then retry the meeting."
-        }
-
-        if message.contains("recording too short") || message.contains("at least") {
-            return "Keep the meeting running a little longer before stopping the capture."
-        }
-
-        if message.contains("no samples recorded") || message.contains("empty audio") {
-            return "The source audio was kept, but there was not enough signal to transcribe."
-        }
-
-        if message.contains("failed to save") {
-            return failed.shortErrorMessage
-        }
-
-        return failed.shortErrorMessage
-    }
-
-    private func failedMeetingMeta(for failed: FailedTranscription) -> String {
-        var parts = [failed.formattedTimestamp]
-
-        if failed.audioFilesExist() {
-            let sizeText = failed.formattedFileSize
-            if sizeText == "Unknown" {
-                parts.append("Audio kept")
-            } else {
-                parts.append("\(sizeText) kept")
-            }
-        }
-
-        if failed.retryCount > 0 {
-            let attempts = failed.retryCount == 1 ? "1 retry" : "\(failed.retryCount) retries"
-            parts.append(attempts)
-        }
-
-        if retryingFailedMeetingIDs.contains(failed.id) {
-            parts.append("Retrying now")
-        }
-
-        return parts.joined(separator: " • ")
     }
 }
 

@@ -50,9 +50,6 @@ class FloatingOverlayController {
             pushStateToViews()
         }
     }
-    var activeMode: SessionMode = .dictation {
-        didSet { pushStateToViews() }
-    }
     var isVisible = false
     var reviewText: String = ""
     var streamingText: String = ""
@@ -179,18 +176,12 @@ class FloatingOverlayController {
     private func pushStateToViews() {
         rootView?.updateForState(
             state,
-            mode: activeMode,
-            transcriptExpanded: false,
-            hasContext: true,
-            draftShortcutHint: "",
             dictationShortcutHint: dictationShortcutHint,
             errorMessage: errorMessage,
             loadingPresentation: loadingPresentation,
             loadingElapsedSeconds: loadingElapsedSeconds,
             isTranscribing: sttRouter?.isTranscribing ?? false,
-            liveTranscript: sttRouter?.liveTranscript ?? "",
-            originalDraft: "",
-            reviewText: ""
+            liveTranscript: sttRouter?.liveTranscript ?? ""
         )
     }
 
