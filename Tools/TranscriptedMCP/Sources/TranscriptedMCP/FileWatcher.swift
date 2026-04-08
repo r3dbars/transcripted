@@ -67,11 +67,12 @@ final class FileWatcher: @unchecked Sendable {
     private func scanForChanges() {
         let files = TranscriptLoader.enumerateSidecars(in: directory)
 
-        for (url, modDate) in files {
-            let filename = url.deletingPathExtension().lastPathComponent
+        for file in files {
+            let filename = file.url.deletingPathExtension().lastPathComponent
+            let modDate = file.modDate
             if knownModTimes[filename] != modDate {
                 knownModTimes[filename] = modDate
-                onChange(url)
+                onChange(file.url)
             }
         }
     }

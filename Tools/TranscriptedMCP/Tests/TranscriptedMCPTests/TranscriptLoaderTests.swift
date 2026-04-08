@@ -39,11 +39,21 @@ final class TranscriptLoaderTests: XCTestCase {
     func testEnumerateSidecars() throws {
         try writeFixture(makeFixtureJSON(), filename: "Call_2026-03-29_10-00-00", to: tempDir)
         try writeFixture(makeFixtureJSON(), filename: "Call_2026-03-30_10-00-00", to: tempDir)
+        try writeFixture(makeDictationDayJSON(), filename: "Dictations_2026-04-07", to: tempDir)
         try "other file".data(using: .utf8)!.write(to: tempDir.appendingPathComponent("notes.json"))
         try "not json".data(using: .utf8)!.write(to: tempDir.appendingPathComponent("readme.txt"))
 
         let sidecars = TranscriptLoader.enumerateSidecars(in: tempDir)
-        XCTAssertEqual(sidecars.count, 2) // Only Call_*.json files
+        XCTAssertEqual(sidecars.count, 3)
+    }
+
+    func testLoadDictationDayJSON() throws {
+        try writeFixture(makeDictationDayJSON(), filename: "Dictations_2026-04-07", to: tempDir)
+
+        let day = TranscriptLoader.loadDictationDay(tempDir.appendingPathComponent("Dictations_2026-04-07.json"))
+        XCTAssertNotNil(day)
+        XCTAssertEqual(day?.entryCount, 2)
+        XCTAssertEqual(day?.entries.first?.title, "Morning note")
     }
 
     func testSpeakerLookup() {
