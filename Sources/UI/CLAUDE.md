@@ -14,7 +14,7 @@ features:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (37 Swift files)
+## Files (38 Swift files)
 
 ### Dictation Overlay
 
@@ -53,9 +53,12 @@ Draft-mode UI is not an active product path in this worktree.
 - `MenuIconButton.swift` — icon-only button style for menubar items
 - `MenuOutlineButton.swift` — outlined button style for menubar actions
 - `MenuTokens.swift` — design tokens for menubar views
-- `AgentConnectionWindowController.swift`
-- `AgentConnectionGuide.swift`
-- `AgentConnectionWindowView.swift` — main standalone agent-connect window
+
+### Agent Connect
+
+- `AgentConnectionGuide.swift` — shared copy and step data for the agent-connect flow
+- `AgentConnectionWindowController.swift` — `AgentConnectionWindowCoordinator` and `NSWindowController` for the standalone agent-connect window
+- `AgentConnectionWindowView.swift` — SwiftUI content for the standalone agent-connect window
 
 The current agent-connect surfaces should keep one simple mental model:
 
@@ -73,8 +76,6 @@ The current agent-connect surfaces should keep one simple mental model:
 
 ### Shared
 
-- `AgentConnectionWindowController.swift` — standalone window for connecting to an agent
-- `AgentConnectionWindowView.swift` — SwiftUI content for the agent connection window
 - `AppSoundPlayer.swift` — UI sound preferences and playback helpers
 
 ## Observation Pattern
