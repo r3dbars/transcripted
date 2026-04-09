@@ -23,14 +23,12 @@ historical, and which local doc to read before editing a subsystem.
   App bootstrap and initialization order.
 - `Sources/*/CLAUDE.md`
   Local subsystem docs.
-- `backend/CLAUDE.md`
-  Beta worker contract.
+- `archive/backend-beta-worker/CLAUDE.md`
+  Archived beta worker contract.
 - `Tools/*/CLAUDE.md`
   Standalone tool package docs where present.
-- `docs/merge/`
-  Historical merge/extraction planning docs.
-- `docs/todo/`
-  Historical notes or future-facing backlog material.
+- `docs/archive/`
+  Historical merge/todo docs and other archived planning notes.
 
 ## What To Trust Most
 
@@ -39,7 +37,7 @@ When docs disagree, prefer:
 1. current repo-level docs
 2. current source files
 3. current local `CLAUDE.md` files whose file lists match the tree
-4. `docs/merge/` and `docs/todo/` only as context
+4. `docs/archive/` only as context
 
 ## Validation Layers
 
@@ -49,11 +47,11 @@ distinct:
 - `bash build.sh`
   The authoritative app build.
 - `bash run-tests.sh`
-  Curated fast tests for Draft-facing logic.
+  Curated fast tests for app-facing logic.
 - `swift test`
   SPM tests for `TranscriptedCore`.
 - `bash run-integration-smoke.sh`
-  Draft/Core integration smoke.
+  App/Core integration smoke.
 
 Rule of thumb:
 
@@ -66,11 +64,11 @@ Rule of thumb:
 - `Sources/CLAUDE.md`
   App boot order and shared state wiring.
 - `Sources/Meeting/CLAUDE.md`
-  Draft/Core bridge, meeting storage, runtime lifecycle.
+  App/Core bridge, meeting storage, runtime lifecycle.
 - `Sources/TranscriptedCore/CLAUDE.md`
   Library boundary, pipeline layout, embedder seams.
-- `backend/CLAUDE.md`
-  Beta worker endpoints and data model.
+- `archive/backend-beta-worker/CLAUDE.md`
+  Archived beta worker endpoints and data model.
 - `Tools/TranscriptedCLI/CLAUDE.md`
   Standalone diarization CLI.
 
@@ -78,8 +76,7 @@ Rule of thumb:
 
 Treat these as reference, not source of truth for runtime behavior on `main`:
 
-- `docs/merge/*`
-- `docs/todo/code-review.md`
+- `docs/archive/*`
 - older cloud/API references in comments or outdated docs
 
 ## When To Update Docs

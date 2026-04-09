@@ -7,27 +7,27 @@ import Carbon
 // MARK: - Carbon Hotkey Handler (C-level callback)
 
 // Global reference so the C callback can reach the dictation controller
-private weak var _sharedSessionController: DraftSessionController?
+private weak var _sharedSessionController: DictationSessionController?
 
 // Global callback for meeting hotkey (id 3). Separate from the session
 // controller so meeting UI can be wired independently of draft/dictation.
 // Stored on the MainActor and invoked from the Carbon callback via Task.
 private var _sharedMeetingToggle: (() -> Void)?
 
-// Carbon hotkeys can fire back-to-back before Draft finishes updating its
+// Carbon hotkeys can fire back-to-back before Transcripted finishes updating its
 // session state. Ignore rapid repeats so start/stop/cancel transitions stay
 // single-shot and predictable.
 private var _lastAcceptedHotkeyTime: CFAbsoluteTime = 0
 
 private func shouldAcceptHotkeyAction(now: CFAbsoluteTime = CFAbsoluteTimeGetCurrent()) -> Bool {
     let elapsed = now - _lastAcceptedHotkeyTime
-    guard elapsed >= DraftConstants.hotkeyActionDebounceInterval else { return false }
+    guard elapsed >= TranscriptedConstants.hotkeyActionDebounceInterval else { return false }
     _lastAcceptedHotkeyTime = now
     return true
 }
 
 @MainActor
-private func routeDictationToggle(sourceApp: NSRunningApplication?, trigger: DraftSessionController.DictationTrigger) {
+private func routeDictationToggle(sourceApp: NSRunningApplication?, trigger: DictationSessionController.DictationTrigger) {
     guard let session = _sharedSessionController else { return }
     DiagnosticsTrail.record(
         logger: session.appState?.logger,
@@ -231,14 +231,14 @@ class ContextCaptureEngine: ObservableObject {
     /// Non-nil when hotkey registration failed — shown as a dismissible banner in MenuBarPanel
     @Published var hotkeyError: String?
 
-    /// Set by DraftAppDelegate to wire the hotkey to the session controller
-    var sessionController: DraftSessionController? {
+    /// Set by TranscriptedAppDelegate to wire the hotkey to the session controller
+    var sessionController: DictationSessionController? {
         didSet {
             _sharedSessionController = sessionController
         }
     }
 
-    /// Closure invoked when ⌥M (hotkey id 3) fires. Wired by DraftAppDelegate
+    /// Closure invoked when ⌥M (hotkey id 3) fires. Wired by TranscriptedAppDelegate
     /// to `MeetingSessionController.toggleMeeting()` (or equivalent). Nil when
     /// the meeting subsystem is unavailable — the hotkey simply does nothing.
     var onMeetingToggle: (() -> Void)? {

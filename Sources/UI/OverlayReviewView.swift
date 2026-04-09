@@ -6,7 +6,7 @@ import AppKit
 @MainActor
 final class OverlayReviewView: NSView {
     private let scrollView = NSScrollView()
-    let draftTextView: DraftTextView
+    let reviewTextView: ReviewTextView
     private let diffDivider = NSView()
     let diffStrip = OverlayDiffStripView()
 
@@ -14,14 +14,14 @@ final class OverlayReviewView: NSView {
     private var originalDraft: String = ""
 
     override init(frame: NSRect) {
-        // Create DraftTextView with text container
+        // Create ReviewTextView with text container
         let textStorage = NSTextStorage()
         let layoutManager = NSLayoutManager()
         textStorage.addLayoutManager(layoutManager)
         let textContainer = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
         textContainer.widthTracksTextView = true
         layoutManager.addTextContainer(textContainer)
-        draftTextView = DraftTextView(frame: .zero, textContainer: textContainer)
+        reviewTextView = ReviewTextView(frame: .zero, textContainer: textContainer)
 
         super.init(frame: frame)
         setupViews()
@@ -32,16 +32,16 @@ final class OverlayReviewView: NSView {
 
     private func setupViews() {
         // Draft text view
-        draftTextView.isVerticallyResizable = true
-        draftTextView.isHorizontallyResizable = false
-        draftTextView.textContainerInset = NSSize(width: 8, height: 8)
+        reviewTextView.isVerticallyResizable = true
+        reviewTextView.isHorizontallyResizable = false
+        reviewTextView.textContainerInset = NSSize(width: 8, height: 8)
 
         // Scroll view
         scrollView.hasVerticalScroller = false
         scrollView.hasHorizontalScroller = false
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
-        scrollView.documentView = draftTextView
+        scrollView.documentView = reviewTextView
         addSubview(scrollView)
 
         // Diff divider
@@ -55,7 +55,7 @@ final class OverlayReviewView: NSView {
         addSubview(diffStrip)
 
         // Listen for text changes to update diff
-        draftTextView.onTextChange = { [weak self] text in
+        reviewTextView.onTextChange = { [weak self] text in
             self?.updateDiffStrip(editedText: text)
         }
     }
@@ -93,9 +93,9 @@ final class OverlayReviewView: NSView {
         )
 
         // Size text view to fit scroll content
-        draftTextView.minSize = NSSize(width: scrollView.contentSize.width, height: 0)
-        draftTextView.maxSize = NSSize(width: scrollView.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
-        draftTextView.textContainer?.containerSize = NSSize(
+        reviewTextView.minSize = NSSize(width: scrollView.contentSize.width, height: 0)
+        reviewTextView.maxSize = NSSize(width: scrollView.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
+        reviewTextView.textContainer?.containerSize = NSSize(
             width: scrollView.contentSize.width,
             height: CGFloat.greatestFiniteMagnitude
         )
@@ -103,12 +103,12 @@ final class OverlayReviewView: NSView {
 
     func update(text: String, originalDraft: String) {
         self.originalDraft = originalDraft
-        draftTextView.string = text
+        reviewTextView.string = text
         updateDiffStrip(editedText: text)
     }
 
     func setEditable(_ editable: Bool) {
-        draftTextView.isEditable = editable
+        reviewTextView.isEditable = editable
     }
 
     private func updateDiffStrip(editedText: String) {

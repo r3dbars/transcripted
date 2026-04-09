@@ -2,7 +2,7 @@
 
 ## What This Contains
 
-Accessibility and AXUIElement helpers for positioning Draft near the focused text field and reading editable text context.
+Accessibility and AXUIElement helpers for positioning Transcripted near the focused text field and reading editable text context.
 
 Current Swift files: **1**
 

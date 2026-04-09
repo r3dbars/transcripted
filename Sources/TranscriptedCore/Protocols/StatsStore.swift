@@ -4,7 +4,7 @@ import Foundation
 // Conformer: StatsDatabase
 //
 // Thin read/write surface for recording history and daily activity. The protocol exposes
-// only the methods embedders need to substitute their own stats backend (e.g. Draft wants
+// only the methods embedders need to substitute their own stats backend (e.g. a host app wants
 // to persist to its own store). Bulk aggregation helpers (monthly rollups, streak
 // computation, etc.) live directly on StatsDatabase and are not part of this protocol.
 

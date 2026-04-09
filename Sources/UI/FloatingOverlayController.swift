@@ -408,7 +408,7 @@ class FloatingOverlayController {
         pushStateToViews()  // Force update for error message
         errorDismissTask = Task { @MainActor [weak self] in
             do {
-                try await Task.sleep(nanoseconds: DraftConstants.errorDismissDelay)
+                try await Task.sleep(nanoseconds: TranscriptedConstants.errorDismissDelay)
             } catch { return }
             guard let self = self, !self.errorMessage.isEmpty else { return }
             self.errorMessage = ""
@@ -428,7 +428,7 @@ class FloatingOverlayController {
         pushStateToViews()
         errorDismissTask = Task { @MainActor [weak self] in
             do {
-                try await Task.sleep(nanoseconds: DraftConstants.noSpeechDismissDelay)
+                try await Task.sleep(nanoseconds: TranscriptedConstants.noSpeechDismissDelay)
             } catch { return }
             guard let self = self else { return }
             self.errorMessage = ""

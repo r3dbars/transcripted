@@ -29,7 +29,7 @@ func testDictationSounds() {
 
     runSuite("AppSoundPlayer uses expected bundled files and fallbacks") {
         assertEqual(AppSoundPlayer.Cue.dictationStart.bundledFileName, "dictation-start.mp3", "start cue file")
-        assertEqual(AppSoundPlayer.Cue.dictationDelivered.bundledFileName, "dictation-delivered.mp3", "delivery cue should use bundled reversed clip")
+        assertEqual(AppSoundPlayer.Cue.dictationDelivered.bundledFileName, "dictation-delivered.mp3", "delivery cue file")
         assertEqual(AppSoundPlayer.Cue.noSpeech.bundledFileName, "dictation-delivered.mp3", "no speech cue file")
         assertEqual(AppSoundPlayer.Cue.meetingTranscriptComplete.bundledFileName, "meeting-transcript-complete.mp3", "meeting cue file")
         assertEqual(AppSoundPlayer.Cue.dictationCancelled.fallbackSystemSoundName, "Basso", "cancel cue fallback")

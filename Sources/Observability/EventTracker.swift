@@ -2,7 +2,7 @@
 // Privacy-first usage analytics via TelemetryDeck's HTTP API — no SDK, no dependencies.
 //
 // TelemetryDeck is built for Apple developers: no IP storage, no PII, server-side
-// hashing of the user identifier. Matches Draft's local-first privacy positioning.
+// hashing of the user identifier. Matches the app's local-first privacy positioning.
 //
 // SETUP:
 //   1. Create a free TelemetryDeck account at telemetrydeck.com
@@ -11,7 +11,7 @@
 //   4. EventTracker is ready — call sites are already in place
 //
 // SIGNALS TRACKED:
-//   app.launched              DraftAppState.initialize()
+//   app.launched              TranscriptedAppState.initialize()
 //   dictation.completed       After Whisper transcription is pasted
 //   draft.shown               When the review overlay appears
 //   draft.accepted            After confirmed inject (paste)

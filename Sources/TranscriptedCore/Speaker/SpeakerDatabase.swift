@@ -31,7 +31,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
 
     /// Public initializer that accepts a custom SQLite path.
     /// Used by tests and by callers that want to store the database outside the default
-    /// `CoreStoragePaths.default` layout (e.g. the Draft app redirecting to its own data dir).
+    /// `CoreStoragePaths.default` layout (e.g. a host app redirecting to its own data dir).
     public init(path: String) {
         dbPath = URL(fileURLWithPath: path)
         try? FileManager.default.createDirectory(

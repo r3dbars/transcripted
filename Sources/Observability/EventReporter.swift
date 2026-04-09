@@ -123,7 +123,7 @@ final class EventReporter {
     private init() {}
 
     /// Register a closure that provides live engine state for context enrichment.
-    /// Called by DraftAppState.initialize() after all engines are wired.
+    /// Called by TranscriptedAppState.initialize() after all engines are wired.
     func setEngineStateSummary(_ provider: @escaping () -> [String: String]) {
         engineStateSummary = provider
     }

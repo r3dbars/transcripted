@@ -252,10 +252,10 @@ public class Audio: ObservableObject {
     // Callback for when recording starts (used for pre-loading models)
     public var onRecordingStart: (() -> Void)?
 
-    // MARK: - Live PCM buffer hooks (Draft live-preview integration)
+    // MARK: - Live PCM buffer hooks (host app live-preview integration)
     //
     // These callbacks let an embedder tap the raw PCM buffers as they arrive
-    // from CoreAudio, in parallel with the WAV file writes. Used by Draft to
+    // from CoreAudio, in parallel with the WAV file writes. Used by the app to
     // drive live dual-channel transcription preview via FluidAudio's
     // StreamingEouAsrManager without a second audio engine.
     //

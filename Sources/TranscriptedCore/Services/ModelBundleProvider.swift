@@ -9,7 +9,7 @@ import Foundation
 ///
 /// The standalone Transcripted app supplies a provider backed by `Bundle.main.resourcePath`
 /// because its diarization models are copied into the app bundle at build time. Embedders
-/// (e.g. the Draft app) can supply a custom provider that points at a shared models cache
+/// (e.g. the app in this repo) can supply a custom provider that points at a shared models cache
 /// in Application Support, a sideloaded directory, or just return `nil` to force downloads.
 public typealias ModelBundleProvider = @Sendable (String) -> URL?
 

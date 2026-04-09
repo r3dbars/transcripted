@@ -17,11 +17,11 @@ private actor AppLogFileWriter {
         if fm.fileExists(atPath: path) {
             do {
                 let attrs = try fm.attributesOfItem(atPath: path)
-                if let size = attrs[.size] as? UInt64, size > DraftConstants.logRotationThreshold {
+                if let size = attrs[.size] as? UInt64, size > TranscriptedConstants.logRotationThreshold {
                     if let data = fm.contents(atPath: path),
                        let content = String(data: data, encoding: .utf8) {
                         let lines = content.components(separatedBy: "\n")
-                        let kept = lines.suffix(DraftConstants.logRotationKeepLines).joined(separator: "\n")
+                        let kept = lines.suffix(TranscriptedConstants.logRotationKeepLines).joined(separator: "\n")
                         do {
                             try kept.write(toFile: path, atomically: true, encoding: .utf8)
                         } catch {

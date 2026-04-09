@@ -16,30 +16,19 @@ not driven by Xcode or package test discovery.
 
 ## Fast Test Runner
 
-`run-tests.sh` compiles a hand-picked list of files into `build/tests` and runs
-`Tests/TestRunner.swift`.
+`run-tests.sh` compiles the root fast tests listed in
+`Tests/FastTests.manifest` into `build/tests` and generates a temporary runner
+at build time.
 
 Important implications:
 
-- adding a file under `Tests/` is not enough by itself
-- new tests must also be wired into:
-  - `run-tests.sh`
-  - `Tests/TestRunner.swift`
+- adding a root `Tests/*Tests.swift` file is not enough by itself
+- new fast tests must be registered in:
+  - `Tests/FastTests.manifest`
 - moving a source file compiled by `run-tests.sh` also requires updating the script
+- `run-tests.sh` now fails if the manifest and the actual root test files drift
 
-## Current Compiled Fast Tests
-
-- `CapturedContextTests.swift`
-- `DictationSoundsTests.swift`
-- `DictationTranscriptWriterTests.swift`
-- `DiffSummaryTests.swift`
-- `RefusalDetectionTests.swift`
-- `MeetingTranscriptStylerTests.swift`
-- `SpeakerNamingPolicyTests.swift`
-- `StyleUtilsTests.swift`
-
-There are additional test files in `Tests/`, but only the ones wired into
-`run-tests.sh` and `Tests/TestRunner.swift` currently execute in the fast lane.
+The current compiled fast test set lives in `Tests/FastTests.manifest`.
 
 ## Core Package Tests
 

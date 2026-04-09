@@ -1,10 +1,10 @@
-// DraftTextView.swift
+// ReviewTextView.swift
 // NSTextView subclass for the review state — handles Enter/Escape/Shift+Enter
 
 import AppKit
 
 @MainActor
-final class DraftTextView: NSTextView {
+final class ReviewTextView: NSTextView {
     /// Called when user presses Enter (non-empty text)
     var onConfirm: (() -> Void)?
     /// Called when user presses Escape

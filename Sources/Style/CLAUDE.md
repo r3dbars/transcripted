@@ -13,7 +13,7 @@ Older docs describing `StyleEngine`, onboarding flows, and `style.md` refinement
 ## Agent notes
 
 - This directory is now utility-only. There is no live `StyleEngine` source here.
-- `Sources/Draft/DiffSummary.swift` reuses `StyleUtils.wordEditDistance(...)`.
+- `Sources/Text/DiffSummary.swift` reuses `StyleUtils.wordEditDistance(...)`.
 - If you change these heuristics, update the tests.
 
 ## Test coverage
