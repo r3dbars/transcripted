@@ -1,7 +1,6 @@
 # TranscriptedCLI
 
-`Tools/TranscriptedCLI/` is a standalone Swift package for command-line access
-to Transcripted context and offline diarization.
+`Tools/TranscriptedCLI/` is a standalone Swift package for command-line access to Transcripted context and offline diarization.
 
 It does not build or run the app target.
 
@@ -10,11 +9,9 @@ It does not build or run the app target.
 ### Local Context
 
 - `transcripted-cli context-recent` — list recent meetings and dictations
-- `transcripted-cli context-search <query>` — search across saved meetings and
-  dictations
+- `transcripted-cli context-search <query>` — search across saved meetings and dictations
 - `transcripted-cli list-dictations` — list saved dictation day files
-- `transcripted-cli read-dictation <filename>` — read one dictation day or one
-  entry
+- `transcripted-cli read-dictation <filename>` — read one dictation day or one entry
 
 By default these commands read:
 
@@ -33,8 +30,7 @@ They also honor:
 ### Offline Audio
 
 - `transcripted-cli diarize <audio>` — diarize one file, output RTTM or JSON
-- `transcripted-cli batch <directory>` — diarize matching audio files in a
-  directory
+- `transcripted-cli batch <directory>` — diarize matching audio files in a directory
 
 ## Files
 
@@ -57,13 +53,13 @@ cd Tools/TranscriptedCLI
 swift build
 swift run transcripted-cli context-recent
 swift run transcripted-cli context-search "roadmap"
+swift run transcripted-cli list-dictations --count 5
 swift run transcripted-cli diarize /path/to/audio.wav --json
 ```
 
 ## Gotchas
 
-- the context commands and the diarization commands serve different users; do
-  not describe the whole package as diarization-only
-- the diarization commands depend on repo-level artifacts, so run
-  `bash build-deps.sh` first when those are missing
+- the context commands and the diarization commands serve different users, do not describe the whole package as diarization-only
+- the diarization commands depend on repo-level artifacts, so run `bash build-deps.sh` first when those are missing
+- the default context paths now point at `~/Library/Application Support/Draft/`, not only the older `~/Documents/Transcripted/` layout
 - changes here should be verified independently from the app build
