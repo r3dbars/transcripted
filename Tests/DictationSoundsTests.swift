@@ -48,7 +48,7 @@ func testDictationSounds() {
     }
 
     runSuite("Fallback system sounds exist") {
-        assertNotNil(NSSound(named: NSSound.Name(AppSoundPlayer.Cue.dictationStart.fallbackSystemSoundName)), "Pop should exist")
+        assertNotNil(NSSound(named: NSSound.Name(AppSoundPlayer.Cue.dictationStart.fallbackSystemSoundName)), "Funk should exist as start fallback")
         assertNotNil(NSSound(named: NSSound.Name(AppSoundPlayer.Cue.dictationDelivered.fallbackSystemSoundName)), "Funk should exist")
         assertNotNil(NSSound(named: NSSound.Name(AppSoundPlayer.Cue.dictationCancelled.fallbackSystemSoundName)), "Basso should exist")
         assertNotNil(NSSound(named: NSSound.Name(AppSoundPlayer.Cue.noSpeech.fallbackSystemSoundName)), "Tink should exist")
