@@ -113,7 +113,7 @@ enum TranscriptedConstants {
 
     /// Output volume for short overlay confirmation cues
     static let overlayCueVolume: Float = 0.7
-    static let deliveredCueVolumeMultiplier: Float = 0.45
+    static let deliveredCueVolumeMultiplier: Float = 0.3
 
     /// Bundled filenames for app feedback cues (stored in Resources/Sounds/)
     static let listeningStartSoundFileName = "dictation-start.mp3"
