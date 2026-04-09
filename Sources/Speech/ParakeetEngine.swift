@@ -473,6 +473,39 @@ class ParakeetEngine: ObservableObject {
         let nativeFormat = inputNode.outputFormat(forBus: 0)
         nativeSampleRate = nativeFormat.sampleRate
 
+        // After sleep/wake, the output format and hardware input format can
+        // desync — outputFormat reports one rate while the hardware runs at
+        // another. installTap asserts they match. Detect and fix by
+        // restarting the engine so CoreAudio rebuilds the graph.
+        let hwFormat = inputNode.inputFormat(forBus: 0)
+        if nativeFormat.sampleRate != hwFormat.sampleRate && hwFormat.sampleRate > 0 {
+            print("⚠️ PARAKEET | format mismatch: output=\(nativeFormat.sampleRate)Hz hw=\(hwFormat.sampleRate)Hz — resyncing engine")
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "format_mismatch_resync",
+                message: "Output/hardware sample rate mismatch after wake",
+                context: ["output_rate": "\(nativeFormat.sampleRate)", "hw_rate": "\(hwFormat.sampleRate)"])
+            audioEngine.stop()
+            isEnginePrewarmed = false
+            audioEngine.prepare()
+            do {
+                try audioEngine.start()
+                isEnginePrewarmed = true
+            } catch {
+                EventReporter.shared.capture(level: .error, engine: "parakeet", event: "resync_engine_failed",
+                    message: error.localizedDescription)
+                return false
+            }
+            // Re-read formats after engine restart
+            let refreshedFormat = inputNode.outputFormat(forBus: 0)
+            nativeSampleRate = refreshedFormat.sampleRate
+        }
+
+        guard nativeSampleRate > 0 else {
+            print("❌ PARAKEET | sample rate is 0 — audio hardware not ready")
+            EventReporter.shared.capture(level: .error, engine: "parakeet", event: "zero_sample_rate",
+                message: "Sample rate is 0, audio hardware not initialized")
+            return false
+        }
+
         guard let monoFormat = AVAudioFormat(standardFormatWithSampleRate: nativeSampleRate, channels: 1) else {
             print("❌ PARAKEET | failed to create mono audio format at \(nativeSampleRate)Hz")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "audio_format_failed",

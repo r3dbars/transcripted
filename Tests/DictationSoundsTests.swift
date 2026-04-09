@@ -29,7 +29,7 @@ func testDictationSounds() {
 
     runSuite("AppSoundPlayer uses expected bundled files and fallbacks") {
         assertEqual(AppSoundPlayer.Cue.dictationStart.bundledFileName, "dictation-start.mp3", "start cue file")
-        assertNil(AppSoundPlayer.Cue.dictationDelivered.bundledFileName, "delivery cue should now use the no-speech system sound")
+        assertEqual(AppSoundPlayer.Cue.dictationDelivered.bundledFileName, "dictation-delivered.mp3", "delivery cue should use bundled reversed clip")
         assertEqual(AppSoundPlayer.Cue.noSpeech.bundledFileName, "dictation-delivered.mp3", "no speech cue file")
         assertEqual(AppSoundPlayer.Cue.meetingTranscriptComplete.bundledFileName, "meeting-transcript-complete.mp3", "meeting cue file")
         assertEqual(AppSoundPlayer.Cue.dictationCancelled.fallbackSystemSoundName, "Basso", "cancel cue fallback")
@@ -48,7 +48,7 @@ func testDictationSounds() {
     }
 
     runSuite("Fallback system sounds exist") {
-        assertNotNil(NSSound(named: NSSound.Name(AppSoundPlayer.Cue.dictationStart.fallbackSystemSoundName)), "Pop should exist")
+        assertNotNil(NSSound(named: NSSound.Name(AppSoundPlayer.Cue.dictationStart.fallbackSystemSoundName)), "Funk should exist as start fallback")
         assertNotNil(NSSound(named: NSSound.Name(AppSoundPlayer.Cue.dictationDelivered.fallbackSystemSoundName)), "Funk should exist")
         assertNotNil(NSSound(named: NSSound.Name(AppSoundPlayer.Cue.dictationCancelled.fallbackSystemSoundName)), "Basso should exist")
         assertNotNil(NSSound(named: NSSound.Name(AppSoundPlayer.Cue.noSpeech.fallbackSystemSoundName)), "Tink should exist")
