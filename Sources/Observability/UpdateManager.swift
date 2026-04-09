@@ -255,10 +255,12 @@ final class UpdateManager: ObservableObject {
     // MARK: - Relaunch
 
     private func spawnRelaunch(appPath: String) throws {
-        let script = "sleep 2 && open -a \"\(appPath)\""
+        // Security: pass appPath as a positional parameter ($1) rather than
+        // interpolating it into the shell command string, preventing shell injection
+        // if appPath contains quotes, backticks, or other shell metacharacters.
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = ["-c", script]
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "sleep 2; open -a \"$1\"", "--", appPath]
         process.standardOutput = Pipe()
         process.standardError = Pipe()
         try process.run()
