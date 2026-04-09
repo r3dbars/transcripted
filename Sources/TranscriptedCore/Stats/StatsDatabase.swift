@@ -118,12 +118,20 @@ public final class StatsDatabase {
 
     /// Execute multiple writes atomically — if the app crashes mid-block, all changes are rolled back.
     func transaction(_ block: () throws -> Void) rethrows {
-        sqlite3_exec(db, "BEGIN EXCLUSIVE", nil, nil, nil)
+        // Security: check sqlite3_exec return values so transaction failures don't silently
+        // leave the database in an inconsistent state (missing BEGIN/COMMIT/ROLLBACK).
+        if sqlite3_exec(db, "BEGIN EXCLUSIVE", nil, nil, nil) != SQLITE_OK {
+            AppLogger.stats.error("Transaction BEGIN EXCLUSIVE failed", ["sqlite_error": dbErrorMessage()])
+        }
         do {
             try block()
-            sqlite3_exec(db, "COMMIT", nil, nil, nil)
+            if sqlite3_exec(db, "COMMIT", nil, nil, nil) != SQLITE_OK {
+                AppLogger.stats.error("Transaction COMMIT failed", ["sqlite_error": dbErrorMessage()])
+            }
         } catch {
-            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            if sqlite3_exec(db, "ROLLBACK", nil, nil, nil) != SQLITE_OK {
+                AppLogger.stats.error("Transaction ROLLBACK failed", ["sqlite_error": dbErrorMessage()])
+            }
             throw error
         }
     }
