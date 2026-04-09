@@ -29,8 +29,8 @@ func testDictationSounds() {
 
     runSuite("AppSoundPlayer uses expected bundled files and fallbacks") {
         assertEqual(AppSoundPlayer.Cue.dictationStart.bundledFileName, "dictation-start.mp3", "start cue file")
-        assertEqual(AppSoundPlayer.Cue.dictationDelivered.bundledFileName, "dictation-delivered.mp3", "delivery cue file")
-        assertEqual(AppSoundPlayer.Cue.noSpeech.bundledFileName, "dictation-delivered.mp3", "no speech cue file")
+        assertEqual(AppSoundPlayer.Cue.dictationDelivered.bundledFileName, "dictation-delivered.m4a", "delivery cue file")
+        assertEqual(AppSoundPlayer.Cue.noSpeech.bundledFileName, "dictation-delivered.m4a", "no speech cue file")
         assertEqual(AppSoundPlayer.Cue.meetingTranscriptComplete.bundledFileName, "meeting-transcript-complete.mp3", "meeting cue file")
         assertEqual(AppSoundPlayer.Cue.dictationCancelled.fallbackSystemSoundName, "Basso", "cancel cue fallback")
         assertEqual(AppSoundPlayer.Cue.noSpeech.fallbackSystemSoundName, "Tink", "no speech cue fallback")
@@ -43,7 +43,7 @@ func testDictationSounds() {
             .appendingPathComponent("Sounds", isDirectory: true)
 
         assertTrue(FileManager.default.fileExists(atPath: soundsDirectory.appendingPathComponent("dictation-start.mp3").path), "dictation-start.mp3 should exist")
-        assertTrue(FileManager.default.fileExists(atPath: soundsDirectory.appendingPathComponent("dictation-delivered.mp3").path), "dictation-delivered.mp3 should exist")
+        assertTrue(FileManager.default.fileExists(atPath: soundsDirectory.appendingPathComponent("dictation-delivered.m4a").path), "dictation-delivered.m4a should exist")
         assertTrue(FileManager.default.fileExists(atPath: soundsDirectory.appendingPathComponent("meeting-transcript-complete.mp3").path), "meeting-transcript-complete.mp3 should exist")
     }
 
