@@ -59,9 +59,9 @@ Draft-mode UI is not an active product path in this worktree.
 
 The current agent-connect surfaces should keep one simple mental model:
 
-- start with the folder prompt
-- offer MCP as the better supported-agent path
-- keep CLI guidance clearly marked as advanced
+- lead with one smart copy-paste prompt
+- let that prompt prefer MCP when available and fall back to folders when not
+- keep manual folder paths and MCP setup secondary, not primary
 
 ### Settings and Onboarding
 

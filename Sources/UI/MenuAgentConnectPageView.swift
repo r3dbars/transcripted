@@ -2,7 +2,6 @@
 // Full-page agent connection guide embedded inside the menubar panel.
 
 import AppKit
-import TranscriptedCore
 
 @MainActor
 final class MenuAgentConnectPageView: NSView {
@@ -16,47 +15,53 @@ final class MenuAgentConnectPageView: NSView {
     )
     private let titleLabel = NSTextField(labelWithString: "Connect your agent")
     private let subtitleLabel = NSTextField(wrappingLabelWithString:
-        "Start with a simple prompt, then use MCP or the CLI if you want a deeper connection."
+        "Copy one prompt, paste it into your agent, and let Transcripted use MCP when available or folders when not."
     )
-    private let starterPromptLabel = NSTextField(labelWithString: "Start here")
+    private let starterPromptLabel = NSTextField(labelWithString: "What this helps with")
+    private let benefitOneRow = AgentConnectInfoRowView(
+        symbolName: "sparkles",
+        title: "Search past meetings faster",
+        body: "Your agent can work from the spoken context Transcripted already saved locally."
+    )
+    private let benefitTwoRow = AgentConnectInfoRowView(
+        symbolName: "checkmark.circle",
+        title: "Pull summaries and action items",
+        body: "The smart prompt can use MCP if it is ready, or fall back to local folders if it is not."
+    )
+    private let benefitThreeRow = AgentConnectInfoRowView(
+        symbolName: "checkmark.circle",
+        title: "Stay simple for beginners",
+        body: "Copy once, paste once, and only use manual setup if you actually need it."
+    )
+    private let manualSetupLabel = NSTextField(labelWithString: "Need manual setup?")
+    private let mcpRow = AgentConnectInfoRowView(
+        symbolName: "cable.connector",
+        title: "Optional MCP setup",
+        body: "Copy the MCP setup text only if your agent supports MCP and you want direct read-only tools."
+    )
     private let folderRow = AgentConnectInfoRowView(
         symbolName: "folder",
-        title: "Show your folders",
-        body: "Meetings and dictations are both saved locally on this Mac."
-    )
-    private let promptRow = AgentConnectInfoRowView(
-        symbolName: "text.quote",
-        title: "Works with any agent",
-        body: "Copy a simple folder-based prompt for Claude, Codex, ChatGPT, or any local agent."
-    )
-    private let howToLabel = NSTextField(labelWithString: "Other ways to connect")
-    private let stepOneRow = AgentConnectInfoRowView(
-        symbolName: "1.circle",
-        title: "1. Start with the prompt",
-        body: "This is the simplest setup and the right default for most people."
-    )
-    private let stepTwoRow = AgentConnectInfoRowView(
-        symbolName: "2.circle",
-        title: "2. Use MCP if supported",
-        body: "Supported agents can connect directly with read-only Transcripted tools."
-    )
-    private let stepThreeRow = AgentConnectInfoRowView(
-        symbolName: "3.circle",
-        title: "3. Use the CLI if you're advanced",
-        body: "The CLI is best for scripts, automation, and offline audio work."
+        title: "Manual folders",
+        body: "Use these only if you want to inspect or share the raw Transcripted paths yourself."
     )
 
-    private let showFolderButton = MenuOutlineButton(
-        title: "Show Transcripted folder",
+    private let copyMCPButton = MenuOutlineButton(
+        title: "Copy MCP setup",
+        symbolName: "cable.connector",
+        accessibilityLabel: "Copy MCP setup",
+        toolTip: "Copy MCP setup"
+    )
+    private let copyFoldersButton = MenuOutlineButton(
+        title: "Copy folder paths",
         symbolName: "folder",
-        accessibilityLabel: "Show Transcripted folder",
-        toolTip: "Show Transcripted folder"
+        accessibilityLabel: "Copy folder paths",
+        toolTip: "Copy folder paths"
     )
     private let copyPromptButton = MenuOutlineButton(
-        title: "Copy starter prompt",
+        title: "Copy agent prompt",
         symbolName: "doc.on.doc",
-        accessibilityLabel: "Copy starter prompt",
-        toolTip: "Copy starter prompt"
+        accessibilityLabel: "Copy agent prompt",
+        toolTip: "Copy agent prompt"
     )
 
     private var resetTask: Task<Void, Never>?
@@ -85,24 +90,28 @@ final class MenuAgentConnectPageView: NSView {
         subtitleLabel.maximumNumberOfLines = 3
         addSubview(subtitleLabel)
 
-        [starterPromptLabel, howToLabel].forEach { label in
+        [starterPromptLabel, manualSetupLabel].forEach { label in
             label.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
             label.textColor = MenuTokens.textPrimaryNS
             addSubview(label)
         }
-        [promptRow, folderRow, stepOneRow, stepTwoRow, stepThreeRow].forEach { addSubview($0) }
+        [benefitOneRow, benefitTwoRow, benefitThreeRow, mcpRow, folderRow].forEach { addSubview($0) }
 
         backButton.target = self
         backButton.action = #selector(goBack)
         addSubview(backButton)
 
-        showFolderButton.target = self
-        showFolderButton.action = #selector(showAppSupportFolder)
-        addSubview(showFolderButton)
-
         copyPromptButton.target = self
         copyPromptButton.action = #selector(copyStarterPrompt)
         addSubview(copyPromptButton)
+
+        copyMCPButton.target = self
+        copyMCPButton.action = #selector(copyMCPSetup)
+        addSubview(copyMCPButton)
+
+        copyFoldersButton.target = self
+        copyFoldersButton.action = #selector(copyFolderPaths)
+        addSubview(copyFoldersButton)
     }
 
     override func layout() {
@@ -128,34 +137,45 @@ final class MenuAgentConnectPageView: NSView {
 
         let copyPromptWidth = max(132, copyPromptButton.fittingSize.width)
         let promptRowWidth = max(180, width - copyPromptWidth - inlineButtonSpacing)
-        promptRow.frame = NSRect(x: pad, y: y, width: promptRowWidth, height: AgentConnectInfoRowView.height)
+        benefitOneRow.frame = NSRect(x: pad, y: y, width: promptRowWidth, height: AgentConnectInfoRowView.height)
         copyPromptButton.frame = NSRect(
-            x: promptRow.frame.maxX + inlineButtonSpacing,
+            x: benefitOneRow.frame.maxX + inlineButtonSpacing,
             y: y + 14,
             width: copyPromptWidth,
             height: MenuTokens.secondaryButtonSize
         )
         y += AgentConnectInfoRowView.height + 14
 
-        let showFolderWidth = max(130, showFolderButton.fittingSize.width)
-        let folderRowWidth = max(180, width - showFolderWidth - inlineButtonSpacing)
-        folderRow.frame = NSRect(x: pad, y: y, width: folderRowWidth, height: AgentConnectInfoRowView.height)
-        showFolderButton.frame = NSRect(
-            x: folderRow.frame.maxX + inlineButtonSpacing,
-            y: y + 14,
-            width: showFolderWidth,
-            height: MenuTokens.secondaryButtonSize
-        )
+        benefitTwoRow.frame = NSRect(x: pad, y: y, width: width, height: AgentConnectInfoRowView.height)
+        y += AgentConnectInfoRowView.height + 8
+
+        benefitThreeRow.frame = NSRect(x: pad, y: y, width: width, height: AgentConnectInfoRowView.height)
         y += AgentConnectInfoRowView.height + 18
 
-        howToLabel.frame = NSRect(x: pad, y: y, width: width, height: 16)
+        manualSetupLabel.frame = NSRect(x: pad, y: y, width: width, height: 16)
         y += 22
 
-        [stepOneRow, stepTwoRow, stepThreeRow].forEach { row in
-            let rowHeight = row.intrinsicContentSize.height
-            row.frame = NSRect(x: pad, y: y, width: width, height: rowHeight)
-            y += rowHeight + 8
-        }
+        let copyMCPWidth = max(120, copyMCPButton.fittingSize.width)
+        let mcpRowWidth = max(180, width - copyMCPWidth - inlineButtonSpacing)
+        mcpRow.frame = NSRect(x: pad, y: y, width: mcpRowWidth, height: AgentConnectInfoRowView.height)
+        copyMCPButton.frame = NSRect(
+            x: mcpRow.frame.maxX + inlineButtonSpacing,
+            y: y + 14,
+            width: copyMCPWidth,
+            height: MenuTokens.secondaryButtonSize
+        )
+        y += AgentConnectInfoRowView.height + 10
+
+        let copyFoldersWidth = max(126, copyFoldersButton.fittingSize.width)
+        let folderRowWidth = max(180, width - copyFoldersWidth - inlineButtonSpacing)
+        folderRow.frame = NSRect(x: pad, y: y, width: folderRowWidth, height: AgentConnectInfoRowView.height)
+        copyFoldersButton.frame = NSRect(
+            x: folderRow.frame.maxX + inlineButtonSpacing,
+            y: y + 14,
+            width: copyFoldersWidth,
+            height: MenuTokens.secondaryButtonSize
+        )
+        y += AgentConnectInfoRowView.height + 8
 
         y += 4
     }
@@ -163,16 +183,15 @@ final class MenuAgentConnectPageView: NSView {
     var intrinsicHeight: CGFloat {
         MenuTokens.secondaryButtonSize + 14 + 22 + 24 + 42 + 16 + 22 +
         (AgentConnectInfoRowView.height + 14) +
+        (AgentConnectInfoRowView.height + 8) +
         (AgentConnectInfoRowView.height + 18) +
-        22 + (AgentConnectInfoRowView.height + 8) * 3 + 12
+        22 +
+        (AgentConnectInfoRowView.height + 10) +
+        (AgentConnectInfoRowView.height + 8) + 12
     }
 
     @objc private func goBack() {
         onBack?()
-    }
-
-    @objc private func showAppSupportFolder() {
-        NSWorkspace.shared.activateFileViewerSelecting([AgentConnectionGuide.appSupportFolder])
     }
 
     @objc private func copyStarterPrompt() {
@@ -182,12 +201,47 @@ final class MenuAgentConnectPageView: NSView {
 
         resetTask?.cancel()
         copyPromptButton.title = "Copied"
-        copyPromptButton.setSymbol("checkmark", accessibilityLabel: "Starter prompt copied")
+        copyPromptButton.setSymbol("checkmark", accessibilityLabel: "Agent prompt copied")
         resetTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard let self, !Task.isCancelled else { return }
-            self.copyPromptButton.title = "Copy starter prompt"
-            self.copyPromptButton.setSymbol("doc.on.doc", accessibilityLabel: "Copy starter prompt")
+            self.copyPromptButton.title = "Copy agent prompt"
+            self.copyPromptButton.setSymbol("doc.on.doc", accessibilityLabel: "Copy agent prompt")
+        }
+    }
+
+    @objc private func copyMCPSetup() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(
+            "\(AgentConnectionGuide.mcpSetupText)\n\n\(AgentConnectionGuide.mcpConfigExample)",
+            forType: .string
+        )
+
+        resetTask?.cancel()
+        copyMCPButton.title = "Copied"
+        copyMCPButton.setSymbol("checkmark", accessibilityLabel: "MCP setup copied")
+        resetTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.copyMCPButton.title = "Copy MCP setup"
+            self.copyMCPButton.setSymbol("cable.connector", accessibilityLabel: "Copy MCP setup")
+        }
+    }
+
+    @objc private func copyFolderPaths() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(AgentConnectionGuide.folderPathsText, forType: .string)
+
+        resetTask?.cancel()
+        copyFoldersButton.title = "Copied"
+        copyFoldersButton.setSymbol("checkmark", accessibilityLabel: "Folder paths copied")
+        resetTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.copyFoldersButton.title = "Copy folder paths"
+            self.copyFoldersButton.setSymbol("folder", accessibilityLabel: "Copy folder paths")
         }
     }
 }
