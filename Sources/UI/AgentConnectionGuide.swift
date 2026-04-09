@@ -2,6 +2,29 @@ import Foundation
 import TranscriptedCore
 
 enum AgentConnectionGuide {
+    static var localMCPBuildDirectory: URL? {
+        let bundleURL = Bundle.main.bundleURL.standardizedFileURL
+        let buildDirectory = bundleURL.deletingLastPathComponent()
+        let repoRoot = buildDirectory.deletingLastPathComponent()
+        let toolsDirectory = repoRoot.appendingPathComponent("Tools/TranscriptedMCP", isDirectory: true)
+
+        guard FileManager.default.fileExists(atPath: toolsDirectory.path) else {
+            return nil
+        }
+
+        return toolsDirectory
+    }
+
+    static var localMCPBinary: URL? {
+        guard let buildDirectory = localMCPBuildDirectory else { return nil }
+        let binary = buildDirectory
+            .appendingPathComponent(".build", isDirectory: true)
+            .appendingPathComponent("debug", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+
+        return FileManager.default.fileExists(atPath: binary.path) ? binary : nil
+    }
+
     static var meetingsFolder: URL {
         let url = MeetingStoragePaths.transcriptsFolder
         AgentOutput.writeAgentReadme(to: url)
@@ -24,21 +47,35 @@ enum AgentConnectionGuide {
         var prompt = """
         I use Transcripted on my Mac.
 
-        If Transcripted MCP tools are available, use them first for recent context, search, meetings, dictations, and recaps.
+        Your job is to connect to my Transcripted data using the best available method, then help me search, summarize, and organize my meetings and dictations.
 
-        If Transcripted MCP tools are not available, use these local folders instead:
+        Connection priority:
+        1. If Transcripted MCP tools are already available in this environment, use them first.
+        2. If Transcripted MCP tools are not available, but this environment can build or configure a local MCP server, try to set up Transcripted MCP using the information below.
+        3. If MCP cannot be used here, fall back to direct file access using the local folders below.
+        4. If neither MCP nor folder access is possible, stop and tell me exactly what is missing, what you tried, and the smallest next step I need to take.
 
-        Meetings:
-        \(meetingsFolder.path)
+        \(mcpPromptBlock)
 
-        Dictations:
-        \(dictationsFolder.path)
+        Folder fallback:
+        - Meetings: \(meetingsFolder.path)
+        - Dictations: \(dictationsFolder.path)
 
-        If you use folders, read AGENT.md and transcripted.json in the meetings folder if they exist.
+        When using folders:
+        - Read AGENT.md and transcripted.json in the meetings folder if they exist.
+        - Prefer the most direct source available.
+        - Use exact filenames, dates, and speaker names when relevant.
+        - Do not invent access or claim data you cannot read.
 
-        Help me search, summarize, and organize my local meetings and dictations.
+        Working rules:
+        - Prefer MCP over raw file inspection when both are available.
+        - Use meetings and dictations together when the task spans both.
+        - Surface uncertainty clearly.
+        - If setup is needed, minimize back-and-forth and propose the next concrete action.
 
-        If neither MCP nor folder access is available yet, help me set up the best option and then continue.
+        First step:
+        Determine which connection mode is available: MCP, MCP setup, or folders.
+        Briefly tell me which mode you are using, then continue with my task.
         """
 
         if let filename {
@@ -48,21 +85,82 @@ enum AgentConnectionGuide {
         return prompt
     }
 
-    static let mcpConfigExample = """
-    {
-      "mcpServers": {
-        "transcripted": {
-          "command": "/path/to/transcripted-mcp"
+    static var mcpPromptBlock: String {
+        var lines = [
+            "Transcripted MCP setup:",
+            "- Server name: transcripted",
+            "- Transport: local stdio",
+        ]
+
+        if let buildDirectory = localMCPBuildDirectory {
+            lines.append("- Build directory: \(buildDirectory.path)")
+            lines.append("- Build command: cd \(buildDirectory.path) && swift build")
         }
-      }
+
+        if let binary = localMCPBinary {
+            lines.append("- Expected binary: \(binary.path)")
+            lines.append("")
+            lines.append("Example MCP config:")
+            lines.append("{")
+            lines.append("  \"mcpServers\": {")
+            lines.append("    \"transcripted\": {")
+            lines.append("      \"command\": \"\(binary.path)\"")
+            lines.append("    }")
+            lines.append("  }")
+            lines.append("}")
+        } else {
+            lines.append("- If a local transcripted-mcp binary is installed, add it to your MCP config under mcpServers.transcripted.command.")
+        }
+
+        lines.append("")
+        lines.append("If connected, Transcripted MCP provides these read-only tools:")
+        lines.append("- recent_context")
+        lines.append("- search_context")
+        lines.append("- list_meetings")
+        lines.append("- read_meeting")
+        lines.append("- list_dictations")
+        lines.append("- read_dictation")
+        lines.append("- search")
+        lines.append("- who_is")
+        lines.append("- recap")
+
+        return lines.joined(separator: "\n")
     }
-    """
 
-    static let mcpSetupText = """
-    MCP is optional. If your agent supports it, Transcripted can expose direct read-only tools for recent context, search, meetings, dictations, and recaps.
+    static var mcpConfigExample: String {
+        let command = localMCPBinary?.path ?? "/path/to/transcripted-mcp"
+        return """
+        {
+          "mcpServers": {
+            "transcripted": {
+              "command": "\(command)"
+            }
+          }
+        }
+        """
+    }
 
-    Install the read-only `transcripted-mcp` server, add it to your MCP config, then restart your client. The server reads the same local Transcripted data automatically.
-    """
+    static var mcpSetupText: String {
+        var lines = [
+            "MCP is optional. If your agent supports it, Transcripted can expose direct read-only tools for recent context, search, meetings, dictations, and recaps.",
+            "",
+            "Install the read-only `transcripted-mcp` server, add it to your MCP config, then restart your client. The server reads the same local Transcripted data automatically.",
+        ]
+
+        if let buildDirectory = localMCPBuildDirectory {
+            lines.append("")
+            lines.append("Local build directory:")
+            lines.append("`\(buildDirectory.path)`")
+        }
+
+        if let binary = localMCPBinary {
+            lines.append("")
+            lines.append("Local binary:")
+            lines.append("`\(binary.path)`")
+        }
+
+        return lines.joined(separator: "\n")
+    }
 
     static let folderPathsText = """
     Meetings:
