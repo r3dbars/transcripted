@@ -1,9 +1,8 @@
 # TranscriptedMCP
 
-Standalone MCP server (`transcripted-mcp`) for querying Transcripted meeting
-and dictation data from Claude Desktop or any MCP-compatible client.
+Standalone MCP server (`transcripted-mcp`) for querying Transcripted meeting and dictation data from Claude Desktop or any MCP-compatible client.
 
-It is read-only and independent from the app target.
+It is read-only, independent from the app target, and builds its own SQLite index from saved artifacts on disk.
 
 ## What It Reads
 
@@ -24,18 +23,33 @@ Path overrides:
 - `TRANSCRIPTED_DICTATIONS_DIR` — dictations directory override
 - `TRANSCRIPTED_INDEX_DIR` — SQLite index directory override
 
+## Package Layout (13 Swift files)
+
+- `Package.swift` — Swift package manifest for the standalone MCP server
+- `Sources/TranscriptedMCP/` — 8 source files for server startup, directory resolution, indexing, and tool handlers
+- `Tests/TranscriptedMCPTests/` — 4 test files for index lifecycle, markdown loading, name variants, and shared fixtures
+
 ## File Index
 
 | File | Purpose |
 |------|---------|
 | `Main.swift` | `@main` entry point; resolves directories, builds the index, starts file watchers, then starts the MCP stdio server |
 | `DataDirectories.swift` | Default-path and env-override resolution for meetings, dictations, and index storage |
-| `ToolHandlers.swift` | Registers every MCP tool and routes requests to the correct loader/index method |
+| `ToolHandlers.swift` | Registers every MCP tool and routes requests to the correct loader or index method |
 | `TranscriptIndex.swift` | SQLite-backed index, incremental updates, and query methods across meetings and dictations |
-| `TranscriptLoader.swift` | Loads `.md` meeting transcripts from disk for `read_meeting` |
+| `TranscriptLoader.swift` | Loads markdown meeting transcripts and dictation day files directly from disk |
 | `Models.swift` | Codable input/output models and `MCPIndexError` |
-| `NameVariants.swift` | Speaker-name fuzzy matching for `search` and `who_is` |
+| `NameVariants.swift` | Speaker-name fuzzy matching for speaker-aware queries |
 | `FileWatcher.swift` | Watches the local transcript directories and incrementally reindexes changed files |
+
+## Test Files
+
+| File | Purpose |
+|------|---------|
+| `TranscriptIndexTests.swift` | Full index lifecycle: reconcile, query, date filters, speaker search, and mixed-context indexing |
+| `TranscriptLoaderTests.swift` | Markdown and YAML frontmatter parsing edge cases |
+| `NameVariantsTests.swift` | Name variant matching accuracy |
+| `TestHelpers.swift` | Shared fixture builders for sample sidecars and temp directories |
 
 ## MCP Tools
 
@@ -61,9 +75,20 @@ meetings/*.json + dictations/*.json
   -> FileWatcher incremental updates on change
   -> SQLite index
 
-meetings/*.md
-  -> TranscriptLoader.load() for read_meeting
+meetings/*.md + dictations/*.md
+  -> TranscriptLoader direct reads for read_meeting and read_dictation
 ```
+
+## Index Shape
+
+The SQLite index keeps separate records for:
+
+- meetings
+- meeting speakers / utterance search rows
+- dictation day files
+- dictation entry search rows
+
+This lets the server answer both meeting-specific queries (`who_is`, `read_meeting`) and mixed-context queries (`search_context`, `recent_context`) without touching app-owned runtime state.
 
 ## Build And Test
 
@@ -91,11 +116,17 @@ Binary path after build:
 }
 ```
 
+## Relationships
+
+- reads meeting sidecars written by `Sources/TranscriptedCore/Storage/AgentOutput.swift`
+- reads dictation sidecars written by `Sources/Dictation/DictationAgentOutput.swift`
+- mirrors speaker-name matching logic from the app with `NameVariants.swift`
+- has no compile-time dependency on the main Transcripted app target
+
 ## Gotchas
 
 - transport is stdio, not HTTP
-- the server auto-creates missing data/index directories
+- the server auto-creates missing data and index directories
 - the index rebuilds from disk on startup
-- `read_meeting` reads the markdown file directly, not the SQLite index
-- the server binary is separate from the app; updating the app does not update
-  the MCP binary automatically
+- `read_meeting` and `read_dictation` read markdown directly from disk, not from the SQLite index
+- the server binary is separate from the app, updating the app does not update the MCP binary automatically

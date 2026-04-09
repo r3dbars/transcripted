@@ -1,6 +1,6 @@
 # TranscriptedQA - QA Testing CLI Tool
 
-QA testing suite for Transcripted. 22 Swift files across Commands/, Generators/, Validators/, Utilities/, Models/, and root.
+QA testing suite for Transcripted. 23 Swift files across Commands/, Generators/, Validators/, Utilities/, Models/, and root.
 
 ## File Index
 
@@ -8,7 +8,7 @@ QA testing suite for Transcripted. 22 Swift files across Commands/, Generators/,
 
 | File | Purpose |
 |------|---------|
-| `TranscriptedQA.swift` | CLI entry point (`@main`), registers all subcommands via ArgumentParser |
+| `TranscriptedQA.swift` | CLI entry point (`@main`), shared path helpers, and subcommand registration |
 
 ### Commands/ (10 files)
 
@@ -19,10 +19,10 @@ QA testing suite for Transcripted. 22 Swift files across Commands/, Generators/,
 | `ValidateArtifacts.swift` | Check transcript sidecars (.json), YAML frontmatter, speaker clips |
 | `ValidateDatabase.swift` | SpeakerDB and StatsDB integrity, schema validation, corruption check |
 | `ValidateIndex.swift` | Transcript index consistency, missing sidecars, orphan files |
-| `ValidateLogs.swift` | Log file analysis, error patterns, warning frequency |
+| `ValidateLogs.swift` | Log file analysis and `app.jsonl` format validation |
 | `ValidateTranscripts.swift` | Transcript content validation, speaker attribution, timestamp checks |
 | `GenerateFixtures.swift` | Generate valid test data (transcripts, sidecars, DB records) that passes all validators; outputs to configurable directory (default: `/tmp/transcripted-test-data`) |
-| `RoundTrip.swift` | Generate test data, validate, corrupt, re-validate — verifies validators catch real defects |
+| `RoundTrip.swift` | Generate test data, validate, corrupt, re-validate, verifies validators catch real defects |
 | `StressTest.swift` | Generate large datasets (configurable transcript/speaker/utterance counts) and validate performance + correctness |
 
 ### Generators/ (1 file)
@@ -37,8 +37,8 @@ QA testing suite for Transcripted. 22 Swift files across Commands/, Generators/,
 |------|---------|
 | `HealthChecker.swift` | System health: disk space, model files, DB existence |
 | `IndexValidator.swift` | Index consistency, transcript/sidecar pairing |
-| `JSONSidecarValidator.swift` | YAML frontmatter, agent JSON structure |
-| `LogValidator.swift` | Log file parsing, error pattern detection |
+| `JSONSidecarValidator.swift` | YAML frontmatter and agent JSON structure |
+| `LogValidator.swift` | Log file parsing and error pattern detection |
 | `SpeakerDBValidator.swift` | SpeakerDB schema, record count, embedding integrity |
 | `StatsDBValidator.swift` | StatsDB schema, recording history, daily activity |
 | `TranscriptValidator.swift` | Transcript content, speaker attribution, timestamp validity |
@@ -48,13 +48,13 @@ QA testing suite for Transcripted. 22 Swift files across Commands/, Generators/,
 | File | Purpose |
 |------|---------|
 | `SQLiteReader.swift` | SQLite file reading, query execution, result parsing |
-| `YAMLParser.swift` | YAML frontmatter parsing, metadata extraction |
+| `YAMLParser.swift` | YAML frontmatter parsing and metadata extraction |
 
 ### Models/ (1 file)
 
 | File | Purpose |
 |------|---------|
-| `ValidationResult.swift` | Validation outcome: success/failure, error details, metrics |
+| `ValidationResult.swift` | Validation outcome: success/failure, error details, warnings, and metrics |
 
 ## Usage
 
@@ -79,11 +79,11 @@ transcripted-qa stress-test --transcripts 100 --speakers-per-transcript 4 --utte
 
 ## Validation Results
 
-`ValidationResult` struct contains:
+`ValidationResult` / `ValidationReport` capture:
 - `success: Bool` - Overall validation status
 - `errors: [String]` - List of errors found
 - `warnings: [String]` - Non-critical warnings
-- `metrics: [String: Any]` - Validation metrics (record counts, file sizes, etc.)
+- `metrics` - Validation metrics (record counts, file sizes, etc.)
 
 ## Key Features
 
@@ -103,3 +103,4 @@ transcripted-qa stress-test --transcripts 100 --speakers-per-transcript 4 --utte
 - SQLite readers use dedicated utility queues for thread safety
 - Validation results are structured for programmatic consumption
 - Error messages are human-readable for CLI output
+- Defaults target the Draft app-support tree under `~/Library/Application Support/Draft/`, including `meetings/` artifacts and `logs/app.jsonl`
