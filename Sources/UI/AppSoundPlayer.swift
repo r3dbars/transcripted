@@ -51,6 +51,15 @@ final class AppSoundPlayer {
                 return "Glass"
             }
         }
+
+        var volumeMultiplier: Float {
+            switch self {
+            case .dictationDelivered, .noSpeech:
+                return TranscriptedConstants.deliveredCueVolumeMultiplier
+            case .dictationStart, .dictationCancelled, .meetingTranscriptComplete:
+                return 1.0
+            }
+        }
     }
 
     static let shared = AppSoundPlayer()
@@ -61,7 +70,7 @@ final class AppSoundPlayer {
         var loadedSounds: [Cue: NSSound] = [:]
         for cue in Cue.allCases {
             guard let sound = Self.loadSound(for: cue) else { continue }
-            sound.volume = TranscriptedConstants.overlayCueVolume
+            sound.volume = TranscriptedConstants.overlayCueVolume * cue.volumeMultiplier
             loadedSounds[cue] = sound
         }
         sounds = loadedSounds
