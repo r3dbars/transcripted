@@ -226,7 +226,9 @@ extension Transcription {
                 let isGhost = ghostSpeakerIdSet.contains(speakerId)
 
                 // Ghost speakers have unreliable embeddings (laughter, coughs, codec artifacts).
-                // Don't create new DB profiles for them — force-merge into the closest real speaker.
+                // Prefer force-merging into the closest real speaker, but if every detected
+                // speaker is a ghost we still need a persistent UUID for transcript sidecars
+                // and later naming updates, so fall back to creating a best-effort profile.
                 if isGhost {
                     var bestNonGhostId: Int?
                     var bestSimilarity: Double = -1
@@ -245,8 +247,15 @@ extension Transcription {
                             "into": "\(targetId)",
                             "similarity": String(format: "%.3f", bestSimilarity)
                         ])
+                    } else {
+                        let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
+                        speakerNewProfiles[speakerId] = newProfile.id
+                        AppLogger.transcription.warning("Ghost speaker kept as standalone best-effort profile", [
+                            "speakerId": "\(speakerId)",
+                            "reason": "no-non-ghost-speaker-to-merge-into"
+                        ])
                     }
-                    continue  // Skip DB matching/creation entirely
+                    continue
                 }
 
                 // Adaptive threshold: require higher similarity when we have fewer segments.
