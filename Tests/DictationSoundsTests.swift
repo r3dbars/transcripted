@@ -35,6 +35,9 @@ func testDictationSounds() {
         assertEqual(AppSoundPlayer.Cue.dictationCancelled.fallbackSystemSoundName, "Basso", "cancel cue fallback")
         assertEqual(AppSoundPlayer.Cue.noSpeech.fallbackSystemSoundName, "Tink", "no speech cue fallback")
         assertEqual(AppSoundPlayer.Cue.dictationDelivered.fallbackSystemSoundName, "Funk", "delivery cue fallback")
+        assertEqual(AppSoundPlayer.Cue.dictationStart.volumeMultiplier, 1.0, "start cue volume")
+        assertEqual(AppSoundPlayer.Cue.dictationDelivered.volumeMultiplier, TranscriptedConstants.deliveredCueVolumeMultiplier, "delivery cue volume")
+        assertEqual(AppSoundPlayer.Cue.noSpeech.volumeMultiplier, TranscriptedConstants.deliveredCueVolumeMultiplier, "no speech cue volume")
     }
 
     runSuite("Bundled sound files exist in Resources/Sounds") {
