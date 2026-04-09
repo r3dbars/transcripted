@@ -325,9 +325,7 @@ class ParakeetEngine: ObservableObject {
         audioWatchdogTask = nil
 
         if isRecording {
-            streamingSamplesLock.lock()
-            streamingSampleBuffer.removeAll(keepingCapacity: true)
-            streamingSamplesLock.unlock()
+            streamingSamplesLock.withLock { streamingSampleBuffer.removeAll(keepingCapacity: true) }
             Task { await eouManager?.reset() }
             audioEngine.inputNode.removeTap(onBus: 0)
             isRecording = false
@@ -347,7 +345,7 @@ class ParakeetEngine: ObservableObject {
         configChangeDebounceTask = Task { @MainActor [weak self] in
             // 250ms debounce — long enough to coalesce rapid BT notifications,
             // short enough that dictation recovery feels responsive.
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            try? await Task.sleep(nanoseconds: TranscriptedConstants.audioConfigChangeDebounceDelay)
             guard !Task.isCancelled, let self = self else { return }
             self.attemptDeviceRecovery()
         }
