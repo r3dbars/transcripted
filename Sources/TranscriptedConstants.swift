@@ -49,6 +49,9 @@ enum TranscriptedConstants {
     /// recording, the engine is likely a zombie (running but disconnected from hardware)
     static let audioWatchdogTimeout: UInt64 = 2_000_000_000  // 2 seconds
 
+    /// Debounce window for coalescing rapid audio config change notifications (e.g. BT reconnect bursts)
+    static let audioConfigChangeDebounceDelay: UInt64 = 250_000_000  // 250ms
+
     // MARK: - Model Loading
 
     /// Polling interval while waiting for voice model to load (nanoseconds)
