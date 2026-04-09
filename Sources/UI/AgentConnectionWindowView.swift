@@ -2,14 +2,12 @@ import AppKit
 import SwiftUI
 
 struct AgentConnectionContext {
-    let appSupportFolderURL: URL
     let meetingsFolderURL: URL
     let dictationsFolderURL: URL
     let starterPrompt: String
     let mcpSetupText: String
     let mcpConfigExample: String
-    let cliSummary: String
-    let cliExamples: String
+    let folderPathsText: String
 
     init(meetingTitle: String?, meetingDate: Date?, transcriptURL: URL?) {
         let filename = transcriptURL?.deletingPathExtension().lastPathComponent
@@ -17,21 +15,19 @@ struct AgentConnectionContext {
         _ = meetingTitle
         _ = meetingDate
 
-        self.appSupportFolderURL = AgentConnectionGuide.appSupportFolder
         self.meetingsFolderURL = AgentConnectionGuide.meetingsFolder
         self.dictationsFolderURL = AgentConnectionGuide.dictationsFolder
         self.starterPrompt = AgentConnectionGuide.starterPrompt(filename: filename)
         self.mcpSetupText = AgentConnectionGuide.mcpSetupText
         self.mcpConfigExample = AgentConnectionGuide.mcpConfigExample
-        self.cliSummary = AgentConnectionGuide.cliSummary
-        self.cliExamples = AgentConnectionGuide.cliExamples
+        self.folderPathsText = AgentConnectionGuide.folderPathsText
     }
 }
 
 private enum AgentConnectionCopyItem: Hashable {
     case prompt
     case mcp
-    case cli
+    case folders
 }
 
 @MainActor
@@ -64,23 +60,12 @@ final class AgentConnectionViewModel: ObservableObject {
         )
     }
 
-    func copyCLIExamples() {
-        copy(
-            """
-            \(context.cliSummary)
-
-            \(context.cliExamples)
-            """,
-            as: .cli
-        )
+    func copyFolderPaths() {
+        copy(context.folderPathsText, as: .folders)
     }
 
     fileprivate func copyLabel(for item: AgentConnectionCopyItem, default title: String) -> String {
         copiedItem == item ? "Copied" : title
-    }
-
-    func openAppSupportFolder() {
-        NSWorkspace.shared.open(context.appSupportFolderURL)
     }
 
     func reveal(_ url: URL?) {
@@ -127,9 +112,8 @@ struct AgentConnectionWindowView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    startHereSection
+                    primarySection
                     mcpSection
-                    cliSection
                     foldersSection
                 }
                 .padding(20)
@@ -156,7 +140,7 @@ struct AgentConnectionWindowView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(AgentConnectionTheme.textPrimary)
 
-                Text("Start with the copy-paste prompt. If your agent supports MCP, you can give it a direct read-only connection too.")
+                Text("Copy one prompt, paste it into your agent, and let Transcripted use MCP when available or folders when not.")
                     .font(.system(size: 12))
                     .foregroundStyle(AgentConnectionTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -169,97 +153,46 @@ struct AgentConnectionWindowView: View {
         .background(AgentConnectionTheme.background)
     }
 
-    private var startHereSection: some View {
+    private var primarySection: some View {
         AgentConnectionSectionCard(
-            title: "Start here",
-            subtitle: "Works with Claude, Codex, ChatGPT, or any agent that can read local files."
+            title: "Copy this into your agent",
+            subtitle: "This is the main path for most people."
         ) {
-            AgentConnectionBodyText("This is the simplest setup and the best default for most people. Give your agent the folders once, then ask normal questions.")
-
-            AgentConnectionCodeBlock(text: viewModel.context.starterPrompt)
-
-            HStack(spacing: 10) {
-                Button(viewModel.copyLabel(for: .prompt, default: "Copy prompt")) {
-                    viewModel.copyStarterPrompt()
-                }
-                .buttonStyle(AgentConnectionPrimaryButtonStyle())
-
-                Button("Open Transcripted folder") {
-                    viewModel.openAppSupportFolder()
-                }
-                .buttonStyle(AgentConnectionSecondaryButtonStyle())
-            }
+            AgentConnectionBodyText("Your agent will use Transcripted MCP tools if they are already connected. If not, it will fall back to your local Transcripted folders and can help you set up the better option later.")
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("Good first asks")
+                Text("What this helps with")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(AgentConnectionTheme.textPrimary)
 
-                ForEach(Array(AgentConnectionGuide.starterExamples.enumerated()), id: \.offset) { index, example in
+                ForEach(Array(AgentConnectionGuide.benefitHighlights.enumerated()), id: \.offset) { index, highlight in
                     AgentConnectionInfoRow(
-                        symbolName: "\(index + 1).circle.fill",
-                        title: example,
-                        detail: "Paste the prompt above first, then ask this directly."
+                        symbolName: index == 0 ? "sparkles" : "checkmark.circle.fill",
+                        title: highlight,
+                        detail: "Works from the same local Transcripted data already saved on this Mac."
                     )
                 }
+            }
+
+            HStack(spacing: 10) {
+                Button(viewModel.copyLabel(for: .prompt, default: "Copy agent prompt")) {
+                    viewModel.copyStarterPrompt()
+                }
+                .buttonStyle(AgentConnectionPrimaryButtonStyle())
             }
         }
     }
 
     private var mcpSection: some View {
         AgentConnectionSectionCard(
-            title: "Best on supported agents",
-            subtitle: "MCP gives your agent direct read-only tools instead of making it browse files by hand."
+            title: "Optional MCP setup",
+            subtitle: "Set this up only if your agent supports MCP and you want the better direct-tool connection."
         ) {
             AgentConnectionBodyText(viewModel.context.mcpSetupText)
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text("What the Transcripted MCP server gives you")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(AgentConnectionTheme.textPrimary)
-
-                ForEach(Array(AgentConnectionGuide.mcpHighlights.enumerated()), id: \.offset) { index, highlight in
-                    AgentConnectionInfoRow(
-                        symbolName: index == 0 ? "wand.and.stars" : "checkmark.circle.fill",
-                        title: highlight,
-                        detail: "Read-only access to the local context Transcripted already saved on this Mac."
-                    )
-                }
-            }
-
-            AgentConnectionCodeBlock(text: viewModel.context.mcpConfigExample)
-
             HStack(spacing: 10) {
-                Button(viewModel.copyLabel(for: .mcp, default: "Copy MCP example")) {
+                Button(viewModel.copyLabel(for: .mcp, default: "Copy MCP setup")) {
                     viewModel.copyMCPSetup()
-                }
-                .buttonStyle(AgentConnectionPrimaryButtonStyle())
-
-                Button("Show meetings folder") {
-                    viewModel.reveal(viewModel.context.meetingsFolderURL)
-                }
-                .buttonStyle(AgentConnectionSecondaryButtonStyle())
-            }
-        }
-    }
-
-    private var cliSection: some View {
-        AgentConnectionSectionCard(
-            title: "Advanced CLI",
-            subtitle: "Use the terminal when you want scripts, automation, or offline audio work."
-        ) {
-            AgentConnectionBodyText(viewModel.context.cliSummary)
-
-            AgentConnectionCodeBlock(text: viewModel.context.cliExamples)
-
-            HStack(spacing: 10) {
-                Button(viewModel.copyLabel(for: .cli, default: "Copy CLI examples")) {
-                    viewModel.copyCLIExamples()
-                }
-                .buttonStyle(AgentConnectionPrimaryButtonStyle())
-
-                Button("Show dictations folder") {
-                    viewModel.reveal(viewModel.context.dictationsFolderURL)
                 }
                 .buttonStyle(AgentConnectionSecondaryButtonStyle())
             }
@@ -268,9 +201,11 @@ struct AgentConnectionWindowView: View {
 
     private var foldersSection: some View {
         AgentConnectionSectionCard(
-            title: "Your folders",
-            subtitle: "All three paths above work from the same local Transcripted data."
+            title: "Manual folders",
+            subtitle: "Only use these if you want to inspect or share the raw local paths yourself."
         ) {
+            AgentConnectionBodyText("The main prompt already includes these paths. They are here as a fallback for manual setup.")
+
             VStack(alignment: .leading, spacing: 12) {
                 AgentConnectionFileRow(
                     name: "Meetings",
@@ -292,6 +227,13 @@ struct AgentConnectionWindowView: View {
                     viewModel.reveal(viewModel.context.dictationsFolderURL)
                 }
             }
+
+            HStack(spacing: 10) {
+                Button(viewModel.copyLabel(for: .folders, default: "Copy folder paths")) {
+                    viewModel.copyFolderPaths()
+                }
+                .buttonStyle(AgentConnectionSecondaryButtonStyle())
+            }
         }
     }
 }
@@ -301,7 +243,6 @@ private enum AgentConnectionTheme {
     static let card = Color(MenuTokens.actionBackgroundNS)
     static let badge = Color(MenuTokens.badgeBackgroundNS)
     static let divider = Color(MenuTokens.sectionDividerNS)
-    static let promptBackground = Color.black.opacity(0.18)
     static let accent = Color(OverlayTokens.accentGreen)
     static let textPrimary = Color(MenuTokens.textPrimaryNS)
     static let textSecondary = Color(MenuTokens.textSecondaryNS)
@@ -366,28 +307,6 @@ private struct AgentConnectionBodyText: View {
             .font(.system(size: 11))
             .foregroundStyle(AgentConnectionTheme.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
-    }
-}
-
-private struct AgentConnectionCodeBlock: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: 12, design: .monospaced))
-            .foregroundStyle(AgentConnectionTheme.textPrimary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .textSelection(.enabled)
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(AgentConnectionTheme.promptBackground)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(AgentConnectionTheme.divider, lineWidth: 1)
-            )
     }
 }
 

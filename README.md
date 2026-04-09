@@ -70,11 +70,11 @@ If your agent can read a folder, it can work from Transcripted's output.
 
 ## Connect your agent
 
-Transcripted now has three clear ways to connect:
+Transcripted now has one main connection path plus two optional fallbacks:
 
-- `Start here` — copy a simple prompt and point any agent at your local folders
-- `MCP` — give supported agents direct read-only tools for search, recaps, meetings, and dictations
-- `CLI` — use `transcripted-cli` for scripts, automation, and offline audio workflows
+- `Copy one prompt` — paste a smart prompt that uses MCP when available and folders when not
+- `MCP` — optionally give supported agents direct read-only tools for search, recaps, meetings, and dictations
+- `Folders` — manually point any file-reading agent at your local Transcripted data if needed
 
 The end-user setup guide lives in `docs/agent-connect.md`.
 
