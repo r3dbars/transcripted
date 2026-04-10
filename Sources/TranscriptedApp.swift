@@ -75,7 +75,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
             meetingPromptDetector.onPromptRequest = { [weak self] candidate in
                 guard PermissionsOnboardingView.hasCompleted else { return false }
-                self?.meetingOverlayController.presentDetectedMeetingPrompt(candidate) ?? false
+                return self?.meetingOverlayController.presentDetectedMeetingPrompt(candidate) ?? false
             }
             meetingPromptDetector.start()
             appState.contextCapture.onMeetingToggle = { [weak self] in

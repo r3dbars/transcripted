@@ -131,6 +131,8 @@ struct PermissionsOnboardingView: View {
             return accessibilityGranted
         case .screenRecording:
             return screenRecordingGranted
+        case .calendar:
+            return TranscriptedPermissionAccess.isGranted(.calendar)
         }
     }
 
