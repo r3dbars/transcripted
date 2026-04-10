@@ -23,7 +23,7 @@ struct HealthChecker {
         }
 
         // Logs directory
-        let logsDir = dataPath.deletingLastPathComponent().appendingPathComponent("logs", isDirectory: true)
+        let logsDir = home.appendingPathComponent("Library/Logs/Transcripted", isDirectory: true)
         if fm.fileExists(atPath: logsDir.path) {
             results.append(.pass("health/logs-dir", target: logsDir.path))
         } else {

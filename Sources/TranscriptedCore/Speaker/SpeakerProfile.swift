@@ -6,7 +6,7 @@ public enum NameSource {
 }
 
 /// A persistent speaker profile with voice fingerprint
-public struct SpeakerProfile: Identifiable {
+public struct SpeakerProfile: Identifiable, Sendable {
     public let id: UUID
     public var displayName: String?        // "Nate", "Travis", or nil if unnamed
     public var nameSource: String?         // NameSource.userManual or nil
@@ -41,7 +41,7 @@ public struct SpeakerProfile: Identifiable {
 }
 
 /// Result of matching an embedding against the speaker database
-public struct SpeakerMatchResult {
+public struct SpeakerMatchResult: Sendable {
     public let profile: SpeakerProfile
     public let similarity: Double          // Cosine similarity score (0.0–1.0)
 

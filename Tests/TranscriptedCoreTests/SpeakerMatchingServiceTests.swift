@@ -35,6 +35,18 @@ final class SpeakerMatchingServiceTests: XCTestCase {
         XCTAssertNil(match)
     }
 
+    func testMatchAgainstProfilesRejectsDisputedProfiles() {
+        let disputed = speakerProfile(
+            embedding: [1, 0],
+            callCount: 8,
+            disputeCount: 1
+        )
+
+        let match = Transcription.matchAgainstProfiles([1, 0], profiles: [disputed], threshold: 0.70)
+
+        XCTAssertNil(match)
+    }
+
     func testComputeWeightedMeanEmbeddingBiasesTowardHeavierSamples() {
         let weighted = Transcription.computeWeightedMeanEmbedding(
             [[1, 0], [0, 1]],
@@ -48,7 +60,8 @@ final class SpeakerMatchingServiceTests: XCTestCase {
     private func speakerProfile(
         embedding: [Float],
         callCount: Int,
-        name: String? = "Known Speaker"
+        name: String? = "Known Speaker",
+        disputeCount: Int = 0
     ) -> SpeakerProfile {
         SpeakerProfile(
             id: UUID(),
@@ -59,7 +72,7 @@ final class SpeakerMatchingServiceTests: XCTestCase {
             lastSeen: Date(),
             callCount: callCount,
             confidence: 0.8,
-            disputeCount: 0
+            disputeCount: disputeCount
         )
     }
 

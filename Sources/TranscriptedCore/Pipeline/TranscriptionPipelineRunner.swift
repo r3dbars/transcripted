@@ -178,8 +178,11 @@ extension TranscriptionTaskManager {
             return (self.notifier, self.statsStore)
         }
 
+        let transcriptId = UUID()
+
         guard let savedURL = TranscriptSaver.saveTranscript(
             result,
+            transcriptId: transcriptId,
             speakerMappings: speakerMappings,
             speakerSources: speakerSources,
             speakerDbIds: speakerDbIds,
@@ -268,7 +271,9 @@ extension TranscriptionTaskManager {
                             matchSimilarity: clip.matchSimilarity,
                             callCount: suggestedIdentity?.callCount ?? clip.callCount,
                             needsNaming: currentName == nil,
-                            needsConfirmation: currentName != nil
+                            needsConfirmation: currentName != nil,
+                            sessionEmbedding: result.systemSpeakerContexts[clip.sortformerSpeakerId]?.sessionEmbedding,
+                            matchedProfileSnapshot: result.systemSpeakerContexts[clip.sortformerSpeakerId]?.matchedProfileSnapshot
                         )
                     }
 
@@ -279,12 +284,14 @@ extension TranscriptionTaskManager {
                             speakers: entries,
                             knownPeople: knownPeople,
                             transcriptURL: savedURL,
+                            transcriptId: transcriptId,
                             systemAudioURL: systemURL,
                             micAudioURL: micURL,
                             onComplete: { [weak self] updates in
                                 self?.handleNamingComplete(
                                     updates: updates,
                                     transcriptURL: savedURL,
+                                    transcriptId: transcriptId,
                                     micURL: micURL,
                                     systemURL: systemURL,
                                     clips: entries

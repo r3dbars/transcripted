@@ -47,4 +47,27 @@ func testSpeakerNamingPolicy() {
         assertEqual(mapping.displayName, "Alex", "auto-applied names should render without a tentative suffix")
         assertEqual(mapping.confidence, .high, "strong repeated matches should be marked high confidence")
     }
+
+    runSuite("SpeakerNamingPolicy.initialMapping keeps disputed profiles generic") {
+        let profile = SpeakerProfile(
+            id: UUID(),
+            displayName: "Alex",
+            nameSource: NameSource.userManual,
+            embedding: [0.1, 0.2, 0.3],
+            firstSeen: Date(),
+            lastSeen: Date(),
+            callCount: 8,
+            confidence: 0.9,
+            disputeCount: 1
+        )
+
+        let mapping = SpeakerNamingPolicy.initialMapping(
+            speakerId: "0",
+            profile: profile,
+            similarity: 0.95
+        )
+
+        assertNil(mapping.identifiedName, "disputed profiles should not auto-apply")
+        assertEqual(mapping.displayName, "Speaker 0", "disputed profiles should stay generic until repaired")
+    }
 }

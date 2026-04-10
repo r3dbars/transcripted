@@ -179,7 +179,6 @@ public class Audio: ObservableObject {
             _recoveryAttemptCount = newValue
         }
     }
-    
     // Recording session generation - increments on each start/stop so delayed
     // recovery work from an old session cannot restart a newer one.
     private var _recordingSessionGeneration: UInt64 = 0
@@ -196,7 +195,6 @@ public class Audio: ObservableObject {
             _recordingSessionGeneration = newValue
         }
     }
-
     let maxRecoveryAttempts = 5
     let recoveryCooldown: TimeInterval = 5.0  // Min seconds between recovery attempts
 
@@ -564,6 +562,9 @@ public class Audio: ObservableObject {
             capture.stop()
         }
 
+        // Use the original mic URL (set at recording start), not the potentially-overwritten
+        // recovery URL. Device recovery creates a new WAV segment but the original file
+        // contains the bulk of the recording.
         let primaryMicURL = originalMicAudioFileURL ?? micAudioFileURL
         let micSegments = self.micSegments
         let finalSystemURL = systemAudioFileURL

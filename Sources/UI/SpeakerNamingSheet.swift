@@ -428,6 +428,7 @@ final class SpeakerRowView: NSView {
                 persistentSpeakerId: entry.id,
                 sortformerSpeakerId: entry.sortformerSpeakerId,
                 newName: current,
+                previousName: current,
                 action: .confirmed
             )
         }
@@ -458,6 +459,7 @@ final class SpeakerRowView: NSView {
             persistentSpeakerId: entry.id,
             sortformerSpeakerId: entry.sortformerSpeakerId,
             newName: typed,
+            previousName: entry.currentName,
             action: action
         )
     }

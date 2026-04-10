@@ -158,28 +158,50 @@ extension TranscriptSaver {
         guard !updates.isEmpty else { return true }
 
         return fileUpdateQueue.sync {
-            // The transcript may have been renamed by MeetingTranscriptStyler between save and naming completion.
-            let resolvedURL = resolveTranscriptURL(transcriptURL, updates: updates)
-
-            guard var content = try? String(contentsOf: resolvedURL, encoding: .utf8) else {
-                AppLogger.pipeline.error("Failed to read transcript for name update", ["path": resolvedURL.path])
+            guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
+                AppLogger.pipeline.error("Failed to read transcript for name update", ["path": transcriptURL.path])
                 return false
             }
 
+            guard let jsonUpdate = prepareUpdatedAgentJSON(
+                transcriptURL: transcriptURL,
+                updates: updates
+            ) else {
+                AppLogger.pipeline.error("Failed to prepare JSON sidecar for name update", [
+                    "path": transcriptURL.lastPathComponent
+                ])
+                return false
+            }
+
+            let obsidianEnabled = isObsidianFormatted(content)
+
             for update in updates {
-                let oldLabel = "Speaker \(update.sortformerSpeakerId)"
-                applyNameReplacement(in: &content, oldName: oldLabel, newName: update.newName, updateSpeakerTag: false)
-                let dbId: UUID = switch update.action {
-                case .merged(let targetId):
-                    targetId
-                case .named, .corrected, .confirmed:
-                    update.persistentSpeakerId
-                }
-                upsertSpeakerDbId(
-                    in: &content,
-                    sortformerSpeakerId: update.sortformerSpeakerId,
-                    dbId: dbId
-                )
+                updateFrontmatterSpeakerMetadata(in: &content, update: update)
+            }
+
+            let updatesBySystemKey = Dictionary(
+                uniqueKeysWithValues: updates.map { ("system_\($0.sortformerSpeakerId)", $0) }
+            )
+            guard rewriteFullTranscriptSection(
+                in: &content,
+                transcript: jsonUpdate.updatedTranscript,
+                updatesBySystemKey: updatesBySystemKey,
+                obsidianEnabled: obsidianEnabled
+            ) else {
+                AppLogger.pipeline.error("Failed to rewrite transcript body for speaker updates", [
+                    "path": transcriptURL.lastPathComponent
+                ])
+                return false
+            }
+
+            guard rewriteRemoteSpeakerBreakdown(
+                in: &content,
+                transcript: jsonUpdate.updatedTranscript
+            ) else {
+                AppLogger.pipeline.error("Failed to rewrite speaker breakdown for speaker updates", [
+                    "path": transcriptURL.lastPathComponent
+                ])
+                return false
             }
 
             // Consolidate speaker breakdown when multiple diarizer IDs got the same name.
@@ -189,85 +211,78 @@ extension TranscriptSaver {
 
             // Atomic write back
             do {
-                try content.write(to: resolvedURL, atomically: true, encoding: .utf8)
-                AppLogger.pipeline.info("Updated speaker names in transcript", ["path": resolvedURL.lastPathComponent, "updates": "\(updates.count)"])
-
-                // Update JSON sidecar
-                updateAgentJSON(
-                    transcriptURL: resolvedURL,
-                    updates: updates,
-                    speakerStoreForIndex: speakerStoreForIndex
-                )
-
-                return true
+                try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
             } catch {
                 AppLogger.pipeline.error("Failed to write updated transcript", ["error": error.localizedDescription])
                 return false
             }
+
+            do {
+                try jsonUpdate.updatedData.write(to: jsonUpdate.jsonURL, options: .atomic)
+            } catch {
+                AppLogger.pipeline.error("Failed to write updated JSON sidecar", [
+                    "path": jsonUpdate.jsonURL.lastPathComponent,
+                    "error": error.localizedDescription
+                ])
+
+                if let originalContent = String(data: jsonUpdate.originalMarkdownData, encoding: .utf8) {
+                    try? originalContent.write(to: transcriptURL, atomically: true, encoding: .utf8)
+                }
+                return false
+            }
+
+            AppLogger.pipeline.info("Updated speaker names in transcript", [
+                "path": transcriptURL.lastPathComponent,
+                "updates": "\(updates.count)"
+            ])
+
+            let folder = transcriptURL.deletingLastPathComponent()
+            do {
+                try AgentOutput.writeIndex(
+                    to: folder,
+                    speakerStore: speakerStoreForIndex ?? SpeakerDatabase.shared
+                )
+            } catch {
+                AppLogger.pipeline.warning("Failed to rebuild transcript index after speaker naming", [
+                    "folder": folder.lastPathComponent,
+                    "error": error.localizedDescription
+                ])
+            }
+
+            return true
         }
     }
 
     /// Resolve a transcript URL that may have been renamed by MeetingTranscriptStyler.
-    /// Tries three strategies in order:
-    ///   1. UUID search — scan .md files for a speaker db_id in the YAML
-    ///   2. Timestamp search — extract the time from the original filename and match YAML `time:` field
-    ///   3. Most recent — fall back to the newest .md file (just saved, should be the right one)
-    static func resolveTranscriptURL(_ url: URL, updates: [SpeakerNameUpdate]) -> URL {
-        if FileManager.default.fileExists(atPath: url.path) { return url }
-
-        let directory = url.deletingLastPathComponent()
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]
-        ).filter({ $0.pathExtension == "md" }) else {
-            AppLogger.pipeline.error("resolveTranscriptURL: cannot list directory", ["dir": directory.path])
+    /// Uses the stable transcript_id written at initial save time.
+    static func resolveTranscriptURL(_ url: URL, transcriptId: UUID) -> URL? {
+        if FileManager.default.fileExists(atPath: url.path),
+           extractTranscriptId(from: url) == transcriptId {
             return url
         }
 
-        AppLogger.pipeline.info("resolveTranscriptURL: file not at expected path, scanning \(files.count) .md files", ["expected": url.lastPathComponent])
+        AppLogger.pipeline.info("Transcript not at expected path, scanning for stable transcript id", [
+            "expected": url.lastPathComponent,
+            "transcriptId": transcriptId.uuidString
+        ])
 
-        // Strategy 1: Search by speaker UUID in YAML frontmatter
-        if let firstId = updates.first?.persistentSpeakerId.uuidString {
-            for file in files {
-                guard let handle = try? FileHandle(forReadingFrom: file) else { continue }
-                let header = handle.readData(ofLength: 2048)
-                try? handle.close()
-                guard let text = String(data: header, encoding: .utf8),
-                      text.contains(firstId) else { continue }
-                AppLogger.pipeline.info("resolveTranscriptURL: matched by UUID", ["to": file.lastPathComponent])
-                return file
-            }
+        let dir = url.deletingLastPathComponent()
+        guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            .filter({ $0.pathExtension == "md" }) else {
+            return nil
         }
 
-        // Strategy 2: Extract timestamp from original filename and match YAML `time:` field.
-        // Original filenames look like "Call 2026-04-10 11-15-12.md" — extract "11:15:12".
-        let stem = url.deletingPathExtension().lastPathComponent
-        if let timeMatch = extractTimeFromFilename(stem) {
-            let yamlTimeString = "time: \(timeMatch)"
-            for file in files {
-                guard let handle = try? FileHandle(forReadingFrom: file) else { continue }
-                let header = handle.readData(ofLength: 512)
-                try? handle.close()
-                guard let text = String(data: header, encoding: .utf8),
-                      text.contains(yamlTimeString) else { continue }
-                AppLogger.pipeline.info("resolveTranscriptURL: matched by timestamp", ["to": file.lastPathComponent, "time": timeMatch])
-                return file
-            }
+        for file in files {
+            guard extractTranscriptId(from: file) == transcriptId else { continue }
+            AppLogger.pipeline.info("Resolved renamed transcript", ["from": url.lastPathComponent, "to": file.lastPathComponent])
+            return dir.appendingPathComponent(file.lastPathComponent)
         }
 
-        // Strategy 3: Fall back to the most recently modified .md file.
-        let sorted = files.sorted { a, b in
-            let aDate = (try? a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-            let bDate = (try? b.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-            return aDate > bDate
-        }
-        if let newest = sorted.first {
-            AppLogger.pipeline.info("resolveTranscriptURL: fell back to newest .md file", ["to": newest.lastPathComponent])
-            return newest
-        }
-
-        AppLogger.pipeline.error("resolveTranscriptURL: no .md files found at all")
-        return url
+        AppLogger.pipeline.error("Failed to resolve transcript by stable id", [
+            "expected": url.lastPathComponent,
+            "transcriptId": transcriptId.uuidString
+        ])
+        return nil
     }
 
     /// Extract a time string like "11:15:12" from a filename like "Call 2026-04-10 11-15-12".
@@ -476,43 +491,89 @@ extension TranscriptSaver {
         return result
     }
     /// Update the JSON sidecar when speaker names change.
-    private static func updateAgentJSON(
+    private static func prepareUpdatedAgentJSON(
         transcriptURL: URL,
-        updates: [SpeakerNameUpdate],
-        speakerStoreForIndex: (any SpeakerStore)?
-    ) {
+        updates: [SpeakerNameUpdate]
+    ) -> (jsonURL: URL, originalMarkdownData: Data, originalJSONData: Data, updatedData: Data, updatedTranscript: AgentTranscript)? {
         let stem = transcriptURL.deletingPathExtension().lastPathComponent
         let jsonURL = transcriptURL.deletingLastPathComponent().appendingPathComponent("\(stem).json")
-        guard FileManager.default.fileExists(atPath: jsonURL.path),
-              let data = try? Data(contentsOf: jsonURL),
-              let transcript = try? JSONDecoder().decode(AgentTranscript.self, from: data) else { return }
+        guard FileManager.default.fileExists(atPath: jsonURL.path) else {
+            AppLogger.pipeline.error("JSON sidecar missing during speaker update", [
+                "path": jsonURL.lastPathComponent
+            ])
+            return nil
+        }
+
+        guard let originalMarkdownData = try? Data(contentsOf: transcriptURL) else {
+            AppLogger.pipeline.error("Failed to re-read transcript before speaker update", [
+                "path": transcriptURL.lastPathComponent
+            ])
+            return nil
+        }
+
+        guard let originalJSONData = try? Data(contentsOf: jsonURL) else {
+            AppLogger.pipeline.error("Failed to read JSON sidecar during speaker update", [
+                "path": jsonURL.lastPathComponent
+            ])
+            return nil
+        }
+
+        guard let transcript = try? JSONDecoder().decode(AgentTranscript.self, from: originalJSONData) else {
+            AppLogger.pipeline.error("Failed to decode JSON sidecar during speaker update", [
+                "path": jsonURL.lastPathComponent
+            ])
+            return nil
+        }
+
+        if let markdownTranscriptId = extractTranscriptId(from: transcriptURL) {
+            guard let sidecarTranscriptIdString = transcript.transcriptId,
+                  let sidecarTranscriptId = UUID(uuidString: sidecarTranscriptIdString),
+                  sidecarTranscriptId == markdownTranscriptId else {
+                AppLogger.pipeline.error("Transcript markdown and JSON sidecar ids do not match", [
+                    "markdown": markdownTranscriptId.uuidString,
+                    "sidecar": transcript.transcriptId ?? "nil",
+                    "path": jsonURL.lastPathComponent
+                ])
+                return nil
+            }
+        }
+
+        guard !updates.isEmpty else {
+            return nil
+        }
 
         // Rebuild speakers with updated names
         var updatedSpeakers = transcript.speakers
+        var updatedSpeakerIds = Set<String>()
         for update in updates {
             let systemKey = "system_\(update.sortformerSpeakerId)"
             if let idx = updatedSpeakers.firstIndex(where: { $0.id == systemKey }) {
                 let old = updatedSpeakers[idx]
-                let persistentSpeakerId: String?
-                switch update.action {
-                case .merged(let targetProfileId):
-                    persistentSpeakerId = targetProfileId.uuidString
-                case .named, .corrected, .confirmed:
-                    persistentSpeakerId = update.persistentSpeakerId.uuidString
-                }
                 updatedSpeakers[idx] = AgentSpeaker(
                     id: old.id,
-                    persistentSpeakerId: persistentSpeakerId,
+                    persistentSpeakerId: (update.resolvedPersistentSpeakerId ?? update.persistentSpeakerId).uuidString,
                     name: update.newName,
                     confidence: old.confidence,
                     wordCount: old.wordCount,
                     speakingSeconds: old.speakingSeconds
                 )
+                updatedSpeakerIds.insert(systemKey)
             }
+        }
+
+        let expectedSpeakerIds = Set(updates.map { "system_\($0.sortformerSpeakerId)" })
+        guard updatedSpeakerIds == expectedSpeakerIds else {
+            AppLogger.pipeline.error("JSON sidecar missing expected speaker ids during update", [
+                "path": jsonURL.lastPathComponent,
+                "expected": "\(expectedSpeakerIds.sorted())",
+                "updated": "\(updatedSpeakerIds.sorted())"
+            ])
+            return nil
         }
 
         var updated = AgentTranscript(
             version: transcript.version,
+            transcriptId: transcript.transcriptId,
             recording: transcript.recording,
             speakers: updatedSpeakers,
             utterances: transcript.utterances
@@ -529,13 +590,11 @@ extension TranscriptSaver {
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let newData = try? encoder.encode(updated) {
-            try? newData.write(to: jsonURL, options: .atomic)
+        guard let newData = try? encoder.encode(updated) else {
+            return nil
         }
 
-        // Rebuild index
-        let folder = transcriptURL.deletingLastPathComponent()
-        rebuildAgentIndex(for: folder, speakerStoreForIndex: speakerStoreForIndex)
+        return (jsonURL, originalMarkdownData, originalJSONData, newData, updated)
     }
 
     private static func updateAgentJSONNames(transcriptURL: URL, dbId: UUID, newName: String) {
@@ -547,6 +606,7 @@ extension TranscriptSaver {
 
         let updated = AgentTranscript(
             version: transcript.version,
+            transcriptId: transcript.transcriptId,
             recording: transcript.recording,
             speakers: transcript.speakers.map { speaker in
                 guard speaker.persistentSpeakerId == dbId.uuidString else { return speaker }
@@ -591,6 +651,7 @@ extension TranscriptSaver {
 
         let rewritten = AgentTranscript(
             version: transcript.version,
+            transcriptId: transcript.transcriptId,
             recording: transcript.recording,
             speakers: transcript.speakers.map { speaker in
                 guard speaker.persistentSpeakerId == sourceDbId.uuidString else { return speaker }
@@ -678,6 +739,7 @@ extension TranscriptSaver {
 
         return AgentTranscript(
             version: transcript.version,
+            transcriptId: transcript.transcriptId,
             recording: transcript.recording,
             speakers: deduplicatedSpeakers,
             utterances: updatedUtterances
@@ -700,6 +762,307 @@ extension TranscriptSaver {
             to: folder,
             speakerStore: speakerStoreForIndex ?? SpeakerDatabase.shared
         )
+    }
+
+    static func extractTranscriptId(from url: URL) -> UUID? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        let header = handle.readData(ofLength: 2048)
+        try? handle.close()
+        guard let text = String(data: header, encoding: .utf8) else { return nil }
+        return extractTranscriptId(fromFrontmatter: text)
+    }
+
+    private static func extractTranscriptId(fromFrontmatter text: String) -> UUID? {
+        for line in text.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("transcript_id:") else { continue }
+            let value = trimmed
+                .dropFirst("transcript_id:".count)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            return UUID(uuidString: value)
+        }
+        return nil
+    }
+
+    private static func updateFrontmatterSpeakerMetadata(
+        in content: inout String,
+        update: SpeakerNameUpdate
+    ) {
+        guard let frontmatterRange = frontmatterContentRange(in: content) else { return }
+
+        var lines = String(content[frontmatterRange])
+            .components(separatedBy: "\n")
+
+        let targetIdLine = #"id: "\#(update.sortformerSpeakerId)""#
+        let resolvedPersistentId = (update.resolvedPersistentSpeakerId ?? update.persistentSpeakerId).uuidString
+        var lineIndex = 0
+
+        while lineIndex < lines.count {
+            let trimmed = lines[lineIndex].trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("- "),
+                  trimmed.contains(targetIdLine) else {
+                lineIndex += 1
+                continue
+            }
+
+            let nextEntryIndex: Int
+            if lineIndex + 1 < lines.count {
+                nextEntryIndex = lines[(lineIndex + 1)..<lines.count].firstIndex(where: { candidate in
+                    candidate.trimmingCharacters(in: .whitespaces).hasPrefix("- ")
+                }) ?? lines.count
+            } else {
+                nextEntryIndex = lines.count
+            }
+
+            var dbIdIndex: Int?
+            var nameIndex: Int?
+            var sourceIndex: Int?
+
+            if lineIndex + 1 < nextEntryIndex {
+                for index in (lineIndex + 1)..<nextEntryIndex {
+                    let candidate = lines[index].trimmingCharacters(in: .whitespaces)
+                    if candidate.hasPrefix("db_id:") {
+                        dbIdIndex = index
+                    } else if candidate.hasPrefix("name:") {
+                        nameIndex = index
+                    } else if candidate.hasPrefix("source:") {
+                        sourceIndex = index
+                    }
+                }
+            }
+
+            let dbIdLine = #"    db_id: "\#(resolvedPersistentId)""#
+            let nameLine = #"    name: "\#(escapeYAML(update.newName))""#
+            let sourceLine = "    source: \(NameSource.userManual)"
+            var nextInsertIndex = lineIndex + 1
+
+            if let dbIdIndex {
+                lines[dbIdIndex] = dbIdLine
+                nextInsertIndex = dbIdIndex + 1
+            } else {
+                lines.insert(dbIdLine, at: nextInsertIndex)
+                if let existingNameIndex = nameIndex, existingNameIndex >= nextInsertIndex {
+                    nameIndex = existingNameIndex + 1
+                }
+                if let existingSourceIndex = sourceIndex, existingSourceIndex >= nextInsertIndex {
+                    sourceIndex = existingSourceIndex + 1
+                }
+                nextInsertIndex += 1
+            }
+
+            if let nameIndex {
+                lines[nameIndex] = nameLine
+                nextInsertIndex = nameIndex + 1
+            } else {
+                lines.insert(nameLine, at: nextInsertIndex)
+                if let existingSourceIndex = sourceIndex, existingSourceIndex >= nextInsertIndex {
+                    sourceIndex = existingSourceIndex + 1
+                }
+                nextInsertIndex += 1
+            }
+
+            if let sourceIndex {
+                lines[sourceIndex] = sourceLine
+            } else {
+                lines.insert(sourceLine, at: nextInsertIndex)
+            }
+
+            content.replaceSubrange(frontmatterRange, with: lines.joined(separator: "\n"))
+            return
+        }
+    }
+
+    private static func frontmatterContentRange(in content: String) -> Range<String.Index>? {
+        guard content.hasPrefix("---\n"),
+              let endRange = content.range(
+                of: "\n---\n",
+                range: content.index(content.startIndex, offsetBy: 4)..<content.endIndex
+              ) else {
+            return nil
+        }
+
+        return content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound
+    }
+
+    private static func rewriteFullTranscriptSection(
+        in content: inout String,
+        transcript: AgentTranscript,
+        updatesBySystemKey: [String: SpeakerNameUpdate],
+        obsidianEnabled: Bool
+    ) -> Bool {
+        let range = fullTranscriptContentRange(in: content) ?? legacyTranscriptContentRange(in: content)
+        guard let range else {
+            return false
+        }
+
+        let lines = String(content[range]).components(separatedBy: "\n")
+        var rewrittenLines = lines
+        var utteranceIndex = 0
+
+        for index in lines.indices {
+            guard let components = parseTranscriptLine(lines[index]) else { continue }
+            guard utteranceIndex < transcript.utterances.count else {
+                return false
+            }
+
+            let utterance = transcript.utterances[utteranceIndex]
+            utteranceIndex += 1
+
+            let expectedTimestamp = formatTranscriptTimestamp(utterance.start)
+            let expectedSource = utterance.speakerId.hasPrefix("mic_") ? "Mic" : "System"
+            guard components.timestamp == expectedTimestamp,
+                  components.source == expectedSource else {
+                AppLogger.pipeline.error("Transcript line no longer matches JSON sidecar", [
+                    "line": "\(utteranceIndex)",
+                    "expectedTimestamp": expectedTimestamp,
+                    "actualTimestamp": components.timestamp,
+                    "expectedSource": expectedSource,
+                    "actualSource": components.source
+                ])
+                return false
+            }
+
+            guard let update = updatesBySystemKey[utterance.speakerId] else { continue }
+
+            let label = transcriptLabel(
+                for: update.newName,
+                currentLabel: components.label,
+                obsidianEnabled: obsidianEnabled
+            )
+            rewrittenLines[index] = "[\(components.timestamp)] [\(components.source)/\(label)] \(components.text)"
+        }
+
+        guard utteranceIndex == transcript.utterances.count else {
+            AppLogger.pipeline.error("Transcript body contained fewer utterances than JSON sidecar", [
+                "bodyCount": "\(utteranceIndex)",
+                "jsonCount": "\(transcript.utterances.count)"
+            ])
+            return false
+        }
+
+        content.replaceSubrange(range, with: rewrittenLines.joined(separator: "\n"))
+        return true
+    }
+
+    private static func rewriteRemoteSpeakerBreakdown(
+        in content: inout String,
+        transcript: AgentTranscript
+    ) -> Bool {
+        guard let replacementRange = remoteSpeakerBreakdownContentRange(in: content) else {
+            return false
+        }
+
+        let utteranceCounts = Dictionary(
+            grouping: transcript.utterances.filter { $0.speakerId.hasPrefix("system_") },
+            by: \.speakerId
+        ).mapValues(\.count)
+
+        let lines = transcript.speakers
+            .filter { $0.id.hasPrefix("system_") }
+            .sorted { $0.id < $1.id }
+            .map { speaker in
+                let speakingTime = DateFormattingHelper.formatDuration(speaker.speakingSeconds)
+                let utteranceCount = utteranceCounts[speaker.id] ?? 0
+                return "- **\(speaker.name):** \(utteranceCount) utterances, ~\(speaker.wordCount) words, \(speakingTime)"
+            }
+
+        content.replaceSubrange(replacementRange, with: lines.joined(separator: "\n"))
+        return true
+    }
+
+    private static func fullTranscriptContentRange(in content: String) -> Range<String.Index>? {
+        guard let headerRange = content.range(of: "## Full Transcript\n\n"),
+              let footerRange = content.range(
+                of: "\n\n---\n\n*Generated by Transcripted",
+                range: headerRange.upperBound..<content.endIndex
+              ) else {
+            return nil
+        }
+
+        return headerRange.upperBound..<footerRange.lowerBound
+    }
+
+    private static func legacyTranscriptContentRange(in content: String) -> Range<String.Index>? {
+        if let frontmatterEndRange = content.range(
+            of: "\n---\n",
+            range: content.index(content.startIndex, offsetBy: min(4, content.count))..<content.endIndex
+        ) {
+            return frontmatterEndRange.upperBound..<content.endIndex
+        }
+
+        guard !content.isEmpty else { return nil }
+        return content.startIndex..<content.endIndex
+    }
+
+    private static func remoteSpeakerBreakdownContentRange(in content: String) -> Range<String.Index>? {
+        guard let headerRange = content.range(of: "#### Remote Speaker Breakdown\n\n") else {
+            return nil
+        }
+
+        if let structuredFooterRange = content.range(
+            of: "\n\n---\n\n## Full Transcript",
+            range: headerRange.upperBound..<content.endIndex
+        ) {
+            return headerRange.upperBound..<structuredFooterRange.lowerBound
+        }
+
+        if let legacyFooterRange = content.range(
+            of: "\n\n---\n",
+            range: headerRange.upperBound..<content.endIndex
+        ) {
+            return headerRange.upperBound..<legacyFooterRange.lowerBound
+        }
+
+        return nil
+    }
+
+    private static func parseTranscriptLine(_ line: String) -> (timestamp: String, source: String, label: String, text: String)? {
+        guard line.hasPrefix("["),
+              let timestampEnd = line.firstIndex(of: "]"),
+              line.indices.contains(line.index(after: timestampEnd)),
+              line[line.index(after: timestampEnd)...].hasPrefix(" [") else {
+            return nil
+        }
+
+        let timestamp = String(line[line.index(after: line.startIndex)..<timestampEnd])
+        let sourceStart = line.index(timestampEnd, offsetBy: 3)
+        guard let labelEnd = line.range(of: "] ", range: sourceStart..<line.endIndex) else {
+            return nil
+        }
+
+        let sourceLabel = line[sourceStart..<labelEnd.lowerBound]
+        guard let separator = sourceLabel.firstIndex(of: "/") else {
+            return nil
+        }
+
+        let source = String(sourceLabel[..<separator])
+        let label = String(sourceLabel[sourceLabel.index(after: separator)...])
+        let textStart = labelEnd.upperBound
+        let text = String(line[textStart...])
+        return (timestamp, source, label, text)
+    }
+
+    private static func transcriptLabel(
+        for name: String,
+        currentLabel: String,
+        obsidianEnabled: Bool
+    ) -> String {
+        let usesWikiLink = (currentLabel.hasPrefix("[[") && currentLabel.hasSuffix("]]"))
+            || (obsidianEnabled && !name.hasPrefix("Speaker "))
+        guard usesWikiLink else { return name }
+        return "[[\(name)]]"
+    }
+
+    private static func formatTranscriptTimestamp(_ seconds: Double) -> String {
+        let startMinutes = Int(seconds) / 60
+        let startSeconds = Int(seconds) % 60
+        return String(format: "%02d:%02d", startMinutes, startSeconds)
+    }
+
+    private static func isObsidianFormatted(_ content: String) -> Bool {
+        content.contains("\ncssclasses:\n  - transcripted")
+            || content.contains("\naliases:\n  - \"Meeting ")
     }
 }
 

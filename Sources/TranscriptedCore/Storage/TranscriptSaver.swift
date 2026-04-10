@@ -87,6 +87,7 @@ public class TranscriptSaver {
     @discardableResult
     public static func saveTranscript(
         _ result: TranscriptionResult,
+        transcriptId: UUID,
         speakerMappings: [String: SpeakerMapping] = [:],
         speakerSources: [String: String] = [:],
         speakerDbIds: [String: UUID] = [:],
@@ -111,7 +112,16 @@ public class TranscriptSaver {
         }
 
         let fileURL = nextTranscriptFileURL(in: saveDir)
-        let markdown = formatTranscriptMarkdown(result: result, speakerMappings: speakerMappings, speakerSources: speakerSources, speakerDbIds: speakerDbIds, date: Date(), meetingTitle: meetingTitle, healthInfo: healthInfo)
+        let markdown = formatTranscriptMarkdown(
+            result: result,
+            transcriptId: transcriptId,
+            speakerMappings: speakerMappings,
+            speakerSources: speakerSources,
+            speakerDbIds: speakerDbIds,
+            date: Date(),
+            meetingTitle: meetingTitle,
+            healthInfo: healthInfo
+        )
 
         // Serialize file writes to prevent concurrent corruption with retroactive speaker updates
         let savedURL: URL? = fileUpdateQueue.sync {
@@ -123,6 +133,7 @@ public class TranscriptSaver {
                 do {
                     try AgentOutput.writeTranscriptJSON(
                         from: result,
+                        transcriptId: transcriptId,
                         speakerMappings: speakerMappings,
                         speakerDbIds: speakerDbIds,
                         to: saveDir,

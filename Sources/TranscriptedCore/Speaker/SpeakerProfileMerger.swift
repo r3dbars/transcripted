@@ -17,6 +17,12 @@ extension SpeakerDatabase {
         }
     }
 
+    public func restoreProfile(_ profile: SpeakerProfile) {
+        queue.sync {
+            restoreProfileImpl(profile)
+        }
+    }
+
     func setDisplayNameImpl(id: UUID, name: String, source: String) {
         guard isDatabaseOpen else {
             AppLogger.speakers.error("setDisplayName failed — database not open", ["speakerId": id.uuidString, "name": name])
@@ -37,8 +43,58 @@ extension SpeakerDatabase {
         sqlite3_finalize(statement)
     }
 
+    func restoreProfileImpl(_ profile: SpeakerProfile) {
+        guard isDatabaseOpen else {
+            AppLogger.speakers.error("restoreProfile failed — database not open", ["speakerId": profile.id.uuidString])
+            return
+        }
+
+        let isoFormatter = ISO8601DateFormatter()
+        let sql = """
+        UPDATE speakers
+        SET display_name = ?, name_source = ?, embedding = ?, first_seen = ?, last_seen = ?, call_count = ?, confidence = ?, dispute_count = ?
+        WHERE id = ?;
+        """
+
+        var statement: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
+            let embeddingData = profile.embedding.withUnsafeBufferPointer { Data(buffer: $0) }
+            let displayName = profile.displayName as NSString?
+            let nameSource = profile.nameSource as NSString?
+            let firstSeen = isoFormatter.string(from: profile.firstSeen) as NSString
+            let lastSeen = isoFormatter.string(from: profile.lastSeen) as NSString
+
+            if let displayName {
+                sqlite3_bind_text(statement, 1, displayName.utf8String, -1, SQLITE_TRANSIENT)
+            } else {
+                sqlite3_bind_null(statement, 1)
+            }
+
+            if let nameSource {
+                sqlite3_bind_text(statement, 2, nameSource.utf8String, -1, SQLITE_TRANSIENT)
+            } else {
+                sqlite3_bind_null(statement, 2)
+            }
+
+            sqlite3_bind_blob(statement, 3, (embeddingData as NSData).bytes, Int32(embeddingData.count), SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 4, firstSeen.utf8String, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 5, lastSeen.utf8String, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int(statement, 6, Int32(profile.callCount))
+            sqlite3_bind_double(statement, 7, profile.confidence)
+            sqlite3_bind_int(statement, 8, Int32(profile.disputeCount))
+            sqlite3_bind_text(statement, 9, (profile.id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+
+            if sqlite3_step(statement) != SQLITE_DONE {
+                AppLogger.speakers.error("Failed to restore profile snapshot", ["sqlite_error": dbErrorMessage(), "id": profile.id.uuidString])
+            }
+        } else {
+            AppLogger.speakers.error("Failed to prepare restoreProfile", ["sqlite_error": dbErrorMessage()])
+        }
+        sqlite3_finalize(statement)
+    }
+
     /// Increment the dispute count for a speaker (inference disagreed with DB name)
-    func incrementDisputeCount(id: UUID) {
+    public func incrementDisputeCount(id: UUID) {
         queue.sync { [self] in
             guard isDatabaseOpen else { return }
             let sql = "UPDATE speakers SET dispute_count = dispute_count + 1 WHERE id = ?;"
@@ -217,6 +273,7 @@ extension SpeakerDatabase {
 
             for j in (i + 1)..<speakers.count {
                 guard !mergedIds.contains(speakers[j].id) else { continue }
+                guard !shouldSkipDuplicateMerge(speakers[i], speakers[j]) else { continue }
 
                 let similarity = cosineSimilarity(speakers[i].embedding, speakers[j].embedding)
                 guard similarity >= threshold else { continue }
@@ -244,6 +301,30 @@ extension SpeakerDatabase {
         if mergeCount > 0 {
             AppLogger.speakers.info("Duplicate merge complete", ["merged": "\(mergeCount)", "remaining": "\(speakers.count - mergeCount)"])
         }
+    }
+
+    private func shouldSkipDuplicateMerge(_ lhs: SpeakerProfile, _ rhs: SpeakerProfile) -> Bool {
+        if lhs.disputeCount > 0 || rhs.disputeCount > 0 {
+            return true
+        }
+
+        let lhsName = normalizedProfileName(lhs)
+        let rhsName = normalizedProfileName(rhs)
+        if let lhsName, let rhsName, lhsName != rhsName {
+            return true
+        }
+
+        return false
+    }
+
+    private func normalizedProfileName(_ profile: SpeakerProfile) -> String? {
+        guard let name = profile.displayName?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty else {
+            return nil
+        }
+
+        return name.lowercased()
     }
 
     // MARK: - Same-Name Profile Merging

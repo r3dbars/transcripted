@@ -1,7 +1,7 @@
 import Foundation
 
 /// Maps speaker labels to identified names from voice fingerprint matching.
-public struct SpeakerMapping {
+public struct SpeakerMapping: Sendable {
     public let speakerId: String           // "0", "1", "2" for speaker IDs
     public var identifiedName: String?     // "John Smith" or nil if unidentified
     public var confidence: SpeakerConfidence?
@@ -37,6 +37,7 @@ public struct SpeakerMapping {
 enum SpeakerNamingPolicy {
     static func shouldAutoAccept(profile: SpeakerProfile, similarity: Double) -> Bool {
         profile.displayName != nil
+            && profile.disputeCount == 0
             && similarity > 0.88
             && profile.callCount > 4
     }
