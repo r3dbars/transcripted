@@ -89,8 +89,9 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.appState.handleSystemWake()
-                self?.overlayController.handleSystemWake()
+                guard let self else { return }
+                await self.appState.handleSystemWake()
+                self.overlayController.handleSystemWake()
             }
         }
         workspaceObservers.append(wakeRecoveryObserver)

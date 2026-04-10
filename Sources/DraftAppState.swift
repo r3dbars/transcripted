@@ -22,7 +22,8 @@ class DraftAppState: ObservableObject {
     )
 
     private var promptsObserver: NSObjectProtocol?
-    private var wakeHealthCheckTask: Task<Void, Never>?
+    private var runtimeReadinessTask: Task<Void, Never>?
+    private var wakeRecoveryTask: Task<Void, Never>?
     private var isInitialized = false
 
     func initialize() async {
@@ -48,20 +49,8 @@ class DraftAppState: ObservableObject {
         )
         #endif
 
-        // Initialize models in background (don't block app startup)
-        Task {
-            await sttRouter.parakeetEngine.initialize()
-            sttRouter.parakeetEngine.prewarm()
-        }
-
-        // Preload meeting diarization + STT models in the background so the
-        // first ⌥M press doesn't block on a cold model download.
-        if #available(macOS 14.0, *) {
-            Task { [weak self] in
-                guard let self else { return }
-                await self.meetingSession.prepareModels(showLoadingUI: false)
-            }
-        }
+        // Kick off shared runtime prep once; wake recovery can await or reuse it.
+        startRuntimeReadinessIfNeeded()
 
         logger.log("APP LAUNCHED | modes: dictation + meetings")
         EventTracker.track("app.launched")
@@ -88,33 +77,73 @@ class DraftAppState: ObservableObject {
     /// Centralized recovery after system wake. Each subsystem that holds OS-level resources
     /// (file descriptors, audio hardware, Metal contexts, Carbon hotkeys) must be checked
     /// and restored here. ParakeetEngine handles its own wake via NSWorkspace observer.
-    func handleSystemWake() {
-        logger.log("WAKE | system wake detected — running recovery checks")
+    func handleSystemWake() async {
+        if let task = wakeRecoveryTask {
+            await task.value
+            return
+        }
 
-        // 1. Carbon hotkeys — can become unresponsive after sleep. Re-register.
-        contextCapture.unregisterHotkey()
-        contextCapture.registerHotkey()
-        logger.log("WAKE | hotkeys re-registered")
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.wakeRecoveryTask = nil }
 
-        // ParakeetEngine handles its own wake recovery via NSWorkspace.didWakeNotification
-        // observer installed during prewarm(). No action needed here.
+            logger.log("WAKE | system wake detected — running recovery checks")
 
-        EventReporter.shared.capture(level: .info, engine: "app", event: "wake_recovery",
-            message: "System wake recovery completed")
+            // 1. Carbon hotkeys — can become unresponsive after sleep. Re-register.
+            contextCapture.unregisterHotkey()
+            contextCapture.registerHotkey()
+            logger.log("WAKE | hotkeys re-registered")
+
+            // Shared runtime prep is deduplicated through a single in-flight task.
+            await self.waitForRuntimeReadiness()
+
+            // ParakeetEngine handles its own wake recovery via NSWorkspace.didWakeNotification
+            // observer installed during prewarm(). No action needed here.
+
+            EventReporter.shared.capture(level: .info, engine: "app", event: "wake_recovery",
+                message: "System wake recovery completed")
+        }
+        wakeRecoveryTask = task
+        await task.value
     }
 
     func shutdown() {
         #if BETA_BUILD
         BetaTelemetry.shared.stopPeriodicShipping()
         #endif
-        wakeHealthCheckTask?.cancel()
-        wakeHealthCheckTask = nil
+        wakeRecoveryTask?.cancel()
+        wakeRecoveryTask = nil
+        runtimeReadinessTask?.cancel()
+        runtimeReadinessTask = nil
         sttRouter.parakeetEngine.cleanup()
         contextCapture.unregisterHotkey()
         if let observer = promptsObserver {
             NotificationCenter.default.removeObserver(observer)
             promptsObserver = nil
         }
+    }
+
+    private func startRuntimeReadinessIfNeeded() {
+        guard runtimeReadinessTask == nil else { return }
+
+        runtimeReadinessTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.runtimeReadinessTask = nil }
+
+            await self.sttRouter.parakeetEngine.initialize()
+            guard !Task.isCancelled else { return }
+            self.sttRouter.parakeetEngine.prewarm()
+            guard !Task.isCancelled else { return }
+
+            if #available(macOS 14.0, *) {
+                await self.meetingSession.prepareModels(showLoadingUI: false)
+            }
+        }
+    }
+
+    private func waitForRuntimeReadiness() async {
+        startRuntimeReadinessIfNeeded()
+        await runtimeReadinessTask?.value
     }
 
     private var meetingStateSummary: String {
