@@ -89,28 +89,13 @@ class ParakeetEngine: ObservableObject {
     var isModelLoaded: Bool { asrManagerReady }
 
     var inputDeviceName: String {
-        var deviceID = AudioDeviceID(0)
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        let status = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
-        )
-        guard status == noErr else { return "Unknown" }
-
-        var name: CFString = "" as CFString
-        var nameSize = UInt32(MemoryLayout<CFString>.size)
-        var nameAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceNameCFString,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        let nameStatus = AudioObjectGetPropertyData(deviceID, &nameAddress, 0, nil, &nameSize, &name)
-        guard nameStatus == noErr, (name as String).count > 0 else { return "Unknown" }
-        return name as String
+        do {
+            let deviceID = try AudioObjectID.readDefaultInputDevice()
+            let name = try deviceID.readString(kAudioDevicePropertyDeviceNameCFString)
+            return name.isEmpty ? "Unknown" : name
+        } catch {
+            return "Unknown"
+        }
     }
 
     // MARK: - Model Initialization

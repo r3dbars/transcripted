@@ -9,9 +9,15 @@ struct CapturedContext {
     var formality: String?      // "casual", "professional", "formal"
     var conversation: String?   // Full conversation thread text
 
+    private var trimmedConversation: String? {
+        guard let conversation else { return nil }
+        let trimmed = conversation.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     /// Whether we successfully extracted a conversation from the screenshot
     var hasConversation: Bool {
-        conversation != nil && !conversation!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        trimmedConversation != nil
     }
 
     /// What the user sees in the input TextEditor — transparent labeled sections
@@ -28,7 +34,7 @@ struct CapturedContext {
             lines.append("FORMALITY: \(formality)")
         }
 
-        if let conversation = conversation, !conversation.isEmpty {
+        if let conversation = trimmedConversation {
             lines.append("")
             lines.append("CONVERSATION:")
             lines.append(conversation)
@@ -52,7 +58,7 @@ struct CapturedContext {
             prompt += "FORMALITY: \(formality)\n"
         }
 
-        if let conversation = conversation {
+        if let conversation = trimmedConversation {
             prompt += "\nCONVERSATION:\n\(conversation)\n"
         }
 

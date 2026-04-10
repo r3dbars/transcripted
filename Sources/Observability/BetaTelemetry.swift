@@ -11,6 +11,7 @@ import Foundation
 final class BetaTelemetry {
     static let shared = BetaTelemetry()
     private init() {}
+    private static let tokenPlaceholder = "BETA_TOKEN_PLACEHOLDER"
 
     // Byte offsets — only ship content written since last successful upload
     private var debugLogOffset: UInt64 = 0
@@ -31,31 +32,21 @@ final class BetaTelemetry {
     // MARK: - Discrete events (fire-and-forget, unchanged)
 
     func sendEvent(type: String, sourceApp: String? = nil, payload: [String: Any] = [:]) {
-        let token = BetaConfig.userToken
-        guard token != "BETA_TOKEN_PLACEHOLDER" else { return }
-        // Security: guard against a malformed proxyBaseURL rather than force-unwrapping,
-        // which would crash the app if the URL string ever becomes invalid.
-        guard let url = URL(string: "\(BetaConfig.proxyBaseURL)/events") else {
-            fputs("⚠️ TELEMETRY | Invalid proxy events URL — dropping event\n", stderr)
-            return
-        }
+        guard let token = Self.activeToken() else { return }
 
         Task.detached(priority: .utility) {
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
             var body: [String: Any] = [
                 "event_type": type,
             ]
             if let app = sourceApp { body["source_app"] = app }
             if !payload.isEmpty { body["payload"] = payload }
 
-            do {
-                request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            } catch {
-                fputs("⚠️ TELEMETRY | failed to serialize event body: \(error.localizedDescription)\n", stderr)
+            guard let request = Self.makeJSONRequest(
+                path: "events",
+                token: token,
+                body: body,
+                failureLabel: "event body"
+            ) else {
                 return
             }
             _ = try? await URLSession.shared.data(for: request)
@@ -83,34 +74,17 @@ final class BetaTelemetry {
     // MARK: - Quit shipping (synchronous, 3s timeout — called from applicationWillTerminate)
 
     func shipLogs() {
-        let token = BetaConfig.userToken
-        guard token != "BETA_TOKEN_PLACEHOLDER" else { return }
-
-        // Ship any remaining debug log content
-        let logChunk = readChunk(from: debugLogURL, offset: &debugLogOffset)
-        let eventChunk = readChunk(from: eventsURL, offset: &eventsOffset)
-
-        guard logChunk != nil || eventChunk != nil else { return }
-
-        var body: [String: Any] = [:]
-        if let log = logChunk { body["log_lines"] = redactChunk(log) }
-        if let events = eventChunk { body["event_lines"] = redactChunk(events) }
-
-        // Security: guard against a malformed proxyBaseURL rather than force-unwrapping.
-        guard let logsURL = URL(string: "\(BetaConfig.proxyBaseURL)/logs") else {
-            fputs("⚠️ TELEMETRY | Invalid proxy logs URL — dropping quit-time logs\n", stderr)
-            return
-        }
-        var request = URLRequest(url: logsURL)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        } catch {
-            fputs("⚠️ TELEMETRY | failed to serialize quit-time log body: \(error.localizedDescription)\n", stderr)
-            return
-        }
+        guard let token = Self.activeToken(),
+              let body = shippingBody(
+                logChunk: readChunk(from: debugLogURL, offset: &debugLogOffset),
+                eventChunk: readChunk(from: eventsURL, offset: &eventsOffset)
+              ),
+              let request = Self.makeJSONRequest(
+                path: "logs",
+                token: token,
+                body: body,
+                failureLabel: "quit-time log body"
+              ) else { return }
 
         // Synchronous wait — applicationWillTerminate can't use async
         let semaphore = DispatchSemaphore(value: 0)
@@ -121,8 +95,7 @@ final class BetaTelemetry {
     // MARK: - Incremental shipping
 
     private func shipIncremental() async {
-        let token = BetaConfig.userToken
-        guard token != "BETA_TOKEN_PLACEHOLDER" else { return }
+        guard let token = Self.activeToken() else { return }
 
         // Read new chunks from both files
         var tempDebugOffset = debugLogOffset
@@ -130,27 +103,13 @@ final class BetaTelemetry {
         let logChunk = readChunk(from: debugLogURL, offset: &tempDebugOffset)
         let eventChunk = readChunk(from: eventsURL, offset: &tempEventsOffset)
 
-        guard logChunk != nil || eventChunk != nil else { return }
-
-        var body: [String: Any] = [:]
-        if let log = logChunk { body["log_lines"] = redactChunk(log) }
-        if let events = eventChunk { body["event_lines"] = redactChunk(events) }
-
-        // Security: guard against a malformed proxyBaseURL rather than force-unwrapping.
-        guard let logsURL = URL(string: "\(BetaConfig.proxyBaseURL)/logs") else {
-            fputs("⚠️ TELEMETRY | Invalid proxy logs URL — dropping incremental logs\n", stderr)
-            return
-        }
-        var request = URLRequest(url: logsURL)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        } catch {
-            fputs("⚠️ TELEMETRY | failed to serialize incremental log body: \(error.localizedDescription)\n", stderr)
-            return
-        }
+        guard let body = shippingBody(logChunk: logChunk, eventChunk: eventChunk),
+              let request = Self.makeJSONRequest(
+                path: "logs",
+                token: token,
+                body: body,
+                failureLabel: "incremental log body"
+              ) else { return }
 
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
@@ -164,25 +123,57 @@ final class BetaTelemetry {
         }
     }
 
+    private static func activeToken() -> String? {
+        let token = BetaConfig.userToken
+        return token == tokenPlaceholder ? nil : token
+    }
+
+    private static func makeJSONRequest(
+        path: String,
+        token: String,
+        body: [String: Any],
+        failureLabel: String
+    ) -> URLRequest? {
+        guard let url = URL(string: "\(BetaConfig.proxyBaseURL)/\(path)") else {
+            fputs("⚠️ TELEMETRY | invalid \(path) URL\n", stderr)
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            return request
+        } catch {
+            fputs("⚠️ TELEMETRY | failed to serialize \(failureLabel): \(error.localizedDescription)\n", stderr)
+            return nil
+        }
+    }
+
+    private func shippingBody(logChunk: String?, eventChunk: String?) -> [String: Any]? {
+        var body: [String: Any] = [:]
+        if let logChunk {
+            body["log_lines"] = redactChunk(logChunk)
+        }
+        if let eventChunk {
+            body["event_lines"] = redactChunk(eventChunk)
+        }
+        return body.isEmpty ? nil : body
+    }
+
     // MARK: - Log Redaction
 
     // Pre-compiled regexes — avoids recompilation per log line
     private static let userPathRegex = try! NSRegularExpression(pattern: #"/Users/[^/]+/"#)
     private static let apiKeyRegex = try! NSRegularExpression(pattern: #"sk-ant-[A-Za-z0-9_-]+"#)
     private static let bearerRegex = try! NSRegularExpression(pattern: #"Bearer [A-Za-z0-9._-]+"#)
-
-    /// Strip sensitive data from log lines before shipping to proxy.
-    private func redactLogLine(_ line: String) -> String {
-        var result = line
-        let fullRange = NSRange(result.startIndex..., in: result)
-        // Redact file paths containing usernames: /Users/<name>/ → /Users/****/
-        result = Self.userPathRegex.stringByReplacingMatches(in: result, range: fullRange, withTemplate: "/Users/****/")
-        let range2 = NSRange(result.startIndex..., in: result)
-        result = Self.apiKeyRegex.stringByReplacingMatches(in: result, range: range2, withTemplate: "sk-ant-****")
-        let range3 = NSRange(result.startIndex..., in: result)
-        result = Self.bearerRegex.stringByReplacingMatches(in: result, range: range3, withTemplate: "Bearer ****")
-        return result
-    }
+    private static let sourceAppNameJSONRegex = try! NSRegularExpression(pattern: #""source_app_name"\s*:\s*"[^"]*""#)
+    private static let sourceAppBundleJSONRegex = try! NSRegularExpression(pattern: #""source_app_bundle_id"\s*:\s*"[^"]*""#)
+    private static let transcriptURLJSONRegex = try! NSRegularExpression(pattern: #""transcript_url"\s*:\s*"[^"]*""#)
+    private static let titleJSONRegex = try! NSRegularExpression(pattern: #""title"\s*:\s*"[^"]*""#)
 
     /// Redact all sensitive data in a multi-line log chunk.
     /// Applies regexes directly on the full chunk (avoids per-line split/rejoin).
@@ -194,6 +185,14 @@ final class BetaTelemetry {
         result = Self.apiKeyRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "sk-ant-****")
         range = NSRange(result.startIndex..., in: result)
         result = Self.bearerRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "Bearer ****")
+        range = NSRange(result.startIndex..., in: result)
+        result = Self.sourceAppNameJSONRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "\"source_app_name\":\"[redacted]\"")
+        range = NSRange(result.startIndex..., in: result)
+        result = Self.sourceAppBundleJSONRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "\"source_app_bundle_id\":\"[redacted]\"")
+        range = NSRange(result.startIndex..., in: result)
+        result = Self.transcriptURLJSONRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "\"transcript_url\":\"[redacted]\"")
+        range = NSRange(result.startIndex..., in: result)
+        result = Self.titleJSONRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "\"title\":\"[redacted]\"")
         return result
     }
 
