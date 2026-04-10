@@ -1,45 +1,32 @@
 # Transcripted
 
 Transcripted is a local Mac app for dictation and meeting capture that turns
-spoken work into structured files your agent can actually use.
+spoken words into structured files your agent can actually use.
 
-Use it today as a practical dictation and meeting tool. Longer term, we think
-audio is the first useful layer of local AI context, because it captures real
-work without asking you to maintain a second brain by hand.
+Use it today as a practical dictation and meeting tool. Longer term, I think
+audio is the first useful layer of AI context, because it captures without asking you to maintain a second brain by hand.
 
 
 ## What You Get Today
 
-- Dictate into any app and paste text back where you were already working
-- Record meetings locally with mic and system audio capture
-- Save human-readable Markdown and machine-readable JSON artifacts on disk
-- Point Claude, Codex, or another local agent at those artifacts with a starter prompt
-
-## Connect Your Agent
-
-Transcripted now has one main connection path plus two optional fallbacks:
-
-- `Copy one prompt` for the default setup flow
-- `MCP` for supported agents that can use direct tools
-- `Folders` for any file-reading agent that should work from local artifacts directly
-
-The end-user setup guide lives in `docs/agent-connect.md`.
+- Dictate into any app and paste text back
+- Record meetings locally
+- Save human-readable Markdown and agent-readable JSON files on disk
+- Point Claude, Codex, OpenClaw or any agent at those files
 
 ## Why This Exists
 
-A lot of important context never makes it into docs or chat logs.
+A lot of important context never makes it into your notes/docs.
 
-It shows up in:
+Important context gets lost in:
 
-- meetings
-- dictated messages
-- voice notes
-- half-formed spoken thinking
+- a call where a decision was made
+- thinking out loud through a hard problem
 
 Most of that context disappears as soon as the conversation ends.
 
-Transcripted tries to preserve that high-signal spoken work locally, then turn
-it into files that stay inspectable, reusable, and easy to load on demand.
+Transcripted preserves that high signal context, then turns
+it into files that stay on device.
 
 ## How It Works
 
@@ -48,14 +35,14 @@ it into files that stay inspectable, reusable, and easy to load on demand.
 Transcripted supports two concrete workflows today:
 
 - dictation into any app
-- local meeting recording and transcription
+- meeting recording and transcription
 
 ### 2. Process it locally
 
-Transcripted transcribes audio on-device and keeps the resulting artifacts on
+Transcripted transcribes audio on-device and keeps the resulting files on
 your Mac.
 
-### 3. Save durable artifacts
+### 3. Save Files
 
 Meeting recordings become:
 
