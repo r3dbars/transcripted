@@ -55,7 +55,7 @@ struct TranscriptedSettingsView: View {
                     .foregroundStyle(.secondary)
                 }
 
-                SettingsSection(title: "Permissions", detail: "Transcripted only asks for permissions that support local capture and paste-back.") {
+                SettingsSection(title: "Permissions", detail: "Transcripted only asks for permissions that support local capture, paste-back, and optional meeting prompts.") {
                     ForEach(TranscriptedPermissionKind.allCases) { kind in
                         PermissionStatusRow(kind: kind, granted: permissionStates[kind] ?? false) {
                             TranscriptedPermissionAccess.openSettings(for: kind)

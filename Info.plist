@@ -28,5 +28,7 @@
     <string>Transcripted needs screen recording access so meeting capture can access system audio from calls, videos, and other apps.</string>
     <key>NSAudioCaptureUsageDescription</key>
     <string>Transcripted records system audio alongside your microphone so meetings can be transcribed locally on your Mac.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Transcripted can optionally use your calendar to spot upcoming meetings and offer a local record prompt right when they start.</string>
 </dict>
 </plist>

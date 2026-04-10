@@ -62,10 +62,12 @@ final class MeetingOverlayRootView: NSView {
     private let statusDot = NSView()
     private let titleLabel = NSTextField(labelWithString: "Meeting")
     private let timerLabel = NSTextField(labelWithString: "00:00")
+    private let detailLabel = NSTextField(labelWithString: "")
     private let micLabel = NSTextField(labelWithString: "Mic")
     private let systemLabel = NSTextField(labelWithString: "System audio")
     private let micWaveform = WaveformHostView(frame: .zero)
     private let systemWaveform = WaveformHostView(frame: .zero)
+    private let recordButton = NSButton()
     private let closeButton = NSButton()
     private let chevronButton = NSButton()
     private let warmupTitleLabel = NSTextField(labelWithString: "Getting Transcripted ready")
@@ -75,7 +77,8 @@ final class MeetingOverlayRootView: NSView {
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
 
     /// Invoked when the user clicks the close/stop button.
-    var onClose: (() -> Void)?
+    var onSecondaryAction: (() -> Void)?
+    var onPrimaryAction: (() -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -106,6 +109,12 @@ final class MeetingOverlayRootView: NSView {
         timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         timerLabel.textColor = MeetingOverlayTokens.textSecondary
         addSubview(timerLabel)
+
+        detailLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        detailLabel.textColor = MeetingOverlayTokens.textSecondary
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.isHidden = true
+        addSubview(detailLabel)
 
         micLabel.font = NSFont.systemFont(ofSize: 8, weight: .medium)
         micLabel.textColor = MeetingOverlayTokens.textSecondary
@@ -139,6 +148,22 @@ final class MeetingOverlayRootView: NSView {
         warmupProgress.isHidden = true
         addSubview(warmupProgress)
 
+        recordButton.attributedTitle = NSAttributedString(
+            string: "Record",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: NSColor.black
+            ]
+        )
+        recordButton.isBordered = false
+        recordButton.wantsLayer = true
+        recordButton.layer?.cornerRadius = 8
+        recordButton.layer?.backgroundColor = OverlayTokens.accentGreen.cgColor
+        recordButton.target = self
+        recordButton.action = #selector(handlePrimaryAction)
+        recordButton.isHidden = true
+        addSubview(recordButton)
+
         closeButton.attributedTitle = NSAttributedString(
             string: "Stop",
             attributes: [
@@ -151,7 +176,7 @@ final class MeetingOverlayRootView: NSView {
         closeButton.layer?.cornerRadius = 8
         closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
         closeButton.target = self
-        closeButton.action = #selector(handleClose)
+        closeButton.action = #selector(handleSecondaryAction)
         closeButton.isHidden = true
         addSubview(closeButton)
 
@@ -170,6 +195,10 @@ final class MeetingOverlayRootView: NSView {
         super.layout()
         if currentState == .preparing {
             layoutWarmup()
+            return
+        }
+        if currentState == .prompt {
+            layoutPrompt()
             return
         }
 
@@ -266,6 +295,56 @@ final class MeetingOverlayRootView: NSView {
         )
     }
 
+    private func layoutPrompt() {
+        let pad: CGFloat = 12
+        let dotSize = MeetingOverlayTokens.dotSize
+        let topY = bounds.height - 22
+
+        statusDot.frame = NSRect(x: pad, y: topY - dotSize / 2, width: dotSize, height: dotSize)
+
+        let timerSize = timerLabel.fittingSize
+        timerLabel.frame = NSRect(
+            x: bounds.width - pad - timerSize.width,
+            y: topY - timerSize.height / 2,
+            width: timerSize.width,
+            height: timerSize.height
+        )
+
+        let titleX = statusDot.frame.maxX + 8
+        let titleWidth = max(0, timerLabel.frame.minX - titleX - 8)
+        let titleSize = titleLabel.fittingSize
+        titleLabel.frame = NSRect(
+            x: titleX,
+            y: topY - titleSize.height / 2,
+            width: min(titleWidth, titleSize.width),
+            height: titleSize.height
+        )
+
+        detailLabel.frame = NSRect(
+            x: pad,
+            y: 34,
+            width: bounds.width - pad * 2,
+            height: 16
+        )
+
+        let secondaryWidth = max(62, closeButton.fittingSize.width + 18)
+        let primaryWidth = max(74, recordButton.fittingSize.width + 18)
+        let buttonHeight: CGFloat = 24
+
+        closeButton.frame = NSRect(
+            x: bounds.width - pad - secondaryWidth - primaryWidth - 8,
+            y: 10,
+            width: secondaryWidth,
+            height: buttonHeight
+        )
+        recordButton.frame = NSRect(
+            x: bounds.width - pad - primaryWidth,
+            y: 10,
+            width: primaryWidth,
+            height: buttonHeight
+        )
+    }
+
     private func layoutWarmup() {
         let pad: CGFloat = 16
         let contentWidth = bounds.width - pad * 2
@@ -286,7 +365,8 @@ final class MeetingOverlayRootView: NSView {
         micLevel: Float,
         systemLevel: Float,
         participants: [String],
-        warmupStatus: MeetingSessionController.ModelWarmupStatus?
+        warmupStatus: MeetingSessionController.ModelWarmupStatus?,
+        prompt: MeetingOverlayController.PromptDisplay?
     ) {
         currentState = state
         if let warmupStatus {
@@ -294,19 +374,22 @@ final class MeetingOverlayRootView: NSView {
         }
 
         let isPreparing = state == .preparing
+        let isPrompting = state == .prompt
         statusDot.isHidden = isPreparing
         titleLabel.isHidden = isPreparing
-        timerLabel.isHidden = isPreparing || state != .recording
-        micLabel.isHidden = isPreparing
-        systemLabel.isHidden = isPreparing
-        micWaveform.isHidden = isPreparing
-        systemWaveform.isHidden = isPreparing
+        timerLabel.isHidden = isPreparing || (state != .recording && !isPrompting)
+        detailLabel.isHidden = !isPrompting
+        micLabel.isHidden = isPreparing || isPrompting
+        systemLabel.isHidden = isPreparing || isPrompting
+        micWaveform.isHidden = isPreparing || isPrompting
+        systemWaveform.isHidden = isPreparing || isPrompting
         let showLevels = state == .recording
         micLabel.isHidden = !showLevels
         systemLabel.isHidden = !showLevels
         micWaveform.isHidden = !showLevels
         systemWaveform.isHidden = !showLevels
-        closeButton.isHidden = isPreparing || state != .recording
+        recordButton.isHidden = !isPrompting
+        closeButton.isHidden = isPreparing || (state != .recording && !isPrompting)
         chevronButton.isHidden = true
         warmupTitleLabel.isHidden = !isPreparing
         warmupSubtitleLabel.isHidden = !isPreparing
@@ -324,24 +407,52 @@ final class MeetingOverlayRootView: NSView {
         case .idle:
             titleLabel.stringValue = "Meeting"
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotIdle.cgColor
+            detailLabel.stringValue = ""
         case .preparing:
             titleLabel.stringValue = "Loading models…"
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotPrep.cgColor
+            detailLabel.stringValue = ""
+        case .prompt:
+            titleLabel.stringValue = prompt?.title ?? "Meeting detected"
+            detailLabel.stringValue = prompt?.detail ?? "Record this meeting?"
+            timerLabel.stringValue = prompt?.countdownText ?? ""
+            statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotPrompt.cgColor
+            closeButton.attributedTitle = NSAttributedString(
+                string: "Not now",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                    .foregroundColor: MeetingOverlayTokens.textPrimary
+                ]
+            )
+            closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
         case .recording:
             titleLabel.stringValue = "Recording meeting"
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotRecording.cgColor
+            closeButton.attributedTitle = NSAttributedString(
+                string: "Stop",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                    .foregroundColor: MeetingOverlayTokens.textPrimary
+                ]
+            )
+            closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
         case .transcribing:
             titleLabel.stringValue = "Saving transcript"
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotPrep.cgColor
+            detailLabel.stringValue = ""
         case .saved:
             titleLabel.stringValue = "Saved transcript"
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotSaved.cgColor
+            detailLabel.stringValue = ""
         case .error(let message):
             titleLabel.stringValue = displayErrorTitle(for: message)
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotError.cgColor
+            detailLabel.stringValue = ""
         }
 
-        timerLabel.stringValue = formatDuration(duration)
+        if state == .recording {
+            timerLabel.stringValue = formatDuration(duration)
+        }
         currentMicLevel = max(0, min(1, micLevel))
         currentSystemLevel = max(0, min(1, systemLevel))
         micWaveform.level = currentMicLevel
@@ -378,8 +489,12 @@ final class MeetingOverlayRootView: NSView {
         return "Transcript needs retry"
     }
 
-    @objc private func handleClose() {
-        onClose?()
+    @objc private func handleSecondaryAction() {
+        onSecondaryAction?()
+    }
+
+    @objc private func handlePrimaryAction() {
+        onPrimaryAction?()
     }
 }
 
@@ -395,12 +510,14 @@ enum MeetingOverlayTokens {
     static let waveformTint  = OverlayTokens.textPrimary
     static let dotIdle       = OverlayTokens.textMuted
     static let dotPrep       = OverlayTokens.textSecondary
+    static let dotPrompt     = OverlayTokens.accentGreen
     static let dotRecording  = NSColor(red: 0.95, green: 0.22, blue: 0.22, alpha: 1.0)
     static let dotSaved      = NSColor.systemGreen
     static let dotError      = NSColor.systemRed
 
     static let panelWidth: CGFloat  = 360
     static let panelHeight: CGFloat = 48
+    static let promptHeight: CGFloat = 88
     static let warmupHeight: CGFloat = 96
     static let cornerRadius: CGFloat = OverlayTokens.cornerRadius
     static let dotSize: CGFloat     = 8
@@ -420,11 +537,18 @@ final class MeetingOverlayController {
 
     enum OverlayState: Equatable {
         case idle
+        case prompt
         case preparing
         case recording
         case transcribing
         case saved
         case error(String)
+    }
+
+    struct PromptDisplay: Equatable {
+        let title: String
+        let detail: String
+        let countdownText: String
     }
 
     // MARK: - State
@@ -435,6 +559,10 @@ final class MeetingOverlayController {
     private var currentSystemLevel: Float = 0
     private var currentParticipants: [String] = []
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
+    private var currentPrompt: PromptDisplay?
+    private var promptCandidate: MeetingPromptDetector.Candidate?
+    private var promptCountdownTask: Task<Void, Never>?
+    private var promptSecondsRemaining = 0
 
     // MARK: - Panel & views
 
@@ -448,6 +576,8 @@ final class MeetingOverlayController {
     /// The session controller the overlay reflects and forwards hotkey events to.
     /// Set once by `TranscriptedAppDelegate` during app launch.
     weak var meetingSession: MeetingSessionController?
+    var onPromptRecord: ((MeetingPromptDetector.Candidate) -> Void)?
+    var onPromptDismiss: ((MeetingPromptDetector.Candidate) -> Void)?
 
     // MARK: - Setup
 
@@ -472,7 +602,8 @@ final class MeetingOverlayController {
 
         let rootView = MeetingOverlayRootView(frame: panel.contentView?.bounds ?? frame)
         rootView.autoresizingMask = [.width, .height]
-        rootView.onClose = { [weak self] in self?.handleCloseTapped() }
+        rootView.onSecondaryAction = { [weak self] in self?.handleSecondaryActionTapped() }
+        rootView.onPrimaryAction = { [weak self] in self?.handlePrimaryActionTapped() }
         panel.contentView?.addSubview(rootView)
 
         self.panel = panel
@@ -502,6 +633,36 @@ final class MeetingOverlayController {
                 break
             }
         }
+    }
+
+    @discardableResult
+    func presentDetectedMeetingPrompt(_ candidate: MeetingPromptDetector.Candidate, timeout seconds: Int = 10) -> Bool {
+        guard let session = meetingSession else { return false }
+
+        switch session.state {
+        case .recording, .transcribing, .loadingModels:
+            return false
+        case .idle, .ready, .error:
+            break
+        }
+
+        guard state == .idle || state == .saved else { return false }
+
+        autoHideTask?.cancel()
+        promptCountdownTask?.cancel()
+
+        promptCandidate = candidate
+        promptSecondsRemaining = max(1, seconds)
+        currentPrompt = PromptDisplay(
+            title: "Meeting detected",
+            detail: candidate.detail,
+            countdownText: "\(promptSecondsRemaining)s"
+        )
+        state = .prompt
+        showPanel()
+        pushToView()
+        schedulePromptCountdown()
+        return true
     }
 
     // MARK: - Subscriptions
@@ -551,12 +712,23 @@ final class MeetingOverlayController {
     private func applySessionState(_ sessionState: MeetingSessionController.State) {
         switch sessionState {
         case .idle:
+            if state == .prompt {
+                pushToView()
+                break
+            }
             state = .idle
             hidePanel()
         case .loadingModels:
             state = .preparing
+            currentPrompt = nil
+            promptCandidate = nil
+            promptCountdownTask?.cancel()
             showPanel()
         case .ready:
+            if state == .prompt {
+                pushToView()
+                break
+            }
             // Ready but not recording — hide unless we're already showing a
             // terminal state (saved/error); the auto-hide task handles those.
             if case .transcribing = state {
@@ -571,13 +743,22 @@ final class MeetingOverlayController {
             hidePanel()
         case .recording:
             state = .recording
+            currentPrompt = nil
+            promptCandidate = nil
+            promptCountdownTask?.cancel()
             autoHideTask?.cancel()
             showPanel()
         case .transcribing:
             state = .transcribing
+            currentPrompt = nil
+            promptCandidate = nil
+            promptCountdownTask?.cancel()
             showPanel()
         case .error(let message):
             state = .error(message)
+            currentPrompt = nil
+            promptCandidate = nil
+            promptCountdownTask?.cancel()
             showPanel()
             scheduleAutoHide(after: 5)
         }
@@ -619,7 +800,14 @@ final class MeetingOverlayController {
     /// Target height for the panel based on the current `isExpanded` flag.
     /// Kept as a helper so show/animate paths agree on the value.
     private func currentPanelHeight() -> CGFloat {
-        state == .preparing ? MeetingOverlayTokens.warmupHeight : MeetingOverlayTokens.panelHeight
+        switch state {
+        case .preparing:
+            return MeetingOverlayTokens.warmupHeight
+        case .prompt:
+            return MeetingOverlayTokens.promptHeight
+        default:
+            return MeetingOverlayTokens.panelHeight
+        }
     }
 
     private func hidePanel() {
@@ -652,6 +840,58 @@ final class MeetingOverlayController {
         }
     }
 
+    private func handleSecondaryActionTapped() {
+        switch state {
+        case .prompt:
+            dismissPrompt(notifyDetector: true)
+        case .recording:
+            handleCloseTapped()
+        default:
+            hidePanel()
+        }
+    }
+
+    private func handlePrimaryActionTapped() {
+        guard case .prompt = state, let candidate = promptCandidate else { return }
+        promptCountdownTask?.cancel()
+        onPromptRecord?(candidate)
+    }
+
+    private func dismissPrompt(notifyDetector: Bool) {
+        promptCountdownTask?.cancel()
+
+        if notifyDetector, let candidate = promptCandidate {
+            onPromptDismiss?(candidate)
+        }
+
+        promptCandidate = nil
+        currentPrompt = nil
+        state = .idle
+        hidePanel()
+    }
+
+    private func schedulePromptCountdown() {
+        promptCountdownTask?.cancel()
+        promptCountdownTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            while self.promptSecondsRemaining > 0 {
+                self.currentPrompt = PromptDisplay(
+                    title: "Meeting detected",
+                    detail: self.promptCandidate?.detail ?? "Record this meeting?",
+                    countdownText: "\(self.promptSecondsRemaining)s"
+                )
+                self.pushToView()
+
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                self.promptSecondsRemaining -= 1
+            }
+
+            self.dismissPrompt(notifyDetector: true)
+        }
+    }
+
     // MARK: - View push
 
     private func pushToView() {
@@ -662,7 +902,8 @@ final class MeetingOverlayController {
             micLevel: currentMicLevel,
             systemLevel: currentSystemLevel,
             participants: currentParticipants,
-            warmupStatus: currentWarmupStatus
+            warmupStatus: currentWarmupStatus,
+            prompt: currentPrompt
         )
     }
 
