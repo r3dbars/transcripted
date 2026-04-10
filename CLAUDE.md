@@ -1,50 +1,54 @@
-# Draft in `r3dbars/transcripted`
+# Transcripted in `r3dbars/transcripted`
 
 ## What This Repo Is
 
-This public repo now carries the **Draft** product on `main` while preserving the
-old standalone Transcripted app on:
+`main` builds the current **Transcripted** macOS menubar app:
 
-- tag: `pre-draft-takeover-2026-04-06`
+- dictation
+- meeting capture and transcription
+- local transcript artifacts for agent workflows
+
+The codebase still contains many `Draft*` symbols and file names. Those are compatibility leftovers from the takeover, not a second product line inside this branch.
+
+Legacy standalone references live on:
+
 - branch: `legacy/transcripted-standalone`
-
-`main` is Draft-first. The legacy Transcripted app does **not** live on `main`.
+- tag: `pre-draft-takeover-2026-04-06`
 
 ## High-Level Layout
 
 ```text
 Sources/
-|- DraftApp.swift
-|- DraftAppState.swift
-|- DraftPaths.swift
+|- DraftApp.swift                 <- @main app entry
+|- DraftAppState.swift           <- shared engine ownership
+|- DraftPaths.swift              <- Application Support paths + compatibility alias
 |- DraftConstants.swift
 |- HotkeyPreferences.swift
-|- API/
 |- Accessibility/
-|- Analysis/
-|- Capture/
-|- Dictation/
-|- Draft/
-|- Feedback/
-|- Local/
-|- Meeting/
-|- Observability/
-|- Prompts/
-|- Speech/
-|- Style/
-|- TranscriptedCore/    <- shared meeting/transcription core kept in-repo
-`- UI/
+|- API/                          <- beta-only config
+|- Capture/                      <- Carbon hotkeys + right-option dictation tap
+|- Dictation/                    <- dictation storage + markdown writer
+|- Draft/                        <- pure diff/refusal helpers
+|- Meeting/                      <- Transcripted ↔ TranscriptedCore bridge
+|- Observability/                <- debug log, JSONL events, beta telemetry, updates
+|- Reliability/                  <- wake recovery
+|- Speech/                       <- Parakeet STT + router
+|- Style/                        <- pure style helper utilities
+|- TranscriptedCore/             <- shared transcription/diarization library
+`- UI/                           <- floating dictation overlay, meeting overlay, menubar UI
 Tests/
 SmokeTests/
+Tools/TranscriptedQA/
+Tools/TranscriptedMCP/
 backend/
-build.sh
 build-deps.sh
+build.sh
 run-tests.sh
 run-integration-smoke.sh
-Package.swift            <- SPM package for TranscriptedCore smoke tests only
+Package.swift
 ```
 
-## Build and Test
+## Build And Test
 
 ```bash
 bash build-deps.sh
@@ -56,29 +60,28 @@ swift test
 
 Rules:
 
-1. After changing Swift source, run `bash build.sh` and `bash run-tests.sh`.
-2. If you change `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash run-integration-smoke.sh`.
-3. `build.sh` builds the Draft app.
-4. `Package.swift` exists so `Sources/TranscriptedCore/` can still be tested as a standalone library surface.
+1. Run `bash build.sh` and `bash run-tests.sh` after Swift changes.
+2. Also run `bash run-integration-smoke.sh` for changes in `Sources/Meeting/`, `Sources/TranscriptedCore/`, or `Sources/Reliability/`.
+3. `build.sh` compiles the app from `Sources/` while excluding `Sources/TranscriptedCore/`.
+4. `Package.swift` and `swift test` cover the standalone `TranscriptedCore` library surface.
 
-## TranscriptedCore
+## Current Product Shape
 
-`Sources/TranscriptedCore/` is the shared meeting/transcription core extracted from
-Transcripted and now co-hosted in this repo. Draft consumes it through
-`Sources/Meeting/`.
+- Dictation is the active overlay flow.
+- Meetings run through `MeetingSessionController` plus a separate non-activating meeting overlay.
+- The old screenshot-to-draft workflow is no longer the live product path; some compatibility code and naming remain.
+- Several folders such as `Sources/Analysis/`, `Sources/Feedback/`, `Sources/Local/`, and `Sources/Prompts/` are currently placeholders/documentation-only rather than active subsystems.
 
-Important implications:
+## Paths And Boundaries
 
-1. `Sources/TranscriptedCore/` is a library boundary. Do not couple it to Draft UI types.
-2. `build.sh` must **not** compile `Sources/TranscriptedCore/` directly into the Draft app target.
-3. `build-deps.sh` builds a unified dependency archive and inlines `TranscriptedCore` from this repo when present.
+- Fresh installs use `~/Library/Application Support/Transcripted/`.
+- If `~/Library/Application Support/Draft/` already exists, `DraftPaths.swift` keeps using it.
+- Meeting artifacts are isolated under `.../meetings/`.
+- Dictation artifacts are isolated under `.../dictations/`.
+- `Sources/TranscriptedCore/` must stay a library boundary. App-facing UI types should not leak into it.
 
-## Cutover Notes
+## Tooling Notes
 
-This repo takeover uses the **manual migration** path:
-
-- existing Transcripted installs do **not** auto-upgrade into Draft
-- Draft keeps its current bundle identifier on `main`
-- old Transcripted release/update plumbing is intentionally disabled on `main`
-
-If you need the old standalone Transcripted app, use the legacy branch or tag above.
+- `Tools/TranscriptedQA` is a separate Swift package for artifact/database validation.
+- `Tools/TranscriptedMCP` is a separate Swift package that serves transcript data over MCP.
+- `build-deps.sh` builds the unified dependency archive used by both the app and the co-hosted `TranscriptedCore` library surface.

@@ -1,45 +1,62 @@
-# Draft in `r3dbars/transcripted`
+# Transcripted in `r3dbars/transcripted`
 
 ## Repo Truth
 
-`main` is the **Draft** product.
+This repo currently builds the **Transcripted** menubar app for:
 
-The old standalone Transcripted app is preserved on:
+- local dictation
+- local meeting capture and transcription
+- agent-friendly transcript artifacts
 
-- `legacy/transcripted-standalone`
-- `pre-draft-takeover-2026-04-06`
+Many internal file and type names still use `Draft*` from the takeover period. Treat those as compatibility naming, not as evidence of a separate Draft product living on `main`.
 
-Do not treat `main` as a dual-app repo.
+The old standalone app is preserved on:
+
+- branch: `legacy/transcripted-standalone`
+- tag: `pre-draft-takeover-2026-04-06`
 
 ## Main Areas
 
-- `Sources/` — Draft app code
-- `Sources/Meeting/` — Draft-to-TranscriptedCore bridge
-- `Sources/TranscriptedCore/` — shared meeting/transcription library
-- `Tests/` — Draft fast test suite
-- `SmokeTests/` — TranscriptedCore integration smoke
-- `backend/` — Draft beta backend
+- `Sources/` — app entry point, UI, dictation, meetings, shared app utilities
+- `Sources/Meeting/` — Transcripted-specific bridge into `TranscriptedCore`
+- `Sources/TranscriptedCore/` — shared transcription/diarization library boundary
+- `Sources/Reliability/` — wake-recovery coordination used by the app and smoke coverage
+- `Tests/` — fast pure-Swift test suite
+- `SmokeTests/` — integration smoke coverage for `TranscriptedCore` and wake recovery
+- `Tools/TranscriptedQA/` — QA CLI
+- `Tools/TranscriptedMCP/` — standalone MCP server for transcript artifacts
+- `backend/` — beta backend/proxy support
 
-## Build Commands
+## Build And Test
 
 ```bash
 bash build-deps.sh
 bash build.sh
 bash run-tests.sh
 bash run-integration-smoke.sh
+swift test
 ```
 
 Rules:
 
 1. After changing Swift source, run `bash build.sh` and `bash run-tests.sh`.
-2. If you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash run-integration-smoke.sh`.
-3. `build.sh` builds the Draft app only.
-4. `Sources/TranscriptedCore/` must stay a library boundary; do not compile it directly into the Draft app target.
+2. If you touch `Sources/Meeting/`, `Sources/TranscriptedCore/`, or `Sources/Reliability/`, also run `bash run-integration-smoke.sh`.
+3. `build.sh` builds the Transcripted app target only.
+4. `Package.swift` exists so `Sources/TranscriptedCore/` can still be built and tested as a library surface with `swift test`.
+5. `build.sh` intentionally excludes `Sources/TranscriptedCore/` from the app compile step; `build-deps.sh` inlines it into the unified dependency archive.
+
+## Storage Notes
+
+- App support data lives under `~/Library/Application Support/Transcripted/` for fresh installs.
+- If `~/Library/Application Support/Draft/` already exists, `DraftPaths.swift` keeps using it for compatibility.
+- Meeting-mode artifacts live under `~/Library/Application Support/{Draft|Transcripted}/meetings/`.
+- Dictation markdown exports live under `~/Library/Application Support/{Draft|Transcripted}/dictations/`.
+- `TranscriptedCore` still defaults to `~/Documents/Transcripted/` when used standalone or by tools that do not pass custom storage paths.
 
 ## Migration Assumption
 
-This repo takeover uses the **manual migration** path:
+This repo still follows the manual migration path:
 
-- existing Transcripted installs do not auto-upgrade into Draft
-- Draft keeps its current bundle identifier on `main`
-- legacy Transcripted update/release plumbing is intentionally not active on `main`
+- existing installs do not auto-upgrade from the old standalone app
+- current builds preserve compatibility with the legacy Draft-named Application Support folder when it already exists
+- old standalone release/update plumbing is not the active path on `main`

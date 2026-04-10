@@ -106,11 +106,11 @@ EOU fires after 1280ms of silence. For fast back-to-back phrases, the last phras
 
 After modifying ParakeetEngine, verify with these checks:
 
-- **Basic recording:** ⌥D → speak → ⌥D → draft appears with correct transcription
+- **Basic dictation:** right Option or `⌥Space` → speak → stop → transcription completes correctly
 - **Long recording:** Record 60+ seconds → EOU live text updates phrase-by-phrase, Parakeet batch transcription returns full accurate text
 - **Model load:** Check `PARAKEET | models loaded` in debug log on launch
 - **Mic permission:** Revoke mic permission in System Settings → press hotkey → should log warning, not crash
 - **Audio device change:** Plug/unplug USB mic during idle → should log device change and re-warm
 - **Quit cleanup:** Quit app during recording → green mic dot should disappear immediately
-- **Debug log:** `tail -f ~/draft-debug.log | grep PARAKEET` shows all parakeet events
+- **Debug log:** `tail -f ~/transcripted-debug.log | grep PARAKEET` shows all parakeet events
 - **Build:** `bash build.sh` — pre-existing warnings only (NSLock in async context is intentional)
