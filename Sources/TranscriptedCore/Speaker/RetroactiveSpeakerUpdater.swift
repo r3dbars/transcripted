@@ -115,6 +115,7 @@ extension TranscriptSaver {
                     for oldName in oldNames {
                         applyNameReplacement(in: &content, oldName: oldName, newName: newName, updateSpeakerTag: true)
                     }
+                    content = consolidateSpeakerBreakdown(content)
                     try content.write(to: fileURL, atomically: true, encoding: .utf8)
                 }
                 updateAgentJSONMerge(transcriptURL: fileURL, sourceDbId: sourceDbId, targetDbId: targetDbId, newName: newName)
@@ -214,9 +215,9 @@ extension TranscriptSaver {
 
         AppLogger.pipeline.info("Transcript not at expected path, scanning for renamed file", ["expected": url.lastPathComponent])
 
-        let dir = url.deletingLastPathComponent()
+        let directory = url.deletingLastPathComponent()
         guard let firstId = updates.first?.persistentSpeakerId.uuidString,
-              let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+              let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
                 .filter({ $0.pathExtension == "md" }) else {
             return url
         }
@@ -464,12 +465,21 @@ extension TranscriptSaver {
             }
         }
 
-        let updated = AgentTranscript(
+        var updated = AgentTranscript(
             version: transcript.version,
             recording: transcript.recording,
             speakers: updatedSpeakers,
             utterances: transcript.utterances
         )
+
+        for update in updates {
+            guard case .merged(let targetProfileId) = update.action else { continue }
+            updated = deduplicateAgentSpeaker(
+                in: updated,
+                persistentSpeakerId: targetProfileId.uuidString,
+                preferredName: update.newName
+            )
+        }
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -533,7 +543,7 @@ extension TranscriptSaver {
               let data = try? Data(contentsOf: jsonURL),
               let transcript = try? JSONDecoder().decode(AgentTranscript.self, from: data) else { return }
 
-        let updated = AgentTranscript(
+        let rewritten = AgentTranscript(
             version: transcript.version,
             recording: transcript.recording,
             speakers: transcript.speakers.map { speaker in
@@ -549,11 +559,93 @@ extension TranscriptSaver {
             },
             utterances: transcript.utterances
         )
+        let updated = deduplicateAgentSpeaker(
+            in: rewritten,
+            persistentSpeakerId: targetDbId.uuidString,
+            preferredName: newName
+        )
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let newData = try? encoder.encode(updated) {
             try? newData.write(to: jsonURL, options: .atomic)
+        }
+    }
+
+    private static func deduplicateAgentSpeaker(
+        in transcript: AgentTranscript,
+        persistentSpeakerId: String,
+        preferredName: String
+    ) -> AgentTranscript {
+        var canonicalSpeakerId: String?
+        var speakerIdMap: [String: String] = [:]
+        var deduplicatedSpeakers: [AgentSpeaker] = []
+
+        for speaker in transcript.speakers {
+            guard speaker.persistentSpeakerId == persistentSpeakerId else {
+                deduplicatedSpeakers.append(speaker)
+                continue
+            }
+
+            if let canonicalSpeakerId,
+               let index = deduplicatedSpeakers.firstIndex(where: { $0.id == canonicalSpeakerId }) {
+                speakerIdMap[speaker.id] = canonicalSpeakerId
+                deduplicatedSpeakers[index] = AgentSpeaker(
+                    id: canonicalSpeakerId,
+                    persistentSpeakerId: persistentSpeakerId,
+                    name: preferredName,
+                    confidence: mergedConfidence(
+                        deduplicatedSpeakers[index].confidence,
+                        speaker.confidence
+                    ),
+                    wordCount: deduplicatedSpeakers[index].wordCount + speaker.wordCount,
+                    speakingSeconds: deduplicatedSpeakers[index].speakingSeconds + speaker.speakingSeconds
+                )
+                continue
+            }
+
+            canonicalSpeakerId = speaker.id
+            speakerIdMap[speaker.id] = speaker.id
+            deduplicatedSpeakers.append(
+                AgentSpeaker(
+                    id: speaker.id,
+                    persistentSpeakerId: persistentSpeakerId,
+                    name: preferredName,
+                    confidence: speaker.confidence,
+                    wordCount: speaker.wordCount,
+                    speakingSeconds: speaker.speakingSeconds
+                )
+            )
+        }
+
+        let updatedUtterances = transcript.utterances.map { utterance in
+            guard let canonicalSpeakerId = speakerIdMap[utterance.speakerId] else {
+                return utterance
+            }
+            return AgentUtterance(
+                start: utterance.start,
+                end: utterance.end,
+                speakerId: canonicalSpeakerId,
+                text: utterance.text
+            )
+        }
+
+        return AgentTranscript(
+            version: transcript.version,
+            recording: transcript.recording,
+            speakers: deduplicatedSpeakers,
+            utterances: updatedUtterances
+        )
+    }
+
+    private static func mergedConfidence(_ lhs: String?, _ rhs: String?) -> String? {
+        switch (lhs, rhs) {
+        case ("high", _), (_, "high"):
+            return "high"
+        case ("medium", _), (_, "medium"):
+            return "medium"
+        default:
+            return lhs ?? rhs
         }
     }
 

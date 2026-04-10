@@ -8,6 +8,11 @@ final class WakeRecoveryCoordinator {
         let hotkeyError: String?
     }
 
+    private struct CompletedWakeRecovery {
+        let task: Task<(Bool, String?), Never>
+        let completedAtUptime: TimeInterval
+    }
+
     typealias HotkeyUnregister = () -> Void
     typealias HotkeyRegister = () -> Void
     typealias HotkeyErrorProvider = () -> String?
@@ -22,9 +27,11 @@ final class WakeRecoveryCoordinator {
     private let currentHotkeyError: HotkeyErrorProvider
     private let onHotkeyAttempt: HotkeyAttemptObserver?
     private let waitForRuntimeReadiness: RuntimeReadinessWaiter
+    private let recentRecoveryReuseWindow: TimeInterval
     private let sleep: Sleep
 
     private var wakeRecoveryTask: Task<(Bool, String?), Never>?
+    private var lastCompletedRecovery: CompletedWakeRecovery?
 
     init(
         hotkeyRetryAttempts: Int,
@@ -34,6 +41,7 @@ final class WakeRecoveryCoordinator {
         currentHotkeyError: @escaping HotkeyErrorProvider,
         onHotkeyAttempt: HotkeyAttemptObserver? = nil,
         waitForRuntimeReadiness: @escaping RuntimeReadinessWaiter,
+        recentRecoveryReuseWindow: TimeInterval = 1,
         sleep: @escaping Sleep = { nanoseconds in
             try? await Task.sleep(nanoseconds: nanoseconds)
         }
@@ -45,24 +53,23 @@ final class WakeRecoveryCoordinator {
         self.currentHotkeyError = currentHotkeyError
         self.onHotkeyAttempt = onHotkeyAttempt
         self.waitForRuntimeReadiness = waitForRuntimeReadiness
+        self.recentRecoveryReuseWindow = max(0, recentRecoveryReuseWindow)
         self.sleep = sleep
     }
 
     func handleSystemWake(onStart: () -> Void = {}) async -> WakeRecoveryResult {
         if let wakeRecoveryTask {
-            let (hotkeysRecovered, hotkeyError) = await wakeRecoveryTask.value
-            return WakeRecoveryResult(
-                hotkeysRecovered: hotkeysRecovered,
-                performedRecovery: false,
-                hotkeyError: hotkeyError
-            )
+            return await joinedWakeRecoveryResult(for: wakeRecoveryTask)
+        }
+
+        if let recentRecoveryTask = recentRecoveryTask() {
+            return await joinedWakeRecoveryResult(for: recentRecoveryTask)
         }
 
         onStart()
+        lastCompletedRecovery = nil
 
         let task: Task<(Bool, String?), Never> = Task { @MainActor [weak self] in
-            defer { self?.wakeRecoveryTask = nil }
-
             let hotkeyResult = await self?.recoverHotkeysAfterWake() ?? (false, "Wake recovery coordinator deallocated")
             await self?.waitForRuntimeReadiness()
             return hotkeyResult
@@ -70,6 +77,11 @@ final class WakeRecoveryCoordinator {
 
         wakeRecoveryTask = task
         let (hotkeysRecovered, hotkeyError) = await task.value
+        lastCompletedRecovery = CompletedWakeRecovery(
+            task: task,
+            completedAtUptime: ProcessInfo.processInfo.systemUptime
+        )
+        wakeRecoveryTask = nil
         return WakeRecoveryResult(
             hotkeysRecovered: hotkeysRecovered,
             performedRecovery: true,
@@ -80,6 +92,7 @@ final class WakeRecoveryCoordinator {
     func cancel() {
         wakeRecoveryTask?.cancel()
         wakeRecoveryTask = nil
+        lastCompletedRecovery = nil
     }
 
     private func recoverHotkeysAfterWake() async -> (Bool, String?) {
@@ -99,5 +112,26 @@ final class WakeRecoveryCoordinator {
         }
 
         return (false, currentHotkeyError())
+    }
+
+    private func recentRecoveryTask() -> Task<(Bool, String?), Never>? {
+        guard let lastCompletedRecovery else { return nil }
+
+        let elapsed = ProcessInfo.processInfo.systemUptime - lastCompletedRecovery.completedAtUptime
+        guard elapsed <= recentRecoveryReuseWindow else {
+            self.lastCompletedRecovery = nil
+            return nil
+        }
+
+        return lastCompletedRecovery.task
+    }
+
+    private func joinedWakeRecoveryResult(for task: Task<(Bool, String?), Never>) async -> WakeRecoveryResult {
+        let (hotkeysRecovered, hotkeyError) = await task.value
+        return WakeRecoveryResult(
+            hotkeysRecovered: hotkeysRecovered,
+            performedRecovery: false,
+            hotkeyError: hotkeyError
+        )
     }
 }

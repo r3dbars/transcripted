@@ -166,4 +166,48 @@ func testWakeRecoveryCoordinator() async {
         let completedAfterReadiness = await MainActor.run { completionFlag.count }
         assertEqual(completedAfterReadiness, 1, "wake recovery should finish after readiness resumes")
     }
+
+    await runSuite("WakeRecoveryCoordinator.handleSystemWake — reuses an immediately completed recovery") {
+        let hotkeys = await MainActor.run { HotkeyScript(scriptedErrors: ["busy", nil]) }
+        let readinessCalls = await MainActor.run { CountBox() }
+        let sleepCalls = await MainActor.run { CountBox() }
+        let readinessStarted = AsyncSignal()
+        let readinessContinue = AsyncSignal()
+
+        let coordinator = await MainActor.run {
+            WakeRecoveryCoordinator(
+                hotkeyRetryAttempts: 3,
+                hotkeyRetryDelay: 1,
+                unregisterHotkeys: { hotkeys.unregister() },
+                registerHotkeys: { hotkeys.register() },
+                currentHotkeyError: { hotkeys.currentError },
+                waitForRuntimeReadiness: {
+                    await MainActor.run { readinessCalls.increment() }
+                    await readinessStarted.open()
+                    await readinessContinue.wait()
+                },
+                sleep: { _ in
+                    await MainActor.run { sleepCalls.increment() }
+                }
+            )
+        }
+
+        let first = Task { await coordinator.handleSystemWake() }
+        await readinessStarted.wait()
+        await readinessContinue.open()
+
+        let firstResult = await first.value
+        let secondResult = await coordinator.handleSystemWake()
+
+        assertTrue(firstResult.hotkeysRecovered, "first wake should recover after retry")
+        assertTrue(firstResult.performedRecovery, "first wake should own the recovery task")
+        assertTrue(secondResult.hotkeysRecovered, "immediate follow-up wake should observe successful recovery")
+        assertFalse(secondResult.performedRecovery, "immediate follow-up wake should reuse the completed recovery")
+        let registerCalls = await MainActor.run { hotkeys.registerCalls }
+        let readinessCount = await MainActor.run { readinessCalls.count }
+        let sleepCount = await MainActor.run { sleepCalls.count }
+        assertEqual(registerCalls, 2, "reused wake should not re-register hotkeys")
+        assertEqual(readinessCount, 1, "reused wake should not wait for readiness again")
+        assertEqual(sleepCount, 1, "reused wake should not add retry sleeps")
+    }
 }

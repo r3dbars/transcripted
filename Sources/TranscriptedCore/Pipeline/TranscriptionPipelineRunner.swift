@@ -65,7 +65,6 @@ extension TranscriptionTaskManager {
         let speakerIds = Array(result.systemSpeakerIds).sorted()
         let speakerDB = await MainActor.run { transcription.speakerDB }
         let speakerClipsDirectory = await MainActor.run { transcription.speakerClipsDirectory }
-        let statsStore = await MainActor.run { self.statsStore }
         var dbKnowledge: [(speakerId: String, profile: SpeakerProfile, similarity: Double)] = []
 
         for utterance in result.systemUtterances {
@@ -174,9 +173,9 @@ extension TranscriptionTaskManager {
         }
 
         // Phase 2: Save transcript with speaker names
-        let notifier: TranscriptNotifier? = await MainActor.run {
+        let (notifier, statsStore): (TranscriptNotifier?, (any StatsStore)?) = await MainActor.run {
             self.displayStatus = .finishing
-            return self.notifier
+            return (self.notifier, self.statsStore)
         }
 
         guard let savedURL = TranscriptSaver.saveTranscript(

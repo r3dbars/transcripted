@@ -140,10 +140,6 @@ extension TranscriptionTaskManager {
             // Re-run duplicate detection now that profiles have been updated
             speakerDB.mergeDuplicates()
 
-            // Resolve the transcript URL — the file may have been renamed by
-            // MeetingTranscriptStyler between save and naming completion.
-            let resolvedURL = TranscriptSaver.resolveTranscriptURL(transcriptURL, updates: updates)
-
             // Update the saved transcript file with canonical speaker IDs and names.
             let canonicalUpdates = resolvedUpdates.map { update -> SpeakerNameUpdate in
                 let canonicalId = canonicalProfileId(for: update)
@@ -165,6 +161,13 @@ extension TranscriptionTaskManager {
                     )
                 }
             }
+
+            // Resolve the transcript URL — the file may have been renamed by
+            // MeetingTranscriptStyler between save and naming completion.
+            let resolvedURL = TranscriptSaver.resolveTranscriptURL(
+                transcriptURL,
+                updates: canonicalUpdates.isEmpty ? resolvedUpdates : canonicalUpdates
+            )
 
             if !canonicalUpdates.isEmpty {
                 TranscriptSaver.updateSpeakerNames(
