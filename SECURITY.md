@@ -1,32 +1,42 @@
 # Security Policy
 
-## The short version
+## Privacy Architecture
 
-Transcripted is local-first software. The security story here is mostly about
-keeping captured audio and transcripts on your Mac.
+Transcripted is local by default.
 
-Core behavior today:
+Its core product workflows are:
 
-- dictation runs locally on your Mac
-- meeting capture and transcription stay local
-- transcripts and feedback data are written to local files you control
+- local dictation capture
+- local meeting capture and transcription
+- local artifact generation for humans and agents
 
-Current builds still use some `Draft`-named application-support paths while the
-transition settles.
+Those artifacts are written as files you can inspect directly rather than being
+hidden behind a cloud-only backend.
+
+Fresh installs default to Transcripted-named storage. If a legacy `Draft`
+Application Support folder already exists, current builds continue using it for
+compatibility while the rename settles.
 
 Data stored locally today:
 
 | Data | Location | Format |
 |------|----------|--------|
-| Meeting transcripts | `~/Library/Application Support/Draft/meetings/transcripts/` | Markdown |
-| App events | `~/Library/Application Support/Draft/events.jsonl` | JSON Lines |
-| Feedback log | `~/Library/Application Support/Draft/feedback.jsonl` | JSON Lines |
-| Style profile | `~/Library/Application Support/Draft/style.md` | Markdown |
-| Prompt overrides | `~/Library/Application Support/Draft/prompts.json` | JSON |
+| Meeting transcripts | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | Markdown |
+| Meeting sidecars + index | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | JSON |
+| Speaker database | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | SQLite |
+| Speaker clips | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | WAV |
+| Dictation logs | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | Markdown |
+| App events | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | JSON Lines |
+| Feedback log | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | JSON Lines |
+| Style profile | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | Markdown |
+| Prompt overrides | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | JSON |
 | Model cache | `~/Library/Caches/models/mlx-community/` | MLX / CoreML |
 
-Beta builds can optionally contact the update/log proxy for update checks and
-diagnostics shipping. Core dictation and transcription do not require cloud APIs.
+Operational caveats:
+
+- first launch may download local models from HuggingFace if they are not already cached
+- beta builds can optionally contact the update/log proxy for update checks and diagnostics shipping
+- core dictation and transcription do not require cloud APIs
 
 ## Supported Versions
 
@@ -37,29 +47,29 @@ diagnostics shipping. Core dictation and transcription do not require cloud APIs
 
 ## Reporting a Vulnerability
 
-Please do not open a public GitHub issue for a security problem.
+If you discover a security vulnerability, report it responsibly:
 
-Instead, open a private GitHub Security Advisory:
+1. Do not open a public GitHub issue for security vulnerabilities
+2. Open a private GitHub Security Advisory at <https://github.com/r3dbars/transcripted/security/advisories/new>
+3. Include:
+   - description of the vulnerability
+   - steps to reproduce
+   - potential impact
+   - suggested fix, if any
 
-[https://github.com/r3dbars/transcripted/security/advisories/new](https://github.com/r3dbars/transcripted/security/advisories/new)
-
-Please include:
-
-- Description of the vulnerability
-- Steps to reproduce
-- Potential impact
-- Suggested fix (if any)
-
-We will acknowledge your report within 48 hours and aim to provide a fix within 7 days for critical issues.
+We will acknowledge your report within 48 hours and aim to provide a fix within
+7 days for critical issues.
 
 ## What we care most about
 
-Because Transcripted captures private spoken context, the main concerns are:
+Given that Transcripted is local-first software, the main security concerns are:
 
-- **Audio capture permissions** — ensuring the app only captures audio when the user intends
-- **Accessibility and paste-back safety** — ensuring automation targets the app the user intended
-- **Local data protection** — transcript and feedback file permissions
-- **Model integrity** — ensuring downloaded ML models haven't been tampered with
-- **Memory safety** — preventing audio buffer overflows or use-after-free in CoreAudio callbacks
+- audio capture permissions and ensuring capture only happens when the user intends
+- accessibility and paste-back safety when Transcripted writes into another app
+- local data protection for transcripts, sidecars, and feedback files
+- model integrity for downloaded local ML artifacts
+- memory safety in CoreAudio and audio-processing code
+- any optional network paths used for beta updates or diagnostics
 
-Out of scope: generic hosted-service attacks. Transcripted does not depend on cloud APIs for its core product workflows.
+Out of scope: generic hosted-service attacks. Transcripted does not depend on
+cloud APIs for its core product workflows.

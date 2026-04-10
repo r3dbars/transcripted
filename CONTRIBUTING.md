@@ -1,18 +1,19 @@
 # Contributing to Transcripted
 
-Thanks for helping out.
+Transcripted is a local Mac app that turns meetings and dictation into
+structured voice artifacts people and agents can both use.
 
 Quick repo orientation before you jump in:
 
-- `main` is the new Transcripted direction built from the Draft codebase
+- `main` is the current Transcripted product built from the Draft codebase
 - the old standalone Transcripted app is preserved on `legacy/transcripted-standalone`
   and `pre-draft-takeover-2026-04-06`
-- some folders and local storage paths still use `Draft` names while the
-  transition settles
+- some storage paths still use `Draft` names for compatibility while the transition settles
 
-The short version of the product story is simple: this repo is building a local
-Mac app for dictation and meeting capture that saves useful artifacts in files
-your own tools and agents can use.
+In public docs and user-facing copy, prefer concrete present-tense claims about
+what the product does today. The broader "audio as a context layer" thesis is
+real, but it should be earned through proof rather than stated as if the future
+state already exists.
 
 ## Development Setup
 
@@ -46,16 +47,27 @@ your own tools and agents can use.
 
 If you touch meeting integration or `TranscriptedCore`, also run:
 
-   ```bash
-   bash run-integration-smoke.sh
-   ```
+```bash
+bash run-integration-smoke.sh
+```
 
 On first launch, models may download from HuggingFace if they are not already
 cached locally.
 
 Build note: `build.sh` is the authoritative app build and uses raw `swiftc`.
-`Package.swift` exists for `TranscriptedCore` compilation/testing and is not
-the main app build.
+`Package.swift` exists for `TranscriptedCore` compilation and testing, but it
+is not the main app build.
+
+## Product Framing
+
+When you change README copy, onboarding text, or public docs, keep these rules
+in mind:
+
+- lead with the concrete product: local dictation and local meeting capture
+- treat "agent-ready artifacts" as a present-tense capability
+- treat "ambient context layer" as vision language, not current product language
+- be precise about what stays local and what may still contact external services
+- explain legacy `Draft` paths as compatibility behavior, not as a second product
 
 ## Making Changes
 
@@ -63,11 +75,11 @@ the main app build.
 
 Create a branch from `main` with a descriptive name:
 
-```
-feat/description     # New feature
-fix/description      # Bug fix
-docs/description     # Documentation only
-refactor/description # Code refactoring
+```text
+feat/description
+fix/description
+docs/description
+refactor/description
 ```
 
 ### Code Style
@@ -75,28 +87,40 @@ refactor/description # Code refactoring
 - Follow existing Swift conventions in the codebase
 - Use `// MARK:` comments to organize sections within files
 - Never do I/O, locks, or allocations inside CoreAudio real-time callbacks
-- Keep `@MainActor` annotations correct (see Threading below)
+- Keep `@MainActor` annotations correct
 
 ### Architecture
 
-The codebase is organized around the current app direction. Some folders still
-carry `Draft` names, but they are part of the same product:
+The codebase is organized around the current Transcripted app:
 
 | Area | Directory | Responsibility |
 |------|-----------|----------------|
-| App shell + shared state | `Sources/` | app lifecycle, hotkeys, paths, shared state |
+| App entry + state | `Sources/` | app lifecycle, hotkeys, paths, shared state |
 | Dictation capture and storage | `Sources/Speech/`, `Sources/Dictation/`, `Sources/Capture/` | speech capture, trigger routing, saved dictation transcripts |
-| Meeting capture | `Sources/Meeting/` | meeting recording, model warmup, transcript flow |
-| UI | `Sources/UI/` | dictation overlay, meeting overlay, menubar, settings, permissions onboarding |
-| Shared transcription core | `Sources/TranscriptedCore/` | extracted meeting/transcription library |
-| Draft-era utility leftovers | `Sources/Draft/`, `Sources/Style/` | small pure helpers still covered by tests |
+| Meeting pipeline | `Sources/Meeting/` | meeting recording, model warmup, transcript flow |
+| UI | `Sources/UI/` | overlay, menubar, onboarding, agent connection |
+| Shared meeting core | `Sources/TranscriptedCore/` | extracted meeting/transcription library and agent artifacts |
+| Text and style helpers | `Sources/Text/`, `Sources/Style/` | formatting, refusal heuristics, and lightweight pure helpers |
 
-`Sources/TranscriptedCore/` should stay a library boundary. Keep Draft app UI
-types and app-specific behavior out of that module.
+Some internal folders still use `Draft` naming while the repo and product are
+being aligned publicly around Transcripted. Treat those as implementation
+details unless a change specifically affects compatibility paths.
+
+### Artifact-First Principle
+
+Transcripted prefers durable local outputs over opaque app-only state.
+
+That means changes should preserve or improve:
+
+- readable Markdown outputs
+- structured JSON sidecars and indexes
+- stable storage paths
+- the ability for external agents to consume saved artifacts directly
 
 ### Threading
 
-Transcripted has strict threading rules due to CoreAudio's real-time requirements:
+Transcripted has strict threading rules due to CoreAudio's real-time
+requirements:
 
 | Component | Thread | Notes |
 |-----------|--------|-------|
@@ -104,7 +128,8 @@ Transcripted has strict threading rules due to CoreAudio's real-time requirement
 | Audio capture internals | `DispatchQueue` + `NSLock` | Real-time audio I/O |
 | CoreAudio I/O callbacks | real-time thread | **No I/O, locks, allocations, or ObjC calls** |
 
-CoreAudio I/O callbacks run on real-time threads. Buffers are deep-copied before async dispatch — never processed in-place.
+CoreAudio I/O callbacks run on real-time threads. Buffers are deep-copied
+before async dispatch, never processed in-place.
 
 ### Testing
 
@@ -127,24 +152,25 @@ file or move a source file that the test script compiles directly, update
 ## Submitting a Pull Request
 
 1. Make sure your code builds without warnings
-2. Run the test suite
-3. Keep PRs focused — one feature or fix per PR
-4. Write a clear PR description explaining **what** changed and **why**
-5. Link any related issues
+2. Run the relevant test suite
+3. Keep PRs focused, one feature or fix per PR
+4. Explain both what changed and why it matters
+5. Call out privacy, storage-path, or migration implications when relevant
+6. Link any related issues
 
 ## Reporting Bugs
 
 Open a GitHub issue with:
 
 - macOS version
-- Steps to reproduce
-- Expected vs actual behavior
-- Relevant logs from `~/Library/Application Support/Draft/events.jsonl`
+- steps to reproduce
+- expected vs actual behavior
+- whether the issue affects dictation, meetings, or agent artifacts
+- relevant logs from `~/Library/Application Support/Transcripted/events.jsonl` or the legacy `Draft` path
 
-If the report is about the old standalone Transcripted app, please say that
-explicitly so it can be triaged against the legacy ref instead of `main`.
+If your machine still uses the legacy `Draft` Application Support folder,
+mention that in the report.
 
 ## Questions?
 
-Open a GitHub issue for questions or discussion. We're happy to help you get
-oriented.
+Open a GitHub issue for questions or discussion.
