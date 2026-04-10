@@ -115,7 +115,7 @@ extension TranscriptSaver {
                     for oldName in oldNames {
                         applyNameReplacement(in: &content, oldName: oldName, newName: newName, updateSpeakerTag: true)
                     }
-                    content = consolidateSpeakerBreakdown(content)
+                    content = SpeakerBreakdownConsolidator.consolidate(content)
                     try content.write(to: fileURL, atomically: true, encoding: .utf8)
                 }
                 updateAgentJSONMerge(transcriptURL: fileURL, sourceDbId: sourceDbId, targetDbId: targetDbId, newName: newName)
