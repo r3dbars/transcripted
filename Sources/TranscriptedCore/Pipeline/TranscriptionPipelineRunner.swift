@@ -162,9 +162,9 @@ extension TranscriptionTaskManager {
         }
 
         // Phase 2: Save transcript with speaker names
-        let notifier: TranscriptNotifier? = await MainActor.run {
+        let (notifier, statsStore): (TranscriptNotifier?, (any StatsStore)?) = await MainActor.run {
             self.displayStatus = .finishing
-            return self.notifier
+            return (self.notifier, self.statsStore)
         }
 
         guard let savedURL = TranscriptSaver.saveTranscript(
@@ -175,7 +175,8 @@ extension TranscriptionTaskManager {
             directory: outputFolder,
             healthInfo: healthInfo,
             notifier: notifier,
-            speakerStoreForIndex: speakerDB
+            speakerStoreForIndex: speakerDB,
+            statsStore: statsStore
         ) else {
             throw PipelineError.saveFailed(detail: "Could not write transcript to \(outputFolder.lastPathComponent)")
         }

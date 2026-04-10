@@ -115,6 +115,7 @@ extension TranscriptSaver {
                     for oldName in oldNames {
                         applyNameReplacement(in: &content, oldName: oldName, newName: newName, updateSpeakerTag: true)
                     }
+                    content = consolidateSpeakerBreakdown(content)
                     try content.write(to: fileURL, atomically: true, encoding: .utf8)
                 }
                 updateAgentJSONMerge(transcriptURL: fileURL, sourceDbId: sourceDbId, targetDbId: targetDbId, newName: newName)
@@ -157,8 +158,10 @@ extension TranscriptSaver {
         guard !updates.isEmpty else { return true }
 
         return fileUpdateQueue.sync {
-            guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
-                AppLogger.pipeline.error("Failed to read transcript for name update", ["path": transcriptURL.path])
+            let resolvedURL = resolveTranscriptURL(transcriptURL, updates: updates)
+
+            guard var content = try? String(contentsOf: resolvedURL, encoding: .utf8) else {
+                AppLogger.pipeline.error("Failed to read transcript for name update", ["path": resolvedURL.path])
                 return false
             }
 
@@ -185,12 +188,12 @@ extension TranscriptSaver {
 
             // Atomic write back
             do {
-                try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
-                AppLogger.pipeline.info("Updated speaker names in transcript", ["path": transcriptURL.lastPathComponent, "updates": "\(updates.count)"])
+                try content.write(to: resolvedURL, atomically: true, encoding: .utf8)
+                AppLogger.pipeline.info("Updated speaker names in transcript", ["path": resolvedURL.lastPathComponent, "updates": "\(updates.count)"])
 
                 // Update JSON sidecar
                 updateAgentJSON(
-                    transcriptURL: transcriptURL,
+                    transcriptURL: resolvedURL,
                     updates: updates,
                     speakerStoreForIndex: speakerStoreForIndex
                 )
@@ -201,6 +204,33 @@ extension TranscriptSaver {
                 return false
             }
         }
+    }
+
+    /// Resolve a transcript URL that may have been renamed by MeetingTranscriptStyler.
+    /// Falls back to scanning the parent directory for a .md file containing a matching speaker db_id.
+    static func resolveTranscriptURL(_ url: URL, updates: [SpeakerNameUpdate]) -> URL {
+        if FileManager.default.fileExists(atPath: url.path) { return url }
+
+        AppLogger.pipeline.info("Transcript not at expected path, scanning for renamed file", ["expected": url.lastPathComponent])
+
+        let directory = url.deletingLastPathComponent()
+        guard let firstId = updates.first?.persistentSpeakerId.uuidString,
+              let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                .filter({ $0.pathExtension == "md" }) else {
+            return url
+        }
+
+        for file in files {
+            guard let handle = try? FileHandle(forReadingFrom: file) else { continue }
+            let header = handle.readData(ofLength: 2048)
+            try? handle.close()
+            guard let text = String(data: header, encoding: .utf8),
+                  text.contains(firstId) else { continue }
+            AppLogger.pipeline.info("Resolved renamed transcript", ["from": url.lastPathComponent, "to": file.lastPathComponent])
+            return file
+        }
+
+        return url
     }
 
     /// Replace all occurrences of a speaker name throughout a transcript's YAML and body.
@@ -432,12 +462,21 @@ extension TranscriptSaver {
             }
         }
 
-        let updated = AgentTranscript(
+        var updated = AgentTranscript(
             version: transcript.version,
             recording: transcript.recording,
             speakers: updatedSpeakers,
             utterances: transcript.utterances
         )
+
+        for update in updates {
+            guard case .merged(let targetProfileId) = update.action else { continue }
+            updated = deduplicateAgentSpeaker(
+                in: updated,
+                persistentSpeakerId: targetProfileId.uuidString,
+                preferredName: update.newName
+            )
+        }
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -501,7 +540,7 @@ extension TranscriptSaver {
               let data = try? Data(contentsOf: jsonURL),
               let transcript = try? JSONDecoder().decode(AgentTranscript.self, from: data) else { return }
 
-        let updated = AgentTranscript(
+        let rewritten = AgentTranscript(
             version: transcript.version,
             recording: transcript.recording,
             speakers: transcript.speakers.map { speaker in
@@ -517,11 +556,93 @@ extension TranscriptSaver {
             },
             utterances: transcript.utterances
         )
+        let updated = deduplicateAgentSpeaker(
+            in: rewritten,
+            persistentSpeakerId: targetDbId.uuidString,
+            preferredName: newName
+        )
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let newData = try? encoder.encode(updated) {
             try? newData.write(to: jsonURL, options: .atomic)
+        }
+    }
+
+    private static func deduplicateAgentSpeaker(
+        in transcript: AgentTranscript,
+        persistentSpeakerId: String,
+        preferredName: String
+    ) -> AgentTranscript {
+        var canonicalSpeakerId: String?
+        var speakerIdMap: [String: String] = [:]
+        var deduplicatedSpeakers: [AgentSpeaker] = []
+
+        for speaker in transcript.speakers {
+            guard speaker.persistentSpeakerId == persistentSpeakerId else {
+                deduplicatedSpeakers.append(speaker)
+                continue
+            }
+
+            if let canonicalSpeakerId,
+               let index = deduplicatedSpeakers.firstIndex(where: { $0.id == canonicalSpeakerId }) {
+                speakerIdMap[speaker.id] = canonicalSpeakerId
+                deduplicatedSpeakers[index] = AgentSpeaker(
+                    id: canonicalSpeakerId,
+                    persistentSpeakerId: persistentSpeakerId,
+                    name: preferredName,
+                    confidence: mergedConfidence(
+                        deduplicatedSpeakers[index].confidence,
+                        speaker.confidence
+                    ),
+                    wordCount: deduplicatedSpeakers[index].wordCount + speaker.wordCount,
+                    speakingSeconds: deduplicatedSpeakers[index].speakingSeconds + speaker.speakingSeconds
+                )
+                continue
+            }
+
+            canonicalSpeakerId = speaker.id
+            speakerIdMap[speaker.id] = speaker.id
+            deduplicatedSpeakers.append(
+                AgentSpeaker(
+                    id: speaker.id,
+                    persistentSpeakerId: persistentSpeakerId,
+                    name: preferredName,
+                    confidence: speaker.confidence,
+                    wordCount: speaker.wordCount,
+                    speakingSeconds: speaker.speakingSeconds
+                )
+            )
+        }
+
+        let updatedUtterances = transcript.utterances.map { utterance in
+            guard let canonicalSpeakerId = speakerIdMap[utterance.speakerId] else {
+                return utterance
+            }
+            return AgentUtterance(
+                start: utterance.start,
+                end: utterance.end,
+                speakerId: canonicalSpeakerId,
+                text: utterance.text
+            )
+        }
+
+        return AgentTranscript(
+            version: transcript.version,
+            recording: transcript.recording,
+            speakers: deduplicatedSpeakers,
+            utterances: updatedUtterances
+        )
+    }
+
+    private static func mergedConfidence(_ lhs: String?, _ rhs: String?) -> String? {
+        switch (lhs, rhs) {
+        case ("high", _), (_, "high"):
+            return "high"
+        case ("medium", _), (_, "medium"):
+            return "medium"
+        default:
+            return lhs ?? rhs
         }
     }
 

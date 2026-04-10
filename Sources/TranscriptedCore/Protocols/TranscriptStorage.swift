@@ -18,7 +18,8 @@ public protocol TranscriptStorage {
         meetingTitle: String?,
         healthInfo: RecordingHealthInfo?,
         notifier: TranscriptNotifier?,
-        speakerStoreForIndex: (any SpeakerStore)?
+        speakerStoreForIndex: (any SpeakerStore)?,
+        statsStore: (any StatsStore)?
     ) -> URL?
 
     /// Update speaker names in an existing transcript file.

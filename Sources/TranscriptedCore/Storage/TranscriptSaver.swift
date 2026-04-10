@@ -2,6 +2,7 @@ import Foundation
 
 /// Handles automatic saving of transcripts to the filesystem
 public class TranscriptSaver {
+    private static let minimumFreeSpaceForTranscriptSave: Int64 = 50_000_000
 
     /// Default save location for the standalone Transcripted app.
     /// Falls back to `CoreStoragePaths.default.transcripts` unless the user has set a
@@ -51,43 +52,20 @@ public class TranscriptSaver {
         directory: URL? = nil,
         notifier: TranscriptNotifier? = nil
     ) -> URL? {
-        // Use default directory if not specified
         let saveDir = directory ?? defaultSaveDirectory
-
-        // Create directory if it doesn't exist
         do {
-            try FileManager.default.createDirectory(at: saveDir, withIntermediateDirectories: true)
+            try ensureSaveDirectoryExists(saveDir)
         } catch {
             AppLogger.pipeline.error("Failed to create save directory", ["error": error.localizedDescription])
             return nil
         }
 
-        // Generate filename with timestamp, avoiding collisions
-        let timestamp = DateFormattingHelper.formatFilename(Date())
-        var fileURL = saveDir.appendingPathComponent("Call_\(timestamp).md")
-        var counter = 1
-        while FileManager.default.fileExists(atPath: fileURL.path) {
-            fileURL = saveDir.appendingPathComponent("Call_\(timestamp)_\(counter).md")
-            counter += 1
-        }
-
-        // Create markdown content with metadata
+        let fileURL = nextTranscriptFileURL(in: saveDir)
         let markdown = formatMarkdown(text: text, duration: duration, date: Date())
 
-        // Write to file
         do {
-            try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
-            FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
-            AppLogger.pipeline.info("Transcript saved", ["path": fileURL.path])
-
-            // Notify the embedder so they can present a user-facing alert
-            if let notifier {
-                let savedURL = fileURL
-                Task { @MainActor in
-                    notifier.notifyTranscriptSaved(fileURL: savedURL)
-                }
-            }
-
+            try writeMarkdown(markdown, to: fileURL)
+            notifySavedTranscript(fileURL, notifier: notifier)
             return fileURL
         } catch {
             AppLogger.pipeline.error("Failed to save transcript", ["error": error.localizedDescription])
@@ -116,41 +94,29 @@ public class TranscriptSaver {
         meetingTitle: String? = nil,
         healthInfo: RecordingHealthInfo? = nil,
         notifier: TranscriptNotifier? = nil,
-        speakerStoreForIndex: (any SpeakerStore)? = nil
+        speakerStoreForIndex: (any SpeakerStore)? = nil,
+        statsStore: (any StatsStore)? = nil
     ) -> URL? {
         let saveDir = directory ?? defaultSaveDirectory
 
         do {
-            try FileManager.default.createDirectory(at: saveDir, withIntermediateDirectories: true)
+            try ensureSaveDirectoryExists(saveDir)
         } catch {
             AppLogger.pipeline.error("Failed to create save directory", ["error": error.localizedDescription])
             return nil
         }
 
-        // Check disk space before writing (prevent partial save where .md succeeds but .json fails)
-        if let attrs = try? FileManager.default.attributesOfFileSystem(forPath: saveDir.path),
-           let freeSpace = attrs[.systemFreeSize] as? Int64,
-           freeSpace < 50_000_000 { // 50MB minimum
-            AppLogger.pipeline.error("Insufficient disk space for transcript save", ["freeSpace": "\(freeSpace / 1_000_000)MB"])
+        guard hasMinimumFreeSpace(in: saveDir) else {
             return nil
         }
 
-        let timestamp = DateFormattingHelper.formatFilename(Date())
-        var fileURL = saveDir.appendingPathComponent("Call_\(timestamp).md")
-        var counter = 1
-        while FileManager.default.fileExists(atPath: fileURL.path) {
-            fileURL = saveDir.appendingPathComponent("Call_\(timestamp)_\(counter).md")
-            counter += 1
-        }
-
+        let fileURL = nextTranscriptFileURL(in: saveDir)
         let markdown = formatTranscriptMarkdown(result: result, speakerMappings: speakerMappings, speakerSources: speakerSources, speakerDbIds: speakerDbIds, date: Date(), meetingTitle: meetingTitle, healthInfo: healthInfo)
 
         // Serialize file writes to prevent concurrent corruption with retroactive speaker updates
         let savedURL: URL? = fileUpdateQueue.sync {
             do {
-                try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
-                FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
-                AppLogger.pipeline.info("Transcript saved", ["path": fileURL.path])
+                try writeMarkdown(markdown, to: fileURL)
 
                 // Agent output: write JSON sidecar + index + CLAUDE.md
                 let stem = fileURL.deletingPathExtension().lastPathComponent
@@ -180,24 +146,65 @@ public class TranscriptSaver {
         }
 
         if let savedURL {
-            if let notifier {
-                Task { @MainActor in
-                    notifier.notifyTranscriptSaved(fileURL: savedURL)
-                }
-            }
+            notifySavedTranscript(savedURL, notifier: notifier)
 
-            // Record to stats database (outside queue — dispatches to MainActor)
-            Task { @MainActor in
-                let metadata = StatsService.createMetadata(
-                    from: result,
-                    transcriptPath: savedURL.path,
-                    title: meetingTitle
-                )
-                await StatsService.shared.recordSession(metadata)
+            let metadata = StatsService.createMetadata(
+                from: result,
+                transcriptPath: savedURL.path,
+                title: meetingTitle
+            )
+            if let statsStore {
+                statsStore.recordSession(metadata)
+            } else {
+                Task { @MainActor in
+                    await StatsService.shared.recordSession(metadata)
+                }
             }
         }
 
         return savedURL
+    }
+
+    private static func ensureSaveDirectoryExists(_ directory: URL) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    private static func hasMinimumFreeSpace(in directory: URL) -> Bool {
+        guard let attrs = try? FileManager.default.attributesOfFileSystem(forPath: directory.path),
+              let freeSpace = attrs[.systemFreeSize] as? Int64 else {
+            return true
+        }
+
+        guard freeSpace >= minimumFreeSpaceForTranscriptSave else {
+            AppLogger.pipeline.error("Insufficient disk space for transcript save", ["freeSpace": "\(freeSpace / 1_000_000)MB"])
+            return false
+        }
+
+        return true
+    }
+
+    private static func nextTranscriptFileURL(in directory: URL) -> URL {
+        let timestamp = DateFormattingHelper.formatFilename(Date())
+        var fileURL = directory.appendingPathComponent("Call_\(timestamp).md")
+        var counter = 1
+        while FileManager.default.fileExists(atPath: fileURL.path) {
+            fileURL = directory.appendingPathComponent("Call_\(timestamp)_\(counter).md")
+            counter += 1
+        }
+        return fileURL
+    }
+
+    private static func writeMarkdown(_ markdown: String, to fileURL: URL) throws {
+        try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
+        FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
+        AppLogger.pipeline.info("Transcript saved", ["path": fileURL.path])
+    }
+
+    private static func notifySavedTranscript(_ fileURL: URL, notifier: TranscriptNotifier?) {
+        guard let notifier else { return }
+        Task { @MainActor in
+            notifier.notifyTranscriptSaved(fileURL: fileURL)
+        }
     }
 }
 

@@ -139,6 +139,7 @@ final class MeetingSessionController: ObservableObject {
     private let diarization: DiarizationService
     private let sttAdapter: MeetingSTTAdapter
     private let speakerDatabase: SpeakerDatabase
+    private let statsDatabase: StatsDatabase
     private let downloader: MeetingModelDownloader
 
     private var cancellables: Set<AnyCancellable> = []
@@ -186,6 +187,7 @@ final class MeetingSessionController: ObservableObject {
 
         // Speaker store: Draft-owned SQLite file under meetings/.
         self.speakerDatabase = SpeakerDatabase(path: storagePaths.speakerDB.path)
+        self.statsDatabase = StatsDatabase(path: storagePaths.statsDB.path)
 
         // Failed-queue manager: takes CoreStoragePaths so its JSON file lives
         // under our meetings directory, not ~/Documents/Transcripted.
@@ -208,7 +210,8 @@ final class MeetingSessionController: ObservableObject {
             speechToText: services.speechToText,
             diarization: services.diarization,
             speakerStore: services.speakerStore,
-            speakerClipsDirectory: storagePaths.speakerClips
+            speakerClipsDirectory: storagePaths.speakerClips,
+            statsStore: statsDatabase
         )
 
         // Model downloader — coordinates Parakeet + PyAnnote readiness.

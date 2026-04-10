@@ -22,6 +22,7 @@ public class TranscriptionTaskManager: ObservableObject {
     public let transcription: Transcription
 
     public let failedTranscriptionManager: FailedTranscriptionManager
+    public let statsStore: (any StatsStore)?
 
     /// Embedder-supplied notifier for transcript-saved and failure events. Optional — when
     /// `nil`, notification hooks become no-ops, which keeps Core usable from headless contexts
@@ -34,9 +35,11 @@ public class TranscriptionTaskManager: ObservableObject {
         diarization: any DiarizationEngine,
         speakerStore: any SpeakerStore,
         speakerClipsDirectory: URL = CoreStoragePaths.default.speakerClips,
+        statsStore: (any StatsStore)? = nil,
         notifier: TranscriptNotifier? = nil
     ) {
         self.failedTranscriptionManager = failedTranscriptionManager
+        self.statsStore = statsStore
         self.notifier = notifier
         self.transcription = Transcription(
             speechToText: speechToText,

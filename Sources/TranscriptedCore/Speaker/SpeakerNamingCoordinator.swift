@@ -162,9 +162,16 @@ extension TranscriptionTaskManager {
                 }
             }
 
+            // Resolve the transcript URL — the file may have been renamed by
+            // MeetingTranscriptStyler between save and naming completion.
+            let resolvedURL = TranscriptSaver.resolveTranscriptURL(
+                transcriptURL,
+                updates: canonicalUpdates.isEmpty ? resolvedUpdates : canonicalUpdates
+            )
+
             if !canonicalUpdates.isEmpty {
                 TranscriptSaver.updateSpeakerNames(
-                    transcriptURL: transcriptURL,
+                    transcriptURL: resolvedURL,
                     updates: canonicalUpdates,
                     speakerStoreForIndex: speakerDB
                 )
@@ -177,13 +184,13 @@ extension TranscriptionTaskManager {
 
             AppLogger.pipeline.info("Speaker naming complete", [
                 "named": "\(canonicalUpdates.count)",
-                "transcript": transcriptURL.lastPathComponent
+                "transcript": resolvedURL.lastPathComponent
             ])
 
             // Only UI state updates on the main thread
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.populateSavedMetadata(from: transcriptURL)
+                self.populateSavedMetadata(from: resolvedURL)
                 self.displayStatus = .transcriptSaved
                 self.scheduleStatusReset(delay: 8)
             }
