@@ -18,7 +18,7 @@ func testCapturedContext() {
         assertEqual(ctx.talkingTo, "Sarah Graham", "talkingTo")
         assertEqual(ctx.formality, "casual", "formality")
         assertTrue(ctx.hasConversation, "should have conversation")
-        assertTrue(ctx.conversation!.contains("Hey, are you coming"), "conversation content")
+        assertEqual(ctx.conversation?.contains("Hey, are you coming"), true, "conversation content")
     }
 
     runSuite("CapturedContext.parse — case insensitivity") {
@@ -54,8 +54,17 @@ func testCapturedContext() {
             """
         let ctx = CapturedContext.parse(from: input)
         assertEqual(ctx.platform, "imessage")
-        let lines = ctx.conversation!.components(separatedBy: "\n").filter { !$0.isEmpty }
+        let lines = ctx.conversation?.components(separatedBy: "\n").filter { !$0.isEmpty } ?? []
         assertEqual(lines.count, 3, "should have 3 conversation lines")
+    }
+
+    runSuite("CapturedContext.hasConversation — whitespace-only conversation") {
+        var ctx = CapturedContext()
+        ctx.conversation = "  \n  "
+
+        assertFalse(ctx.hasConversation, "whitespace-only conversation should be treated as empty")
+        assertFalse(ctx.displayText.contains("CONVERSATION:"), "display text should omit empty conversation sections")
+        assertFalse(ctx.draftingPrompt(userInstructions: "").contains("CONVERSATION:"), "prompt should omit empty conversation sections")
     }
 
     runSuite("CapturedContext.parse — conversation stops at next header") {

@@ -40,7 +40,7 @@ func assertNil<T>(_ value: T?, _ message: String = "", file: String = #file, lin
     } else {
         failedTests += 1
         let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        print("  FAIL [\(loc)] \(message.isEmpty ? "expected nil" : message), got \(value!)")
+        print("  FAIL [\(loc)] \(message.isEmpty ? "expected nil" : message), got \(String(describing: value))")
     }
 }
 

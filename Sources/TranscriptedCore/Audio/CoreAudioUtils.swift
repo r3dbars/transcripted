@@ -24,6 +24,11 @@ extension AudioObjectID {
         try AudioDeviceID.system.readDefaultSystemOutputDevice()
     }
 
+    /// Reads the value for `kAudioHardwarePropertyDefaultInputDevice`.
+    static func readDefaultInputDevice() throws -> AudioDeviceID {
+        try AudioObjectID.system.readDefaultInputDevice()
+    }
+
     static func readProcessList() throws -> [AudioObjectID] {
         try AudioObjectID.system.readProcessList()
     }
@@ -80,6 +85,13 @@ extension AudioObjectID {
         try requireSystemObject()
 
         return try read(kAudioHardwarePropertyDefaultSystemOutputDevice, defaultValue: AudioDeviceID.unknown)
+    }
+
+    /// Reads the value for `kAudioHardwarePropertyDefaultInputDevice`, should only be called on the system object.
+    func readDefaultInputDevice() throws -> AudioDeviceID {
+        try requireSystemObject()
+
+        return try read(kAudioHardwarePropertyDefaultInputDevice, defaultValue: AudioDeviceID.unknown)
     }
 
     /// Reads the value for `kAudioDevicePropertyDeviceUID` for the device represented by this audio object ID.
