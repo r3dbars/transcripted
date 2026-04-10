@@ -33,7 +33,12 @@ final class BetaTelemetry {
     func sendEvent(type: String, sourceApp: String? = nil, payload: [String: Any] = [:]) {
         let token = BetaConfig.userToken
         guard token != "BETA_TOKEN_PLACEHOLDER" else { return }
-        let url = URL(string: "\(BetaConfig.proxyBaseURL)/events")!
+        // Security: guard against a malformed proxyBaseURL rather than force-unwrapping,
+        // which would crash the app if the URL string ever becomes invalid.
+        guard let url = URL(string: "\(BetaConfig.proxyBaseURL)/events") else {
+            fputs("⚠️ TELEMETRY | Invalid proxy events URL — dropping event\n", stderr)
+            return
+        }
 
         Task.detached(priority: .utility) {
             var request = URLRequest(url: url)
@@ -91,7 +96,12 @@ final class BetaTelemetry {
         if let log = logChunk { body["log_lines"] = redactChunk(log) }
         if let events = eventChunk { body["event_lines"] = redactChunk(events) }
 
-        var request = URLRequest(url: URL(string: "\(BetaConfig.proxyBaseURL)/logs")!)
+        // Security: guard against a malformed proxyBaseURL rather than force-unwrapping.
+        guard let logsURL = URL(string: "\(BetaConfig.proxyBaseURL)/logs") else {
+            fputs("⚠️ TELEMETRY | Invalid proxy logs URL — dropping quit-time logs\n", stderr)
+            return
+        }
+        var request = URLRequest(url: logsURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -126,7 +136,12 @@ final class BetaTelemetry {
         if let log = logChunk { body["log_lines"] = redactChunk(log) }
         if let events = eventChunk { body["event_lines"] = redactChunk(events) }
 
-        var request = URLRequest(url: URL(string: "\(BetaConfig.proxyBaseURL)/logs")!)
+        // Security: guard against a malformed proxyBaseURL rather than force-unwrapping.
+        guard let logsURL = URL(string: "\(BetaConfig.proxyBaseURL)/logs") else {
+            fputs("⚠️ TELEMETRY | Invalid proxy logs URL — dropping incremental logs\n", stderr)
+            return
+        }
+        var request = URLRequest(url: logsURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
