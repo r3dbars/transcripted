@@ -491,9 +491,46 @@ class ParakeetEngine: ObservableObject {
                     message: error.localizedDescription)
                 return false
             }
-            // Re-read formats after engine restart
-            let refreshedFormat = inputNode.outputFormat(forBus: 0)
-            nativeSampleRate = refreshedFormat.sampleRate
+            // Re-read both formats after engine restart and refuse to install a
+            // tap until CoreAudio reports a stable, matching hardware graph.
+            let refreshedOutputFormat = inputNode.outputFormat(forBus: 0)
+            let refreshedHardwareFormat = inputNode.inputFormat(forBus: 0)
+            nativeSampleRate = refreshedOutputFormat.sampleRate
+
+            guard refreshedOutputFormat.sampleRate > 0, refreshedHardwareFormat.sampleRate > 0 else {
+                EventReporter.shared.capture(level: .warning, engine: "parakeet",
+                    event: "format_mismatch_retry_needed",
+                    message: "Audio hardware still settling after device change",
+                    context: [
+                        "output_rate": "\(refreshedOutputFormat.sampleRate)",
+                        "hw_rate": "\(refreshedHardwareFormat.sampleRate)"
+                    ])
+                audioEngine.stop()
+                isEnginePrewarmed = false
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
+                    self?.prewarm()
+                }
+                return false
+            }
+
+            guard refreshedOutputFormat.sampleRate == refreshedHardwareFormat.sampleRate else {
+                print("⚠️ PARAKEET | format mismatch persisted after resync: output=\(refreshedOutputFormat.sampleRate)Hz hw=\(refreshedHardwareFormat.sampleRate)Hz")
+                EventReporter.shared.capture(level: .warning, engine: "parakeet",
+                    event: "format_mismatch_retry_needed",
+                    message: "Audio format mismatch persisted after engine resync",
+                    context: [
+                        "output_rate": "\(refreshedOutputFormat.sampleRate)",
+                        "hw_rate": "\(refreshedHardwareFormat.sampleRate)"
+                    ])
+                audioEngine.stop()
+                isEnginePrewarmed = false
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
+                    self?.prewarm()
+                }
+                return false
+            }
         }
 
         guard nativeSampleRate > 0 else {
