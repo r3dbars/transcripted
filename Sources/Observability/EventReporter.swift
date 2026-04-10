@@ -46,7 +46,7 @@ private actor EventFileWriter {
 
         // Ensure directory exists
         do {
-            try FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
+            try FileManager.default.createPrivateDirectory(at: storageDir)
         } catch {
             fputs("⚠️ EVENT | failed to create directory \(storageDir.path): \(error.localizedDescription)\n", stderr)
         }
@@ -80,6 +80,7 @@ private actor EventFileWriter {
         } else {
             do {
                 try lineData.write(to: fileURL)
+                FileManager.default.restrictFileToOwnerOnly(at: fileURL)
                 print("📊 EVENT | created events.jsonl at \(fileURL.path)")
             } catch {
                 fputs("⚠️ EVENT | failed to create events.jsonl: \(error.localizedDescription)\n", stderr)
@@ -90,6 +91,8 @@ private actor EventFileWriter {
                 fputs("⚠️ EVENT | failed to open FileHandle after creation: \(error.localizedDescription)\n", stderr)
             }
         }
+
+        FileManager.default.restrictFileToOwnerOnly(at: fileURL)
     }
 
     deinit {

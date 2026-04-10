@@ -9,9 +9,9 @@
 # - NOTARY_PROFILE set to the local keychain profile name for notarytool
 # - optional: brew install create-dmg for the custom DMG layout
 
-set -e
+set -euo pipefail
 
-BETA_TOKEN="$1"
+BETA_TOKEN="${1:-}"
 USER_NAME="${2:-beta}"
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 
@@ -24,12 +24,46 @@ fi
 APP_NAME="Transcripted"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
+APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 DMG_NAME="Transcripted-${USER_NAME}.dmg"
-SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
+SIGNING_IDENTITY="${SIGNING_IDENTITY:-${SIGN_IDENTITY:-}}"
 SIGNING_DISPLAY_NAME=""
 NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 BETA_CONFIG_PATH="Sources/API/BetaConfig.swift"
 BETA_CONFIG_BACKUP="$(mktemp -t transcripted-beta-config)"
+BETA_ENTITLEMENTS="config/entitlements/beta.plist"
+TRANSCRIPTED_CORE_MODULE="deps-modules/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
+
+validate_signed_app() {
+    echo "Validating app signature..."
+    codesign --verify --deep --strict --verbose=4 "$APP_BUNDLE"
+    codesign -dvvv --entitlements :- "$APP_BUNDLE"
+}
+
+validate_notarized_artifacts() {
+    echo "Validating Gatekeeper acceptance..."
+    spctl -a -t exec -vv "$APP_BUNDLE"
+    spctl -a -t open -vv "$BUILD_DIR/$DMG_NAME"
+}
+
+resolve_sign_identity() {
+    local requested_identity="$1"
+    local found_line
+
+    if [ -n "$requested_identity" ]; then
+        found_line="$(security find-identity -v -p codesigning 2>/dev/null | grep -F "$requested_identity" | head -1 || true)"
+        if [ -z "$found_line" ]; then
+            echo "❌ Requested signing identity not found: $requested_identity"
+            echo "Available identities:"
+            security find-identity -v -p codesigning || true
+            exit 1
+        fi
+        printf '%s\n' "$found_line"
+        return 0
+    fi
+
+    security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 || true
+}
 
 cleanup() {
     if [ -f "$BETA_CONFIG_BACKUP" ]; then
@@ -39,6 +73,18 @@ cleanup() {
 }
 
 trap cleanup EXIT
+
+if [ ! -f "$BETA_ENTITLEMENTS" ]; then
+    echo "❌ Missing entitlements file: $BETA_ENTITLEMENTS"
+    exit 1
+fi
+
+if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ]; then
+    echo "❌ Dependencies missing or stale — required for beta builds"
+    echo "   Missing module: $TRANSCRIPTED_CORE_MODULE"
+    echo "   Run build-deps.sh --force first to rebuild dependencies."
+    exit 1
+fi
 
 echo "🔨 Building Transcripted Beta for $USER_NAME (token: $BETA_TOKEN)..."
 
@@ -65,41 +111,12 @@ if [ -d "Resources" ]; then
     cp -R Resources/. "$APP_BUNDLE/Contents/Resources/"
 fi
 
-# Create entitlements (hardened runtime compatible)
-cat > "$BUILD_DIR/Transcripted.entitlements" << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>com.apple.security.app-sandbox</key>
-    <false/>
-    <key>com.apple.security.network.client</key>
-    <true/>
-    <key>com.apple.security.device.audio-input</key>
-    <true/>
-    <key>com.apple.security.speech.recognition</key>
-    <true/>
-    <key>com.apple.security.cs.allow-jit</key>
-    <true/>
-    <key>com.apple.security.cs.disable-library-validation</key>
-    <true/>
-</dict>
-</plist>
-EOF
-
-# Inject the user's beta token
+# Inject the user's beta token after dependency preflight succeeds.
 echo "Injecting token for $USER_NAME..."
 cp "$BETA_CONFIG_PATH" "$BETA_CONFIG_BACKUP"
 sed -i '' "s/BETA_TOKEN_PLACEHOLDER/$BETA_TOKEN/" "$BETA_CONFIG_PATH"
 
 # Unified dependencies (FluidAudio + mlx-swift-lm)
-TRANSCRIPTED_CORE_MODULE="deps-modules/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
-if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ]; then
-    echo "❌ Dependencies missing or stale — required for beta builds"
-    echo "   Missing module: $TRANSCRIPTED_CORE_MODULE"
-    echo "   Run build-deps.sh --force first to rebuild dependencies."
-    exit 1
-fi
 echo "Dependencies found"
 
 DEPS_MODULE_FLAGS="-Ideps-modules"
@@ -120,7 +137,7 @@ SOURCE_FILES=$(find Sources -name '*.swift' -not -path 'Sources/TranscriptedCore
 swiftc \
     -O \
     -D BETA_BUILD \
-    -o "$APP_BUNDLE/Contents/MacOS/$APP_NAME" \
+    -o "$APP_BINARY" \
     -framework AVFoundation \
     -framework AppKit \
     -framework SwiftUI \
@@ -144,18 +161,15 @@ swiftc \
     -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
     2>&1
 
-COMPILE_STATUS=$?
-
-if [ $COMPILE_STATUS -ne 0 ]; then
-    echo "❌ Build failed!"
+if [ ! -x "$APP_BINARY" ]; then
+    echo "❌ Build finished without a runnable app binary: $APP_BINARY"
     exit 1
 fi
 
-if [ -z "$SIGNING_IDENTITY" ]; then
-    SIGNING_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | awk '{print $2}')
-    SIGNING_DISPLAY_NAME=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
-else
-    SIGNING_DISPLAY_NAME="$SIGNING_IDENTITY"
+SIGNING_MATCH="$(resolve_sign_identity "$SIGNING_IDENTITY")"
+if [ -n "$SIGNING_MATCH" ]; then
+    SIGNING_IDENTITY="$(echo "$SIGNING_MATCH" | awk '{print $2}')"
+    SIGNING_DISPLAY_NAME="$(echo "$SIGNING_MATCH" | sed 's/.*"\(.*\)"/\1/')"
 fi
 
 if [ -n "$SIGNING_IDENTITY" ]; then
@@ -164,7 +178,7 @@ if [ -n "$SIGNING_IDENTITY" ]; then
         --sign "$SIGNING_IDENTITY" \
         --options runtime \
         --timestamp \
-        --entitlements "$BUILD_DIR/Transcripted.entitlements" \
+        --entitlements "$BETA_ENTITLEMENTS" \
         "$APP_BUNDLE" 2>&1; then
         echo "❌ Signing failed! Make sure you have a valid Developer ID Application certificate."
         echo "   Open Xcode → Settings → Accounts → Manage Certificates"
@@ -174,9 +188,11 @@ else
     echo "⚠️  No Developer ID found — signing ad-hoc for local smoke testing"
     codesign --force --deep \
         --sign - \
-        --entitlements "$BUILD_DIR/Transcripted.entitlements" \
+        --entitlements "$BETA_ENTITLEMENTS" \
         "$APP_BUNDLE" 2>&1
 fi
+
+validate_signed_app
 
 # Create DMG
 echo "Creating DMG..."
@@ -201,7 +217,7 @@ if command -v create-dmg >/dev/null 2>&1; then
         $DMG_BG_FLAGS \
         "$BUILD_DIR/$DMG_NAME" \
         "$APP_BUNDLE" \
-        2>&1 || true  # create-dmg returns non-zero on "already exists" even after rm
+        2>&1 || true
 else
     echo "⚠️  create-dmg not found — using hdiutil fallback"
     STAGING_DIR="$BUILD_DIR/dmg-staging"
@@ -234,6 +250,7 @@ fi
 # Notarize (only with Developer ID — Apple Development certs can't be notarized)
 if [ "$SKIP_NOTARIZATION" = "1" ]; then
     echo "⚠️  Skipping notarization (SKIP_NOTARIZATION=1)"
+    echo "   Expect Gatekeeper to reject the Developer ID app until it is notarized."
 elif [[ "$SIGNING_DISPLAY_NAME" == Developer\ ID* ]]; then
     if [ -z "$NOTARY_PROFILE" ]; then
         echo "❌ NOTARY_PROFILE is not set."
@@ -247,9 +264,9 @@ elif [[ "$SIGNING_DISPLAY_NAME" == Developer\ ID* ]]; then
         --keychain-profile "$NOTARY_PROFILE" \
         --wait
 
-    # Staple
     echo "Stapling notarization ticket..."
     xcrun stapler staple "$BUILD_DIR/$DMG_NAME"
+    validate_notarized_artifacts
 else
     echo "⚠️  Skipping notarization (using development cert — local testing only)"
 fi

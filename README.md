@@ -200,6 +200,13 @@ bash build-deps.sh
 bash build.sh
 ```
 
+`build.sh` is the local development path. It expects the unified dependency
+artifacts from `build-deps.sh` and then signs the app for stable local
+permissions on the current machine.
+
+For signed DMG packaging and notarization workflow notes, see
+`docs/release-packaging.md`.
+
 ## Tests
 
 ```bash
