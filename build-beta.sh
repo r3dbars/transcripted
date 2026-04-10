@@ -68,6 +68,22 @@ resolve_sign_identity() {
     security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 || true
 }
 
+sign_embedded_payloads() {
+    local sign_hash="$1"
+    local framework_path
+    local metallib_path
+
+    for framework_path in "$APP_BUNDLE"/Contents/Frameworks/*.framework; do
+        [ -d "$framework_path" ] || continue
+        codesign --force --sign "$sign_hash" "$framework_path"
+    done
+
+    for metallib_path in "$APP_BUNDLE"/Contents/MacOS/*.metallib; do
+        [ -f "$metallib_path" ] || continue
+        codesign --force --sign "$sign_hash" "$metallib_path"
+    done
+}
+
 cleanup() {
     if [ -f "$BETA_CONFIG_BACKUP" ]; then
         cp "$BETA_CONFIG_BACKUP" "$BETA_CONFIG_PATH"
@@ -188,7 +204,8 @@ fi
 
 if [ -n "$SIGNING_IDENTITY" ]; then
     echo "Signing with: ${SIGNING_DISPLAY_NAME:-$SIGNING_IDENTITY}"
-    if ! codesign --force --deep \
+    sign_embedded_payloads "$SIGNING_IDENTITY"
+    if ! codesign --force \
         --sign "$SIGNING_IDENTITY" \
         --options runtime \
         --timestamp \
@@ -200,7 +217,8 @@ if [ -n "$SIGNING_IDENTITY" ]; then
     fi
 else
     echo "⚠️  No Developer ID found — signing ad-hoc for local smoke testing"
-    codesign --force --deep \
+    sign_embedded_payloads "-"
+    codesign --force \
         --sign - \
         --entitlements "$BETA_ENTITLEMENTS" \
         "$APP_BUNDLE" 2>&1
