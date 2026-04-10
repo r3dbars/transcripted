@@ -9,9 +9,46 @@
 set -e
 
 DRAFT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEPS_BUILD="$DRAFT_DIR/.deps-build"
 DEPS_LIBS="$DRAFT_DIR/deps-libs"
 DEPS_MODULES="$DRAFT_DIR/deps-modules"
+DEPS_BUILD="$(mktemp -d "$DRAFT_DIR/.deps-build.XXXXXX")"
+DEPS_LIBS_TMP="$(mktemp -d "$DRAFT_DIR/.deps-libs.XXXXXX")"
+DEPS_MODULES_TMP="$(mktemp -d "$DRAFT_DIR/.deps-modules.XXXXXX")"
+TEMP_DIRS=("$DEPS_BUILD" "$DEPS_LIBS_TMP" "$DEPS_MODULES_TMP")
+STALE_DIRS=()
+
+cleanup_temp_dirs() {
+    for dir in "${TEMP_DIRS[@]}"; do
+        if [ -e "$dir" ]; then
+            rm -rf "$dir"
+        fi
+    done
+}
+
+stash_existing_dir() {
+    local path="$1"
+    if [ -e "$path" ]; then
+        local stale_path="${path}.stale.$(date +%s).$$"
+        mv "$path" "$stale_path"
+        STALE_DIRS+=("$stale_path")
+    fi
+}
+
+promote_output_dir() {
+    local source_path="$1"
+    local target_path="$2"
+    stash_existing_dir "$target_path"
+    mv "$source_path" "$target_path"
+}
+
+cleanup_stale_dirs() {
+    for dir in "${STALE_DIRS[@]}"; do
+        rm -rf "$dir" 2>/dev/null || \
+            echo "[build-deps] NOTE: left stale directory behind for later cleanup: $dir"
+    done
+}
+
+trap cleanup_temp_dirs EXIT
 
 # ---------------------------------------------------------------------------
 # Discover the TranscriptedCore source tree to inline into the unified deps build.
@@ -99,8 +136,6 @@ fi
 
 echo "Building FluidAudio + mlx-swift-lm (unified)..."
 
-# Clean previous build
-rm -rf "$DEPS_BUILD" "$DEPS_LIBS" "$DEPS_MODULES"
 mkdir -p "$DEPS_BUILD/Sources"
 
 # Symlink TranscriptedCore's source tree into $DEPS_BUILD so SPM's target
@@ -170,9 +205,6 @@ BUILD_RELEASE="$DEPS_BUILD/.build/arm64-apple-macosx/release"
 MODULES_SRC="$DEPS_BUILD/.build/release/Modules"
 CHECKOUTS="$DEPS_BUILD/.build/checkouts"
 
-# Create output directories
-mkdir -p "$DEPS_LIBS" "$DEPS_MODULES"
-
 # --- Static library: combine all .o files into one .a ---
 echo "Creating static library..."
 cd "$BUILD_RELEASE"
@@ -184,8 +216,8 @@ echo "$ALL_BUILD_DIRS" | while read -r dir; do echo "  $dir"; done
 
 # Archive all .o files into libDraftDeps.a (includes TranscriptedCore — used by build.sh which
 # excludes Sources/TranscriptedCore from its swiftc invocation to avoid name-collision issues).
-find $ALL_BUILD_DIRS -name "*.o" -print0 | xargs -0 ar rcs "$DEPS_LIBS/libDraftDeps.a"
-OBJ_COUNT=$(ar t "$DEPS_LIBS/libDraftDeps.a" | wc -l | tr -d ' ')
+find $ALL_BUILD_DIRS -name "*.o" -print0 | xargs -0 ar rcs "$DEPS_LIBS_TMP/libDraftDeps.a"
+OBJ_COUNT=$(ar t "$DEPS_LIBS_TMP/libDraftDeps.a" | wc -l | tr -d ' ')
 echo "  $OBJ_COUNT object files archived"
 
 # Also create libExternalDeps.a — same as libDraftDeps.a but without TranscriptedCore objects.
@@ -193,8 +225,8 @@ echo "  $OBJ_COUNT object files archived"
 # source via SPM. Using libDraftDeps.a there causes duplicate-symbol linker errors because
 # Core appears in both the SPM-compiled objects and the static archive.
 EXTERNAL_DIRS=$(find . -maxdepth 1 -name "*.build" -type d | grep -v "Shim.build" | grep -v "TranscriptedCore.build" | sort)
-find $EXTERNAL_DIRS -name "*.o" -print0 | xargs -0 ar rcs "$DEPS_LIBS/libExternalDeps.a"
-EXT_COUNT=$(ar t "$DEPS_LIBS/libExternalDeps.a" | wc -l | tr -d ' ')
+find $EXTERNAL_DIRS -name "*.o" -print0 | xargs -0 ar rcs "$DEPS_LIBS_TMP/libExternalDeps.a"
+EXT_COUNT=$(ar t "$DEPS_LIBS_TMP/libExternalDeps.a" | wc -l | tr -d ' ')
 echo "  $EXT_COUNT object files archived (external-only, no TranscriptedCore)"
 
 # --- Swift modules ---
@@ -203,14 +235,14 @@ for mod in "$MODULES_SRC"/*.swiftmodule; do
     name=$(basename "$mod" .swiftmodule)
     # Skip Shim — that's our build helper
     [ "$name" = "Shim" ] && continue
-    mkdir -p "$DEPS_MODULES/${name}.swiftmodule"
-    cp "$mod" "$DEPS_MODULES/${name}.swiftmodule/arm64-apple-macos.swiftmodule"
+    mkdir -p "$DEPS_MODULES_TMP/${name}.swiftmodule"
+    cp "$mod" "$DEPS_MODULES_TMP/${name}.swiftmodule/arm64-apple-macos.swiftmodule"
     if [ -f "$MODULES_SRC/${name}.swiftdoc" ]; then
-        cp "$MODULES_SRC/${name}.swiftdoc" "$DEPS_MODULES/${name}.swiftmodule/arm64-apple-macos.swiftdoc"
+        cp "$MODULES_SRC/${name}.swiftdoc" "$DEPS_MODULES_TMP/${name}.swiftmodule/arm64-apple-macos.swiftdoc"
     fi
     # Copy .swiftinterface if present (for resilient modules)
     if [ -f "$MODULES_SRC/${name}.swiftinterface" ]; then
-        cp "$MODULES_SRC/${name}.swiftinterface" "$DEPS_MODULES/${name}.swiftmodule/arm64-apple-macos.swiftinterface"
+        cp "$MODULES_SRC/${name}.swiftinterface" "$DEPS_MODULES_TMP/${name}.swiftmodule/arm64-apple-macos.swiftinterface"
     fi
 done
 
@@ -220,30 +252,30 @@ echo "Copying C module maps..."
 # _NumericsShims (from swift-numerics)
 NUMERICS_SHIMS=$(find "$CHECKOUTS" -path "*/_NumericsShims/include" -type d 2>/dev/null | head -1)
 if [ -n "$NUMERICS_SHIMS" ]; then
-    mkdir -p "$DEPS_MODULES/_NumericsShims"
-    cp "$NUMERICS_SHIMS/"* "$DEPS_MODULES/_NumericsShims/"
+    mkdir -p "$DEPS_MODULES_TMP/_NumericsShims"
+    cp "$NUMERICS_SHIMS/"* "$DEPS_MODULES_TMP/_NumericsShims/"
 fi
 
 # FastClusterWrapper (from FluidAudio)
 if [ -d "$CHECKOUTS/FluidAudio/Sources/FastClusterWrapper/include" ]; then
-    mkdir -p "$DEPS_MODULES/FastClusterWrapper"
-    cp "$CHECKOUTS/FluidAudio/Sources/FastClusterWrapper/include/module.modulemap" "$DEPS_MODULES/FastClusterWrapper/"
-    cp "$CHECKOUTS/FluidAudio/Sources/FastClusterWrapper/include/"*.h "$DEPS_MODULES/FastClusterWrapper/" 2>/dev/null || true
+    mkdir -p "$DEPS_MODULES_TMP/FastClusterWrapper"
+    cp "$CHECKOUTS/FluidAudio/Sources/FastClusterWrapper/include/module.modulemap" "$DEPS_MODULES_TMP/FastClusterWrapper/"
+    cp "$CHECKOUTS/FluidAudio/Sources/FastClusterWrapper/include/"*.h "$DEPS_MODULES_TMP/FastClusterWrapper/" 2>/dev/null || true
 fi
 
 # MachTaskSelfWrapper (from FluidAudio)
 if [ -d "$CHECKOUTS/FluidAudio/Sources/MachTaskSelfWrapper/include" ]; then
-    mkdir -p "$DEPS_MODULES/MachTaskSelfWrapper"
-    cp "$CHECKOUTS/FluidAudio/Sources/MachTaskSelfWrapper/include/module.modulemap" "$DEPS_MODULES/MachTaskSelfWrapper/"
-    cp "$CHECKOUTS/FluidAudio/Sources/MachTaskSelfWrapper/include/"*.h "$DEPS_MODULES/MachTaskSelfWrapper/" 2>/dev/null || true
+    mkdir -p "$DEPS_MODULES_TMP/MachTaskSelfWrapper"
+    cp "$CHECKOUTS/FluidAudio/Sources/MachTaskSelfWrapper/include/module.modulemap" "$DEPS_MODULES_TMP/MachTaskSelfWrapper/"
+    cp "$CHECKOUTS/FluidAudio/Sources/MachTaskSelfWrapper/include/"*.h "$DEPS_MODULES_TMP/MachTaskSelfWrapper/" 2>/dev/null || true
 fi
 
 # yyjson
 YYJSON_H=$(find "$CHECKOUTS" -name "yyjson.h" -path "*/src/yyjson.h" 2>/dev/null | head -1)
 if [ -n "$YYJSON_H" ]; then
-    mkdir -p "$DEPS_MODULES/yyjson"
-    cp "$YYJSON_H" "$DEPS_MODULES/yyjson/"
-    cat > "$DEPS_MODULES/yyjson/module.modulemap" << 'MODULEMAP_EOF'
+    mkdir -p "$DEPS_MODULES_TMP/yyjson"
+    cp "$YYJSON_H" "$DEPS_MODULES_TMP/yyjson/"
+    cat > "$DEPS_MODULES_TMP/yyjson/module.modulemap" << 'MODULEMAP_EOF'
 module yyjson {
     umbrella header "yyjson.h"
     export *
@@ -256,15 +288,15 @@ fi
 CMLX_INCLUDE=$(find "$CHECKOUTS" -path "*/Cmlx/include" -type d 2>/dev/null | head -1)
 if [ -n "$CMLX_INCLUDE" ]; then
     echo "  Copying Cmlx headers..."
-    mkdir -p "$DEPS_MODULES/Cmlx"
-    cp -R "$CMLX_INCLUDE/"* "$DEPS_MODULES/Cmlx/"
+    mkdir -p "$DEPS_MODULES_TMP/Cmlx"
+    cp -R "$CMLX_INCLUDE/"* "$DEPS_MODULES_TMP/Cmlx/"
 fi
 
 # Also check for Cmlx module map in the build output
 CMLX_MODULEMAP=$(find "$BUILD_RELEASE" -path "*Cmlx*module.modulemap" 2>/dev/null | head -1)
-if [ -n "$CMLX_MODULEMAP" ] && [ ! -f "$DEPS_MODULES/Cmlx/module.modulemap" ]; then
-    mkdir -p "$DEPS_MODULES/Cmlx"
-    cp "$CMLX_MODULEMAP" "$DEPS_MODULES/Cmlx/"
+if [ -n "$CMLX_MODULEMAP" ] && [ ! -f "$DEPS_MODULES_TMP/Cmlx/module.modulemap" ]; then
+    mkdir -p "$DEPS_MODULES_TMP/Cmlx"
+    cp "$CMLX_MODULEMAP" "$DEPS_MODULES_TMP/Cmlx/"
 fi
 
 # --- Metal libraries: compile MLX Metal shaders ---
@@ -297,8 +329,8 @@ if [ -n "$CMLX_SRC" ]; then
         AIR_COUNT=$(ls "$METAL_OUT"/*.air 2>/dev/null | wc -l | tr -d ' ')
         if [ "$AIR_COUNT" -gt 0 ]; then
             echo "  Linking $AIR_COUNT .air files into mlx.metallib..."
-            xcrun metallib -o "$DEPS_LIBS/mlx.metallib" "$METAL_OUT"/*.air
-            ls -lh "$DEPS_LIBS/mlx.metallib"
+            xcrun metallib -o "$DEPS_LIBS_TMP/mlx.metallib" "$METAL_OUT"/*.air
+            ls -lh "$DEPS_LIBS_TMP/mlx.metallib"
         else
             echo "  WARNING: No .air files produced — Metal shaders not compiled"
         fi
@@ -308,6 +340,10 @@ if [ -n "$CMLX_SRC" ]; then
 else
     echo "  WARNING: Cmlx source not found — cannot compile Metal shaders"
 fi
+
+promote_output_dir "$DEPS_LIBS_TMP" "$DEPS_LIBS"
+promote_output_dir "$DEPS_MODULES_TMP" "$DEPS_MODULES"
+cleanup_stale_dirs
 
 echo ""
 echo "=== Results ==="
