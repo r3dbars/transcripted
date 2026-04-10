@@ -1,8 +1,14 @@
 # TranscriptedQA - QA Testing CLI Tool
 
-QA testing suite for Transcripted. 23 Swift files across Commands/, Generators/, Validators/, Utilities/, Models/, and root.
+QA testing suite for Transcripted. 23 Swift files total: `Package.swift` plus 22 files under `Sources/TranscriptedQA/`.
 
 ## File Index
+
+### Package Root (1 file)
+
+| File | Purpose |
+|------|---------|
+| `Package.swift` | Swift package manifest for the standalone QA CLI |
 
 ### Root (1 file)
 
