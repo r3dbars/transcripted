@@ -25,6 +25,7 @@ APP_NAME="Transcripted"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+STAGED_APP_BINARY="$BUILD_DIR/$APP_NAME-beta-bin"
 DMG_NAME="Transcripted-${USER_NAME}.dmg"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-${SIGN_IDENTITY:-}}"
 SIGNING_DISPLAY_NAME=""
@@ -32,12 +33,14 @@ NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 BETA_CONFIG_PATH="Sources/API/BetaConfig.swift"
 BETA_CONFIG_BACKUP="$(mktemp -t transcripted-beta-config)"
 BETA_ENTITLEMENTS="config/entitlements/beta.plist"
+DEPS_FRAMEWORK_ROOT="deps-frameworks"
+ESPEAK_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/ESpeakNG.framework"
 TRANSCRIPTED_CORE_MODULE="deps-modules/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
 
 validate_signed_app() {
     echo "Validating app signature..."
     codesign --verify --deep --strict --verbose=4 "$APP_BUNDLE"
-    codesign -dvvv --entitlements :- "$APP_BUNDLE"
+    codesign -dvvv --entitlements - "$APP_BUNDLE"
 }
 
 validate_notarized_artifacts() {
@@ -79,9 +82,10 @@ if [ ! -f "$BETA_ENTITLEMENTS" ]; then
     exit 1
 fi
 
-if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ]; then
+if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -d "$ESPEAK_FRAMEWORK" ]; then
     echo "❌ Dependencies missing or stale — required for beta builds"
     echo "   Missing module: $TRANSCRIPTED_CORE_MODULE"
+    echo "   Missing framework: $ESPEAK_FRAMEWORK"
     echo "   Run build-deps.sh --force first to rebuild dependencies."
     exit 1
 fi
@@ -92,6 +96,7 @@ echo "🔨 Building Transcripted Beta for $USER_NAME (token: $BETA_TOKEN)..."
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
+mkdir -p "$APP_BUNDLE/Contents/Frameworks"
 
 # Bundle Parakeet CoreML models
 PARAKEET_SRC="$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml"
@@ -121,23 +126,30 @@ echo "Dependencies found"
 
 DEPS_MODULE_FLAGS="-Ideps-modules"
 for dir in deps-modules/*/; do
-    [ -d "$dir" ] && DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
+    [ -d "$dir" ] || continue
+    case "$(basename "$dir")" in
+        *.swiftmodule) continue ;;
+    esac
+    DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
 done
 
-DEPS_FLAGS="$DEPS_MODULE_FLAGS -Ldeps-libs -lDraftDeps -framework CoreML -framework CoreAudio"
+DEPS_FLAGS="$DEPS_MODULE_FLAGS -F$DEPS_FRAMEWORK_ROOT -Ldeps-libs -lDraftDeps -framework ESpeakNG -framework CoreML -framework CoreAudio"
 
 # Bundle Metal libraries if present
 for metallib in deps-libs/*.metallib; do
     [ -f "$metallib" ] && cp "$metallib" "$APP_BUNDLE/Contents/MacOS/"
 done
 
+cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
+
 # Compile with BETA_BUILD flag
 echo "Compiling (beta build)..."
 SOURCE_FILES=$(find Sources -name '*.swift' -not -path 'Sources/TranscriptedCore/*')
+rm -f "$STAGED_APP_BINARY"
 swiftc \
     -O \
     -D BETA_BUILD \
-    -o "$APP_BINARY" \
+    -o "$STAGED_APP_BINARY" \
     -framework AVFoundation \
     -framework AppKit \
     -framework SwiftUI \
@@ -160,6 +172,8 @@ swiftc \
     -target arm64-apple-macos14.0 \
     -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
     2>&1
+
+mv "$STAGED_APP_BINARY" "$APP_BINARY"
 
 if [ ! -x "$APP_BINARY" ]; then
     echo "❌ Build finished without a runnable app binary: $APP_BINARY"

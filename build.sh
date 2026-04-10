@@ -114,7 +114,11 @@ echo "Dependencies found"
 # Build the -I flags for all module directories
 DEPS_MODULE_FLAGS="-I$DEPS_MODULE_ROOT"
 for dir in "$DEPS_MODULE_ROOT"/*/; do
-    [ -d "$dir" ] && DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
+    [ -d "$dir" ] || continue
+    case "$(basename "$dir")" in
+        *.swiftmodule) continue ;;
+    esac
+    DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
 done
 
 DEPS_FLAGS="$DEPS_MODULE_FLAGS -Ldeps-libs -lDraftDeps -framework CoreML -framework CoreAudio"
