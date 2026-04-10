@@ -1,11 +1,74 @@
 #!/bin/bash
 # Build Transcripted - local dictation + meeting transcription app
 
+set -euo pipefail
+
 APP_NAME="Transcripted"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
+APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+LOCAL_ENTITLEMENTS="config/entitlements/local.plist"
+SIGN_IDENTITY="${SIGN_IDENTITY:-${SIGNING_IDENTITY:-}}"
+DEPS_ARCHIVE="deps-libs/libDraftDeps.a"
+DEPS_MODULE_ROOT="deps-modules"
+TRANSCRIPTED_CORE_MODULE="$DEPS_MODULE_ROOT/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
+
+ensure_build_prerequisites() {
+    if [ ! -f "$LOCAL_ENTITLEMENTS" ]; then
+        echo "Missing entitlements file: $LOCAL_ENTITLEMENTS"
+        exit 1
+    fi
+}
+
+ensure_deps_ready() {
+    if [ -f "$DEPS_ARCHIVE" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ]; then
+        return 0
+    fi
+
+    echo "Dependencies missing or stale for TranscriptedCore."
+    echo "Expected:"
+    echo "  $DEPS_ARCHIVE"
+    echo "  $DEPS_MODULE_ROOT/"
+    echo "  $TRANSCRIPTED_CORE_MODULE"
+    echo ""
+    echo "Run: bash build-deps.sh --force"
+    exit 1
+}
+
+resolve_sign_identity() {
+    local requested_identity="$1"
+    local found_line
+
+    if [ -n "$requested_identity" ]; then
+        found_line="$(security find-identity -v -p codesigning 2>/dev/null | grep -F "$requested_identity" | head -1 || true)"
+        if [ -z "$found_line" ]; then
+            echo "Requested signing identity not found: $requested_identity"
+            echo "Available identities:"
+            security find-identity -v -p codesigning || true
+            exit 1
+        fi
+        printf '%s\n' "$found_line"
+        return 0
+    fi
+
+    found_line="$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 || true)"
+    if [ -n "$found_line" ]; then
+        printf '%s\n' "$found_line"
+        return 0
+    fi
+
+    printf '%s\n' ""
+}
+
+verify_signature() {
+    codesign --verify --deep --strict --verbose=4 "$APP_BUNDLE"
+    codesign -dvvv --entitlements :- "$APP_BUNDLE"
+}
 
 echo "Building Transcripted..."
+
+ensure_build_prerequisites
+ensure_deps_ready
 
 # Clean
 rm -rf "$BUILD_DIR"
@@ -45,36 +108,12 @@ if [ -d "Resources" ]; then
     cp -R Resources/. "$APP_BUNDLE/Contents/Resources/"
 fi
 
-# Create entitlements
-cat > "$BUILD_DIR/Transcripted.entitlements" << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>com.apple.security.app-sandbox</key>
-    <false/>
-    <key>com.apple.security.device.audio-input</key>
-    <true/>
-    <key>com.apple.security.device.audio-capture</key>
-    <true/>
-    <key>com.apple.security.speech.recognition</key>
-    <true/>
-</dict>
-</plist>
-EOF
-
 # Unified dependencies (FluidAudio + mlx-swift-lm)
-# Run build-deps.sh first to build these artifacts
-if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ]; then
-    echo "Dependencies not found — required for Parakeet STT + meeting diarization"
-    echo "   Run build-deps.sh first to build dependencies."
-    exit 1
-fi
 echo "Dependencies found"
 
 # Build the -I flags for all module directories
-DEPS_MODULE_FLAGS="-Ideps-modules"
-for dir in deps-modules/*/; do
+DEPS_MODULE_FLAGS="-I$DEPS_MODULE_ROOT"
+for dir in "$DEPS_MODULE_ROOT"/*/; do
     [ -d "$dir" ] && DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
 done
 
@@ -91,7 +130,7 @@ echo "Compiling..."
 SOURCE_FILES=$(find Sources -name '*.swift' -not -path 'Sources/TranscriptedCore/*')
 swiftc \
     -O \
-    -o "$APP_BUNDLE/Contents/MacOS/$APP_NAME" \
+    -o "$APP_BINARY" \
     -framework AVFoundation \
     -framework AppKit \
     -framework SwiftUI \
@@ -114,39 +153,37 @@ swiftc \
     -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
     2>&1
 
-if [ $? -ne 0 ]; then
-    echo "Build failed!"
+if [ ! -x "$APP_BINARY" ]; then
+    echo "Build finished without a runnable app binary: $APP_BINARY"
     exit 1
 fi
 
-# Sign — auto-detect the first valid Developer ID on this machine.
-# We extract the SHA-1 hash (not the name) because the same cert may exist in
-# both System.keychain and login.keychain, which makes name-based lookup
-# ambiguous and silently fails codesign — leaving the binary ad-hoc signed and
-# wiping TCC permissions on every rebuild. Hashes are unambiguous.
-SIGN_HASH=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | awk '{print $2}')
-SIGN_NAME=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
+SIGN_MATCH="$(resolve_sign_identity "$SIGN_IDENTITY")"
+SIGN_HASH=""
+SIGN_NAME=""
+if [ -n "$SIGN_MATCH" ]; then
+    SIGN_HASH="$(echo "$SIGN_MATCH" | awk '{print $2}')"
+    SIGN_NAME="$(echo "$SIGN_MATCH" | sed 's/.*"\(.*\)"/\1/')"
+fi
+
 if [ -n "$SIGN_HASH" ]; then
-    echo "Signing with: $SIGN_NAME ($SIGN_HASH)"
-    if ! codesign --force --deep --sign "$SIGN_HASH" \
-        --entitlements "$BUILD_DIR/Transcripted.entitlements" \
-        "$APP_BUNDLE"; then
-        echo "Codesign failed — aborting build"
-        exit 1
-    fi
+    echo "Signing with: ${SIGN_NAME:-$SIGN_HASH} ($SIGN_HASH)"
+    codesign --force --deep --sign "$SIGN_HASH" \
+        --entitlements "$LOCAL_ENTITLEMENTS" \
+        "$APP_BUNDLE"
 else
     echo "No Developer ID found — signing ad-hoc (permissions may not persist)"
     codesign --force --deep --sign - \
-        --entitlements "$BUILD_DIR/Transcripted.entitlements" \
-        "$APP_BUNDLE" 2>&1
+        --entitlements "$LOCAL_ENTITLEMENTS" \
+        "$APP_BUNDLE"
 fi
 
-# Verify the signature took — catches silent codesign failures that would
-# otherwise leave behind a linker-stamped ad-hoc binary.
-if codesign -dv "$APP_BUNDLE" 2>&1 | grep -q "Signature=adhoc"; then
-    if [ -n "$SIGN_HASH" ]; then
-        echo "WARNING: expected Developer ID signature but binary is ad-hoc — permissions will reset on each build"
-    fi
+echo "Verifying signature..."
+verify_signature
+
+if [ -n "$SIGN_HASH" ] && codesign -dv "$APP_BUNDLE" 2>&1 | grep -q "Signature=adhoc"; then
+    echo "Expected Developer ID signature but binary is ad-hoc."
+    exit 1
 fi
 
 echo "Build complete!"
