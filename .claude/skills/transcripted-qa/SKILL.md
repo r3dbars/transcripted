@@ -34,21 +34,28 @@ Run tiers in order. Stop and enter the fix loop if Tier 0 fails. Run independent
 ### Tier 0 — Build Verification
 
 ```bash
-cd /path/to/transcripted && xcodebuild -project Transcripted.xcodeproj -scheme Transcripted -configuration Debug build CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO 2>&1
+cd /path/to/transcripted && bash build-deps.sh && bash build.sh 2>&1
 ```
 
-If FluidAudio module errors occur, run `scripts/build-fluidaudio.sh --force` and copy artifacts:
-```bash
-cp -R scripts/fluidaudio-libs/* fluidaudio-libs/ && cp -R scripts/fluidaudio-modules/* fluidaudio-modules/
-```
+`build.sh` is the authoritative app build on `main`. The old `Transcripted.xcodeproj` flow is historical and should not be used for current QA.
 
-If this fails, extract the compiler errors and enter the fix loop. Do NOT proceed to other tiers.
+If dependency artifacts are missing, `build-deps.sh` is the required first step. If the build fails, extract the compiler or linker errors and enter the fix loop. Do NOT proceed to other tiers.
 
-### Tier 1 — Unit Tests (430 tests across 30 test files)
+### Tier 1 — Fast Regression Suite
 
 ```bash
-xcodebuild -project Transcripted.xcodeproj -scheme Transcripted test -destination 'platform=macOS' CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO 2>&1
+cd /path/to/transcripted && bash run-tests.sh 2>&1
 ```
+
+`run-tests.sh` is the repo's fast custom `swiftc` regression suite, not XCTest. Capture the failing test names and assertion output exactly.
+
+### Tier 1.5 — Package Seam Coverage
+
+```bash
+cd /path/to/transcripted && swift test 2>&1
+```
+
+Run this when the change touches `Package.swift`, `Sources/TranscriptedCore/`, or shared library interfaces. Also run it when you need additional confirmation that the package seam still compiles cleanly.
 
 **What's covered** (by test file → source file):
 
