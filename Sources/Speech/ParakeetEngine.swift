@@ -71,7 +71,10 @@ class ParakeetEngine: ObservableObject {
     private var asrManager: AsrManager?
     private var audioWatchdogTask: Task<Void, Never>?
     private var asrManagerReady = false
-    private var didReceiveAudioSamples = false
+    // Written true by the audio tap callback (audio thread); reset false in startRecording()
+    // before installTap(), so no write-write race. Matches the nonisolated(unsafe) pattern
+    // used for lastLevelUpdate and eouManager.
+    private nonisolated(unsafe) var didReceiveAudioSamples = false
 
     var isModelLoaded: Bool { asrManagerReady }
 
