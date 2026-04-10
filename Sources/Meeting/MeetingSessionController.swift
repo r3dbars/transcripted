@@ -11,9 +11,10 @@
 //   2. prepareModels() loads Parakeet + PyAnnote/WeSpeaker/Sortformer. Safe to
 //      call multiple times — each engine is idempotent.
 //   3. startRecording() begins capture via MeetingCaptureBridge.
-//   4. stopRecording() awaits capture files, hands them to Core's
-//      TranscriptionTaskManager, which runs the full diarize→transcribe→save
-//      pipeline and writes a .md to MeetingStoragePaths.transcriptsFolder.
+//   4. stopRecording() awaits capture files, then either starts a background
+//      transcription immediately or enqueues it behind the current one.
+//      TranscriptionTaskManager still runs one diarize→transcribe→save
+//      pipeline at a time and writes a .md to MeetingStoragePaths.transcriptsFolder.
 //
 // The session controller does NOT own a hotkey or UI — Lane C (meeting-ui)
 // wires those up.
@@ -70,6 +71,17 @@ final class MeetingSessionController: ObservableObject {
         let hasAudioFiles: Bool
     }
 
+    private struct QueuedTranscriptionJob {
+        let micURL: URL
+        let systemURL: URL?
+        let healthInfo: RecordingHealthInfo
+    }
+
+    private enum TerminalTranscriptionOutcome: Equatable {
+        case transcriptSaved
+        case failed(String)
+    }
+
     // MARK: - Published state (for meeting UI bindings)
 
     /// High-level session state for the meeting UI.
@@ -78,7 +90,7 @@ final class MeetingSessionController: ObservableObject {
         case loadingModels       // ensureModelsReady() in flight
         case ready               // Models loaded, ready to record
         case recording           // Capture in progress
-        case transcribing        // Recording stopped, pipeline running
+        case transcribing        // Background transcription or speaker naming running
         case error(String)       // Fatal error — see message
     }
 
@@ -132,6 +144,8 @@ final class MeetingSessionController: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var modelPreparationTask: Task<Result<Void, Error>, Never>?
     private var retryingFailedMeetingIDs: Set<UUID> = []
+    private var queuedTranscriptionJobs: [QueuedTranscriptionJob] = []
+    private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
 
     // MARK: - Init
 
@@ -243,8 +257,9 @@ final class MeetingSessionController: ObservableObject {
         applyModelPreparationResult(result, showLoadingUI: showLoadingUI)
     }
 
-    /// Begin a new meeting recording. Requires `state == .ready` (or .idle —
-    /// in which case we load models first). Safe to call from UI buttons.
+    /// Begin a new meeting recording. Safe to call from UI buttons. If a prior
+    /// meeting is still transcribing, the new capture starts immediately and
+    /// the older transcript continues in the background.
     func startRecording(trigger: StartTrigger = .unknown) async {
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -266,9 +281,9 @@ final class MeetingSessionController: ObservableObject {
                 )
                 return
             }
-        case .ready:
+        case .ready, .transcribing:
             break
-        case .recording, .transcribing:
+        case .recording:
             DiagnosticsTrail.record(
                 engine: "meeting",
                 event: "meeting_start_ignored",
@@ -288,9 +303,9 @@ final class MeetingSessionController: ObservableObject {
         )
     }
 
-    /// Stop capture and hand off to the Core pipeline. Returns once the task
-    /// has been *started* (not when it completes — observers watch
-    /// `displayStatus` / `lastSavedTranscriptURL` for that).
+    /// Stop capture and queue the finished meeting for background transcription.
+    /// Returns once the finished audio has either started transcribing or been
+    /// placed behind the current background task.
     func stopRecording(reason: StopReason = .unknown) async {
         guard case .recording = state else { return }
 
@@ -308,17 +323,18 @@ final class MeetingSessionController: ObservableObject {
 
         let files = await capture.stopAndAwaitFiles()
         let healthInfo = capture.healthInfo()
+        let durationMs = Int(recordingDuration * 1000)
         state = .transcribing
 
         DiagnosticsTrail.record(
             level: capture.systemAudioStatus.isWarning ? .warning : .info,
             engine: "meeting",
             event: "meeting_recording_stopped",
-            message: "Meeting recording stopped and transcription started",
+            message: "Meeting recording stopped",
             context: baseDiagnosticsContext(
                 extra: [
                     "reason": reason.rawValue,
-                    "duration_ms": "\(Int(recordingDuration * 1000))",
+                    "duration_ms": "\(durationMs)",
                     "mic_file_present": boolString(files.micURL != nil),
                     "system_file_present": boolString(files.systemURL != nil),
                     "capture_quality": healthInfo.captureQuality.rawValue,
@@ -340,17 +356,44 @@ final class MeetingSessionController: ObservableObject {
             return
         }
 
-        taskManager.startTranscription(
+        let outcome = enqueueTranscriptionJob(
             micURL: micURL,
             systemURL: files.systemURL,
-            outputFolder: storagePaths.transcripts,
             healthInfo: healthInfo
+        )
+
+        let queueDepth = queuedTranscriptionJobs.count
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: outcome == .startedImmediately ? "meeting_transcription_started" : "meeting_transcription_queued",
+            message: outcome == .startedImmediately
+                ? "Meeting transcription started"
+                : "Meeting queued behind an earlier transcription",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "reason": reason.rawValue,
+                    "duration_ms": "\(durationMs)",
+                    "queue_depth": "\(queueDepth)"
+                ]
+            )
         )
     }
 
     /// Cancel any in-progress pipeline. Does not cancel an active recording —
     /// use stopRecording() for that.
     func cancelActiveTranscription(reason: TranscriptionCancelReason = .unknown) {
+        let queuedJobs = queuedTranscriptionJobs
+        queuedTranscriptionJobs.removeAll()
+        lastTerminalTranscriptionOutcome = nil
+
+        for job in queuedJobs {
+            failedManager.addFailedTranscription(
+                micAudioURL: job.micURL,
+                systemAudioURL: job.systemURL,
+                errorMessage: "Transcription cancelled"
+            )
+        }
+
         taskManager.cancelAll()
         state = .ready
         DiagnosticsTrail.record(
@@ -363,6 +406,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     func retryFailedMeeting(id: UUID) {
+        guard !isRecording, !hasBackgroundTranscriptionWork else { return }
         guard !retryingFailedMeetingIDs.contains(id) else { return }
 
         retryingFailedMeetingIDs.insert(id)
@@ -427,74 +471,19 @@ final class MeetingSessionController: ObservableObject {
             }
             .store(in: &cancellables)
 
+        taskManager.$activeCount
+            .combineLatest(taskManager.$speakerNamingRequest)
+            .sink { [weak self] _, _ in
+                self?.handleBackgroundTranscriptionWorkChanged()
+            }
+            .store(in: &cancellables)
+
         taskManager.$displayStatus
             .sink { [weak self] status in
                 guard let self else { return }
                 let previousStatus = self.displayStatus
                 self.displayStatus = status
-                // Pipeline completion: reset state to .ready for next meeting.
-                if case .transcribing = self.state {
-                    switch status {
-                    case .transcriptSaved:
-                        DiagnosticsTrail.record(
-                            engine: "meeting",
-                            event: "meeting_transcript_saved",
-                            message: "Meeting transcript saved",
-                            context: self.baseDiagnosticsContext(
-                                extra: [
-                                    "title": self.lastSavedTitle ?? "",
-                                    "transcript_url": self.lastSavedTranscriptURL?.path ?? ""
-                                ]
-                            )
-                        )
-                        self.state = .ready
-                    case .failed(let message):
-                        DiagnosticsTrail.record(
-                            level: .error,
-                            engine: "meeting",
-                            event: "meeting_transcript_failed",
-                            message: "Meeting transcription failed",
-                            context: self.baseDiagnosticsContext(extra: ["error": message])
-                        )
-                        self.state = .error(message)
-                    case .gettingReady:
-                        if previousStatus.diagnosticName != status.diagnosticName {
-                            DiagnosticsTrail.record(
-                                engine: "meeting",
-                                event: "meeting_pipeline_phase",
-                                message: "Meeting pipeline getting ready",
-                                context: self.baseDiagnosticsContext(extra: ["phase": "getting_ready"])
-                            )
-                        }
-                    case .transcribing(let progress):
-                        let previousBucket = Int(previousStatus.progress * 4)
-                        let currentBucket = Int(progress * 4)
-                        if previousStatus.diagnosticName != status.diagnosticName || previousBucket != currentBucket {
-                            DiagnosticsTrail.record(
-                                engine: "meeting",
-                                event: "meeting_pipeline_phase",
-                                message: "Meeting transcription in progress",
-                                context: self.baseDiagnosticsContext(
-                                    extra: [
-                                        "phase": "transcribing",
-                                        "progress_pct": "\(Int(progress * 100))"
-                                    ]
-                                )
-                            )
-                        }
-                    case .finishing:
-                        if previousStatus.diagnosticName != status.diagnosticName {
-                            DiagnosticsTrail.record(
-                                engine: "meeting",
-                                event: "meeting_pipeline_phase",
-                                message: "Meeting transcription finishing",
-                                context: self.baseDiagnosticsContext(extra: ["phase": "finishing"])
-                            )
-                        }
-                    default:
-                        break
-                    }
-                }
+                self.handleDisplayStatusChange(from: previousStatus, to: status)
             }
             .store(in: &cancellables)
 
@@ -664,6 +653,167 @@ final class MeetingSessionController: ObservableObject {
         refreshWarmupStatus()
     }
 
+    private enum QueueInsertionOutcome: Equatable {
+        case startedImmediately
+        case queued(position: Int)
+    }
+
+    private var hasBackgroundTranscriptionWork: Bool {
+        taskManager.activeCount > 0 || taskManager.speakerNamingRequest != nil || !queuedTranscriptionJobs.isEmpty
+    }
+
+    private var canStartQueuedTranscriptionImmediately: Bool {
+        taskManager.activeCount == 0 && taskManager.speakerNamingRequest == nil
+    }
+
+    private var isCaptureSessionActive: Bool {
+        if case .recording = state {
+            return true
+        }
+        return isRecording
+    }
+
+    private func enqueueTranscriptionJob(
+        micURL: URL,
+        systemURL: URL?,
+        healthInfo: RecordingHealthInfo
+    ) -> QueueInsertionOutcome {
+        let job = QueuedTranscriptionJob(
+            micURL: micURL,
+            systemURL: systemURL,
+            healthInfo: healthInfo
+        )
+
+        if canStartQueuedTranscriptionImmediately {
+            startQueuedTranscription(job)
+            return .startedImmediately
+        }
+
+        queuedTranscriptionJobs.append(job)
+        return .queued(position: queuedTranscriptionJobs.count)
+    }
+
+    private func startQueuedTranscription(_ job: QueuedTranscriptionJob) {
+        lastTerminalTranscriptionOutcome = nil
+
+        if !isCaptureSessionActive {
+            state = .transcribing
+        }
+
+        taskManager.startTranscription(
+            micURL: job.micURL,
+            systemURL: job.systemURL,
+            outputFolder: storagePaths.transcripts,
+            healthInfo: job.healthInfo
+        )
+    }
+
+    private func handleBackgroundTranscriptionWorkChanged() {
+        if canStartQueuedTranscriptionImmediately {
+            if let nextJob = popNextQueuedTranscriptionJob() {
+                startQueuedTranscription(nextJob)
+                return
+            }
+
+            finalizeBackgroundTranscriptionStateIfNeeded()
+            return
+        }
+
+        if !isCaptureSessionActive {
+            state = .transcribing
+        }
+    }
+
+    private func popNextQueuedTranscriptionJob() -> QueuedTranscriptionJob? {
+        guard !queuedTranscriptionJobs.isEmpty else { return nil }
+        return queuedTranscriptionJobs.removeFirst()
+    }
+
+    private func finalizeBackgroundTranscriptionStateIfNeeded() {
+        guard !hasBackgroundTranscriptionWork else { return }
+        guard !isCaptureSessionActive else { return }
+
+        switch lastTerminalTranscriptionOutcome {
+        case .failed(let message):
+            state = .error(message)
+        case .transcriptSaved:
+            state = .ready
+        case .none:
+            if case .transcribing = state {
+                state = .ready
+            }
+        }
+    }
+
+    private func handleDisplayStatusChange(from previousStatus: DisplayStatus, to status: DisplayStatus) {
+        switch status {
+        case .transcriptSaved:
+            lastTerminalTranscriptionOutcome = .transcriptSaved
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "meeting_transcript_saved",
+                message: "Meeting transcript saved",
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "title": lastSavedTitle ?? "",
+                        "transcript_url": lastSavedTranscriptURL?.path ?? "",
+                        "queue_depth": "\(queuedTranscriptionJobs.count)"
+                    ]
+                )
+            )
+        case .failed(let message):
+            lastTerminalTranscriptionOutcome = .failed(message)
+            DiagnosticsTrail.record(
+                level: .error,
+                engine: "meeting",
+                event: "meeting_transcript_failed",
+                message: "Meeting transcription failed",
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "error": message,
+                        "queue_depth": "\(queuedTranscriptionJobs.count)"
+                    ]
+                )
+            )
+        case .gettingReady:
+            if previousStatus.diagnosticName != status.diagnosticName {
+                DiagnosticsTrail.record(
+                    engine: "meeting",
+                    event: "meeting_pipeline_phase",
+                    message: "Meeting pipeline getting ready",
+                    context: baseDiagnosticsContext(extra: ["phase": "getting_ready"])
+                )
+            }
+        case .transcribing(let progress):
+            let previousBucket = Int(previousStatus.progress * 4)
+            let currentBucket = Int(progress * 4)
+            if previousStatus.diagnosticName != status.diagnosticName || previousBucket != currentBucket {
+                DiagnosticsTrail.record(
+                    engine: "meeting",
+                    event: "meeting_pipeline_phase",
+                    message: "Meeting transcription in progress",
+                    context: baseDiagnosticsContext(
+                        extra: [
+                            "phase": "transcribing",
+                            "progress_pct": "\(Int(progress * 100))"
+                        ]
+                    )
+                )
+            }
+        case .finishing:
+            if previousStatus.diagnosticName != status.diagnosticName {
+                DiagnosticsTrail.record(
+                    engine: "meeting",
+                    event: "meeting_pipeline_phase",
+                    message: "Meeting transcription finishing",
+                    context: baseDiagnosticsContext(extra: ["phase": "finishing"])
+                )
+            }
+        default:
+            break
+        }
+    }
+
     private func logWarmupStatusChange(from oldValue: ModelWarmupStatus, to newValue: ModelWarmupStatus) {
         guard warmupDiagnosticsSignature(for: oldValue) != warmupDiagnosticsSignature(for: newValue) else { return }
 
@@ -698,7 +848,8 @@ final class MeetingSessionController: ObservableObject {
             "display_status": displayStatus.diagnosticName,
             "dictation_model_state": parakeetEngine.modelDownloadState.diagnosticName,
             "meeting_model_state": diarization.modelState.diagnosticName,
-            "system_audio_status": capture.systemAudioStatus.diagnosticName
+            "system_audio_status": capture.systemAudioStatus.diagnosticName,
+            "queue_depth": "\(queuedTranscriptionJobs.count)"
         ]
 
         for (key, value) in extra {
