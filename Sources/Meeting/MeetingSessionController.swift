@@ -508,12 +508,7 @@ final class MeetingSessionController: ObservableObject {
                     engine: "meeting",
                     event: "meeting_transcript_artifact_ready",
                     message: "Meeting transcript artifact is ready",
-                    context: self.baseDiagnosticsContext(
-                        extra: [
-                            "title": styled.title,
-                            "transcript_url": styled.url.path
-                        ]
-                    )
+                    context: self.baseDiagnosticsContext()
                 )
             }
             .store(in: &cancellables)
@@ -760,8 +755,6 @@ final class MeetingSessionController: ObservableObject {
                 message: "Meeting transcript saved",
                 context: baseDiagnosticsContext(
                     extra: [
-                        "title": lastSavedTitle ?? "",
-                        "transcript_url": lastSavedTranscriptURL?.path ?? "",
                         "queue_depth": "\(queuedTranscriptionJobs.count)"
                     ]
                 )

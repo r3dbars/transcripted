@@ -37,6 +37,8 @@ private actor AppLogFileWriter {
             fm.createFile(atPath: path, contents: nil)
         }
 
+        fm.restrictFileToOwnerOnly(at: URL(fileURLWithPath: path))
+
         openHandleIfNeeded()
     }
 

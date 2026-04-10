@@ -130,14 +130,13 @@ public class DiarizationService: ObservableObject {
             embeddingExcludeOverlap: true,
             minSegmentDuration: 1.1821,
             minGapDuration: 0.2874,
-            exclusiveSegments: true,
             speechOnsetThreshold: 0.4472,
             speechOffsetThreshold: 0.4472,
             segmentationMinDurationOn: 0.0,
             segmentationMinDurationOff: 0.2738,
             maxVBxIterations: 24,
             convergenceTolerance: 0.0001
-        ).withSpeakers(min: 3, max: 11)
+        )
         let manager = OfflineDiarizerManager(config: offlineConfig)
 
         if let bundlePath = bundleProvider("offline-diarizer-models") {

@@ -20,8 +20,13 @@ extension AudioObjectID {
 
 extension AudioObjectID {
     /// Reads the value for `kAudioHardwarePropertyDefaultSystemOutputDevice`.
-    static func readDefaultSystemOutputDevice() throws -> AudioDeviceID {
+    public static func readDefaultSystemOutputDevice() throws -> AudioDeviceID {
         try AudioDeviceID.system.readDefaultSystemOutputDevice()
+    }
+
+    /// Reads the value for `kAudioHardwarePropertyDefaultInputDevice`.
+    public static func readDefaultInputDevice() throws -> AudioDeviceID {
+        try AudioObjectID.system.readDefaultInputDevice()
     }
 
     static func readProcessList() throws -> [AudioObjectID] {
@@ -82,6 +87,13 @@ extension AudioObjectID {
         return try read(kAudioHardwarePropertyDefaultSystemOutputDevice, defaultValue: AudioDeviceID.unknown)
     }
 
+    /// Reads the value for `kAudioHardwarePropertyDefaultInputDevice`, should only be called on the system object.
+    func readDefaultInputDevice() throws -> AudioDeviceID {
+        try requireSystemObject()
+
+        return try read(kAudioHardwarePropertyDefaultInputDevice, defaultValue: AudioDeviceID.unknown)
+    }
+
     /// Reads the value for `kAudioDevicePropertyDeviceUID` for the device represented by this audio object ID.
     func readDeviceUID() throws -> String { try readString(kAudioDevicePropertyDeviceUID) }
 
@@ -133,7 +145,7 @@ extension AudioObjectID {
         try read(address, defaultValue: defaultValue, inQualifierSize: 0, inQualifierData: nil)
     }
 
-    func readString(_ selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal, element: AudioObjectPropertyElement = kAudioObjectPropertyElementMain) throws -> String {
+    public func readString(_ selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal, element: AudioObjectPropertyElement = kAudioObjectPropertyElementMain) throws -> String {
         try read(AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: element), defaultValue: "" as CFString) as String
     }
 
