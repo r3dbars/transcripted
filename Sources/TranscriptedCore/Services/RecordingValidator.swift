@@ -65,7 +65,8 @@ public enum RecordingValidator {
         }
 
         do {
-            let values = try checkPath.resourceValues(forKeys: [.volumeAvailableCapacityKey])
+            let probeURL = diskSpaceProbeURL(for: checkPath)
+            let values = try probeURL.resourceValues(forKeys: [.volumeAvailableCapacityKey])
             guard let availableCapacity = values.volumeAvailableCapacity else {
                 return .failure("Cannot determine available disk space. Check that your save location is accessible.")
             }
@@ -79,6 +80,20 @@ public enum RecordingValidator {
         } catch {
             return .failure("Error checking disk space: \(error.localizedDescription)")
         }
+    }
+
+    /// Resolves a disk-space probe target even when the final save directory does not
+    /// exist yet, which is common on first launch and for newly chosen custom paths.
+    static func diskSpaceProbeURL(for candidateURL: URL, fileManager: FileManager = .default) -> URL {
+        var probeURL = candidateURL
+
+        while !fileManager.fileExists(atPath: probeURL.path) {
+            let parentURL = probeURL.deletingLastPathComponent()
+            guard parentURL.path != probeURL.path else { break }
+            probeURL = parentURL
+        }
+
+        return probeURL
     }
 
     /// Checks if we have write permissions to the configured transcripts folder

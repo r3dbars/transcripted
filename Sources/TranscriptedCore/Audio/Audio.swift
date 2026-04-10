@@ -425,6 +425,10 @@ public class Audio: ObservableObject {
             return
         }
 
+        // Gate duplicate start requests while the permission prompt is open or
+        // the async recorder setup is still being scheduled.
+        isStarting = true
+
         // Check microphone permission and request if not determined
         // This allows users who skipped permission during onboarding to grant it at record time
         let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
@@ -452,9 +456,6 @@ public class Audio: ObservableObject {
             }
             return
         }
-
-        // Set isStarting to prevent double-start during async setup
-        isStarting = true
         error = nil
         isMicRecovering = false
         systemBufferCount = 0  // Reset debug counter (lock-protected)
@@ -546,18 +547,16 @@ public class Audio: ObservableObject {
 
     public func stop() {
         recordingSessionGeneration &+= 1
-        guard let engine = engine, let inputNode = inputNode else {
-            // Ensure flag reset even on guard failure
-            isRecording = false
-            return
-        }
+        if let engine, let inputNode {
+            AppLogger.audio.info("Stopping audio capture")
 
-        AppLogger.audio.info("Stopping audio capture")
-
-        // Stop audio engine FIRST (prevents new buffers from arriving)
-        if engine.isRunning {
-            inputNode.removeTap(onBus: 0)
-            engine.stop()
+            // Stop audio engine FIRST (prevents new buffers from arriving)
+            if engine.isRunning {
+                inputNode.removeTap(onBus: 0)
+                engine.stop()
+            }
+        } else {
+            AppLogger.audio.warning("Stopping audio capture without an active engine")
         }
 
         // Stop system audio capture
