@@ -158,8 +158,7 @@ extension TranscriptSaver {
         guard !updates.isEmpty else { return true }
 
         return fileUpdateQueue.sync {
-            // Resolve the actual file path — the transcript may have been renamed
-            // by MeetingTranscriptStyler between save and naming completion.
+            // The transcript may have been renamed by MeetingTranscriptStyler between save and naming completion.
             let resolvedURL = resolveTranscriptURL(transcriptURL, updates: updates)
 
             guard var content = try? String(contentsOf: resolvedURL, encoding: .utf8) else {

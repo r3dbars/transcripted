@@ -162,8 +162,7 @@ extension TranscriptionTaskManager {
                 }
             }
 
-            // Resolve the transcript URL — the file may have been renamed by
-            // MeetingTranscriptStyler between save and naming completion.
+            // The file may have been renamed by MeetingTranscriptStyler between save and naming completion.
             let resolvedURL = TranscriptSaver.resolveTranscriptURL(
                 transcriptURL,
                 updates: canonicalUpdates.isEmpty ? resolvedUpdates : canonicalUpdates
