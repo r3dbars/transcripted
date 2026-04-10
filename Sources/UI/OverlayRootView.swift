@@ -171,11 +171,9 @@ final class OverlayRootView: NSView {
 
 @MainActor
 final class OverlayLoadingView: NSView {
-    private let titleLabel = NSTextField(labelWithString: "Loading dictation")
+    private let titleLabel = NSTextField(labelWithString: "Getting ready")
     private let detailLabel = NSTextField(wrappingLabelWithString: "")
     private let progressBar = NSProgressIndicator()
-    private let statusLabel = NSTextField(labelWithString: "")
-    private let elapsedLabel = NSTextField(labelWithString: "First launch can take a minute or two.")
 
     override var isFlipped: Bool { true }
 
@@ -206,17 +204,6 @@ final class OverlayLoadingView: NSView {
         progressBar.maxValue = 1
         progressBar.doubleValue = 0
         addSubview(progressBar)
-
-        statusLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
-        statusLabel.textColor = OverlayTokens.textSecondary
-        addSubview(statusLabel)
-
-        elapsedLabel.font = NSFont.systemFont(ofSize: 11)
-        elapsedLabel.textColor = OverlayTokens.textMuted
-        elapsedLabel.isBezeled = false
-        elapsedLabel.isEditable = false
-        elapsedLabel.drawsBackground = false
-        addSubview(elapsedLabel)
     }
 
     override func layout() {
@@ -224,11 +211,9 @@ final class OverlayLoadingView: NSView {
         let pad: CGFloat = 14
         let contentWidth = max(0, bounds.width - pad * 2)
 
-        titleLabel.frame = NSRect(x: pad, y: 10, width: contentWidth, height: 16)
-        detailLabel.frame = NSRect(x: pad, y: 30, width: contentWidth, height: 28)
-        progressBar.frame = NSRect(x: pad, y: 64, width: contentWidth, height: 8)
-        statusLabel.frame = NSRect(x: pad, y: 76, width: contentWidth, height: 12)
-        elapsedLabel.frame = NSRect(x: pad, y: 88, width: contentWidth, height: 12)
+        titleLabel.frame = NSRect(x: pad, y: 12, width: contentWidth, height: 16)
+        detailLabel.frame = NSRect(x: pad, y: 32, width: contentWidth, height: 16)
+        progressBar.frame = NSRect(x: pad, y: 54, width: contentWidth, height: 6)
     }
 
     func update(
@@ -238,12 +223,6 @@ final class OverlayLoadingView: NSView {
         titleLabel.stringValue = presentation.title
         detailLabel.stringValue = presentation.detail
         progressBar.doubleValue = presentation.progress
-        statusLabel.stringValue = presentation.status
-        if elapsedSeconds > 0 {
-            elapsedLabel.stringValue = "First launch can take a minute or two. \(elapsedSeconds)s elapsed."
-        } else {
-            elapsedLabel.stringValue = "First launch can take a minute or two."
-        }
         needsLayout = true
     }
 }
