@@ -168,9 +168,7 @@ class DictationSessionController: ObservableObject {
             message: "Dictation started",
             context: dictationContext(
                 extra: [
-                    "trigger": trigger.rawValue,
-                    "source_app_name": sourceApp?.localizedName ?? "",
-                    "source_app_bundle_id": sourceApp?.bundleIdentifier ?? ""
+                    "trigger": trigger.rawValue
                 ]
             )
         )
@@ -620,9 +618,7 @@ class DictationSessionController: ObservableObject {
                 message: "Saved dictation markdown export",
                 context: dictationContext(
                     extra: [
-                        "delivery": delivery.rawValue,
-                        "title": saved.title,
-                        "filename": saved.url.lastPathComponent
+                        "delivery": delivery.rawValue
                     ]
                 )
             )
@@ -641,8 +637,6 @@ class DictationSessionController: ObservableObject {
 
     private func dictationContext(extra: [String: String] = [:]) -> [String: String] {
         var context: [String: String] = [
-            "source_app_name": sessionSourceApp?.localizedName ?? "",
-            "source_app_bundle_id": sessionSourceApp?.bundleIdentifier ?? "",
             "audio_device": appState?.sttRouter.inputDeviceName ?? ""
         ]
 

@@ -27,4 +27,15 @@ extension FileManager {
     var dictationSupportDir: URL {
         transcriptedAppSupportDir.appendingPathComponent("dictations", isDirectory: true)
     }
+
+    /// Create a directory and tighten it to owner-only access (0700).
+    func createPrivateDirectory(at url: URL) throws {
+        try createDirectory(at: url, withIntermediateDirectories: true)
+        try? setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+    }
+
+    /// Tighten a file to owner-only access (0600).
+    func restrictFileToOwnerOnly(at url: URL) {
+        try? setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
 }

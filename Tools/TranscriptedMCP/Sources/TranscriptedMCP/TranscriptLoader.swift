@@ -68,10 +68,11 @@ enum TranscriptLoader {
         }
 
         return files.compactMap { url in
-            guard let kind = sidecarKind(for: url) else { return nil }
-            let modDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey])
+            guard case .valid(let safeURL) = PathSecurity.validateExistingFile(url, under: directory),
+                  let kind = sidecarKind(for: safeURL) else { return nil }
+            let modDate = (try? safeURL.resourceValues(forKeys: [.contentModificationDateKey])
                 .contentModificationDate?.timeIntervalSince1970) ?? 0
-            return ContextSidecarFile(url: url, modDate: modDate, kind: kind)
+            return ContextSidecarFile(url: safeURL, modDate: modDate, kind: kind)
         }
     }
 

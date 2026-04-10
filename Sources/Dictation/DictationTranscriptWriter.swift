@@ -110,6 +110,7 @@ enum DictationTranscriptWriter {
         }
 
         try body.write(to: url, atomically: true, encoding: .utf8)
+        FileManager.default.restrictFileToOwnerOnly(at: url)
 
         let sidecarURL = try? DictationAgentOutput.appendEntry(
             title: title,

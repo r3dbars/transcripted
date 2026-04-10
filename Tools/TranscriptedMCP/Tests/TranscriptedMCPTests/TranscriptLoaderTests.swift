@@ -56,6 +56,36 @@ final class TranscriptLoaderTests: XCTestCase {
         XCTAssertEqual(day?.entries.first?.title, "Morning note")
     }
 
+    func testEnumerateSidecarsSkipsSymlinkedFiles() throws {
+        let outsideDir = makeTempDir()
+        defer { removeTempDir(outsideDir) }
+
+        let outsideFile = outsideDir.appendingPathComponent("Call_2026-03-29_10-00-00.json")
+        try makeFixtureJSON().write(to: outsideFile)
+
+        let symlinkURL = tempDir.appendingPathComponent("Call_2026-03-29_10-00-00.json")
+        try FileManager.default.createSymbolicLink(at: symlinkURL, withDestinationURL: outsideFile)
+
+        let sidecars = TranscriptLoader.enumerateSidecars(in: tempDir)
+        XCTAssertTrue(sidecars.isEmpty)
+    }
+
+    func testResolveReadableFileRejectsSymlinkEscape() throws {
+        let outsideDir = makeTempDir()
+        defer { removeTempDir(outsideDir) }
+
+        let outsideFile = outsideDir.appendingPathComponent("Dictations_2026-04-07.md")
+        try "# Secret".write(to: outsideFile, atomically: true, encoding: .utf8)
+
+        let symlinkURL = tempDir.appendingPathComponent("Dictations_2026-04-07.md")
+        try FileManager.default.createSymbolicLink(at: symlinkURL, withDestinationURL: outsideFile)
+
+        let result = PathSecurity.resolveReadableFile(named: "Dictations_2026-04-07.md", in: tempDir)
+        guard case .invalid = result else {
+            return XCTFail("Expected symlink escape to be rejected")
+        }
+    }
+
     func testSpeakerLookup() {
         let fixture = makeFixtureJSON()
         let transcript = try! JSONDecoder().decode(AgentTranscript.self, from: fixture)
