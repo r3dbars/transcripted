@@ -15,6 +15,7 @@ struct TestRunner {
         testMeetingTranscriptStyler()
         testDictationTranscriptWriter()
         testDictationSessionTimeout()
+        testMicRecordingMergePlan()
 
         print("\n\(totalTests) tests, \(passedTests) passed, \(failedTests) failed")
         if failedTests > 0 {

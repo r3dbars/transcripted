@@ -71,6 +71,7 @@ class ParakeetEngine: ObservableObject {
 
     // FluidAudio ASR
     private var asrManager: AsrManager?
+    private var initializeTask: Task<Void, Never>?
     private var audioWatchdogTask: Task<Void, Never>?
     private var pendingRecoveryTask: Task<Void, Never>?
     private var asrManagerReady = false
@@ -108,11 +109,27 @@ class ParakeetEngine: ObservableObject {
     /// Load Parakeet models from the app bundle (preferred) or download from HuggingFace (fallback).
     /// Bundle path: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/
     func initialize() async {
+        if let initializeTask {
+            await initializeTask.value
+            return
+        }
         guard asrManager == nil else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "already_initialized",
                 message: "initialize() called but ASR manager already exists — ignoring")
             return
         }
+
+        let task: Task<Void, Never> = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performInitialize()
+        }
+        initializeTask = task
+        await task.value
+        initializeTask = nil
+    }
+
+    private func performInitialize() async {
+        guard asrManager == nil else { return }
 
         // Request microphone permission early so it's granted before first recording
         if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
@@ -827,6 +844,8 @@ class ParakeetEngine: ObservableObject {
 
     func cleanup() {
         cancelPendingRecovery()
+        initializeTask?.cancel()
+        initializeTask = nil
         if let observer = configChangeObserver {
             NotificationCenter.default.removeObserver(observer)
             configChangeObserver = nil
@@ -846,6 +865,8 @@ class ParakeetEngine: ObservableObject {
     deinit {
         pendingRecoveryTask?.cancel()
         pendingRecoveryTask = nil
+        initializeTask?.cancel()
+        initializeTask = nil
         if let observer = configChangeObserver {
             NotificationCenter.default.removeObserver(observer)
         }

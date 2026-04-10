@@ -17,6 +17,7 @@ swiftc \
     Tests/MeetingTranscriptStylerTests.swift \
     Tests/DictationTranscriptWriterTests.swift \
     Tests/DictationSessionTimeoutTests.swift \
+    Tests/MicRecordingMergePlanTests.swift \
     Sources/Capture/CapturedContext.swift \
     Sources/Draft/DraftUtils.swift \
     Sources/Style/StyleUtils.swift \
@@ -27,6 +28,7 @@ swiftc \
     Sources/DraftConstants.swift \
     Sources/Draft/DiffSummary.swift \
     Sources/Meeting/MeetingTranscriptStyler.swift \
+    Sources/TranscriptedCore/Audio/MicRecordingSegment.swift \
     -framework AppKit \
     -parse-as-library \
     -o build/tests \

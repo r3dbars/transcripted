@@ -153,6 +153,7 @@ extension Audio {
             let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic.wav")
 
             self.originalMicAudioFileURL = fileURL
+            self.micSegments = [MicRecordingSegment(url: fileURL)]
             DispatchQueue.main.async {
                 self.micAudioFileURL = fileURL
             }
@@ -243,6 +244,122 @@ extension Audio {
                     AppLogger.audioMic.error("Too many consecutive write errors, stopping mic writes")
                 }
             }
+        }
+    }
+
+    func finalizeMicRecording(primaryURL: URL?, segments: [MicRecordingSegment]) -> URL? {
+        guard let primaryURL else { return segments.last?.url }
+        guard segments.count > 1 else { return primaryURL }
+
+        let mergedFilename = primaryURL.deletingPathExtension().lastPathComponent + "_merged.wav"
+        let mergedURL = primaryURL.deletingLastPathComponent().appendingPathComponent(mergedFilename)
+
+        do {
+            try? FileManager.default.removeItem(at: mergedURL)
+            guard let outputFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: 16000,
+                channels: 1,
+                interleaved: true
+            ) else {
+                throw NSError(domain: "Audio", code: 11, userInfo: [
+                    NSLocalizedDescriptionKey: "Failed to create merged mic format"
+                ])
+            }
+
+            let mergedFile = try AVAudioFile(
+                forWriting: mergedURL,
+                settings: outputFormat.settings,
+                commonFormat: outputFormat.commonFormat,
+                interleaved: outputFormat.isInterleaved
+            )
+
+            var insertedSilenceSamples = 0
+            for (index, segment) in segments.enumerated() {
+                if index > 0 {
+                    let silenceSamples = MicRecordingMergePlan.silenceSampleCount(
+                        before: segment,
+                        sampleRate: outputFormat.sampleRate
+                    )
+                    if silenceSamples > 0 {
+                        try writeSilence(frameCount: silenceSamples, to: mergedFile, format: outputFormat)
+                        insertedSilenceSamples += silenceSamples
+                    }
+                }
+
+                let samples = try AudioResampler.loadAndResample(url: segment.url, targetRate: 16000)
+                try writeMergedMicSamples(samples, to: mergedFile, format: outputFormat)
+            }
+
+            FileManager.default.restrictToOwnerOnly(atPath: mergedURL.path)
+            AppLogger.audioMic.info("Merged mic recovery segments", [
+                "segments": "\(segments.count)",
+                "insertedSilenceSeconds": String(format: "%.3f", Double(insertedSilenceSamples) / outputFormat.sampleRate),
+                "file": mergedURL.lastPathComponent
+            ])
+            for segment in Set(segments.map(\.url)) {
+                try? FileManager.default.removeItem(at: segment)
+            }
+            return mergedURL
+        } catch {
+            try? FileManager.default.removeItem(at: mergedURL)
+            AppLogger.audioMic.error("Failed to merge mic recovery segments", [
+                "segments": "\(segments.count)",
+                "error": error.localizedDescription
+            ])
+            return primaryURL
+        }
+    }
+
+    private func writeMergedMicSamples(_ samples: [Float], to file: AVAudioFile, format: AVAudioFormat) throws {
+        let chunkSize = 16000 * 30
+        var offset = 0
+
+        while offset < samples.count {
+            let count = min(chunkSize, samples.count - offset)
+            guard let buffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(count)
+            ) else {
+                throw NSError(domain: "Audio", code: 12, userInfo: [
+                    NSLocalizedDescriptionKey: "Failed to allocate merged mic buffer"
+                ])
+            }
+
+            buffer.frameLength = AVAudioFrameCount(count)
+            if let channelData = buffer.floatChannelData?[0] {
+                samples.withUnsafeBufferPointer { pointer in
+                    channelData.update(from: pointer.baseAddress! + offset, count: count)
+                }
+            }
+
+            try file.write(from: buffer)
+            offset += count
+        }
+    }
+
+    private func writeSilence(frameCount: Int, to file: AVAudioFile, format: AVAudioFormat) throws {
+        let chunkSize = 16000 * 30
+        var remaining = frameCount
+
+        while remaining > 0 {
+            let count = min(chunkSize, remaining)
+            guard let buffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(count)
+            ) else {
+                throw NSError(domain: "Audio", code: 13, userInfo: [
+                    NSLocalizedDescriptionKey: "Failed to allocate silence buffer"
+                ])
+            }
+
+            buffer.frameLength = AVAudioFrameCount(count)
+            if let channelData = buffer.floatChannelData?[0] {
+                channelData.initialize(repeating: 0, count: count)
+            }
+
+            try file.write(from: buffer)
+            remaining -= count
         }
     }
 

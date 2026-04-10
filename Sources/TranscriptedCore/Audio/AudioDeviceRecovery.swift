@@ -28,11 +28,11 @@ extension Audio {
                 }
 
                 // Give up after too many failed recoveries
-                if self.deviceSwitchCount >= self.maxRecoveryAttempts {
+                if self.recoveryAttemptCount >= self.maxRecoveryAttempts {
                     AppLogger.audioMic.error("Max recovery attempts reached, stopping recording", [
-                        "attempts": "\(self.deviceSwitchCount)"
+                        "attempts": "\(self.recoveryAttemptCount)"
                     ])
-                    let savedError = "Audio device unavailable \u{2014} recording stopped after \(self.deviceSwitchCount) recovery attempts. Reconnect your microphone and try again."
+                    let savedError = "Audio device unavailable \u{2014} recording stopped after \(self.recoveryAttemptCount) recovery attempts. Reconnect your microphone and try again."
                     DispatchQueue.main.async {
                         self.stop()
                         // Re-apply error after stop() clears it
@@ -84,6 +84,7 @@ extension Audio {
         // Track device switch for health monitoring
         let switchStart = Date()
         deviceSwitchCount += 1
+        recoveryAttemptCount += 1
         AppLogger.audioMic.debug("Recovering from device change", ["switchNumber": "\(deviceSwitchCount)", "maxAttempts": "\(maxRecoveryAttempts)"])
 
         // Stop engine (but keep recording flag true)
@@ -114,7 +115,22 @@ extension Audio {
         }
 
         // Get ACTUAL hardware format (not converter format)
-        let recordingFormat = newInputNode.inputFormat(forBus: 1)
+        var recordingFormat = newInputNode.inputFormat(forBus: 1)
+        if recordingFormat.sampleRate <= 0 || recordingFormat.channelCount <= 0 {
+            AppLogger.audioMic.warning("Recovery format invalid after first read, retrying", [
+                "sampleRate": "\(recordingFormat.sampleRate)",
+                "channels": "\(recordingFormat.channelCount)"
+            ])
+            Thread.sleep(forTimeInterval: 0.3)
+            recordingFormat = newInputNode.inputFormat(forBus: 1)
+        }
+        guard recordingFormat.sampleRate > 0, recordingFormat.channelCount > 0 else {
+            AppLogger.audioMic.error("Recovery format remained invalid", [
+                "sampleRate": "\(recordingFormat.sampleRate)",
+                "channels": "\(recordingFormat.channelCount)"
+            ])
+            return
+        }
         let oldChannelCount = self.inputChannelCount
         AppLogger.audioMic.info("Switched to default device", ["sampleRate": "\(recordingFormat.sampleRate)", "channels": "\(recordingFormat.channelCount)"])
 
@@ -125,15 +141,33 @@ extension Audio {
             AppLogger.audioMic.debug("Recovery: will manually downmix to mono", ["channels": "\(recordingFormat.channelCount)"])
         }
 
-        // Check if we need to create a new file due to format change
-        // Must check BOTH sample rate AND channel count changes
-        // All micAudioFile accesses wrapped in micAudioFileQueue.sync for thread safety
+        // Rotate files only when the sample rate changes. Channel-count-only changes
+        // keep writing into the same mono WAV, which avoids unnecessary segment churn.
+        // All micAudioFile accesses wrapped in micAudioFileQueue.sync for thread safety.
         let sampleRateChanged = micAudioFileQueue.sync { micAudioFile.map { recordingFormat.sampleRate != $0.processingFormat.sampleRate } ?? false }
         let channelCountChanged = oldChannelCount != recordingFormat.channelCount
+        var recoverySegmentURL: URL?
+        var shouldKeepRecoverySegment = false
+        defer {
+            if let recoverySegmentURL, !shouldKeepRecoverySegment {
+                micAudioFileQueue.sync {
+                    if micAudioFile?.url == recoverySegmentURL {
+                        micAudioFile = nil
+                    }
+                }
+                try? FileManager.default.removeItem(at: recoverySegmentURL)
+            }
+        }
 
-        if sampleRateChanged || channelCountChanged {
-            let changeReason = sampleRateChanged ? "Sample rate" : "Channel count"
-            AppLogger.audioMic.warning("Format changed, closing old file and creating new segment", ["reason": changeReason])
+        if channelCountChanged && !sampleRateChanged {
+            AppLogger.audioMic.info("Input channel count changed, keeping current recording file", [
+                "oldChannels": "\(oldChannelCount)",
+                "newChannels": "\(recordingFormat.channelCount)"
+            ])
+        }
+
+        if sampleRateChanged {
+            AppLogger.audioMic.warning("Sample rate changed, closing old file and creating new segment")
             micAudioFileQueue.sync { micAudioFile = nil }
 
             // Create new file segment as mono
@@ -141,6 +175,7 @@ extension Audio {
             try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
             let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
             let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic_recovery.wav")
+            recoverySegmentURL = fileURL
 
             do {
                 // Always create mono format at new sample rate
@@ -164,11 +199,6 @@ extension Audio {
                 FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
                 micAudioFileQueue.sync { micAudioFile = newFile }
                 AppLogger.audioMic.info("Created recovery audio file", ["file": fileURL.lastPathComponent])
-
-                // Update file URL reference
-                DispatchQueue.main.async {
-                    self.micAudioFileURL = fileURL
-                }
             } catch {
                 AppLogger.audioMic.error("Failed to create recovery audio file", ["error": error.localizedDescription])
                 return
@@ -213,6 +243,14 @@ extension Audio {
                 reason: "Device switch"
             )
             appendRecordingGap(gap)
+            if let recoverySegmentURL {
+                appendMicSegment(MicRecordingSegment(url: recoverySegmentURL, gapBeforeDuration: gap.duration))
+                shouldKeepRecoverySegment = true
+                DispatchQueue.main.async {
+                    self.micAudioFileURL = recoverySegmentURL
+                }
+            }
+            recoveryAttemptCount = 0
             AppLogger.audioMic.info("Device recovery complete, recording continues", ["gap": gap.description])
         } catch {
             AppLogger.audioMic.error("Failed to restart engine", ["error": error.localizedDescription])
