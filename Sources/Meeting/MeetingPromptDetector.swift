@@ -9,12 +9,13 @@ final class MeetingPromptDetector {
         let id: String
         let title: String
         let detail: String
+        let source: MeetingPromptSource
         let startDate: Date
         let endDate: Date
-        let meetingURL: URL
+        let meetingURL: URL?
     }
 
-    private enum Provider: Equatable {
+    private enum Provider: String, CaseIterable, Hashable {
         case zoom
         case googleMeet
         case teams
@@ -44,6 +45,10 @@ final class MeetingPromptDetector {
                 return ["com.apple.FaceTime"]
             }
         }
+
+        var supportsNativeRuntimePrompt: Bool {
+            !activeBundleIdentifiers.isEmpty
+        }
     }
 
     private struct ScoredCandidate {
@@ -55,8 +60,10 @@ final class MeetingPromptDetector {
 
     private let eventStore = EKEventStore()
     private var pollingTask: Task<Void, Never>?
+    private var workspaceObservers: [NSObjectProtocol] = []
     private var snoozedUntil: [String: Date] = [:]
     private var pendingUntil: [String: Date] = [:]
+    private var recentNativeActivity: [Provider: Date] = [:]
 
     private let defaultSnoozeInterval: TimeInterval = 30 * 60
     private let pendingCooldown: TimeInterval = 90
@@ -74,6 +81,7 @@ final class MeetingPromptDetector {
 
     func start() {
         guard pollingTask == nil else { return }
+        installWorkspaceObservers()
 
         pollingTask = Task { [weak self] in
             guard let self else { return }
@@ -91,19 +99,42 @@ final class MeetingPromptDetector {
     func stop() {
         pollingTask?.cancel()
         pollingTask = nil
+        for observer in workspaceObservers {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        workspaceObservers.removeAll()
     }
 
     func snooze(candidate: Candidate, interval: TimeInterval? = nil) {
-        let until = max(
-            Date().addingTimeInterval(interval ?? defaultSnoozeInterval),
-            candidate.endDate.addingTimeInterval(5 * 60)
+        let now = Date()
+        let baseInterval = MeetingPromptHeuristics.snoozeInterval(
+            for: candidate.source,
+            explicit: interval,
+            defaultInterval: defaultSnoozeInterval
         )
+        let until: Date
+        switch candidate.source {
+        case .calendarEvent:
+            until = max(
+                now.addingTimeInterval(baseInterval),
+                candidate.endDate.addingTimeInterval(5 * 60)
+            )
+        case .runtimeApp:
+            until = now.addingTimeInterval(baseInterval)
+        }
         snoozedUntil[candidate.id] = until
         pendingUntil[candidate.id] = until
     }
 
     func markAccepted(candidate: Candidate) {
-        let until = max(Date().addingTimeInterval(defaultSnoozeInterval), candidate.endDate.addingTimeInterval(5 * 60))
+        let now = Date()
+        let until: Date
+        switch candidate.source {
+        case .calendarEvent:
+            until = max(now.addingTimeInterval(defaultSnoozeInterval), candidate.endDate.addingTimeInterval(5 * 60))
+        case .runtimeApp:
+            until = now.addingTimeInterval(defaultSnoozeInterval)
+        }
         snoozedUntil[candidate.id] = until
         pendingUntil[candidate.id] = until
     }
@@ -111,19 +142,27 @@ final class MeetingPromptDetector {
     private func evaluate() async {
         pruneExpiredEntries()
 
-        guard TranscriptedPermissionAccess.calendarAccessGranted() else { return }
-
         let now = Date()
-        let runningBundleIDs = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+        let runningApplications = NSWorkspace.shared.runningApplications
+        let runningBundleIDs = Set(runningApplications.compactMap(\.bundleIdentifier))
         let frontmostBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        seedNativeActivityIfNeeded(frontmostBundleID: frontmostBundleID, now: now)
 
-        guard let match = upcomingCandidates(
+        var candidates: [ScoredCandidate] = []
+        if TranscriptedPermissionAccess.calendarAccessGranted() {
+            candidates.append(contentsOf: upcomingCalendarCandidates(
+                now: now,
+                runningBundleIDs: runningBundleIDs,
+                frontmostBundleID: frontmostBundleID
+            ))
+        }
+        candidates.append(contentsOf: runtimeReminderCandidates(
             now: now,
             runningBundleIDs: runningBundleIDs,
             frontmostBundleID: frontmostBundleID
-        ).first else {
-            return
-        }
+        ))
+
+        guard let match = candidates.sorted(by: sortCandidates).first else { return }
 
         guard snoozedUntil[match.candidate.id] == nil, pendingUntil[match.candidate.id] == nil else { return }
 
@@ -132,7 +171,89 @@ final class MeetingPromptDetector {
         }
     }
 
-    private func upcomingCandidates(
+    private func installWorkspaceObservers() {
+        guard workspaceObservers.isEmpty else { return }
+
+        let names: [NSNotification.Name] = [
+            NSWorkspace.didActivateApplicationNotification,
+            NSWorkspace.didLaunchApplicationNotification
+        ]
+
+        workspaceObservers = names.map { name in
+            NSWorkspace.shared.notificationCenter.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.handleWorkspaceApplicationNotification(notification)
+                }
+            }
+        }
+    }
+
+    private func handleWorkspaceApplicationNotification(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              let bundleIdentifier = app.bundleIdentifier,
+              let provider = provider(forBundleIdentifier: bundleIdentifier),
+              provider.supportsNativeRuntimePrompt else { return }
+
+        recentNativeActivity[provider] = Date()
+        Task { @MainActor [weak self] in
+            await self?.evaluate()
+        }
+    }
+
+    private func seedNativeActivityIfNeeded(frontmostBundleID: String?, now: Date) {
+        guard let frontmostBundleID,
+              let provider = provider(forBundleIdentifier: frontmostBundleID),
+              provider.supportsNativeRuntimePrompt,
+              recentNativeActivity[provider] == nil else { return }
+
+        recentNativeActivity[provider] = now
+    }
+
+    private func runtimeReminderCandidates(
+        now: Date,
+        runningBundleIDs: Set<String>,
+        frontmostBundleID: String?
+    ) -> [ScoredCandidate] {
+        Provider.allCases.compactMap { provider in
+            guard provider.supportsNativeRuntimePrompt else { return nil }
+            guard provider.activeBundleIdentifiers.contains(where: runningBundleIDs.contains) else { return nil }
+
+            let isFrontmost = frontmostBundleID.map(provider.activeBundleIdentifiers.contains) ?? false
+            guard let presentation = MeetingPromptHeuristics.runtimePresentation(
+                providerName: displayName(for: provider),
+                isFrontmost: isFrontmost,
+                lastActiveAt: recentNativeActivity[provider],
+                now: now
+            ) else { return nil }
+
+            return ScoredCandidate(
+                candidate: Candidate(
+                    id: "runtime:\(provider.rawValue)",
+                    title: presentation.title,
+                    detail: presentation.detail,
+                    source: .runtimeApp,
+                    startDate: now,
+                    endDate: now.addingTimeInterval(MeetingPromptHeuristics.runtimeReminderSnoozeInterval),
+                    meetingURL: nil
+                ),
+                score: presentation.score
+            )
+        }
+    }
+
+    private func sortCandidates(_ lhs: ScoredCandidate, _ rhs: ScoredCandidate) -> Bool {
+        if lhs.score != rhs.score {
+            return lhs.score > rhs.score
+        }
+        return lhs.candidate.startDate < rhs.candidate.startDate
+    }
+
+    private func upcomingCalendarCandidates(
         now: Date,
         runningBundleIDs: Set<String>,
         frontmostBundleID: String?
@@ -150,12 +271,7 @@ final class MeetingPromptDetector {
                     frontmostBundleID: frontmostBundleID
                 )
             }
-            .sorted {
-                if $0.score != $1.score {
-                    return $0.score > $1.score
-                }
-                return $0.candidate.startDate < $1.candidate.startDate
-            }
+            .sorted(by: sortCandidates)
     }
 
     private func scoredCandidate(
@@ -178,15 +294,16 @@ final class MeetingPromptDetector {
 
         guard genericWindow || extendedRuntimeWindow else { return nil }
 
-        let title = trimmedTitle(from: event)
-        let detail = buildDetail(title: title, startsIn: startsIn, runtimeReason: runtimeReason)
+        let eventTitle = trimmedTitle(from: event)
+        let detail = buildDetail(eventTitle: eventTitle, startsIn: startsIn, runtimeReason: runtimeReason)
         let score = scoreForCandidate(startsIn: startsIn, runtimeReason: runtimeReason)
 
         return ScoredCandidate(
             candidate: Candidate(
-                id: event.calendarItemIdentifier,
-                title: title,
+                id: "calendar:\(event.calendarItemIdentifier)",
+                title: "Meeting detected",
                 detail: detail,
+                source: .calendarEvent,
                 startDate: event.startDate,
                 endDate: event.endDate,
                 meetingURL: meetingURL
@@ -200,25 +317,25 @@ final class MeetingPromptDetector {
         return trimmed.isEmpty ? "Upcoming meeting" : trimmed
     }
 
-    private func buildDetail(title: String, startsIn: TimeInterval, runtimeReason: String?) -> String {
+    private func buildDetail(eventTitle: String, startsIn: TimeInterval, runtimeReason: String?) -> String {
         if let runtimeReason {
-            return "\(title) - \(runtimeReason)"
+            return "\(eventTitle) - \(runtimeReason)"
         }
 
         if startsIn > 90 {
             let minutes = Int(ceil(startsIn / 60))
-            return "\(title) - starts in \(minutes) min"
+            return "\(eventTitle) - starts in \(minutes) min"
         }
 
         if startsIn > 15 {
-            return "\(title) - starts soon"
+            return "\(eventTitle) - starts soon"
         }
 
         if startsIn >= -120 {
-            return "\(title) - starting now"
+            return "\(eventTitle) - starting now"
         }
 
-        return "\(title) - already in progress"
+        return "\(eventTitle) - already in progress"
     }
 
     private func scoreForCandidate(startsIn: TimeInterval, runtimeReason: String?) -> Int {
@@ -318,9 +435,16 @@ final class MeetingPromptDetector {
         return nil
     }
 
+    private func provider(forBundleIdentifier bundleIdentifier: String) -> Provider? {
+        Provider.allCases.first { $0.activeBundleIdentifiers.contains(bundleIdentifier) }
+    }
+
     private func pruneExpiredEntries() {
         let now = Date()
         snoozedUntil = snoozedUntil.filter { $0.value > now }
         pendingUntil = pendingUntil.filter { $0.value > now }
+        recentNativeActivity = recentNativeActivity.filter {
+            now.timeIntervalSince($0.value) <= MeetingPromptHeuristics.runtimeActivityFreshness
+        }
     }
 }
