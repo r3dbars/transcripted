@@ -59,8 +59,7 @@ extension TranscriptionTaskManager {
             // Re-run duplicate detection now that profiles have been updated
             speakerDB.mergeDuplicates()
 
-            // Resolve the transcript URL — the file may have been renamed by
-            // MeetingTranscriptStyler between save and naming completion.
+            // The file may have been renamed by MeetingTranscriptStyler between save and naming completion.
             let resolvedURL = TranscriptSaver.resolveTranscriptURL(transcriptURL, updates: updates)
 
             // Update the saved transcript file with real names

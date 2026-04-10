@@ -312,8 +312,6 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func handleAudioConfigChange() {
-        // Track whether any config change in the current burst interrupted a
-        // recording. Once set, subsequent changes in the same burst inherit it.
         if isRecording {
             configChangeWasRecording = true
         }
