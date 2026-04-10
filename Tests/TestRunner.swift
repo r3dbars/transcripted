@@ -5,7 +5,7 @@ import Foundation
 
 @main
 struct TestRunner {
-    static func main() {
+    static func main() async {
         print("Draft Test Suite\n")
 
         testCapturedContext()
@@ -16,6 +16,7 @@ struct TestRunner {
         testDictationTranscriptWriter()
         testDictationSessionTimeout()
         testMicRecordingMergePlan()
+        await testWakeRecoveryCoordinator()
 
         print("\n\(totalTests) tests, \(passedTests) passed, \(failedTests) failed")
         if failedTests > 0 {

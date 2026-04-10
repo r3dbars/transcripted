@@ -18,6 +18,7 @@ swiftc \
     Tests/DictationTranscriptWriterTests.swift \
     Tests/DictationSessionTimeoutTests.swift \
     Tests/MicRecordingMergePlanTests.swift \
+    Tests/WakeRecoveryCoordinatorTests.swift \
     Sources/Capture/CapturedContext.swift \
     Sources/Draft/DraftUtils.swift \
     Sources/Style/StyleUtils.swift \
@@ -27,6 +28,7 @@ swiftc \
     Sources/Dictation/DictationTranscriptWriter.swift \
     Sources/DraftConstants.swift \
     Sources/Draft/DiffSummary.swift \
+    Sources/Reliability/WakeRecoveryCoordinator.swift \
     Sources/Meeting/MeetingTranscriptStyler.swift \
     Sources/TranscriptedCore/Audio/MicRecordingSegment.swift \
     -framework AppKit \

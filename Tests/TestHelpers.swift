@@ -59,3 +59,8 @@ func runSuite(_ name: String, _ block: () -> Void) {
     print("Running \(name)...")
     block()
 }
+
+func runSuite(_ name: String, _ block: () async -> Void) async {
+    print("Running \(name)...")
+    await block()
+}

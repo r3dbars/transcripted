@@ -26,8 +26,32 @@ class DraftAppState: ObservableObject {
 
     private var promptsObserver: NSObjectProtocol?
     private var runtimeReadinessTask: Task<Void, Never>?
-    private var wakeRecoveryTask: Task<Void, Never>?
     private var isInitialized = false
+    private lazy var wakeRecoveryCoordinator = WakeRecoveryCoordinator(
+        hotkeyRetryAttempts: Self.wakeHotkeyRetryAttempts,
+        hotkeyRetryDelay: Self.wakeHotkeyRetryDelay,
+        unregisterHotkeys: { [weak self] in
+            self?.contextCapture.unregisterHotkey()
+        },
+        registerHotkeys: { [weak self] in
+            self?.contextCapture.registerHotkey()
+        },
+        currentHotkeyError: { [weak self] in
+            self?.contextCapture.hotkeyError
+        },
+        onHotkeyAttempt: { [weak self] attempt, error in
+            guard let self else { return }
+            if let error {
+                self.logger.log("WAKE | hotkey re-register failed on attempt \(attempt): \(error)")
+            } else {
+                self.logger.log("WAKE | hotkeys re-registered (attempt \(attempt))")
+            }
+        },
+        waitForRuntimeReadiness: { [weak self] in
+            guard let self else { return }
+            await self.waitForRuntimeReadiness()
+        }
+    )
 
     func initialize() async {
         guard !isInitialized else { return }
@@ -81,43 +105,36 @@ class DraftAppState: ObservableObject {
     /// (file descriptors, audio hardware, Metal contexts, Carbon hotkeys) must be checked
     /// and restored here. ParakeetEngine handles its own wake via NSWorkspace observer.
     func handleSystemWake() async {
-        if let task = wakeRecoveryTask {
-            await task.value
-            return
+        let result = await wakeRecoveryCoordinator.handleSystemWake {
+            self.logger.log("WAKE | system wake detected — running recovery checks")
         }
 
-        let task = Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer { self.wakeRecoveryTask = nil }
+        guard result.performedRecovery else { return }
 
-            logger.log("WAKE | system wake detected — running recovery checks")
-
-            // 1. Carbon hotkeys — can become unresponsive after sleep. Re-register.
-            let hotkeysRecovered = await self.recoverHotkeysAfterWake()
-
-            // Shared runtime prep is deduplicated through a single in-flight task.
-            await self.waitForRuntimeReadiness()
-
-            // ParakeetEngine handles its own wake recovery via NSWorkspace.didWakeNotification
-            // observer installed during prewarm(). No action needed here.
-
+        if !result.hotkeysRecovered {
             EventReporter.shared.capture(
-                level: hotkeysRecovered ? .info : .warning,
+                level: .warning,
                 engine: "app",
-                event: "wake_recovery",
-                message: hotkeysRecovered ? "System wake recovery completed" : "System wake recovery completed with hotkey warnings"
+                event: "wake_hotkey_recovery_failed",
+                message: result.hotkeyError ?? "Hotkey re-registration failed after wake"
             )
         }
-        wakeRecoveryTask = task
-        await task.value
+
+        // ParakeetEngine handles its own wake recovery via NSWorkspace.didWakeNotification
+        // observer installed during prewarm(). No action needed here.
+        EventReporter.shared.capture(
+            level: result.hotkeysRecovered ? .info : .warning,
+            engine: "app",
+            event: "wake_recovery",
+            message: result.hotkeysRecovered ? "System wake recovery completed" : "System wake recovery completed with hotkey warnings"
+        )
     }
 
     func shutdown() {
         #if BETA_BUILD
         BetaTelemetry.shared.stopPeriodicShipping()
         #endif
-        wakeRecoveryTask?.cancel()
-        wakeRecoveryTask = nil
+        wakeRecoveryCoordinator.cancel()
         runtimeReadinessTask?.cancel()
         runtimeReadinessTask = nil
         sttRouter.parakeetEngine.cleanup()
@@ -149,30 +166,6 @@ class DraftAppState: ObservableObject {
     private func waitForRuntimeReadiness() async {
         startRuntimeReadinessIfNeeded()
         await runtimeReadinessTask?.value
-    }
-
-    private func recoverHotkeysAfterWake() async -> Bool {
-        for attempt in 1...Self.wakeHotkeyRetryAttempts {
-            contextCapture.unregisterHotkey()
-            contextCapture.registerHotkey()
-
-            if contextCapture.hotkeyError == nil {
-                logger.log("WAKE | hotkeys re-registered (attempt \(attempt))")
-                return true
-            }
-
-            logger.log("WAKE | hotkey re-register failed on attempt \(attempt): \(contextCapture.hotkeyError ?? "unknown error")")
-            guard attempt < Self.wakeHotkeyRetryAttempts else { break }
-            try? await Task.sleep(nanoseconds: Self.wakeHotkeyRetryDelay)
-        }
-
-        EventReporter.shared.capture(
-            level: .warning,
-            engine: "app",
-            event: "wake_hotkey_recovery_failed",
-            message: contextCapture.hotkeyError ?? "Hotkey re-registration failed after wake"
-        )
-        return false
     }
 
     private var meetingStateSummary: String {
