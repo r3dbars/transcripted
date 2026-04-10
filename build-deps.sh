@@ -15,9 +15,45 @@ DEPS_BUILD="$(mktemp -d "$DRAFT_DIR/.deps-build.XXXXXX")"
 DEPS_LIBS_TMP="$(mktemp -d "$DRAFT_DIR/.deps-libs.XXXXXX")"
 DEPS_MODULES_TMP="$(mktemp -d "$DRAFT_DIR/.deps-modules.XXXXXX")"
 TEMP_DIRS=("$DEPS_BUILD" "$DEPS_LIBS_TMP" "$DEPS_MODULES_TMP")
+PREVIOUS_OUTPUTS=()
 STALE_DIRS=()
+BUILD_SUCCEEDED=false
+FLUID_AUDIO_VERSION="${FLUID_AUDIO_VERSION:-0.7.9}"
+MLX_SWIFT_LM_REVISION="${MLX_SWIFT_LM_REVISION:-25b00d4}"
+SWIFT_TRANSFORMERS_VERSION="${SWIFT_TRANSFORMERS_VERSION:-1.2.1}"
+
+backup_existing_output() {
+    local path="$1"
+    if [ -e "$path" ]; then
+        local backup_path="${path}.backup.$(date +%s).$$"
+        mv "$path" "$backup_path"
+        PREVIOUS_OUTPUTS+=("$path::$backup_path")
+    fi
+}
+
+restore_previous_outputs() {
+    for entry in "${PREVIOUS_OUTPUTS[@]}"; do
+        local path="${entry%%::*}"
+        local backup_path="${entry#*::}"
+        if [ -e "$backup_path" ]; then
+            rm -rf "$path"
+            mv "$backup_path" "$path"
+        fi
+    done
+}
+
+cleanup_previous_outputs() {
+    for entry in "${PREVIOUS_OUTPUTS[@]}"; do
+        local backup_path="${entry#*::}"
+        rm -rf "$backup_path"
+    done
+}
 
 cleanup_temp_dirs() {
+    if [ "$BUILD_SUCCEEDED" != true ]; then
+        restore_previous_outputs
+    fi
+
     for dir in "${TEMP_DIRS[@]}"; do
         if [ -e "$dir" ]; then
             rm -rf "$dir"
@@ -48,8 +84,37 @@ cleanup_stale_dirs() {
     done
 }
 
-trap cleanup_temp_dirs EXIT
+resolve_package_graph() {
+    local resolve_cmd=("swift" "package" "resolve")
 
+    echo "Resolving dependencies..."
+    echo "  FluidAudio:         $FLUID_AUDIO_VERSION"
+    echo "  mlx-swift-lm rev:   $MLX_SWIFT_LM_REVISION"
+    echo "  swift-transformers: $SWIFT_TRANSFORMERS_VERSION"
+
+    if "${resolve_cmd[@]}"; then
+        return 0
+    fi
+
+    echo "[build-deps] WARNING: initial resolve failed; retrying from a clean SwiftPM state"
+    rm -rf .build Package.resolved
+    "${resolve_cmd[@]}"
+}
+
+build_release_graph() {
+    echo "Building (this takes several minutes on first run)..."
+
+    if swift build -c release; then
+        return 0
+    fi
+
+    echo "[build-deps] WARNING: release build failed; clearing package state and retrying once"
+    rm -rf .build Package.resolved
+    resolve_package_graph
+    swift build -c release
+}
+
+trap cleanup_temp_dirs EXIT
 # ---------------------------------------------------------------------------
 # Discover the TranscriptedCore source tree to inline into the unified deps build.
 # ---------------------------------------------------------------------------
@@ -136,6 +201,8 @@ fi
 
 echo "Building FluidAudio + mlx-swift-lm (unified)..."
 
+backup_existing_output "$DEPS_LIBS"
+backup_existing_output "$DEPS_MODULES"
 mkdir -p "$DEPS_BUILD/Sources"
 
 # Symlink TranscriptedCore's source tree into $DEPS_BUILD so SPM's target
@@ -152,8 +219,9 @@ let package = Package(
     name: "DraftDeps",
     platforms: [.macOS(.v14)],
     dependencies: [
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.9"),
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm", revision: "25b00d4"),
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "FLUID_AUDIO_VERSION_PLACEHOLDER"),
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm", revision: "MLX_SWIFT_LM_REVISION_PLACEHOLDER"),
+        .package(url: "https://github.com/huggingface/swift-transformers", exact: "SWIFT_TRANSFORMERS_VERSION_PLACEHOLDER"),
     ],
     targets: [
         // TranscriptedCore is built directly from its source tree rather than
@@ -170,7 +238,8 @@ let package = Package(
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
             ],
-            path: "TranscriptedCore"
+            path: "TranscriptedCore",
+            exclude: ["CLAUDE.md"]
         ),
         .target(
             name: "Shim",
@@ -186,6 +255,13 @@ let package = Package(
 )
 PACKAGE_EOF
 
+FLUID_AUDIO_VERSION="$FLUID_AUDIO_VERSION" \
+MLX_SWIFT_LM_REVISION="$MLX_SWIFT_LM_REVISION" \
+SWIFT_TRANSFORMERS_VERSION="$SWIFT_TRANSFORMERS_VERSION" \
+perl -0pi \
+    -e 's/FLUID_AUDIO_VERSION_PLACEHOLDER/$ENV{FLUID_AUDIO_VERSION}/g; s/MLX_SWIFT_LM_REVISION_PLACEHOLDER/$ENV{MLX_SWIFT_LM_REVISION}/g; s/SWIFT_TRANSFORMERS_VERSION_PLACEHOLDER/$ENV{SWIFT_TRANSFORMERS_VERSION}/g' \
+    "$DEPS_BUILD/Package.swift"
+
 cat > "$DEPS_BUILD/Sources/Shim.swift" << 'SWIFT_EOF'
 import FluidAudio
 import MLXLLM
@@ -195,10 +271,19 @@ SWIFT_EOF
 
 # Build in release mode
 cd "$DEPS_BUILD"
-echo "Resolving dependencies..."
-swift package resolve
-echo "Building (this takes several minutes on first run)..."
-swift build -c release
+export FLUID_AUDIO_VERSION
+export MLX_SWIFT_LM_REVISION
+export SWIFT_TRANSFORMERS_VERSION
+resolve_package_graph
+
+MLX_SWIFT_CHECKOUT="$DEPS_BUILD/.build/checkouts/mlx-swift"
+if [ -d "$MLX_SWIFT_CHECKOUT/.git" ]; then
+    echo "Ensuring mlx-swift submodules are present..."
+    git -C "$MLX_SWIFT_CHECKOUT" submodule sync --recursive
+    git -C "$MLX_SWIFT_CHECKOUT" submodule update --init --recursive --jobs 1
+fi
+
+build_release_graph
 
 # Paths
 BUILD_RELEASE="$DEPS_BUILD/.build/arm64-apple-macosx/release"
@@ -220,14 +305,15 @@ find $ALL_BUILD_DIRS -name "*.o" -print0 | xargs -0 ar rcs "$DEPS_LIBS_TMP/libDr
 OBJ_COUNT=$(ar t "$DEPS_LIBS_TMP/libDraftDeps.a" | wc -l | tr -d ' ')
 echo "  $OBJ_COUNT object files archived"
 
-# Also create libExternalDeps.a — same as libDraftDeps.a but without TranscriptedCore objects.
-# Package.swift links against this for `swift test`, which compiles TranscriptedCore from
-# source via SPM. Using libDraftDeps.a there causes duplicate-symbol linker errors because
-# Core appears in both the SPM-compiled objects and the static archive.
-EXTERNAL_DIRS=$(find . -maxdepth 1 -name "*.build" -type d | grep -v "Shim.build" | grep -v "TranscriptedCore.build" | sort)
-find $EXTERNAL_DIRS -name "*.o" -print0 | xargs -0 ar rcs "$DEPS_LIBS_TMP/libExternalDeps.a"
+# Also create libExternalDeps.a for the SwiftPM package seam.
+# In theory this could omit TranscriptedCore objects because `swift test` compiles
+# Core from source. In practice some dependency objects still reference Core-owned
+# symbols, and the "external-only" archive can fail to link. Reuse the unified
+# archive under a stable filename so package tests and embedders see a consistent
+# dependency bundle.
+cp "$DEPS_LIBS_TMP/libDraftDeps.a" "$DEPS_LIBS_TMP/libExternalDeps.a"
 EXT_COUNT=$(ar t "$DEPS_LIBS_TMP/libExternalDeps.a" | wc -l | tr -d ' ')
-echo "  $EXT_COUNT object files archived (external-only, no TranscriptedCore)"
+echo "  $EXT_COUNT object files archived for SwiftPM compatibility"
 
 # --- Swift modules ---
 echo "Copying Swift modules..."
@@ -344,6 +430,8 @@ fi
 promote_output_dir "$DEPS_LIBS_TMP" "$DEPS_LIBS"
 promote_output_dir "$DEPS_MODULES_TMP" "$DEPS_MODULES"
 cleanup_stale_dirs
+cleanup_previous_outputs
+BUILD_SUCCEEDED=true
 
 echo ""
 echo "=== Results ==="
