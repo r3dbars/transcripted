@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Speaker Database Protocol
 // Conformer: SpeakerDatabase
 
-public protocol SpeakerStore {
+public protocol SpeakerStore: Sendable {
     /// Match a voice embedding against known speaker profiles
     func matchSpeaker(embedding: [Float], threshold: Double) -> SpeakerMatchResult?
 
@@ -19,6 +19,9 @@ public protocol SpeakerStore {
     /// Set the display name for a speaker
     func setDisplayName(id: UUID, name: String, source: String)
 
+    /// Restore a profile to a previously snapshotted state.
+    func restoreProfile(_ profile: SpeakerProfile)
+
     /// Delete a speaker profile
     func deleteSpeaker(id: UUID)
 
@@ -33,6 +36,9 @@ public protocol SpeakerStore {
 
     /// Remove weak/unnamed profiles with low confidence
     func pruneWeakProfiles()
+
+    /// Record that a match suggestion was rejected by the user.
+    func incrementDisputeCount(id: UUID)
 
     /// Reset dispute count for a confirmed speaker
     func resetDisputeCount(id: UUID)

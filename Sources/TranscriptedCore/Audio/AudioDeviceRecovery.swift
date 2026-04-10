@@ -245,9 +245,6 @@ extension Audio {
             if let recoverySegmentURL {
                 appendMicSegment(MicRecordingSegment(url: recoverySegmentURL, gapBeforeDuration: gap.duration))
                 shouldKeepRecoverySegment = true
-                DispatchQueue.main.async {
-                    self.micAudioFileURL = recoverySegmentURL
-                }
             }
             recoveryAttemptCount = 0
             AppLogger.audioMic.info("Device recovery complete, recording continues", ["gap": gap.description])

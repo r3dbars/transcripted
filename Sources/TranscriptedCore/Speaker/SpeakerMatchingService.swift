@@ -61,6 +61,9 @@ extension Transcription {
         var secondBestSimilarity: Double = -1
 
         for profile in profiles {
+            // A disputed profile was explicitly rejected by the user; don't
+            // auto-match future recordings back into it until the user repairs it.
+            guard profile.disputeCount == 0 else { continue }
             guard profile.embedding.count == embedding.count else { continue }
             let similarity = cosineSimilarityStatic(embedding, profile.embedding)
             if similarity >= threshold {

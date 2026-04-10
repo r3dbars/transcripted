@@ -158,28 +158,26 @@ extension TranscriptSaver {
         guard !updates.isEmpty else { return true }
 
         return fileUpdateQueue.sync {
-            // The transcript may have been renamed by MeetingTranscriptStyler between save and naming completion.
-            let resolvedURL = resolveTranscriptURL(transcriptURL, updates: updates)
-
-            guard var content = try? String(contentsOf: resolvedURL, encoding: .utf8) else {
-                AppLogger.pipeline.error("Failed to read transcript for name update", ["path": resolvedURL.path])
+            guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
+                AppLogger.pipeline.error("Failed to read transcript for name update", ["path": transcriptURL.path])
                 return false
             }
 
             for update in updates {
-                let oldLabel = "Speaker \(update.sortformerSpeakerId)"
-                applyNameReplacement(in: &content, oldName: oldLabel, newName: update.newName, updateSpeakerTag: false)
-                let dbId: UUID = switch update.action {
-                case .merged(let targetId):
-                    targetId
-                case .named, .corrected, .confirmed:
-                    update.persistentSpeakerId
+                updateFrontmatterSpeakerMetadata(in: &content, update: update)
+
+                var oldNames = ["Speaker \(update.sortformerSpeakerId)"]
+                if let previousName = update.previousName?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !previousName.isEmpty {
+                    oldNames.append(previousName)
+                    if !previousName.hasSuffix("?") {
+                        oldNames.append("\(previousName)?")
+                    }
                 }
-                upsertSpeakerDbId(
-                    in: &content,
-                    sortformerSpeakerId: update.sortformerSpeakerId,
-                    dbId: dbId
-                )
+
+                for oldName in Array(Set(oldNames)).filter({ !$0.isEmpty && $0 != update.newName }) {
+                    applyNameReplacement(in: &content, oldName: oldName, newName: update.newName, updateSpeakerTag: false)
+                }
             }
 
             // Consolidate speaker breakdown when multiple diarizer IDs got the same name.
@@ -189,12 +187,12 @@ extension TranscriptSaver {
 
             // Atomic write back
             do {
-                try content.write(to: resolvedURL, atomically: true, encoding: .utf8)
-                AppLogger.pipeline.info("Updated speaker names in transcript", ["path": resolvedURL.lastPathComponent, "updates": "\(updates.count)"])
+                try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
+                AppLogger.pipeline.info("Updated speaker names in transcript", ["path": transcriptURL.lastPathComponent, "updates": "\(updates.count)"])
 
                 // Update JSON sidecar
                 updateAgentJSON(
-                    transcriptURL: resolvedURL,
+                    transcriptURL: transcriptURL,
                     updates: updates,
                     speakerStoreForIndex: speakerStoreForIndex
                 )
@@ -208,66 +206,35 @@ extension TranscriptSaver {
     }
 
     /// Resolve a transcript URL that may have been renamed by MeetingTranscriptStyler.
-    /// Tries three strategies in order:
-    ///   1. UUID search — scan .md files for a speaker db_id in the YAML
-    ///   2. Timestamp search — extract the time from the original filename and match YAML `time:` field
-    ///   3. Most recent — fall back to the newest .md file (just saved, should be the right one)
-    static func resolveTranscriptURL(_ url: URL, updates: [SpeakerNameUpdate]) -> URL {
-        if FileManager.default.fileExists(atPath: url.path) { return url }
-
-        let directory = url.deletingLastPathComponent()
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]
-        ).filter({ $0.pathExtension == "md" }) else {
-            AppLogger.pipeline.error("resolveTranscriptURL: cannot list directory", ["dir": directory.path])
+    /// Uses the stable transcript_id written at initial save time.
+    static func resolveTranscriptURL(_ url: URL, transcriptId: UUID) -> URL? {
+        if FileManager.default.fileExists(atPath: url.path),
+           extractTranscriptId(from: url) == transcriptId {
             return url
         }
 
-        AppLogger.pipeline.info("resolveTranscriptURL: file not at expected path, scanning \(files.count) .md files", ["expected": url.lastPathComponent])
+        AppLogger.pipeline.info("Transcript not at expected path, scanning for stable transcript id", [
+            "expected": url.lastPathComponent,
+            "transcriptId": transcriptId.uuidString
+        ])
 
-        // Strategy 1: Search by speaker UUID in YAML frontmatter
-        if let firstId = updates.first?.persistentSpeakerId.uuidString {
-            for file in files {
-                guard let handle = try? FileHandle(forReadingFrom: file) else { continue }
-                let header = handle.readData(ofLength: 2048)
-                try? handle.close()
-                guard let text = String(data: header, encoding: .utf8),
-                      text.contains(firstId) else { continue }
-                AppLogger.pipeline.info("resolveTranscriptURL: matched by UUID", ["to": file.lastPathComponent])
-                return file
-            }
+        let dir = url.deletingLastPathComponent()
+        guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            .filter({ $0.pathExtension == "md" }) else {
+            return nil
         }
 
-        // Strategy 2: Extract timestamp from original filename and match YAML `time:` field.
-        // Original filenames look like "Call 2026-04-10 11-15-12.md" — extract "11:15:12".
-        let stem = url.deletingPathExtension().lastPathComponent
-        if let timeMatch = extractTimeFromFilename(stem) {
-            let yamlTimeString = "time: \(timeMatch)"
-            for file in files {
-                guard let handle = try? FileHandle(forReadingFrom: file) else { continue }
-                let header = handle.readData(ofLength: 512)
-                try? handle.close()
-                guard let text = String(data: header, encoding: .utf8),
-                      text.contains(yamlTimeString) else { continue }
-                AppLogger.pipeline.info("resolveTranscriptURL: matched by timestamp", ["to": file.lastPathComponent, "time": timeMatch])
-                return file
-            }
+        for file in files {
+            guard extractTranscriptId(from: file) == transcriptId else { continue }
+            AppLogger.pipeline.info("Resolved renamed transcript", ["from": url.lastPathComponent, "to": file.lastPathComponent])
+            return dir.appendingPathComponent(file.lastPathComponent)
         }
 
-        // Strategy 3: Fall back to the most recently modified .md file.
-        let sorted = files.sorted { a, b in
-            let aDate = (try? a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-            let bDate = (try? b.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-            return aDate > bDate
-        }
-        if let newest = sorted.first {
-            AppLogger.pipeline.info("resolveTranscriptURL: fell back to newest .md file", ["to": newest.lastPathComponent])
-            return newest
-        }
-
-        AppLogger.pipeline.error("resolveTranscriptURL: no .md files found at all")
-        return url
+        AppLogger.pipeline.error("Failed to resolve transcript by stable id", [
+            "expected": url.lastPathComponent,
+            "transcriptId": transcriptId.uuidString
+        ])
+        return nil
     }
 
     /// Extract a time string like "11:15:12" from a filename like "Call 2026-04-10 11-15-12".
@@ -493,16 +460,9 @@ extension TranscriptSaver {
             let systemKey = "system_\(update.sortformerSpeakerId)"
             if let idx = updatedSpeakers.firstIndex(where: { $0.id == systemKey }) {
                 let old = updatedSpeakers[idx]
-                let persistentSpeakerId: String?
-                switch update.action {
-                case .merged(let targetProfileId):
-                    persistentSpeakerId = targetProfileId.uuidString
-                case .named, .corrected, .confirmed:
-                    persistentSpeakerId = update.persistentSpeakerId.uuidString
-                }
                 updatedSpeakers[idx] = AgentSpeaker(
                     id: old.id,
-                    persistentSpeakerId: persistentSpeakerId,
+                    persistentSpeakerId: (update.resolvedPersistentSpeakerId ?? update.persistentSpeakerId).uuidString,
                     name: update.newName,
                     confidence: old.confidence,
                     wordCount: old.wordCount,
@@ -513,6 +473,7 @@ extension TranscriptSaver {
 
         var updated = AgentTranscript(
             version: transcript.version,
+            transcriptId: transcript.transcriptId,
             recording: transcript.recording,
             speakers: updatedSpeakers,
             utterances: transcript.utterances
@@ -547,6 +508,7 @@ extension TranscriptSaver {
 
         let updated = AgentTranscript(
             version: transcript.version,
+            transcriptId: transcript.transcriptId,
             recording: transcript.recording,
             speakers: transcript.speakers.map { speaker in
                 guard speaker.persistentSpeakerId == dbId.uuidString else { return speaker }
@@ -591,6 +553,7 @@ extension TranscriptSaver {
 
         let rewritten = AgentTranscript(
             version: transcript.version,
+            transcriptId: transcript.transcriptId,
             recording: transcript.recording,
             speakers: transcript.speakers.map { speaker in
                 guard speaker.persistentSpeakerId == sourceDbId.uuidString else { return speaker }
@@ -678,6 +641,7 @@ extension TranscriptSaver {
 
         return AgentTranscript(
             version: transcript.version,
+            transcriptId: transcript.transcriptId,
             recording: transcript.recording,
             speakers: deduplicatedSpeakers,
             utterances: updatedUtterances
@@ -700,6 +664,127 @@ extension TranscriptSaver {
             to: folder,
             speakerStore: speakerStoreForIndex ?? SpeakerDatabase.shared
         )
+    }
+
+    static func extractTranscriptId(from url: URL) -> UUID? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        let header = handle.readData(ofLength: 2048)
+        try? handle.close()
+        guard let text = String(data: header, encoding: .utf8) else { return nil }
+        return extractTranscriptId(fromFrontmatter: text)
+    }
+
+    private static func extractTranscriptId(fromFrontmatter text: String) -> UUID? {
+        for line in text.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("transcript_id:") else { continue }
+            let value = trimmed
+                .dropFirst("transcript_id:".count)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            return UUID(uuidString: value)
+        }
+        return nil
+    }
+
+    private static func updateFrontmatterSpeakerMetadata(
+        in content: inout String,
+        update: SpeakerNameUpdate
+    ) {
+        guard let frontmatterRange = frontmatterContentRange(in: content) else { return }
+
+        var lines = String(content[frontmatterRange])
+            .components(separatedBy: "\n")
+
+        let targetIdLine = #"id: "\#(update.sortformerSpeakerId)""#
+        let resolvedPersistentId = (update.resolvedPersistentSpeakerId ?? update.persistentSpeakerId).uuidString
+        var lineIndex = 0
+
+        while lineIndex < lines.count {
+            let trimmed = lines[lineIndex].trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("- "),
+                  trimmed.contains(targetIdLine) else {
+                lineIndex += 1
+                continue
+            }
+
+            let nextEntryIndex: Int
+            if lineIndex + 1 < lines.count {
+                nextEntryIndex = lines[(lineIndex + 1)..<lines.count].firstIndex(where: { candidate in
+                    candidate.trimmingCharacters(in: .whitespaces).hasPrefix("- ")
+                }) ?? lines.count
+            } else {
+                nextEntryIndex = lines.count
+            }
+
+            var dbIdIndex: Int?
+            var nameIndex: Int?
+            var sourceIndex: Int?
+
+            if lineIndex + 1 < nextEntryIndex {
+                for index in (lineIndex + 1)..<nextEntryIndex {
+                    let candidate = lines[index].trimmingCharacters(in: .whitespaces)
+                    if candidate.hasPrefix("db_id:") {
+                        dbIdIndex = index
+                    } else if candidate.hasPrefix("name:") {
+                        nameIndex = index
+                    } else if candidate.hasPrefix("source:") {
+                        sourceIndex = index
+                    }
+                }
+            }
+
+            let dbIdLine = #"    db_id: "\#(resolvedPersistentId)""#
+            let nameLine = #"    name: "\#(escapeYAML(update.newName))""#
+            let sourceLine = "    source: \(NameSource.userManual)"
+            var nextInsertIndex = lineIndex + 1
+
+            if let dbIdIndex {
+                lines[dbIdIndex] = dbIdLine
+                nextInsertIndex = dbIdIndex + 1
+            } else {
+                lines.insert(dbIdLine, at: nextInsertIndex)
+                if let existingNameIndex = nameIndex, existingNameIndex >= nextInsertIndex {
+                    nameIndex = existingNameIndex + 1
+                }
+                if let existingSourceIndex = sourceIndex, existingSourceIndex >= nextInsertIndex {
+                    sourceIndex = existingSourceIndex + 1
+                }
+                nextInsertIndex += 1
+            }
+
+            if let nameIndex {
+                lines[nameIndex] = nameLine
+                nextInsertIndex = nameIndex + 1
+            } else {
+                lines.insert(nameLine, at: nextInsertIndex)
+                if let existingSourceIndex = sourceIndex, existingSourceIndex >= nextInsertIndex {
+                    sourceIndex = existingSourceIndex + 1
+                }
+                nextInsertIndex += 1
+            }
+
+            if let sourceIndex {
+                lines[sourceIndex] = sourceLine
+            } else {
+                lines.insert(sourceLine, at: nextInsertIndex)
+            }
+
+            content.replaceSubrange(frontmatterRange, with: lines.joined(separator: "\n"))
+            return
+        }
+    }
+
+    private static func frontmatterContentRange(in content: String) -> Range<String.Index>? {
+        guard content.hasPrefix("---\n"),
+              let endRange = content.range(
+                of: "\n---\n",
+                range: content.index(content.startIndex, offsetBy: 4)..<content.endIndex
+              ) else {
+            return nil
+        }
+
+        return content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound
     }
 }
 
