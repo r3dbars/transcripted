@@ -1,9 +1,11 @@
 import SwiftUI
 import AppKit
 
+@MainActor
 struct TranscriptedSettingsView: View {
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
     @State private var permissionStates = PermissionSnapshot.current()
+    @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
 
     var body: some View {
         ScrollView {
@@ -62,14 +64,17 @@ struct TranscriptedSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                SpeakerPeopleSettingsSection(model: speakerPeopleModel)
             }
             .padding(24)
         }
-        .frame(minWidth: 680, minHeight: 580)
+        .frame(minWidth: 760, minHeight: 720)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             refreshPermissions()
             rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
+            speakerPeopleModel.refresh()
         }
     }
 
@@ -97,7 +102,7 @@ private struct PermissionSnapshot {
     }
 }
 
-private struct SettingsSection<Content: View>: View {
+struct SettingsSection<Content: View>: View {
     let title: String
     let detail: String
     @ViewBuilder var content: Content

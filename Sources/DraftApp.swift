@@ -22,7 +22,7 @@ class DraftAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
     private var lastExternalApplication: NSRunningApplication?
-    private lazy var settingsWindowController = TranscriptedSettingsWindowController()
+    private lazy var settingsWindowController = TranscriptedSettingsWindowController(appState: appState)
     private lazy var menuPanelController = MenuBarPanelController(
         appState: appState,
         preferredSourceAppProvider: { [weak self] in self?.lastExternalApplication },

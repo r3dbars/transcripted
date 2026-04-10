@@ -207,7 +207,8 @@ final class MeetingSessionController: ObservableObject {
             failedTranscriptionManager: failedManager,
             speechToText: services.speechToText,
             diarization: services.diarization,
-            speakerStore: services.speakerStore
+            speakerStore: services.speakerStore,
+            speakerClipsDirectory: storagePaths.speakerClips
         )
 
         // Model downloader — coordinates Parakeet + PyAnnote readiness.

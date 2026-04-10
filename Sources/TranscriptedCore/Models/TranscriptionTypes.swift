@@ -195,9 +195,23 @@ public struct TranscriptionMetadata {
 
 // MARK: - Speaker Naming Flow Types
 
+/// A named person the user can link a detected speaker to.
+public struct SpeakerIdentityOption: Identifiable, Hashable {
+    public let id: UUID
+    public let displayName: String
+    public let callCount: Int
+
+    public init(id: UUID, displayName: String, callCount: Int) {
+        self.id = id
+        self.displayName = displayName
+        self.callCount = callCount
+    }
+}
+
 /// Request to show the speaker naming UI after transcription completes
 public struct SpeakerNamingRequest {
     public let speakers: [SpeakerNamingEntry]
+    public let knownPeople: [SpeakerIdentityOption]
     public let transcriptURL: URL
     public let systemAudioURL: URL
     public let micAudioURL: URL
@@ -205,12 +219,14 @@ public struct SpeakerNamingRequest {
 
     public init(
         speakers: [SpeakerNamingEntry],
+        knownPeople: [SpeakerIdentityOption],
         transcriptURL: URL,
         systemAudioURL: URL,
         micAudioURL: URL,
         onComplete: @escaping ([SpeakerNameUpdate]) -> Void
     ) {
         self.speakers = speakers
+        self.knownPeople = knownPeople
         self.transcriptURL = transcriptURL
         self.systemAudioURL = systemAudioURL
         self.micAudioURL = micAudioURL
@@ -221,30 +237,36 @@ public struct SpeakerNamingRequest {
 /// A single speaker needing naming or confirmation
 public struct SpeakerNamingEntry: Identifiable {
     public let id: UUID                     // persistent speaker ID from SpeakerDatabase
+    public let suggestedProfileId: UUID?    // existing person this row suggests, if any
     public let sortformerSpeakerId: String  // "0", "1" — for transcript string matching
     public let clipURL: URL                 // temporary WAV clip for playback
     public let sampleText: String           // representative quote from transcript
     public let currentName: String?         // nil if unknown speaker
     public let matchSimilarity: Double?     // cosine similarity score
+    public let callCount: Int               // how many times this profile has been seen
     public let needsNaming: Bool            // true = unknown speaker (show text field)
     public let needsConfirmation: Bool      // true = known but low confidence (show confirm/deny)
 
     public init(
         id: UUID,
+        suggestedProfileId: UUID?,
         sortformerSpeakerId: String,
         clipURL: URL,
         sampleText: String,
         currentName: String?,
         matchSimilarity: Double?,
+        callCount: Int,
         needsNaming: Bool,
         needsConfirmation: Bool
     ) {
         self.id = id
+        self.suggestedProfileId = suggestedProfileId
         self.sortformerSpeakerId = sortformerSpeakerId
         self.clipURL = clipURL
         self.sampleText = sampleText
         self.currentName = currentName
         self.matchSimilarity = matchSimilarity
+        self.callCount = callCount
         self.needsNaming = needsNaming
         self.needsConfirmation = needsConfirmation
     }

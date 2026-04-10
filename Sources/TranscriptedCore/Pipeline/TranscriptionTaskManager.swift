@@ -33,6 +33,7 @@ public class TranscriptionTaskManager: ObservableObject {
         speechToText: any SpeechToTextEngine,
         diarization: any DiarizationEngine,
         speakerStore: any SpeakerStore,
+        speakerClipsDirectory: URL = CoreStoragePaths.default.speakerClips,
         notifier: TranscriptNotifier? = nil
     ) {
         self.failedTranscriptionManager = failedTranscriptionManager
@@ -40,7 +41,8 @@ public class TranscriptionTaskManager: ObservableObject {
         self.transcription = Transcription(
             speechToText: speechToText,
             diarization: diarization,
-            speakerStore: speakerStore
+            speakerStore: speakerStore,
+            speakerClipsDirectory: speakerClipsDirectory
         )
     }
 

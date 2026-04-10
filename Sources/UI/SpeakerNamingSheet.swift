@@ -65,7 +65,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
         self.request = request
         self.onClose = onClose
 
-        let frame = NSRect(x: 0, y: 0, width: 520, height: 420)
+        let frame = NSRect(x: 0, y: 0, width: 620, height: 520)
         self.contentView = SpeakerNamingContentView(frame: frame, request: request)
 
         let window = NSWindow(
@@ -74,7 +74,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Name the speakers"
+        window.title = "Review speakers"
         window.contentView = contentView
         window.isReleasedWhenClosed = false
         window.level = .modalPanel
@@ -98,6 +98,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     func windowWillClose(_ notification: Notification) {
+        SpeakerClipPlayback.stop()
         onClose()
     }
 }
@@ -108,11 +109,11 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
 @MainActor
 final class SpeakerNamingContentView: NSView {
 
-    private let titleLabel = NSTextField(labelWithString: "Who spoke in this meeting?")
-    private let subtitleLabel = NSTextField(labelWithString: "Give each voice a name so we can recognize them next time.")
+    private let titleLabel = NSTextField(labelWithString: "Review the speakers from this meeting")
+    private let subtitleLabel = NSTextField(labelWithString: "Confirm suggestions, link voices to existing people, or leave them unknown for now.")
     private let scrollView = NSScrollView()
     private let documentView = NSView()
-    private let saveButton = NSButton(title: "Save names", target: nil, action: nil)
+    private let saveButton = NSButton(title: "Save speaker decisions", target: nil, action: nil)
     private let cancelButton = NSButton(title: "Skip", target: nil, action: nil)
 
     private let request: SpeakerNamingRequest
@@ -168,7 +169,7 @@ final class SpeakerNamingContentView: NSView {
         rows.removeAll()
 
         for entry in request.speakers {
-            let row = SpeakerRowView(entry: entry)
+            let row = SpeakerRowView(entry: entry, knownPeople: request.knownPeople)
             documentView.addSubview(row)
             rows.append(row)
         }
@@ -223,7 +224,7 @@ final class SpeakerNamingContentView: NSView {
         // Layout rows inside the document view (flipped coordinates — rows
         // stack top-down, but we lay them out using bottom-up math since the
         // document view is not flipped).
-        let rowHeight: CGFloat = 88
+        let rowHeight: CGFloat = 128
         let rowSpacing: CGFloat = 10
         let docHeight = max(
             scrollView.frame.height,
@@ -271,15 +272,22 @@ final class SpeakerNamingContentView: NSView {
 final class SpeakerRowView: NSView {
 
     private let entry: SpeakerNamingEntry
+    private let knownPeopleByLabel: [String: SpeakerIdentityOption]
+    private let knownPeopleLabels: [String]
     private let labelField = NSTextField(labelWithString: "")
+    private let evidenceField = NSTextField(labelWithString: "")
     private let sampleField = NSTextField(wrappingLabelWithString: "")
-    private let nameField = NSTextField(string: "")
-    private let confirmButton = NSButton(title: "Confirm", target: nil, action: nil)
+    private let nameField = NSComboBox(frame: .zero)
+    private let playButton = NSButton(title: "Play sample", target: nil, action: nil)
+    private let confirmButton = NSButton(title: "Use Suggested", target: nil, action: nil)
 
     private var userConfirmed: Bool = false
 
-    init(entry: SpeakerNamingEntry) {
+    init(entry: SpeakerNamingEntry, knownPeople: [SpeakerIdentityOption]) {
         self.entry = entry
+        let optionLabels = Self.makeIdentityLabels(for: knownPeople.filter { $0.id != entry.id })
+        self.knownPeopleByLabel = optionLabels.lookup
+        self.knownPeopleLabels = optionLabels.labels
         super.init(frame: .zero)
         setupViews()
     }
@@ -295,7 +303,7 @@ final class SpeakerRowView: NSView {
         layer?.borderWidth = 1
 
         if let current = entry.currentName, !current.isEmpty {
-            labelField.stringValue = "Is this \(current)?"
+            labelField.stringValue = "Suggested match: \(current)"
         } else {
             labelField.stringValue = "Speaker \(entry.sortformerSpeakerId)"
         }
@@ -303,19 +311,33 @@ final class SpeakerRowView: NSView {
         labelField.textColor = NSColor.labelColor
         addSubview(labelField)
 
+        evidenceField.stringValue = evidenceDescription()
+        evidenceField.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        evidenceField.textColor = NSColor.secondaryLabelColor
+        addSubview(evidenceField)
+
         sampleField.stringValue = "\u{201C}\(entry.sampleText)\u{201D}"
         sampleField.font = NSFont.systemFont(ofSize: 11)
         sampleField.textColor = NSColor.secondaryLabelColor
-        sampleField.maximumNumberOfLines = 2
-        sampleField.lineBreakMode = .byTruncatingTail
+        sampleField.maximumNumberOfLines = 3
+        sampleField.lineBreakMode = .byWordWrapping
         addSubview(sampleField)
 
-        nameField.placeholderString = "Enter name"
+        nameField.isEditable = true
+        nameField.usesDataSource = false
         nameField.font = NSFont.systemFont(ofSize: 12)
-        if let current = entry.currentName {
-            nameField.stringValue = current
+        if entry.currentName != nil {
+            nameField.placeholderString = "Use the suggestion or choose a different person"
+        } else {
+            nameField.placeholderString = "Type a new name or choose an existing person"
         }
+        nameField.addItems(withObjectValues: knownPeopleLabels)
         addSubview(nameField)
+
+        playButton.bezelStyle = .rounded
+        playButton.target = self
+        playButton.action = #selector(handlePlaySample)
+        addSubview(playButton)
 
         confirmButton.bezelStyle = .inline
         confirmButton.target = self
@@ -329,23 +351,36 @@ final class SpeakerRowView: NSView {
         let pad: CGFloat = 12
         let w = bounds.width - pad * 2
 
+        let playSize = playButton.fittingSize
         labelField.frame = NSRect(
             x: pad,
             y: bounds.height - pad - 18,
-            width: w,
+            width: max(120, w - playSize.width - 8),
             height: 18
+        )
+        playButton.frame = NSRect(
+            x: bounds.width - pad - max(92, playSize.width),
+            y: bounds.height - pad - 22,
+            width: max(92, playSize.width),
+            height: 22
+        )
+        evidenceField.frame = NSRect(
+            x: pad,
+            y: labelField.frame.minY - 18,
+            width: w,
+            height: 16
         )
         sampleField.frame = NSRect(
             x: pad,
-            y: labelField.frame.minY - 26,
+            y: evidenceField.frame.minY - 38,
             width: w,
-            height: 24
+            height: 34
         )
 
         let fieldH: CGFloat = 22
         if !confirmButton.isHidden {
             let btnSize = confirmButton.fittingSize
-            let btnW = max(80, btnSize.width)
+            let btnW = max(102, btnSize.width + 4)
             confirmButton.frame = NSRect(
                 x: bounds.width - pad - btnW,
                 y: pad,
@@ -363,10 +398,16 @@ final class SpeakerRowView: NSView {
         }
     }
 
+    @objc private func handlePlaySample() {
+        SpeakerClipPlayback.play(entry.clipURL)
+    }
+
     @objc private func handleConfirm() {
         userConfirmed = true
-        confirmButton.title = "Confirmed"
-        confirmButton.isEnabled = false
+        if let current = entry.currentName {
+            nameField.stringValue = current
+        }
+        confirmButton.title = "Using Suggested"
     }
 
     /// Build a `SpeakerNameUpdate` reflecting the user's input for this row.
@@ -375,6 +416,14 @@ final class SpeakerRowView: NSView {
         let typed = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if userConfirmed, let current = entry.currentName, !current.isEmpty {
+            if let suggestedProfileId = entry.suggestedProfileId {
+                return SpeakerNameUpdate(
+                    persistentSpeakerId: entry.id,
+                    sortformerSpeakerId: entry.sortformerSpeakerId,
+                    newName: current,
+                    action: .merged(targetProfileId: suggestedProfileId)
+                )
+            }
             return SpeakerNameUpdate(
                 persistentSpeakerId: entry.id,
                 sortformerSpeakerId: entry.sortformerSpeakerId,
@@ -385,8 +434,19 @@ final class SpeakerRowView: NSView {
 
         guard !typed.isEmpty else { return nil }
 
+        if let option = knownPeopleByLabel[typed] {
+            return SpeakerNameUpdate(
+                persistentSpeakerId: entry.id,
+                sortformerSpeakerId: entry.sortformerSpeakerId,
+                newName: option.displayName,
+                action: .merged(targetProfileId: option.id)
+            )
+        }
+
         let action: SpeakerNameUpdate.NamingAction
-        if let current = entry.currentName, !current.isEmpty {
+        if entry.suggestedProfileId != nil {
+            action = .named
+        } else if let current = entry.currentName, !current.isEmpty {
             action = typed.caseInsensitiveCompare(current) == .orderedSame
                 ? .confirmed
                 : .corrected
@@ -400,5 +460,42 @@ final class SpeakerRowView: NSView {
             newName: typed,
             action: action
         )
+    }
+
+    private func evidenceDescription() -> String {
+        var parts: [String] = []
+        if let similarity = entry.matchSimilarity {
+            parts.append("\(Int((similarity * 100).rounded()))% match")
+        }
+        if entry.callCount > 0 {
+            let calls = entry.callCount == 1 ? "1 call" : "\(entry.callCount) calls"
+            parts.append("seen in \(calls)")
+        }
+        if parts.isEmpty {
+            return entry.needsNaming ? "New speaker" : "Review this match"
+        }
+        return parts.joined(separator: " • ")
+    }
+
+    private static func makeIdentityLabels(
+        for options: [SpeakerIdentityOption]
+    ) -> (labels: [String], lookup: [String: SpeakerIdentityOption]) {
+        let duplicateCounts = Dictionary(grouping: options, by: { $0.displayName.lowercased() })
+            .mapValues(\.count)
+        var lookup: [String: SpeakerIdentityOption] = [:]
+
+        let labels = options.map { option in
+            let label: String
+            if duplicateCounts[option.displayName.lowercased(), default: 0] > 1 {
+                let calls = option.callCount == 1 ? "1 call" : "\(option.callCount) calls"
+                label = "\(option.displayName) • \(calls) • \(option.id.uuidString.prefix(8))"
+            } else {
+                label = option.displayName
+            }
+            lookup[label] = option
+            return label
+        }
+
+        return (labels, lookup)
     }
 }

@@ -204,7 +204,7 @@ public enum AgentOutput {
     }
 
     /// Rebuild the root index file by scanning existing JSON sidecars.
-    public static func writeIndex(to folder: URL, speakerDB: SpeakerDatabase) throws {
+    public static func writeIndex(to folder: URL, speakerStore: any SpeakerStore) throws {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])
             .filter({ $0.pathExtension == "json" && $0.lastPathComponent != "transcripted.json" && $0.lastPathComponent != "failed_transcriptions.json" }) else {
@@ -237,7 +237,7 @@ public enum AgentOutput {
         }
 
         // Known speakers from database
-        let allSpeakers = speakerDB.allSpeakers()
+        let allSpeakers = speakerStore.allSpeakers()
         let knownSpeakers = allSpeakers.compactMap { profile -> AgentKnownSpeaker? in
             guard let name = profile.displayName else { return nil }
             return AgentKnownSpeaker(
@@ -308,6 +308,7 @@ public enum AgentOutput {
     - Each speaker has an `id` (e.g., `mic_0`, `system_0`) unique within one transcript
     - `persistent_speaker_id` is a UUID that tracks the same person across meetings
     - `known_speakers` in the index lists all named speakers with their call count
+    - `name` stays generic until a speaker match is confirmed by the user or auto-accepted
     - Confidence: `"high"` (voice match > 85%), `"medium"` (voice match > 70%), or `null`
 
     ## Common Agent Tasks
