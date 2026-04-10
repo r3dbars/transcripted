@@ -46,7 +46,7 @@ enum RecentMeetingsScanner {
 
 @MainActor
 final class MenuBarRecentMeetingsView: NSView {
-    private let headerLabel = NSTextField(labelWithString: "Recent meetings")
+    private let headerLabel = NSTextField(labelWithString: "Meetings")
     private let emptyLabel = NSTextField(labelWithString: "No meetings yet.")
     private let listContainer = FlippedRecentMeetingsContainer()
 
@@ -77,15 +77,17 @@ final class MenuBarRecentMeetingsView: NSView {
     override func layout() {
         super.layout()
 
-        headerLabel.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 16)
-        let listY: CGFloat = 24
-
-        if rowViews.isEmpty {
-            emptyLabel.isHidden = false
+        guard hasContent else {
+            headerLabel.isHidden = true
+            emptyLabel.isHidden = true
             listContainer.isHidden = true
-            emptyLabel.frame = NSRect(x: 0, y: listY, width: bounds.width, height: 14)
             return
         }
+
+        headerLabel.isHidden = false
+
+        headerLabel.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 16)
+        let listY: CGFloat = 24
 
         emptyLabel.isHidden = true
         listContainer.isHidden = false
@@ -131,9 +133,13 @@ final class MenuBarRecentMeetingsView: NSView {
         invalidateIntrinsicContentSize()
     }
 
+    var hasContent: Bool {
+        !rowViews.isEmpty
+    }
+
     var intrinsicHeight: CGFloat {
         let contentHeight = rowViews.reduce(CGFloat(0)) { $0 + $1.intrinsicContentSize.height }
-        if rowViews.isEmpty { return 40 }
+        if rowViews.isEmpty { return 0 }
         return 24 + contentHeight
     }
 }
@@ -160,11 +166,6 @@ private final class RecentMeetingRowView: NSView {
         symbolName: "doc.on.doc",
         accessibilityLabel: "Copy transcript",
         toolTip: "Copy transcript"
-    )
-    private let showButton = MenuIconButton(
-        symbolName: "folder",
-        accessibilityLabel: "Show in Finder",
-        toolTip: "Show in Finder"
     )
     private let divider = NSView()
     private let showsDivider: Bool
@@ -210,12 +211,9 @@ private final class RecentMeetingRowView: NSView {
         dateLabel.textColor = MenuTokens.textSecondaryNS
         addSubview(dateLabel)
 
-        [copyButton, showButton].forEach { addSubview($0) }
+        addSubview(copyButton)
         copyButton.target = self
         copyButton.action = #selector(copyTranscript)
-
-        showButton.target = self
-        showButton.action = #selector(showInFinder)
 
         divider.wantsLayer = true
         divider.layer?.backgroundColor = MenuTokens.sectionDividerNS.cgColor
@@ -248,8 +246,7 @@ private final class RecentMeetingRowView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard !copyButton.frame.contains(point),
-              !showButton.frame.contains(point) else {
+        guard !copyButton.frame.contains(point) else {
             super.mouseDown(with: event)
             return
         }
@@ -266,14 +263,7 @@ private final class RecentMeetingRowView: NSView {
             height: buttonSize
         )
 
-        showButton.frame = NSRect(
-            x: copyButton.frame.minX - 8 - buttonSize,
-            y: (bounds.height - buttonSize) / 2,
-            width: buttonSize,
-            height: buttonSize
-        )
-
-        let textWidth = max(0, showButton.frame.minX - 12)
+        let textWidth = max(0, copyButton.frame.minX - 12)
         titleLabel.frame = NSRect(x: 0, y: 6, width: textWidth, height: 14)
         dateLabel.frame = NSRect(x: 0, y: 21, width: textWidth, height: 12)
         divider.frame = NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
@@ -295,9 +285,6 @@ private final class RecentMeetingRowView: NSView {
         }
     }
 
-    @objc private func showInFinder() {
-        NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
-    }
 }
 
 @MainActor

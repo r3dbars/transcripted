@@ -37,13 +37,18 @@ struct PermissionsOnboardingView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    ForEach(TranscriptedPermissionKind.allCases) { kind in
+                    ForEach(requiredPermissions) { kind in
                         PermissionSetupCard(
                             kind: kind,
                             granted: isGranted(kind),
                             action: { TranscriptedPermissionAccess.openSettings(for: kind) }
                         )
                     }
+
+                    OptionalPermissionsCard(
+                        optionalPermissions: optionalPermissions,
+                        isGranted: isGranted
+                    )
 
                     VStack(alignment: .leading, spacing: 10) {
                         Text("What happens next")
@@ -107,6 +112,14 @@ struct PermissionsOnboardingView: View {
 
     private var hasRequiredPermissions: Bool {
         micGranted && accessibilityGranted
+    }
+
+    private var requiredPermissions: [TranscriptedPermissionKind] {
+        TranscriptedPermissionKind.allCases.filter(\.isRequiredOnFirstLaunch)
+    }
+
+    private var optionalPermissions: [TranscriptedPermissionKind] {
+        TranscriptedPermissionKind.allCases.filter { !$0.isRequiredOnFirstLaunch }
     }
 
     private var continueButtonTitle: String {
@@ -233,6 +246,57 @@ private struct PermissionSetupCard: View {
             if !granted {
                 Button(kind.onboardingActionTitle, action: action)
                     .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(MenuTokens.cardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(MenuTokens.cardBorder, lineWidth: 1)
+                )
+        )
+    }
+}
+
+private struct OptionalPermissionsCard: View {
+    let optionalPermissions: [TranscriptedPermissionKind]
+    let isGranted: (TranscriptedPermissionKind) -> Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Optional later")
+                .font(.subheadline.weight(.semibold))
+
+            Text("You can start dictating without these. Add them later from Settings when you want richer meeting capture.")
+                .font(.caption)
+                .foregroundStyle(MenuTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ForEach(optionalPermissions) { kind in
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: kind.icon)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(MenuTokens.textMuted)
+                        .frame(width: 16, height: 16)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(kind.title)
+                                .font(.caption.weight(.semibold))
+
+                            Text(isGranted(kind) ? "Ready" : "Later")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(isGranted(kind) ? MenuTokens.statusGreen : MenuTokens.textMuted)
+                        }
+
+                        Text(kind.summary)
+                            .font(.caption)
+                            .foregroundStyle(MenuTokens.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
         }
         .padding(14)

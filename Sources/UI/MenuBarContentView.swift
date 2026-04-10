@@ -88,11 +88,18 @@ final class MenuBarContentView: NSView {
         shortcutsView.frame = NSRect(x: pad, y: y, width: width, height: shortcutsHeight)
         y += shortcutsHeight + MenuTokens.sectionSpacing
 
-        recentsDivider.frame = NSRect(x: pad, y: y - (MenuTokens.sectionSpacing / 2), width: width, height: dividerHeight)
+        if recentMeetingsView.hasContent {
+            recentsDivider.isHidden = false
+            recentsDivider.frame = NSRect(x: pad, y: y - (MenuTokens.sectionSpacing / 2), width: width, height: dividerHeight)
 
-        let recentsHeight = recentMeetingsView.intrinsicHeight
-        recentMeetingsView.frame = NSRect(x: pad, y: y, width: width, height: recentsHeight)
-        y += recentsHeight + MenuTokens.sectionSpacing
+            let recentsHeight = recentMeetingsView.intrinsicHeight
+            recentMeetingsView.isHidden = false
+            recentMeetingsView.frame = NSRect(x: pad, y: y, width: width, height: recentsHeight)
+            y += recentsHeight + MenuTokens.sectionSpacing
+        } else {
+            recentsDivider.isHidden = true
+            recentMeetingsView.isHidden = true
+        }
 
         footerDivider.frame = NSRect(x: pad, y: y - (MenuTokens.sectionSpacing / 2), width: width, height: dividerHeight)
 
