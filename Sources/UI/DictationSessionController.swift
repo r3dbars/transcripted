@@ -201,7 +201,7 @@ class DictationSessionController: ObservableObject {
                 message: "Dictation recording failed to start",
                 context: dictationContext(extra: ["audio_device": appState.sttRouter.inputDeviceName])
             )
-            overlayController.showError("Microphone unavailable")
+            overlayController.showError(appState.sttRouter.lastStartFailureMessage ?? "Microphone unavailable")
             isDictating = false
             return
         }
@@ -611,6 +611,8 @@ class DictationSessionController: ObservableObject {
         switch reason {
         case .systemWake:
             return "Dictation stopped while your Mac was asleep"
+        case .audioDeviceRecoveryFailed:
+            return "Transcripted couldn't reconnect to the new microphone"
         case .recoveryFailed:
             return "Microphone recovery failed"
         case .audioDeviceChanged, .none:

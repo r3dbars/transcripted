@@ -651,7 +651,7 @@ final class MeetingOverlayController {
         promptCandidate = candidate
         promptSecondsRemaining = max(1, seconds)
         currentPrompt = PromptDisplay(
-            title: "Meeting detected",
+            title: candidate.title,
             detail: candidate.detail,
             countdownText: "\(promptSecondsRemaining)s"
         )
@@ -874,7 +874,7 @@ final class MeetingOverlayController {
 
             while self.promptSecondsRemaining > 0 {
                 self.currentPrompt = PromptDisplay(
-                    title: "Meeting detected",
+                    title: self.promptCandidate?.title ?? "Meeting detected",
                     detail: self.promptCandidate?.detail ?? "Record this meeting?",
                     countdownText: "\(self.promptSecondsRemaining)s"
                 )
