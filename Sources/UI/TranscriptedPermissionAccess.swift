@@ -159,17 +159,7 @@ enum TranscriptedPermissionAccess {
     }
 
     static func screenRecordingGranted() -> Bool {
-        if #available(macOS 15.0, *) {
-            return CGPreflightScreenCaptureAccess()
-        }
-
-        let testImage = CGWindowListCreateImage(
-            CGRect(x: 0, y: 0, width: 1, height: 1),
-            .optionOnScreenOnly,
-            kCGNullWindowID,
-            [.nominalResolution]
-        )
-        return testImage != nil
+        CGPreflightScreenCaptureAccess()
     }
 
     private static func openSystemSettings(_ urlString: String) {

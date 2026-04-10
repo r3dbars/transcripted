@@ -10,7 +10,8 @@ import Foundation
 //
 // Binary dependency layout:
 //   deps-libs/libDraftDeps.a          — prebuilt mega-library (FluidAudio 0.7.9 + MLX + deps + TranscriptedCore)
-//   deps-libs/libExternalDeps.a       — SwiftPM compatibility archive (currently mirrors libDraftDeps.a)
+//   deps-libs/libExternalDeps.a       — external-only archive for SPM tests (no TranscriptedCore objects)
+//   deps-frameworks/ESpeakNG.framework — FluidAudio binary dependency for package recompiles
 //   deps-modules/*.swiftmodule        — Swift interface files for FluidAudio et al.
 //   deps-modules/FastClusterWrapper   — C header for fast-cluster C++ wrapper
 //   deps-modules/MachTaskSelfWrapper  — C header for mach_task_self helper
@@ -40,6 +41,7 @@ let package = Package(
             exclude: ["CLAUDE.md"],
             swiftSettings: [
                 .unsafeFlags([
+                    "-F", "\(repoRoot)/deps-frameworks",
                     "-I", "\(repoRoot)/deps-modules",
                     "-I", "\(repoRoot)/deps-modules/FastClusterWrapper",
                     "-I", "\(repoRoot)/deps-modules/MachTaskSelfWrapper",
@@ -48,10 +50,14 @@ let package = Package(
             ],
             linkerSettings: [
                 .unsafeFlags([
+                    "-F\(repoRoot)/deps-frameworks",
                     "-L\(repoRoot)/deps-libs",
                     "-lExternalDeps",
                     "-lc++",
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "\(repoRoot)/deps-frameworks",
                 ]),
+                .linkedFramework("ESpeakNG"),
                 .linkedFramework("Metal"),
                 .linkedFramework("MetalKit"),
                 .linkedFramework("Accelerate"),
@@ -70,6 +76,7 @@ let package = Package(
                 // @testable import TranscriptedCore transitively re-exports FluidAudio/MLX
                 // module interfaces, so the test target needs the same -I search paths.
                 .unsafeFlags([
+                    "-F", "\(repoRoot)/deps-frameworks",
                     "-I", "\(repoRoot)/deps-modules",
                     "-I", "\(repoRoot)/deps-modules/FastClusterWrapper",
                     "-I", "\(repoRoot)/deps-modules/MachTaskSelfWrapper",
@@ -80,10 +87,14 @@ let package = Package(
                 // Mirror Core target linker flags so the xctest binary can resolve
                 // FluidAudio symbols pulled in through @testable.
                 .unsafeFlags([
+                    "-F\(repoRoot)/deps-frameworks",
                     "-L\(repoRoot)/deps-libs",
                     "-lExternalDeps",
                     "-lc++",
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "\(repoRoot)/deps-frameworks",
                 ]),
+                .linkedFramework("ESpeakNG"),
                 .linkedFramework("Metal"),
                 .linkedFramework("MetalKit"),
                 .linkedFramework("Accelerate"),
