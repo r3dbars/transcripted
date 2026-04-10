@@ -47,10 +47,10 @@ Rules:
 
 ## Current architecture
 
-- `Sources/TranscriptedApp.swift` wires the menubar app, popover, dictation overlay, and meeting overlay.
+- `Sources/TranscriptedApp.swift` wires the menubar app, popover, dictation overlay, meeting overlay, and detected-meeting prompt flow.
 - `Sources/TranscriptedAppState.swift` owns app-wide services: `STTRouter`, `ContextCaptureEngine`, and the lazily built `MeetingSessionController`.
 - `Sources/UI/DictationSessionController.swift` now handles dictation only. Removed draft-mode entry points surface a fixed error message.
-- `Sources/Meeting/` adapts app-owned pieces like `ParakeetEngine` into `TranscriptedCore`.
+- `Sources/Meeting/` adapts app-owned pieces like `ParakeetEngine` into `TranscriptedCore`, including meeting-link detection and app-level transcription queueing.
 - `Sources/TranscriptedCore/` contains the reusable meeting transcription library.
 - Root `Package.swift` exists so `TranscriptedCore` can be tested as a standalone package surface.
 

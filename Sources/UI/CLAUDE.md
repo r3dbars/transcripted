@@ -37,7 +37,7 @@ Draft-mode UI is not an active product path in this worktree.
 
 ### Meeting Overlay
 
-- `MeetingOverlayController.swift` — non-activating panel for meeting warmup, recording, and transcription status
+- `MeetingOverlayController.swift` — non-activating panel for detected-meeting prompts, model warmup, recording, and transcription status
 - `SpeakerNamingSheet.swift` — sheet for renaming speakers in a completed meeting
 
 ### Menubar
@@ -56,7 +56,7 @@ Draft-mode UI is not an active product path in this worktree.
 
 ### Agent Connect
 
-- `AgentConnectionGuide.swift` — shared copy and step data for the agent-connect flow
+- `AgentConnectionGuide.swift` — shared smart-prompt, MCP setup, and folder fallback copy for the agent-connect flow
 - `AgentConnectionWindowController.swift` — `AgentConnectionWindowCoordinator` and `NSWindowController` for the standalone agent-connect window
 - `AgentConnectionWindowView.swift` — SwiftUI content for the standalone agent-connect window
 
@@ -95,6 +95,7 @@ bash run-tests.sh
 Manual checks:
 
 - dictation overlay starts, stops, and auto-pastes cleanly
+- detected-meeting prompts appear only when appropriate and can start or snooze a meeting cleanly
 - meeting overlay warms up and records cleanly
-- menubar popover renders shortcuts, recents, and settings actions
+- menubar popover renders shortcuts, recents, settings actions, and the agent-connect page cleanly
 - permissions onboarding and settings window still open correctly

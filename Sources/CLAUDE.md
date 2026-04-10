@@ -9,11 +9,12 @@
 
 Important entry points:
 
-- `TranscriptedApp.swift` — app entry point, menubar wiring, popover, overlay setup
+- `TranscriptedApp.swift` — app entry point, menubar wiring, popover, overlay setup, and detected-meeting prompt wiring
 - `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, and lazy `MeetingSessionController`
 - `Capture/ContextCaptureEngine.swift` — right-option dictation handling, keyboard hotkeys, meeting hotkey routing
 - `UI/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
-- `Meeting/MeetingSessionController.swift` — app-side bridge into `TranscriptedCore`
+- `Meeting/MeetingPromptDetector.swift` — Calendar-driven meeting-link detection used to offer one-tap meeting capture prompts
+- `Meeting/MeetingSessionController.swift` — app-side bridge into `TranscriptedCore`, including queued meeting transcription handoff
 - `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter
 
 ## Directory map
