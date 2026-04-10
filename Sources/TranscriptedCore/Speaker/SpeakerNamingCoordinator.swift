@@ -186,12 +186,29 @@ extension TranscriptionTaskManager {
                 "transcript": resolvedURL.lastPathComponent
             ])
 
-            // Only UI state updates on the main thread
+            // UI state updates on the main thread.
+            // Setting displayStatus triggers MeetingSessionController's
+            // handleDisplayStatusChange → lastTerminalTranscriptionOutcome.
+            // Then a brief delay ensures the Combine pipeline has flushed
+            // before we re-trigger the background-work check, which drives
+            // the overlay from .transcribing → .saved → auto-hide.
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.populateSavedMetadata(from: resolvedURL)
                 self.displayStatus = .transcriptSaved
                 self.scheduleStatusReset(delay: 8)
+            }
+            // Belt-and-suspenders: if the Combine subscription missed the
+            // speakerNamingRequest nil-out (set before this Task started),
+            // re-publish the change to force the session controller to
+            // finalize its state and dismiss the overlay.
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                if self.displayStatus == .transcriptSaved || self.displayStatus == .idle {
+                    self.displayStatus = .transcriptSaved
+                    self.scheduleStatusReset(delay: 3)
+                }
             }
         }
     }

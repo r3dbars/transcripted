@@ -208,31 +208,79 @@ extension TranscriptSaver {
     }
 
     /// Resolve a transcript URL that may have been renamed by MeetingTranscriptStyler.
-    /// Falls back to scanning the parent directory for a .md file containing a matching speaker db_id.
+    /// Tries three strategies in order:
+    ///   1. UUID search — scan .md files for a speaker db_id in the YAML
+    ///   2. Timestamp search — extract the time from the original filename and match YAML `time:` field
+    ///   3. Most recent — fall back to the newest .md file (just saved, should be the right one)
     static func resolveTranscriptURL(_ url: URL, updates: [SpeakerNameUpdate]) -> URL {
         if FileManager.default.fileExists(atPath: url.path) { return url }
 
-        AppLogger.pipeline.info("Transcript not at expected path, scanning for renamed file", ["expected": url.lastPathComponent])
-
         let directory = url.deletingLastPathComponent()
-        guard let firstId = updates.first?.persistentSpeakerId.uuidString,
-              let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-                .filter({ $0.pathExtension == "md" }) else {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey]
+        ).filter({ $0.pathExtension == "md" }) else {
+            AppLogger.pipeline.error("resolveTranscriptURL: cannot list directory", ["dir": directory.path])
             return url
         }
 
-        // Read only the YAML frontmatter (first 2 KB) of each file to find the match.
-        for file in files {
-            guard let handle = try? FileHandle(forReadingFrom: file) else { continue }
-            let header = handle.readData(ofLength: 2048)
-            try? handle.close()
-            guard let text = String(data: header, encoding: .utf8),
-                  text.contains(firstId) else { continue }
-            AppLogger.pipeline.info("Resolved renamed transcript", ["from": url.lastPathComponent, "to": file.lastPathComponent])
-            return file
+        AppLogger.pipeline.info("resolveTranscriptURL: file not at expected path, scanning \(files.count) .md files", ["expected": url.lastPathComponent])
+
+        // Strategy 1: Search by speaker UUID in YAML frontmatter
+        if let firstId = updates.first?.persistentSpeakerId.uuidString {
+            for file in files {
+                guard let handle = try? FileHandle(forReadingFrom: file) else { continue }
+                let header = handle.readData(ofLength: 2048)
+                try? handle.close()
+                guard let text = String(data: header, encoding: .utf8),
+                      text.contains(firstId) else { continue }
+                AppLogger.pipeline.info("resolveTranscriptURL: matched by UUID", ["to": file.lastPathComponent])
+                return file
+            }
         }
 
+        // Strategy 2: Extract timestamp from original filename and match YAML `time:` field.
+        // Original filenames look like "Call 2026-04-10 11-15-12.md" — extract "11:15:12".
+        let stem = url.deletingPathExtension().lastPathComponent
+        if let timeMatch = extractTimeFromFilename(stem) {
+            let yamlTimeString = "time: \(timeMatch)"
+            for file in files {
+                guard let handle = try? FileHandle(forReadingFrom: file) else { continue }
+                let header = handle.readData(ofLength: 512)
+                try? handle.close()
+                guard let text = String(data: header, encoding: .utf8),
+                      text.contains(yamlTimeString) else { continue }
+                AppLogger.pipeline.info("resolveTranscriptURL: matched by timestamp", ["to": file.lastPathComponent, "time": timeMatch])
+                return file
+            }
+        }
+
+        // Strategy 3: Fall back to the most recently modified .md file.
+        let sorted = files.sorted { a, b in
+            let aDate = (try? a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            let bDate = (try? b.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            return aDate > bDate
+        }
+        if let newest = sorted.first {
+            AppLogger.pipeline.info("resolveTranscriptURL: fell back to newest .md file", ["to": newest.lastPathComponent])
+            return newest
+        }
+
+        AppLogger.pipeline.error("resolveTranscriptURL: no .md files found at all")
         return url
+    }
+
+    /// Extract a time string like "11:15:12" from a filename like "Call 2026-04-10 11-15-12".
+    private static func extractTimeFromFilename(_ stem: String) -> String? {
+        // Match pattern: digits-digits-digits at the end (e.g., "11-15-12")
+        guard let regex = try? NSRegularExpression(pattern: #"(\d{1,2})-(\d{2})-(\d{2})$"#),
+              let match = regex.firstMatch(in: stem, range: NSRange(location: 0, length: (stem as NSString).length)),
+              match.numberOfRanges >= 4 else { return nil }
+        let ns = stem as NSString
+        let h = ns.substring(with: match.range(at: 1))
+        let m = ns.substring(with: match.range(at: 2))
+        let s = ns.substring(with: match.range(at: 3))
+        return "\(h):\(m):\(s)"
     }
 
     /// Replace all occurrences of a speaker name throughout a transcript's YAML and body.
