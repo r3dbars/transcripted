@@ -16,8 +16,10 @@ set -e
 DRAFT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SMOKE_BIN="$DRAFT_DIR/build/core-integration-smoke"
 WAKE_SMOKE_BIN="$DRAFT_DIR/build/wake-recovery-smoke"
+DEPS_FRAMEWORK_ROOT="$DRAFT_DIR/deps-frameworks"
+ESPEAK_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/ESpeakNG.framework"
 
-if [ ! -f "$DRAFT_DIR/deps-libs/libDraftDeps.a" ] || [ ! -d "$DRAFT_DIR/deps-modules" ] || [ ! -d "$DRAFT_DIR/deps-frameworks/ESpeakNG.framework" ]; then
+if [ ! -f "$DRAFT_DIR/deps-libs/libDraftDeps.a" ] || [ ! -d "$DRAFT_DIR/deps-modules" ] || [ ! -d "$ESPEAK_FRAMEWORK" ]; then
     echo "Dependencies not found — run build-deps.sh first."
     exit 1
 fi
@@ -27,7 +29,11 @@ mkdir -p "$DRAFT_DIR/build"
 # Build the -I flags for every module directory in deps-modules.
 DEPS_MODULE_FLAGS="-Ideps-modules"
 for dir in "$DRAFT_DIR"/deps-modules/*/; do
-    [ -d "$dir" ] && DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
+    [ -d "$dir" ] || continue
+    case "$(basename "$dir")" in
+        *.swiftmodule) continue ;;
+    esac
+    DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
 done
 DEPS_FRAMEWORK_FLAGS="-Fdeps-frameworks"
 
@@ -46,6 +52,7 @@ swiftc \
     -framework Accelerate \
     -framework Network \
     -framework UserNotifications \
+    -framework ESpeakNG \
     -lc++ \
     $DEPS_MODULE_FLAGS \
     $DEPS_FRAMEWORK_FLAGS \
@@ -54,6 +61,7 @@ swiftc \
     "$DRAFT_DIR/SmokeTests/CoreIntegrationSmoke.swift" \
     -parse-as-library \
     -target arm64-apple-macos14.0 \
+    -Xlinker -rpath -Xlinker "$DEPS_FRAMEWORK_ROOT" \
     2>&1
 
 echo "Compiling wake recovery smoke…"

@@ -137,7 +137,7 @@ echo "[build-deps] Using TranscriptedCore from: $TRANSCRIPTED_ROOT"
 # Skip if already built (use --force to rebuild).
 # libExternalDeps.a was added later for SPM-based `swift test`, so require it too;
 # otherwise legacy worktrees would keep skipping while missing the archive.
-if [ -f "$DEPS_LIBS/libDraftDeps.a" ] && [ -f "$DEPS_LIBS/libExternalDeps.a" ] && [ -d "$DEPS_MODULES" ] && [ -d "$DEPS_FRAMEWORKS/ESpeakNG.framework" ] && [ "$1" != "--force" ]; then
+if [ -f "$DEPS_LIBS/libDraftDeps.a" ] && [ -f "$DEPS_LIBS/libExternalDeps.a" ] && [ -d "$DEPS_MODULES" ] && [ -d "$DEPS_FRAMEWORKS/ESpeakNG.framework" ] && [ "${1:-}" != "--force" ]; then
     echo "Dependencies already built. Use --force to rebuild."
     echo "  libs:    $DEPS_LIBS/libDraftDeps.a"
     echo "           $DEPS_LIBS/libExternalDeps.a"
@@ -325,15 +325,29 @@ if [ -n "$CMLX_MODULEMAP" ] && [ ! -f "$DEPS_MODULES/Cmlx/module.modulemap" ]; t
     ditto "$CMLX_MODULEMAP" "$DEPS_MODULES/Cmlx/module.modulemap"
 fi
 
-# Binary framework slice needed by FluidAudio's ESpeakNG binary target.
-ESPEAK_FRAMEWORK_SRC="$CHECKOUTS/FluidAudio/Sources/FluidAudio/Frameworks/ESpeakNG.xcframework/macos-arm64_x86_64/ESpeakNG.framework"
-if [ -d "$ESPEAK_FRAMEWORK_SRC" ]; then
-    echo "Copying ESpeakNG.framework..."
-    rm -rf "$DEPS_FRAMEWORKS/ESpeakNG.framework"
-    ditto "$ESPEAK_FRAMEWORK_SRC" "$DEPS_FRAMEWORKS/ESpeakNG.framework"
-else
-    echo "  WARNING: ESpeakNG.framework not found in FluidAudio checkout"
+# Export the binary-target framework needed by FluidAudio and package recompiles.
+echo "Copying ESpeakNG.framework..."
+ESPEAK_FRAMEWORK_SRC="$(
+    find "$CHECKOUTS" \
+        -path "*/ESpeakNG.framework" \
+        -type d 2>/dev/null | \
+        grep '/macos' | \
+        head -1 || true
+)"
+if [ -z "$ESPEAK_FRAMEWORK_SRC" ]; then
+    ESPEAK_FRAMEWORK_SRC="$(
+        find "$CHECKOUTS" \
+            -path "*/ESpeakNG.framework" \
+            -type d 2>/dev/null | \
+            head -1 || true
+    )"
 fi
+if [ -z "$ESPEAK_FRAMEWORK_SRC" ]; then
+    echo "[build-deps] ERROR: ESpeakNG.framework not found in resolved dependencies"
+    exit 1
+fi
+rm -rf "$DEPS_FRAMEWORKS/ESpeakNG.framework"
+ditto "$ESPEAK_FRAMEWORK_SRC" "$DEPS_FRAMEWORKS/ESpeakNG.framework"
 
 # --- Metal libraries: compile MLX Metal shaders ---
 # SPM's `swift build` doesn't compile .metal files — only Xcode does.
