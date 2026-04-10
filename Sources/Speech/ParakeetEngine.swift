@@ -19,6 +19,101 @@ private extension NSLock {
     }
 }
 
+private enum InputDeviceLookupError: Error {
+    case propertyReadFailed(OSStatus)
+    case unknownDevice
+}
+
+private enum CoreAudioInputDeviceLookup {
+    static func defaultInputDeviceName() throws -> String {
+        let deviceID = try defaultInputDeviceID()
+        let name = try readStringProperty(
+            selector: kAudioDevicePropertyDeviceNameCFString,
+            objectID: AudioObjectID(deviceID)
+        )
+        return name.isEmpty ? "Unknown" : name
+    }
+
+    private static func defaultInputDeviceID() throws -> AudioDeviceID {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var deviceID = AudioDeviceID(kAudioObjectUnknown)
+        var dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
+
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &deviceID
+        )
+
+        guard status == noErr else {
+            throw InputDeviceLookupError.propertyReadFailed(status)
+        }
+        guard deviceID != AudioDeviceID(kAudioObjectUnknown) else {
+            throw InputDeviceLookupError.unknownDevice
+        }
+
+        return deviceID
+    }
+
+    private static func readStringProperty(
+        selector: AudioObjectPropertySelector,
+        objectID: AudioObjectID
+    ) throws -> String {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: Unmanaged<CFString>?
+        var dataSize = UInt32(MemoryLayout<CFString>.size)
+
+        let status = withUnsafeMutablePointer(to: &value) { valuePointer in
+            AudioObjectGetPropertyData(
+                objectID,
+                &address,
+                0,
+                nil,
+                &dataSize,
+                UnsafeMutableRawPointer(valuePointer)
+            )
+        }
+
+        guard status == noErr else {
+            throw InputDeviceLookupError.propertyReadFailed(status)
+        }
+
+        return (value?.takeUnretainedValue() as String?) ?? ""
+    }
+}
+
+// FluidAudio 0.7.9 no longer exposes the older streaming EOU manager used by
+// this dormant live-display path. Keep a no-op shim so the disabled code path
+// still compiles until we rewire live transcripts to the newer streaming API.
+private actor StreamingEouAsrManager {
+    enum ChunkSize {
+        case ms320
+    }
+
+    init(chunkSize: ChunkSize, eouDebounceMs: Int) {}
+
+    func loadModels(modelDir: URL) async throws {}
+
+    func setPartialCallback(_ callback: @escaping @Sendable (String) -> Void) async {}
+
+    func setEouCallback(_ callback: @escaping @Sendable (String) -> Void) async {}
+
+    func process(audioBuffer: AVAudioPCMBuffer) async throws -> String { "" }
+
+    func reset() async {}
+}
+
 enum ParakeetModelState {
     case notLoaded
     case downloading(progress: Double)
@@ -77,9 +172,7 @@ class ParakeetEngine: ObservableObject {
 
     var inputDeviceName: String {
         do {
-            let deviceID = try AudioObjectID.readDefaultInputDevice()
-            let name = try deviceID.readString(kAudioDevicePropertyDeviceNameCFString)
-            return name.isEmpty ? "Unknown" : name
+            return try CoreAudioInputDeviceLookup.defaultInputDeviceName()
         } catch {
             return "Unknown"
         }
@@ -122,24 +215,15 @@ class ParakeetEngine: ObservableObject {
                 // Fallback: download from HuggingFace (~600MB on first run)
                 print("🌐 PARAKEET | models not bundled, downloading (~600MB)...")
                 modelDownloadState = .downloading(progress: 0.0)
-                models = try await AsrModels.downloadAndLoad(version: .v3) { [weak self] progress in
-                    Task { @MainActor in
-                        self?.modelDownloadState = .downloading(progress: progress.fractionCompleted)
-                        switch progress.phase {
-                        case .listing:
-                            print("🌐 PARAKEET | listing model files...")
-                        case .downloading(let completed, let total):
-                            print("🌐 PARAKEET | downloading \(completed)/\(total) files (\(Int(progress.fractionCompleted * 100))%)...")
-                        case .compiling(let name):
-                            print("🌐 PARAKEET | compiling \(name)...")
-                        }
-                    }
-                }
+                let downloadedPath = try await AsrModels.download(version: .v3)
+                modelDownloadState = .loading
+                print("🌐 PARAKEET | loading downloaded models from: \(downloadedPath.path)")
+                models = try await AsrModels.load(from: downloadedPath, version: .v3)
                 loadSource = "download"
             }
 
             let manager = AsrManager(config: .default)
-            try await manager.loadModels(models)
+            try await manager.initialize(models: models)
 
             asrManager = manager
             asrManagerReady = true
@@ -182,15 +266,14 @@ class ParakeetEngine: ObservableObject {
                     print("📦 PARAKEET EOU | loading from cache: \(expectedDir.path)")
                     modelDir = expectedDir
                 } else {
-                    print("🌐 PARAKEET EOU | downloading streaming model (~120MB)...")
-                    let modelNames = ["streaming_encoder", "decoder", "joint_decision"]
-                    _ = try await DownloadUtils.loadModels(
-                        .parakeetEou320,
-                        modelNames: modelNames,
-                        directory: cacheBase
+                    print("⚠️ PARAKEET EOU | streaming model download unavailable with current FluidAudio API")
+                    EventReporter.shared.capture(
+                        level: .warning,
+                        engine: "parakeet",
+                        event: "eou_model_unavailable",
+                        message: "Streaming EOU model download is unavailable with the current FluidAudio version"
                     )
-                    print("✅ PARAKEET EOU | download complete")
-                    modelDir = expectedDir
+                    return
                 }
             }
             try await eou.loadModels(modelDir: modelDir)
@@ -904,7 +987,7 @@ class ParakeetEngine: ObservableObject {
         asrManagerReady = false
         eouManager = nil
         modelDownloadState = .notLoaded
-        Task { await mgr?.cleanup() }
+        Task { mgr?.cleanup() }
     }
 
     deinit {
@@ -917,7 +1000,7 @@ class ParakeetEngine: ObservableObject {
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
         let mgr = asrManager
-        Task { await mgr?.cleanup() }
+        Task { mgr?.cleanup() }
         eouManager = nil
     }
 }
