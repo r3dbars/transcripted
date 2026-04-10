@@ -43,9 +43,10 @@ extension Audio {
 
                 // Audio stopped → device likely changed
                 AppLogger.audioMic.warning("Audio device disconnected or changed, switching to default")
+                let sessionGeneration = self.recordingSessionGeneration
                 // Dispatch to background — recovery uses Thread.sleep for HAL settle time
                 DispatchQueue.global(qos: .userInitiated).async {
-                    self.recoverFromDeviceChange()
+                    self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
                 }
             }
         }
@@ -58,7 +59,16 @@ extension Audio {
 
     // MARK: - Device Recovery
 
-    func recoverFromDeviceChange() {
+    func recoverFromDeviceChange(sessionGeneration: UInt64) {
+        // Ignore recovery work that belonged to an older recording session.
+        guard sessionGeneration == recordingSessionGeneration else {
+            AppLogger.audioMic.info("Skipping stale recovery request", [
+                "expectedSession": "\(sessionGeneration)",
+                "currentSession": "\(recordingSessionGeneration)"
+            ])
+            return
+        }
+
         // CRITICAL: Prevent concurrent recovery attempts
         // AVAudioEngine notifications can fire multiple times during rapid device changes
         guard !isMicRecovering else {
@@ -93,6 +103,15 @@ extension Audio {
         // HAL settle time - wait for audio hardware to stabilize after device change
         // Same approach as SystemAudioCapture recovery
         Thread.sleep(forTimeInterval: 0.1)  // 100ms
+
+        // A new recording session may have started while the HAL was settling.
+        guard sessionGeneration == recordingSessionGeneration else {
+            AppLogger.audioMic.info("Skipping stale recovery after HAL settle", [
+                "expectedSession": "\(sessionGeneration)",
+                "currentSession": "\(recordingSessionGeneration)"
+            ])
+            return
+        }
 
         // Get ACTUAL hardware format (not converter format)
         let recordingFormat = newInputNode.inputFormat(forBus: 1)
@@ -159,6 +178,14 @@ extension Audio {
         // Reinstall tap using shared buffer handler
         newInputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
             self?.handleMicBuffer(buffer)
+        }
+
+        guard sessionGeneration == recordingSessionGeneration else {
+            AppLogger.audioMic.info("Skipping stale recovery before engine restart", [
+                "expectedSession": "\(sessionGeneration)",
+                "currentSession": "\(recordingSessionGeneration)"
+            ])
+            return
         }
 
         // Restart engine

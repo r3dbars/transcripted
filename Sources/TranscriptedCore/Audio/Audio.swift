@@ -154,6 +154,24 @@ public class Audio: ObservableObject {
         }
     }
     var lastRecoveryTime: Date?
+    
+    // Recording session generation - increments on each start/stop so delayed
+    // recovery work from an old session cannot restart a newer one.
+    private var _recordingSessionGeneration: UInt64 = 0
+    private let recordingSessionGenerationLock = NSLock()
+    var recordingSessionGeneration: UInt64 {
+        get {
+            recordingSessionGenerationLock.lock()
+            defer { recordingSessionGenerationLock.unlock() }
+            return _recordingSessionGeneration
+        }
+        set {
+            recordingSessionGenerationLock.lock()
+            defer { recordingSessionGenerationLock.unlock() }
+            _recordingSessionGeneration = newValue
+        }
+    }
+
     let maxRecoveryAttempts = 5
     let recoveryCooldown: TimeInterval = 5.0  // Min seconds between recovery attempts
 
@@ -352,9 +370,10 @@ public class Audio: ObservableObject {
                 self.sleepTimestamp = nil
 
                 // Proactively trigger mic recovery instead of waiting for the 3-5s watchdog delay
+                let sessionGeneration = self.recordingSessionGeneration
                 DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1.0) { [weak self] in
                     guard let self = self, self.isRecording else { return }
-                    self.recoverFromDeviceChange()
+                    self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
                 }
             }
         }
@@ -412,10 +431,12 @@ public class Audio: ObservableObject {
         // Set isStarting to prevent double-start during async setup
         isStarting = true
         error = nil
+        isMicRecovering = false
         systemBufferCount = 0  // Reset debug counter (lock-protected)
         resetSilenceTracking()  // Start fresh silence tracking
         systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
         systemAudioSilenceStart = nil  // Reset system audio silence tracking
+        recordingSessionGeneration &+= 1
 
         // Reset health tracking for new recording session
         recordingGaps = []
@@ -454,10 +475,12 @@ public class Audio: ObservableObject {
         // Set isStarting to prevent double-start during async setup
         isStarting = true
         error = nil
+        isMicRecovering = false
         systemBufferCount = 0  // Reset debug counter (lock-protected)
         resetSilenceTracking()  // Start fresh silence tracking
         systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
         systemAudioSilenceStart = nil  // Reset system audio silence tracking
+        recordingSessionGeneration &+= 1
 
         // Reset health tracking for new recording session
         recordingGaps = []
@@ -493,6 +516,7 @@ public class Audio: ObservableObject {
     // MARK: - Stop Recording
 
     public func stop() {
+        recordingSessionGeneration &+= 1
         guard let engine = engine, let inputNode = inputNode else {
             // Ensure flag reset even on guard failure
             isRecording = false
@@ -526,6 +550,7 @@ public class Audio: ObservableObject {
             self.systemAudioStatus = .unknown  // Reset status when not recording
             self.stopTimer()
             self.stopWatchdog()
+            self.isMicRecovering = false
             NSSound(named: "Pop")?.play()
         }
 
