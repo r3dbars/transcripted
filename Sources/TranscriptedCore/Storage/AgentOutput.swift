@@ -6,9 +6,18 @@ import Foundation
 /// Designed for AI agent consumption — flat, unambiguous, chronological.
 struct AgentTranscript: Codable {
     let version: String
+    let transcriptId: String?
     let recording: AgentRecording
     let speakers: [AgentSpeaker]
     let utterances: [AgentUtterance]
+
+    enum CodingKeys: String, CodingKey {
+        case version
+        case transcriptId = "transcript_id"
+        case recording
+        case speakers
+        case utterances
+    }
 }
 
 struct AgentRecording: Codable {
@@ -127,6 +136,7 @@ public enum AgentOutput {
     /// Write a structured JSON sidecar for a transcript.
     public static func writeTranscriptJSON(
         from result: TranscriptionResult,
+        transcriptId: UUID,
         speakerMappings: [String: SpeakerMapping],
         speakerDbIds: [String: UUID],
         to folder: URL,
@@ -185,6 +195,7 @@ public enum AgentOutput {
 
         let transcript = AgentTranscript(
             version: "1.0",
+            transcriptId: transcriptId.uuidString,
             recording: AgentRecording(
                 date: dateString,
                 durationSeconds: Int(result.duration),

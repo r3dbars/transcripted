@@ -55,6 +55,7 @@ extension TranscriptSaver {
     @available(macOS 14.0, *)
     public static func formatTranscriptMarkdown(
         result: TranscriptionResult,
+        transcriptId: UUID,
         speakerMappings: [String: SpeakerMapping] = [:],
         speakerSources: [String: String] = [:],
         speakerDbIds: [String: UUID] = [:],
@@ -86,6 +87,7 @@ extension TranscriptSaver {
         // Build YAML frontmatter
         var yaml = """
         ---
+        transcript_id: "\(transcriptId.uuidString)"
         date: \(isoDate)
         time: \(timeString)
         duration: "\(durationString)"

@@ -5,7 +5,7 @@
 import Foundation
 
 /// A single utterance in the transcript (one speaker saying something)
-public struct TranscriptionUtterance {
+public struct TranscriptionUtterance: Sendable {
     public let start: Double           // seconds
     public let end: Double             // seconds
     public let channel: Int            // 0 = mic, 1 = system
@@ -34,16 +34,25 @@ public struct TranscriptionUtterance {
 }
 
 /// Complete transcription result from the local pipeline
-public struct TranscriptionResult {
+public struct TranscriptionResult: Sendable {
     public let micUtterances: [TranscriptionUtterance]
     public let systemUtterances: [TranscriptionUtterance]
+    public let systemSpeakerContexts: [String: SystemSpeakerContext]
     public let duration: TimeInterval
     public let processingTime: TimeInterval
     public let droppedSegments: Int
 
-    public init(micUtterances: [TranscriptionUtterance], systemUtterances: [TranscriptionUtterance], duration: TimeInterval, processingTime: TimeInterval, droppedSegments: Int = 0) {
+    public init(
+        micUtterances: [TranscriptionUtterance],
+        systemUtterances: [TranscriptionUtterance],
+        systemSpeakerContexts: [String: SystemSpeakerContext] = [:],
+        duration: TimeInterval,
+        processingTime: TimeInterval,
+        droppedSegments: Int = 0
+    ) {
         self.micUtterances = micUtterances
         self.systemUtterances = systemUtterances
+        self.systemSpeakerContexts = systemSpeakerContexts
         self.duration = duration
         self.processingTime = processingTime
         self.droppedSegments = droppedSegments
@@ -144,13 +153,13 @@ public enum PipelineError: LocalizedError {
 }
 
 /// Speaker confidence level from voice fingerprint matching
-public enum SpeakerConfidence: String, Codable {
+public enum SpeakerConfidence: String, Codable, Sendable {
     case high
     case medium
 }
 
 /// Individual speaker identified in the call
-public struct IdentifiedSpeaker: Codable {
+public struct IdentifiedSpeaker: Codable, Sendable {
     public let name: String
     public let speakerId: String?
     public let confidence: SpeakerConfidence
@@ -206,20 +215,24 @@ public struct SpeakerNamingRequest {
     public init(
         speakers: [SpeakerNamingEntry],
         transcriptURL: URL,
+        transcriptId: UUID,
         systemAudioURL: URL,
         micAudioURL: URL,
         onComplete: @escaping ([SpeakerNameUpdate]) -> Void
     ) {
         self.speakers = speakers
         self.transcriptURL = transcriptURL
+        self.transcriptId = transcriptId
         self.systemAudioURL = systemAudioURL
         self.micAudioURL = micAudioURL
         self.onComplete = onComplete
     }
+
+    public let transcriptId: UUID
 }
 
 /// A single speaker needing naming or confirmation
-public struct SpeakerNamingEntry: Identifiable {
+public struct SpeakerNamingEntry: Identifiable, Sendable {
     public let id: UUID                     // persistent speaker ID from SpeakerDatabase
     public let sortformerSpeakerId: String  // "0", "1" — for transcript string matching
     public let clipURL: URL                 // temporary WAV clip for playback
@@ -228,6 +241,8 @@ public struct SpeakerNamingEntry: Identifiable {
     public let matchSimilarity: Double?     // cosine similarity score
     public let needsNaming: Bool            // true = unknown speaker (show text field)
     public let needsConfirmation: Bool      // true = known but low confidence (show confirm/deny)
+    public let sessionEmbedding: [Float]?   // mean embedding from the current meeting
+    public let matchedProfileSnapshot: SpeakerProfile? // pre-meeting DB profile for correction rollback
 
     public init(
         id: UUID,
@@ -237,7 +252,9 @@ public struct SpeakerNamingEntry: Identifiable {
         currentName: String?,
         matchSimilarity: Double?,
         needsNaming: Bool,
-        needsConfirmation: Bool
+        needsConfirmation: Bool,
+        sessionEmbedding: [Float]? = nil,
+        matchedProfileSnapshot: SpeakerProfile? = nil
     ) {
         self.id = id
         self.sortformerSpeakerId = sortformerSpeakerId
@@ -247,29 +264,58 @@ public struct SpeakerNamingEntry: Identifiable {
         self.matchSimilarity = matchSimilarity
         self.needsNaming = needsNaming
         self.needsConfirmation = needsConfirmation
+        self.sessionEmbedding = sessionEmbedding
+        self.matchedProfileSnapshot = matchedProfileSnapshot
+    }
+}
+
+/// Per-speaker context captured during one transcription run.
+/// Keeps enough information around to safely recover from a false-positive match.
+public struct SystemSpeakerContext: Sendable {
+    public let persistentSpeakerId: UUID
+    public let sessionEmbedding: [Float]?
+    public let matchedProfileSnapshot: SpeakerProfile?
+    public let matchSimilarity: Double?
+
+    public init(
+        persistentSpeakerId: UUID,
+        sessionEmbedding: [Float]?,
+        matchedProfileSnapshot: SpeakerProfile?,
+        matchSimilarity: Double?
+    ) {
+        self.persistentSpeakerId = persistentSpeakerId
+        self.sessionEmbedding = sessionEmbedding
+        self.matchedProfileSnapshot = matchedProfileSnapshot
+        self.matchSimilarity = matchSimilarity
     }
 }
 
 /// Result of user naming/confirming a speaker
-public struct SpeakerNameUpdate {
+public struct SpeakerNameUpdate: Sendable {
     public let persistentSpeakerId: UUID
     public let sortformerSpeakerId: String
     public let newName: String
+    public let previousName: String?
     public let action: NamingAction
+    public let resolvedPersistentSpeakerId: UUID?
 
     public init(
         persistentSpeakerId: UUID,
         sortformerSpeakerId: String,
         newName: String,
-        action: NamingAction
+        previousName: String? = nil,
+        action: NamingAction,
+        resolvedPersistentSpeakerId: UUID? = nil
     ) {
         self.persistentSpeakerId = persistentSpeakerId
         self.sortformerSpeakerId = sortformerSpeakerId
         self.newName = newName
+        self.previousName = previousName
         self.action = action
+        self.resolvedPersistentSpeakerId = resolvedPersistentSpeakerId
     }
 
-    public enum NamingAction {
+    public enum NamingAction: Sendable {
         case named      // user typed a name for unknown speaker
         case confirmed  // user confirmed suggested name
         case corrected  // user rejected suggestion and typed correct name

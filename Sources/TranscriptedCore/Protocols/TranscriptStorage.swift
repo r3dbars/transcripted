@@ -11,6 +11,7 @@ public protocol TranscriptStorage {
     @discardableResult
     static func saveTranscript(
         _ result: TranscriptionResult,
+        transcriptId: UUID,
         speakerMappings: [String: SpeakerMapping],
         speakerSources: [String: String],
         speakerDbIds: [String: UUID],

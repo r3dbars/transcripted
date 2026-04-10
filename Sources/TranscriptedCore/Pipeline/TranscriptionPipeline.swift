@@ -309,6 +309,38 @@ extension Transcription {
                 ])
             }
 
+            var systemSpeakerContexts: [String: SystemSpeakerContext] = [:]
+            let effectiveSpeakerIds = Set(
+                speakerSegments.map { speakerIdRemap[$0.speakerId] ?? $0.speakerId }
+            )
+
+            for effectiveSpeakerId in effectiveSpeakerIds {
+                let persistentId = speakerMatchResults[effectiveSpeakerId]?.persistentId
+                    ?? speakerNewProfiles[effectiveSpeakerId]
+                guard let persistentId else { continue }
+
+                let sessionEmbedding: [Float]?
+                if let embeddings = embeddingsPerSpeaker[effectiveSpeakerId], !embeddings.isEmpty {
+                    let weights = embeddingWeights[effectiveSpeakerId]
+                        ?? Array(repeating: Float(1.0), count: embeddings.count)
+                    sessionEmbedding = Self.computeWeightedMeanEmbedding(embeddings, weights: weights)
+                } else {
+                    sessionEmbedding = nil
+                }
+
+                let matchedProfileSnapshot = speakerMatchResults[effectiveSpeakerId]
+                    .flatMap { match in
+                        existingProfiles.first(where: { $0.id == match.persistentId })
+                    }
+
+                systemSpeakerContexts[String(effectiveSpeakerId)] = SystemSpeakerContext(
+                    persistentSpeakerId: persistentId,
+                    sessionEmbedding: sessionEmbedding,
+                    matchedProfileSnapshot: matchedProfileSnapshot,
+                    matchSimilarity: speakerMatchResults[effectiveSpeakerId]?.similarity
+                )
+            }
+
             for (index, segment) in speakerSegments.enumerated() {
                 // Allow cancellation between segments (user hit stop or app is terminating)
                 try Task.checkCancellation()
@@ -435,6 +467,7 @@ extension Transcription {
             return TranscriptionResult(
                 micUtterances: mergedMicUtterances,
                 systemUtterances: mergedSystemUtterances,
+                systemSpeakerContexts: systemSpeakerContexts,
                 duration: duration,
                 processingTime: processingTime,
                 droppedSegments: droppedSegments

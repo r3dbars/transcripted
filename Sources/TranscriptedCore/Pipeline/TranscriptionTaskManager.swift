@@ -103,8 +103,12 @@ public class TranscriptionTaskManager: ObservableObject {
 
                 await MainActor.run {
                     self.populateSavedMetadata(from: transcriptURL)
-                    self.displayStatus = .transcriptSaved
-                    self.scheduleStatusReset(delay: 4)
+                    if self.speakerNamingRequest == nil {
+                        self.displayStatus = .transcriptSaved
+                        self.scheduleStatusReset(delay: 4)
+                    } else {
+                        self.displayStatus = .finishing
+                    }
                     self.handleTaskCompletion(taskId: task.id)
                 }
 
@@ -187,8 +191,12 @@ public class TranscriptionTaskManager: ObservableObject {
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
                 self.populateSavedMetadata(from: transcriptURL)
-                self.displayStatus = .transcriptSaved
-                self.scheduleStatusReset(delay: 4)
+                if self.speakerNamingRequest == nil {
+                    self.displayStatus = .transcriptSaved
+                    self.scheduleStatusReset(delay: 4)
+                } else {
+                    self.displayStatus = .finishing
+                }
             }
 
             return true

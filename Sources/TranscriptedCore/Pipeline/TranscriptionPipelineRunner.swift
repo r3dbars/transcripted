@@ -164,8 +164,11 @@ extension TranscriptionTaskManager {
             return self.notifier
         }
 
+        let transcriptId = UUID()
+
         guard let savedURL = TranscriptSaver.saveTranscript(
             result,
+            transcriptId: transcriptId,
             speakerMappings: speakerMappings,
             speakerSources: speakerSources,
             speakerDbIds: speakerDbIds,
@@ -208,7 +211,9 @@ extension TranscriptionTaskManager {
                             currentName: clip.currentName,
                             matchSimilarity: clip.matchSimilarity,
                             needsNaming: clip.currentName == nil,
-                            needsConfirmation: clip.currentName != nil
+                            needsConfirmation: clip.currentName != nil,
+                            sessionEmbedding: result.systemSpeakerContexts[clip.sortformerSpeakerId]?.sessionEmbedding,
+                            matchedProfileSnapshot: result.systemSpeakerContexts[clip.sortformerSpeakerId]?.matchedProfileSnapshot
                         )
                     }
 
@@ -218,12 +223,14 @@ extension TranscriptionTaskManager {
                         self.speakerNamingRequest = SpeakerNamingRequest(
                             speakers: entries,
                             transcriptURL: savedURL,
+                            transcriptId: transcriptId,
                             systemAudioURL: systemURL,
                             micAudioURL: micURL,
                             onComplete: { [weak self] updates in
                                 self?.handleNamingComplete(
                                     updates: updates,
                                     transcriptURL: savedURL,
+                                    transcriptId: transcriptId,
                                     micURL: micURL,
                                     systemURL: systemURL,
                                     clips: entries

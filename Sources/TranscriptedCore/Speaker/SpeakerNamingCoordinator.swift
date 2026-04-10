@@ -14,82 +14,70 @@ extension TranscriptionTaskManager {
     public func handleNamingComplete(
         updates: [SpeakerNameUpdate],
         transcriptURL: URL,
+        transcriptId: UUID,
         micURL: URL,
         systemURL: URL,
         clips: [SpeakerNamingEntry]
     ) {
         let speakerDB = transcription.speakerDB
+        let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map { ($0.sortformerSpeakerId, $0) })
 
-        // Immediately dismiss the naming tray so the UI is responsive
-        self.speakerNamingRequest = nil
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let resolvedUpdates = Self.applyNamingUpdates(
+                updates,
+                clipsBySpeakerId: clipsBySpeakerId,
+                speakerDB: speakerDB
+            ) else {
+                SpeakerClipExtractor.cleanupClips(clips)
+                try? FileManager.default.removeItem(at: micURL)
+                try? FileManager.default.removeItem(at: systemURL)
 
-        // All DB writes, file updates, and cleanup run off the main thread
-        Task.detached { [weak self] in
-            // Apply name updates to speaker database
-            for update in updates {
-                switch update.action {
-                case .merged(let targetId):
-                    speakerDB.mergeProfiles(sourceId: update.persistentSpeakerId, into: targetId)
-
-                case .named, .corrected:
-                    speakerDB.setDisplayName(
-                        id: update.persistentSpeakerId,
-                        name: update.newName,
-                        source: NameSource.userManual
+                Task { @MainActor in
+                    self?.finishNamingFlow(
+                        didFinalizeTranscript: false,
+                        updatesCount: updates.count,
+                        transcriptId: transcriptId,
+                        resolvedURL: transcriptURL
                     )
-
-                case .confirmed:
-                    speakerDB.setDisplayName(
-                        id: update.persistentSpeakerId,
-                        name: update.newName,
-                        source: NameSource.userManual
-                    )
-                    speakerDB.resetDisputeCount(id: update.persistentSpeakerId)
                 }
-
-                AppLogger.speakers.info("Speaker named", [
-                    "id": "\(update.persistentSpeakerId)",
-                    "name": update.newName,
-                    "action": "\(update.action)"
-                ])
+                return
             }
 
-            // Merge profiles that ended up with the same name
-            speakerDB.mergeProfilesByName()
-            // Re-run duplicate detection now that profiles have been updated
-            speakerDB.mergeDuplicates()
+            guard let resolvedURL = TranscriptSaver.resolveTranscriptURL(
+                transcriptURL,
+                transcriptId: transcriptId
+            ) else {
+                SpeakerClipExtractor.cleanupClips(clips)
+                try? FileManager.default.removeItem(at: micURL)
+                try? FileManager.default.removeItem(at: systemURL)
 
-            // Resolve the transcript URL — the file may have been renamed by
-            // MeetingTranscriptStyler between save and naming completion.
-            let resolvedURL = TranscriptSaver.resolveTranscriptURL(transcriptURL, updates: updates)
-
-            // Update the saved transcript file with real names
-            if !updates.isEmpty {
-                TranscriptSaver.updateSpeakerNames(
-                    transcriptURL: resolvedURL,
-                    updates: updates,
-                    speakerStore: speakerDB
-                )
+                Task { @MainActor in
+                    self?.finishNamingFlow(
+                        didFinalizeTranscript: false,
+                        updatesCount: updates.count,
+                        transcriptId: transcriptId,
+                        resolvedURL: transcriptURL
+                    )
+                }
+                return
             }
+            let didFinalizeTranscript = updates.isEmpty || TranscriptSaver.updateSpeakerNames(
+                transcriptURL: resolvedURL,
+                updates: resolvedUpdates,
+                speakerStore: speakerDB
+            )
 
-            // Clean up clips and audio files
             SpeakerClipExtractor.cleanupClips(clips)
             try? FileManager.default.removeItem(at: micURL)
             try? FileManager.default.removeItem(at: systemURL)
 
-            AppLogger.pipeline.info("Speaker naming complete", [
-                "named": "\(updates.count)",
-                "transcript": resolvedURL.lastPathComponent
-            ])
-
-            // Re-populate metadata with the resolved URL so the Combine
-            // subscription in MeetingSessionController fires a restyle —
-            // this updates the title to include speaker names (e.g.,
-            // "Meeting with Nate Bucher and Steven Smith").
-            await MainActor.run {
-                self?.populateSavedMetadata(from: resolvedURL)
-                self?.displayStatus = .transcriptSaved
-                self?.scheduleStatusReset(delay: 8)
+            Task { @MainActor in
+                self?.finishNamingFlow(
+                    didFinalizeTranscript: didFinalizeTranscript,
+                    updatesCount: updates.count,
+                    transcriptId: transcriptId,
+                    resolvedURL: resolvedURL
+                )
             }
         }
     }
@@ -104,5 +92,171 @@ extension TranscriptionTaskManager {
             speakerNamingRequest = nil
             AppLogger.pipeline.info("Cleaned up pending naming on shutdown")
         }
+    }
+
+    nonisolated private static func applyNamingUpdates(
+        _ updates: [SpeakerNameUpdate],
+        clipsBySpeakerId: [String: SpeakerNamingEntry],
+        speakerDB: any SpeakerStore
+    ) -> [SpeakerNameUpdate]? {
+        var resolvedUpdates: [SpeakerNameUpdate] = []
+        resolvedUpdates.reserveCapacity(updates.count)
+
+        for update in updates {
+            let entry = clipsBySpeakerId[update.sortformerSpeakerId]
+            guard let resolvedPersistentSpeakerId = resolvePersistentSpeakerId(
+                for: update,
+                entry: entry,
+                speakerDB: speakerDB
+            ) else {
+                return nil
+            }
+
+            AppLogger.speakers.info("Speaker named", [
+                "originalId": update.persistentSpeakerId.uuidString,
+                "resolvedId": resolvedPersistentSpeakerId.uuidString,
+                "name": update.newName,
+                "action": "\(update.action)"
+            ])
+
+            resolvedUpdates.append(SpeakerNameUpdate(
+                persistentSpeakerId: update.persistentSpeakerId,
+                sortformerSpeakerId: update.sortformerSpeakerId,
+                newName: update.newName,
+                previousName: update.previousName,
+                action: update.action,
+                resolvedPersistentSpeakerId: resolvedPersistentSpeakerId
+            ))
+        }
+
+        return resolvedUpdates
+    }
+
+    nonisolated private static func resolvePersistentSpeakerId(
+        for update: SpeakerNameUpdate,
+        entry: SpeakerNamingEntry?,
+        speakerDB: any SpeakerStore
+    ) -> UUID? {
+        switch update.action {
+        case .merged(let targetProfileId):
+            speakerDB.mergeProfiles(sourceId: update.persistentSpeakerId, into: targetProfileId)
+            speakerDB.resetDisputeCount(id: targetProfileId)
+            return targetProfileId
+
+        case .confirmed:
+            speakerDB.setDisplayName(
+                id: update.persistentSpeakerId,
+                name: update.newName,
+                source: NameSource.userManual
+            )
+            speakerDB.resetDisputeCount(id: update.persistentSpeakerId)
+            return update.persistentSpeakerId
+
+        case .named:
+            if let targetProfile = exactNamedTarget(
+                named: update.newName,
+                excluding: update.persistentSpeakerId,
+                speakerDB: speakerDB
+            ) {
+                speakerDB.mergeProfiles(sourceId: update.persistentSpeakerId, into: targetProfile.id)
+                speakerDB.resetDisputeCount(id: targetProfile.id)
+                return targetProfile.id
+            }
+
+            speakerDB.setDisplayName(
+                id: update.persistentSpeakerId,
+                name: update.newName,
+                source: NameSource.userManual
+            )
+            speakerDB.resetDisputeCount(id: update.persistentSpeakerId)
+            return update.persistentSpeakerId
+
+        case .corrected:
+            if let matchedProfile = entry?.matchedProfileSnapshot {
+                speakerDB.restoreProfile(matchedProfile)
+                speakerDB.incrementDisputeCount(id: matchedProfile.id)
+            }
+
+            if let targetProfile = exactNamedTarget(
+                named: update.newName,
+                excluding: update.persistentSpeakerId,
+                speakerDB: speakerDB
+            ) {
+                if let embedding = entry?.sessionEmbedding {
+                    _ = speakerDB.addOrUpdateSpeaker(embedding: embedding, existingId: targetProfile.id)
+                }
+                speakerDB.setDisplayName(
+                    id: targetProfile.id,
+                    name: update.newName,
+                    source: NameSource.userManual
+                )
+                speakerDB.resetDisputeCount(id: targetProfile.id)
+                return targetProfile.id
+            }
+
+            if let embedding = entry?.sessionEmbedding {
+                let newProfile = speakerDB.addOrUpdateSpeaker(embedding: embedding, existingId: nil)
+                speakerDB.setDisplayName(
+                    id: newProfile.id,
+                    name: update.newName,
+                    source: NameSource.userManual
+                )
+                speakerDB.resetDisputeCount(id: newProfile.id)
+                return newProfile.id
+            }
+
+            AppLogger.speakers.error("Correction missing session embedding; refusing unsafe profile rewrite", [
+                "speakerId": update.persistentSpeakerId.uuidString,
+                "name": update.newName
+            ])
+            return nil
+        }
+    }
+
+    nonisolated private static func exactNamedTarget(
+        named rawName: String,
+        excluding sourceId: UUID,
+        speakerDB: any SpeakerStore
+    ) -> SpeakerProfile? {
+        let targetName = normalizeSpeakerName(rawName)
+        guard !targetName.isEmpty else { return nil }
+
+        return speakerDB.allSpeakers()
+            .filter { profile in
+                profile.id != sourceId && normalizeSpeakerName(profile.displayName) == targetName
+            }
+            .sorted { $0.callCount > $1.callCount }
+            .first
+    }
+
+    nonisolated private static func normalizeSpeakerName(_ name: String?) -> String {
+        (name ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    @MainActor private func finishNamingFlow(
+        didFinalizeTranscript: Bool,
+        updatesCount: Int,
+        transcriptId: UUID,
+        resolvedURL: URL
+    ) {
+        if didFinalizeTranscript {
+            AppLogger.pipeline.info("Speaker naming complete", [
+                "named": "\(updatesCount)",
+                "transcript": resolvedURL.lastPathComponent
+            ])
+            populateSavedMetadata(from: resolvedURL)
+            displayStatus = .transcriptSaved
+        } else {
+            AppLogger.pipeline.error("Speaker naming finalization failed", [
+                "transcriptId": transcriptId.uuidString,
+                "transcript": resolvedURL.lastPathComponent
+            ])
+            displayStatus = .failed(message: "Failed to finalize speaker names")
+        }
+
+        scheduleStatusReset(delay: 8)
+        speakerNamingRequest = nil
     }
 }
