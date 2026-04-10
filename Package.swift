@@ -15,6 +15,7 @@ import Foundation
 //   deps-modules/FastClusterWrapper   — C header for fast-cluster C++ wrapper
 //   deps-modules/MachTaskSelfWrapper  — C header for mach_task_self helper
 //   deps-modules/yyjson               — C header for yyjson JSON parser
+//   deps-frameworks/ESpeakNG.framework — binary framework re-exported by FluidAudio
 //
 // `#filePath` resolves to Package.swift's absolute location on disk, so the -I/-L
 // flags work whether swiftc is invoked from the package root (`swift test`) or from
@@ -44,14 +45,19 @@ let package = Package(
                     "-I", "\(repoRoot)/deps-modules/FastClusterWrapper",
                     "-I", "\(repoRoot)/deps-modules/MachTaskSelfWrapper",
                     "-I", "\(repoRoot)/deps-modules/yyjson",
+                    "-F", "\(repoRoot)/deps-frameworks",
                 ]),
             ],
             linkerSettings: [
                 .unsafeFlags([
+                    "-F\(repoRoot)/deps-frameworks",
                     "-L\(repoRoot)/deps-libs",
                     "-lExternalDeps",
                     "-lc++",
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "\(repoRoot)/deps-frameworks",
                 ]),
+                .linkedFramework("ESpeakNG"),
                 .linkedFramework("Metal"),
                 .linkedFramework("MetalKit"),
                 .linkedFramework("Accelerate"),
@@ -74,16 +80,21 @@ let package = Package(
                     "-I", "\(repoRoot)/deps-modules/FastClusterWrapper",
                     "-I", "\(repoRoot)/deps-modules/MachTaskSelfWrapper",
                     "-I", "\(repoRoot)/deps-modules/yyjson",
+                    "-F", "\(repoRoot)/deps-frameworks",
                 ]),
             ],
             linkerSettings: [
                 // Mirror Core target linker flags so the xctest binary can resolve
                 // FluidAudio symbols pulled in through @testable.
                 .unsafeFlags([
+                    "-F\(repoRoot)/deps-frameworks",
                     "-L\(repoRoot)/deps-libs",
                     "-lExternalDeps",
                     "-lc++",
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "\(repoRoot)/deps-frameworks",
                 ]),
+                .linkedFramework("ESpeakNG"),
                 .linkedFramework("Metal"),
                 .linkedFramework("MetalKit"),
                 .linkedFramework("Accelerate"),

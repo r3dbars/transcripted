@@ -11,6 +11,8 @@ LOCAL_ENTITLEMENTS="config/entitlements/local.plist"
 SIGN_IDENTITY="${SIGN_IDENTITY:-${SIGNING_IDENTITY:-}}"
 DEPS_ARCHIVE="deps-libs/libDraftDeps.a"
 DEPS_MODULE_ROOT="deps-modules"
+DEPS_FRAMEWORK_ROOT="deps-frameworks"
+ESPEAK_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/ESpeakNG.framework"
 TRANSCRIPTED_CORE_MODULE="$DEPS_MODULE_ROOT/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
 
 ensure_build_prerequisites() {
@@ -21,7 +23,7 @@ ensure_build_prerequisites() {
 }
 
 ensure_deps_ready() {
-    if [ -f "$DEPS_ARCHIVE" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ]; then
+    if [ -f "$DEPS_ARCHIVE" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -d "$ESPEAK_FRAMEWORK" ]; then
         return 0
     fi
 
@@ -30,6 +32,7 @@ ensure_deps_ready() {
     echo "  $DEPS_ARCHIVE"
     echo "  $DEPS_MODULE_ROOT/"
     echo "  $TRANSCRIPTED_CORE_MODULE"
+    echo "  $ESPEAK_FRAMEWORK"
     echo ""
     echo "Run: bash build-deps.sh --force"
     exit 1
@@ -74,6 +77,7 @@ ensure_deps_ready
 rm -rf "$BUILD_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
+mkdir -p "$APP_BUNDLE/Contents/Frameworks"
 
 # Bundle Parakeet model directories used by FluidAudio.
 # The runtime loader can resolve files from both the `-coreml` and legacy
@@ -121,13 +125,15 @@ for dir in "$DEPS_MODULE_ROOT"/*/; do
     DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
 done
 
-DEPS_FLAGS="$DEPS_MODULE_FLAGS -Ldeps-libs -lDraftDeps -framework CoreML -framework CoreAudio"
+DEPS_FLAGS="$DEPS_MODULE_FLAGS -F$DEPS_FRAMEWORK_ROOT -Ldeps-libs -lDraftDeps -framework ESpeakNG -framework CoreML -framework CoreAudio"
 
 # Bundle Metal libraries if present
 # MLX searches for mlx.metallib next to the binary first (Contents/MacOS/)
 for metallib in deps-libs/*.metallib; do
     [ -f "$metallib" ] && cp "$metallib" "$APP_BUNDLE/Contents/MacOS/"
 done
+
+cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 
 # Compile
 echo "Compiling..."

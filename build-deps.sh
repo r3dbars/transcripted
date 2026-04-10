@@ -11,10 +11,12 @@ set -e
 DRAFT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEPS_LIBS="$DRAFT_DIR/deps-libs"
 DEPS_MODULES="$DRAFT_DIR/deps-modules"
+DEPS_FRAMEWORKS="$DRAFT_DIR/deps-frameworks"
 DEPS_BUILD="$(mktemp -d "$DRAFT_DIR/.deps-build.XXXXXX")"
 DEPS_LIBS_TMP="$(mktemp -d "$DRAFT_DIR/.deps-libs.XXXXXX")"
 DEPS_MODULES_TMP="$(mktemp -d "$DRAFT_DIR/.deps-modules.XXXXXX")"
-TEMP_DIRS=("$DEPS_BUILD" "$DEPS_LIBS_TMP" "$DEPS_MODULES_TMP")
+DEPS_FRAMEWORKS_TMP="$(mktemp -d "$DRAFT_DIR/.deps-frameworks.XXXXXX")"
+TEMP_DIRS=("$DEPS_BUILD" "$DEPS_LIBS_TMP" "$DEPS_MODULES_TMP" "$DEPS_FRAMEWORKS_TMP")
 PREVIOUS_OUTPUTS=()
 STALE_DIRS=()
 BUILD_SUCCEEDED=false
@@ -191,11 +193,12 @@ echo "[build-deps] Using TranscriptedCore from: $TRANSCRIPTED_ROOT"
 # Skip if already built (use --force to rebuild).
 # libExternalDeps.a was added later for SPM-based `swift test`, so require it too;
 # otherwise legacy worktrees would keep skipping while missing the archive.
-if [ -f "$DEPS_LIBS/libDraftDeps.a" ] && [ -f "$DEPS_LIBS/libExternalDeps.a" ] && [ -d "$DEPS_MODULES" ] && [ "$1" != "--force" ]; then
+if [ -f "$DEPS_LIBS/libDraftDeps.a" ] && [ -f "$DEPS_LIBS/libExternalDeps.a" ] && [ -d "$DEPS_MODULES" ] && [ -d "$DEPS_FRAMEWORKS/ESpeakNG.framework" ] && [ "${1:-}" != "--force" ]; then
     echo "Dependencies already built. Use --force to rebuild."
     echo "  libs:    $DEPS_LIBS/libDraftDeps.a"
     echo "           $DEPS_LIBS/libExternalDeps.a"
     echo "  modules: $DEPS_MODULES/"
+    echo "  frameworks: $DEPS_FRAMEWORKS/"
     exit 0
 fi
 
@@ -203,6 +206,7 @@ echo "Building FluidAudio + mlx-swift-lm (unified)..."
 
 backup_existing_output "$DEPS_LIBS"
 backup_existing_output "$DEPS_MODULES"
+backup_existing_output "$DEPS_FRAMEWORKS"
 mkdir -p "$DEPS_BUILD/Sources"
 
 # Symlink TranscriptedCore's source tree into $DEPS_BUILD so SPM's target
@@ -385,6 +389,29 @@ if [ -n "$CMLX_MODULEMAP" ] && [ ! -f "$DEPS_MODULES_TMP/Cmlx/module.modulemap" 
     cp "$CMLX_MODULEMAP" "$DEPS_MODULES_TMP/Cmlx/"
 fi
 
+# --- Binary frameworks: export binary-target frameworks required by the app build ---
+echo "Copying binary frameworks..."
+ESPEAK_FRAMEWORK_SRC="$(
+    find "$CHECKOUTS" \
+        -path "*/ESpeakNG.framework" \
+        -type d 2>/dev/null | \
+        grep '/macos' | \
+        head -1 || true
+)"
+if [ -z "$ESPEAK_FRAMEWORK_SRC" ]; then
+    ESPEAK_FRAMEWORK_SRC="$(
+        find "$CHECKOUTS" \
+            -path "*/ESpeakNG.framework" \
+            -type d 2>/dev/null | \
+            head -1 || true
+    )"
+fi
+if [ -z "$ESPEAK_FRAMEWORK_SRC" ]; then
+    echo "[build-deps] ERROR: ESpeakNG.framework not found in resolved dependencies"
+    exit 1
+fi
+cp -R "$ESPEAK_FRAMEWORK_SRC" "$DEPS_FRAMEWORKS_TMP/"
+
 # --- Metal libraries: compile MLX Metal shaders ---
 # SPM's `swift build` doesn't compile .metal files — only Xcode does.
 # We manually compile them with xcrun metal → .air, then xcrun metallib → .metallib.
@@ -429,6 +456,7 @@ fi
 
 promote_output_dir "$DEPS_LIBS_TMP" "$DEPS_LIBS"
 promote_output_dir "$DEPS_MODULES_TMP" "$DEPS_MODULES"
+promote_output_dir "$DEPS_FRAMEWORKS_TMP" "$DEPS_FRAMEWORKS"
 cleanup_stale_dirs
 cleanup_previous_outputs
 BUILD_SUCCEEDED=true
@@ -444,5 +472,8 @@ MOD_COUNT=$(ls "$DEPS_MODULES/" | wc -l | tr -d ' ')
 if [ "$MOD_COUNT" -gt 30 ]; then
     echo "  ... and $((MOD_COUNT - 30)) more"
 fi
+echo ""
+echo "Frameworks:"
+ls "$DEPS_FRAMEWORKS/"
 echo ""
 echo "Done. build.sh will detect these artifacts automatically."
