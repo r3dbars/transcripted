@@ -32,19 +32,6 @@ final class MeetingModelDownloader {
             return
         }
 
-        // If either engine still needs to download, verify we actually have a
-        // network path. This gives the UI a specific error rather than a generic
-        // URLError hundreds of seconds from now after retries exhaust.
-        let needsDownload = !stt.isReady || diarization.modelState != .ready
-        if needsDownload {
-            let reachable = await ModelDownloadService.checkNetworkReachability()
-            if !reachable {
-                throw NSError(domain: "MeetingModelDownloader", code: 1, userInfo: [
-                    NSLocalizedDescriptionKey: "Models need to download but the network is unreachable."
-                ])
-            }
-        }
-
         // Kick both initializers in parallel. Each is idempotent and each owns
         // its own progress reporting via @Published properties on the engines.
         async let sttReady: Void = stt.initialize()

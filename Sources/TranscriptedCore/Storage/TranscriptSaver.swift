@@ -10,7 +10,7 @@ public class TranscriptSaver {
     /// directories before use. Falls back to the default location if validation fails, so
     /// a tampered UserDefaults value cannot redirect transcripts to an arbitrary path.
     ///
-    /// Embedders (e.g. the app in this repo) should NOT rely on this property — instead pass an
+    /// Embedders (e.g. the Draft app) should NOT rely on this property — instead pass an
     /// explicit `directory:` argument to `saveTranscript(...)` so their own storage layout
     /// is honoured.
     public static var defaultSaveDirectory: URL {
@@ -116,7 +116,7 @@ public class TranscriptSaver {
         meetingTitle: String? = nil,
         healthInfo: RecordingHealthInfo? = nil,
         notifier: TranscriptNotifier? = nil,
-        speakerStore: (any SpeakerStore)? = nil,
+        speakerStoreForIndex: (any SpeakerStore)? = nil,
         statsStore: (any StatsStore)? = nil
     ) -> URL? {
         let saveDir = directory ?? defaultSaveDirectory
@@ -165,7 +165,7 @@ public class TranscriptSaver {
                     )
                     try AgentOutput.writeIndex(
                         to: saveDir,
-                        speakerStore: speakerStore ?? SpeakerDatabase.shared
+                        speakerStore: speakerStoreForIndex ?? SpeakerDatabase.shared
                     )
                     AgentOutput.writeAgentReadme(to: saveDir)
                 } catch {

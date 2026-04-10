@@ -147,6 +147,7 @@ extension TranscriptSaver {
             // Add speaker tags for named participants
             for key in sortedSpeakerKeys {
                 guard let mapping = speakerMappings[key],
+                      mapping.isConfirmedIdentity,
                       let name = mapping.identifiedName,
                       !name.isEmpty else { continue }
                 let sanitized = name.replacingOccurrences(of: " ", with: "-").lowercased()
@@ -248,6 +249,7 @@ extension TranscriptSaver {
         // Obsidian: participants section with wiki links
         if obsidianEnabled {
             let namedSpeakers = speakerMappings.values
+                .filter { $0.isConfirmedIdentity }
                 .compactMap { $0.identifiedName }
                 .filter { !$0.isEmpty }
             if !namedSpeakers.isEmpty {

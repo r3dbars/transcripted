@@ -211,6 +211,7 @@ final class MeetingSessionController: ObservableObject {
             speechToText: services.speechToText,
             diarization: services.diarization,
             speakerStore: services.speakerStore,
+            speakerClipsDirectory: storagePaths.speakerClips,
             statsStore: statsDatabase
         )
 

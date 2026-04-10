@@ -15,15 +15,18 @@ public class Transcription: ObservableObject {
     public let parakeet: any SpeechToTextEngine
     public let diarization: any DiarizationEngine
     public let speakerDB: any SpeakerStore
+    public let speakerClipsDirectory: URL
 
     public init(
         speechToText: any SpeechToTextEngine,
         diarization: any DiarizationEngine,
-        speakerStore: any SpeakerStore
+        speakerStore: any SpeakerStore,
+        speakerClipsDirectory: URL = CoreStoragePaths.default.speakerClips
     ) {
         self.parakeet = speechToText
         self.diarization = diarization
         self.speakerDB = speakerStore
+        self.speakerClipsDirectory = speakerClipsDirectory
     }
 
     private var hasInitialized = false

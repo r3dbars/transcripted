@@ -104,7 +104,7 @@ public enum SpeakerClipExtractor {
 
     /// Copy a temporary clip to persistent storage, keyed by speaker UUID.
     /// Overwrites any existing clip for this speaker (keeps the latest).
-    static func persistClip(
+    public static func persistClip(
         from tempClipURL: URL,
         speakerId: UUID,
         clipsDirectory: URL = defaultClipsDirectory

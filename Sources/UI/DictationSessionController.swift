@@ -8,6 +8,9 @@ import Combine
 @MainActor
 class DictationSessionController: ObservableObject {
     private static let removedDraftModeMessage = "This build of Transcripted supports dictation and meetings only."
+    private static let sessionTimeoutInterval: TimeInterval = 5 * 60
+    private static let sessionTimeoutPollInterval: TimeInterval = 1.0
+    private static let transcriptionTimeoutSeconds: Double = 120
 
     enum DictationTrigger: String {
         case rightOptionTap = "right_option_tap"
@@ -91,10 +94,7 @@ class DictationSessionController: ObservableObject {
     private var sessionTimeoutTask: Task<Void, Never>?
     private var sessionStartTime: CFAbsoluteTime = 0
     private var currentDictationTrigger: DictationTrigger = .unknown
-
-    /// Max duration for a listening session before auto-cancel (5 minutes).
-    /// Prevents stuck sessions when the user walks away from the computer.
-    private static let sessionTimeoutNanos: UInt64 = 5 * 60 * 1_000_000_000
+    private var sessionTimeout = DictationSessionTimeout(timeoutInterval: 5 * 60)
 
     deinit {
         startupTask?.cancel()
@@ -113,8 +113,8 @@ class DictationSessionController: ObservableObject {
                 if self.isInSession {
                     self.cancelSession(message: Self.removedDraftModeMessage)
                 } else if self.isDictating {
-                    self.isDictating = false
-                    self.overlayController?.showError("Audio device changed")
+                    let message = self.interruptionMessage(for: appState.sttRouter.interruptionReason)
+                    self.handleDictationInterruption(message: message)
                 }
             }
     }
@@ -143,8 +143,7 @@ class DictationSessionController: ObservableObject {
         streamingTask = nil
         clipboardRestoreTask?.cancel()
         clipboardRestoreTask = nil
-        sessionTimeoutTask?.cancel()
-        sessionTimeoutTask = nil
+        clearSessionTimeout()
         isInSession = false
         overlayController.showError(message)
     }
@@ -269,8 +268,7 @@ class DictationSessionController: ObservableObject {
             )
             return
         }
-        sessionTimeoutTask?.cancel()
-        sessionTimeoutTask = nil
+        clearSessionTimeout()
 
         appState.sttRouter.stopRecording()
         streamingTask?.cancel()
@@ -293,9 +291,61 @@ class DictationSessionController: ObservableObject {
                     return
                 }
             }
+
             overlayController.state = .drafting
-            let voiceText = await appState.sttRouter.transcribe()
+
+            let voiceText: String?
+            do {
+                voiceText = try await TranscriptedConstants.withTimeout(seconds: Self.transcriptionTimeoutSeconds) {
+                    return await appState.sttRouter.transcribe()
+                }
+            } catch is CancellationError {
+                guard !Task.isCancelled else { return }
+                appState.logger.log("DICTATION | transcription timed out")
+                DiagnosticsTrail.record(
+                    logger: appState.logger,
+                    level: .warning,
+                    engine: "dictation",
+                    event: "dictation_transcription_timeout",
+                    message: "Dictation timed out while waiting for transcription",
+                    context: self.dictationContext(
+                        extra: [
+                            "trigger": self.currentDictationTrigger.rawValue,
+                            "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000))"
+                        ]
+                    )
+                )
+                overlayController.showError("Dictation timed out while transcribing")
+                isDictating = false
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                appState.logger.log("DICTATION | transcription failed: \(error.localizedDescription)")
+                DiagnosticsTrail.record(
+                    logger: appState.logger,
+                    level: .warning,
+                    engine: "dictation",
+                    event: "dictation_transcription_failed",
+                    message: "Dictation transcription failed",
+                    context: self.dictationContext(
+                        extra: [
+                            "trigger": self.currentDictationTrigger.rawValue,
+                            "error": error.localizedDescription
+                        ]
+                    )
+                )
+                overlayController.showError("Dictation transcription failed")
+                isDictating = false
+                return
+            }
             guard !Task.isCancelled else { return }
+
+            if voiceText == nil, !appState.sttRouter.isModelLoaded {
+                appState.logger.log("DICTATION | voice model failed to load for transcription")
+                overlayController.showError("Voice model failed to load")
+                isDictating = false
+                return
+            }
 
             guard let text = voiceText, !text.isEmpty else {
                 appState.logger.log("DICTATION | no transcription, cancelling")
@@ -363,8 +413,7 @@ class DictationSessionController: ObservableObject {
         streamingTask = nil
         clipboardRestoreTask?.cancel()
         clipboardRestoreTask = nil
-        sessionTimeoutTask?.cancel()
-        sessionTimeoutTask = nil
+        clearSessionTimeout()
         if appState.sttRouter.isRecording {
             appState.sttRouter.cancel()
         }
@@ -497,21 +546,75 @@ class DictationSessionController: ObservableObject {
     /// Install a timeout that auto-cancels the session after 5 minutes.
     /// Prevents stuck sessions if the user walks away from the computer.
     private func installSessionTimeout() {
-        sessionTimeoutTask?.cancel()
+        clearSessionTimeout()
+        sessionTimeout.start(at: ProcessInfo.processInfo.systemUptime)
         sessionTimeoutTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Self.sessionTimeoutNanos)
-            guard !Task.isCancelled, let self = self else { return }
-            if self.isInSession {
-                self.appState?.logger.log("SESSION | auto-cancelled after timeout")
-                EventReporter.shared.capture(level: .warning, engine: "overlay", event: "session_timeout",
-                    message: "Session auto-cancelled after 5 minutes")
-                self.cancelSession()
-            } else if self.isDictating {
-                self.appState?.logger.log("DICTATION | auto-cancelled after timeout")
-                EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_timeout",
-                    message: "Dictation auto-cancelled after 5 minutes")
-                self.cancelDictation()
+            while !Task.isCancelled {
+                guard let self = self else { return }
+                let uptime = ProcessInfo.processInfo.systemUptime
+                if self.sessionTimeout.isExpired(at: uptime) {
+                    if self.isInSession {
+                        self.appState?.logger.log("SESSION | auto-cancelled after timeout")
+                        EventReporter.shared.capture(level: .warning, engine: "overlay", event: "session_timeout",
+                            message: "Session auto-cancelled after 5 minutes")
+                        self.cancelSession()
+                    } else if self.isDictating {
+                        self.appState?.logger.log("DICTATION | auto-cancelled after timeout")
+                        EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_timeout",
+                            message: "Dictation auto-cancelled after 5 minutes")
+                        self.cancelDictation()
+                    }
+                    return
+                }
+
+                let remaining = self.sessionTimeout.remaining(at: uptime) ?? 0
+                let sleepSeconds = min(remaining, Self.sessionTimeoutPollInterval)
+                guard sleepSeconds > 0 else { return }
+                try? await Task.sleep(nanoseconds: UInt64(sleepSeconds * 1_000_000_000))
             }
+        }
+    }
+
+    private func clearSessionTimeout() {
+        sessionTimeoutTask?.cancel()
+        sessionTimeoutTask = nil
+        sessionTimeout.clear()
+    }
+
+    private func handleDictationInterruption(message: String) {
+        guard isDictating else { return }
+        streamingTask?.cancel()
+        streamingTask = nil
+        clipboardRestoreTask?.cancel()
+        clipboardRestoreTask = nil
+        clearSessionTimeout()
+        isDictating = false
+
+        DiagnosticsTrail.record(
+            logger: appState?.logger,
+            level: .warning,
+            engine: "dictation",
+            event: "dictation_interrupted",
+            message: message,
+            context: dictationContext(
+                extra: [
+                    "trigger": currentDictationTrigger.rawValue,
+                    "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000))",
+                    "reason": appState?.sttRouter.interruptionReason?.rawValue ?? "unknown"
+                ]
+            )
+        )
+        overlayController?.showError(message)
+    }
+
+    private func interruptionMessage(for reason: RecordingInterruptionReason?) -> String {
+        switch reason {
+        case .systemWake:
+            return "Dictation stopped while your Mac was asleep"
+        case .recoveryFailed:
+            return "Microphone recovery failed"
+        case .audioDeviceChanged, .none:
+            return "Audio device changed"
         }
     }
 

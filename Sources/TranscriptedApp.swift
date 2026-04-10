@@ -23,7 +23,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     var popover: NSPopover?
     private var lastExternalApplication: NSRunningApplication?
     private var hasPresentedInitialOnboarding = false
-    private lazy var settingsWindowController = TranscriptedSettingsWindowController()
+    private lazy var settingsWindowController = TranscriptedSettingsWindowController(appState: appState)
     private lazy var menuPanelController = MenuBarPanelController(
         appState: appState,
         preferredSourceAppProvider: { [weak self] in self?.lastExternalApplication },
@@ -108,8 +108,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.appState.handleSystemWake()
-                self?.overlayController.handleSystemWake()
+                guard let self else { return }
+                await self.appState.handleSystemWake()
+                self.overlayController.handleSystemWake()
             }
         }
         workspaceObservers.append(wakeRecoveryObserver)

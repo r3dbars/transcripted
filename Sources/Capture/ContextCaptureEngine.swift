@@ -254,6 +254,11 @@ class ContextCaptureEngine: ObservableObject {
             return
         }
 
+        // Restore C-callback routing after temporary unregister/re-register cycles
+        // such as wake recovery.
+        _sharedSessionController = sessionController
+        _sharedMeetingToggle = onMeetingToggle
+
         // Register for kEventHotKeyPressed (dictation fallback + meeting mode)
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(

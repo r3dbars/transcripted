@@ -153,6 +153,7 @@ extension Audio {
             let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic.wav")
 
             self.originalMicAudioFileURL = fileURL
+            self.micSegments = [MicRecordingSegment(url: fileURL)]
             DispatchQueue.main.async {
                 self.micAudioFileURL = fileURL
             }
@@ -243,6 +244,32 @@ extension Audio {
                     AppLogger.audioMic.error("Too many consecutive write errors, stopping mic writes")
                 }
             }
+        }
+    }
+
+    func finalizeMicRecording(primaryURL: URL?, segments: [MicRecordingSegment]) -> URL? {
+        guard let primaryURL else { return segments.last?.url }
+        guard segments.count > 1 else { return primaryURL }
+
+        do {
+            let mergedURL = try MicRecordingFileMerger.merge(primaryURL: primaryURL, segments: segments)
+            let insertedSilenceSamples = segments
+                .dropFirst()
+                .reduce(0) { partialResult, segment in
+                    partialResult + MicRecordingMergePlan.silenceSampleCount(before: segment, sampleRate: 16_000)
+                }
+            AppLogger.audioMic.info("Merged mic recovery segments", [
+                "segments": "\(segments.count)",
+                "insertedSilenceSeconds": String(format: "%.3f", Double(insertedSilenceSamples) / 16_000),
+                "file": mergedURL?.lastPathComponent ?? primaryURL.lastPathComponent
+            ])
+            return mergedURL
+        } catch {
+            AppLogger.audioMic.error("Failed to merge mic recovery segments", [
+                "segments": "\(segments.count)",
+                "error": error.localizedDescription
+            ])
+            return primaryURL
         }
     }
 
