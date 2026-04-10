@@ -67,4 +67,30 @@ final class CoreStoragePathsTests: XCTestCase {
         XCTAssertFalse(result.isValid)
         XCTAssertNotNil(result.errorMessage)
     }
+
+    func testRecordingValidatorDiskSpaceProbeFallsBackToExistingParent() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("RecordingValidatorTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let missingLeaf = tempRoot
+            .appendingPathComponent("nested", isDirectory: true)
+            .appendingPathComponent("transcripts", isDirectory: true)
+
+        let probeURL = RecordingValidator.diskSpaceProbeURL(for: missingLeaf)
+
+        XCTAssertEqual(probeURL, tempRoot)
+    }
+
+    func testRecordingValidatorDiskSpaceProbePreservesExistingPath() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("RecordingValidatorTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let probeURL = RecordingValidator.diskSpaceProbeURL(for: tempRoot)
+
+        XCTAssertEqual(probeURL, tempRoot)
+    }
 }

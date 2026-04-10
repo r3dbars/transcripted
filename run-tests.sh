@@ -54,7 +54,7 @@ import Foundation
 
 @main
 struct FastTestRunner {
-    static func main() {
+    static func main() async {
         print("Transcripted Fast Test Suite\n")
 EOF
 
@@ -69,7 +69,7 @@ while IFS=':' read -r test_file entry_function; do
         exit 1
     fi
 
-    printf '        %s()\n' "$entry_function" >> "$GENERATED_RUNNER"
+    printf '        await runEntry(%s)\n' "$entry_function" >> "$GENERATED_RUNNER"
 done <<EOF
 $manifest_entries
 EOF
@@ -83,6 +83,14 @@ cat >> "$GENERATED_RUNNER" <<'EOF'
         } else {
             print("ALL TESTS PASSED")
         }
+    }
+
+    static func runEntry(_ entry: () -> Void) async {
+        entry()
+    }
+
+    static func runEntry(_ entry: () async -> Void) async {
+        await entry()
     }
 }
 EOF
@@ -103,12 +111,15 @@ APP_SOURCES=(
     "Sources/Text/RefusalHeuristics.swift"
     "Sources/Style/StyleUtils.swift"
     "Sources/DraftPaths.swift"
+    "Sources/Dictation/DictationSessionTimeout.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
     "Sources/Dictation/DictationAgentOutput.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"
     "Sources/TranscriptedConstants.swift"
     "Sources/Text/DiffSummary.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
+    "Sources/Reliability/WakeRecoveryCoordinator.swift"
+    "Sources/TranscriptedCore/Audio/MicRecordingSegment.swift"
     "Sources/TranscriptedCore/Models/TranscriptionTypes.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerProfile.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift"

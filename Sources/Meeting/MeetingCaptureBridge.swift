@@ -58,6 +58,10 @@ final class MeetingCaptureBridge: ObservableObject {
     /// Start a new recording session. Returns immediately; the session remains
     /// active until `stopAndAwaitFiles()` is called.
     func startRecording() {
+        if let continuation = completionContinuation {
+            completionContinuation = nil
+            continuation.resume(returning: (audio.micAudioFileURL, audio.systemAudioFileURL))
+        }
         guard !audio.isRecording else { return }
         audio.start()
     }

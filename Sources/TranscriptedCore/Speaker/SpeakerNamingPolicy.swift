@@ -5,19 +5,32 @@ public struct SpeakerMapping {
     public let speakerId: String           // "0", "1", "2" for speaker IDs
     public var identifiedName: String?     // "John Smith" or nil if unidentified
     public var confidence: SpeakerConfidence?
+    public var isConfirmedIdentity: Bool
 
-    /// Display name: uses identified name if available, otherwise "Speaker X"
+    /// Display name used in persisted artifacts.
+    /// Suggested identities remain generic until the user confirms them.
     public var displayName: String {
-        if let name = identifiedName {
-            return confidence == .medium ? "\(name)?" : name
+        if isConfirmedIdentity, let name = identifiedName {
+            return name
         }
         return "Speaker \(speakerId)"
     }
 
-    public init(speakerId: String, identifiedName: String? = nil, confidence: SpeakerConfidence? = nil) {
+    public var suggestedName: String? {
+        guard !isConfirmedIdentity else { return nil }
+        return identifiedName
+    }
+
+    public init(
+        speakerId: String,
+        identifiedName: String? = nil,
+        confidence: SpeakerConfidence? = nil,
+        isConfirmedIdentity: Bool = false
+    ) {
         self.speakerId = speakerId
         self.identifiedName = identifiedName
         self.confidence = confidence
+        self.isConfirmedIdentity = isConfirmedIdentity
     }
 }
 
@@ -40,14 +53,14 @@ enum SpeakerNamingPolicy {
         guard shouldAutoAccept(profile: profile, similarity: similarity),
               let name = profile.displayName,
               !name.isEmpty else {
-            // Keep the diarizer label until the user explicitly confirms the suggestion.
             return SpeakerMapping(speakerId: speakerId)
         }
 
         return SpeakerMapping(
             speakerId: speakerId,
             identifiedName: name,
-            confidence: confidence(similarity: similarity, callCount: profile.callCount)
+            confidence: confidence(similarity: similarity, callCount: profile.callCount),
+            isConfirmedIdentity: true
         )
     }
 }

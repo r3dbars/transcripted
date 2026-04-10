@@ -308,6 +308,7 @@ public enum AgentOutput {
     - Each speaker has an `id` (e.g., `mic_0`, `system_0`) unique within one transcript
     - `persistent_speaker_id` is a UUID that tracks the same person across meetings
     - `known_speakers` in the index lists all named speakers with their call count
+    - `name` stays generic until a speaker match is confirmed by the user or auto-accepted
     - Confidence: `"high"` (voice match > 85%), `"medium"` (voice match > 70%), or `null`
 
     ## Common Agent Tasks

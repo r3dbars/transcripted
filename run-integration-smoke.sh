@@ -15,6 +15,7 @@ set -e
 
 DRAFT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SMOKE_BIN="$DRAFT_DIR/build/core-integration-smoke"
+WAKE_SMOKE_BIN="$DRAFT_DIR/build/wake-recovery-smoke"
 
 if [ ! -f "$DRAFT_DIR/deps-libs/libDraftDeps.a" ] || [ ! -d "$DRAFT_DIR/deps-modules" ]; then
     echo "Dependencies not found — run build-deps.sh first."
@@ -51,6 +52,24 @@ swiftc \
     -target arm64-apple-macos14.0 \
     2>&1
 
+echo "Compiling wake recovery smoke…"
+swiftc \
+    -O \
+    -o "$WAKE_SMOKE_BIN" \
+    "$DRAFT_DIR/Sources/Reliability/WakeRecoveryCoordinator.swift" \
+    "$DRAFT_DIR/SmokeTests/WakeRecoverySmoke.swift" \
+    -parse-as-library \
+    -target arm64-apple-macos14.0 \
+    2>&1
+
 echo ""
-echo "Running smoke…"
+echo "Running core smoke…"
 "$SMOKE_BIN"
+
+echo ""
+echo "Running wake smoke…"
+"$WAKE_SMOKE_BIN"
+
+echo ""
+echo "Running recovery merge package tests…"
+swift test --filter MicRecordingFileMergerTests
