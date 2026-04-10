@@ -29,6 +29,7 @@ final class MeetingSessionController: ObservableObject {
     enum StartTrigger: String {
         case hotkey = "hotkey"
         case menu = "menu"
+        case detectedPrompt = "detected_prompt"
         case unknown = "unknown"
     }
 

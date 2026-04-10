@@ -96,6 +96,7 @@ swiftc \
     -framework AppKit \
     -framework SwiftUI \
     -framework Combine \
+    -framework EventKit \
     -framework Speech \
     -framework Security \
     -framework Carbon \

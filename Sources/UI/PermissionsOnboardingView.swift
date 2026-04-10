@@ -19,7 +19,7 @@ struct PermissionsOnboardingView: View {
                 Text("Welcome to Transcripted")
                     .font(.title3.weight(.semibold))
 
-                Text("Turn on two quick permissions and you can start dictating into any app right away. Meeting audio can wait until you need it.")
+                Text("Turn on two quick permissions and you can start dictating into any app right away. Meeting audio and meeting prompts can wait until you need them.")
                     .font(.callout)
                     .foregroundStyle(MenuTokens.textSecondary)
 
@@ -59,7 +59,7 @@ struct PermissionsOnboardingView: View {
                             icon: "record.circle.fill",
                             title: "Meetings",
                             detail: screenRecordingGranted
-                                ? "Meeting audio is ready too."
+                                ? "Meeting audio is ready too. Calendar prompts stay optional."
                                 : "You can enable Screen Recording later when you want call audio from Zoom, Meet, or other apps."
                         )
                     }
@@ -131,6 +131,8 @@ struct PermissionsOnboardingView: View {
             return accessibilityGranted
         case .screenRecording:
             return screenRecordingGranted
+        case .calendar:
+            return TranscriptedPermissionAccess.isGranted(.calendar)
         }
     }
 

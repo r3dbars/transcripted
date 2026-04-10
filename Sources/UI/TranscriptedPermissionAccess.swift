@@ -1,11 +1,13 @@
 import AppKit
 import AVFoundation
 import ApplicationServices
+import EventKit
 
 enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
     case microphone
     case accessibility
     case screenRecording
+    case calendar
 
     var id: String { rawValue }
 
@@ -17,6 +19,8 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
             return "hand.raised.fill"
         case .screenRecording:
             return "rectangle.on.rectangle"
+        case .calendar:
+            return "calendar"
         }
     }
 
@@ -24,7 +28,7 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         switch self {
         case .microphone, .accessibility:
             return true
-        case .screenRecording:
+        case .screenRecording, .calendar:
             return false
         }
     }
@@ -37,6 +41,8 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
             return "Accessibility"
         case .screenRecording:
             return "Screen Recording"
+        case .calendar:
+            return "Calendar"
         }
     }
 
@@ -48,6 +54,8 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
             return "Needed for global shortcuts and pasting text back into the app you were using."
         case .screenRecording:
             return "Optional for meeting capture. Needed when you want call audio from other apps."
+        case .calendar:
+            return "Optional for meeting prompts. Lets Transcripted notice upcoming meetings from Apple Calendar, Google, or Exchange calendars synced to your Mac."
         }
     }
 
@@ -59,6 +67,8 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
             return "Allow accessibility"
         case .screenRecording:
             return "Enable meeting audio"
+        case .calendar:
+            return "Enable meeting prompts"
         }
     }
 }
@@ -72,6 +82,8 @@ enum TranscriptedPermissionAccess {
             return AXIsProcessTrusted()
         case .screenRecording:
             return screenRecordingGranted()
+        case .calendar:
+            return calendarAccessGranted()
         }
     }
 
@@ -104,6 +116,45 @@ enum TranscriptedPermissionAccess {
                 _ = CGRequestScreenCaptureAccess()
             }
             openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        case .calendar:
+            Task { @MainActor in
+                let granted = await requestCalendarAccessIfNeeded()
+                guard !granted else { return }
+                openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")
+            }
+        }
+    }
+
+    static func requestCalendarAccessIfNeeded() async -> Bool {
+        let status = EKEventStore.authorizationStatus(for: .event)
+        switch status {
+        case .fullAccess:
+            return true
+        case .authorized:
+            return true
+        case .notDetermined:
+            let store = EKEventStore()
+            do {
+                return try await store.requestFullAccessToEvents()
+            } catch {
+                return false
+            }
+        case .writeOnly, .denied, .restricted:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    static func calendarAccessGranted() -> Bool {
+        let status = EKEventStore.authorizationStatus(for: .event)
+        switch status {
+        case .fullAccess, .authorized:
+            return true
+        case .writeOnly, .denied, .restricted, .notDetermined:
+            return false
+        @unknown default:
+            return false
         }
     }
 

@@ -7,7 +7,6 @@ Use it today as a practical dictation and meeting tool. Longer term, we think
 audio is the first useful layer of local AI context, because it captures real
 work without asking you to maintain a second brain by hand.
 
-![Transcripted dictation mode](docs/screenshots/dictation-mode.png)
 
 ## What You Get Today
 
@@ -179,7 +178,6 @@ Operational caveats:
 - first launch may download local models from HuggingFace if they are not cached
 - beta builds can optionally contact the update/log proxy for update checks and diagnostics
 
-![Transcripted privacy architecture](docs/screenshots/privacy-architecture.png)
 
 ## What Exists Today
 
