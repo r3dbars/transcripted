@@ -42,6 +42,7 @@ class ParakeetEngine: ObservableObject {
     @Published var modelDownloadState: ParakeetModelState = .notLoaded
     @Published var recordingInterrupted = false
     @Published var interruptionReason: RecordingInterruptionReason?
+    @Published var lastStartFailureMessage: String?
 
     private let audioEngine = AVAudioEngine()
     private var sampleBuffer: [Float] = []
@@ -293,18 +294,36 @@ class ParakeetEngine: ObservableObject {
         guard !isEnginePrewarmed, !isRecording else { return }
         do {
             let inputNode = audioEngine.inputNode
-            let nativeFormat = inputNode.outputFormat(forBus: 0)
+            let outputFormat = inputNode.outputFormat(forBus: 0)
+            let hardwareFormat = inputNode.inputFormat(forBus: 0)
 
-            // Validate audio format — after sleep, the input node may return a zero-rate
-            // format if CoreAudio hardware hasn't fully reinitialized.
-            guard nativeFormat.sampleRate > 0, nativeFormat.channelCount > 0 else {
+            // After wake or Bluetooth route churn, outputFormat can briefly report a
+            // stale rate while the hardware graph is still rebuilding. Prewarm only
+            // succeeds once both views of the input graph are valid and aligned.
+            guard isValidAudioFormat(outputFormat), isValidAudioFormat(hardwareFormat) else {
                 EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "prewarm_invalid_format",
                     message: "Audio format invalid during prewarm",
-                    context: ["sample_rate": "\(nativeFormat.sampleRate)", "channels": "\(nativeFormat.channelCount)"])
+                    context: [
+                        "output_rate": "\(outputFormat.sampleRate)",
+                        "output_channels": "\(outputFormat.channelCount)",
+                        "hw_rate": "\(hardwareFormat.sampleRate)",
+                        "hw_channels": "\(hardwareFormat.channelCount)",
+                    ])
                 return
             }
 
-            nativeSampleRate = nativeFormat.sampleRate
+            guard outputFormat.sampleRate == hardwareFormat.sampleRate else {
+                EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "prewarm_format_mismatch",
+                    message: "Audio graph still settling during prewarm",
+                    context: [
+                        "output_rate": "\(outputFormat.sampleRate)",
+                        "hw_rate": "\(hardwareFormat.sampleRate)",
+                        "audio_device": inputDeviceName,
+                    ])
+                return
+            }
+
+            nativeSampleRate = outputFormat.sampleRate
 
             audioEngine.prepare()
             try audioEngine.start()
@@ -422,7 +441,9 @@ class ParakeetEngine: ObservableObject {
 
     func startRecording(isRecoveryAttempt: Bool = false) -> Bool {
         guard !isRecording else { return true }
+        lastStartFailureMessage = nil
         guard pendingRecoveryTask == nil else {
+            lastStartFailureMessage = "Audio device is still reconnecting after wake. Try again in a moment."
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_blocked_recovery",
                 message: "startRecording() called while audio recovery was still in progress",
                 context: ["audio_device": inputDeviceName])
@@ -430,6 +451,7 @@ class ParakeetEngine: ObservableObject {
         }
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         guard micStatus == .authorized else {
+            lastStartFailureMessage = "Microphone access is turned off. Enable Transcripted in System Settings > Privacy & Security > Microphone."
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "mic_not_authorized",
                 message: "Microphone permission status: \(micStatus.rawValue)")
             return false
@@ -443,25 +465,30 @@ class ParakeetEngine: ObservableObject {
 
         let inputNode = audioEngine.inputNode
         let nativeFormat = inputNode.outputFormat(forBus: 0)
-        guard isValidAudioFormat(nativeFormat) else {
+        let hwFormat = inputNode.inputFormat(forBus: 0)
+        guard isValidAudioFormat(nativeFormat), isValidAudioFormat(hwFormat) else {
+            lastStartFailureMessage = "Audio device is still reconnecting after wake. Try again in a moment."
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_invalid_format",
                 message: "Audio format invalid during startRecording",
-                context: ["sample_rate": "\(nativeFormat.sampleRate)", "channels": "\(nativeFormat.channelCount)"])
+                context: [
+                    "output_rate": "\(nativeFormat.sampleRate)",
+                    "output_channels": "\(nativeFormat.channelCount)",
+                    "hw_rate": "\(hwFormat.sampleRate)",
+                    "hw_channels": "\(hwFormat.channelCount)",
+                ])
             scheduleRecovery(
-                after: TranscriptedConstants.audioRecoveryDelay,
+                after: TranscriptedConstants.audioRewarmDelay,
                 event: "start_recording_rewarm_failed",
-                retryDelay: nil
+                retryDelay: TranscriptedConstants.audioRewarmDelay
             )
             return false
         }
         nativeSampleRate = nativeFormat.sampleRate
-        recordedSampleRate = nativeSampleRate
 
         // After sleep/wake, the output format and hardware input format can
         // desync — outputFormat reports one rate while the hardware runs at
         // another. installTap asserts they match. Detect and fix by
         // restarting the engine so CoreAudio rebuilds the graph.
-        let hwFormat = inputNode.inputFormat(forBus: 0)
         if nativeFormat.sampleRate != hwFormat.sampleRate && hwFormat.sampleRate > 0 {
             print("⚠️ PARAKEET | format mismatch: output=\(nativeFormat.sampleRate)Hz hw=\(hwFormat.sampleRate)Hz — resyncing engine")
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "format_mismatch_resync",
@@ -484,43 +511,50 @@ class ParakeetEngine: ObservableObject {
             let refreshedHardwareFormat = inputNode.inputFormat(forBus: 0)
             nativeSampleRate = refreshedOutputFormat.sampleRate
 
-            guard refreshedOutputFormat.sampleRate > 0, refreshedHardwareFormat.sampleRate > 0 else {
+            guard isValidAudioFormat(refreshedOutputFormat), isValidAudioFormat(refreshedHardwareFormat) else {
+                lastStartFailureMessage = "Audio device is still reconnecting after wake. Try again in a moment."
                 EventReporter.shared.capture(level: .warning, engine: "parakeet",
                     event: "format_mismatch_retry_needed",
                     message: "Audio hardware still settling after device change",
                     context: [
                         "output_rate": "\(refreshedOutputFormat.sampleRate)",
-                        "hw_rate": "\(refreshedHardwareFormat.sampleRate)"
+                        "hw_rate": "\(refreshedHardwareFormat.sampleRate)",
+                        "audio_device": inputDeviceName,
                     ])
                 audioEngine.stop()
                 isEnginePrewarmed = false
-                Task { @MainActor [weak self] in
-                    try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-                    self?.prewarm()
-                }
+                scheduleRecovery(
+                    after: TranscriptedConstants.audioRewarmDelay,
+                    event: "start_recording_rewarm_failed",
+                    retryDelay: TranscriptedConstants.audioRewarmDelay
+                )
                 return false
             }
 
             guard refreshedOutputFormat.sampleRate == refreshedHardwareFormat.sampleRate else {
+                lastStartFailureMessage = "Bluetooth audio is still resyncing after wake. Try again in a moment."
                 print("⚠️ PARAKEET | format mismatch persisted after resync: output=\(refreshedOutputFormat.sampleRate)Hz hw=\(refreshedHardwareFormat.sampleRate)Hz")
                 EventReporter.shared.capture(level: .warning, engine: "parakeet",
                     event: "format_mismatch_retry_needed",
                     message: "Audio format mismatch persisted after engine resync",
                     context: [
                         "output_rate": "\(refreshedOutputFormat.sampleRate)",
-                        "hw_rate": "\(refreshedHardwareFormat.sampleRate)"
+                        "hw_rate": "\(refreshedHardwareFormat.sampleRate)",
+                        "audio_device": inputDeviceName,
                     ])
                 audioEngine.stop()
                 isEnginePrewarmed = false
-                Task { @MainActor [weak self] in
-                    try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-                    self?.prewarm()
-                }
+                scheduleRecovery(
+                    after: TranscriptedConstants.audioRewarmDelay,
+                    event: "start_recording_rewarm_failed",
+                    retryDelay: TranscriptedConstants.audioRewarmDelay
+                )
                 return false
             }
         }
 
         guard nativeSampleRate > 0 else {
+            lastStartFailureMessage = "Audio hardware is not ready yet. Try again in a moment."
             print("❌ PARAKEET | sample rate is 0 — audio hardware not ready")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "zero_sample_rate",
                 message: "Sample rate is 0, audio hardware not initialized")
@@ -528,11 +562,14 @@ class ParakeetEngine: ObservableObject {
         }
 
         guard let monoFormat = AVAudioFormat(standardFormatWithSampleRate: nativeSampleRate, channels: 1) else {
+            lastStartFailureMessage = "Transcripted couldn't configure the microphone format."
             print("❌ PARAKEET | failed to create mono audio format at \(nativeSampleRate)Hz")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "audio_format_failed",
                 message: "AVAudioFormat creation failed", context: ["sample_rate": "\(nativeSampleRate)"])
             return false
         }
+
+        recordedSampleRate = nativeSampleRate
 
         inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: monoFormat) { [weak self] buffer, _ in
             guard let self = self,
@@ -619,6 +656,7 @@ class ParakeetEngine: ObservableObject {
                 try audioEngine.start()
                 isEnginePrewarmed = true
             } catch {
+                lastStartFailureMessage = "Transcripted couldn't start the microphone. Try again in a moment."
                 inputNode.removeTap(onBus: 0)  // Clean up tap to prevent double-install crash
                 print("❌ PARAKEET | audio engine failed: \(error.localizedDescription)")
                 EventReporter.shared.capture(level: .error, engine: "parakeet",
@@ -627,6 +665,7 @@ class ParakeetEngine: ObservableObject {
             }
         }
 
+        lastStartFailureMessage = nil
         isRecording = true
         liveTranscript = ""
         committedStreamText = ""
@@ -908,6 +947,7 @@ class ParakeetEngine: ObservableObject {
         }
         resetBufferedAudio(keepingCapacity: false)
         recordedSampleRate = nil
+        lastStartFailureMessage = nil
         isTranscribing = false
         liveTranscript = ""
         committedStreamText = ""
@@ -1009,24 +1049,41 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func rewarmEngine() -> Bool {
-        let inputFormat = audioEngine.inputNode.outputFormat(forBus: 0)
-        guard isValidAudioFormat(inputFormat) else {
+        let outputFormat = audioEngine.inputNode.outputFormat(forBus: 0)
+        let hardwareFormat = audioEngine.inputNode.inputFormat(forBus: 0)
+        guard isValidAudioFormat(outputFormat), isValidAudioFormat(hardwareFormat) else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "rewarm_invalid_format",
                 message: "Audio format invalid during recovery re-warm",
-                context: ["sample_rate": "\(inputFormat.sampleRate)", "channels": "\(inputFormat.channelCount)"])
+                context: [
+                    "output_rate": "\(outputFormat.sampleRate)",
+                    "output_channels": "\(outputFormat.channelCount)",
+                    "hw_rate": "\(hardwareFormat.sampleRate)",
+                    "hw_channels": "\(hardwareFormat.channelCount)",
+                ])
             return false
         }
 
-        nativeSampleRate = inputFormat.sampleRate
+        guard outputFormat.sampleRate == hardwareFormat.sampleRate else {
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "rewarm_format_mismatch",
+                message: "Audio graph still settling during recovery re-warm",
+                context: [
+                    "output_rate": "\(outputFormat.sampleRate)",
+                    "hw_rate": "\(hardwareFormat.sampleRate)",
+                    "audio_device": inputDeviceName,
+                ])
+            return false
+        }
+
+        nativeSampleRate = outputFormat.sampleRate
         do {
-            print("🔄 PARAKEET | re-warming audio engine (\(inputDeviceName), \(inputFormat.sampleRate)Hz)")
+            print("🔄 PARAKEET | re-warming audio engine (\(inputDeviceName), \(outputFormat.sampleRate)Hz)")
             audioEngine.prepare()
             try audioEngine.start()
             isEnginePrewarmed = true
             print("🔥 PARAKEET | engine re-warmed")
             EventReporter.shared.capture(level: .info, engine: "parakeet", event: "rewarm_succeeded",
                 message: "Audio engine re-warmed",
-                context: ["audio_device": inputDeviceName, "sample_rate": "\(inputFormat.sampleRate)"])
+                context: ["audio_device": inputDeviceName, "sample_rate": "\(outputFormat.sampleRate)"])
             return true
         } catch {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "rewarm_attempt_failed",

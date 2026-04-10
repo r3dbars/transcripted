@@ -201,7 +201,7 @@ class DictationSessionController: ObservableObject {
                 message: "Dictation recording failed to start",
                 context: dictationContext(extra: ["audio_device": appState.sttRouter.inputDeviceName])
             )
-            overlayController.showError("Microphone unavailable")
+            overlayController.showError(appState.sttRouter.lastStartFailureMessage ?? "Microphone unavailable")
             isDictating = false
             return
         }
