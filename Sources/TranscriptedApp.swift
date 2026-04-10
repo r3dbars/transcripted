@@ -39,6 +39,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     /// the dictation overlay so regressions to one can't break the other.
     @available(macOS 14.0, *)
     lazy var meetingOverlayController = MeetingOverlayController()
+    @available(macOS 14.0, *)
+    lazy var meetingPromptDetector = MeetingPromptDetector()
     private var workspaceObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -60,6 +62,22 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         if #available(macOS 14.0, *) {
             let meetingSession = appState.meetingSession
             meetingOverlayController.setup(meetingSession: meetingSession)
+            meetingOverlayController.onPromptRecord = { [weak self] candidate in
+                guard let self else { return }
+                self.meetingPromptDetector.markAccepted(candidate: candidate)
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    await self.appState.meetingSession.startRecording(trigger: .detectedPrompt)
+                }
+            }
+            meetingOverlayController.onPromptDismiss = { [weak self] candidate in
+                self?.meetingPromptDetector.snooze(candidate: candidate)
+            }
+            meetingPromptDetector.onPromptRequest = { [weak self] candidate in
+                guard PermissionsOnboardingView.hasCompleted else { return false }
+                self?.meetingOverlayController.presentDetectedMeetingPrompt(candidate) ?? false
+            }
+            meetingPromptDetector.start()
             appState.contextCapture.onMeetingToggle = { [weak self] in
                 self?.meetingOverlayController.toggleFromHotkey()
             }
@@ -113,6 +131,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     func applicationWillTerminate(_ notification: Notification) {
         for observer in workspaceObservers {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        if #available(macOS 14.0, *) {
+            meetingPromptDetector.stop()
         }
         #if BETA_BUILD
         BetaTelemetry.shared.shipLogs()
