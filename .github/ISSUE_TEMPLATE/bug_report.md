@@ -20,12 +20,23 @@ What you expected to happen.
 **Actual behavior**
 What actually happened.
 
+**Area**
+- Dictation
+- Meetings
+- Agent artifacts / external agent handoff
+- Other
+
 **Environment**
 - macOS version:
-- Draft version/commit:
+- Transcripted version/commit:
 - Audio source (mic, Zoom, Meet, etc.):
+
+**Storage details**
+- Are you using `~/Library/Application Support/Transcripted/` or a legacy `Draft/` folder?
 
 **Diagnostics**
 If you have logs, screenshots, or exported diagnostics, attach them here.
 
-If this report is about the old standalone Transcripted app, please say so and include the legacy ref you were using (`legacy/transcripted-standalone` or `pre-draft-takeover-2026-04-06`).
+If this report is about the old standalone Transcripted app, say so explicitly
+and include the legacy ref you were using (`legacy/transcripted-standalone` or
+`pre-draft-takeover-2026-04-06`).
