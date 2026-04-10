@@ -65,6 +65,17 @@ public class Audio: ObservableObject {
     // Device recovery creates a new WAV segment and updates micAudioFileURL (the write target),
     // but the original file contains the bulk of the recording and is what the pipeline should use.
     var originalMicAudioFileURL: URL?
+    private var _micSegments: [MicRecordingSegment] = []
+    private let micSegmentsLock = NSLock()
+    var micSegments: [MicRecordingSegment] {
+        get { micSegmentsLock.lock(); defer { micSegmentsLock.unlock() }; return _micSegments }
+        set { micSegmentsLock.lock(); defer { micSegmentsLock.unlock() }; _micSegments = newValue }
+    }
+    func appendMicSegment(_ segment: MicRecordingSegment) {
+        micSegmentsLock.lock()
+        defer { micSegmentsLock.unlock() }
+        _micSegments.append(segment)
+    }
 
     // MARK: - Recording Health Tracking (Phase 1: Sleep/Wake + Gap Logging)
 
@@ -154,6 +165,34 @@ public class Audio: ObservableObject {
         }
     }
     var lastRecoveryTime: Date?
+    private var _recoveryAttemptCount: Int = 0
+    private let recoveryAttemptCountLock = NSLock()
+    var recoveryAttemptCount: Int {
+        get {
+            recoveryAttemptCountLock.lock()
+            defer { recoveryAttemptCountLock.unlock() }
+            return _recoveryAttemptCount
+        }
+        set {
+            recoveryAttemptCountLock.lock()
+            defer { recoveryAttemptCountLock.unlock() }
+            _recoveryAttemptCount = newValue
+        }
+    }
+    private var _recordingSessionGeneration: UInt64 = 0
+    private let recordingSessionGenerationLock = NSLock()
+    var recordingSessionGeneration: UInt64 {
+        get {
+            recordingSessionGenerationLock.lock()
+            defer { recordingSessionGenerationLock.unlock() }
+            return _recordingSessionGeneration
+        }
+        set {
+            recordingSessionGenerationLock.lock()
+            defer { recordingSessionGenerationLock.unlock() }
+            _recordingSessionGeneration = newValue
+        }
+    }
     let maxRecoveryAttempts = 5
     let recoveryCooldown: TimeInterval = 5.0  // Min seconds between recovery attempts
 
@@ -352,9 +391,10 @@ public class Audio: ObservableObject {
                 self.sleepTimestamp = nil
 
                 // Proactively trigger mic recovery instead of waiting for the 3-5s watchdog delay
+                let sessionGeneration = self.recordingSessionGeneration
                 DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1.0) { [weak self] in
                     guard let self = self, self.isRecording else { return }
-                    self.recoverFromDeviceChange()
+                    self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
                 }
             }
         }
@@ -416,15 +456,18 @@ public class Audio: ObservableObject {
         resetSilenceTracking()  // Start fresh silence tracking
         systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
         systemAudioSilenceStart = nil  // Reset system audio silence tracking
+        recordingSessionGeneration &+= 1
 
         // Reset health tracking for new recording session
         recordingGaps = []
         deviceSwitchCount = 0
+        recoveryAttemptCount = 0
         sleepTimestamp = nil
         lastRecoveryTime = nil
         consecutiveMicWriteErrors = 0
         consecutiveSystemWriteErrors = 0
         systemAudioFailed = false
+        micSegments = []
 
         AppLogger.audio.info("Starting audio capture")
 
@@ -458,15 +501,18 @@ public class Audio: ObservableObject {
         resetSilenceTracking()  // Start fresh silence tracking
         systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
         systemAudioSilenceStart = nil  // Reset system audio silence tracking
+        recordingSessionGeneration &+= 1
 
         // Reset health tracking for new recording session
         recordingGaps = []
         deviceSwitchCount = 0
+        recoveryAttemptCount = 0
         sleepTimestamp = nil
         lastRecoveryTime = nil
         consecutiveMicWriteErrors = 0
         consecutiveSystemWriteErrors = 0
         systemAudioFailed = false
+        micSegments = []
 
         AppLogger.audio.info("Starting audio capture")
 
@@ -493,18 +539,17 @@ public class Audio: ObservableObject {
     // MARK: - Stop Recording
 
     public func stop() {
-        guard let engine = engine, let inputNode = inputNode else {
-            // Ensure flag reset even on guard failure
-            isRecording = false
-            return
-        }
+        recordingSessionGeneration &+= 1
+        if let engine, let inputNode {
+            AppLogger.audio.info("Stopping audio capture")
 
-        AppLogger.audio.info("Stopping audio capture")
-
-        // Stop audio engine FIRST (prevents new buffers from arriving)
-        if engine.isRunning {
-            inputNode.removeTap(onBus: 0)
-            engine.stop()
+            // Stop audio engine FIRST (prevents new buffers from arriving)
+            if engine.isRunning {
+                inputNode.removeTap(onBus: 0)
+                engine.stop()
+            }
+        } else {
+            AppLogger.audio.warning("Stopping audio capture without an active engine")
         }
 
         // Stop system audio capture
@@ -515,7 +560,8 @@ public class Audio: ObservableObject {
         // Use the original mic URL (set at recording start), not the potentially-overwritten
         // recovery URL. Device recovery creates a new WAV segment but the original file
         // contains the bulk of the recording.
-        let finalMicURL = originalMicAudioFileURL ?? micAudioFileURL
+        let primaryMicURL = originalMicAudioFileURL ?? micAudioFileURL
+        let micSegments = self.micSegments
         let finalSystemURL = systemAudioFileURL
 
         // Update UI immediately - don't wait for file cleanup
@@ -526,6 +572,7 @@ public class Audio: ObservableObject {
             self.systemAudioStatus = .unknown  // Reset status when not recording
             self.stopTimer()
             self.stopWatchdog()
+            self.isMicRecovering = false
             NSSound(named: "Pop")?.play()
         }
 
@@ -535,9 +582,9 @@ public class Audio: ObservableObject {
 
         cleanupGroup.enter()
         micAudioFileQueue.async { [weak self] in
-            if self?.micAudioFile != nil {
-                self?.micAudioFile = nil
-                AppLogger.audioMic.info("Audio file closed", ["file": finalMicURL?.lastPathComponent ?? "unknown"])
+            if let self, self.micAudioFile != nil {
+                self.micAudioFile = nil
+                AppLogger.audioMic.info("Audio file closed", ["file": primaryMicURL?.lastPathComponent ?? self.micAudioFileURL?.lastPathComponent ?? "unknown"])
             }
             cleanupGroup.leave()
         }
@@ -552,9 +599,15 @@ public class Audio: ObservableObject {
         }
 
         // Notify completion AFTER files are closed (but don't block main thread waiting)
-        cleanupGroup.notify(queue: .main) { [weak self] in
-            self?.originalMicAudioFileURL = nil
-            self?.onRecordingComplete?(finalMicURL, finalSystemURL)
+        cleanupGroup.notify(queue: .global(qos: .utility)) { [weak self] in
+            guard let self else { return }
+            let finalMicURL = self.finalizeMicRecording(primaryURL: primaryMicURL, segments: micSegments)
+            DispatchQueue.main.async {
+                self.originalMicAudioFileURL = nil
+                self.micSegments = []
+                self.micAudioFileURL = finalMicURL
+                self.onRecordingComplete?(finalMicURL, finalSystemURL)
+            }
         }
     }
 

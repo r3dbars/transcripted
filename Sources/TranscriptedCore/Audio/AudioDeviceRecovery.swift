@@ -27,11 +27,11 @@ extension Audio {
                 }
 
                 // Give up after too many failed recoveries
-                if self.deviceSwitchCount >= self.maxRecoveryAttempts {
+                if self.recoveryAttemptCount >= self.maxRecoveryAttempts {
                     AppLogger.audioMic.error("Max recovery attempts reached, stopping recording", [
-                        "attempts": "\(self.deviceSwitchCount)"
+                        "attempts": "\(self.recoveryAttemptCount)"
                     ])
-                    let savedError = "Audio device unavailable \u{2014} recording stopped after \(self.deviceSwitchCount) recovery attempts. Reconnect your microphone and try again."
+                    let savedError = "Audio device unavailable \u{2014} recording stopped after \(self.recoveryAttemptCount) recovery attempts. Reconnect your microphone and try again."
                     DispatchQueue.main.async {
                         self.stop()
                         // Re-apply error after stop() clears it
@@ -42,9 +42,10 @@ extension Audio {
 
                 // Audio stopped → device likely changed
                 AppLogger.audioMic.warning("Audio device disconnected or changed, switching to default")
+                let sessionGeneration = self.recordingSessionGeneration
                 // Dispatch to background — recovery uses Thread.sleep for HAL settle time
                 DispatchQueue.global(qos: .userInitiated).async {
-                    self.recoverFromDeviceChange()
+                    self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
                 }
             }
         }
@@ -57,7 +58,15 @@ extension Audio {
 
     // MARK: - Device Recovery
 
-    func recoverFromDeviceChange() {
+    func recoverFromDeviceChange(sessionGeneration: UInt64) {
+        guard sessionGeneration == recordingSessionGeneration else {
+            AppLogger.audioMic.info("Skipping stale recovery request", [
+                "expectedSession": "\(sessionGeneration)",
+                "currentSession": "\(recordingSessionGeneration)"
+            ])
+            return
+        }
+
         // CRITICAL: Prevent concurrent recovery attempts
         // AVAudioEngine notifications can fire multiple times during rapid device changes
         guard !isMicRecovering else {
@@ -73,6 +82,7 @@ extension Audio {
         // Track device switch for health monitoring
         let switchStart = Date()
         deviceSwitchCount += 1
+        recoveryAttemptCount += 1
         AppLogger.audioMic.debug("Recovering from device change", ["switchNumber": "\(deviceSwitchCount)", "maxAttempts": "\(maxRecoveryAttempts)"])
 
         // Stop engine (but keep recording flag true)
@@ -93,6 +103,14 @@ extension Audio {
         // Same approach as SystemAudioCapture recovery
         Thread.sleep(forTimeInterval: 0.1)  // 100ms
 
+        guard sessionGeneration == recordingSessionGeneration else {
+            AppLogger.audioMic.info("Skipping stale recovery after HAL settle", [
+                "expectedSession": "\(sessionGeneration)",
+                "currentSession": "\(recordingSessionGeneration)"
+            ])
+            return
+        }
+
         // Get ACTUAL hardware format (not converter format)
         let recordingFormat = newInputNode.inputFormat(forBus: 1)
         let oldChannelCount = self.inputChannelCount
@@ -110,6 +128,7 @@ extension Audio {
         // All micAudioFile accesses wrapped in micAudioFileQueue.sync for thread safety
         let sampleRateChanged = micAudioFileQueue.sync { micAudioFile.map { recordingFormat.sampleRate != $0.processingFormat.sampleRate } ?? false }
         let channelCountChanged = oldChannelCount != recordingFormat.channelCount
+        var recoverySegmentURL: URL?
 
         if sampleRateChanged || channelCountChanged {
             let changeReason = sampleRateChanged ? "Sample rate" : "Channel count"
@@ -121,6 +140,7 @@ extension Audio {
             try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
             let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
             let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic_recovery.wav")
+            recoverySegmentURL = fileURL
 
             do {
                 // Always create mono format at new sample rate
@@ -160,6 +180,14 @@ extension Audio {
             self?.handleMicBuffer(buffer)
         }
 
+        guard sessionGeneration == recordingSessionGeneration else {
+            AppLogger.audioMic.info("Skipping stale recovery before engine restart", [
+                "expectedSession": "\(sessionGeneration)",
+                "currentSession": "\(recordingSessionGeneration)"
+            ])
+            return
+        }
+
         // Restart engine
         do {
             try engine.start()
@@ -185,6 +213,10 @@ extension Audio {
                 reason: "Device switch"
             )
             appendRecordingGap(gap)
+            if let recoverySegmentURL {
+                appendMicSegment(MicRecordingSegment(url: recoverySegmentURL, gapBeforeDuration: gap.duration))
+            }
+            recoveryAttemptCount = 0
             AppLogger.audioMic.info("Device recovery complete, recording continues", ["gap": gap.description])
         } catch {
             AppLogger.audioMic.error("Failed to restart engine", ["error": error.localizedDescription])

@@ -17,8 +17,8 @@ func transcriptedTranscriptDirectory(relativeTo meetingsRoot: URL = transcripted
 }
 
 func transcriptedLogFilePath(relativeTo meetingsRoot: URL = transcriptedMeetingDirectory()) -> String {
-    meetingsRoot.deletingLastPathComponent()
-        .appendingPathComponent("logs", isDirectory: true)
+    FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Logs/Transcripted", isDirectory: true)
         .appendingPathComponent("app.jsonl").path
 }
 

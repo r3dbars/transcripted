@@ -16,7 +16,7 @@ set -e
 DRAFT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SMOKE_BIN="$DRAFT_DIR/build/core-integration-smoke"
 
-if [ ! -f "$DRAFT_DIR/deps-libs/libDraftDeps.a" ] || [ ! -d "$DRAFT_DIR/deps-modules" ]; then
+if [ ! -f "$DRAFT_DIR/deps-libs/libDraftDeps.a" ] || [ ! -d "$DRAFT_DIR/deps-modules" ] || [ ! -d "$DRAFT_DIR/deps-frameworks/ESpeakNG.framework" ]; then
     echo "Dependencies not found — run build-deps.sh first."
     exit 1
 fi
@@ -28,6 +28,7 @@ DEPS_MODULE_FLAGS="-Ideps-modules"
 for dir in "$DRAFT_DIR"/deps-modules/*/; do
     [ -d "$dir" ] && DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
 done
+DEPS_FRAMEWORK_FLAGS="-Fdeps-frameworks"
 
 echo "Compiling core integration smoke…"
 swiftc \
@@ -38,6 +39,7 @@ swiftc \
     -framework Combine \
     -framework CoreML \
     -framework CoreAudio \
+    -framework ESpeakNG \
     -framework Metal \
     -framework MetalKit \
     -framework Accelerate \
@@ -45,7 +47,9 @@ swiftc \
     -framework UserNotifications \
     -lc++ \
     $DEPS_MODULE_FLAGS \
+    $DEPS_FRAMEWORK_FLAGS \
     -Ldeps-libs -lDraftDeps \
+    -Xlinker -rpath -Xlinker "$DRAFT_DIR/deps-frameworks" \
     "$DRAFT_DIR/SmokeTests/CoreIntegrationSmoke.swift" \
     -parse-as-library \
     -target arm64-apple-macos14.0 \

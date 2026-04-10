@@ -7,10 +7,13 @@ APP_NAME="Transcripted"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+STAGED_APP_BINARY="$BUILD_DIR/$APP_NAME-bin"
 LOCAL_ENTITLEMENTS="config/entitlements/local.plist"
 SIGN_IDENTITY="${SIGN_IDENTITY:-${SIGNING_IDENTITY:-}}"
 DEPS_ARCHIVE="deps-libs/libDraftDeps.a"
 DEPS_MODULE_ROOT="deps-modules"
+DEPS_FRAMEWORK_ROOT="deps-frameworks"
+ESPEAK_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/ESpeakNG.framework"
 TRANSCRIPTED_CORE_MODULE="$DEPS_MODULE_ROOT/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
 
 ensure_build_prerequisites() {
@@ -21,7 +24,7 @@ ensure_build_prerequisites() {
 }
 
 ensure_deps_ready() {
-    if [ -f "$DEPS_ARCHIVE" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ]; then
+    if [ -f "$DEPS_ARCHIVE" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -d "$ESPEAK_FRAMEWORK" ]; then
         return 0
     fi
 
@@ -30,6 +33,7 @@ ensure_deps_ready() {
     echo "  $DEPS_ARCHIVE"
     echo "  $DEPS_MODULE_ROOT/"
     echo "  $TRANSCRIPTED_CORE_MODULE"
+    echo "  $ESPEAK_FRAMEWORK"
     echo ""
     echo "Run: bash build-deps.sh --force"
     exit 1
@@ -62,7 +66,17 @@ resolve_sign_identity() {
 
 verify_signature() {
     codesign --verify --deep --strict --verbose=4 "$APP_BUNDLE"
-    codesign -dvvv --entitlements :- "$APP_BUNDLE"
+    codesign -dvvv --entitlements - "$APP_BUNDLE"
+}
+
+sign_embedded_frameworks() {
+    local sign_hash="$1"
+    local framework_path
+
+    for framework_path in "$APP_BUNDLE"/Contents/Frameworks/*.framework; do
+        [ -d "$framework_path" ] || continue
+        codesign --force --sign "$sign_hash" "$framework_path"
+    done
 }
 
 echo "Building Transcripted..."
@@ -74,6 +88,7 @@ ensure_deps_ready
 rm -rf "$BUILD_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
+mkdir -p "$APP_BUNDLE/Contents/Frameworks"
 
 # Bundle Parakeet model directories used by FluidAudio.
 # The runtime loader can resolve files from both the `-coreml` and legacy
@@ -91,7 +106,8 @@ for model_dir in "${PARAKEET_MODEL_DIRS[@]}"; do
     model_src="$PARAKEET_MODELS_ROOT/$model_dir"
     if [ -d "$model_src/Encoder.mlmodelc" ]; then
         echo "Bundling Parakeet models from $model_dir..."
-        cp -R "$model_src" "$PARAKEET_BUNDLE_DIR/"
+        rm -rf "$PARAKEET_BUNDLE_DIR/$model_dir"
+        ditto "$model_src" "$PARAKEET_BUNDLE_DIR/$model_dir"
         bundled_parakeet_models=true
     fi
 done
@@ -117,7 +133,7 @@ for dir in "$DEPS_MODULE_ROOT"/*/; do
     [ -d "$dir" ] && DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
 done
 
-DEPS_FLAGS="$DEPS_MODULE_FLAGS -Ldeps-libs -lDraftDeps -framework CoreML -framework CoreAudio"
+DEPS_FLAGS="$DEPS_MODULE_FLAGS -F$DEPS_FRAMEWORK_ROOT -Ldeps-libs -lDraftDeps -framework ESpeakNG -framework CoreML -framework CoreAudio"
 
 # Bundle Metal libraries if present
 # MLX searches for mlx.metallib next to the binary first (Contents/MacOS/)
@@ -125,12 +141,16 @@ for metallib in deps-libs/*.metallib; do
     [ -f "$metallib" ] && cp "$metallib" "$APP_BUNDLE/Contents/MacOS/"
 done
 
+# Bundle FluidAudio's binary framework dependency.
+cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
+
 # Compile
 echo "Compiling..."
 SOURCE_FILES=$(find Sources -name '*.swift' -not -path 'Sources/TranscriptedCore/*')
+rm -f "$STAGED_APP_BINARY"
 swiftc \
     -O \
-    -o "$APP_BINARY" \
+    -o "$STAGED_APP_BINARY" \
     -framework AVFoundation \
     -framework AppKit \
     -framework SwiftUI \
@@ -153,6 +173,8 @@ swiftc \
     -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
     2>&1
 
+mv "$STAGED_APP_BINARY" "$APP_BINARY"
+
 if [ ! -x "$APP_BINARY" ]; then
     echo "Build finished without a runnable app binary: $APP_BINARY"
     exit 1
@@ -168,12 +190,14 @@ fi
 
 if [ -n "$SIGN_HASH" ]; then
     echo "Signing with: ${SIGN_NAME:-$SIGN_HASH} ($SIGN_HASH)"
-    codesign --force --deep --sign "$SIGN_HASH" \
+    sign_embedded_frameworks "$SIGN_HASH"
+    codesign --force --sign "$SIGN_HASH" \
         --entitlements "$LOCAL_ENTITLEMENTS" \
         "$APP_BUNDLE"
 else
     echo "No Developer ID found — signing ad-hoc (permissions may not persist)"
-    codesign --force --deep --sign - \
+    sign_embedded_frameworks "-"
+    codesign --force --sign - \
         --entitlements "$LOCAL_ENTITLEMENTS" \
         "$APP_BUNDLE"
 fi
