@@ -16,11 +16,13 @@ swiftc \
     Tests/DiffSummaryTests.swift \
     Tests/MeetingTranscriptStylerTests.swift \
     Tests/DictationTranscriptWriterTests.swift \
+    Tests/DictationSessionTimeoutTests.swift \
     Sources/Capture/CapturedContext.swift \
     Sources/Draft/DraftUtils.swift \
     Sources/Style/StyleUtils.swift \
     Sources/DraftPaths.swift \
     Sources/Dictation/DictationStoragePaths.swift \
+    Sources/Dictation/DictationSessionTimeout.swift \
     Sources/Dictation/DictationTranscriptWriter.swift \
     Sources/DraftConstants.swift \
     Sources/Draft/DiffSummary.swift \
