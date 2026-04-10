@@ -273,6 +273,7 @@ extension SpeakerDatabase {
 
             for j in (i + 1)..<speakers.count {
                 guard !mergedIds.contains(speakers[j].id) else { continue }
+                guard !shouldSkipDuplicateMerge(speakers[i], speakers[j]) else { continue }
 
                 let similarity = cosineSimilarity(speakers[i].embedding, speakers[j].embedding)
                 guard similarity >= threshold else { continue }
@@ -300,6 +301,30 @@ extension SpeakerDatabase {
         if mergeCount > 0 {
             AppLogger.speakers.info("Duplicate merge complete", ["merged": "\(mergeCount)", "remaining": "\(speakers.count - mergeCount)"])
         }
+    }
+
+    private func shouldSkipDuplicateMerge(_ lhs: SpeakerProfile, _ rhs: SpeakerProfile) -> Bool {
+        if lhs.disputeCount > 0 || rhs.disputeCount > 0 {
+            return true
+        }
+
+        let lhsName = normalizedProfileName(lhs)
+        let rhsName = normalizedProfileName(rhs)
+        if let lhsName, let rhsName, lhsName != rhsName {
+            return true
+        }
+
+        return false
+    }
+
+    private func normalizedProfileName(_ profile: SpeakerProfile) -> String? {
+        guard let name = profile.displayName?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty else {
+            return nil
+        }
+
+        return name.lowercased()
     }
 
     // MARK: - Same-Name Profile Merging
