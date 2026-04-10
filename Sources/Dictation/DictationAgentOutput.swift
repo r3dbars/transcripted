@@ -135,6 +135,7 @@ enum DictationAgentOutput {
 
         let data = try encoder.encode(payload)
         try data.write(to: sidecarURL, options: .atomic)
+        FileManager.default.restrictFileToOwnerOnly(at: sidecarURL)
         return sidecarURL
     }
 

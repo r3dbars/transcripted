@@ -273,7 +273,11 @@ private func handleListMeetings(params: CallTool.Parameters, index: TranscriptIn
 
     // Populate titles from markdown YAML frontmatter
     for i in results.indices {
-        let mdURL = meetingsDir.appendingPathComponent(results[i].filename + ".md")
+        guard case .valid(let mdURL) = PathSecurity.resolveReadableFile(
+            named: results[i].filename,
+            appendingExtension: "md",
+            in: meetingsDir
+        ) else { continue }
         if let content = try? String(contentsOf: mdURL, encoding: .utf8) {
             results[i].title = extractTitle(from: content) ?? results[i].filename
         }
@@ -337,12 +341,13 @@ private func handleReadMeeting(params: CallTool.Parameters, meetingsDir: URL) th
 
     let section = params.arguments?["section"]?.stringValue ?? "full"
 
-    // Try .md file first, then without extension
-    let mdURL = meetingsDir.appendingPathComponent(filename.hasSuffix(".md") ? filename : filename + ".md")
-        .standardizedFileURL
-
-    // Reject path traversal (e.g., filename = "../../etc/passwd")
-    guard mdURL.path.hasPrefix(meetingsDir.standardizedFileURL.path + "/") else {
+    let mdURL: URL
+    switch PathSecurity.resolveReadableFile(named: filename, appendingExtension: "md", in: meetingsDir) {
+    case .valid(let url):
+        mdURL = url
+    case .missing:
+        return .init(content: [.text(text: "Meeting not found: \(filename). Use list_meetings to see available meetings.")], isError: true)
+    case .invalid:
         return .init(content: [.text(text: "Invalid filename: \(filename)")], isError: true)
     }
 
@@ -382,11 +387,13 @@ private func handleReadDictation(params: CallTool.Parameters, dictationsDir: URL
     }
 
     let entryId = params.arguments?["entry_id"]?.stringValue
-    let sidecarURL = dictationsDir
-        .appendingPathComponent(filename.hasSuffix(".json") ? filename : filename + ".json")
-        .standardizedFileURL
-
-    guard sidecarURL.path.hasPrefix(dictationsDir.standardizedFileURL.path + "/") else {
+    let sidecarURL: URL
+    switch PathSecurity.resolveReadableFile(named: filename, appendingExtension: "json", in: dictationsDir) {
+    case .valid(let url):
+        sidecarURL = url
+    case .missing:
+        return .init(content: [.text(text: "Dictation not found: \(filename). Use list_dictations to see available days.")], isError: true)
+    case .invalid:
         return .init(content: [.text(text: "Invalid filename: \(filename)")], isError: true)
     }
 
@@ -412,11 +419,14 @@ private func handleReadDictation(params: CallTool.Parameters, dictationsDir: URL
         return .init(content: [.text(text: result)])
     }
 
-    let markdownURL = dictationsDir
-        .appendingPathComponent(day.markdownFilename)
-        .standardizedFileURL
-
-    guard markdownURL.path.hasPrefix(dictationsDir.standardizedFileURL.path + "/") else {
+    let markdownURL: URL
+    switch PathSecurity.resolveReadableFile(named: day.markdownFilename, in: dictationsDir) {
+    case .valid(let url):
+        markdownURL = url
+    case .missing:
+        let json = try JSONEncoder.pretty.encode(day)
+        return .init(content: [.text(text: String(data: json, encoding: .utf8) ?? "{}")])
+    case .invalid:
         return .init(content: [.text(text: "Invalid markdown filename for \(filename)")], isError: true)
     }
 
@@ -533,9 +543,11 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
 
     for meeting in meetings {
         // Read first ~200 words of transcript as preview
-        let mdURL = meetingsDir.appendingPathComponent(meeting.filename + ".md")
-        // Skip files that would escape dataDir (path traversal)
-        guard mdURL.standardizedFileURL.path.hasPrefix(meetingsDir.standardizedFileURL.path) else { continue }
+        guard case .valid(let mdURL) = PathSecurity.resolveReadableFile(
+            named: meeting.filename,
+            appendingExtension: "md",
+            in: meetingsDir
+        ) else { continue }
         var preview = ""
         var title = meeting.filename
         if let content = try? String(contentsOf: mdURL, encoding: .utf8) {
@@ -594,8 +606,12 @@ private func parseContextKind(_ raw: String?) -> ContextKind {
 }
 
 private func meetingTitle(for filename: String, meetingsDir: URL) -> String {
-    let mdURL = meetingsDir.appendingPathComponent(filename + ".md")
-    guard let content = try? String(contentsOf: mdURL, encoding: .utf8) else {
+    guard case .valid(let mdURL) = PathSecurity.resolveReadableFile(
+        named: filename,
+        appendingExtension: "md",
+        in: meetingsDir
+    ),
+    let content = try? String(contentsOf: mdURL, encoding: .utf8) else {
         return filename
     }
     return extractTitle(from: content) ?? filename
