@@ -611,6 +611,8 @@ class DictationSessionController: ObservableObject {
         switch reason {
         case .systemWake:
             return "Dictation stopped while your Mac was asleep"
+        case .audioDeviceRecoveryFailed:
+            return "Transcripted couldn't reconnect to the new microphone"
         case .recoveryFailed:
             return "Microphone recovery failed"
         case .audioDeviceChanged, .none:

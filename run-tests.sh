@@ -116,6 +116,7 @@ APP_SOURCES=(
     "Sources/Dictation/DictationAgentOutput.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"
     "Sources/TranscriptedConstants.swift"
+    "Sources/Speech/RecordedAudioTimeline.swift"
     "Sources/Text/DiffSummary.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/Reliability/WakeRecoveryCoordinator.swift"

@@ -29,6 +29,7 @@ enum ParakeetModelState {
 
 enum RecordingInterruptionReason: String {
     case audioDeviceChanged = "audio_device_changed"
+    case audioDeviceRecoveryFailed = "audio_device_recovery_failed"
     case systemWake = "system_wake"
     case recoveryFailed = "recovery_failed"
 }
@@ -45,9 +46,8 @@ class ParakeetEngine: ObservableObject {
     @Published var lastStartFailureMessage: String?
 
     private let audioEngine = AVAudioEngine()
-    private var sampleBuffer: [Float] = []
+    private var capturedAudioTimeline = RecordedAudioTimeline()
     private var nativeSampleRate: Double = 48000
-    private var recordedSampleRate: Double?
     private let pendingSamplesLock = NSLock()
     private var pendingSamples: [Float] = []
     private nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
@@ -69,7 +69,6 @@ class ParakeetEngine: ObservableObject {
     // Cached format for makePCMBuffer — always 16kHz mono, no need to recreate per chunk
     private let eouPCMFormat = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)
     private var configChangeObserver: NSObjectProtocol?
-    private var configChangeDebounceTask: Task<Void, Never>?
     private var configRecoveryTask: Task<Void, Never>?
     /// Tracks whether a recording was active when the first config change in a
     /// burst arrived. Subsequent changes during recovery inherit this flag so
@@ -363,40 +362,208 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func handleAudioConfigChange() {
-        let wasRecording = isRecording
+        let wasRecording = isRecording || configChangeWasRecording
         audioWatchdogTask?.cancel()
         audioWatchdogTask = nil
         cancelPendingRecovery()
+        cancelConfigRecovery(resetState: false)
 
         if isRecording {
-            streamingSamplesLock.withLock { streamingSampleBuffer.removeAll(keepingCapacity: true) }
-            Task { await eouManager?.reset() }
-            audioEngine.inputNode.removeTap(onBus: 0)
-            isRecording = false
-            audioLevel = 0
+            finishActiveRecording(flushPendingSamples: true)
         }
 
         audioEngine.stop()
         isEnginePrewarmed = false
 
-        // Always interrupt if a recording was active — don't try to auto-restart.
-        // The new audio pipeline may look functional but silently produce no samples
-        // (e.g., USB dock unplug), leaving the overlay stuck in listening state.
-        if wasRecording {
-            interruptionReason = .audioDeviceChanged
-            recordingInterrupted = true
-            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_interrupted",
-                message: "Recording interrupted by device change", context: ["audio_device": inputDeviceName])
-        }
-
         EventReporter.shared.capture(level: .info, engine: "parakeet", event: "audio_device_change_detected",
             message: "Audio configuration changed",
             context: ["audio_device": inputDeviceName, "was_recording": "\(wasRecording)"])
 
+        guard wasRecording else {
+            scheduleRecovery(
+                after: TranscriptedConstants.audioRecoveryDelay,
+                event: "device_change_rewarm_failed",
+                retryDelay: nil
+            )
+            return
+        }
+
+        configChangeWasRecording = true
+        scheduleConfigRecovery()
+    }
+
+    private func scheduleConfigRecovery() {
+        cancelConfigRecovery(resetState: false)
+        EventReporter.shared.capture(level: .info, engine: "parakeet", event: "device_change_recovery_started",
+            message: "Attempting to resume recording after audio device change",
+            context: [
+                "audio_device": inputDeviceName,
+                "buffered_duration_s": String(format: "%.2f", capturedAudioTimeline.totalDurationSeconds),
+            ])
+
+        configRecoveryTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: TranscriptedConstants.audioConfigChangeDebounceDelay)
+            guard let self, !Task.isCancelled else { return }
+
+            let maxAttempts = 5
+            for attempt in 1...maxAttempts {
+                guard !Task.isCancelled else { return }
+
+                let rewarmed = self.rewarmEngine()
+                let restarted = rewarmed && self.startRecording(
+                    isRecoveryAttempt: true,
+                    continuingSession: true,
+                    allowDeferredRecovery: false
+                )
+                let resumed: Bool
+                if restarted {
+                    resumed = await self.waitForRecoveredAudioSamples()
+                } else {
+                    resumed = false
+                }
+
+                if resumed {
+                    self.configRecoveryTask = nil
+                    self.configChangeWasRecording = false
+                    EventReporter.shared.capture(level: .info, engine: "parakeet", event: "device_change_recording_resumed",
+                        message: "Recording resumed after audio device change",
+                        context: [
+                            "audio_device": self.inputDeviceName,
+                            "attempt": "\(attempt)",
+                            "buffered_duration_s": String(format: "%.2f", self.capturedAudioTimeline.totalDurationSeconds),
+                        ])
+                    return
+                }
+
+                self.finishActiveRecording(flushPendingSamples: true)
+                self.audioEngine.stop()
+                self.isEnginePrewarmed = false
+
+                guard attempt < maxAttempts else { break }
+
+                EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "device_change_recovery_retry",
+                    message: "Retrying audio device recovery",
+                    context: [
+                        "audio_device": self.inputDeviceName,
+                        "attempt": "\(attempt)",
+                    ])
+                try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRewarmDelay)
+            }
+
+            guard !Task.isCancelled else { return }
+            self.configRecoveryTask = nil
+            self.configChangeWasRecording = false
+            self.interruptionReason = .audioDeviceRecoveryFailed
+            self.recordingInterrupted = true
+            EventReporter.shared.capture(level: .error, engine: "parakeet", event: "device_change_recording_resume_failed",
+                message: "Recording could not resume after audio device change",
+                context: [
+                    "audio_device": self.inputDeviceName,
+                    "buffered_duration_s": String(format: "%.2f", self.capturedAudioTimeline.totalDurationSeconds),
+                ])
+        }
+    }
+
+    private func waitForRecoveredAudioSamples() async -> Bool {
+        let pollInterval: UInt64 = 100_000_000
+        var waited: UInt64 = 0
+
+        while waited < TranscriptedConstants.audioWatchdogTimeout {
+            if didReceiveAudioSamples {
+                return true
+            }
+
+            let remaining = TranscriptedConstants.audioWatchdogTimeout - waited
+            try? await Task.sleep(nanoseconds: min(pollInterval, remaining))
+            guard !Task.isCancelled else { return false }
+            waited += min(pollInterval, remaining)
+        }
+
+        if !didReceiveAudioSamples {
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "device_change_resume_no_samples",
+                message: "No audio samples arrived after audio device recovery",
+                context: ["audio_device": inputDeviceName])
+        }
+        return didReceiveAudioSamples
+    }
+
+    private func finishActiveRecording(flushPendingSamples: Bool) {
+        if liveDisplayEnabled {
+            streamingSamplesLock.withLock { streamingSampleBuffer.removeAll(keepingCapacity: true) }
+            Task { await eouManager?.reset() }
+        }
+
+        if isRecording {
+            audioEngine.inputNode.removeTap(onBus: 0)
+        }
+
+        if flushPendingSamples {
+            appendPendingSamplesToCapturedAudio()
+        } else {
+            pendingSamplesLock.withLock {
+                pendingSamples.removeAll(keepingCapacity: true)
+            }
+        }
+
+        isRecording = false
+        audioLevel = 0
+    }
+
+    private func appendPendingSamplesToCapturedAudio() {
+        let sampleRate = nativeSampleRate
+        pendingSamplesLock.withLock {
+            guard !pendingSamples.isEmpty else { return }
+            let samples = pendingSamples
+            pendingSamples.removeAll(keepingCapacity: true)
+            capturedAudioTimeline.append(samples, sampleRate: sampleRate)
+        }
+    }
+
+    private func cancelConfigRecovery(resetState: Bool = true) {
+        configRecoveryTask?.cancel()
+        configRecoveryTask = nil
+        if resetState {
+            configChangeWasRecording = false
+        }
+    }
+
+    private func currentStartRecoveryMessage() -> String {
+        configChangeWasRecording
+            ? "Audio device is still reconnecting. Try again in a moment."
+            : "Audio device is still reconnecting after wake. Try again in a moment."
+    }
+
+    private func currentBluetoothResyncMessage() -> String {
+        configChangeWasRecording
+            ? "Bluetooth audio is still resyncing. Try again in a moment."
+            : "Bluetooth audio is still resyncing after wake. Try again in a moment."
+    }
+
+    private func currentHardwareNotReadyMessage() -> String {
+        configChangeWasRecording
+            ? "Audio hardware is still switching devices. Try again in a moment."
+            : "Audio hardware is not ready yet. Try again in a moment."
+    }
+
+    private func currentMicStartFailureMessage() -> String {
+        configChangeWasRecording
+            ? "Transcripted couldn't reconnect to the microphone yet. Try again in a moment."
+            : "Transcripted couldn't start the microphone. Try again in a moment."
+    }
+
+    private func currentStartRetryDelay() -> UInt64 {
+        configChangeWasRecording ? TranscriptedConstants.audioRecoveryDelay : TranscriptedConstants.audioRewarmDelay
+    }
+
+    private func scheduleStartRecoveryIfNeeded(
+        allowDeferredRecovery: Bool,
+        event: String = "start_recording_rewarm_failed"
+    ) {
+        guard allowDeferredRecovery else { return }
         scheduleRecovery(
-            after: TranscriptedConstants.audioRecoveryDelay,
-            event: "device_change_rewarm_failed",
-            retryDelay: nil
+            after: currentStartRetryDelay(),
+            event: event,
+            retryDelay: currentStartRetryDelay()
         )
     }
 
@@ -410,14 +577,9 @@ class ParakeetEngine: ObservableObject {
         audioWatchdogTask?.cancel()
         audioWatchdogTask = nil
         cancelPendingRecovery()
+        cancelConfigRecovery()
         if isRecording {
-            streamingSamplesLock.lock()
-            streamingSampleBuffer.removeAll(keepingCapacity: true)
-            streamingSamplesLock.unlock()
-            Task { await eouManager?.reset() }
-            audioEngine.inputNode.removeTap(onBus: 0)
-            isRecording = false
-            audioLevel = 0
+            finishActiveRecording(flushPendingSamples: false)
         }
 
         audioEngine.stop()
@@ -439,11 +601,15 @@ class ParakeetEngine: ObservableObject {
 
     // MARK: - Recording
 
-    func startRecording(isRecoveryAttempt: Bool = false) -> Bool {
+    func startRecording(
+        isRecoveryAttempt: Bool = false,
+        continuingSession: Bool = false,
+        allowDeferredRecovery: Bool = true
+    ) -> Bool {
         guard !isRecording else { return true }
         lastStartFailureMessage = nil
         guard pendingRecoveryTask == nil else {
-            lastStartFailureMessage = "Audio device is still reconnecting after wake. Try again in a moment."
+            lastStartFailureMessage = currentStartRecoveryMessage()
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_blocked_recovery",
                 message: "startRecording() called while audio recovery was still in progress",
                 context: ["audio_device": inputDeviceName])
@@ -460,14 +626,15 @@ class ParakeetEngine: ObservableObject {
         recordingInterrupted = false
         interruptionReason = nil
         didReceiveAudioSamples = false
-        resetBufferedAudio()
-        sampleBuffer.reserveCapacity(Int(nativeSampleRate * Double(TranscriptedConstants.audioBufferCapacitySeconds)))
+        if !continuingSession {
+            resetBufferedAudio()
+        }
 
         let inputNode = audioEngine.inputNode
         let nativeFormat = inputNode.outputFormat(forBus: 0)
         let hwFormat = inputNode.inputFormat(forBus: 0)
         guard isValidAudioFormat(nativeFormat), isValidAudioFormat(hwFormat) else {
-            lastStartFailureMessage = "Audio device is still reconnecting after wake. Try again in a moment."
+            lastStartFailureMessage = currentStartRecoveryMessage()
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_invalid_format",
                 message: "Audio format invalid during startRecording",
                 context: [
@@ -476,11 +643,7 @@ class ParakeetEngine: ObservableObject {
                     "hw_rate": "\(hwFormat.sampleRate)",
                     "hw_channels": "\(hwFormat.channelCount)",
                 ])
-            scheduleRecovery(
-                after: TranscriptedConstants.audioRewarmDelay,
-                event: "start_recording_rewarm_failed",
-                retryDelay: TranscriptedConstants.audioRewarmDelay
-            )
+            scheduleStartRecoveryIfNeeded(allowDeferredRecovery: allowDeferredRecovery)
             return false
         }
         nativeSampleRate = nativeFormat.sampleRate
@@ -512,7 +675,7 @@ class ParakeetEngine: ObservableObject {
             nativeSampleRate = refreshedOutputFormat.sampleRate
 
             guard isValidAudioFormat(refreshedOutputFormat), isValidAudioFormat(refreshedHardwareFormat) else {
-                lastStartFailureMessage = "Audio device is still reconnecting after wake. Try again in a moment."
+                lastStartFailureMessage = currentStartRecoveryMessage()
                 EventReporter.shared.capture(level: .warning, engine: "parakeet",
                     event: "format_mismatch_retry_needed",
                     message: "Audio hardware still settling after device change",
@@ -523,16 +686,12 @@ class ParakeetEngine: ObservableObject {
                     ])
                 audioEngine.stop()
                 isEnginePrewarmed = false
-                scheduleRecovery(
-                    after: TranscriptedConstants.audioRewarmDelay,
-                    event: "start_recording_rewarm_failed",
-                    retryDelay: TranscriptedConstants.audioRewarmDelay
-                )
+                scheduleStartRecoveryIfNeeded(allowDeferredRecovery: allowDeferredRecovery)
                 return false
             }
 
             guard refreshedOutputFormat.sampleRate == refreshedHardwareFormat.sampleRate else {
-                lastStartFailureMessage = "Bluetooth audio is still resyncing after wake. Try again in a moment."
+                lastStartFailureMessage = currentBluetoothResyncMessage()
                 print("⚠️ PARAKEET | format mismatch persisted after resync: output=\(refreshedOutputFormat.sampleRate)Hz hw=\(refreshedHardwareFormat.sampleRate)Hz")
                 EventReporter.shared.capture(level: .warning, engine: "parakeet",
                     event: "format_mismatch_retry_needed",
@@ -544,17 +703,13 @@ class ParakeetEngine: ObservableObject {
                     ])
                 audioEngine.stop()
                 isEnginePrewarmed = false
-                scheduleRecovery(
-                    after: TranscriptedConstants.audioRewarmDelay,
-                    event: "start_recording_rewarm_failed",
-                    retryDelay: TranscriptedConstants.audioRewarmDelay
-                )
+                scheduleStartRecoveryIfNeeded(allowDeferredRecovery: allowDeferredRecovery)
                 return false
             }
         }
 
         guard nativeSampleRate > 0 else {
-            lastStartFailureMessage = "Audio hardware is not ready yet. Try again in a moment."
+            lastStartFailureMessage = currentHardwareNotReadyMessage()
             print("❌ PARAKEET | sample rate is 0 — audio hardware not ready")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "zero_sample_rate",
                 message: "Sample rate is 0, audio hardware not initialized")
@@ -568,8 +723,6 @@ class ParakeetEngine: ObservableObject {
                 message: "AVAudioFormat creation failed", context: ["sample_rate": "\(nativeSampleRate)"])
             return false
         }
-
-        recordedSampleRate = nativeSampleRate
 
         inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: monoFormat) { [weak self] buffer, _ in
             guard let self = self,
@@ -656,7 +809,7 @@ class ParakeetEngine: ObservableObject {
                 try audioEngine.start()
                 isEnginePrewarmed = true
             } catch {
-                lastStartFailureMessage = "Transcripted couldn't start the microphone. Try again in a moment."
+                lastStartFailureMessage = currentMicStartFailureMessage()
                 inputNode.removeTap(onBus: 0)  // Clean up tap to prevent double-install crash
                 print("❌ PARAKEET | audio engine failed: \(error.localizedDescription)")
                 EventReporter.shared.capture(level: .error, engine: "parakeet",
@@ -681,7 +834,8 @@ class ParakeetEngine: ObservableObject {
             context: [
                 "audio_device": inputDeviceName,
                 "sample_rate": "\(nativeSampleRate)",
-                "recovery_attempt": "\(isRecoveryAttempt)"
+                "recovery_attempt": "\(isRecoveryAttempt)",
+                "continuing_session": "\(continuingSession)"
             ])
 
         // Watchdog: detect zombie audio engine (running but no samples flowing after sleep/wake).
@@ -704,7 +858,7 @@ class ParakeetEngine: ObservableObject {
 
             let sampleCount = self.pendingSamplesLock.withLock {
                 guard self.isRecording else { return -1 }
-                return self.pendingSamples.count + self.sampleBuffer.count
+                return self.pendingSamples.count
             }
             guard sampleCount >= 0 else { return }
 
@@ -715,15 +869,9 @@ class ParakeetEngine: ObservableObject {
                 context: ["audio_device": self.inputDeviceName])
 
             // Full teardown
-            self.streamingSamplesLock.withLock {
-                self.streamingSampleBuffer.removeAll(keepingCapacity: true)
-            }
-            await self.eouManager?.reset()
-            self.audioEngine.inputNode.removeTap(onBus: 0)
+            self.finishActiveRecording(flushPendingSamples: false)
             self.audioEngine.stop()
             self.isEnginePrewarmed = false
-            self.isRecording = false
-            self.audioLevel = 0
             self.resetBufferedAudio()
 
             // Brief delay for hardware to reinitialize
@@ -731,7 +879,7 @@ class ParakeetEngine: ObservableObject {
             guard !Task.isCancelled else { return }
 
             // Retry once — isRecoveryAttempt prevents another watchdog
-            if self.startRecording(isRecoveryAttempt: true) {
+            if self.startRecording(isRecoveryAttempt: true, allowDeferredRecovery: false) {
                 print("✅ PARAKEET | zombie engine recovered — recording restarted")
                 EventReporter.shared.capture(level: .info, engine: "parakeet", event: "zombie_engine_recovered",
                     message: "Audio engine recovered after reset")
@@ -747,11 +895,13 @@ class ParakeetEngine: ObservableObject {
     }
 
     func stopRecording() {
-        guard isRecording else { return }
+        let wasRecoveringFromDeviceChange = configChangeWasRecording
+        guard isRecording || wasRecoveringFromDeviceChange else { return }
         cancelPendingRecovery()
+        cancelConfigRecovery()
         audioWatchdogTask?.cancel()
         audioWatchdogTask = nil
-        if liveDisplayEnabled {
+        if isRecording, liveDisplayEnabled {
             streamingSamplesLock.lock()
             let remainingEou: [Float] = streamingSampleBuffer
             streamingSampleBuffer.removeAll(keepingCapacity: true)
@@ -764,20 +914,21 @@ class ParakeetEngine: ObservableObject {
                 }
             }
         }
-        audioEngine.inputNode.removeTap(onBus: 0)
-        pendingSamplesLock.lock()
-        sampleBuffer.append(contentsOf: pendingSamples)
-        pendingSamples.removeAll(keepingCapacity: true)
-        pendingSamplesLock.unlock()
-        isRecording = false
+        if isRecording {
+            audioEngine.inputNode.removeTap(onBus: 0)
+            appendPendingSamplesToCapturedAudio()
+            isRecording = false
+        }
         audioLevel = 0
-        print("⏹️ PARAKEET | recording stopped (\(sampleBuffer.count) samples, \(String(format: "%.1f", Double(sampleBuffer.count) / nativeSampleRate))s)")
+        let sampleCount = capturedAudioTimeline.totalSourceSampleCount
+        let durationSeconds = capturedAudioTimeline.totalDurationSeconds
+        print("⏹️ PARAKEET | recording stopped (\(sampleCount) samples, \(String(format: "%.1f", durationSeconds))s)")
         EventReporter.shared.capture(level: .info, engine: "parakeet", event: "recording_stopped",
             message: "Recording stopped",
             context: [
                 "audio_device": inputDeviceName,
-                "sample_count": "\(sampleBuffer.count)",
-                "duration_s": String(format: "%.1f", Double(sampleBuffer.count) / nativeSampleRate)
+                "sample_count": "\(sampleCount)",
+                "duration_s": String(format: "%.1f", durationSeconds)
             ])
     }
 
@@ -808,11 +959,8 @@ class ParakeetEngine: ObservableObject {
                 message: "transcribe() called while transcription already in progress")
             return nil
         }
-        pendingSamplesLock.withLock {
-            sampleBuffer.append(contentsOf: pendingSamples)
-            pendingSamples.removeAll(keepingCapacity: true)
-        }
-        guard !sampleBuffer.isEmpty else {
+        appendPendingSamplesToCapturedAudio()
+        guard !capturedAudioTimeline.isEmpty else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "no_audio_samples",
                 message: "No audio samples in buffer when transcribe() called")
             return nil
@@ -825,33 +973,40 @@ class ParakeetEngine: ObservableObject {
         }
 
         isTranscribing = true
-        // Swap instead of copy — moves data out of sampleBuffer without allocating a duplicate.
-        // sampleBuffer is cleared immediately, freeing capacity before resampling.
-        var samples: [Float] = []
-        swap(&samples, &sampleBuffer)
-        let inputRate = recordedSampleRate ?? nativeSampleRate
+        let segments = capturedAudioTimeline.drain()
+        let nativeCount = segments.reduce(0) { $0 + $1.samples.count }
+        let estimatedResampledCount = segments.reduce(0) { partial, segment in
+            partial + Int((Double(segment.samples.count) * TranscriptedConstants.parakeetSampleRate / segment.sampleRate).rounded())
+        }
+        var resampled: [Float] = []
+        resampled.reserveCapacity(estimatedResampledCount)
 
         let startTime = CFAbsoluteTimeGetCurrent()
 
-        // Resample to 16kHz for Parakeet inference, then free the native-rate buffer
-        // before inference — avoids holding both the raw and resampled arrays simultaneously.
-        let nativeCount = samples.count
-        let resampled = AudioResampler.resample(samples, from: inputRate, to: 16000)
-        samples.removeAll()
-        print("🔄 PARAKEET | resampled \(nativeCount) → \(resampled.count) samples")
+        for segment in segments {
+            if segment.sampleRate == TranscriptedConstants.parakeetSampleRate {
+                resampled.append(contentsOf: segment.samples)
+            } else {
+                let resampledSegment = AudioResampler.resample(
+                    segment.samples,
+                    from: segment.sampleRate,
+                    to: TranscriptedConstants.parakeetSampleRate
+                )
+                resampled.append(contentsOf: resampledSegment)
+            }
+        }
+        print("🔄 PARAKEET | resampled \(nativeCount) source samples across \(segments.count) segment(s) → \(resampled.count) samples")
 
         do {
             let result = try await manager.transcribe(resampled, source: .microphone)
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            let audioDuration = Double(resampled.count) / 16000.0
+            let audioDuration = Double(resampled.count) / TranscriptedConstants.parakeetSampleRate
             let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
             print("✅ PARAKEET | transcribed in \(String(format: "%.2f", elapsed))s: \"\(trimmed.prefix(80))...\"")
 
             isTranscribing = false
-            sampleBuffer.removeAll(keepingCapacity: true)
-            recordedSampleRate = nil
 
             if trimmed.isEmpty {
                 EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "transcription_empty",
@@ -877,8 +1032,6 @@ class ParakeetEngine: ObservableObject {
                 message: error.localizedDescription,
                 context: ["samples": "\(nativeCount)", "elapsed": String(format: "%.2f", elapsed)])
             isTranscribing = false
-            sampleBuffer.removeAll(keepingCapacity: true)
-            recordedSampleRate = nil
             return nil
         }
     }
@@ -886,7 +1039,7 @@ class ParakeetEngine: ObservableObject {
     // MARK: - Pure-Sample Transcription (for Meeting pipeline)
 
     /// Transcribe pre-resampled 16kHz mono Float32 samples directly, bypassing
-    /// ParakeetEngine's recording lifecycle (audioEngine, sampleBuffer, EOU streaming).
+    /// ParakeetEngine's recording lifecycle (audioEngine, capture timeline, EOU streaming).
     ///
     /// Used by `MeetingSTTAdapter` to satisfy Core's `SpeechToTextEngine` protocol:
     /// Core's TranscriptionPipeline owns its own recording (mic + system audio files via
@@ -932,21 +1085,13 @@ class ParakeetEngine: ObservableObject {
 
     func cancel() {
         cancelPendingRecovery()
+        cancelConfigRecovery()
         audioWatchdogTask?.cancel()
         audioWatchdogTask = nil
         if isRecording {
-            if liveDisplayEnabled {
-                streamingSamplesLock.lock()
-                streamingSampleBuffer.removeAll(keepingCapacity: true)
-                streamingSamplesLock.unlock()
-                Task { await eouManager?.reset() }
-            }
-            audioEngine.inputNode.removeTap(onBus: 0)
-            isRecording = false
-            audioLevel = 0
+            finishActiveRecording(flushPendingSamples: false)
         }
         resetBufferedAudio(keepingCapacity: false)
-        recordedSampleRate = nil
         lastStartFailureMessage = nil
         isTranscribing = false
         liveTranscript = ""
@@ -955,6 +1100,7 @@ class ParakeetEngine: ObservableObject {
 
     func cleanup() {
         cancelPendingRecovery()
+        cancelConfigRecovery()
         initializeTask?.cancel()
         initializeTask = nil
         if let observer = configChangeObserver {
@@ -976,6 +1122,8 @@ class ParakeetEngine: ObservableObject {
     deinit {
         pendingRecoveryTask?.cancel()
         pendingRecoveryTask = nil
+        configRecoveryTask?.cancel()
+        configRecoveryTask = nil
         initializeTask?.cancel()
         initializeTask = nil
         if let observer = configChangeObserver {
@@ -1001,11 +1149,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func resetBufferedAudio(keepingCapacity: Bool = true) {
-        if keepingCapacity {
-            sampleBuffer.removeAll(keepingCapacity: true)
-        } else {
-            sampleBuffer.removeAll()
-        }
+        capturedAudioTimeline.removeAll(keepingCapacity: keepingCapacity)
         pendingSamplesLock.withLock {
             if keepingCapacity {
                 pendingSamples.removeAll(keepingCapacity: true)
