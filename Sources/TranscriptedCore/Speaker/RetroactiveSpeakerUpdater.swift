@@ -10,12 +10,19 @@ extension TranscriptSaver {
     /// Thread-safe: serialized via fileUpdateQueue to prevent concurrent file corruption.
     public static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String) {
         fileUpdateQueue.sync {
-            _retroactivelyUpdateSpeakerImpl(dbId: dbId, newName: newName)
+            _retroactivelyUpdateSpeakerImpl(dbId: dbId, newName: newName, directory: nil)
         }
     }
 
-    private static func _retroactivelyUpdateSpeakerImpl(dbId: UUID, newName: String) {
-        let dir = defaultSaveDirectory
+    /// Internal overload for tests — scans a specific directory instead of `defaultSaveDirectory`.
+    static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String, in directory: URL) {
+        fileUpdateQueue.sync {
+            _retroactivelyUpdateSpeakerImpl(dbId: dbId, newName: newName, directory: directory)
+        }
+    }
+
+    private static func _retroactivelyUpdateSpeakerImpl(dbId: UUID, newName: String, directory: URL?) {
+        let dir = directory ?? defaultSaveDirectory
         guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
             .filter({ $0.pathExtension == "md" }) else { return }
 
@@ -34,12 +41,9 @@ extension TranscriptSaver {
                     // Next line should be name: "..."
                     if i + 1 < lines.count {
                         let nameLine = lines[i + 1]
-                        if let range = nameLine.range(of: "name: \""),
-                           let endRange = nameLine[range.upperBound...].range(of: "\"") {
-                            let oldName = String(nameLine[range.upperBound..<endRange.lowerBound])
-                            if oldName != newName && !oldNames.contains(oldName) {
-                                oldNames.append(oldName)
-                            }
+                        if let oldName = unescapeYAMLStringValue(afterPrefix: "name: ", in: nameLine),
+                           oldName != newName && !oldNames.contains(oldName) {
+                            oldNames.append(oldName)
                         }
                     }
                 }
@@ -147,6 +151,13 @@ extension TranscriptSaver {
                 return false
             }
 
+            // Mirror name and persistent ID updates into the JSON sidecar so agents
+            // see the finalized speaker data without re-parsing the markdown.
+            let jsonURL = transcriptURL.deletingPathExtension().appendingPathExtension("json")
+            if FileManager.default.fileExists(atPath: jsonURL.path) {
+                updateAgentSidecar(at: jsonURL, updates: updates)
+            }
+
             AppLogger.pipeline.info("Updated speaker names in transcript", [
                 "path": transcriptURL.lastPathComponent,
                 "updates": "\(updates.count)"
@@ -154,6 +165,46 @@ extension TranscriptSaver {
 
             return true
         }
+    }
+
+    private static func updateAgentSidecar(at jsonURL: URL, updates: [SpeakerNameUpdate]) {
+        guard let data = try? Data(contentsOf: jsonURL),
+              let transcript = try? JSONDecoder().decode(AgentTranscript.self, from: data) else { return }
+
+        var updatedSpeakers = transcript.speakers
+        var changed = false
+
+        for i in updatedSpeakers.indices {
+            let speakerId = updatedSpeakers[i].id
+            guard speakerId.hasPrefix("system_") else { continue }
+            let sortformerKey = String(speakerId.dropFirst("system_".count))
+            guard let update = updates.first(where: { $0.sortformerSpeakerId == sortformerKey }) else { continue }
+
+            let resolvedId = (update.resolvedPersistentSpeakerId ?? update.persistentSpeakerId).uuidString
+            updatedSpeakers[i] = AgentSpeaker(
+                id: updatedSpeakers[i].id,
+                persistentSpeakerId: resolvedId,
+                name: update.newName,
+                confidence: updatedSpeakers[i].confidence,
+                wordCount: updatedSpeakers[i].wordCount,
+                speakingSeconds: updatedSpeakers[i].speakingSeconds
+            )
+            changed = true
+        }
+
+        guard changed else { return }
+
+        let updated = AgentTranscript(
+            version: transcript.version,
+            transcriptId: transcript.transcriptId,
+            recording: transcript.recording,
+            speakers: updatedSpeakers,
+            utterances: transcript.utterances
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try? encoder.encode(updated).write(to: jsonURL, options: .atomic)
     }
 
     /// Resolve a transcript URL that may have been renamed by MeetingTranscriptStyler.
@@ -192,9 +243,10 @@ extension TranscriptSaver {
     /// Handles YAML frontmatter, body labels, wiki links, and speaker breakdown.
     /// Pass `updateSpeakerTag: true` when the old name also has an Obsidian tag to rename.
     private static func applyNameReplacement(in content: inout String, oldName: String, newName: String, updateSpeakerTag: Bool) {
-        // Security: YAML-escape the new name before interpolating into double-quoted scalars
+        // Security: YAML-escape both old and new names when matching/replacing YAML scalars.
+        let yamlSafeOldName = escapeYAML(oldName)
         let yamlSafeName = escapeYAML(newName)
-        content = content.replacingOccurrences(of: "name: \"\(oldName)\"", with: "name: \"\(yamlSafeName)\"")
+        content = content.replacingOccurrences(of: "name: \"\(yamlSafeOldName)\"", with: "name: \"\(yamlSafeName)\"")
         content = content.replacingOccurrences(of: "[System/\(oldName)]", with: "[System/\(newName)]")
         content = content.replacingOccurrences(of: "[[\(oldName)]]", with: "[[\(newName)]]")
         content = content.replacingOccurrences(of: "**\(oldName):**", with: "**\(newName):**")
@@ -567,12 +619,14 @@ extension TranscriptSaver {
         return (timestamp, source, label, text)
     }
 
+    private static let styledHeaderRegex = try? NSRegularExpression(pattern: #"^([0-9:]+)\s+\[(.+?)\]$"#)
+
     private static func parseStyledTranscriptHeader(_ line: String) -> (timestamp: String, source: String, label: String)? {
         let normalizedHeader = line
             .replacingOccurrences(of: "**", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard let regex = try? NSRegularExpression(pattern: #"^([0-9:]+)\s+\[(.+?)\]$"#) else {
+        guard let regex = styledHeaderRegex else {
             return nil
         }
 
@@ -612,6 +666,42 @@ extension TranscriptSaver {
     private static func isObsidianFormatted(_ content: String) -> Bool {
         content.contains("\ncssclasses:\n  - transcripted")
             || content.contains("\naliases:\n  - \"Meeting ")
+    }
+
+    /// Extract and unescape a double-quoted YAML scalar value that starts after `prefix`.
+    /// Handles `\"`, `\\`, `\n`, `\r`, `\t` escape sequences.
+    /// Returns nil if the prefix isn't found or the value isn't double-quoted.
+    private static func unescapeYAMLStringValue(afterPrefix prefix: String, in line: String) -> String? {
+        guard let prefixRange = line.range(of: prefix) else { return nil }
+        let afterPrefix = line[prefixRange.upperBound...]
+        guard afterPrefix.hasPrefix("\"") else { return nil }
+
+        var result = ""
+        var index = afterPrefix.index(after: afterPrefix.startIndex)  // skip opening "
+        while index < afterPrefix.endIndex {
+            let c = afterPrefix[index]
+            if c == "\\" {
+                let nextIndex = afterPrefix.index(after: index)
+                guard nextIndex < afterPrefix.endIndex else { break }
+                switch afterPrefix[nextIndex] {
+                case "\"": result.append("\"")
+                case "\\": result.append("\\")
+                case "n":  result.append("\n")
+                case "r":  result.append("\r")
+                case "t":  result.append("\t")
+                default:
+                    result.append(c)
+                    result.append(afterPrefix[nextIndex])
+                }
+                index = afterPrefix.index(nextIndex, offsetBy: 1)
+            } else if c == "\"" {
+                break  // closing quote
+            } else {
+                result.append(c)
+                index = afterPrefix.index(after: index)
+            }
+        }
+        return result
     }
 }
 

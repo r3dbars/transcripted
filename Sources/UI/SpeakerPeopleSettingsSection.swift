@@ -67,15 +67,12 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
         let profileId = profile.id
         let speakerDatabase = self.speakerDatabase
-        let transcriptsDirectory = self.transcriptsDirectory
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             speakerDatabase.setDisplayName(id: profileId, name: trimmed, source: NameSource.userManual)
             speakerDatabase.resetDisputeCount(id: profileId)
             TranscriptSaver.retroactivelyUpdateSpeaker(
                 dbId: profileId,
-                newName: trimmed,
-                directory: transcriptsDirectory,
-                speakerStoreForIndex: speakerDatabase
+                newName: trimmed
             )
             let profiles = Self.sortedProfiles(from: speakerDatabase)
             DispatchQueue.main.async {
@@ -92,7 +89,6 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let targetId = target.id
         let targetName = target.displayName
         let speakerDatabase = self.speakerDatabase
-        let transcriptsDirectory = self.transcriptsDirectory
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
 
@@ -115,12 +111,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 ?? sourceName
                 ?? "Speaker \(targetId.uuidString.prefix(8))"
 
-            TranscriptSaver.retroactivelyMergeSpeaker(
-                sourceDbId: sourceId,
-                into: targetId,
-                newName: resolvedName,
-                directory: transcriptsDirectory,
-                speakerStoreForIndex: speakerDatabase
+            TranscriptSaver.retroactivelyUpdateSpeaker(
+                dbId: sourceId,
+                newName: resolvedName
             )
             let profiles = Self.sortedProfiles(from: speakerDatabase)
             DispatchQueue.main.async {
