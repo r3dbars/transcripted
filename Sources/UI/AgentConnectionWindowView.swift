@@ -209,7 +209,7 @@ struct AgentConnectionWindowView: View {
             VStack(alignment: .leading, spacing: 12) {
                 AgentConnectionFileRow(
                     name: "Meetings",
-                    detail: "Structured meeting transcripts, markdown files, and AGENT.md live here.",
+                    detail: "Structured meeting transcripts, markdown files, and JSON sidecars live here.",
                     path: viewModel.context.meetingsFolderURL.path,
                     isAvailable: viewModel.fileExists(viewModel.context.meetingsFolderURL),
                     actionTitle: "Reveal"
