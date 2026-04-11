@@ -58,11 +58,11 @@ final class MeetingModelDownloader {
                 ])
             }
 
-            AppLogger.pipeline.info("Meeting model warmup complete", [
+            TranscriptedCore.AppLogger.pipeline.info("Meeting model warmup complete", [
                 "elapsed_ms": "\(Int(Date().timeIntervalSince(startedAt) * 1000))"
             ])
         } catch {
-            AppLogger.pipeline.error("Meeting model warmup failed", [
+            TranscriptedCore.AppLogger.pipeline.error("Meeting model warmup failed", [
                 "elapsed_ms": "\(Int(Date().timeIntervalSince(startedAt) * 1000))",
                 "error": error.localizedDescription
             ])
