@@ -13,7 +13,7 @@
     <key>CFBundleShortVersionString</key>
     <string>1.0.3</string>
     <key>TranscriptedSentryDSN</key>
-    <string></string>
+    <string>https://c011fcf6649a739e6de3c298307d9685@o4511202804170752.ingest.us.sentry.io/4511202819112960</string>
     <key>TranscriptedSentryEnvironment</key>
     <string>production</string>
     <key>CFBundlePackageType</key>
