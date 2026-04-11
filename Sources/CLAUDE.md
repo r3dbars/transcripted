@@ -6,14 +6,18 @@
 
 - dictation capture and paste-back
 - meeting capture, transcription, and transcript browsing
+- wake / sleep recovery for active recording flows
 
 Important entry points:
 
 - `TranscriptedApp.swift` — app entry point, menubar wiring, popover, overlay setup, and detected-meeting prompt wiring
-- `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, and lazy `MeetingSessionController`
+- `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, wake-recovery coordination, and lazy `MeetingSessionController`
+- `DraftPaths.swift` — app-support path helpers for the current Draft-named compatibility tree
+- `HotkeyPreferences.swift` — persisted hotkey settings used by capture routing
+- `TranscriptedConstants.swift` — shared timing and behavior constants used across the app target
 - `Capture/ContextCaptureEngine.swift` — right-option dictation handling, keyboard hotkeys, meeting hotkey routing
 - `UI/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
-- `Meeting/MeetingPromptDetector.swift` — Calendar-driven meeting-link detection used to offer one-tap meeting capture prompts
+- `Meeting/MeetingPromptDetector.swift` — Calendar and runtime-app meeting detection used to offer one-tap meeting capture prompts
 - `Meeting/MeetingSessionController.swift` — app-side bridge into `TranscriptedCore`, including queued meeting transcription handoff
 - `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter
 
@@ -22,14 +26,15 @@ Important entry points:
 - `Accessibility/` — AX helpers for overlay positioning
 - `API/` — beta-only config currently; older API docs are historical
 - `Capture/` — hotkeys, context parsing, capture routing
-- `Dictation/` — dictation transcript persistence
-- `Text/` — small pure text utilities retained from the earlier drafting flow
-- `Meeting/` — app-side meeting bridge and transcript restyling
+- `Dictation/` — dictation transcript persistence and timeout helpers
+- `Meeting/` — app-side meeting bridge, prompts, storage, and transcript restyling
 - `Observability/` — events, debug log, telemetry, beta updater, crash reporting
-- `Speech/` — Parakeet STT and router
+- `Reliability/` — wake / sleep recovery coordination
+- `Speech/` — Parakeet STT, router, and recorded-audio buffering helpers
 - `Style/` — pure text heuristics retained from the older style-learning system
+- `Text/` — small pure text utilities retained from the earlier drafting flow
 - `TranscriptedCore/` — shared library boundary
-- `UI/` — menubar, overlays, settings, recent meetings, speaker naming
+- `UI/` — menubar, overlays, settings, recent meetings, speaker naming, and agent-connect
 
 The historical planning docs that used to live alongside older placeholder
 areas were moved under `docs/archive/` so the source tree reads more like the

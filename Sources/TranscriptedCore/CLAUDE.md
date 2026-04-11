@@ -4,18 +4,18 @@
 
 `Sources/TranscriptedCore/` is the reusable meeting transcription library embedded in this repo. It is consumed by the app through `Sources/Meeting/`, and it can also be tested as a standalone Swift package through the root `Package.swift`.
 
-## Subsystems (55 Swift files)
+## Subsystems (57 Swift files)
 
-- `Audio/` (9 files) — mic + system audio capture, device recovery, resampling, level metering, process tap, buffer writer
+- `Audio/` (11 files) — mic + system audio capture, device recovery, resampling, level metering, process tap, buffer writing, and merge helpers
 - `Logging/` (2 files) — shared app logger and JSONL file logger
-- `Models/` (4 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, metadata builders
+- `Models/` (4 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, and transcript metadata builders
 - `Pipeline/` (4 files) — transcription orchestration, pipeline runner, and task queue
 - `Protocols/` (7 files) — host-injected seams: `SpeechToTextEngine`, `DiarizationEngine`, `SpeakerStore`, `TranscriptNotifier`, `AudioCaptureEngine`, `StatsStore`, `TranscriptStorage`
-- `Services/` (7 files) — DI container (`AppServices`), model download, path indirection, recording validation, diarization, failed transcription manager
-- `Speaker/` (10 files) — speaker DB, embedding matching/clustering, clip extraction, naming policy/coordinator, profile merging, retroactive updater
+- `Services/` (7 files) — DI container (`AppServices`), model bundle / download management, path indirection, recording validation, diarization, and failed-transcription persistence
+- `Speaker/` (10 files) — speaker DB, embedding matching / clustering, clip extraction, naming policy / coordinator, profile merging, retroactive transcript updates
 - `Stats/` (4 files) — recording stats database, models, queries, and service
 - `Storage/` (4 files) — transcript save, scanner, formatter, JSON sidecar output
-- `Utilities/` (4 files) — date helpers, permissions, transcript utility functions
+- `Utilities/` (4 files) — date formatting / parsing, file permissions, and transcript update helpers
 
 ## The seams embedders should know
 
@@ -68,9 +68,17 @@ Also run when the package seam changes:
 
 - `swift test`
 
-Current direct core coverage is thin and concentrated around the public seam:
+Current direct core coverage includes:
 
 - `Tests/TranscriptedCoreTests/CoreStoragePathsTests.swift`
+- `Tests/TranscriptedCoreTests/EmbeddingClustererTests.swift`
+- `Tests/TranscriptedCoreTests/MicRecordingFileMergerTests.swift`
+- `Tests/TranscriptedCoreTests/RetroactiveSpeakerUpdaterTests.swift`
+- `Tests/TranscriptedCoreTests/SpeakerMatchingServiceTests.swift`
+- `Tests/TranscriptedCoreTests/SpeakerNamingCoordinatorTests.swift`
+- `Tests/TranscriptedCoreTests/SpeakerProfileMergerTests.swift`
+- `Tests/TranscriptedCoreTests/StatsDatabaseTests.swift`
+- `Tests/TranscriptedCoreTests/TranscriptionPipelineHelpersTests.swift`
 - `SmokeTests/CoreIntegrationSmoke.swift`
 
-That means many core changes still depend heavily on build + smoke validation.
+Core coverage is still selective, but it is no longer limited just to the package seam. Speaker reconciliation, file merging, stats, and storage-path behavior now have direct tests.

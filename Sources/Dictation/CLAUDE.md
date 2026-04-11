@@ -2,11 +2,12 @@
 
 ## What this directory does
 
-`Sources/Dictation/` owns the on-disk markdown artifacts written after a dictation completes. It does not handle audio capture or STT itself; that stays in `DictationSessionController` and `Speech/`.
+`Sources/Dictation/` owns the small persistence helpers behind completed dictation sessions. It does not handle audio capture or STT itself; that stays in `DictationSessionController` and `Speech/`.
 
 ## Files
 
 - `DictationAgentOutput.swift` — Codable models (`AgentDictationDay`, `AgentDictationEntry`) for the JSON sidecar written alongside each day's markdown
+- `DictationSessionTimeout.swift` — uptime-based timeout helper so sleep does not consume a session's remaining record window
 - `DictationStoragePaths.swift` — Draft-named storage root for dictation artifacts
 - `DictationTranscriptWriter.swift` — groups completed dictations into one markdown file per day
 
@@ -15,7 +16,7 @@
 1. `Sources/UI/DictationSessionController.swift` transcribes audio with `STTRouter`.
 2. The session tries to paste the text back into the target app.
 3. The session records whether delivery was `pasted`, `copied`, or `failed`.
-4. `DictationTranscriptWriter.save(...)` appends a new section to that day's markdown file.
+4. `DictationTranscriptWriter.save(...)` appends a new section to that day's markdown file and updates the JSON sidecar.
 
 ## Storage
 
@@ -34,10 +35,12 @@ Each section captures:
 
 ## Test coverage
 
+- `Tests/DictationAgentOutputTests.swift`
+- `Tests/DictationSessionTimeoutTests.swift`
 - `Tests/DictationTranscriptWriterTests.swift`
 
 ## Agent notes
 
 - If you change the markdown layout, update the tests.
 - Dictation artifacts are append-only by day; do not assume one file per session.
-- This directory is about persistence only. Recording lifecycle changes belong in `Sources/UI/DictationSessionController.swift` and `Sources/Speech/`.
+- This directory is about persistence and timing helpers only. Recording lifecycle changes belong in `Sources/UI/DictationSessionController.swift` and `Sources/Speech/`.

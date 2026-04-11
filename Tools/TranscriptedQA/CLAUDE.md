@@ -21,28 +21,28 @@ QA testing suite for Transcripted. 23 Swift files total: `Package.swift` plus 22
 | File | Purpose |
 |------|---------|
 | `CheckHealth.swift` | Quick health check: DB integrity, model presence, disk space |
+| `GenerateFixtures.swift` | Generate valid test data (transcripts, sidecars, DB records) for CI or manual verification |
+| `RoundTrip.swift` | Generate test data, validate, corrupt, re-validate, and confirm validators catch real defects |
+| `StressTest.swift` | Generate large datasets and validate performance + correctness |
 | `ValidateAll.swift` | Run all validators: transcripts, DB, index, logs, artifacts |
-| `ValidateArtifacts.swift` | Check transcript sidecars (.json), YAML frontmatter, speaker clips |
+| `ValidateArtifacts.swift` | Check transcript sidecars (`.json`), YAML frontmatter, speaker clips |
 | `ValidateDatabase.swift` | SpeakerDB and StatsDB integrity, schema validation, corruption check |
 | `ValidateIndex.swift` | Transcript index consistency, missing sidecars, orphan files |
 | `ValidateLogs.swift` | Log file analysis and `app.jsonl` format validation |
 | `ValidateTranscripts.swift` | Transcript content validation, speaker attribution, timestamp checks |
-| `GenerateFixtures.swift` | Generate valid test data (transcripts, sidecars, DB records) that passes all validators; outputs to configurable directory (default: `/tmp/transcripted-test-data`) |
-| `RoundTrip.swift` | Generate test data, validate, corrupt, re-validate, verifies validators catch real defects |
-| `StressTest.swift` | Generate large datasets (configurable transcript/speaker/utterance counts) and validate performance + correctness |
 
 ### Generators/ (1 file)
 
 | File | Purpose |
 |------|---------|
-| `TestDataGenerator.swift` | Shared fixture builder used by GenerateFixtures, RoundTrip, and StressTest commands |
+| `TestDataGenerator.swift` | Shared fixture builder used by `GenerateFixtures`, `RoundTrip`, and `StressTest` |
 
 ### Validators/ (7 files)
 
 | File | Purpose |
 |------|---------|
 | `HealthChecker.swift` | System health: disk space, model files, DB existence |
-| `IndexValidator.swift` | Index consistency, transcript/sidecar pairing |
+| `IndexValidator.swift` | Index consistency, transcript / sidecar pairing |
 | `JSONSidecarValidator.swift` | YAML frontmatter and agent JSON structure |
 | `LogValidator.swift` | Log file parsing and error pattern detection |
 | `SpeakerDBValidator.swift` | SpeakerDB schema, record count, embedding integrity |
@@ -94,9 +94,9 @@ transcripted-qa stress-test --transcripts 100 --speakers-per-transcript 4 --utte
 ## Key Features
 
 - **Health checks**: Quick system status before deep validation
-- **Database integrity**: SpeakerDB and StatsDB corruption detection with backup/recreate pattern
+- **Database integrity**: SpeakerDB and StatsDB corruption detection with backup / recreate pattern
 - **Transcript validation**: Content, speaker attribution, timestamp consistency
-- **Index validation**: Transcript/sidecar pairing, orphan file detection
+- **Index validation**: Transcript / sidecar pairing, orphan file detection
 - **Log analysis**: Error pattern detection, warning frequency tracking
 - **Artifact validation**: YAML frontmatter, JSON sidecars, speaker clips
 - **Fixture generation**: `generate-fixtures` creates valid test data for use in CI or manual testing

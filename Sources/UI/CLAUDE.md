@@ -2,8 +2,7 @@
 
 ## What This Does
 
-`Sources/UI/` contains the current app surfaces for Transcripted's active
-features:
+`Sources/UI/` contains the current app surfaces for Transcripted's active features:
 
 - dictation overlay
 - meeting overlay
@@ -14,7 +13,7 @@ features:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (38 Swift files)
+## Files (40 Swift files)
 
 ### Dictation Overlay
 
@@ -70,7 +69,9 @@ The current agent-connect surfaces should keep one simple mental model:
 
 - `HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
 - `PermissionsOnboardingView.swift` — first-launch permissions walkthrough
-- `TranscriptedPermissionAccess.swift` — accessibility and screen recording permission checks
+- `SpeakerClipPlayback.swift` — simple shared audio-preview helper for persisted speaker sample clips
+- `SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, naming, merging, previewing, and deleting saved speaker profiles
+- `TranscriptedPermissionAccess.swift` — accessibility, screen recording, and calendar permission checks
 - `TranscriptedSettingsView.swift` — main settings view
 - `TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 
@@ -98,4 +99,5 @@ Manual checks:
 - detected-meeting prompts appear only when appropriate and can start or snooze a meeting cleanly
 - meeting overlay warms up and records cleanly
 - menubar popover renders shortcuts, recents, settings actions, and the agent-connect page cleanly
+- speaker settings can preview clips and rename / merge people cleanly
 - permissions onboarding and settings window still open correctly

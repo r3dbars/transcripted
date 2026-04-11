@@ -44,6 +44,7 @@ They also honor:
 | `DiarizeCommand.swift` | Single-file diarization command |
 | `BatchCommand.swift` | Directory diarization command |
 | `ConfigLoader.swift` | JSON-to-`OfflineDiarizerConfig` loader |
+| `DiarizerConfigCompatibility.swift` | Compatibility shim for speaker-bound tuning while newer FluidAudio APIs are in flux |
 | `RTTMWriter.swift` | RTTM output formatter |
 
 ## Build And Run
@@ -62,4 +63,5 @@ swift run transcripted-cli diarize /path/to/audio.wav --json
 - the context commands and the diarization commands serve different users, do not describe the whole package as diarization-only
 - the diarization commands depend on repo-level artifacts, so run `bash build-deps.sh` first when those are missing
 - the default context paths now point at `~/Library/Application Support/Draft/`, not only the older `~/Documents/Transcripted/` layout
+- `DiarizerConfigCompatibility.swift` currently keeps old bounded-speaker call sites compiling; it does not reintroduce upstream behavior by itself
 - changes here should be verified independently from the app build
