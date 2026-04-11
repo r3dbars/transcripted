@@ -23,10 +23,10 @@ Path overrides:
 - `TRANSCRIPTED_DICTATIONS_DIR` — dictations directory override
 - `TRANSCRIPTED_INDEX_DIR` — SQLite index directory override
 
-## Package Layout (13 Swift files)
+## Package Layout (14 Swift files)
 
 - `Package.swift` — Swift package manifest for the standalone MCP server
-- `Sources/TranscriptedMCP/` — 8 source files for server startup, directory resolution, indexing, and tool handlers
+- `Sources/TranscriptedMCP/` — 9 source files for server startup, directory resolution, path validation, indexing, and tool handlers
 - `Tests/TranscriptedMCPTests/` — 4 test files for index lifecycle, markdown loading, name variants, and shared fixtures
 
 ## File Index
@@ -40,6 +40,7 @@ Path overrides:
 | `TranscriptLoader.swift` | Loads markdown meeting transcripts and dictation day files directly from disk |
 | `Models.swift` | Codable input/output models and `MCPIndexError` |
 | `NameVariants.swift` | Speaker-name fuzzy matching for speaker-aware queries |
+| `PathSecurity.swift` | Guards direct file reads against traversal, symlinks, and out-of-root paths |
 | `FileWatcher.swift` | Watches the local transcript directories and incrementally reindexes changed files |
 
 ## Test Files
@@ -47,7 +48,7 @@ Path overrides:
 | File | Purpose |
 |------|---------|
 | `TranscriptIndexTests.swift` | Full index lifecycle: reconcile, query, date filters, speaker search, and mixed-context indexing |
-| `TranscriptLoaderTests.swift` | Markdown and YAML frontmatter parsing edge cases |
+| `TranscriptLoaderTests.swift` | Markdown and YAML frontmatter parsing edge cases, including path-safety checks |
 | `NameVariantsTests.swift` | Name variant matching accuracy |
 | `TestHelpers.swift` | Shared fixture builders for sample sidecars and temp directories |
 
@@ -126,6 +127,7 @@ Binary path after build:
 ## Gotchas
 
 - transport is stdio, not HTTP
+- direct file reads are path-validated and reject traversal or symlink escapes
 - the server auto-creates missing data and index directories
 - the index rebuilds from disk on startup
 - `read_meeting` and `read_dictation` read markdown directly from disk, not from the SQLite index

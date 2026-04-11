@@ -6,16 +6,15 @@
 
 ## Key Files
 
-- `ParakeetEngine.swift` — app-owned Parakeet STT engine, recording control,
-  live transcript state, model initialization, and audio-device handling
+- `ParakeetEngine.swift` — app-owned Parakeet STT engine, recording control, live transcript state, model initialization, audio-device handling, and wake-recovery support
+- `RecordedAudioTimeline.swift` — in-memory segmented audio buffer used when recorded audio needs to be preserved across interruptions or recovery handoffs
 - `STTRouter.swift` — small main-actor wrapper used by the rest of the app
 
 ## Current Notes
 
-- This directory powers dictation
-- The meeting pipeline reuses the same app-owned `ParakeetEngine` through
-  `Sources/Meeting/MeetingSTTAdapter.swift`
-- Do not assume a separate local-LLM drafting path exists in this tree
+- This directory powers dictation.
+- The meeting pipeline reuses the same app-owned `ParakeetEngine` through `Sources/Meeting/MeetingSTTAdapter.swift`.
+- Do not assume a separate local-LLM drafting path exists in this tree.
 
 ## Verification
 
@@ -31,3 +30,4 @@ Manual checks:
 - dictation can start and stop cleanly
 - live transcript updates while listening
 - device changes do not leave the app stuck
+- wake / resume does not strand buffered audio or leave recovery state hanging
