@@ -8,6 +8,7 @@ enum SentryPayloadSanitizer {
         "bearer",
         "bundle",
         "email",
+        "error",
         "file",
         "path",
         "speaker",
@@ -19,9 +20,12 @@ enum SentryPayloadSanitizer {
         "url",
     ]
 
-    private static let userPathRegex = try! NSRegularExpression(pattern: #"/Users/[^/]+/"#)
+    private static let userPathRegex = try! NSRegularExpression(pattern: #"/Users/[^/\s]+/"#)
+    private static let absolutePathRegex = try! NSRegularExpression(pattern: #"(?<!https:)(?<!http:)/(?:Users|private|var|tmp|Volumes|Applications)[^\s"]*"#)
     private static let apiKeyRegex = try! NSRegularExpression(pattern: #"sk-[A-Za-z0-9_-]+"#)
     private static let bearerRegex = try! NSRegularExpression(pattern: #"Bearer [A-Za-z0-9._-]+"#)
+    private static let emailRegex = try! NSRegularExpression(pattern: #"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}"#, options: [.caseInsensitive])
+    private static let localHostnameRegex = try! NSRegularExpression(pattern: #"\b[a-zA-Z0-9._-]+\.local\b"#)
 
     static func sanitizeTags(_ tags: [String: String]) -> [String: String] {
         var sanitized: [String: String] = [:]
@@ -57,9 +61,15 @@ enum SentryPayloadSanitizer {
         var range = NSRange(result.startIndex..., in: result)
         result = userPathRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "/Users/****/")
         range = NSRange(result.startIndex..., in: result)
+        result = absolutePathRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-path]")
+        range = NSRange(result.startIndex..., in: result)
         result = apiKeyRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "sk-****")
         range = NSRange(result.startIndex..., in: result)
         result = bearerRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "Bearer ****")
+        range = NSRange(result.startIndex..., in: result)
+        result = emailRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-email]")
+        range = NSRange(result.startIndex..., in: result)
+        result = localHostnameRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-host]")
 
         if result.count > maxValueLength {
             return String(result.prefix(maxValueLength)) + "..."

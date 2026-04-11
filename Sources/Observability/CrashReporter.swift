@@ -103,13 +103,12 @@ final class CrashReporter {
         guard isConfigured, !handlerInstalled else { return }
 
         NSSetUncaughtExceptionHandler { exception in
-            let message = exception.reason ?? "Unknown exception"
             let name = exception.name.rawValue
             let symbols = exception.callStackSymbols.prefix(20).joined(separator: "\n")
             CrashReporter.shared.sendEvent(
                 level: "fatal",
                 title: name,
-                message: message,
+                message: "Uncaught exception",
                 tags: ["source": "uncaught_exception"],
                 extra: ["callstack": symbols]
             )
@@ -123,13 +122,11 @@ final class CrashReporter {
 
     /// Call inside catch blocks to report Swift errors.
     func capture(error: Error, context: String = "") {
-        let message = context.isEmpty
-            ? error.localizedDescription
-            : "\(context): \(error.localizedDescription)"
+        _ = context
         sendEvent(
             level: "error",
             title: String(describing: type(of: error)),
-            message: message,
+            message: "Swift error captured",
             tags: ["source": "swift_error"]
         )
     }

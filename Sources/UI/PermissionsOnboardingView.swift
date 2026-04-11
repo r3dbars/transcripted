@@ -332,7 +332,7 @@ private struct DiagnosticConsentCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Crash reports")
+            Text("Crash and error reports")
                 .font(.subheadline.weight(.semibold))
 
             Text("Transcripted can send technical crash and error information to help fix bugs faster. It does not send transcript text, audio, meeting titles, or speaker names.")
@@ -341,7 +341,7 @@ private struct DiagnosticConsentCard: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             Toggle(
-                "Help improve Transcripted with crash reports",
+                "Help improve Transcripted with crash and error reports",
                 isOn: Binding(
                     get: { crashReportingEnabled },
                     set: onToggle
@@ -367,7 +367,7 @@ private struct DiagnosticConsentCard: View {
 
     private var footnote: String {
         if !isAvailable {
-            return "This build does not have Sentry configured yet, so crash reports stay on this Mac only. You can still change this later from Settings."
+            return "This build does not have Sentry configured yet, so crash and error reports stay on this Mac only. You can still change this later from Settings."
         }
 
         return crashReportingEnabled

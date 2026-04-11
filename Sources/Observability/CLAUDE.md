@@ -13,6 +13,7 @@ optional beta shipping, and update plumbing.
 - `DiagnosticsTrail.swift` — lightweight high-signal diagnostics helper
 - `CrashReporter.swift` — crash reporting setup
 - `CrashReportingPreferences.swift` — Settings-backed crash reporting preference
+- `SentryEventPolicy.swift` — explicit allowlist of non-fatal events permitted to reach Sentry
 - `SentryPayloadSanitizer.swift` — strips obvious sensitive values before Sentry sends
 - `EventTracker.swift` — lightweight analytics hook
 - `BetaTelemetry.swift` — beta-only log/event shipping
@@ -29,6 +30,8 @@ optional beta shipping, and update plumbing.
 - Sentry DSN/config is read from `Info.plist` (`TranscriptedSentryDSN`) or
   process environment for local testing, and crash reports must stay scrubbed of
   transcript/audio/title/path data
+- Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should
+  not automatically assume they are safe to send off-device.
 
 ## Verification
 

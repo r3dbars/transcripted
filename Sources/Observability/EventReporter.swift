@@ -158,12 +158,13 @@ final class EventReporter {
             await writer.append(entry)
         }
 
-        if level == .error {
+        if level == .error,
+           let sentryPolicy = SentryEventPolicy.policy(forEngine: engine, event: event) {
             CrashReporter.shared.captureObservabilityEvent(
                 level: level,
-                engine: engine,
-                event: event,
-                message: message,
+                engine: sentryPolicy.engine,
+                event: sentryPolicy.event,
+                message: sentryPolicy.summary,
                 context: mergedContext
             )
         }

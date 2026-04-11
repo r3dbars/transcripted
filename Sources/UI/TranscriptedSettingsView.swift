@@ -59,8 +59,8 @@ struct TranscriptedSettingsView: View {
                     .foregroundStyle(.secondary)
                 }
 
-                SettingsSection(title: "Diagnostics", detail: "Crash reports help fix reliability issues without sending transcript text, audio, meeting titles, or speaker names.") {
-                    Toggle("Send crash reports", isOn: Binding(
+                SettingsSection(title: "Diagnostics", detail: "Crash and error reports help fix reliability issues without sending transcript text, audio, meeting titles, or speaker names.") {
+                    Toggle("Send crash and error reports", isOn: Binding(
                         get: { crashReportingEnabled },
                         set: { newValue in
                             crashReportingEnabled = newValue
@@ -165,9 +165,9 @@ struct TranscriptedSettingsView: View {
         if CrashReporter.isAvailable {
             return crashReportingEnabled
                 ? "Enabled. Transcripted will send scrubbed crash and error data to Sentry so reliability issues are easier to diagnose. Use the test button to verify your dashboard wiring."
-                : "Off. Transcripted will keep crash details on this Mac only."
+                : "Off. Transcripted will keep crash and error details on this Mac only."
         }
-        return "This build does not have a Sentry DSN configured yet, so crash reporting stays local."
+        return "This build does not have a Sentry DSN configured yet, so crash and error reporting stay local."
     }
 
     private func sendTestSentryEvent() {
@@ -177,7 +177,7 @@ struct TranscriptedSettingsView: View {
         }
 
         guard crashReportingEnabled else {
-            sentryTestStatus = "Turn on crash reports first."
+            sentryTestStatus = "Turn on crash and error reports first."
             return
         }
 

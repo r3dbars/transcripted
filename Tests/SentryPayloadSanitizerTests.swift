@@ -8,7 +8,7 @@ func testSentryPayloadSanitizer() {
         assertFalse(sanitized.contains("/Users/redbars/"), "username should be redacted")
         assertFalse(sanitized.contains("sk-ant-secret"), "API keys should be redacted")
         assertFalse(sanitized.contains("Bearer abc123"), "bearer tokens should be redacted")
-        assertTrue(sanitized.contains("/Users/****/"), "sanitized path marker should remain")
+        assertTrue(sanitized.contains("[redacted-path]"), "sanitized path marker should remain")
         assertTrue(sanitized.contains("sk-****"), "sanitized API key marker should remain")
         assertTrue(sanitized.contains("Bearer ****"), "sanitized bearer marker should remain")
     }
@@ -19,6 +19,7 @@ func testSentryPayloadSanitizer() {
             "meeting_state": "transcribing",
             "title": "Private customer call",
             "transcript_url": "/Users/redbars/Library/Application Support/Draft/meetings/demo.md",
+            "error": "meeting title leaked",
             "source_app_bundle_id": "com.apple.Safari",
         ])
 
@@ -26,6 +27,19 @@ func testSentryPayloadSanitizer() {
         assertEqual(sanitized["meeting_state"], "transcribing", "non-sensitive state should remain")
         assertNil(sanitized["title"], "title should be dropped")
         assertNil(sanitized["transcript_url"], "transcript path should be dropped")
+        assertNil(sanitized["error"], "free-form error payloads should be dropped")
         assertNil(sanitized["source_app_bundle_id"], "source app bundle IDs should be dropped")
+    }
+
+    runSuite("SentryPayloadSanitizer.sanitizeText redacts emails hostnames and non-home paths") {
+        let input = "Contact me at person@example.com from Redbarss-MacBook-Pro.local and inspect /private/var/folders/demo/file.txt"
+        let sanitized = SentryPayloadSanitizer.sanitizeText(input)
+
+        assertFalse(sanitized.contains("person@example.com"), "emails should be redacted")
+        assertFalse(sanitized.contains("Redbarss-MacBook-Pro.local"), "hostnames should be redacted")
+        assertFalse(sanitized.contains("/private/var/folders/demo/file.txt"), "absolute private paths should be redacted")
+        assertTrue(sanitized.contains("[redacted-email]"), "redacted email marker should remain")
+        assertTrue(sanitized.contains("[redacted-host]"), "redacted hostname marker should remain")
+        assertTrue(sanitized.contains("[redacted-path]"), "redacted path marker should remain")
     }
 }
