@@ -1,5 +1,5 @@
+<img width="625" height="329" alt="Screenshot 2026-04-10 at 7 31 17 PM" src="https://github.com/user-attachments/assets/86453a3e-9eee-4525-b985-777366296cf5" />
 
-(https://github.com/user-attachments/assets/40ff75aa-9202-46f3-b536-8303217028a3) 
 
 ## Transcripted
 Transcripted is a local Mac app for dictation and meeting capture that turns
