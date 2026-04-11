@@ -17,9 +17,41 @@ DEPS_BUILD="$(mktemp -d "$TMP_ROOT/transcripted-deps-build.XXXXXX")"
 DEPS_LIBS="$DRAFT_DIR/deps-libs"
 DEPS_MODULES="$DRAFT_DIR/deps-modules"
 DEPS_FRAMEWORKS="$DRAFT_DIR/deps-frameworks"
+DEPS_TOOLS="$DRAFT_DIR/deps-tools"
 FLUID_AUDIO_VERSION="${FLUID_AUDIO_VERSION:-0.7.9}"
 MLX_SWIFT_LM_REVISION="${MLX_SWIFT_LM_REVISION:-25b00d4}"
 SWIFT_TRANSFORMERS_VERSION="${SWIFT_TRANSFORMERS_VERSION:-1.2.1}"
+SPARKLE_VERSION="${SPARKLE_VERSION:-2.9.1}"
+
+download_sparkle_distribution() {
+    local sparkle_root="$DEPS_BUILD/sparkle"
+    local sparkle_zip="$sparkle_root/Sparkle-for-Swift-Package-Manager.zip"
+    local sparkle_url="https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-for-Swift-Package-Manager.zip"
+    local unpacked_root="$sparkle_root/unpacked"
+    local framework_src="$unpacked_root/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+
+    echo "Downloading Sparkle $SPARKLE_VERSION..."
+    mkdir -p "$sparkle_root"
+    curl --fail --location --silent --show-error "$sparkle_url" -o "$sparkle_zip"
+    unzip -q "$sparkle_zip" -d "$unpacked_root"
+
+    if [ ! -d "$framework_src" ]; then
+        echo "[build-deps] ERROR: Sparkle.framework not found in downloaded distribution"
+        exit 1
+    fi
+
+    rm -rf "$DEPS_FRAMEWORKS/Sparkle.framework"
+    ditto "$framework_src" "$DEPS_FRAMEWORKS/Sparkle.framework"
+
+    rm -rf "$DEPS_TOOLS/sparkle"
+    mkdir -p "$DEPS_TOOLS/sparkle"
+    ditto "$unpacked_root/bin" "$DEPS_TOOLS/sparkle/bin"
+    if [ -f "$unpacked_root/SampleAppcast.xml" ]; then
+        ditto "$unpacked_root/SampleAppcast.xml" "$DEPS_TOOLS/sparkle/SampleAppcast.xml"
+    fi
+
+    chmod +x "$DEPS_TOOLS/sparkle/bin/"*
+}
 
 resolve_package_graph() {
     local resolve_cmd=("swift" "package" "resolve" "--disable-dependency-cache")
@@ -137,19 +169,21 @@ echo "[build-deps] Using TranscriptedCore from: $TRANSCRIPTED_ROOT"
 # Skip if already built (use --force to rebuild).
 # libExternalDeps.a was added later for SPM-based `swift test`, so require it too;
 # otherwise legacy worktrees would keep skipping while missing the archive.
-if [ -f "$DEPS_LIBS/libDraftDeps.a" ] && [ -f "$DEPS_LIBS/libExternalDeps.a" ] && [ -d "$DEPS_MODULES" ] && [ -d "$DEPS_FRAMEWORKS/ESpeakNG.framework" ] && [ "${1:-}" != "--force" ]; then
+if [ -f "$DEPS_LIBS/libDraftDeps.a" ] && [ -f "$DEPS_LIBS/libExternalDeps.a" ] && [ -d "$DEPS_MODULES" ] && [ -d "$DEPS_FRAMEWORKS/ESpeakNG.framework" ] && [ -d "$DEPS_FRAMEWORKS/Sparkle.framework" ] && [ -x "$DEPS_TOOLS/sparkle/bin/generate_appcast" ] && [ "${1:-}" != "--force" ]; then
     echo "Dependencies already built. Use --force to rebuild."
     echo "  libs:    $DEPS_LIBS/libDraftDeps.a"
     echo "           $DEPS_LIBS/libExternalDeps.a"
     echo "  modules: $DEPS_MODULES/"
     echo "  frameworks: $DEPS_FRAMEWORKS/ESpeakNG.framework"
+    echo "              $DEPS_FRAMEWORKS/Sparkle.framework"
+    echo "  tools:      $DEPS_TOOLS/sparkle/bin/generate_appcast"
     exit 0
 fi
 
 echo "Building FluidAudio + mlx-swift-lm (unified)..."
 
 # Clean previous build
-rm -rf "$DEPS_LIBS" "$DEPS_MODULES" "$DEPS_FRAMEWORKS"
+rm -rf "$DEPS_LIBS" "$DEPS_MODULES" "$DEPS_FRAMEWORKS" "$DEPS_TOOLS"
 mkdir -p "$DEPS_BUILD/Sources"
 
 # Copy TranscriptedCore's source tree into $DEPS_BUILD so SPM sees a stable,
@@ -349,6 +383,8 @@ fi
 rm -rf "$DEPS_FRAMEWORKS/ESpeakNG.framework"
 ditto "$ESPEAK_FRAMEWORK_SRC" "$DEPS_FRAMEWORKS/ESpeakNG.framework"
 
+download_sparkle_distribution
+
 # --- Metal libraries: compile MLX Metal shaders ---
 # SPM's `swift build` doesn't compile .metal files — only Xcode does.
 # We manually compile them with xcrun metal → .air, then xcrun metallib → .metallib.
@@ -405,5 +441,8 @@ fi
 echo ""
 echo "Frameworks:"
 ls "$DEPS_FRAMEWORKS/"
+echo ""
+echo "Sparkle tools:"
+ls "$DEPS_TOOLS/sparkle/bin"
 echo ""
 echo "Done. build.sh will detect these artifacts automatically."

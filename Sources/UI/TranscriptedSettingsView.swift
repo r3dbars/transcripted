@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 
 struct TranscriptedSettingsView: View {
+    @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var permissionStates = PermissionSnapshot.current()
@@ -96,6 +97,8 @@ struct TranscriptedSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                SpeakerPeopleSettingsSection(model: speakerPeopleModel)
             }
             .padding(24)
         }
@@ -163,7 +166,7 @@ private struct PermissionSnapshot {
     }
 }
 
-private struct SettingsSection<Content: View>: View {
+struct SettingsSection<Content: View>: View {
     let title: String
     let detail: String
     @ViewBuilder var content: Content

@@ -35,6 +35,7 @@ BETA_CONFIG_BACKUP="$(mktemp -t transcripted-beta-config)"
 BETA_ENTITLEMENTS="config/entitlements/beta.plist"
 DEPS_FRAMEWORK_ROOT="deps-frameworks"
 ESPEAK_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/ESpeakNG.framework"
+SPARKLE_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sparkle.framework"
 TRANSCRIPTED_CORE_MODULE="deps-modules/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
 
 validate_signed_app() {
@@ -72,6 +73,17 @@ sign_embedded_payloads() {
     local sign_hash="$1"
     local framework_path
     local metallib_path
+    local nested_code_path
+
+    while IFS= read -r -d '' nested_code_path; do
+        codesign --force --sign "$sign_hash" "$nested_code_path"
+    done < <(
+        find "$APP_BUNDLE/Contents/Frameworks" \
+            \( -path "*/Sparkle.framework/Versions/*/Updater.app" \
+            -o -path "*/Sparkle.framework/Versions/*/XPCServices/*.xpc" \
+            -o -path "*/Sparkle.framework/Versions/*/Autoupdate" \) \
+            -print0 | sort -z
+    )
 
     for framework_path in "$APP_BUNDLE"/Contents/Frameworks/*.framework; do
         [ -d "$framework_path" ] || continue
@@ -98,10 +110,11 @@ if [ ! -f "$BETA_ENTITLEMENTS" ]; then
     exit 1
 fi
 
-if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -d "$ESPEAK_FRAMEWORK" ]; then
+if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -d "$ESPEAK_FRAMEWORK" ] || [ ! -d "$SPARKLE_FRAMEWORK" ]; then
     echo "❌ Dependencies missing or stale — required for beta builds"
     echo "   Missing module: $TRANSCRIPTED_CORE_MODULE"
     echo "   Missing framework: $ESPEAK_FRAMEWORK"
+    echo "   Missing framework: $SPARKLE_FRAMEWORK"
     echo "   Run build-deps.sh --force first to rebuild dependencies."
     exit 1
 fi
@@ -157,6 +170,7 @@ for metallib in deps-libs/*.metallib; do
 done
 
 cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
+cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 
 # Compile with BETA_BUILD flag
 echo "Compiling (beta build)..."
@@ -180,6 +194,7 @@ swiftc \
     -framework Vision \
     -framework MetalPerformanceShaders \
     -framework MetalPerformanceShadersGraph \
+    -framework Sparkle \
     -lsqlite3 \
     -lc++ \
     $DEPS_FLAGS \

@@ -20,6 +20,12 @@
     <string>14.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUFeedURL</key>
+    <string>https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>Ib6MHm4eeZYjhsZblNT0DEo3LzK9fYvBLkmqvw/Vo7Q=</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Transcripted needs microphone access for dictation and to capture your side of meetings.</string>
     <key>NSSpeechRecognitionUsageDescription</key>

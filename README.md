@@ -165,6 +165,7 @@ continue using that location for compatibility while the rename settles.
 Operational caveats:
 
 - first launch may download local models from HuggingFace if they are not cached
+- signed builds can check Transcripted's Sparkle appcast for in-app updates
 - beta builds can optionally contact the update/log proxy for update checks and diagnostics
 
 
