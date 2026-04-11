@@ -136,7 +136,7 @@ final class CrashReporter {
 
     /// Report a non-fatal message with optional context dict.
     func capture(message: String, level: String = "warning", extra: [String: String] = [:]) {
-        sendEvent(
+        _ = sendEvent(
             level: level,
             title: message,
             message: message,
@@ -153,7 +153,7 @@ final class CrashReporter {
         message: String,
         context: [String: String]
     ) {
-        sendEvent(
+        _ = sendEvent(
             level: level.rawValue,
             title: "\(engine).\(event)",
             message: message,
@@ -167,8 +167,28 @@ final class CrashReporter {
         )
     }
 
+    /// Send a safe manual test event so Sentry wiring can be verified without crashing the app.
+    @discardableResult
+    func sendTestEvent() -> String? {
+        sendEvent(
+            level: "warning",
+            title: "sentry_test_event",
+            message: "Manual Sentry verification from Transcripted Settings",
+            tags: [
+                "source": "manual_test",
+                "engine": "settings",
+                "event": "sentry_test_event",
+            ],
+            extra: [
+                "recommended_check": "Search for sentry_test_event in the Sentry issue list",
+            ],
+            fingerprint: ["settings", "sentry_test_event"]
+        )
+    }
+
     // MARK: - HTTP
 
+    @discardableResult
     private func sendEvent(
         level: String,
         title: String,
@@ -176,16 +196,17 @@ final class CrashReporter {
         tags: [String: String] = [:],
         extra: [String: String] = [:],
         fingerprint: [String]? = nil
-    ) {
-        guard isEnabled else { return }
+    ) -> String? {
+        guard isEnabled else { return nil }
 
+        let eventID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
         let sanitizedTitle = SentryPayloadSanitizer.sanitizeText(title)
         let sanitizedMessage = SentryPayloadSanitizer.sanitizeText(message)
         let sanitizedTags = SentryPayloadSanitizer.sanitizeTags(tags)
         let sanitizedExtra = SentryPayloadSanitizer.sanitizeContext(extra)
 
         var payload: [String: Any] = [
-            "event_id": UUID().uuidString.replacingOccurrences(of: "-", with: ""),
+            "event_id": eventID,
             "timestamp": ISO8601DateFormatter().string(from: Date()),
             "platform": "cocoa",
             "environment": environment,
@@ -222,7 +243,7 @@ final class CrashReporter {
         }
 
         guard let url = URL(string: "https://\(host)/api/\(projectID)/store/"),
-              let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
+              let body = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -235,5 +256,6 @@ final class CrashReporter {
         request.timeoutInterval = 5
 
         URLSession.shared.dataTask(with: request).resume()
+        return eventID
     }
 }
