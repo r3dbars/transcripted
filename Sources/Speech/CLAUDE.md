@@ -1,25 +1,23 @@
-# Speech Directory
+# Speech
 
-## What This Does
+## What this directory owns
 
-`Sources/Speech/` owns the app's live dictation speech path.
+`Sources/Speech/` owns the app’s live STT path and audio-device-facing dictation
+recording logic.
 
-## Key Files
+## Important files
 
-- `ParakeetEngine.swift` — app-owned Parakeet STT engine, recording control,
-  live transcript state, model initialization, and audio-device handling
+- `ParakeetEngine.swift` — app-owned Parakeet STT engine, recording control, live transcript state, model initialization, and audio-device handling
 - `STTRouter.swift` — small main-actor wrapper used by the rest of the app
+- `RecordedAudioTimeline.swift` — audio timing helpers shared by recording / transcript paths
 
-## Current Notes
+## Notes
 
-- This directory powers dictation
-- The meeting pipeline reuses the same app-owned `ParakeetEngine` through
-  `Sources/Meeting/MeetingSTTAdapter.swift`
-- Do not assume a separate local-LLM drafting path exists in this tree
+- dictation uses this directory directly
+- meetings reuse the same app-owned `ParakeetEngine` through `Sources/Meeting/MeetingSTTAdapter.swift`
+- wake handling and runtime recovery touch this layer indirectly through `TranscriptedAppState` and `Sources/Reliability/`
 
-## Verification
-
-After changing speech code:
+## Verify
 
 ```bash
 bash build.sh
@@ -28,6 +26,6 @@ bash run-tests.sh
 
 Manual checks:
 
-- dictation can start and stop cleanly
+- dictation starts and stops cleanly
 - live transcript updates while listening
-- device changes do not leave the app stuck
+- audio-device changes and wake events do not leave the app stuck

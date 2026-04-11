@@ -2,66 +2,92 @@
 
 ## Current repo truth
 
-- `main` is the current Transcripted product, derived from the earlier Draft codebase.
-- The current app on `main` supports **dictation** and **meetings**.
-- The older draft / ghostwriting flow is not active on `main`. `DictationSessionController` keeps compatibility stubs for removed draft-mode entry points.
-- `Sources/TranscriptedCore/` is an in-repo library consumed through `Sources/Meeting/`. Keep it as a library boundary.
-- `build.sh` builds the app target. The root `Package.swift` exists for `TranscriptedCore` package tests and smoke coverage, not as the main app build.
+- `main` is the current Transcripted product.
+- The active app supports **dictation** and **meetings**.
+- The older draft / ghostwriting flow is not an active product path on `main`.
+- `Sources/TranscriptedCore/` is an in-repo library boundary used by the app through `Sources/Meeting/`.
+- `build.sh` builds the app target. The root `Package.swift` exists for `TranscriptedCore` package tests and smoke coverage.
 
 ## Read this first
 
 1. `README.md`
 2. `AGENTS.md`
-3. `docs/agent-onboarding.md`
-4. `Sources/CLAUDE.md`
-5. `Sources/Dictation/CLAUDE.md` when touching dictation persistence
-6. `Sources/Meeting/CLAUDE.md` when touching meeting capture or meeting UI
-7. `Sources/TranscriptedCore/CLAUDE.md` when touching the shared library
-8. `Tests/README.md`
-9. `docs/storage-paths.md`
+3. `CLAUDE.md`
+4. `docs/agent-onboarding.md`
+5. `docs/storage-paths.md`
+6. `Sources/CLAUDE.md`
+7. `Sources/Dictation/CLAUDE.md` when touching dictation persistence
+8. `Sources/Meeting/CLAUDE.md` when touching meeting capture, storage, or UI
+9. `Sources/TranscriptedCore/CLAUDE.md` when touching the shared library
+10. `Sources/Reliability/CLAUDE.md` when touching wake / hotkey recovery
+11. `Tests/README.md`
 
 ## Directory map
 
-- `Sources/` — app shell, hotkeys, speech, dictation UI, meeting bridge, shared app paths
-- `Sources/Dictation/` — markdown persistence for completed dictations
-- `Sources/Meeting/` — app-side bridge into `TranscriptedCore`
+- `Sources/` — app target, menu bar shell, capture routing, speech, storage, and UI
+- `Sources/Dictation/` — dictation export persistence
+- `Sources/Meeting/` — app-side meeting adapter layer over `TranscriptedCore`
 - `Sources/TranscriptedCore/` — reusable meeting transcription library
-- `Tests/` — fast custom Swift test runner plus `TranscriptedCore` package tests
-- `SmokeTests/` — integration smoke for the bundled core library seam
-- `Tools/TranscriptedCLI/` — standalone offline diarization CLI
-- `Tools/TranscriptedMCP/` — read-only MCP server for saved meeting artifacts
-- `Tools/TranscriptedQA/` — artifact validation CLI
+- `Sources/Reliability/` — wake / hotkey recovery coordination
+- `Tests/` — curated fast tests plus the `TranscriptedCore` package tests
+- `SmokeTests/` — app/core integration smoke coverage
+- `Tools/TranscriptedCLI/` — standalone CLI for context search and offline diarization
+- `Tools/TranscriptedMCP/` — read-only MCP server over saved captures
+- `Tools/TranscriptedQA/` — standalone artifact validation CLI
 - `archive/backend-beta-worker/` — archived beta proxy / telemetry backend
 
 ## Documentation status
 
-The repo has both current docs and historical docs from the earlier drafting-focused codebase.
-
 Current source-of-truth docs:
 
+- `README.md`
 - `AGENTS.md`
 - `CLAUDE.md`
 - `docs/agent-onboarding.md`
+- `docs/storage-paths.md`
+- `docs/agent-connect.md`
 - `Sources/CLAUDE.md`
 - `Sources/Dictation/CLAUDE.md`
 - `Sources/Meeting/CLAUDE.md`
 - `Sources/TranscriptedCore/CLAUDE.md`
+- `Sources/Reliability/CLAUDE.md`
 - `Tests/README.md`
-- `docs/storage-paths.md`
 - `Tools/TranscriptedCLI/CLAUDE.md`
+- `Tools/TranscriptedMCP/CLAUDE.md`
+- `Tools/TranscriptedQA/CLAUDE.md`
 
-Beta/distribution-only docs:
-
-- `archive/backend-beta-worker/README.md`
-
-Historical or planning-heavy docs:
+Historical or archived context:
 
 - `docs/archive/`
-- `.claude/skills/transcripted-qa/SKILL.md`
+- `archive/backend-beta-worker/`
 
-The remaining `Sources/*/CLAUDE.md` files describe either live subsystems or
-small retained utility areas. The historical merge/todo docs now live under
-`docs/archive/`, and the old placeholder-only source docs were removed.
+## Storage reality
+
+The current app separates captures from app-owned state.
+
+Default app root:
+
+- `~/Library/Application Support/Transcripted/`
+
+Default capture library:
+
+- `~/Library/Application Support/Transcripted/captures/`
+
+Default capture folders:
+
+- meetings: `~/Library/Application Support/Transcripted/captures/meetings/`
+- dictations: `~/Library/Application Support/Transcripted/captures/dictations/`
+
+App-owned folders:
+
+- state: `~/Library/Application Support/Transcripted/state/`
+- cache: `~/Library/Application Support/Transcripted/cache/`
+- logs: `~/Library/Application Support/Transcripted/logs/`
+- tmp recordings: `~/Library/Application Support/Transcripted/tmp/recordings/`
+
+The capture library can be relocated in Settings via `transcriptSaveLocation`.
+Legacy Draft and `~/Documents/Transcripted` layouts still appear in compatibility
+paths for some tools, but they are no longer the default app storage model.
 
 ## Build and test
 
@@ -78,20 +104,21 @@ Rules:
 1. After changing Swift source, run `bash build.sh` and `bash run-tests.sh`.
 2. If you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash run-integration-smoke.sh`.
 3. If you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam, also run `swift test`.
-4. `build.sh` must not compile `Sources/TranscriptedCore/` directly into the app target.
+4. Keep `Sources/TranscriptedCore/` as a library boundary. Do not compile it directly into the app target.
 
 ## Testing gotchas
 
-- `run-tests.sh` is a custom `swiftc` runner, not XCTest.
+- `run-tests.sh` is a custom `swiftc` runner, not XCTest discovery.
 - Adding a root `Tests/*Tests.swift` file is not enough by itself; it must be registered in `Tests/FastTests.manifest`.
-- `Tests/TranscriptedCoreTests/` is a separate Swift Package target, run via `swift test` rather than `run-tests.sh`.
+- `Tests/TranscriptedCoreTests/` is a separate Swift Package target, run via `swift test`.
 
-## Storage
+## Doc update triggers
 
-Current persisted data on `main` uses Draft-named compatibility roots:
+Update docs in the same change whenever you modify:
 
-- app support root: `~/Library/Application Support/Draft/`
-- dictations: `~/Library/Application Support/Draft/dictations/`
-- meetings: `~/Library/Application Support/Draft/meetings/`
-
-See `docs/storage-paths.md` for the full map, including `TranscriptedCore` standalone defaults.
+- capture-library or storage-path behavior
+- build or test commands
+- tool defaults or env overrides
+- ownership boundaries between app code and `TranscriptedCore`
+- wake-recovery or hotkey lifecycle assumptions
+- agent-facing output schemas or folder conventions

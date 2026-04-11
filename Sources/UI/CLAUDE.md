@@ -1,91 +1,57 @@
-# UI Directory
+# UI
 
-## What This Does
+## What this directory owns
 
-`Sources/UI/` contains the current app surfaces for Transcripted's active
-features:
+`Sources/UI/` contains the live app surfaces for:
 
 - dictation overlay
-- meeting overlay
-- menubar popover
+- meeting overlay and detected-meeting prompt UI
+- menu bar popover
 - permissions onboarding
-- settings
-- speaker naming and agent-connect helpers
+- settings, including capture-library selection
+- agent-connect helpers
+- speaker naming
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (38 Swift files)
+## Important areas
 
-### Dictation Overlay
+### Dictation overlay
 
-- `DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
-- `ReviewTextView.swift` — editable NSTextView for dictation preview
-- `FloatingOverlayController.swift` — owns the overlay panel lifecycle and Combine subscriptions
-- `FloatingOverlayPanel.swift` — non-activating NSPanel for the dictation overlay
-- `OverlayDiffStripView.swift` — side-by-side diff indicator in review state
-- `OverlayDraftingView.swift` — drafting/processing state view
-- `OverlayHeaderView.swift` — overlay title bar with controls
-- `OverlayListeningView.swift` — waveform and status during active dictation
-- `OverlayReviewView.swift` — post-dictation review before paste
-- `OverlayRootView.swift` — top-level SwiftUI container switching between overlay states
-- `OverlayStreamingView.swift` — streaming transcript display during dictation
-- `OverlayToastView.swift` — ephemeral toast notifications in the overlay
-- `OverlayTokens.swift` — design tokens (colors, spacing, sizing) for overlay views
-- `OverlayToolbarView.swift` — action buttons in the overlay footer
-- `PanelDragView.swift` — drag handle for repositioning the overlay panel
-- `WaveformLayer.swift` — Core Animation layer drawing the audio waveform
+- `DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are compatibility stubs
+- `FloatingOverlayController.swift` / `FloatingOverlayPanel.swift` — non-activating overlay panel lifecycle
+- `OverlayRootView.swift` and related `Overlay*View.swift` files — dictation listening, review, streaming, toast, and toolbar surfaces
+- `ReviewTextView.swift` — editable NSTextView used during review
+- `WaveformLayer.swift` — waveform rendering
 
-### Meeting Overlay
+### Meeting UI
 
-- `MeetingOverlayController.swift` — non-activating panel for detected-meeting prompts, model warmup, recording, and transcription status
-- `SpeakerNamingSheet.swift` — sheet for renaming speakers in a completed meeting
+- `MeetingOverlayController.swift` — non-activating panel for detected-meeting prompts, warmup, recording, and transcription status
+- `SpeakerNamingSheet.swift` — speaker rename flow for completed meetings
 
-### Menubar
+### Menu bar
 
-- `MenuAgentConnectPageView.swift` — agent connection page in menubar popover
-- `MenuBarContentView.swift` — root content view for the menubar popover
-- `MenuBarHeaderView.swift` — popover header with app name and status
-- `MenuBarModelDownloadView.swift` — model download progress in the menubar
-- `MenuBarPanelController.swift` — NSPopover controller for the menubar
-- `MenuBarRecentMeetingsView.swift` — recent meetings list in the popover
-- `MenuBarSettingsView.swift` — settings actions in the popover footer
-- `MenuBarShortcutsView.swift` — keyboard shortcut hints in the popover
-- `MenuIconButton.swift` — icon-only button style for menubar items
-- `MenuOutlineButton.swift` — outlined button style for menubar actions
-- `MenuTokens.swift` — design tokens for menubar views
+- `MenuBarPanelController.swift` — popover controller
+- `MenuBarContentView.swift` — root popover content
+- `MenuBarRecentMeetingsView.swift` — recent meetings list and retry / delete actions
+- `MenuBarShortcutsView.swift` — keyboard shortcut summary
+- `MenuBarSettingsView.swift` — popover footer actions
 
-### Agent Connect
+### Agent connect and settings
 
-- `AgentConnectionGuide.swift` — shared smart-prompt, MCP setup, and folder fallback copy for the agent-connect flow
-- `AgentConnectionWindowController.swift` — `AgentConnectionWindowCoordinator` and `NSWindowController` for the standalone agent-connect window
-- `AgentConnectionWindowView.swift` — SwiftUI content for the standalone agent-connect window
+- `AgentConnectionGuide.swift` — smart prompt, MCP setup text, and folder fallback copy
+- `AgentConnectionWindowController.swift` / `AgentConnectionWindowView.swift` — standalone agent-connect window
+- `TranscriptedSettingsView.swift` — settings UI for shortcuts, permissions, and storage
+- `TranscriptedSettingsWindowController.swift` — settings window lifecycle
+- `PermissionsOnboardingView.swift` — first-run onboarding
 
-The current agent-connect surfaces should keep one simple mental model:
+## Patterns to preserve
 
-- lead with one smart copy-paste prompt
-- let that prompt prefer MCP when available and fall back to folders when not
-- keep manual folder paths and MCP setup secondary, not primary
+- controllers own subscriptions and push explicit updates into AppKit surfaces
+- views are mostly renderers, not long-lived shared state owners
+- the capture-library setting belongs in the settings flow; app state, cache, logs, and tmp do not move with it
 
-### Settings and Onboarding
-
-- `HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
-- `PermissionsOnboardingView.swift` — first-launch permissions walkthrough
-- `TranscriptedPermissionAccess.swift` — accessibility and screen recording permission checks
-- `TranscriptedSettingsView.swift` — main settings view
-- `TranscriptedSettingsWindowController.swift` — NSWindowController for settings
-
-### Shared
-
-- `AppSoundPlayer.swift` — UI sound preferences and playback helpers
-
-## Observation Pattern
-
-Controllers own Combine subscriptions and push explicit `update(...)` calls into
-AppKit views. Views are renderers, not observable state owners.
-
-## Verification
-
-After changing UI code:
+## Verify
 
 ```bash
 bash build.sh
@@ -95,7 +61,7 @@ bash run-tests.sh
 Manual checks:
 
 - dictation overlay starts, stops, and auto-pastes cleanly
-- detected-meeting prompts appear only when appropriate and can start or snooze a meeting cleanly
+- meeting prompts appear only when appropriate
 - meeting overlay warms up and records cleanly
-- menubar popover renders shortcuts, recents, settings actions, and the agent-connect page cleanly
-- permissions onboarding and settings window still open correctly
+- menu bar popover renders recents, shortcuts, settings, and agent-connect correctly
+- settings shows the current capture library and opens Finder links correctly

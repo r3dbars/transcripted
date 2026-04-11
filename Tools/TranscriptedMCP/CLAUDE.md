@@ -1,96 +1,70 @@
 # TranscriptedMCP
 
-Standalone MCP server (`transcripted-mcp`) for querying Transcripted meeting and dictation data from Claude Desktop or any MCP-compatible client.
+Standalone MCP server (`transcripted-mcp`) for querying Transcripted meeting and
+dictation data from Claude Desktop or any MCP-compatible client.
 
-It is read-only, independent from the app target, and builds its own SQLite index from saved artifacts on disk.
+It is read-only, independent from the app target, and builds its own SQLite
+index from saved artifacts on disk.
 
-## What It Reads
+## Directory resolution
 
 Default locations:
 
-- meetings: `~/Library/Application Support/Draft/meetings/transcripts`
-- dictations: `~/Library/Application Support/Draft/dictations/transcripts`
-- index: meetings folder by default
+- meetings: `~/Library/Application Support/Transcripted/captures/meetings/`
+- dictations: `~/Library/Application Support/Transcripted/captures/dictations/`
+- index: `~/Library/Application Support/Transcripted/cache/`
 
-Legacy fallback:
+Legacy fallback order when the newer folders are missing:
 
-- `~/Documents/Transcripted`
+1. `~/Library/Application Support/Draft/meetings/transcripts/` and `.../dictations/transcripts/`
+2. `~/Documents/Transcripted/`
 
-Path overrides:
+Overrides:
 
-- `TRANSCRIPTED_DATA_DIR` — shared meetings + dictations directory
-- `TRANSCRIPTED_MEETINGS_DIR` — meetings directory override
-- `TRANSCRIPTED_DICTATIONS_DIR` — dictations directory override
-- `TRANSCRIPTED_INDEX_DIR` — SQLite index directory override
+- `TRANSCRIPTED_DATA_DIR`
+- `TRANSCRIPTED_MEETINGS_DIR`
+- `TRANSCRIPTED_DICTATIONS_DIR`
+- `TRANSCRIPTED_INDEX_DIR`
 
-## Package Layout (13 Swift files)
+## Important files
 
-- `Package.swift` — Swift package manifest for the standalone MCP server
-- `Sources/TranscriptedMCP/` — 8 source files for server startup, directory resolution, indexing, and tool handlers
-- `Tests/TranscriptedMCPTests/` — 4 test files for index lifecycle, markdown loading, name variants, and shared fixtures
+- `Main.swift` — `@main` entry point, directory resolution, index startup, file watchers, and stdio server boot
+- `DataDirectories.swift` — default-path, env-override, and legacy-fallback resolution
+- `ToolHandlers.swift` — MCP tool registration and request routing
+- `TranscriptIndex.swift` — SQLite-backed index and query methods
+- `TranscriptLoader.swift` — markdown loaders for meetings and dictations
+- `NameVariants.swift` — speaker-name fuzzy matching
+- `FileWatcher.swift` — incremental reindexing on file changes
+- `PathSecurity.swift` — path validation for read requests inside the watched directories
+- `Models.swift` — Codable request/response models and shared errors
 
-## File Index
+## MCP tools
 
-| File | Purpose |
-|------|---------|
-| `Main.swift` | `@main` entry point; resolves directories, builds the index, starts file watchers, then starts the MCP stdio server |
-| `DataDirectories.swift` | Default-path and env-override resolution for meetings, dictations, and index storage |
-| `ToolHandlers.swift` | Registers every MCP tool and routes requests to the correct loader or index method |
-| `TranscriptIndex.swift` | SQLite-backed index, incremental updates, and query methods across meetings and dictations |
-| `TranscriptLoader.swift` | Loads markdown meeting transcripts and dictation day files directly from disk |
-| `Models.swift` | Codable input/output models and `MCPIndexError` |
-| `NameVariants.swift` | Speaker-name fuzzy matching for speaker-aware queries |
-| `FileWatcher.swift` | Watches the local transcript directories and incrementally reindexes changed files |
+All tools are read-only:
 
-## Test Files
+- `list_meetings`
+- `read_meeting`
+- `list_dictations`
+- `read_dictation`
+- `search`
+- `search_context`
+- `recent_context`
+- `who_is`
+- `recap`
 
-| File | Purpose |
-|------|---------|
-| `TranscriptIndexTests.swift` | Full index lifecycle: reconcile, query, date filters, speaker search, and mixed-context indexing |
-| `TranscriptLoaderTests.swift` | Markdown and YAML frontmatter parsing edge cases |
-| `NameVariantsTests.swift` | Name variant matching accuracy |
-| `TestHelpers.swift` | Shared fixture builders for sample sidecars and temp directories |
-
-## MCP Tools
-
-All tools are read-only.
-
-| Tool | Description |
-|------|-------------|
-| `list_meetings` | List saved meetings with metadata and optional date filters |
-| `read_meeting` | Read one meeting transcript by filename |
-| `list_dictations` | List saved dictation day files with counts, source apps, and titles |
-| `read_dictation` | Read one dictation day or one specific dictation entry |
-| `search` | Search meeting transcript content |
-| `search_context` | Search across meetings, dictations, or both |
-| `recent_context` | Get a mixed recent feed of meetings and dictations |
-| `who_is` | Look up a speaker profile across saved meetings |
-| `recap` | Build a structured digest for a date range |
-
-## Data Flow
+## Data flow
 
 ```text
-meetings/*.json + dictations/*.json
+meeting .json sidecars + dictation markdown/day payloads
   -> TranscriptIndex.reconcile() on startup
   -> FileWatcher incremental updates on change
   -> SQLite index
 
-meetings/*.md + dictations/*.md
-  -> TranscriptLoader direct reads for read_meeting and read_dictation
+meeting and dictation markdown
+  -> TranscriptLoader direct reads for read_meeting / read_dictation
 ```
 
-## Index Shape
-
-The SQLite index keeps separate records for:
-
-- meetings
-- meeting speakers / utterance search rows
-- dictation day files
-- dictation entry search rows
-
-This lets the server answer both meeting-specific queries (`who_is`, `read_meeting`) and mixed-context queries (`search_context`, `recent_context`) without touching app-owned runtime state.
-
-## Build And Test
+## Build and test
 
 ```bash
 cd Tools/TranscriptedMCP
@@ -104,29 +78,9 @@ Binary path after build:
 .build/debug/transcripted-mcp
 ```
 
-## Example MCP Config
-
-```json
-{
-  "mcpServers": {
-    "transcripted": {
-      "command": "/absolute/path/to/transcripted-mcp"
-    }
-  }
-}
-```
-
-## Relationships
-
-- reads meeting sidecars written by `Sources/TranscriptedCore/Storage/AgentOutput.swift`
-- reads dictation sidecars written by `Sources/Dictation/DictationAgentOutput.swift`
-- mirrors speaker-name matching logic from the app with `NameVariants.swift`
-- has no compile-time dependency on the main Transcripted app target
-
-## Gotchas
+## Notes
 
 - transport is stdio, not HTTP
 - the server auto-creates missing data and index directories
-- the index rebuilds from disk on startup
-- `read_meeting` and `read_dictation` read markdown directly from disk, not from the SQLite index
-- the server binary is separate from the app, updating the app does not update the MCP binary automatically
+- `read_meeting` and `read_dictation` read files from disk directly, not from the SQLite index
+- the MCP binary is separate from the app; updating the app does not update the built server automatically

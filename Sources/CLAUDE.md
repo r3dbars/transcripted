@@ -1,47 +1,51 @@
-# Sources overview
+# Sources Overview
 
-## Current runtime
+## What `Sources/` owns
 
-`Sources/` is the app target. On `main`, the app is centered on:
+`Sources/` is the app target. On `main`, the live product is centered on:
 
 - dictation capture and paste-back
 - meeting capture, transcription, and transcript browsing
+- menu bar controls, onboarding, settings, and agent-connect flows
 
-Important entry points:
+## Important entry points
 
-- `TranscriptedApp.swift` — app entry point, menubar wiring, popover, overlay setup, and detected-meeting prompt wiring
-- `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, and lazy `MeetingSessionController`
-- `Capture/ContextCaptureEngine.swift` — right-option dictation handling, keyboard hotkeys, meeting hotkey routing
-- `UI/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
-- `Meeting/MeetingPromptDetector.swift` — Calendar-driven meeting-link detection used to offer one-tap meeting capture prompts
-- `Meeting/MeetingSessionController.swift` — app-side bridge into `TranscriptedCore`, including queued meeting transcription handoff
-- `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter
+- `TranscriptedApp.swift` — app entry point, menu bar wiring, popover, overlays, onboarding, and detected-meeting prompt setup
+- `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, wake recovery, and lazy `MeetingSessionController`
+- `Capture/ContextCaptureEngine.swift` — global hotkeys, right-Option dictation trigger, and routing into dictation or meetings
+- `UI/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are compatibility stubs
+- `Meeting/MeetingPromptDetector.swift` — Calendar-driven meeting-link detection used for one-tap meeting prompts
+- `Meeting/MeetingSessionController.swift` — app-side bridge into `TranscriptedCore`, including single-flight transcription queueing
+- `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — app-owned STT path used by dictation and the meeting adapter
+- `Reliability/WakeRecoveryCoordinator.swift` — deduplicated wake recovery for hotkeys and runtime readiness
 
 ## Directory map
 
-- `Accessibility/` — AX helpers for overlay positioning
-- `API/` — beta-only config currently; older API docs are historical
-- `Capture/` — hotkeys, context parsing, capture routing
-- `Dictation/` — dictation transcript persistence
-- `Text/` — small pure text utilities retained from the earlier drafting flow
-- `Meeting/` — app-side meeting bridge and transcript restyling
-- `Observability/` — events, debug log, telemetry, beta updater, crash reporting
-- `Speech/` — Parakeet STT and router
-- `Style/` — pure text heuristics retained from the older style-learning system
-- `TranscriptedCore/` — shared library boundary
-- `UI/` — menubar, overlays, settings, recent meetings, speaker naming
+- `Accessibility/` — AX helpers for focused-element metadata and overlay positioning
+- `API/` — beta-build config only
+- `Capture/` — global triggers, hotkeys, and capture routing
+- `Dictation/` — dictation artifact persistence
+- `Meeting/` — app-side meeting adapters, storage, and transcript restyling
+- `Observability/` — debug logging, events, diagnostics, crash reporting, and beta telemetry/update plumbing
+- `Reliability/` — wake / hotkey recovery coordination
+- `Speech/` — Parakeet STT and live recording plumbing
+- `Style/` — small retained style heuristics
+- `Text/` — small retained text utilities
+- `TranscriptedCore/` — reusable meeting transcription library
+- `UI/` — overlays, menu bar, settings, onboarding, and agent-connect surfaces
 
-The historical planning docs that used to live alongside older placeholder
-areas were moved under `docs/archive/` so the source tree reads more like the
-live app surface and less like a half-finished subsystem map.
+## Storage model to keep in mind
+
+- captures live in the selected capture library
+- default capture library: `~/Library/Application Support/Transcripted/captures/`
+- app-owned state, cache, logs, and tmp stay under `~/Library/Application Support/Transcripted/`
+
+Read `docs/storage-paths.md` before changing file-output assumptions.
 
 ## Read before editing
 
 - touching dictation persistence: `Sources/Dictation/CLAUDE.md`
 - touching meeting flow: `Sources/Meeting/CLAUDE.md`
-- touching core library or meeting pipeline internals: `Sources/TranscriptedCore/CLAUDE.md`
+- touching wake / hotkey recovery: `Sources/Reliability/CLAUDE.md`
 - touching STT / recording lifecycle: `Sources/Speech/CLAUDE.md`
-- touching tests or package boundaries: `Tests/README.md`
-
-Prefer the local doc plus the actual Swift file list before assuming an older
-Draft-era subsystem is still live.
+- touching the shared library: `Sources/TranscriptedCore/CLAUDE.md`

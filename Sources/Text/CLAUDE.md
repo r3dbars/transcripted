@@ -1,22 +1,22 @@
-# Text utilities
+# Text Utilities
 
 ## Current status
 
-`Sources/Text/` holds a couple of small pure text helpers that survived the
-earlier drafting flow.
+`Sources/Text/` contains a few pure text helpers retained from the earlier
+drafting flow.
 
-## Files
+## Important files
 
-- `DiffSummary.swift` — pure word-level diff helpers used by overlay review UI
+- `DiffSummary.swift` — word-level diff helpers still used by overlay review UI
 - `RefusalHeuristics.swift` — refusal-phrase heuristic retained as a pure utility
 
-## Agent notes
+## Notes
 
-- The product-level drafting mode is removed on `main`; `Sources/UI/DictationSessionController.swift` now handles dictation only and returns a fixed message from removed draft-mode methods.
-- `DiffSummary` is still used by `Sources/UI/OverlayDiffStripView.swift` and `Sources/UI/OverlayReviewView.swift`.
-- `RefusalHeuristics.looksLikeRefusal(...)` is still covered by tests, but it belongs to the older ghostwriting domain and is not a live top-level product flow on `main`.
+- the product-level drafting mode is removed on `main`
+- `DiffSummary` still matters to the dictation overlay review experience
+- `RefusalHeuristics` is legacy-domain utility, not a top-level current feature
 
-## Test coverage
+## Relevant tests
 
 - `Tests/DiffSummaryTests.swift`
 - `Tests/RefusalHeuristicsTests.swift`

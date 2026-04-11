@@ -1,62 +1,60 @@
 # TranscriptedCore
 
-## What this directory does
+## What this directory owns
 
-`Sources/TranscriptedCore/` is the reusable meeting transcription library embedded in this repo. It is consumed by the app through `Sources/Meeting/`, and it can also be tested as a standalone Swift package through the root `Package.swift`.
+`Sources/TranscriptedCore/` is the reusable meeting transcription library
+embedded in this repo. The app uses it through `Sources/Meeting/`, and the root
+`Package.swift` exposes it for standalone package tests.
 
-## Subsystems (55 Swift files)
+## Subsystems
 
-- `Audio/` (9 files) — mic + system audio capture, device recovery, resampling, level metering, process tap, buffer writer
-- `Logging/` (2 files) — shared app logger and JSONL file logger
-- `Models/` (4 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, metadata builders
-- `Pipeline/` (4 files) — transcription orchestration, pipeline runner, and task queue
-- `Protocols/` (7 files) — host-injected seams: `SpeechToTextEngine`, `DiarizationEngine`, `SpeakerStore`, `TranscriptNotifier`, `AudioCaptureEngine`, `StatsStore`, `TranscriptStorage`
-- `Services/` (7 files) — DI container (`AppServices`), model download, path indirection, recording validation, diarization, failed transcription manager
-- `Speaker/` (10 files) — speaker DB, embedding matching/clustering, clip extraction, naming policy/coordinator, profile merging, retroactive updater
-- `Stats/` (4 files) — recording stats database, models, queries, and service
-- `Storage/` (4 files) — transcript save, scanner, formatter, JSON sidecar output
-- `Utilities/` (4 files) — date helpers, permissions, transcript utility functions
+- `Audio/` — mic + system audio capture, resampling, level metering, recovery, and scratch-file writing
+- `Logging/` — shared app logger and JSONL file logger
+- `Models/` — public data types such as `TranscriptionResult`, `DisplayStatus`, and failed-transcription metadata
+- `Pipeline/` — transcription orchestration, pipeline runner, and task queue
+- `Protocols/` — host-injected seams: `SpeechToTextEngine`, `DiarizationEngine`, `SpeakerStore`, `TranscriptNotifier`, `AudioCaptureEngine`, `StatsStore`, `TranscriptStorage`
+- `Services/` — DI container, model download, path indirection, recording validation, diarization, and failed-transcription management
+- `Speaker/` — speaker DB, embeddings, matching, naming, clip extraction, and retroactive updates
+- `Stats/` — recording stats database and query services
+- `Storage/` — transcript saving, markdown formatting, sidecar/index writing, and scanning
+- `Utilities/` — date, permissions, and transcript helpers
 
-## The seams embedders should know
+## Host seams to know
 
-- `CoreStoragePaths` — redirects all persisted output away from the standalone defaults
-- `ModelBundleProvider` — lets hosts override where offline model bundles are resolved
+- `CoreStoragePaths` — central filesystem layout for captures, DBs, failed queue, logs, and raw-audio scratch
+- `ModelBundleProvider` — lets hosts override where offline model bundles resolve
 - `AppServices` — DI container over protocol-typed STT / diarization / speaker-store dependencies
 - `TranscriptionTaskManager` — host-facing queue and orchestration surface
 - `TranscriptNotifier` — optional callback channel for transcript-saved / failure notifications
 
-These seams exist specifically so the app can embed the library without adopting the old standalone Transcripted app assumptions.
+## Current default paths
+
+`CoreStoragePaths.default` now uses the Transcripted Application Support layout:
+
+- captures: `~/Library/Application Support/Transcripted/captures/meetings/`
+- state: `~/Library/Application Support/Transcripted/state/`
+- logs: `~/Library/Application Support/Transcripted/logs/`
+- raw audio scratch: `~/Library/Application Support/Transcripted/tmp/recordings/`
+
+The app still injects its own `CoreStoragePaths` so:
+
+- meeting transcripts follow the selected capture library
+- databases, failed queue, logs, and scratch stay under the app-owned Transcripted folders
 
 ## Threading model
 
-- `Audio` and several `Audio/*` helpers are **not** `@MainActor`. They run on audio or background threads.
-- `TranscriptionTaskManager`, `Transcription`, and many service surfaces are `@MainActor ObservableObject`.
-- Heavy pipeline work is pushed off the main actor through `nonisolated` async helpers in the pipeline runner.
-- Any callback that handles live audio buffers must stay real-time safe.
-
-## Storage behavior
-
-Standalone `TranscriptedCore.default` paths point to:
-
-- `~/Documents/Transcripted/` for transcripts, databases, clips, and failed queue
-- `~/Library/Logs/Transcripted/` for logs
-
-The app does **not** use those defaults for meetings. `Sources/Meeting/MeetingSessionController.swift` injects app-specific `CoreStoragePaths` rooted in the current Draft-named compatibility tree.
-
-`TranscriptSaver.saveTranscript(...)` also writes:
-
-- a markdown transcript
-- an agent JSON sidecar
-- an index file
+- most audio capture types are not `@MainActor`
+- `TranscriptionTaskManager`, `Transcription`, and many service surfaces are `@MainActor`
+- heavy pipeline work is pushed off the main actor through async helpers
+- any callback touching live audio buffers must remain real-time safe
 
 ## Editing rules
 
-- Keep app-shell UI types out of this directory.
-- Prefer injected paths, injected providers, and protocol seams over `Bundle.main` or hard-coded home-directory assumptions.
-- If a new dependency is needed by hosts, make it injectable at the core boundary rather than reaching out to app globals.
-- If you change protocol signatures, `AppServices`, `Package.swift`, or public models, test both the app build and the standalone package boundary.
+- keep app-shell UI types out of this directory
+- prefer injected paths, providers, and protocol seams over global app assumptions
+- if you change protocol signatures, `AppServices`, public models, or path semantics, verify both the app and package seams
 
-## Test and verification
+## Verify
 
 Always run:
 
@@ -68,9 +66,7 @@ Also run when the package seam changes:
 
 - `swift test`
 
-Current direct core coverage is thin and concentrated around the public seam:
+Direct coverage is still thin and centered on the public seam:
 
 - `Tests/TranscriptedCoreTests/CoreStoragePathsTests.swift`
 - `SmokeTests/CoreIntegrationSmoke.swift`
-
-That means many core changes still depend heavily on build + smoke validation.

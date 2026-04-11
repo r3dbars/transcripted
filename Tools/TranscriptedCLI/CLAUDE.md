@@ -1,24 +1,32 @@
 # TranscriptedCLI
 
-`Tools/TranscriptedCLI/` is a standalone Swift package for command-line access to Transcripted context and offline diarization.
+`Tools/TranscriptedCLI/` is a standalone Swift package for:
+
+- searching saved Transcripted context from the terminal
+- offline diarization commands
 
 It does not build or run the app target.
 
-## Command Groups
+## Command groups
 
-### Local Context
+### Local context
 
-- `transcripted-cli context-recent` — list recent meetings and dictations
-- `transcripted-cli context-search <query>` — search across saved meetings and dictations
-- `transcripted-cli list-dictations` — list saved dictation day files
-- `transcripted-cli read-dictation <filename>` — read one dictation day or one entry
+- `transcripted-cli context-recent`
+- `transcripted-cli context-search <query>`
+- `transcripted-cli list-dictations`
+- `transcripted-cli read-dictation <filename>`
 
-By default these commands read:
+Default context locations:
 
-- meetings: `~/Library/Application Support/Draft/meetings/transcripts`
-- dictations: `~/Library/Application Support/Draft/dictations/transcripts`
+- meetings: `~/Library/Application Support/Transcripted/captures/meetings/`
+- dictations: `~/Library/Application Support/Transcripted/captures/dictations/`
 
-They also honor:
+Legacy fallback order when those newer folders are missing:
+
+1. `~/Library/Application Support/Draft/meetings/transcripts/` and `.../dictations/transcripts/`
+2. `~/Documents/Transcripted/`
+
+Overrides:
 
 - `--data-dir`
 - `--meetings-dir`
@@ -27,26 +35,25 @@ They also honor:
 - `TRANSCRIPTED_MEETINGS_DIR`
 - `TRANSCRIPTED_DICTATIONS_DIR`
 
-### Offline Audio
+### Offline audio
 
-- `transcripted-cli diarize <audio>` — diarize one file, output RTTM or JSON
-- `transcripted-cli batch <directory>` — diarize matching audio files in a directory
+- `transcripted-cli diarize <audio>`
+- `transcripted-cli batch <directory>`
 
-## Files
+## Important files
 
-| File | Purpose |
-|------|---------|
-| `Package.swift` | Swift package manifest; links against repo dependency artifacts |
-| `TranscriptedCLI.swift` | `@main` command root and subcommand registration |
-| `ContextCommands.swift` | CLI entry points for recent/search/dictation commands |
-| `ContextStore.swift` | Shared file-loading and filtering logic for local context |
-| `ContextModels.swift` | Codable models used by the context commands |
-| `DiarizeCommand.swift` | Single-file diarization command |
-| `BatchCommand.swift` | Directory diarization command |
-| `ConfigLoader.swift` | JSON-to-`OfflineDiarizerConfig` loader |
-| `RTTMWriter.swift` | RTTM output formatter |
+- `Package.swift` — Swift package manifest
+- `TranscriptedCLI.swift` — `@main` command root and subcommand registration
+- `ContextCommands.swift` — CLI entry points for recent/search/dictation commands
+- `ContextStore.swift` — directory resolution, markdown loading, and filtering logic
+- `ContextModels.swift` — Codable models used by context commands
+- `DiarizeCommand.swift` — single-file diarization
+- `BatchCommand.swift` — directory diarization
+- `ConfigLoader.swift` — config loading
+- `DiarizerConfigCompatibility.swift` — legacy config compatibility helpers
+- `RTTMWriter.swift` — RTTM formatter
 
-## Build And Run
+## Build and run
 
 ```bash
 cd Tools/TranscriptedCLI
@@ -57,9 +64,8 @@ swift run transcripted-cli list-dictations --count 5
 swift run transcripted-cli diarize /path/to/audio.wav --json
 ```
 
-## Gotchas
+## Notes
 
-- the context commands and the diarization commands serve different users, do not describe the whole package as diarization-only
-- the diarization commands depend on repo-level artifacts, so run `bash build-deps.sh` first when those are missing
-- the default context paths now point at `~/Library/Application Support/Draft/`, not only the older `~/Documents/Transcripted/` layout
-- changes here should be verified independently from the app build
+- the context commands and diarization commands serve different use cases; do not describe the whole package as diarization-only
+- diarization commands depend on repo-level artifacts, so run `bash build-deps.sh` first when they are missing
+- context commands read markdown directly and can synthesize dictation summaries even when JSON sidecars are absent

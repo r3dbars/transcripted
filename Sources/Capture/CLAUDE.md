@@ -1,39 +1,27 @@
-# Capture Directory
+# Capture
 
-## What This Does
+## What this directory owns
 
-`Sources/Capture/` owns the active global-trigger layer for:
+`Sources/Capture/` owns the global trigger layer for:
 
-- dictation start/stop
-- meeting start/stop
+- dictation start / stop
+- meeting start / stop
 - optional right-Option tap dictation
 
-It no longer owns a live screenshot-driven draft mode.
+It does not own a live screenshot-driven draft mode anymore.
 
-## Key Files
+## Important files
 
-- `ContextCaptureEngine.swift` — Carbon hotkey registration, hotkey debounce,
-  right-Option tap detection, and routing into dictation or meeting handlers
-- `CapturedContext.swift` — legacy structured screenshot-context helper retained
-  for tests and compatibility code; not the center of the current runtime path
-
-## Current Hotkey Flow
-
-- Hotkey id `2` routes dictation toggles into `DictationSessionController`
-- Hotkey id `3` routes meeting toggles through the app-provided meeting closure
-- Rapid repeats are ignored using `TranscriptedConstants.hotkeyActionDebounceInterval`
-- Right-Option tap can act as an alternate dictation trigger
+- `ContextCaptureEngine.swift` — Carbon hotkey registration, debounce, right-Option tap detection, and routing into dictation or meeting handlers
+- `CapturedContext.swift` — legacy structured screenshot-context helper retained for compatibility and tests, not a primary runtime path
 
 ## Guardrails
 
-- Keep the C-level Carbon callback tiny and bounce into `@MainActor` work
-- Keep meeting routing separate from dictation routing
-- Do not reintroduce screenshot/OCR assumptions here unless the source files
-  come back in the same change
+- keep the Carbon callback tiny and bounce into `@MainActor` work
+- keep meeting routing separate from dictation routing
+- do not reintroduce screenshot or OCR assumptions unless the same change restores the full source path
 
-## Verification
-
-After changing this directory:
+## Verify
 
 ```bash
 bash build.sh
