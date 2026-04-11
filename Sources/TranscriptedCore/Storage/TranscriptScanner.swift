@@ -52,13 +52,11 @@ public enum TranscriptScanner {
         var migrated = 0
 
         for (index, fileURL) in markdownFiles.enumerated() {
-            // Check if already migrated
-            if database.recordingExists(transcriptPath: fileURL.path) {
-                continue
-            }
-
             // Parse the transcript
             if let (metadata, _) = parseTranscriptFile(fileURL) {
+                if database.recordingExists(id: metadata.id) || database.recordingExists(transcriptPath: fileURL.path) {
+                    continue
+                }
                 database.recordSession(metadata)
                 migrated += 1
             }
@@ -94,6 +92,7 @@ public enum TranscriptScanner {
         var processingTimeMs = 0
         var title: String?
         var actionItemsCount = 0
+        var captureID: String?
 
         // Check for YAML frontmatter
         if content.hasPrefix("---") {
@@ -157,6 +156,9 @@ public enum TranscriptScanner {
                     case "action_items":
                         actionItemsCount = Int(value) ?? 0
 
+                    case "capture_id", "transcript_id":
+                        captureID = value
+
                     default:
                         break
                     }
@@ -183,6 +185,7 @@ public enum TranscriptScanner {
         title = extractTitle(from: fileURL, content: content)
 
         let metadata = RecordingMetadata(
+            id: captureID ?? UUID().uuidString,
             date: date,
             durationSeconds: durationSeconds,
             wordCount: wordCount,

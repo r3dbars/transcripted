@@ -287,6 +287,7 @@ extension StatsService {
     /// Create a RecordingMetadata from local transcription result
     public nonisolated static func createMetadata(
         from result: TranscriptionResult,
+        captureId: UUID,
         transcriptPath: String?,
         title: String?
     ) -> RecordingMetadata {
@@ -294,6 +295,7 @@ extension StatsService {
         let totalSpeakers = result.micSpeakerCount + result.systemSpeakerCount
 
         return RecordingMetadata(
+            id: captureId.uuidString,
             date: Date(),
             durationSeconds: Int(result.duration),
             wordCount: totalWordCount,

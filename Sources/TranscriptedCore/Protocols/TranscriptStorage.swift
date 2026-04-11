@@ -29,6 +29,7 @@ public protocol TranscriptStorage {
     static func updateSpeakerNames(
         transcriptURL: URL,
         updates: [SpeakerNameUpdate],
+        transcriptionResult: TranscriptionResult,
         speakerStore: (any SpeakerStore)?
     ) -> Bool
 

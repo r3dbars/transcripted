@@ -1,31 +1,113 @@
 // DraftPaths.swift
-// Shared Application Support directory helper — safe fallback, no force-unwraps.
+// Shared storage layout helpers for Transcripted.
 
 import Foundation
 
+enum TranscriptedStoragePreferences {
+    static let captureLibraryLocationKey = "transcriptSaveLocation"
+
+    static func captureLibraryURL(
+        userDefaults: UserDefaults = .standard,
+        fileManager: FileManager = .default
+    ) -> URL {
+        if let customPath = userDefaults.string(forKey: captureLibraryLocationKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !customPath.isEmpty {
+            return URL(fileURLWithPath: customPath, isDirectory: true).standardizedFileURL
+        }
+
+        return fileManager.transcriptedDefaultCaptureLibraryDir
+    }
+
+    static func setCaptureLibraryURL(_ url: URL?, userDefaults: UserDefaults = .standard) {
+        if let url {
+            userDefaults.set(url.standardizedFileURL.path, forKey: captureLibraryLocationKey)
+        } else {
+            userDefaults.removeObject(forKey: captureLibraryLocationKey)
+        }
+    }
+}
+
 extension FileManager {
-    /// Transcripted-facing compatibility helper.
-    /// Current main still keeps app-support data under Draft's existing folder
-    /// until a deliberate migration path exists.
-    var transcriptedAppSupportDir: URL {
-        let appSupport = urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+    private var userApplicationSupportDir: URL {
+        urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        return appSupport.appendingPathComponent("Draft", isDirectory: true)
     }
 
-    /// Legacy alias while older code still refers to the Draft-named root.
+    /// App-owned Transcripted root.
+    var transcriptedAppSupportDir: URL {
+        let url = userApplicationSupportDir.appendingPathComponent("Transcripted", isDirectory: true)
+        try? createPrivateDirectory(at: url)
+        try? createPrivateDirectory(at: url.appendingPathComponent("captures", isDirectory: true))
+        try? createDirectory(at: url.appendingPathComponent("captures/meetings", isDirectory: true), withIntermediateDirectories: true)
+        try? createDirectory(at: url.appendingPathComponent("captures/dictations", isDirectory: true), withIntermediateDirectories: true)
+        try? createPrivateDirectory(at: url.appendingPathComponent("state", isDirectory: true))
+        try? createPrivateDirectory(at: url.appendingPathComponent("cache", isDirectory: true))
+        try? createPrivateDirectory(at: url.appendingPathComponent("logs", isDirectory: true))
+        try? createPrivateDirectory(at: url.appendingPathComponent("tmp", isDirectory: true))
+        try? createPrivateDirectory(at: url.appendingPathComponent("tmp/recordings", isDirectory: true))
+        return url
+    }
+
+    /// Historic Draft compatibility root, retained only for migration / cleanup flows.
     var draftAppSupportDir: URL {
-        transcriptedAppSupportDir
+        userApplicationSupportDir.appendingPathComponent("Draft", isDirectory: true)
     }
 
-    /// ~/Library/Application Support/Draft/meetings/
+    var transcriptedDefaultCaptureLibraryDir: URL {
+        let url = transcriptedAppSupportDir.appendingPathComponent("captures", isDirectory: true)
+        try? createPrivateDirectory(at: url)
+        return url
+    }
+
+    var transcriptedCaptureLibraryDir: URL {
+        let url = TranscriptedStoragePreferences.captureLibraryURL(fileManager: self)
+        try? createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    var transcriptedStateDir: URL {
+        let url = transcriptedAppSupportDir.appendingPathComponent("state", isDirectory: true)
+        try? createPrivateDirectory(at: url)
+        return url
+    }
+
+    var transcriptedCacheDir: URL {
+        let url = transcriptedAppSupportDir.appendingPathComponent("cache", isDirectory: true)
+        try? createPrivateDirectory(at: url)
+        return url
+    }
+
+    var transcriptedLogsDir: URL {
+        let url = transcriptedAppSupportDir.appendingPathComponent("logs", isDirectory: true)
+        try? createPrivateDirectory(at: url)
+        return url
+    }
+
+    var transcriptedTemporaryDir: URL {
+        let url = transcriptedAppSupportDir.appendingPathComponent("tmp", isDirectory: true)
+        try? createPrivateDirectory(at: url)
+        return url
+    }
+
+    var transcriptedRecordingsDir: URL {
+        let url = transcriptedTemporaryDir.appendingPathComponent("recordings", isDirectory: true)
+        try? createPrivateDirectory(at: url)
+        return url
+    }
+
+    /// <capture-library>/meetings/
     var meetingSupportDir: URL {
-        transcriptedAppSupportDir.appendingPathComponent("meetings", isDirectory: true)
+        let url = transcriptedCaptureLibraryDir.appendingPathComponent("meetings", isDirectory: true)
+        try? createDirectory(at: url, withIntermediateDirectories: true)
+        return url
     }
 
-    /// ~/Library/Application Support/Draft/dictations/
+    /// <capture-library>/dictations/
     var dictationSupportDir: URL {
-        transcriptedAppSupportDir.appendingPathComponent("dictations", isDirectory: true)
+        let url = transcriptedCaptureLibraryDir.appendingPathComponent("dictations", isDirectory: true)
+        try? createDirectory(at: url, withIntermediateDirectories: true)
+        return url
     }
 
     /// Create a directory and tighten it to owner-only access (0700).

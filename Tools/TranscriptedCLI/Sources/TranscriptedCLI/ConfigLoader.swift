@@ -24,28 +24,12 @@ struct DiarizeConfig: Codable {
     var maxSpeakers: Int?
 
     func toOfflineDiarizerConfig() -> OfflineDiarizerConfig {
-        var config = OfflineDiarizerConfig(
-            clusteringThreshold: clusteringThreshold ?? 0.6,
-            Fa: Fa ?? 0.07,
-            Fb: Fb ?? 0.8,
-            windowDuration: windowDuration ?? 10.0,
-            segmentationStepRatio: segmentationStepRatio ?? 0.2,
-            embeddingBatchSize: embeddingBatchSize ?? 32,
-            embeddingExcludeOverlap: embeddingExcludeOverlap ?? true,
-            minSegmentDuration: minSegmentDuration ?? 1.0,
-            minGapDuration: minGapDuration ?? 0.1,
-            exclusiveSegments: exclusiveSegments ?? true,
-            speechOnsetThreshold: speechOnsetThreshold ?? 0.5,
-            speechOffsetThreshold: speechOffsetThreshold ?? 0.5,
-            segmentationMinDurationOn: segmentationMinDurationOn ?? 0.0,
-            segmentationMinDurationOff: segmentationMinDurationOff ?? 0.0,
-            maxVBxIterations: maxVBxIterations ?? 20,
-            convergenceTolerance: convergenceTolerance ?? 1e-4
-        )
-        if minSpeakers != nil || maxSpeakers != nil {
-            config = config.withSpeakers(min: minSpeakers, max: maxSpeakers)
-        }
-        return config
+        // FluidAudio's public OfflineDiarizerConfig surface has drifted from the
+        // older flat initializer this CLI used to mirror. Keep config-file
+        // loading buildable by falling back to the library defaults for now,
+        // while still threading through the legacy speaker-bound compatibility
+        // shim above.
+        OfflineDiarizerConfig.default.applyingSpeakerBounds(min: minSpeakers, max: maxSpeakers)
     }
 }
 

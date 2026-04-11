@@ -87,6 +87,8 @@ extension TranscriptSaver {
         // Build YAML frontmatter
         var yaml = """
         ---
+        capture_id: "\(transcriptId.uuidString)"
+        capture_type: meeting
         transcript_id: "\(transcriptId.uuidString)"
         date: \(isoDate)
         time: \(timeString)

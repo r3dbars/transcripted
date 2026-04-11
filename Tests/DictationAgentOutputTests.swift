@@ -1,10 +1,10 @@
 // DictationAgentOutputTests.swift
-// Tests for machine-readable dictation sidecars.
+// Tests for markdown-only dictation day captures.
 
 import Foundation
 
 func testDictationAgentOutput() {
-    runSuite("DictationTranscriptWriter.save — writes JSON sidecar for agent use") {
+    runSuite("DictationTranscriptWriter.save — writes markdown-only day captures") {
         let fm = FileManager.default
         let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationAgentTests-\(UUID().uuidString)", isDirectory: true)
         let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
@@ -20,27 +20,29 @@ func testDictationAgentOutput() {
             directory: outputDir
         )
 
-        let sidecarURL = outputDir.appendingPathComponent("Dictations_2026-04-07.json")
-        assertEqual(saved?.sidecarURL?.path, sidecarURL.path, "dictation save should report the sidecar path")
+        let markdownURL = outputDir.appendingPathComponent("Dictations_2026-04-07.md")
+        assertEqual(saved?.url.path, markdownURL.path, "dictation save should report the markdown capture path")
+        assertEqual(saved?.sidecarURL, nil, "dictation save should not report a JSON sidecar")
 
         guard
-            let data = try? Data(contentsOf: sidecarURL),
-            let payload = try? JSONDecoder().decode(AgentDictationDay.self, from: data)
+            let markdown = try? String(contentsOf: markdownURL, encoding: .utf8)
         else {
-            assertTrue(false, "expected decodable dictation agent sidecar")
+            assertTrue(false, "expected markdown dictation capture")
             return
         }
 
-        assertEqual(payload.captureType, "dictation_day", "sidecar capture type")
-        assertEqual(payload.markdownFilename, "Dictations_2026-04-07.md", "sidecar should point at matching markdown file")
-        assertEqual(payload.entryCount, 1, "single dictation should produce one entry")
-        assertEqual(payload.entries.first?.delivery, "copied", "delivery should use machine-readable enum values")
-        assertEqual(payload.entries.first?.sourceAppName, "Unknown", "missing app should be encoded predictably")
-        assertEqual(payload.entries.first?.wordCount, 7, "entry word count")
-        assertTrue(payload.entries.first?.id.hasPrefix("dictation-") == true, "entry id should be stable and namespaced")
+        assertTrue(markdown.contains("capture_type: dictation_day"), "frontmatter should label the capture type")
+        assertTrue(markdown.contains("# Dictations for"), "markdown should include the day heading")
+        assertTrue(markdown.contains("Entry ID: `dictation-"), "each dictation should receive a stable entry id")
+        assertTrue(markdown.contains("Captured: 2026-04-07T14:15:00.000Z"), "captured timestamp should use ISO format")
+        assertTrue(markdown.contains("Source app: Unknown"), "missing app should be encoded predictably")
+        assertTrue(markdown.contains("Delivery: copied"), "delivery should use machine-readable enum values")
+        assertTrue(markdown.contains("Words: 7"), "entry word count should be recorded")
+        assertTrue(markdown.contains("Characters: 40"), "entry character count should be recorded")
+        assertTrue(markdown.contains("Ship the follow-up note to product today"), "dictation text should be preserved")
     }
 
-    runSuite("DictationTranscriptWriter.save — appends entries to existing JSON sidecar") {
+    runSuite("DictationTranscriptWriter.save — appends entries to the existing markdown day file") {
         let fm = FileManager.default
         let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationAgentTests-\(UUID().uuidString)", isDirectory: true)
         let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
@@ -65,19 +67,23 @@ func testDictationAgentOutput() {
             directory: outputDir
         )
 
-        let sidecarURL = outputDir.appendingPathComponent("Dictations_2026-04-07.json")
+        let markdownURL = outputDir.appendingPathComponent("Dictations_2026-04-07.md")
         guard
-            let data = try? Data(contentsOf: sidecarURL),
-            let payload = try? JSONDecoder().decode(AgentDictationDay.self, from: data)
+            let markdown = try? String(contentsOf: markdownURL, encoding: .utf8)
         else {
-            assertTrue(false, "expected combined dictation sidecar")
+            assertTrue(false, "expected combined dictation markdown")
             return
         }
 
-        assertEqual(payload.entryCount, 2, "same-day dictations should aggregate")
-        assertEqual(payload.entries.count, 2, "entry array should include both dictations")
-        assertTrue(payload.entries[0].createdAt < payload.entries[1].createdAt, "entries should be chronological")
-        assertEqual(payload.wordCount, payload.entries.reduce(0) { $0 + $1.wordCount }, "top-level word count should roll up entries")
+        let entryCount = markdown.components(separatedBy: "Entry ID: `dictation-").count - 1
+        assertEqual(entryCount, 2, "same-day dictations should aggregate into one markdown day file")
+        assertTrue(markdown.contains("Morning dictation for triage"), "first dictation should be preserved")
+        assertTrue(markdown.contains("Evening dictation with more detail"), "second dictation should be preserved")
+
+        let firstRange = markdown.range(of: "Morning dictation for triage")
+        let secondRange = markdown.range(of: "Evening dictation with more detail")
+        let firstStartsEarlier = (firstRange?.lowerBound ?? markdown.endIndex) < (secondRange?.lowerBound ?? markdown.startIndex)
+        assertTrue(firstStartsEarlier, "entries should remain chronological")
     }
 }
 

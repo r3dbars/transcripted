@@ -1,9 +1,5 @@
 // EventReporter.swift
-// Centralized event tracking — structured JSONL for Claude Code + optional Sentry forwarding
-//
-// Every meaningful error, warning, and operational event across all engines funnels through
-// EventReporter.shared.capture(). Events are written to ~/Library/Application Support/Draft/events.jsonl
-// (same directory as feedback.jsonl and prompts.json) and optionally forwarded to Sentry.
+// Centralized event tracking — structured JSONL for local diagnostics + optional Sentry forwarding.
 //
 // Design: @MainActor singleton + actor-based file writer (same pattern as AppLogger).
 // Fire-and-forget via Task.detached — capture() never blocks the caller.
@@ -41,7 +37,7 @@ private actor EventFileWriter {
     }()
 
     init() {
-        let storageDir = FileManager.default.transcriptedAppSupportDir
+        let storageDir = FileManager.default.transcriptedLogsDir
         fileURL = storageDir.appendingPathComponent("events.jsonl")
 
         // Ensure directory exists

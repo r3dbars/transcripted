@@ -23,6 +23,7 @@ let package = Package(
             path: "Sources/TranscriptedCLI",
             swiftSettings: [
                 .unsafeFlags([
+                    "-F", "\(repoRoot)/deps-frameworks",
                     "-I", "\(repoRoot)/deps-modules",
                     "-I", "\(repoRoot)/deps-modules/FastClusterWrapper",
                     "-I", "\(repoRoot)/deps-modules/MachTaskSelfWrapper",
@@ -31,10 +32,12 @@ let package = Package(
             ],
             linkerSettings: [
                 .unsafeFlags([
+                    "-F\(repoRoot)/deps-frameworks",
                     "-L\(repoRoot)/deps-libs",
                     "-lDraftDeps",
                     "-lc++",
                 ]),
+                .linkedFramework("ESpeakNG"),
                 .linkedFramework("Metal"),
                 .linkedFramework("MetalKit"),
                 .linkedFramework("Accelerate"),

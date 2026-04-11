@@ -1,6 +1,6 @@
 // AppLogger.swift
-// Shared logging service — tracks every user action with timestamps
-// Writes to both in-app debug panel and ~/draft-debug.log
+// Shared logging service — tracks every user action with timestamps.
+// Writes to both the in-app debug panel and the app-owned logs folder.
 
 import Foundation
 import SwiftUI
@@ -69,10 +69,9 @@ private actor AppLogFileWriter {
 class AppLogger: ObservableObject {
     @Published var entries: [String] = []
 
-    private let logFilePath: String = {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return home + "/draft-debug.log"
-    }()
+    private let logFilePath = FileManager.default.transcriptedLogsDir
+        .appendingPathComponent("debug.log", isDirectory: false)
+        .path
     private let fileWriter = AppLogFileWriter()
     private var lastLogByKey: [String: CFAbsoluteTime] = [:]
 

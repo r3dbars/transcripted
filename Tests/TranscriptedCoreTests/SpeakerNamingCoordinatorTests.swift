@@ -19,6 +19,24 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         let source: String
         let label: String
         let text: String
+        let sortformerSpeakerId: Int?
+        let speakingSeconds: Double
+
+        init(
+            timestamp: String,
+            source: String,
+            label: String,
+            text: String,
+            sortformerSpeakerId: Int? = nil,
+            speakingSeconds: Double = 3.0
+        ) {
+            self.timestamp = timestamp
+            self.source = source
+            self.label = label
+            self.text = text
+            self.sortformerSpeakerId = sortformerSpeakerId
+            self.speakingSeconds = speakingSeconds
+        }
     }
 
     private struct BreakdownEntry {
@@ -52,51 +70,36 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             existingId: nil
         ).id
         let transcriptURL = harness.paths.transcripts.appendingPathComponent("Call_2026-04-10_15-01-23.md")
-        let jsonURL = transcriptURL.deletingPathExtension().appendingPathExtension("json")
         let clipURL = tempDirectory.appendingPathComponent("speaker.wav")
         let micURL = tempDirectory.appendingPathComponent("mic.wav")
         let systemURL = tempDirectory.appendingPathComponent("system.wav")
+        let speakers = [
+            MarkdownSpeaker(
+                id: "1",
+                persistentSpeakerId: persistentSpeakerId,
+                name: "Speaker 1",
+                confidence: "unknown",
+                source: "db_pending"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "Speaker 1",
+                text: "Thanks for joining."
+            )
+        ]
 
         try sampleTranscript(
             transcriptId: transcriptId,
-            speakers: [
-                MarkdownSpeaker(
-                    id: "1",
-                    persistentSpeakerId: persistentSpeakerId,
-                    name: "Speaker 1",
-                    confidence: "unknown",
-                    source: "db_pending"
-                )
-            ],
-            utterances: [
-                MarkdownUtterance(
-                    timestamp: "00:01",
-                    source: "System",
-                    label: "Speaker 1",
-                    text: "Thanks for joining."
-                )
-            ],
+            speakers: speakers,
+            utterances: utterances,
             breakdownEntries: [
                 BreakdownEntry(name: "Speaker 1", utterances: 1, wordCount: 5, duration: "00:03")
             ]
         ).write(to: transcriptURL, atomically: true, encoding: .utf8)
-        try writeSidecar(
-            to: jsonURL,
-            transcriptId: transcriptId,
-            speakers: [
-                AgentSpeaker(
-                    id: "system_1",
-                    persistentSpeakerId: persistentSpeakerId.uuidString,
-                    name: "Speaker 1",
-                    confidence: "unknown",
-                    wordCount: 5,
-                    speakingSeconds: 3.0
-                )
-            ],
-            utterances: [
-                AgentUtterance(start: 1.0, end: 4.0, speakerId: "system_1", text: "Thanks for joining.")
-            ]
-        )
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
         try Data().write(to: clipURL)
         try Data().write(to: micURL)
         try Data().write(to: systemURL)
@@ -122,6 +125,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             ],
             transcriptURL: transcriptURL,
             transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
             micURL: micURL,
             systemURL: systemURL,
             clips: [
@@ -147,8 +151,6 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         XCTAssertEqual(harness.manager.lastSavedTranscriptURL, transcriptURL)
         let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertTrue(savedTranscript.contains("Sarah Graham"))
-        let savedSidecar = try JSONDecoder().decode(AgentTranscript.self, from: Data(contentsOf: jsonURL))
-        XCTAssertEqual(savedSidecar.speakers.first?.name, "Sarah Graham")
         XCTAssertFalse(FileManager.default.fileExists(atPath: clipURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))
@@ -166,6 +168,25 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         let clipURL = tempDirectory.appendingPathComponent("speaker-failure.wav")
         let micURL = tempDirectory.appendingPathComponent("mic-failure.wav")
         let systemURL = tempDirectory.appendingPathComponent("system-failure.wav")
+        let transcriptionResult = sampleTranscriptionResult(
+            speakers: [
+                MarkdownSpeaker(
+                    id: "1",
+                    persistentSpeakerId: persistentSpeakerId,
+                    name: "Speaker 1",
+                    confidence: "unknown",
+                    source: "db_pending"
+                )
+            ],
+            utterances: [
+                MarkdownUtterance(
+                    timestamp: "00:01",
+                    source: "System",
+                    label: "Speaker 1",
+                    text: "Thanks for joining."
+                )
+            ]
+        )
 
         try Data().write(to: clipURL)
         try Data().write(to: micURL)
@@ -192,6 +213,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             ],
             transcriptURL: missingTranscriptURL,
             transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
             micURL: micURL,
             systemURL: systemURL,
             clips: [
@@ -232,51 +254,36 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         ).id
         let originalTranscriptURL = harness.paths.transcripts.appendingPathComponent("Call_2026-04-10_15-01-23.md")
         let renamedTranscriptURL = harness.paths.transcripts.appendingPathComponent("Meeting with Speaker 1.md")
-        let renamedJSONURL = renamedTranscriptURL.deletingPathExtension().appendingPathExtension("json")
         let clipURL = tempDirectory.appendingPathComponent("speaker-renamed.wav")
         let micURL = tempDirectory.appendingPathComponent("mic-renamed.wav")
         let systemURL = tempDirectory.appendingPathComponent("system-renamed.wav")
+        let speakers = [
+            MarkdownSpeaker(
+                id: "1",
+                persistentSpeakerId: persistentSpeakerId,
+                name: "Speaker 1",
+                confidence: "unknown",
+                source: "db_pending"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "Speaker 1",
+                text: "Thanks for joining."
+            )
+        ]
 
         try sampleTranscript(
             transcriptId: transcriptId,
-            speakers: [
-                MarkdownSpeaker(
-                    id: "1",
-                    persistentSpeakerId: persistentSpeakerId,
-                    name: "Speaker 1",
-                    confidence: "unknown",
-                    source: "db_pending"
-                )
-            ],
-            utterances: [
-                MarkdownUtterance(
-                    timestamp: "00:01",
-                    source: "System",
-                    label: "Speaker 1",
-                    text: "Thanks for joining."
-                )
-            ],
+            speakers: speakers,
+            utterances: utterances,
             breakdownEntries: [
                 BreakdownEntry(name: "Speaker 1", utterances: 1, wordCount: 5, duration: "00:03")
             ]
         ).write(to: renamedTranscriptURL, atomically: true, encoding: .utf8)
-        try writeSidecar(
-            to: renamedJSONURL,
-            transcriptId: transcriptId,
-            speakers: [
-                AgentSpeaker(
-                    id: "system_1",
-                    persistentSpeakerId: persistentSpeakerId.uuidString,
-                    name: "Speaker 1",
-                    confidence: "unknown",
-                    wordCount: 5,
-                    speakingSeconds: 3.0
-                )
-            ],
-            utterances: [
-                AgentUtterance(start: 1.0, end: 4.0, speakerId: "system_1", text: "Thanks for joining.")
-            ]
-        )
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
         try Data().write(to: clipURL)
         try Data().write(to: micURL)
         try Data().write(to: systemURL)
@@ -302,6 +309,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             ],
             transcriptURL: originalTranscriptURL,
             transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
             micURL: micURL,
             systemURL: systemURL,
             clips: [
@@ -327,8 +335,6 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         XCTAssertEqual(harness.manager.lastSavedTranscriptURL, renamedTranscriptURL)
         let savedTranscript = try String(contentsOf: renamedTranscriptURL, encoding: .utf8)
         XCTAssertTrue(savedTranscript.contains("Sarah Graham"))
-        let savedSidecar = try JSONDecoder().decode(AgentTranscript.self, from: Data(contentsOf: renamedJSONURL))
-        XCTAssertEqual(savedSidecar.speakers.first?.name, "Sarah Graham")
         XCTAssertFalse(FileManager.default.fileExists(atPath: originalTranscriptURL.path))
     }
 
@@ -362,51 +368,36 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         let targetBefore = harness.speakerDB.getSpeaker(id: targetProfile.id)
 
         let transcriptURL = harness.paths.transcripts.appendingPathComponent("Meeting with Matt Vlasach.md")
-        let jsonURL = transcriptURL.deletingPathExtension().appendingPathExtension("json")
         let clipURL = tempDirectory.appendingPathComponent("speaker-correction.wav")
         let micURL = tempDirectory.appendingPathComponent("mic-correction.wav")
         let systemURL = tempDirectory.appendingPathComponent("system-correction.wav")
+        let speakers = [
+            MarkdownSpeaker(
+                id: "1",
+                persistentSpeakerId: matchedProfile.id,
+                name: "Matt Vlasach",
+                confidence: "medium",
+                source: "db_pending"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "Matt Vlasach",
+                text: "Thanks for joining."
+            )
+        ]
 
         try sampleTranscript(
             transcriptId: transcriptId,
-            speakers: [
-                MarkdownSpeaker(
-                    id: "1",
-                    persistentSpeakerId: matchedProfile.id,
-                    name: "Matt Vlasach",
-                    confidence: "medium",
-                    source: "db_pending"
-                )
-            ],
-            utterances: [
-                MarkdownUtterance(
-                    timestamp: "00:01",
-                    source: "System",
-                    label: "Matt Vlasach",
-                    text: "Thanks for joining."
-                )
-            ],
+            speakers: speakers,
+            utterances: utterances,
             breakdownEntries: [
                 BreakdownEntry(name: "Matt Vlasach", utterances: 1, wordCount: 5, duration: "00:03")
             ]
         ).write(to: transcriptURL, atomically: true, encoding: .utf8)
-        try writeSidecar(
-            to: jsonURL,
-            transcriptId: transcriptId,
-            speakers: [
-                AgentSpeaker(
-                    id: "system_1",
-                    persistentSpeakerId: matchedProfile.id.uuidString,
-                    name: "Matt Vlasach",
-                    confidence: "medium",
-                    wordCount: 5,
-                    speakingSeconds: 3.0
-                )
-            ],
-            utterances: [
-                AgentUtterance(start: 1.0, end: 4.0, speakerId: "system_1", text: "Thanks for joining.")
-            ]
-        )
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
         try Data().write(to: clipURL)
         try Data().write(to: micURL)
         try Data().write(to: systemURL)
@@ -432,6 +423,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             ],
             transcriptURL: transcriptURL,
             transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
             micURL: micURL,
             systemURL: systemURL,
             clips: [
@@ -459,9 +451,6 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         XCTAssertTrue(savedTranscript.contains("Sarah Graham"))
         XCTAssertFalse(savedTranscript.contains("Matt Vlasach"))
         XCTAssertTrue(savedTranscript.contains(targetProfile.id.uuidString))
-        let savedSidecar = try JSONDecoder().decode(AgentTranscript.self, from: Data(contentsOf: jsonURL))
-        XCTAssertEqual(savedSidecar.speakers.first?.name, "Sarah Graham")
-        XCTAssertEqual(savedSidecar.speakers.first?.persistentSpeakerId, targetProfile.id.uuidString)
 
         let rejectedProfile = harness.speakerDB.getSpeaker(id: matchedProfile.id)
         XCTAssertEqual(rejectedProfile?.displayName, "Matt Vlasach")
@@ -474,7 +463,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testHandleNamingCompletePublishesFailureWhenSidecarMissing() async throws {
+    func testHandleNamingCompleteSucceedsWithoutJSONSidecar() async throws {
         let harness = try makeHarness()
         let transcriptId = UUID()
         let persistentSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
@@ -485,31 +474,34 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         let clipURL = tempDirectory.appendingPathComponent("speaker-missing-sidecar.wav")
         let micURL = tempDirectory.appendingPathComponent("mic-missing-sidecar.wav")
         let systemURL = tempDirectory.appendingPathComponent("system-missing-sidecar.wav")
+        let speakers = [
+            MarkdownSpeaker(
+                id: "1",
+                persistentSpeakerId: persistentSpeakerId,
+                name: "Speaker 1",
+                confidence: "unknown",
+                source: "db_pending"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "Speaker 1",
+                text: "Thanks for joining."
+            )
+        ]
 
         let originalTranscript = sampleTranscript(
             transcriptId: transcriptId,
-            speakers: [
-                MarkdownSpeaker(
-                    id: "1",
-                    persistentSpeakerId: persistentSpeakerId,
-                    name: "Speaker 1",
-                    confidence: "unknown",
-                    source: "db_pending"
-                )
-            ],
-            utterances: [
-                MarkdownUtterance(
-                    timestamp: "00:01",
-                    source: "System",
-                    label: "Speaker 1",
-                    text: "Thanks for joining."
-                )
-            ],
+            speakers: speakers,
+            utterances: utterances,
             breakdownEntries: [
                 BreakdownEntry(name: "Speaker 1", utterances: 1, wordCount: 5, duration: "00:03")
             ]
         )
         try originalTranscript.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
         try Data().write(to: clipURL)
         try Data().write(to: micURL)
         try Data().write(to: systemURL)
@@ -535,6 +527,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             ],
             transcriptURL: transcriptURL,
             transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
             micURL: micURL,
             systemURL: systemURL,
             clips: [
@@ -553,14 +546,13 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         )
 
         try await waitUntil {
-            if case .failed(message: "Failed to finalize speaker names") = harness.manager.displayStatus,
-               harness.manager.speakerNamingRequest == nil {
-                return true
-            }
-            return false
+            harness.manager.speakerNamingRequest == nil
+                && harness.manager.displayStatus == .transcriptSaved
         }
 
-        XCTAssertEqual(try String(contentsOf: transcriptURL, encoding: .utf8), originalTranscript)
+        let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertNotEqual(savedTranscript, originalTranscript)
+        XCTAssertTrue(savedTranscript.contains("Sarah Graham"))
     }
 
     @MainActor
@@ -585,30 +577,33 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         let clipURL = tempDirectory.appendingPathComponent("speaker-no-embedding.wav")
         let micURL = tempDirectory.appendingPathComponent("mic-no-embedding.wav")
         let systemURL = tempDirectory.appendingPathComponent("system-no-embedding.wav")
+        let speakers = [
+            MarkdownSpeaker(
+                id: "1",
+                persistentSpeakerId: matchedProfile.id,
+                name: "Matt Vlasach",
+                confidence: "medium",
+                source: "db_pending"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "Matt Vlasach",
+                text: "Thanks for joining."
+            )
+        ]
 
         try sampleTranscript(
             transcriptId: transcriptId,
-            speakers: [
-                MarkdownSpeaker(
-                    id: "1",
-                    persistentSpeakerId: matchedProfile.id,
-                    name: "Matt Vlasach",
-                    confidence: "medium",
-                    source: "db_pending"
-                )
-            ],
-            utterances: [
-                MarkdownUtterance(
-                    timestamp: "00:01",
-                    source: "System",
-                    label: "Matt Vlasach",
-                    text: "Thanks for joining."
-                )
-            ],
+            speakers: speakers,
+            utterances: utterances,
             breakdownEntries: [
                 BreakdownEntry(name: "Matt Vlasach", utterances: 1, wordCount: 5, duration: "00:03")
             ]
         ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
         try Data().write(to: clipURL)
         try Data().write(to: micURL)
         try Data().write(to: systemURL)
@@ -634,6 +629,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             ],
             transcriptURL: transcriptURL,
             transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
             micURL: micURL,
             systemURL: systemURL,
             clips: [
@@ -782,27 +778,74 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         """
     }
 
-    private func writeSidecar(
-        to url: URL,
-        transcriptId: UUID,
-        speakers: [AgentSpeaker],
-        utterances: [AgentUtterance]
-    ) throws {
-        let transcript = AgentTranscript(
-            version: "1.0",
-            transcriptId: transcriptId.uuidString,
-            recording: AgentRecording(
-                date: "2026-04-10T15:01:23-0500",
-                durationSeconds: 90,
-                droppedSegments: 0,
-                engines: AgentEngines(stt: "parakeet-tdt-v3", diarization: "pyannote-offline")
-            ),
-            speakers: speakers,
-            utterances: utterances
+    private func sampleTranscriptionResult(
+        speakers: [MarkdownSpeaker],
+        utterances: [MarkdownUtterance],
+        duration: TimeInterval = 90
+    ) -> TranscriptionResult {
+        let speakersById = Dictionary(uniqueKeysWithValues: speakers.compactMap { speaker in
+            Int(speaker.id).map { ($0, speaker) }
+        })
+        let speakersByName = Dictionary(grouping: speakers) { normalizeSpeakerLabel($0.name) }
+
+        let mappedUtterances = utterances.map { utterance -> TranscriptionUtterance in
+            let channel = utterance.source.caseInsensitiveCompare("Mic") == .orderedSame ? 0 : 1
+            let speakerId = utterance.sortformerSpeakerId
+                ?? resolvedSpeakerId(
+                    for: utterance,
+                    channel: channel,
+                    speakersByName: speakersByName
+                )
+            let persistentSpeakerId = speakersById[speakerId]?.persistentSpeakerId
+            let start = timestampSeconds(for: utterance.timestamp)
+
+            return TranscriptionUtterance(
+                start: start,
+                end: start + utterance.speakingSeconds,
+                channel: channel,
+                speakerId: speakerId,
+                persistentSpeakerId: persistentSpeakerId,
+                matchSimilarity: nil,
+                transcript: utterance.text
+            )
+        }
+
+        return TranscriptionResult(
+            micUtterances: mappedUtterances.filter { $0.channel == 0 },
+            systemUtterances: mappedUtterances.filter { $0.channel == 1 },
+            duration: duration,
+            processingTime: 3.0
         )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(transcript).write(to: url, options: .atomic)
+    }
+
+    private func resolvedSpeakerId(
+        for utterance: MarkdownUtterance,
+        channel: Int,
+        speakersByName: [String: [MarkdownSpeaker]]
+    ) -> Int {
+        if let parsedId = Int(utterance.label.replacingOccurrences(of: "Speaker ", with: "")) {
+            return parsedId
+        }
+
+        let normalizedLabel = normalizeSpeakerLabel(utterance.label)
+        if let match = speakersByName[normalizedLabel], match.count == 1, let id = Int(match[0].id) {
+            return id
+        }
+
+        return channel == 0 ? 0 : 1
+    }
+
+    private func normalizeSpeakerLabel(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "[[", with: "")
+            .replacingOccurrences(of: "]]", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func timestampSeconds(for timestamp: String) -> Double {
+        let parts = timestamp.split(separator: ":").compactMap { Double($0) }
+        guard parts.count == 2 else { return 0 }
+        return (parts[0] * 60) + parts[1]
     }
 
     private func waitUntil(

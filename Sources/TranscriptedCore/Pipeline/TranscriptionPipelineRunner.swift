@@ -196,11 +196,6 @@ extension TranscriptionTaskManager {
                     speakerDB: speakerDB
                 )
 
-                // Persist clips so they survive naming tray dismissal
-                for clip in clips {
-                    SpeakerClipExtractor.persistClip(from: clip.clipURL, speakerId: clip.persistentSpeakerId)
-                }
-
                 if !clips.isEmpty {
                     let entries = clips.map { clip in
                         return SpeakerNamingEntry(
@@ -231,6 +226,7 @@ extension TranscriptionTaskManager {
                                     updates: updates,
                                     transcriptURL: savedURL,
                                     transcriptId: transcriptId,
+                                    transcriptionResult: result,
                                     micURL: micURL,
                                     systemURL: systemURL,
                                     clips: entries

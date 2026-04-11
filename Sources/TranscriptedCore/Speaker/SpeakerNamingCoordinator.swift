@@ -15,6 +15,7 @@ extension TranscriptionTaskManager {
         updates: [SpeakerNameUpdate],
         transcriptURL: URL,
         transcriptId: UUID,
+        transcriptionResult: TranscriptionResult,
         micURL: URL,
         systemURL: URL,
         clips: [SpeakerNamingEntry]
@@ -64,6 +65,7 @@ extension TranscriptionTaskManager {
             let didFinalizeTranscript = updates.isEmpty || TranscriptSaver.updateSpeakerNames(
                 transcriptURL: resolvedURL,
                 updates: resolvedUpdates,
+                transcriptionResult: transcriptionResult,
                 speakerStore: speakerDB
             )
 

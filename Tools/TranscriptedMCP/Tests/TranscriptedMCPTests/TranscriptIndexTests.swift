@@ -89,14 +89,14 @@ final class TranscriptIndexTests: XCTestCase {
 
         XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
 
-        try FileManager.default.removeItem(at: tempDir.appendingPathComponent("Call_2026-03-29_10-00-00.json"))
+        try FileManager.default.removeItem(at: tempDir.appendingPathComponent("Call_2026-03-29_10-00-00.md"))
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 0)
     }
 
-    func testMalformedJSONIsSkipped() throws {
-        try "not json".data(using: .utf8)!.write(to: tempDir.appendingPathComponent("Call_2026-03-29_10-00-00.json"))
+    func testMalformedMarkdownIsSkipped() throws {
+        try "not markdown".write(to: tempDir.appendingPathComponent("Call_2026-03-29_10-00-00.md"), atomically: true, encoding: .utf8)
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         let results = try index.listRecentMeetings(count: 10)

@@ -11,20 +11,23 @@ final class CoreStoragePathsTests: XCTestCase {
     func testDefaultLayoutIsSelfConsistent() {
         let paths = CoreStoragePaths.default
 
-        // speakers.sqlite, stats.sqlite, failed_transcriptions.json, and speaker_clips all
-        // live inside the transcripts root by default.
-        XCTAssertEqual(paths.speakerDB.deletingLastPathComponent().path, paths.transcripts.path)
-        XCTAssertEqual(paths.statsDB.deletingLastPathComponent().path, paths.transcripts.path)
-        XCTAssertEqual(paths.failedQueue.deletingLastPathComponent().path, paths.transcripts.path)
-        XCTAssertEqual(paths.speakerClips.deletingLastPathComponent().path, paths.transcripts.path)
+        let appRoot = paths.transcripts
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        XCTAssertEqual(paths.transcripts.path, appRoot.appendingPathComponent("captures/meetings").path)
+        XCTAssertEqual(paths.speakerDB.path, appRoot.appendingPathComponent("state/speakers.sqlite").path)
+        XCTAssertEqual(paths.statsDB.path, appRoot.appendingPathComponent("state/stats.sqlite").path)
+        XCTAssertEqual(paths.failedQueue.path, appRoot.appendingPathComponent("state/failed_transcriptions.json").path)
+        XCTAssertEqual(paths.audioCaptures.path, appRoot.appendingPathComponent("tmp/recordings").path)
+        XCTAssertEqual(paths.speakerClips.path, appRoot.appendingPathComponent("tmp/recordings/speaker_clips").path)
+        XCTAssertEqual(paths.logs.path, appRoot.appendingPathComponent("logs").path)
 
         XCTAssertEqual(paths.speakerDB.lastPathComponent, "speakers.sqlite")
         XCTAssertEqual(paths.statsDB.lastPathComponent, "stats.sqlite")
         XCTAssertEqual(paths.failedQueue.lastPathComponent, "failed_transcriptions.json")
         XCTAssertEqual(paths.speakerClips.lastPathComponent, "speaker_clips")
-
-        // Log directory lives under ~/Library/Logs/Transcripted, NOT under transcripts.
-        XCTAssertTrue(paths.logs.path.hasSuffix("Library/Logs/Transcripted"))
+        XCTAssertEqual(paths.transcripts.deletingLastPathComponent().lastPathComponent, "captures")
     }
 
     func testCustomLayoutHonorsFields() {

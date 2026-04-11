@@ -157,22 +157,21 @@ final class MeetingSessionController: ObservableObject {
     ///   with STTRouter so we do not spin up a second AsrManager.
     init(parakeet: ParakeetEngine) {
         self.parakeetEngine = parakeet
-        // Ensure the Draft meetings directory exists on disk before anyone
-        // tries to write to it. MeetingStoragePaths.root is idempotent.
+        // Ensure the capture library and app-owned directories exist on disk before use.
         _ = MeetingStoragePaths.root
+        _ = MeetingStoragePaths.stateFolder
+        _ = MeetingStoragePaths.logsFolder
+        _ = MeetingStoragePaths.recordingsScratch
 
-        // Build app-owned CoreStoragePaths. Every Core component that
-        // accepts a `paths:` parameter gets this instance so nothing leaks to
-        // ~/Documents/Transcripted.
+        // Build app-owned CoreStoragePaths so captures and internal state stay split.
         self.storagePaths = CoreStoragePaths(
             transcripts: MeetingStoragePaths.transcriptsFolder,
             speakerDB: MeetingStoragePaths.speakersDatabase,
-            statsDB: MeetingStoragePaths.root.appendingPathComponent("stats.sqlite"),
-            failedQueue: MeetingStoragePaths.root.appendingPathComponent("failed_transcriptions.json"),
+            statsDB: MeetingStoragePaths.statsDatabase,
+            failedQueue: MeetingStoragePaths.failedTranscriptionsFile,
             speakerClips: MeetingStoragePaths.speakerClipsFolder,
             audioCaptures: MeetingStoragePaths.recordingsScratch,
-            logs: FileManager.default.transcriptedAppSupportDir
-                .appendingPathComponent("logs", isDirectory: true)
+            logs: MeetingStoragePaths.logsFolder
         )
 
         // Capture bridge owns an `Audio` instance with our storage paths so
@@ -186,12 +185,12 @@ final class MeetingSessionController: ObservableObject {
         // DiarizationEngine via an empty extension (see DiarizationService.swift).
         self.diarization = DiarizationService()
 
-        // Speaker store: app-owned SQLite file under meetings/.
+        // Speaker store: app-owned SQLite file under state/.
         self.speakerDatabase = SpeakerDatabase(path: storagePaths.speakerDB.path)
         self.statsDatabase = StatsDatabase(path: storagePaths.statsDB.path)
 
         // Failed-queue manager: takes CoreStoragePaths so its JSON file lives
-        // under our meetings directory, not ~/Documents/Transcripted.
+        // under app-owned state, not the capture library.
         // TODO: Phase 2 ships without failed-transcription recovery for meeting
         // mode — we construct the manager because TranscriptionTaskManager
         // requires it, but nothing in the app currently drains the failed queue

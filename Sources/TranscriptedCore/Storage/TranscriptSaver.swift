@@ -19,8 +19,8 @@ public class TranscriptSaver {
         // Check for custom save location first
         if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
            !customPath.isEmpty {
-            let candidateURL = URL(fileURLWithPath: customPath)
-            let validation = RecordingValidator.validateSavePath(candidateURL)
+            let captureLibraryURL = URL(fileURLWithPath: customPath, isDirectory: true)
+            let validation = RecordingValidator.validateSavePath(captureLibraryURL)
             guard validation.isValid else {
                 AppLogger.pipeline.warning("Custom save path rejected in defaultSaveDirectory, using default", [
                     "path": customPath,
@@ -28,7 +28,7 @@ public class TranscriptSaver {
                 ])
                 return fallback
             }
-            return candidateURL
+            return captureLibraryURL.appendingPathComponent("meetings", isDirectory: true)
         }
 
         return fallback
@@ -129,7 +129,7 @@ public class TranscriptSaver {
             return nil
         }
 
-        // Check disk space before writing (prevent partial save where .md succeeds but .json fails)
+        // Check disk space before writing.
         if let attrs = try? FileManager.default.attributesOfFileSystem(forPath: saveDir.path),
            let freeSpace = attrs[.systemFreeSize] as? Int64,
            freeSpace < 50_000_000 { // 50MB minimum
@@ -163,27 +163,6 @@ public class TranscriptSaver {
                 FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
                 AppLogger.pipeline.info("Transcript saved", ["path": fileURL.path])
 
-                // Agent output: write JSON sidecar + index + CLAUDE.md
-                let stem = fileURL.deletingPathExtension().lastPathComponent
-                do {
-                    try AgentOutput.writeTranscriptJSON(
-                        from: result,
-                        transcriptId: transcriptId,
-                        speakerMappings: speakerMappings,
-                        speakerDbIds: speakerDbIds,
-                        to: saveDir,
-                        stem: stem
-                    )
-                    try AgentOutput.writeIndex(
-                        to: saveDir,
-                        speakerStore: speakerStore ?? SpeakerDatabase.shared
-                    )
-                    AgentOutput.writeAgentReadme(to: saveDir)
-                } catch {
-                    AppLogger.pipeline.error("Agent output failed", ["error": error.localizedDescription])
-                    // Non-fatal — Markdown already saved successfully
-                }
-
                 return fileURL
             } catch {
                 AppLogger.pipeline.error("Failed to save transcript", ["error": error.localizedDescription])
@@ -201,6 +180,7 @@ public class TranscriptSaver {
             // Record to stats database (outside queue — dispatches to MainActor)
             let metadata = StatsService.createMetadata(
                 from: result,
+                captureId: transcriptId,
                 transcriptPath: savedURL.path,
                 title: meetingTitle
             )

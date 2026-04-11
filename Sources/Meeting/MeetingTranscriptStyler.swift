@@ -285,8 +285,10 @@ enum MeetingTranscriptStyler {
     }
 
     private static func renameTranscriptArtifactsIfNeeded(at url: URL, title: String) -> URL {
-        let originalStem = url.deletingPathExtension().lastPathComponent
-        let sanitizedStem = sanitizedFileStem(for: title, fallback: originalStem)
+        let sanitizedStem = sanitizedFileStem(
+            for: title,
+            fallback: url.deletingPathExtension().lastPathComponent
+        )
         let targetURL = uniqueTranscriptURL(
             in: url.deletingLastPathComponent(),
             preferredStem: sanitizedStem,
@@ -296,28 +298,11 @@ enum MeetingTranscriptStyler {
         guard targetURL != url else { return url }
 
         let fm = FileManager.default
-        let originalJSONURL = url.deletingPathExtension().appendingPathExtension("json")
-        let targetJSONURL = targetURL.deletingPathExtension().appendingPathExtension("json")
-        var renamedMarkdown = false
 
         do {
             try fm.moveItem(at: url, to: targetURL)
-            renamedMarkdown = true
-
-            if fm.fileExists(atPath: originalJSONURL.path) {
-                try fm.moveItem(at: originalJSONURL, to: targetJSONURL)
-                updateAgentIndexIfNeeded(
-                    in: targetURL.deletingLastPathComponent(),
-                    fromStem: originalStem,
-                    toStem: targetURL.deletingPathExtension().lastPathComponent
-                )
-            }
-
             return targetURL
         } catch {
-            if renamedMarkdown {
-                try? fm.moveItem(at: targetURL, to: url)
-            }
             return url
         }
     }
@@ -338,48 +323,19 @@ enum MeetingTranscriptStyler {
 
     private static func uniqueTranscriptURL(in directory: URL, preferredStem: String, originalURL: URL) -> URL {
         let fm = FileManager.default
-        let originalJSONURL = originalURL.deletingPathExtension().appendingPathExtension("json")
         var candidateStem = preferredStem
         var suffix = 2
 
         while true {
             let candidateURL = directory.appendingPathComponent(candidateStem).appendingPathExtension("md")
-            let candidateJSONURL = directory.appendingPathComponent(candidateStem).appendingPathExtension("json")
-
             let markdownTaken = candidateURL != originalURL && fm.fileExists(atPath: candidateURL.path)
-            let jsonTaken = candidateJSONURL != originalJSONURL && fm.fileExists(atPath: candidateJSONURL.path)
 
-            if !markdownTaken && !jsonTaken {
+            if !markdownTaken {
                 return candidateURL
             }
 
             candidateStem = "\(preferredStem) \(suffix)"
             suffix += 1
-        }
-    }
-
-    private static func updateAgentIndexIfNeeded(in directory: URL, fromStem: String, toStem: String) {
-        guard fromStem != toStem else { return }
-
-        let indexURL = directory.appendingPathComponent("transcripted.json")
-        guard let data = try? Data(contentsOf: indexURL),
-              var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              var transcripts = root["transcripts"] as? [[String: Any]] else {
-            return
-        }
-
-        var didChange = false
-        for index in transcripts.indices {
-            guard transcripts[index]["filename"] as? String == fromStem else { continue }
-            transcripts[index]["filename"] = toStem
-            didChange = true
-        }
-
-        guard didChange else { return }
-        root["transcripts"] = transcripts
-
-        if let updatedData = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) {
-            try? updatedData.write(to: indexURL, options: .atomic)
         }
     }
 }
