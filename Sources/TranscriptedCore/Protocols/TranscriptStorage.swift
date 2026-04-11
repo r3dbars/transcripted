@@ -19,7 +19,7 @@ public protocol TranscriptStorage {
         meetingTitle: String?,
         healthInfo: RecordingHealthInfo?,
         notifier: TranscriptNotifier?,
-        speakerStoreForIndex: (any SpeakerStore)?,
+        speakerStore: (any SpeakerStore)?,
         statsStore: (any StatsStore)?
     ) -> URL?
 
@@ -29,16 +29,12 @@ public protocol TranscriptStorage {
     static func updateSpeakerNames(
         transcriptURL: URL,
         updates: [SpeakerNameUpdate],
-        speakerStoreForIndex: (any SpeakerStore)?
+        transcriptionResult: TranscriptionResult,
+        speakerStore: (any SpeakerStore)?
     ) -> Bool
 
     /// Retroactively update a speaker name across existing transcripts on disk.
-    static func retroactivelyUpdateSpeaker(
-        dbId: UUID,
-        newName: String,
-        directory: URL,
-        speakerStoreForIndex: (any SpeakerStore)?
-    )
+    static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String)
 
     /// Default save directory (reads UserDefaults override if the standalone app sets one,
     /// otherwise `CoreStoragePaths.default.transcripts`).

@@ -12,48 +12,110 @@ func makeFixtureJSON(
         ("mic_0", 0.0, 5.0, "Good morning everyone"),
         ("system_0", 5.0, 10.0, "Let's discuss the product roadmap"),
     ]
-) -> Data {
-    let agentSpeakers = speakers.map { s in
-        [
-            "id": s.id,
-            "persistent_speaker_id": s.persistentId as Any,
-            "name": s.name,
-            "confidence": "high" as Any,
-            "word_count": 100,
-            "speaking_seconds": 60.0
-        ] as [String: Any]
+) -> String {
+    let dateComponents = splitDateTime(date)
+    let totalWordCount = utterances.reduce(0) { partial, utterance in
+        partial + utterance.text.split(whereSeparator: \.isWhitespace).count
     }
+    let micUtterances = utterances.filter { $0.speakerId.hasPrefix("mic_") }
+    let systemUtterances = utterances.filter { $0.speakerId.hasPrefix("system_") }
+    let micSpeakerCount = Set(micUtterances.map(\.speakerId)).count
+    let systemSpeakerCount = Set(systemUtterances.map(\.speakerId)).count
 
-    let agentUtterances = utterances.map { u in
-        [
-            "start": u.start,
-            "end": u.end,
-            "speaker_id": u.speakerId,
-            "text": u.text
-        ] as [String: Any]
-    }
-
-    let json: [String: Any] = [
-        "version": "1.0",
-        "recording": [
-            "date": date,
-            "duration_seconds": durationSeconds,
-            "dropped_segments": 0,
-            "engines": [
-                "stt": "parakeet-tdt-v3",
-                "diarization": "pyannote-offline"
+    let speakerLines = speakers
+        .filter { $0.id.hasPrefix("system_") }
+        .map { speaker -> String in
+            let rawId = speaker.id.replacingOccurrences(of: "system_", with: "")
+            var lines = [
+                "  - id: \"\(rawId)\""
             ]
-        ],
-        "speakers": agentSpeakers,
-        "utterances": agentUtterances
-    ]
+            if let persistentId = speaker.persistentId {
+                lines.append("    db_id: \"\(persistentId)\"")
+            }
+            lines.append("    name: \"\(speaker.name)\"")
+            lines.append("    confidence: high")
+            lines.append("    source: db_scan")
+            return lines.joined(separator: "\n")
+        }
+        .joined(separator: "\n")
 
-    return try! JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
+    let speakerLookup = Dictionary(uniqueKeysWithValues: speakers.map { ($0.id, $0.name) })
+    let transcriptBody = utterances.map { utterance -> String in
+        let source = utterance.speakerId.hasPrefix("mic_") ? "Mic" : "System"
+        let label = speakerLookup[utterance.speakerId] ?? utterance.speakerId
+        return "[\(formatTimestamp(utterance.start))] [\(source)/\(label)] \(utterance.text)"
+    }.joined(separator: "\n\n")
+
+    let groupedSystemUtterances = Dictionary(grouping: systemUtterances, by: \.speakerId)
+    let breakdown = groupedSystemUtterances.keys.sorted().map { speakerId -> String in
+        let grouped = groupedSystemUtterances[speakerId] ?? []
+        let name = speakerLookup[speakerId] ?? speakerId
+        let wordCount = grouped.reduce(0) { partial, utterance in
+            partial + utterance.text.split(whereSeparator: \.isWhitespace).count
+        }
+        let speakingSeconds = grouped.reduce(0.0) { partial, utterance in
+            partial + max(0, utterance.end - utterance.start)
+        }
+        return "- **\(name):** \(grouped.count) utterances, ~\(wordCount) words, \(formatDuration(seconds: Int(speakingSeconds.rounded())))"
+    }.joined(separator: "\n")
+
+    return """
+    ---
+    transcript_id: "\(UUID().uuidString)"
+    date: \(dateComponents.date)
+    time: \(dateComponents.time)
+    duration: "\(formatDuration(seconds: durationSeconds))"
+    processing_time: "3.0s"
+    transcription_engine: parakeet_local
+    diarization_engine: pyannote_offline
+    sources: [mic, system_audio]
+    mic_utterances: \(micUtterances.count)
+    system_utterances: \(systemUtterances.count)
+    mic_speakers: \(micSpeakerCount)
+    system_speakers: \(systemSpeakerCount)
+    total_word_count: \(totalWordCount)
+    speakers:
+    \(speakerLines)
+    ---
+
+    # Meeting Fixture
+
+    **Duration:** \(formatDuration(seconds: durationSeconds)) | **Words:** \(totalWordCount) | **Utterances:** \(utterances.count)
+
+    ---
+
+    ## Channel & Speaker Analytics
+
+    ### Microphone (You)
+    - **Utterances:** \(micUtterances.count)
+    - **Words:** ~\(micUtterances.reduce(0) { $0 + $1.text.split(whereSeparator: \.isWhitespace).count })
+    - **Speaking Time:** \(formatDuration(seconds: Int(micUtterances.reduce(0.0) { $0 + ($1.end - $1.start) }.rounded())))
+
+    ### Meeting Audio (Remote Participants)
+    - **Utterances:** \(systemUtterances.count)
+    - **Words:** ~\(systemUtterances.reduce(0) { $0 + $1.text.split(whereSeparator: \.isWhitespace).count })
+    - **Speaking Time:** \(formatDuration(seconds: Int(systemUtterances.reduce(0.0) { $0 + ($1.end - $1.start) }.rounded())))
+    - **Speakers Detected:** \(systemSpeakerCount)
+
+    #### Remote Speaker Breakdown
+
+    \(breakdown)
+
+    ---
+
+    ## Full Transcript
+
+    \(transcriptBody)
+
+    ---
+
+    *Generated by Transcripted with Parakeet + PyAnnote (local) | Duration: \(formatDuration(seconds: durationSeconds)) | \(totalWordCount) words | \(max(1, systemSpeakerCount + micSpeakerCount)) speakers*
+    """
 }
 
-func writeFixture(_ data: Data, filename: String, to directory: URL) throws {
-    let path = directory.appendingPathComponent("\(filename).json")
-    try data.write(to: path)
+func writeFixture(_ content: String, filename: String, to directory: URL) throws {
+    let path = directory.appendingPathComponent("\(filename).md")
+    try content.write(to: path, atomically: true, encoding: .utf8)
 }
 
 func makeDictationDayJSON(
@@ -63,34 +125,38 @@ func makeDictationDayJSON(
         ("dictation-20260407-091500-000", "2026-04-07T09:15:00-0500", "Morning note", "Ship the follow-up note to product today", "Slack", "copied"),
         ("dictation-20260407-183000-000", "2026-04-07T18:30:00-0500", "Evening note", "Remember to send the recap before dinner", "Mail", "pasted"),
     ]
-) -> Data {
-    let dictationEntries = entries.map { entry in
-        [
-            "id": entry.id,
-            "created_at": entry.createdAt,
-            "title": entry.title,
-            "text": entry.text,
-            "source_app_name": entry.sourceAppName,
-            "source_app_bundle_id": "com.example.\(entry.sourceAppName.lowercased())",
-            "delivery": entry.delivery,
-            "word_count": entry.text.split(whereSeparator: \.isWhitespace).count,
-            "character_count": entry.text.count
-        ] as [String: Any]
-    }
+) -> String {
+    let title = "Dictations for \(date)"
+    let sections = entries.map { entry in
+        let wordCount = entry.text.split(whereSeparator: \.isWhitespace).count
+        let characterCount = entry.text.count
+        return """
+        ## \(formatDictationHeading(from: entry.createdAt)) - \(entry.title)
 
-    let json: [String: Any] = [
-        "version": "1.0",
-        "capture_type": "dictation_day",
-        "date": date,
-        "markdown_filename": markdownFilename,
-        "entry_count": dictationEntries.count,
-        "word_count": dictationEntries.reduce(0) { partialResult, item in
-            partialResult + ((item["word_count"] as? Int) ?? 0)
-        },
-        "entries": dictationEntries
-    ]
+        Entry ID: `\(entry.id)`
+        Captured: \(normalizedISO(entry.createdAt))
+        Source app: \(entry.sourceAppName)
+        Bundle ID: `com.example.\(entry.sourceAppName.lowercased())`
+        Delivery: \(entry.delivery)
+        Words: \(wordCount)
+        Characters: \(characterCount)
 
-    return try! JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
+        \(entry.text)
+        """
+    }.joined(separator: "\n\n")
+
+    _ = markdownFilename
+    return """
+    ---
+    title: "\(title)"
+    date: \(date)
+    capture_type: dictation_day
+    ---
+
+    # \(title)
+
+    \(sections)
+    """
 }
 
 func makeTempDir() -> URL {
@@ -101,4 +167,58 @@ func makeTempDir() -> URL {
 
 func removeTempDir(_ dir: URL) {
     try? FileManager.default.removeItem(at: dir)
+}
+
+private func splitDateTime(_ isoish: String) -> (date: String, time: String) {
+    let date = String(isoish.prefix(10))
+    let timeStart = isoish.index(isoish.startIndex, offsetBy: 11, limitedBy: isoish.endIndex) ?? isoish.endIndex
+    let time = String(isoish[timeStart...].prefix(8))
+    return (date, time.isEmpty ? "00:00:00" : time)
+}
+
+private func formatTimestamp(_ seconds: Double) -> String {
+    let totalSeconds = Int(seconds.rounded())
+    let minutes = totalSeconds / 60
+    let remainingSeconds = totalSeconds % 60
+    return String(format: "%02d:%02d", minutes, remainingSeconds)
+}
+
+private func formatDuration(seconds: Int) -> String {
+    let hours = seconds / 3600
+    let minutes = (seconds % 3600) / 60
+    let remainingSeconds = seconds % 60
+
+    if hours > 0 {
+        return String(format: "%d:%02d:%02d", hours, minutes, remainingSeconds)
+    }
+    return String(format: "%02d:%02d", minutes, remainingSeconds)
+}
+
+private func formatDictationHeading(from createdAt: String) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
+
+    guard let date = formatter.date(from: createdAt) else {
+        return "12:00 AM"
+    }
+
+    let output = DateFormatter()
+    output.locale = Locale(identifier: "en_US_POSIX")
+    output.dateFormat = "h:mm a"
+    return output.string(from: date)
+}
+
+private func normalizedISO(_ value: String) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
+
+    guard let date = formatter.date(from: value) else {
+        return value
+    }
+
+    let output = ISO8601DateFormatter()
+    output.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return output.string(from: date)
 }

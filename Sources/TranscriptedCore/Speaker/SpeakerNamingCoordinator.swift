@@ -15,12 +15,12 @@ extension TranscriptionTaskManager {
         updates: [SpeakerNameUpdate],
         transcriptURL: URL,
         transcriptId: UUID,
+        transcriptionResult: TranscriptionResult,
         micURL: URL,
         systemURL: URL,
         clips: [SpeakerNamingEntry]
     ) {
         let speakerDB = transcription.speakerDB
-        let speakerClipsDirectory = transcription.speakerClipsDirectory
         let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map { ($0.sortformerSpeakerId, $0) })
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -62,25 +62,11 @@ extension TranscriptionTaskManager {
                 }
                 return
             }
-
-            let handledIds = Set(resolvedUpdates.map(\.persistentSpeakerId))
-            for entry in clips where entry.suggestedProfileId != nil && !handledIds.contains(entry.id) {
-                speakerDB.deleteSpeaker(id: entry.id)
-                SpeakerClipExtractor.deletePersistedClip(
-                    for: entry.id,
-                    clipsDirectory: speakerClipsDirectory
-                )
-            }
-
-            // Merge profiles that ended up with the same name
-            speakerDB.mergeProfilesByName()
-            // Re-run duplicate detection now that profiles have been updated
-            speakerDB.mergeDuplicates()
-
             let didFinalizeTranscript = updates.isEmpty || TranscriptSaver.updateSpeakerNames(
                 transcriptURL: resolvedURL,
                 updates: resolvedUpdates,
-                speakerStoreForIndex: speakerDB
+                transcriptionResult: transcriptionResult,
+                speakerStore: speakerDB
             )
 
             SpeakerClipExtractor.cleanupClips(clips)
@@ -105,13 +91,6 @@ extension TranscriptionTaskManager {
             try? FileManager.default.removeItem(at: request.micAudioURL)
             try? FileManager.default.removeItem(at: request.systemAudioURL)
             SpeakerClipExtractor.cleanupClips(request.speakers)
-            for entry in request.speakers where entry.suggestedProfileId != nil {
-                transcription.speakerDB.deleteSpeaker(id: entry.id)
-                SpeakerClipExtractor.deletePersistedClip(
-                    for: entry.id,
-                    clipsDirectory: transcription.speakerClipsDirectory
-                )
-            }
             speakerNamingRequest = nil
             AppLogger.pipeline.info("Cleaned up pending naming on shutdown")
         }

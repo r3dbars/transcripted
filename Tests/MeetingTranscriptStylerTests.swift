@@ -13,26 +13,16 @@ private func testMeetingTranscriptStylerRenamesArtifacts() {
 
     let originalStem = "Call_2026-04-07_09-14-00"
     let transcriptURL = directory.appendingPathComponent("\(originalStem).md")
-    let jsonURL = directory.appendingPathComponent("\(originalStem).json")
-    let indexURL = directory.appendingPathComponent("transcripted.json")
-
     try? sampleMeetingTranscript().write(to: transcriptURL, atomically: true, encoding: .utf8)
-    try? "{}".write(to: jsonURL, atomically: true, encoding: .utf8)
-    try? sampleAgentIndex(stem: originalStem).write(to: indexURL, atomically: true, encoding: .utf8)
 
     let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
     let updatedMarkdown = try? String(contentsOf: styled.url, encoding: .utf8)
-    let updatedIndexData = try? Data(contentsOf: indexURL)
-    let updatedIndex = updatedIndexData.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-    let transcripts = updatedIndex?["transcripts"] as? [[String: Any]]
 
     assertEqual(styled.title, "Meeting with Alex", "Styler should promote named remote speakers into the title")
     assertEqual(styled.url.lastPathComponent, "Meeting with Alex.md", "Styler should rename the markdown artifact to the final title")
     assertTrue(FileManager.default.fileExists(atPath: styled.url.path), "Renamed markdown should exist")
-    assertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("Meeting with Alex.json").path), "Matching JSON sidecar should move with the markdown")
     assertFalse(FileManager.default.fileExists(atPath: transcriptURL.path), "Original markdown should be replaced")
     assertTrue(updatedMarkdown?.contains("# Meeting with Alex") == true, "Markdown body should be rewritten with the canonical title")
-    assertEqual(transcripts?.first?["filename"] as? String, "Meeting with Alex" as String?, "Agent index should follow the renamed artifact")
 }
 
 private func testMeetingTranscriptStylerIsIdempotent() {
@@ -67,30 +57,6 @@ private func sampleMeetingTranscript() -> String {
 
     **[00:04] [System/Alex]**
     Happy to help. Let's get started.
-    """
-}
-
-private func sampleAgentIndex(stem: String) -> String {
-    """
-    {
-      "known_speakers" : [],
-      "transcript_count" : 1,
-      "transcripts" : [
-        {
-          "date" : "2026-04-07",
-          "duration_seconds" : 750,
-          "filename" : "\(stem)",
-          "speaker_count" : 2,
-          "speakers" : [
-            "You",
-            "Alex"
-          ],
-          "word_count" : 42
-        }
-      ],
-      "updated_at" : "2026-04-07T09:14:00-0500",
-      "version" : "1.0"
-    }
     """
 }
 

@@ -1,12 +1,11 @@
 import SwiftUI
 import AppKit
 
-@MainActor
 struct TranscriptedSettingsView: View {
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var permissionStates = PermissionSnapshot.current()
-    @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
+    @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
 
     var body: some View {
         ScrollView {
@@ -73,37 +72,80 @@ struct TranscriptedSettingsView: View {
                     }
                 }
 
-                SettingsSection(title: "Storage", detail: "All recordings, transcripts, and logs stay on your Mac.") {
-                    StorageRow(title: "Meeting transcripts", url: MeetingStoragePaths.transcriptsFolder)
-                    StorageRow(title: "Dictation transcripts", url: DictationStoragePaths.transcriptsFolder)
+                SettingsSection(title: "Storage", detail: "Captures can live anywhere you want, while app state stays separated under Application Support.") {
+                    StorageRow(title: "Capture library", url: captureLibraryURL)
+                    StorageRow(title: "Meeting captures", url: MeetingStoragePaths.transcriptsFolder)
+                    StorageRow(title: "Dictation captures", url: DictationStoragePaths.transcriptsFolder)
+                    StorageRow(title: "App state", url: appStateFolder)
+                    StorageRow(title: "App cache", url: cacheFolder)
                     StorageRow(title: "App logs", url: logsFolder)
+                    StorageRow(title: "Temporary recordings", url: recordingsFolder)
 
-                    Text("Compatibility note: Transcripted currently stores its app-support data inside the existing Draft-named Application Support folder on disk so this beta can coexist with earlier builds.")
+                    HStack {
+                        Button("Choose Capture Library") {
+                            chooseCaptureLibrary()
+                        }
+
+                        Button("Reset to Default") {
+                            TranscriptedStoragePreferences.setCaptureLibraryURL(nil)
+                            refreshStoragePaths()
+                        }
+                    }
+
+                    Text("Choose a folder like an Obsidian vault if you want agents to read the raw Markdown captures directly. Transcripted will keep its databases, cache, logs, and tmp files under Application Support.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-
-                SpeakerPeopleSettingsSection(model: speakerPeopleModel)
             }
             .padding(24)
         }
-        .frame(minWidth: 760, minHeight: 720)
+        .frame(minWidth: 680, minHeight: 580)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             refreshPermissions()
+            refreshStoragePaths()
             rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
             uiSoundsEnabled = UISoundPreferences.isEnabled()
-            speakerPeopleModel.refresh()
         }
     }
 
+    private var appStateFolder: URL {
+        FileManager.default.transcriptedStateDir
+    }
+
+    private var cacheFolder: URL {
+        FileManager.default.transcriptedCacheDir
+    }
+
     private var logsFolder: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/Transcripted", isDirectory: true)
+        FileManager.default.transcriptedLogsDir
+    }
+
+    private var recordingsFolder: URL {
+        FileManager.default.transcriptedRecordingsDir
     }
 
     private func refreshPermissions() {
         permissionStates = PermissionSnapshot.current()
+    }
+
+    private func refreshStoragePaths() {
+        captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
+    }
+
+    private func chooseCaptureLibrary() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Choose"
+        panel.message = "Select the folder Transcripted should use as its capture library."
+        panel.directoryURL = captureLibraryURL
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        TranscriptedStoragePreferences.setCaptureLibraryURL(url)
+        refreshStoragePaths()
     }
 }
 
@@ -121,7 +163,7 @@ private struct PermissionSnapshot {
     }
 }
 
-struct SettingsSection<Content: View>: View {
+private struct SettingsSection<Content: View>: View {
     let title: String
     let detail: String
     @ViewBuilder var content: Content

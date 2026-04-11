@@ -14,25 +14,25 @@ final class TranscriptLoaderTests: XCTestCase {
         super.tearDown()
     }
 
-    func testLoadValidJSON() throws {
+    func testLoadValidMarkdown() throws {
         let fixture = makeFixtureJSON()
         try writeFixture(fixture, filename: "Call_test", to: tempDir)
 
-        let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_test.json"))
+        let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_test.md"))
         XCTAssertNotNil(transcript)
-        XCTAssertEqual(transcript?.version, "1.0")
+        XCTAssertEqual(transcript?.version, "2.0")
         XCTAssertEqual(transcript?.utterances.count, 2)
         XCTAssertEqual(transcript?.speakers.count, 2)
     }
 
-    func testLoadMalformedJSONReturnsNil() throws {
-        try "not json at all".data(using: .utf8)!.write(to: tempDir.appendingPathComponent("Call_bad.json"))
-        let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_bad.json"))
+    func testLoadMalformedMarkdownReturnsNil() throws {
+        try "not markdown at all".write(to: tempDir.appendingPathComponent("Call_bad.md"), atomically: true, encoding: .utf8)
+        let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_bad.md"))
         XCTAssertNil(transcript)
     }
 
     func testLoadMissingFileReturnsNil() {
-        let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_missing.json"))
+        let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_missing.md"))
         XCTAssertNil(transcript)
     }
 
@@ -47,10 +47,10 @@ final class TranscriptLoaderTests: XCTestCase {
         XCTAssertEqual(sidecars.count, 3)
     }
 
-    func testLoadDictationDayJSON() throws {
+    func testLoadDictationDayMarkdown() throws {
         try writeFixture(makeDictationDayJSON(), filename: "Dictations_2026-04-07", to: tempDir)
 
-        let day = TranscriptLoader.loadDictationDay(tempDir.appendingPathComponent("Dictations_2026-04-07.json"))
+        let day = TranscriptLoader.loadDictationDay(tempDir.appendingPathComponent("Dictations_2026-04-07.md"))
         XCTAssertNotNil(day)
         XCTAssertEqual(day?.entryCount, 2)
         XCTAssertEqual(day?.entries.first?.title, "Morning note")
@@ -60,10 +60,10 @@ final class TranscriptLoaderTests: XCTestCase {
         let outsideDir = makeTempDir()
         defer { removeTempDir(outsideDir) }
 
-        let outsideFile = outsideDir.appendingPathComponent("Call_2026-03-29_10-00-00.json")
-        try makeFixtureJSON().write(to: outsideFile)
+        let outsideFile = outsideDir.appendingPathComponent("Call_2026-03-29_10-00-00.md")
+        try makeFixtureJSON().write(to: outsideFile, atomically: true, encoding: .utf8)
 
-        let symlinkURL = tempDir.appendingPathComponent("Call_2026-03-29_10-00-00.json")
+        let symlinkURL = tempDir.appendingPathComponent("Call_2026-03-29_10-00-00.md")
         try FileManager.default.createSymbolicLink(at: symlinkURL, withDestinationURL: outsideFile)
 
         let sidecars = TranscriptLoader.enumerateSidecars(in: tempDir)
@@ -88,7 +88,9 @@ final class TranscriptLoaderTests: XCTestCase {
 
     func testSpeakerLookup() {
         let fixture = makeFixtureJSON()
-        let transcript = try! JSONDecoder().decode(AgentTranscript.self, from: fixture)
+        let url = tempDir.appendingPathComponent("Call_lookup.md")
+        try! fixture.write(to: url, atomically: true, encoding: .utf8)
+        let transcript = TranscriptLoader.load(url)!
         let lookup = TranscriptLoader.speakerLookup(from: transcript)
 
         XCTAssertEqual(lookup["mic_0"]?.name, "You")
