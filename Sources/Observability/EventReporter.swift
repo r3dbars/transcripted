@@ -157,5 +157,15 @@ final class EventReporter {
         Task.detached(priority: .utility) { [writer, entry] in
             await writer.append(entry)
         }
+
+        if level == .error {
+            CrashReporter.shared.captureObservabilityEvent(
+                level: level,
+                engine: engine,
+                event: event,
+                message: message,
+                context: mergedContext
+            )
+        }
     }
 }

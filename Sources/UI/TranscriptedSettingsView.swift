@@ -2,8 +2,10 @@ import SwiftUI
 import AppKit
 
 struct TranscriptedSettingsView: View {
+    @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
+    @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
 
@@ -56,6 +58,22 @@ struct TranscriptedSettingsView: View {
                     .foregroundStyle(.secondary)
                 }
 
+                SettingsSection(title: "Diagnostics", detail: "Crash reports help fix reliability issues without sending transcript text, audio, meeting titles, or speaker names.") {
+                    Toggle("Send crash reports", isOn: Binding(
+                        get: { crashReportingEnabled },
+                        set: { newValue in
+                            crashReportingEnabled = newValue
+                            CrashReportingPreferences.setEnabled(newValue)
+                            CrashReporter.shared.refreshPreference()
+                        }
+                    ))
+                    .disabled(!CrashReporter.isAvailable)
+
+                    Text(crashReportingFootnote)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 SettingsSection(title: "Permissions", detail: "Transcripted only asks for permissions that support local capture, paste-back, and optional meeting prompts.") {
                     ForEach(TranscriptedPermissionKind.allCases) { kind in
                         PermissionStatusRow(kind: kind, granted: permissionStates[kind] ?? false) {
@@ -96,6 +114,8 @@ struct TranscriptedSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                SpeakerPeopleSettingsSection(model: speakerPeopleModel)
             }
             .padding(24)
         }
@@ -106,6 +126,7 @@ struct TranscriptedSettingsView: View {
             refreshStoragePaths()
             rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
             uiSoundsEnabled = UISoundPreferences.isEnabled()
+            crashReportingEnabled = CrashReportingPreferences.isEnabled()
         }
     }
 
@@ -123,6 +144,15 @@ struct TranscriptedSettingsView: View {
 
     private var recordingsFolder: URL {
         FileManager.default.transcriptedRecordingsDir
+    }
+
+    private var crashReportingFootnote: String {
+        if CrashReporter.isAvailable {
+            return crashReportingEnabled
+                ? "Enabled. Transcripted will send scrubbed crash and error data to Sentry so reliability issues are easier to diagnose."
+                : "Off. Transcripted will keep crash details on this Mac only."
+        }
+        return "This build does not have a Sentry DSN configured yet, so crash reporting stays local."
     }
 
     private func refreshPermissions() {
@@ -163,7 +193,7 @@ private struct PermissionSnapshot {
     }
 }
 
-private struct SettingsSection<Content: View>: View {
+struct SettingsSection<Content: View>: View {
     let title: String
     let detail: String
     @ViewBuilder var content: Content

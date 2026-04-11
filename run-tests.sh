@@ -120,6 +120,7 @@ APP_SOURCES=(
     "Sources/Text/DiffSummary.swift"
     "Sources/Meeting/MeetingPromptHeuristics.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
+    "Sources/Observability/SentryPayloadSanitizer.swift"
     "Sources/Reliability/WakeRecoveryCoordinator.swift"
     "Sources/TranscriptedCore/Audio/MicRecordingSegment.swift"
     "Sources/TranscriptedCore/Models/TranscriptionTypes.swift"

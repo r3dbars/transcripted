@@ -12,6 +12,8 @@ optional beta shipping, and update plumbing.
 - `JSONLWriter.swift` — shared append-only JSONL writer
 - `DiagnosticsTrail.swift` — lightweight high-signal diagnostics helper
 - `CrashReporter.swift` — crash reporting setup
+- `CrashReportingPreferences.swift` — Settings-backed crash reporting preference
+- `SentryPayloadSanitizer.swift` — strips obvious sensitive values before Sentry sends
 - `EventTracker.swift` — lightweight analytics hook
 - `BetaTelemetry.swift` — beta-only log/event shipping
 - `UpdateManager.swift` — beta updater flow
@@ -24,6 +26,9 @@ optional beta shipping, and update plumbing.
   because they appear in historical docs or event logs
 - `build.sh` and beta behavior can affect logs, signing, and permissions during
   local testing
+- Sentry DSN/config is read from `Info.plist` (`TranscriptedSentryDSN`) or
+  process environment for local testing, and crash reports must stay scrubbed of
+  transcript/audio/title/path data
 
 ## Verification
 

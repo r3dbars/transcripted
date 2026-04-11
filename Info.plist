@@ -12,6 +12,10 @@
     <string>1.0.3</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0.3</string>
+    <key>TranscriptedSentryDSN</key>
+    <string></string>
+    <key>TranscriptedSentryEnvironment</key>
+    <string>production</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
