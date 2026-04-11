@@ -3,11 +3,15 @@ import AppKit
 import TranscriptedCore
 
 struct TranscriptedSettingsView: View {
-    let speakerPeopleModel: SpeakerPeopleSettingsViewModel
+    @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
+
+    init(speakerPeopleModel: SpeakerPeopleSettingsViewModel) {
+        self.speakerPeopleModel = speakerPeopleModel
+    }
 
     var body: some View {
         ScrollView {
