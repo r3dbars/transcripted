@@ -1,6 +1,7 @@
-<img width="1024" height="1024" alt="transcripted-logo" src="https://github.com/user-attachments/assets/5027f97c-f5cf-4e77-8e99-e4ebe9ca1098" />
-# Transcripted
 
+(https://github.com/user-attachments/assets/40ff75aa-9202-46f3-b536-8303217028a3) 
+
+## Transcripted
 Transcripted is a local Mac app for dictation and meeting capture that turns
 spoken words into structured files your agent can actually use.
 
