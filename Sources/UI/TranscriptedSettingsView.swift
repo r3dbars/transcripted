@@ -1,9 +1,9 @@
 import SwiftUI
 import AppKit
+import TranscriptedCore
 
 struct TranscriptedSettingsView: View {
-    var speakerPeopleModel: SpeakerPeopleSettingsViewModel
-
+    let speakerPeopleModel: SpeakerPeopleSettingsViewModel
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var permissionStates = PermissionSnapshot.current()

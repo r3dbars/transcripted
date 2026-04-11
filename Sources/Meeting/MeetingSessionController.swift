@@ -537,20 +537,14 @@ final class MeetingSessionController: ObservableObject {
     private func refreshWarmupStatus() {
         let dictationState = parakeetEngine.modelDownloadState
         let meetingState = diarization.modelState
-        let shouldSurfaceMeetingWarmup: Bool
-
-        switch state {
-        case .loadingModels:
-            shouldSurfaceMeetingWarmup = true
-        case .error:
-            if case .failed = meetingState {
-                shouldSurfaceMeetingWarmup = true
-            } else {
-                shouldSurfaceMeetingWarmup = false
-            }
-        default:
-            shouldSurfaceMeetingWarmup = false
+        let isMeetingWarmupInFlight = modelPreparationTask != nil || state == .loadingModels
+        let hasMeetingWarmupFailure: Bool
+        if case .failed = meetingState {
+            hasMeetingWarmupFailure = true
+        } else {
+            hasMeetingWarmupFailure = false
         }
+        let shouldSurfaceMeetingWarmup = isMeetingWarmupInFlight || hasMeetingWarmupFailure
 
         if case .ready = dictationState, case .ready = meetingState {
             warmupStatus = .ready
