@@ -46,6 +46,13 @@ enum DictationTranscriptWriter {
         return formatter
     }()
 
+    private static let entryIdFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
+        return formatter
+    }()
+
     private static let sectionTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -69,6 +76,12 @@ enum DictationTranscriptWriter {
         return formatter
     }()
 
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
     @discardableResult
     static func save(
         text: String,
@@ -87,8 +100,10 @@ enum DictationTranscriptWriter {
         let sourceBundleID = sourceApp?.bundleIdentifier ?? ""
         let wordCount = normalizedText.split(whereSeparator: \.isWhitespace).count
         let characterCount = normalizedText.count
+        let entryID = "dictation-\(entryIdFormatter.string(from: createdAt))"
         let dayHeader = dailyHeader(for: createdAt)
         let section = dailySection(
+            entryID: entryID,
             title: title,
             text: normalizedText,
             createdAt: createdAt,
@@ -112,20 +127,7 @@ enum DictationTranscriptWriter {
         try body.write(to: url, atomically: true, encoding: .utf8)
         FileManager.default.restrictFileToOwnerOnly(at: url)
 
-        let sidecarURL = try? DictationAgentOutput.appendEntry(
-            title: title,
-            text: normalizedText,
-            sourceAppName: sourceAppName,
-            sourceAppBundleId: sourceBundleID.isEmpty ? nil : sourceBundleID,
-            delivery: delivery,
-            wordCount: wordCount,
-            characterCount: characterCount,
-            createdAt: createdAt,
-            markdownURL: url,
-            directory: folder
-        )
-
-        return SavedDictationTranscript(url: url, title: title, sidecarURL: sidecarURL)
+        return SavedDictationTranscript(url: url, title: title, sidecarURL: nil)
     }
 
     static func dailyFileURL(for date: Date, in directory: URL) -> URL {
@@ -149,6 +151,7 @@ enum DictationTranscriptWriter {
     }
 
     private static func dailySection(
+        entryID: String,
         title: String,
         text: String,
         createdAt: Date,
@@ -164,10 +167,11 @@ enum DictationTranscriptWriter {
         return """
         ## \(sectionTimeFormatter.string(from: createdAt)) - \(headingTitle)
 
-        Dictated \(detailFormatter.string(from: createdAt))  •  \(wordCount) \(wordCount == 1 ? "word" : "words")  •  \(delivery.summaryText)
-
+        Entry ID: `\(entryID)`
+        Captured: \(isoFormatter.string(from: createdAt))
         Source app: \(sourceAppName)\(bundleLine)
-        Timestamp: \(frontmatterDateFormatter.string(from: createdAt)) \(frontmatterTimeFormatter.string(from: createdAt))
+        Delivery: \(delivery.rawValue)
+        Words: \(wordCount)
         Characters: \(characterCount)
 
         \(text)

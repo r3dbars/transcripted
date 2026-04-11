@@ -64,7 +64,7 @@ extension TranscriptionTaskManager {
         // Build DB knowledge snapshot: what do we already know about these speakers?
         let speakerIds = Array(result.systemSpeakerIds).sorted()
         let speakerDB = await MainActor.run { transcription.speakerDB }
-        let speakerClipsDirectory = await MainActor.run { transcription.speakerClipsDirectory }
+        let statsStore = await MainActor.run { self.statsStore }
         var dbKnowledge: [(speakerId: String, profile: SpeakerProfile, similarity: Double)] = []
 
         for utterance in result.systemUtterances {
@@ -105,29 +105,30 @@ extension TranscriptionTaskManager {
             }
         }
 
-        // Keep identity metadata for every speaker, but only persist a visible person name
-        // once the match is strong enough to auto-accept.
-        for sid in speakerIds {
-            let key = "system_\(sid)"
-            if let entry = dbKnowledge.first(where: { $0.speakerId == sid }) {
+        // Auto-accept known speakers: populate mappings from DB without showing naming UI
+        var identifiedSpeakers: [IdentifiedSpeaker] = []
+        for entry in dbKnowledge {
+            let key = "system_\(entry.speakerId)"
+            let mapping = SpeakerNamingPolicy.initialMapping(
+                speakerId: entry.speakerId,
+                profile: entry.profile,
+                similarity: entry.similarity
+            )
+            speakerMappings[key] = mapping
+            speakerSources[entry.speakerId] = autoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"
+
+            if autoAcceptedIds.contains(entry.speakerId),
+               let name = entry.profile.displayName {
                 let confidence = SpeakerNamingPolicy.confidence(
                     similarity: entry.similarity,
                     callCount: entry.profile.callCount
                 )
-                speakerMappings[key] = SpeakerMapping(
-                    speakerId: sid,
-                    identifiedName: entry.profile.displayName,
+                identifiedSpeakers.append(IdentifiedSpeaker(
+                    name: name,
+                    speakerId: entry.speakerId,
                     confidence: confidence,
-                    isConfirmedIdentity: autoAcceptedIds.contains(sid)
-                )
-                speakerSources[sid] = autoAcceptedIds.contains(sid) ? "db" : "db_pending"
-            } else {
-                speakerMappings[key] = SpeakerMapping(
-                    speakerId: sid,
-                    identifiedName: nil,
-                    confidence: nil,
-                    isConfirmedIdentity: false
-                )
+                    evidence: "Voice fingerprint match (\(String(format: "%.0f", entry.similarity * 100))%, \(entry.profile.callCount) calls)"
+                ))
             }
         }
 
@@ -141,18 +142,6 @@ extension TranscriptionTaskManager {
         speakerDB.mergeDuplicates()
         speakerDB.pruneWeakProfiles()
 
-        // Tentative suggestions stay generic in saved artifacts until the user confirms them.
-        let tentativeSuggestedSpeakerIds = Set(
-            dbKnowledge.compactMap { entry -> String? in
-                guard !autoAcceptedIds.contains(entry.speakerId),
-                      let suggestedName = entry.profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
-                      !suggestedName.isEmpty else {
-                    return nil
-                }
-                return entry.speakerId
-            }
-        )
-
         // Build diarizer speaker-ID → persistent DB UUID mapping for YAML
         var speakerDbIds: [String: UUID] = [:]
         for utterance in result.systemUtterances {
@@ -160,9 +149,6 @@ extension TranscriptionTaskManager {
             if let pid = utterance.persistentSpeakerId, speakerDbIds[sid] == nil {
                 speakerDbIds[sid] = pid
             }
-        }
-        for sid in tentativeSuggestedSpeakerIds {
-            speakerDbIds.removeValue(forKey: sid)
         }
 
         // Keep placeholder labels tied to persistent speaker UUIDs so later confirmation,
@@ -173,9 +159,9 @@ extension TranscriptionTaskManager {
         }
 
         // Phase 2: Save transcript with speaker names
-        let (notifier, statsStore): (TranscriptNotifier?, (any StatsStore)?) = await MainActor.run {
+        let notifier: TranscriptNotifier? = await MainActor.run {
             self.displayStatus = .finishing
-            return (self.notifier, self.statsStore)
+            return self.notifier
         }
 
         let transcriptId = UUID()
@@ -189,7 +175,7 @@ extension TranscriptionTaskManager {
             directory: outputFolder,
             healthInfo: healthInfo,
             notifier: notifier,
-            speakerStoreForIndex: speakerDB,
+            speakerStore: speakerDB,
             statsStore: statsStore
         ) else {
             throw PipelineError.saveFailed(detail: "Could not write transcript to \(outputFolder.lastPathComponent)")
@@ -210,68 +196,17 @@ extension TranscriptionTaskManager {
                     speakerDB: speakerDB
                 )
 
-                // Persist clips so they survive naming tray dismissal
-                var provisionalSuggestions: [String: (provisionalId: UUID, suggested: SpeakerIdentityOption)] = [:]
-                for sid in needsActionIds.sorted() {
-                    guard let entry = dbKnowledge.first(where: { $0.speakerId == sid }),
-                          let suggestedName = entry.profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
-                          !suggestedName.isEmpty else {
-                        continue
-                    }
-
-                    let provisionalProfile = speakerDB.addOrUpdateSpeaker(
-                        embedding: entry.profile.embedding,
-                        existingId: nil
-                    )
-                    provisionalSuggestions[sid] = (
-                        provisionalProfile.id,
-                        SpeakerIdentityOption(
-                            id: entry.profile.id,
-                            displayName: suggestedName,
-                            callCount: entry.profile.callCount
-                        )
-                    )
-                }
-
-                for clip in clips {
-                    let clipSpeakerId = provisionalSuggestions[clip.sortformerSpeakerId]?.provisionalId
-                        ?? clip.persistentSpeakerId
-                    SpeakerClipExtractor.persistClip(
-                        from: clip.clipURL,
-                        speakerId: clipSpeakerId,
-                        clipsDirectory: speakerClipsDirectory
-                    )
-                }
-
                 if !clips.isEmpty {
-                    let knownPeople = speakerDB.allSpeakers().compactMap { profile -> SpeakerIdentityOption? in
-                        guard let name = profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
-                              !name.isEmpty else { return nil }
-                        return SpeakerIdentityOption(id: profile.id, displayName: name, callCount: profile.callCount)
-                    }.sorted { lhs, rhs in
-                        if lhs.displayName.caseInsensitiveCompare(rhs.displayName) == .orderedSame {
-                            if lhs.callCount == rhs.callCount {
-                                return lhs.id.uuidString < rhs.id.uuidString
-                            }
-                            return lhs.callCount > rhs.callCount
-                        }
-                        return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
-                    }
-
                     let entries = clips.map { clip in
-                        let suggestedIdentity = provisionalSuggestions[clip.sortformerSpeakerId]?.suggested
-                        let currentName = suggestedIdentity?.displayName ?? clip.currentName
                         return SpeakerNamingEntry(
-                            id: provisionalSuggestions[clip.sortformerSpeakerId]?.provisionalId ?? clip.persistentSpeakerId,
-                            suggestedProfileId: suggestedIdentity?.id,
+                            id: clip.persistentSpeakerId,
                             sortformerSpeakerId: clip.sortformerSpeakerId,
                             clipURL: clip.clipURL,
                             sampleText: clip.sampleText,
-                            currentName: currentName,
+                            currentName: clip.currentName,
                             matchSimilarity: clip.matchSimilarity,
-                            callCount: suggestedIdentity?.callCount ?? clip.callCount,
-                            needsNaming: currentName == nil,
-                            needsConfirmation: currentName != nil,
+                            needsNaming: clip.currentName == nil,
+                            needsConfirmation: clip.currentName != nil,
                             sessionEmbedding: result.systemSpeakerContexts[clip.sortformerSpeakerId]?.sessionEmbedding,
                             matchedProfileSnapshot: result.systemSpeakerContexts[clip.sortformerSpeakerId]?.matchedProfileSnapshot
                         )
@@ -282,7 +217,6 @@ extension TranscriptionTaskManager {
                     await MainActor.run {
                         self.speakerNamingRequest = SpeakerNamingRequest(
                             speakers: entries,
-                            knownPeople: knownPeople,
                             transcriptURL: savedURL,
                             transcriptId: transcriptId,
                             systemAudioURL: systemURL,
@@ -292,6 +226,7 @@ extension TranscriptionTaskManager {
                                     updates: updates,
                                     transcriptURL: savedURL,
                                     transcriptId: transcriptId,
+                                    transcriptionResult: result,
                                     micURL: micURL,
                                     systemURL: systemURL,
                                     clips: entries

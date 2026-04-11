@@ -47,7 +47,7 @@ struct Batch: AsyncParsableCommand {
         if let configPath = config {
             diarizerConfig = try ConfigLoader.load(from: configPath)
         } else {
-            diarizerConfig = OfflineDiarizerConfig.default.withSpeakers(min: 2, max: 8)
+            diarizerConfig = OfflineDiarizerConfig.default.applyingSpeakerBounds(min: 2, max: 8)
         }
 
         // Initialize diarizer once

@@ -25,24 +25,44 @@ struct TranscriptedDataDirectories {
     ) -> TranscriptedDataDirectories {
         if let sharedPath = environment["TRANSCRIPTED_DATA_DIR"], !sharedPath.isEmpty {
             let sharedURL = URL(fileURLWithPath: sharedPath)
-            let indexURL = environment["TRANSCRIPTED_INDEX_DIR"].map(URL.init(fileURLWithPath:)) ?? sharedURL
+            let meetingsURL: URL
+            let dictationsURL: URL
+            if fileManager.fileExists(atPath: sharedURL.appendingPathComponent("meetings", isDirectory: true).path)
+                || fileManager.fileExists(atPath: sharedURL.appendingPathComponent("dictations", isDirectory: true).path) {
+                meetingsURL = sharedURL.appendingPathComponent("meetings", isDirectory: true)
+                dictationsURL = sharedURL.appendingPathComponent("dictations", isDirectory: true)
+            } else {
+                meetingsURL = sharedURL
+                dictationsURL = sharedURL
+            }
+            let indexURL = environment["TRANSCRIPTED_INDEX_DIR"].map(URL.init(fileURLWithPath:))
+                ?? sharedURL
             return TranscriptedDataDirectories(
-                meetingsDir: sharedURL,
-                dictationsDir: sharedURL,
+                meetingsDir: meetingsURL,
+                dictationsDir: dictationsURL,
                 indexDir: indexURL
             )
         }
 
         let home = fileManager.homeDirectoryForCurrentUser
+        let transcriptedRoot = home
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("Transcripted", isDirectory: true)
+        let defaultCaptures = transcriptedRoot.appendingPathComponent("captures", isDirectory: true)
+        let defaultMeetings = defaultCaptures.appendingPathComponent("meetings", isDirectory: true)
+        let defaultDictations = defaultCaptures.appendingPathComponent("dictations", isDirectory: true)
+        let defaultIndex = transcriptedRoot.appendingPathComponent("cache", isDirectory: true)
+
         let draftRoot = home
             .appendingPathComponent("Library", isDirectory: true)
             .appendingPathComponent("Application Support", isDirectory: true)
             .appendingPathComponent("Draft", isDirectory: true)
 
-        let defaultMeetings = draftRoot
+        let legacyDraftMeetings = draftRoot
             .appendingPathComponent("meetings", isDirectory: true)
             .appendingPathComponent("transcripts", isDirectory: true)
-        let defaultDictations = draftRoot
+        let legacyDraftDictations = draftRoot
             .appendingPathComponent("dictations", isDirectory: true)
             .appendingPathComponent("transcripts", isDirectory: true)
         let legacyShared = home
@@ -53,15 +73,20 @@ struct TranscriptedDataDirectories {
         let dictationsOverride = environment["TRANSCRIPTED_DICTATIONS_DIR"].map(URL.init(fileURLWithPath:))
         let indexOverride = environment["TRANSCRIPTED_INDEX_DIR"].map(URL.init(fileURLWithPath:))
 
-        let useLegacy = meetingsOverride == nil
+        let useLegacyDraft = meetingsOverride == nil
             && dictationsOverride == nil
             && !fileManager.fileExists(atPath: defaultMeetings.path)
+            && fileManager.fileExists(atPath: legacyDraftMeetings.path)
+        let useLegacyShared = meetingsOverride == nil
+            && dictationsOverride == nil
+            && !fileManager.fileExists(atPath: defaultMeetings.path)
+            && !fileManager.fileExists(atPath: legacyDraftMeetings.path)
             && fileManager.fileExists(atPath: legacyShared.path)
 
         return TranscriptedDataDirectories(
-            meetingsDir: meetingsOverride ?? (useLegacy ? legacyShared : defaultMeetings),
-            dictationsDir: dictationsOverride ?? (useLegacy ? legacyShared : defaultDictations),
-            indexDir: indexOverride ?? (meetingsOverride ?? (useLegacy ? legacyShared : defaultMeetings))
+            meetingsDir: meetingsOverride ?? (useLegacyDraft ? legacyDraftMeetings : (useLegacyShared ? legacyShared : defaultMeetings)),
+            dictationsDir: dictationsOverride ?? (useLegacyDraft ? legacyDraftDictations : (useLegacyShared ? legacyShared : defaultDictations)),
+            indexDir: indexOverride ?? defaultIndex
         )
     }
 }

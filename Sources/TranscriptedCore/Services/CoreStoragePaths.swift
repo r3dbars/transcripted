@@ -12,26 +12,25 @@ import Foundation
 /// different location without patching Core internals. The standalone
 /// Transcripted app uses `.default` which mirrors the historic layout.
 public struct CoreStoragePaths: Sendable {
-    /// Root directory for user-facing transcript output (`~/Documents/Transcripted` by default).
+    /// Root directory for user-facing meeting capture output.
     public let transcripts: URL
 
-    /// SQLite file holding voice fingerprints (`~/Documents/Transcripted/speakers.sqlite` by default).
+    /// SQLite file holding voice fingerprints.
     public let speakerDB: URL
 
-    /// SQLite file holding recording history (`~/Documents/Transcripted/stats.sqlite` by default).
+    /// SQLite file holding recording history.
     public let statsDB: URL
 
-    /// JSON queue of unfinished transcriptions (`~/Documents/Transcripted/failed_transcriptions.json` by default).
+    /// JSON queue of unfinished transcriptions.
     public let failedQueue: URL
 
-    /// Directory for persistent speaker audio clips (`~/Documents/Transcripted/speaker_clips` by default).
+    /// Directory for temporary speaker audio clips if a host still needs them.
     public let speakerClips: URL
 
-    /// Directory for raw mic/system WAV captures written by the audio engine
-    /// (`~/Documents` by default, matching the historic layout).
+    /// Directory for raw mic/system WAV captures written by the audio engine.
     public let audioCaptures: URL
 
-    /// Directory for JSON Lines log files (`~/Library/Logs/Transcripted` by default).
+    /// Directory for JSON Lines log files.
     public let logs: URL
 
     public init(
@@ -52,28 +51,33 @@ public struct CoreStoragePaths: Sendable {
         self.logs = logs
     }
 
-    /// The historic Transcripted layout:
-    /// - `~/Documents/Transcripted/` for transcripts, databases, failed queue, clips
-    /// - `~/Documents/` for raw mic/system WAV captures
-    /// - `~/Library/Logs/Transcripted/` for app.jsonl
+    /// Default Transcripted layout:
+    /// - `~/Library/Application Support/Transcripted/captures/meetings/` for meeting captures
+    /// - `~/Library/Application Support/Transcripted/state/` for databases + failed queue
+    /// - `~/Library/Application Support/Transcripted/tmp/recordings/` for raw audio scratch
+    /// - `~/Library/Application Support/Transcripted/logs/` for app.jsonl
     ///
-    /// If the documents directory is unreachable (restricted sandbox), falls back to
+    /// If the Application Support directory is unreachable (restricted sandbox), falls back to
     /// the temporary directory so Core can still boot in a degraded mode.
     public static let `default`: CoreStoragePaths = {
         let fm = FileManager.default
-        let documentsRoot = fm.urls(for: .documentDirectory, in: .userDomainMask).first
-            ?? fm.temporaryDirectory.appendingPathComponent("TranscriptedFallback")
-        let transcriptedFolder = documentsRoot.appendingPathComponent("Transcripted")
-        let logsFolder = fm.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/Transcripted")
+        let appSupportRoot = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("Transcripted", isDirectory: true)
+            ?? fm.temporaryDirectory.appendingPathComponent("TranscriptedFallback", isDirectory: true)
+        let capturesRoot = appSupportRoot.appendingPathComponent("captures", isDirectory: true)
+        let stateRoot = appSupportRoot.appendingPathComponent("state", isDirectory: true)
+        let logsFolder = appSupportRoot.appendingPathComponent("logs", isDirectory: true)
+        let tmpRecordings = appSupportRoot
+            .appendingPathComponent("tmp", isDirectory: true)
+            .appendingPathComponent("recordings", isDirectory: true)
 
         return CoreStoragePaths(
-            transcripts: transcriptedFolder,
-            speakerDB: transcriptedFolder.appendingPathComponent("speakers.sqlite"),
-            statsDB: transcriptedFolder.appendingPathComponent("stats.sqlite"),
-            failedQueue: transcriptedFolder.appendingPathComponent("failed_transcriptions.json"),
-            speakerClips: transcriptedFolder.appendingPathComponent("speaker_clips"),
-            audioCaptures: documentsRoot,
+            transcripts: capturesRoot.appendingPathComponent("meetings", isDirectory: true),
+            speakerDB: stateRoot.appendingPathComponent("speakers.sqlite"),
+            statsDB: stateRoot.appendingPathComponent("stats.sqlite"),
+            failedQueue: stateRoot.appendingPathComponent("failed_transcriptions.json"),
+            speakerClips: tmpRecordings.appendingPathComponent("speaker_clips", isDirectory: true),
+            audioCaptures: tmpRecordings,
             logs: logsFolder
         )
     }()

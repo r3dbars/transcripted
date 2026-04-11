@@ -55,14 +55,7 @@ public enum RecordingValidator {
 
     /// Checks if sufficient disk space is available on the configured save volume
     private static func checkDiskSpace(paths: CoreStoragePaths) -> ValidationResult? {
-        // Check the actual save location, not just Documents — user may save to an external drive
-        let checkPath: URL
-        if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
-           !customPath.isEmpty {
-            checkPath = URL(fileURLWithPath: customPath)
-        } else {
-            checkPath = paths.transcripts
-        }
+        let checkPath = resolvedSaveDirectory(paths: paths)
 
         do {
             let probeURL = diskSpaceProbeURL(for: checkPath)
@@ -98,7 +91,7 @@ public enum RecordingValidator {
 
     /// Checks if we have write permissions to the configured transcripts folder
     private static func checkFilePermissions(paths: CoreStoragePaths) -> ValidationResult? {
-        let transcriptsDir = paths.transcripts
+        let transcriptsDir = resolvedSaveDirectory(paths: paths)
         // Ensure the directory exists before probing — first run on a new install starts with nothing
         try? FileManager.default.createDirectory(at: transcriptsDir, withIntermediateDirectories: true)
 
@@ -113,6 +106,16 @@ public enum RecordingValidator {
         } catch {
             return .failure("Can't write to save folder. Check Finder permissions for \(transcriptsDir.path).")
         }
+    }
+
+    private static func resolvedSaveDirectory(paths: CoreStoragePaths) -> URL {
+        if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
+           !customPath.isEmpty {
+            return URL(fileURLWithPath: customPath, isDirectory: true)
+                .appendingPathComponent("meetings", isDirectory: true)
+        }
+
+        return paths.transcripts
     }
 
     // MARK: - Save Path Validation
