@@ -25,11 +25,12 @@
 - `Sources/` — app shell, hotkeys, speech, dictation UI, meeting bridge, shared app paths
 - `Sources/Dictation/` — markdown persistence for completed dictations
 - `Sources/Meeting/` — app-side bridge into `TranscriptedCore`
+- `Sources/Reliability/` — wake / sleep recovery coordination for active recording flows
 - `Sources/TranscriptedCore/` — reusable meeting transcription library
 - `Tests/` — fast custom Swift test runner plus `TranscriptedCore` package tests
-- `SmokeTests/` — integration smoke for the bundled core library seam
-- `Tools/TranscriptedCLI/` — standalone offline diarization CLI
-- `Tools/TranscriptedMCP/` — read-only MCP server for saved meeting artifacts
+- `SmokeTests/` — integration smoke for the bundled core library seam, plus a wake-recovery smoke check
+- `Tools/TranscriptedCLI/` — standalone CLI for local context queries and offline diarization
+- `Tools/TranscriptedMCP/` — read-only MCP server for saved meeting and dictation artifacts
 - `Tools/TranscriptedQA/` — artifact validation CLI
 - `archive/backend-beta-worker/` — archived beta proxy / telemetry backend
 
@@ -49,6 +50,8 @@ Current source-of-truth docs:
 - `Tests/README.md`
 - `docs/storage-paths.md`
 - `Tools/TranscriptedCLI/CLAUDE.md`
+- `Tools/TranscriptedMCP/CLAUDE.md`
+- `Tools/TranscriptedQA/CLAUDE.md`
 
 Beta/distribution-only docs:
 

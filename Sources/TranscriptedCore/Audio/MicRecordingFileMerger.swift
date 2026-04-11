@@ -83,7 +83,12 @@ enum MicRecordingFileMerger {
             buffer.frameLength = AVAudioFrameCount(count)
             if let channelData = buffer.floatChannelData?[0] {
                 samples.withUnsafeBufferPointer { pointer in
-                    channelData.update(from: pointer.baseAddress! + offset, count: count)
+                    // Security: guard against nil baseAddress — baseAddress is non-nil for
+                    // non-empty arrays, which is guaranteed by the loop condition (offset <
+                    // samples.count), but force-unwrapping here would crash the audio thread
+                    // if the invariant were ever violated.
+                    guard let base = pointer.baseAddress else { return }
+                    channelData.update(from: base + offset, count: count)
                 }
             }
 

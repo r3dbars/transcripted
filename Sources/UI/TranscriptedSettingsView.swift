@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import TranscriptedCore
 
 struct TranscriptedSettingsView: View {
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
@@ -77,6 +78,8 @@ struct TranscriptedSettingsView: View {
                     }
                 }
 
+                SpeakerPeopleSettingsSection(model: speakerPeopleModel)
+
                 SettingsSection(title: "Storage", detail: "Captures can live anywhere you want, while app state stays separated under Application Support.") {
                     StorageRow(title: "Capture library", url: captureLibraryURL)
                     StorageRow(title: "Meeting captures", url: MeetingStoragePaths.transcriptsFolder)
@@ -101,8 +104,6 @@ struct TranscriptedSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-
-                SpeakerPeopleSettingsSection(model: speakerPeopleModel)
             }
             .padding(24)
         }

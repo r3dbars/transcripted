@@ -95,8 +95,22 @@ public final class StatsDatabase {
     private func configureOpenDatabase() {
         isDatabaseOpen = true
         FileManager.default.restrictToOwnerOnly(atPath: dbPath.path)
-        // WAL mode for crash safety, busy timeout to avoid SQLITE_BUSY, NORMAL sync for performance
-        sqlite3_exec(db, "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;", nil, nil, nil)
+        // Security: check each PRAGMA return value so a silent failure (e.g. WAL mode refused
+        // because another process holds the db) is logged rather than silently misconfiguring
+        // the database. Matches the same pattern used in SpeakerDatabase.configureOpenDatabase().
+        let pragmas = [
+            ("journal_mode=WAL", "journal_mode"),
+            ("busy_timeout=5000", "busy_timeout"),
+            ("synchronous=NORMAL", "synchronous")
+        ]
+        for (pragma, name) in pragmas {
+            var errorMessage: UnsafeMutablePointer<CChar>?
+            if sqlite3_exec(db, "PRAGMA \(pragma);", nil, nil, &errorMessage) != SQLITE_OK {
+                let detail = errorMessage.map { String(cString: $0) } ?? "unknown"
+                AppLogger.stats.error("PRAGMA failed", ["pragma": name, "detail": detail])
+                sqlite3_free(errorMessage)
+            }
+        }
     }
 
     /// Verify database integrity using PRAGMA quick_check.
