@@ -1,5 +1,5 @@
+![Generated Image April 10, 2026 - 7_25PM](https://github.com/user-attachments/assets/eb34c548-e2ca-42eb-a6c8-ee13860ffdbd)
 
-(https://github.com/user-attachments/assets/40ff75aa-9202-46f3-b536-8303217028a3) 
 
 ## Transcripted
 Transcripted is a local Mac app for dictation and meeting capture that turns
