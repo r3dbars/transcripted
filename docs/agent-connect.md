@@ -25,14 +25,20 @@ The copied prompt tells the agent to:
 - otherwise read the local Transcripted folders directly
 - help you set up the better option if neither path is ready yet
 
+The intended user path is:
+
+- click `Connect your agent`
+- copy the prompt
+- paste it into your agent
+- let the agent use MCP first or fall back to the saved folders
+
 Current local folders:
 
-- meetings: `~/Library/Application Support/Draft/meetings/transcripts`
-- dictations: `~/Library/Application Support/Draft/dictations/transcripts`
+- meetings: `~/Library/Application Support/Transcripted/captures/meetings`
+- dictations: `~/Library/Application Support/Transcripted/captures/dictations`
 
 The meetings folder also contains:
 
-- `AGENT.md` — plain-English structure guide for file-based agents
 - `transcripted.json` — index of saved meeting transcripts
 
 ## Optional: MCP

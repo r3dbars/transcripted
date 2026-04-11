@@ -81,6 +81,30 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let transcriptURL = temporaryDirectory.appendingPathComponent("generic.md")
         try genericMarkdown().write(to: transcriptURL, atomically: true, encoding: .utf8)
         try writeGenericAgentSidecar(nextTo: transcriptURL)
+        let speakers = [
+            MarkdownSpeaker(
+                id: "0",
+                persistentSpeakerId: speakerId,
+                name: "Speaker 0",
+                confidence: "medium",
+                source: "db"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:00",
+                source: "System",
+                label: "Speaker 0",
+                text: "hello there",
+                sortformerSpeakerId: 0,
+                speakingSeconds: 1.0
+            )
+        ]
+        let transcriptionResult = sampleTranscriptionResult(
+            speakers: speakers,
+            utterances: utterances,
+            duration: 1
+        )
 
         let updated = TranscriptSaver.updateSpeakerNames(
             transcriptURL: transcriptURL,
@@ -92,7 +116,8 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
                     action: .named
                 )
             ],
-            speakerStoreForIndex: speakerDatabase
+            transcriptionResult: transcriptionResult,
+            speakerStore: speakerDatabase
         )
 
         XCTAssertTrue(updated)
