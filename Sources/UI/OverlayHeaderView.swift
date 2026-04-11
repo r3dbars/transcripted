@@ -14,7 +14,7 @@ private final class OverlayPrimaryButton: NSButton {
 
     override var intrinsicContentSize: NSSize {
         let base = super.intrinsicContentSize
-        return NSSize(width: base.width + 22, height: max(28, base.height + 10))
+        return NSSize(width: base.width + 16, height: max(24, base.height + 6))
     }
 
     override var isHighlighted: Bool {
@@ -45,7 +45,7 @@ private final class OverlayPrimaryButton: NSButton {
         attributedTitle = NSAttributedString(
             string: title,
             attributes: [
-                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
                 .foregroundColor: NSColor.black.withAlphaComponent(0.88)
             ]
         )
@@ -108,11 +108,11 @@ final class OverlayHeaderView: NSView {
         shortcutHint.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         addSubview(shortcutHint)
 
-        stopButton.title = "Done"
+        stopButton.title = "Stop"
         stopButton.isHidden = true
         stopButton.target = self
         stopButton.action = #selector(stopButtonPressed)
-        stopButton.toolTip = "Finish dictation"
+        stopButton.toolTip = "Stop dictation"
         addSubview(stopButton)
     }
 
