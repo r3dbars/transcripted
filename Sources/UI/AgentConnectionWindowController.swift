@@ -45,7 +45,7 @@ final class AgentConnectionWindowController: NSWindowController, NSWindowDelegat
     init(context: AgentConnectionContext) {
         self.viewModel = AgentConnectionViewModel(context: context)
 
-        let frame = NSRect(x: 0, y: 0, width: 680, height: 760)
+        let frame = NSRect(x: 0, y: 0, width: 680, height: 560)
         let window = NSWindow(
             contentRect: frame,
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -68,7 +68,7 @@ final class AgentConnectionWindowController: NSWindowController, NSWindowDelegat
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
         window.backgroundColor = MenuTokens.surfaceBackgroundNS
-        window.minSize = NSSize(width: 620, height: 620)
+        window.minSize = NSSize(width: 620, height: 440)
         window.maxSize = NSSize(width: 960, height: 1040)
         window.isReleasedWhenClosed = false
         window.level = .normal

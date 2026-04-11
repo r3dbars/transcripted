@@ -2,8 +2,6 @@ import AppKit
 import SwiftUI
 
 struct AgentConnectionContext {
-    let meetingsFolderURL: URL
-    let dictationsFolderURL: URL
     let starterPrompt: String
     let mcpSetupText: String
     let mcpConfigExample: String
@@ -15,8 +13,6 @@ struct AgentConnectionContext {
         _ = meetingTitle
         _ = meetingDate
 
-        self.meetingsFolderURL = AgentConnectionGuide.meetingsFolder
-        self.dictationsFolderURL = AgentConnectionGuide.dictationsFolder
         self.starterPrompt = AgentConnectionGuide.starterPrompt(filename: filename)
         self.mcpSetupText = AgentConnectionGuide.mcpSetupText
         self.mcpConfigExample = AgentConnectionGuide.mcpConfigExample
@@ -68,21 +64,6 @@ final class AgentConnectionViewModel: ObservableObject {
         copiedItem == item ? "Copied" : title
     }
 
-    func reveal(_ url: URL?) {
-        guard let url else {
-            NSSound.beep()
-            return
-        }
-
-        let target = fileExists(url) ? url : url.deletingLastPathComponent()
-        NSWorkspace.shared.activateFileViewerSelecting([target])
-    }
-
-    func fileExists(_ url: URL?) -> Bool {
-        guard let url else { return false }
-        return FileManager.default.fileExists(atPath: url.path)
-    }
-
     private func copy(_ value: String, as item: AgentConnectionCopyItem) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -113,13 +94,12 @@ struct AgentConnectionWindowView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     primarySection
-                    mcpSection
-                    foldersSection
+                    advancedSection
                 }
                 .padding(20)
             }
         }
-        .frame(minWidth: 680, minHeight: 620)
+        .frame(minWidth: 680, minHeight: 440)
         .background(AgentConnectionTheme.background)
     }
 
@@ -140,7 +120,7 @@ struct AgentConnectionWindowView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(AgentConnectionTheme.textPrimary)
 
-                Text("Copy one prompt, paste it into your agent, and let Transcripted use MCP when available or folders when not.")
+                Text(AgentConnectionGuide.headerSummary)
                     .font(.system(size: 12))
                     .foregroundStyle(AgentConnectionTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -155,27 +135,13 @@ struct AgentConnectionWindowView: View {
 
     private var primarySection: some View {
         AgentConnectionSectionCard(
-            title: "Copy this into your agent",
-            subtitle: "This is the main path for most people."
+            title: "Start here",
+            subtitle: "This is the only step most people need."
         ) {
-            AgentConnectionBodyText("Your agent will use Transcripted MCP tools if they are already connected. If not, it will fall back to your local Transcripted folders and can help you set up the better option later.")
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("What this helps with")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(AgentConnectionTheme.textPrimary)
-
-                ForEach(Array(AgentConnectionGuide.benefitHighlights.enumerated()), id: \.offset) { index, highlight in
-                    AgentConnectionInfoRow(
-                        symbolName: index == 0 ? "sparkles" : "checkmark.circle.fill",
-                        title: highlight,
-                        detail: "Works from the same local Transcripted data already saved on this Mac."
-                    )
-                }
-            }
+            AgentConnectionBodyText(AgentConnectionGuide.primarySetupSummary)
 
             HStack(spacing: 10) {
-                Button(viewModel.copyLabel(for: .prompt, default: "Copy agent prompt")) {
+                Button(viewModel.copyLabel(for: .prompt, default: "Copy prompt")) {
                     viewModel.copyStarterPrompt()
                 }
                 .buttonStyle(AgentConnectionPrimaryButtonStyle())
@@ -183,52 +149,19 @@ struct AgentConnectionWindowView: View {
         }
     }
 
-    private var mcpSection: some View {
+    private var advancedSection: some View {
         AgentConnectionSectionCard(
-            title: "Optional MCP setup",
-            subtitle: "Set this up only if your agent supports MCP and you want the better direct-tool connection."
+            title: "Manual setup",
+            subtitle: "Only use this if the main prompt is not enough."
         ) {
-            AgentConnectionBodyText(viewModel.context.mcpSetupText)
+            AgentConnectionBodyText(AgentConnectionGuide.manualSetupSummary)
 
-            HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 10) {
                 Button(viewModel.copyLabel(for: .mcp, default: "Copy MCP setup")) {
                     viewModel.copyMCPSetup()
                 }
                 .buttonStyle(AgentConnectionSecondaryButtonStyle())
-            }
-        }
-    }
 
-    private var foldersSection: some View {
-        AgentConnectionSectionCard(
-            title: "Manual folders",
-            subtitle: "Only use these if you want to inspect or share the raw local paths yourself."
-        ) {
-            AgentConnectionBodyText("The main prompt already includes these paths. They are here as a fallback for manual setup.")
-
-            VStack(alignment: .leading, spacing: 12) {
-                AgentConnectionFileRow(
-                    name: "Meetings",
-                    detail: "Structured meeting transcripts, markdown files, and AGENT.md live here.",
-                    path: viewModel.context.meetingsFolderURL.path,
-                    isAvailable: viewModel.fileExists(viewModel.context.meetingsFolderURL),
-                    actionTitle: "Reveal"
-                ) {
-                    viewModel.reveal(viewModel.context.meetingsFolderURL)
-                }
-
-                AgentConnectionFileRow(
-                    name: "Dictations",
-                    detail: "Saved dictation days and entries live here.",
-                    path: viewModel.context.dictationsFolderURL.path,
-                    isAvailable: viewModel.fileExists(viewModel.context.dictationsFolderURL),
-                    actionTitle: "Reveal"
-                ) {
-                    viewModel.reveal(viewModel.context.dictationsFolderURL)
-                }
-            }
-
-            HStack(spacing: 10) {
                 Button(viewModel.copyLabel(for: .folders, default: "Copy folder paths")) {
                     viewModel.copyFolderPaths()
                 }
@@ -307,78 +240,6 @@ private struct AgentConnectionBodyText: View {
             .font(.system(size: 11))
             .foregroundStyle(AgentConnectionTheme.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
-    }
-}
-
-private struct AgentConnectionInfoRow: View {
-    let symbolName: String
-    let title: String
-    let detail: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbolName)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(AgentConnectionTheme.accent)
-                .frame(width: 24, height: 24)
-                .background(
-                    Circle()
-                        .fill(AgentConnectionTheme.badge)
-                )
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(AgentConnectionTheme.textPrimary)
-
-                Text(detail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(AgentConnectionTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-}
-
-private struct AgentConnectionFileRow: View {
-    let name: String
-    let detail: String
-    let path: String
-    let isAvailable: Bool
-    let actionTitle: String
-    let action: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(name)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(AgentConnectionTheme.textPrimary)
-
-                    if !isAvailable {
-                        Text("Not written yet")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(AgentConnectionTheme.missing)
-                    }
-                }
-
-                Text(detail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(AgentConnectionTheme.textSecondary)
-
-                Text(path)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(AgentConnectionTheme.textMuted)
-                    .textSelection(.enabled)
-            }
-
-            Spacer(minLength: 12)
-
-            Button(actionTitle, action: action)
-                .buttonStyle(AgentConnectionSecondaryButtonStyle())
-                .disabled(!isAvailable)
-        }
     }
 }
 

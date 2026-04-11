@@ -15,34 +15,15 @@ final class MenuAgentConnectPageView: NSView {
     )
     private let titleLabel = NSTextField(labelWithString: "Connect your agent")
     private let subtitleLabel = NSTextField(wrappingLabelWithString:
-        "Copy one prompt, paste it into your agent, and let Transcripted use MCP when available or folders when not."
+        AgentConnectionGuide.headerSummary
     )
-    private let starterPromptLabel = NSTextField(labelWithString: "What this helps with")
-    private let benefitOneRow = AgentConnectInfoRowView(
-        symbolName: "sparkles",
-        title: "Search past meetings faster",
-        body: "Your agent can work from the spoken context Transcripted already saved locally."
+    private let starterPromptLabel = NSTextField(labelWithString: "Start here")
+    private let starterPromptBodyLabel = NSTextField(wrappingLabelWithString:
+        AgentConnectionGuide.primarySetupSummary
     )
-    private let benefitTwoRow = AgentConnectInfoRowView(
-        symbolName: "checkmark.circle",
-        title: "Pull summaries and action items",
-        body: "The smart prompt can use MCP if it is ready, or fall back to local folders if it is not."
-    )
-    private let benefitThreeRow = AgentConnectInfoRowView(
-        symbolName: "checkmark.circle",
-        title: "Stay simple for beginners",
-        body: "Copy once, paste once, and only use manual setup if you actually need it."
-    )
-    private let manualSetupLabel = NSTextField(labelWithString: "Need manual setup?")
-    private let mcpRow = AgentConnectInfoRowView(
-        symbolName: "cable.connector",
-        title: "Optional MCP setup",
-        body: "Copy the MCP setup text only if your agent supports MCP and you want direct read-only tools."
-    )
-    private let folderRow = AgentConnectInfoRowView(
-        symbolName: "folder",
-        title: "Manual folders",
-        body: "Use these only if you want to inspect or share the raw Transcripted paths yourself."
+    private let manualSetupLabel = NSTextField(labelWithString: "Manual setup")
+    private let manualSetupBodyLabel = NSTextField(wrappingLabelWithString:
+        AgentConnectionGuide.manualSetupSummary
     )
 
     private let copyMCPButton = MenuOutlineButton(
@@ -58,10 +39,11 @@ final class MenuAgentConnectPageView: NSView {
         toolTip: "Copy folder paths"
     )
     private let copyPromptButton = MenuOutlineButton(
-        title: "Copy agent prompt",
+        title: "Copy prompt",
         symbolName: "doc.on.doc",
         accessibilityLabel: "Copy agent prompt",
-        toolTip: "Copy agent prompt"
+        toolTip: "Copy agent prompt",
+        style: .accent
     )
 
     private var resetTask: Task<Void, Never>?
@@ -87,7 +69,7 @@ final class MenuAgentConnectPageView: NSView {
 
         subtitleLabel.font = NSFont.systemFont(ofSize: 11)
         subtitleLabel.textColor = MenuTokens.textSecondaryNS
-        subtitleLabel.maximumNumberOfLines = 3
+        subtitleLabel.maximumNumberOfLines = 2
         addSubview(subtitleLabel)
 
         [starterPromptLabel, manualSetupLabel].forEach { label in
@@ -95,7 +77,13 @@ final class MenuAgentConnectPageView: NSView {
             label.textColor = MenuTokens.textPrimaryNS
             addSubview(label)
         }
-        [benefitOneRow, benefitTwoRow, benefitThreeRow, mcpRow, folderRow].forEach { addSubview($0) }
+
+        [starterPromptBodyLabel, manualSetupBodyLabel].forEach { label in
+            label.font = NSFont.systemFont(ofSize: 10)
+            label.textColor = MenuTokens.textSecondaryNS
+            label.maximumNumberOfLines = 3
+            addSubview(label)
+        }
 
         backButton.target = self
         backButton.action = #selector(goBack)
@@ -119,7 +107,6 @@ final class MenuAgentConnectPageView: NSView {
 
         let pad: CGFloat = 0
         let width = bounds.width - pad * 2
-        let inlineButtonSpacing: CGFloat = 8
         var y: CGFloat = 0
 
         let backWidth = max(72, backButton.fittingSize.width)
@@ -129,65 +116,57 @@ final class MenuAgentConnectPageView: NSView {
         titleLabel.frame = NSRect(x: pad, y: y, width: width, height: 22)
         y += 26
 
-        subtitleLabel.frame = NSRect(x: pad, y: y, width: width, height: 42)
-        y += 54
+        subtitleLabel.frame = NSRect(x: pad, y: y, width: width, height: 28)
+        y += 40
 
         starterPromptLabel.frame = NSRect(x: pad, y: y, width: width, height: 16)
         y += 22
 
-        let copyPromptWidth = max(132, copyPromptButton.fittingSize.width)
-        let promptRowWidth = max(180, width - copyPromptWidth - inlineButtonSpacing)
-        benefitOneRow.frame = NSRect(x: pad, y: y, width: promptRowWidth, height: AgentConnectInfoRowView.height)
+        starterPromptBodyLabel.frame = NSRect(x: pad, y: y, width: width, height: 28)
+        y += 36
+
         copyPromptButton.frame = NSRect(
-            x: benefitOneRow.frame.maxX + inlineButtonSpacing,
-            y: y + 14,
-            width: copyPromptWidth,
+            x: pad,
+            y: y,
+            width: width,
             height: MenuTokens.secondaryButtonSize
         )
-        y += AgentConnectInfoRowView.height + 14
-
-        benefitTwoRow.frame = NSRect(x: pad, y: y, width: width, height: AgentConnectInfoRowView.height)
-        y += AgentConnectInfoRowView.height + 8
-
-        benefitThreeRow.frame = NSRect(x: pad, y: y, width: width, height: AgentConnectInfoRowView.height)
-        y += AgentConnectInfoRowView.height + 18
+        y += MenuTokens.secondaryButtonSize + 18
 
         manualSetupLabel.frame = NSRect(x: pad, y: y, width: width, height: 16)
         y += 22
 
-        let copyMCPWidth = max(120, copyMCPButton.fittingSize.width)
-        let mcpRowWidth = max(180, width - copyMCPWidth - inlineButtonSpacing)
-        mcpRow.frame = NSRect(x: pad, y: y, width: mcpRowWidth, height: AgentConnectInfoRowView.height)
+        manualSetupBodyLabel.frame = NSRect(x: pad, y: y, width: width, height: 28)
+        y += 36
+
         copyMCPButton.frame = NSRect(
-            x: mcpRow.frame.maxX + inlineButtonSpacing,
-            y: y + 14,
-            width: copyMCPWidth,
+            x: pad,
+            y: y,
+            width: width,
             height: MenuTokens.secondaryButtonSize
         )
-        y += AgentConnectInfoRowView.height + 10
+        y += MenuTokens.secondaryButtonSize + 8
 
-        let copyFoldersWidth = max(126, copyFoldersButton.fittingSize.width)
-        let folderRowWidth = max(180, width - copyFoldersWidth - inlineButtonSpacing)
-        folderRow.frame = NSRect(x: pad, y: y, width: folderRowWidth, height: AgentConnectInfoRowView.height)
         copyFoldersButton.frame = NSRect(
-            x: folderRow.frame.maxX + inlineButtonSpacing,
-            y: y + 14,
-            width: copyFoldersWidth,
+            x: pad,
+            y: y,
+            width: width,
             height: MenuTokens.secondaryButtonSize
         )
-        y += AgentConnectInfoRowView.height + 8
-
-        y += 4
+        y += MenuTokens.secondaryButtonSize + 4
     }
 
     var intrinsicHeight: CGFloat {
-        MenuTokens.secondaryButtonSize + 14 + 22 + 24 + 42 + 16 + 22 +
-        (AgentConnectInfoRowView.height + 14) +
-        (AgentConnectInfoRowView.height + 8) +
-        (AgentConnectInfoRowView.height + 18) +
+        MenuTokens.secondaryButtonSize + 14 +
+        26 +
+        40 +
         22 +
-        (AgentConnectInfoRowView.height + 10) +
-        (AgentConnectInfoRowView.height + 8) + 12
+        36 +
+        MenuTokens.secondaryButtonSize + 18 +
+        22 +
+        36 +
+        MenuTokens.secondaryButtonSize + 8 +
+        MenuTokens.secondaryButtonSize + 4
     }
 
     @objc private func goBack() {
@@ -205,7 +184,7 @@ final class MenuAgentConnectPageView: NSView {
         resetTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard let self, !Task.isCancelled else { return }
-            self.copyPromptButton.title = "Copy agent prompt"
+            self.copyPromptButton.title = "Copy prompt"
             self.copyPromptButton.setSymbol("doc.on.doc", accessibilityLabel: "Copy agent prompt")
         }
     }
@@ -243,68 +222,5 @@ final class MenuAgentConnectPageView: NSView {
             self.copyFoldersButton.title = "Copy folder paths"
             self.copyFoldersButton.setSymbol("folder", accessibilityLabel: "Copy folder paths")
         }
-    }
-}
-
-private final class AgentConnectInfoRowView: NSView {
-    private let symbolWellView = NSView()
-    private let symbolView = NSImageView()
-    private let titleLabel = NSTextField(labelWithString: "")
-    private let bodyLabel = NSTextField(wrappingLabelWithString: "")
-
-    init(symbolName: String, title: String, body: String) {
-        super.init(frame: .zero)
-
-        wantsLayer = true
-        layer?.cornerRadius = 12
-        layer?.backgroundColor = MenuTokens.actionBackgroundNS.cgColor
-        layer?.borderWidth = 1
-        layer?.borderColor = MenuTokens.actionBorderNS.cgColor
-
-        symbolWellView.wantsLayer = true
-        symbolWellView.layer?.cornerRadius = 11
-        symbolWellView.layer?.backgroundColor = MenuTokens.symbolBackgroundNS.cgColor
-        symbolWellView.layer?.borderWidth = 1
-        symbolWellView.layer?.borderColor = MenuTokens.symbolBorderNS.cgColor
-        addSubview(symbolWellView)
-
-        symbolView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold))
-        symbolView.contentTintColor = MenuTokens.textPrimaryNS
-        symbolWellView.addSubview(symbolView)
-
-        titleLabel.stringValue = title
-        titleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        titleLabel.textColor = MenuTokens.textPrimaryNS
-        addSubview(titleLabel)
-
-        bodyLabel.stringValue = body
-        bodyLabel.font = NSFont.systemFont(ofSize: 10)
-        bodyLabel.textColor = MenuTokens.textSecondaryNS
-        bodyLabel.maximumNumberOfLines = 2
-        addSubview(bodyLabel)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override var isFlipped: Bool { true }
-
-    override func layout() {
-        super.layout()
-        symbolWellView.frame = NSRect(x: 12, y: 13, width: 22, height: 22)
-        symbolView.frame = symbolWellView.bounds
-        let textX = symbolWellView.frame.maxX + 10
-        let textWidth = bounds.width - textX - 12
-        titleLabel.frame = NSRect(x: textX, y: 12, width: textWidth, height: 14)
-        bodyLabel.frame = NSRect(x: textX, y: 28, width: textWidth, height: 24)
-    }
-
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: Self.height)
-    }
-
-    static var height: CGFloat {
-        56
     }
 }

@@ -2,6 +2,12 @@ import Foundation
 import TranscriptedCore
 
 enum AgentConnectionGuide {
+    static let headerSummary = "Copy one prompt. Everything else is optional."
+    static let primarySetupSummary =
+        "Paste this into your agent. It will use Transcripted MCP if it is ready, or fall back to your local folders."
+    static let manualSetupSummary =
+        "Use MCP setup if your agent supports it. Use folder paths only if you need the fallback."
+
     static var localMCPBuildDirectory: URL? {
         let bundleURL = Bundle.main.bundleURL.standardizedFileURL
         let buildDirectory = bundleURL.deletingLastPathComponent()
@@ -36,12 +42,6 @@ enum AgentConnectionGuide {
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
-
-    static let benefitHighlights = [
-        "Search past meetings and dictations faster",
-        "Pull summaries and action items in one place",
-        "Give your agent the real spoken context from this Mac",
-    ]
 
     static func starterPrompt(filename: String?) -> String {
         var prompt = """
