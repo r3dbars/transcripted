@@ -21,7 +21,7 @@ final class MeetingModelDownloader {
     }
 
     /// Ensure both STT and diarization models are loaded before the first meeting
-    /// recording starts. Safe to call multiple times — each underlying engine is
+    /// recording starts. Safe to call multiple times - each underlying engine is
     /// idempotent after first successful load.
     ///
     /// Network reachability is checked first so we can short-circuit with a clear
@@ -32,27 +32,41 @@ final class MeetingModelDownloader {
             return
         }
 
+        let startedAt = Date()
+
         // Kick both initializers in parallel. Each is idempotent and each owns
         // its own progress reporting via @Published properties on the engines.
-        async let sttReady: Void = stt.initialize()
-        async let diarReady: Void = diarization.initialize()
-        _ = await (sttReady, diarReady)
+        do {
+            async let sttReady: Void = stt.initialize()
+            async let diarReady: Void = diarization.initialize()
+            _ = await (sttReady, diarReady)
 
-        // After both returns, confirm they actually reached a usable state.
-        guard stt.isReady else {
-            throw NSError(domain: "MeetingModelDownloader", code: 2, userInfo: [
-                NSLocalizedDescriptionKey: "Parakeet STT failed to load."
-            ])
-        }
-        guard diarization.modelState == .ready else {
-            let detail: String
-            switch diarization.modelState {
-            case .failed(let msg): detail = msg
-            default: detail = "unknown state"
+            // After both returns, confirm they actually reached a usable state.
+            guard stt.isReady else {
+                throw NSError(domain: "MeetingModelDownloader", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "Parakeet STT failed to load."
+                ])
             }
-            throw NSError(domain: "MeetingModelDownloader", code: 3, userInfo: [
-                NSLocalizedDescriptionKey: "Diarization models failed to load: \(detail)"
+            guard diarization.modelState == .ready else {
+                let detail: String
+                switch diarization.modelState {
+                case .failed(let msg): detail = msg
+                default: detail = "unknown state"
+                }
+                throw NSError(domain: "MeetingModelDownloader", code: 3, userInfo: [
+                    NSLocalizedDescriptionKey: "Diarization models failed to load: \(detail)"
+                ])
+            }
+
+            AppLogger.pipeline.info("Meeting model warmup complete", [
+                "elapsed_ms": "\(Int(Date().timeIntervalSince(startedAt) * 1000))"
             ])
+        } catch {
+            AppLogger.pipeline.error("Meeting model warmup failed", [
+                "elapsed_ms": "\(Int(Date().timeIntervalSince(startedAt) * 1000))",
+                "error": error.localizedDescription
+            ])
+            throw error
         }
     }
 }
