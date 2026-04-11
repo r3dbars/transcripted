@@ -4,12 +4,69 @@
 import AppKit
 
 @MainActor
+private final class OverlayPrimaryButton: NSButton {
+    override var title: String {
+        didSet {
+            updateTitleAppearance()
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let base = super.intrinsicContentSize
+        return NSSize(width: base.width + 22, height: max(28, base.height + 10))
+    }
+
+    override var isHighlighted: Bool {
+        didSet { updateLayerAppearance() }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        commonInit()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func commonInit() {
+        isBordered = false
+        bezelStyle = .regularSquare
+        setButtonType(.momentaryPushIn)
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.borderWidth = 1
+        focusRingType = .none
+        updateTitleAppearance()
+        updateLayerAppearance()
+    }
+
+    private func updateTitleAppearance() {
+        attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: NSColor.black.withAlphaComponent(0.88)
+            ]
+        )
+    }
+
+    private func updateLayerAppearance() {
+        layer?.backgroundColor = (isHighlighted
+            ? NSColor.white.withAlphaComponent(0.78)
+            : NSColor.white.withAlphaComponent(0.94)
+        ).cgColor
+        layer?.borderColor = NSColor.black.withAlphaComponent(0.10).cgColor
+    }
+}
+
+@MainActor
 final class OverlayHeaderView: NSView {
     private let modeLabel = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
     let waveformHost = WaveformHostView(frame: .zero)
     private let shortcutHint = NSTextField(labelWithString: "")
-    private let stopButton = NSButton(title: "Done", target: nil, action: nil)
+    private let stopButton = OverlayPrimaryButton(frame: .zero)
     var onStopRequested: (() -> Void)?
 
     override init(frame: NSRect) {
@@ -51,10 +108,7 @@ final class OverlayHeaderView: NSView {
         shortcutHint.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         addSubview(shortcutHint)
 
-        stopButton.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
-        stopButton.bezelStyle = .rounded
-        stopButton.controlSize = .small
-        stopButton.isBordered = true
+        stopButton.title = "Done"
         stopButton.isHidden = true
         stopButton.target = self
         stopButton.action = #selector(stopButtonPressed)
