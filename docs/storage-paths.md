@@ -1,5 +1,10 @@
 # Storage Paths
 
+Current runtime truth only.
+
+For the proposed storage redesign and migration plan, see
+`docs/storage-refactor-plan.md`.
+
 ## Current App Paths On `main`
 
 The current Transcripted app on `main` still uses Draft-named compatibility
