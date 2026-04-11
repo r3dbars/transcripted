@@ -242,6 +242,8 @@ enum MeetingTranscriptStyler {
         return entries
     }
 
+    private static let transcriptEntryRegex = try? NSRegularExpression(pattern: #"^\[?([0-9:]+)\]?\s+\[(.+?)\](.*)$"#)
+
     private static func parseTranscriptEntry(from chunk: String) -> TranscriptEntry? {
         let lines = chunk
             .components(separatedBy: "\n")
@@ -253,7 +255,7 @@ enum MeetingTranscriptStyler {
             .replacingOccurrences(of: "**", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard let regex = try? NSRegularExpression(pattern: #"^\[?([0-9:]+)\]?\s+\[(.+?)\](.*)$"#) else {
+        guard let regex = transcriptEntryRegex else {
             return nil
         }
 
