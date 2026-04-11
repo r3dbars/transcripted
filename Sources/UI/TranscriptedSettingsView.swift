@@ -1,7 +1,9 @@
 import SwiftUI
 import AppKit
+import TranscriptedCore
 
 struct TranscriptedSettingsView: View {
+    let speakerPeopleModel: SpeakerPeopleSettingsViewModel
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var permissionStates = PermissionSnapshot.current()
@@ -71,6 +73,8 @@ struct TranscriptedSettingsView: View {
                         }
                     }
                 }
+
+                SpeakerPeopleSettingsSection(model: speakerPeopleModel)
 
                 SettingsSection(title: "Storage", detail: "Captures can live anywhere you want, while app state stays separated under Application Support.") {
                     StorageRow(title: "Capture library", url: captureLibraryURL)
@@ -163,7 +167,7 @@ private struct PermissionSnapshot {
     }
 }
 
-private struct SettingsSection<Content: View>: View {
+struct SettingsSection<Content: View>: View {
     let title: String
     let detail: String
     @ViewBuilder var content: Content
