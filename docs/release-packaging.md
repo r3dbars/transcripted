@@ -65,8 +65,12 @@ SKIP_NOTARIZATION=1 bash build-beta.sh <beta-token> <user-name>
 
 - `codesign --verify --deep --strict` passes for the `.app`
 - the DMG is signed when a Developer ID identity is available
-- notarized runs staple a ticket and then pass `spctl` checks for the app and DMG
+- notarized runs staple a ticket, pass `spctl` checks for the app, and pass `xcrun stapler validate` for the DMG
 - the release process updates `docs/appcast.xml` if users should receive the build through Sparkle
+
+Some local `spctl -t open` checks against a stapled DMG can still report
+`source=Insufficient Context`. Treat a successful `xcrun stapler validate` on
+the DMG as the reliable release gate for the archive itself.
 
 If notarization is intentionally skipped, Gatekeeper rejection for the signed
 app is expected until the artifact is notarized and stapled.
