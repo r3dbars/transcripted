@@ -52,7 +52,22 @@ validate_signed_app() {
 validate_notarized_artifacts() {
     echo "Validating Gatekeeper acceptance..."
     spctl -a -t exec -vv "$APP_BUNDLE"
-    spctl -a -t open -vv "$BUILD_DIR/$DMG_NAME"
+    xcrun stapler validate "$BUILD_DIR/$DMG_NAME"
+
+    local dmg_check_output
+    if dmg_check_output="$(spctl -a -t open -vv "$BUILD_DIR/$DMG_NAME" 2>&1)"; then
+        printf '%s\n' "$dmg_check_output"
+        return 0
+    fi
+
+    printf '%s\n' "$dmg_check_output"
+    if printf '%s' "$dmg_check_output" | grep -q "source=Insufficient Context"; then
+        echo "⚠️  DMG open assessment returned Insufficient Context after stapling."
+        echo "   Treating stapler validation as the source of truth for the signed disk image."
+        return 0
+    fi
+
+    return 1
 }
 
 resolve_sign_identity() {
@@ -81,7 +96,16 @@ sign_embedded_payloads() {
     local nested_code_path
 
     while IFS= read -r -d '' nested_code_path; do
-        codesign --force --sign "$sign_hash" "$nested_code_path"
+        if [ "$sign_hash" = "-" ]; then
+            codesign --force --sign "$sign_hash" "$nested_code_path"
+        else
+            codesign --force \
+                --sign "$sign_hash" \
+                --options runtime \
+                --timestamp \
+                --preserve-metadata=identifier,entitlements,requirements \
+                "$nested_code_path"
+        fi
     done < <(
         find "$APP_BUNDLE/Contents/Frameworks" \
             \( -path "*/Sparkle.framework/Versions/*/Updater.app" \

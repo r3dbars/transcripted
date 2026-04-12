@@ -21,7 +21,7 @@ struct PermissionsOnboardingView: View {
                 Text("Welcome to Transcripted")
                     .font(.title3.weight(.semibold))
 
-                Text("Turn on two quick permissions and you can start dictating into any app right away. Meeting audio and meeting prompts can wait until you need them.")
+                Text("Answer two quick privacy questions, then turn on the permissions you need to start dictating into any app right away. Meeting audio and meeting prompts can wait until you need them.")
                     .font(.callout)
                     .foregroundStyle(MenuTokens.textSecondary)
 
@@ -39,6 +39,15 @@ struct PermissionsOnboardingView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    ObservabilityConsentCard(
+                        crashReportingEnabled: $crashReportingEnabled,
+                        anonymousAnalyticsEnabled: $anonymousAnalyticsEnabled,
+                        crashReportingAvailable: CrashReporter.isAvailable,
+                        analyticsAvailable: AnalyticsReporter.isAvailable,
+                        onCrashToggle: updateCrashReportingPreference,
+                        onAnalyticsToggle: updateAnalyticsPreference
+                    )
+
                     ForEach(requiredPermissions) { kind in
                         PermissionSetupCard(
                             kind: kind,
@@ -50,15 +59,6 @@ struct PermissionsOnboardingView: View {
                     OptionalPermissionsCard(
                         optionalPermissions: optionalPermissions,
                         isGranted: isGranted
-                    )
-
-                    ObservabilityConsentCard(
-                        crashReportingEnabled: $crashReportingEnabled,
-                        anonymousAnalyticsEnabled: $anonymousAnalyticsEnabled,
-                        crashReportingAvailable: CrashReporter.isAvailable,
-                        analyticsAvailable: AnalyticsReporter.isAvailable,
-                        onCrashToggle: updateCrashReportingPreference,
-                        onAnalyticsToggle: updateAnalyticsPreference
                     )
 
                     VStack(alignment: .leading, spacing: 10) {
@@ -352,41 +352,37 @@ private struct ObservabilityConsentCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Optional diagnostics")
+            Text("Help improve Transcripted")
                 .font(.subheadline.weight(.semibold))
 
-            Text("Both options are optional, and you can change either one later in Settings. Transcripted never sends transcript text, audio, meeting titles, speaker names, source app names, emails, file paths, or raw URLs.")
+            Text("These start on by default for this release, and you can turn either one off right now or later in Settings. Transcripted never sends transcript text, audio, meeting titles, speaker names, source app names, emails, file paths, or raw URLs.")
                 .font(.caption)
                 .foregroundStyle(MenuTokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Toggle(
-                "Share crash and error reports",
+            ObservabilityQuestionRow(
+                icon: "bolt.shield.fill",
+                question: "Share crash and error reports to help diagnose broken releases?",
+                detail: crashFootnote,
                 isOn: Binding(
                     get: { crashReportingEnabled },
-                    set: onCrashToggle
-                )
+                    set: { onCrashToggle($0) }
+                ),
+                toggleTitle: "Share crash and error reports",
+                isAvailable: crashReportingAvailable
             )
-            .disabled(!crashReportingAvailable)
 
-            Toggle(
-                "Share anonymous usage statistics",
+            ObservabilityQuestionRow(
+                icon: "chart.bar.xaxis",
+                question: "Share anonymized usage stats to show what parts of Transcripted people actually use?",
+                detail: analyticsFootnote,
                 isOn: Binding(
                     get: { anonymousAnalyticsEnabled },
-                    set: onAnalyticsToggle
-                )
+                    set: { onAnalyticsToggle($0) }
+                ),
+                toggleTitle: "Share anonymous usage stats",
+                isAvailable: analyticsAvailable
             )
-            .disabled(!analyticsAvailable)
-
-            Text(crashFootnote)
-                .font(.caption)
-                .foregroundStyle(MenuTokens.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Text(analyticsFootnote)
-                .font(.caption)
-                .foregroundStyle(MenuTokens.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
         .background(
@@ -405,8 +401,8 @@ private struct ObservabilityConsentCard: View {
         }
 
         return crashReportingEnabled
-            ? "On by default. You can turn this off now or later from Settings."
-            : "Off. You can change this later from Settings if you want to help improve Transcripted."
+            ? "On by default. Transcripted will send scrubbed crash logs plus a small allowlist of reliability events to Sentry. You can turn this off now or later from Settings."
+            : "Off. Crash and error details will stay on this Mac unless you turn this back on later."
     }
 
     private var analyticsFootnote: String {
@@ -415,8 +411,55 @@ private struct ObservabilityConsentCard: View {
         }
 
         return anonymousAnalyticsEnabled
-            ? "On. Transcripted will send only allowlisted, bucketed product events with an anonymous device ID."
-            : "Off by default. Turn this on only if you want to share anonymous usage trends."
+            ? "On by default. Transcripted will send only allowlisted, bucketed product events with an anonymous device ID to PostHog."
+            : "Off. Transcripted will stop sending anonymous usage trends unless you turn this back on later."
+    }
+}
+
+private struct ObservabilityQuestionRow: View {
+    let icon: String
+    let question: String
+    let detail: String
+    @Binding var isOn: Bool
+    let toggleTitle: String
+    let isAvailable: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(MenuTokens.pillBackground)
+                        .frame(width: 34, height: 34)
+
+                    Image(systemName: icon)
+                        .font(.system(size: 14, weight: .semibold))
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(question)
+                        .font(.subheadline.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(MenuTokens.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Toggle(toggleTitle, isOn: $isOn)
+                .disabled(!isAvailable)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(MenuTokens.pillBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(MenuTokens.pillBorder, lineWidth: 1)
+                )
+        )
     }
 }
 

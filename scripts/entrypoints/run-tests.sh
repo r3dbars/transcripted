@@ -125,6 +125,7 @@ APP_SOURCES=(
     "Sources/Observability/AnalyticsEventPolicy.swift"
     "Sources/Observability/AnalyticsPayloadSanitizer.swift"
     "Sources/Observability/AnalyticsPreferences.swift"
+    "Sources/Observability/CrashReportingPreferences.swift"
     "Sources/Observability/SentryEventPolicy.swift"
     "Sources/Observability/SentryPayloadSanitizer.swift"
     "Sources/Reliability/WakeRecoveryCoordinator.swift"
