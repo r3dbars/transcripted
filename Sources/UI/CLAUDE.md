@@ -2,58 +2,53 @@
 
 ## What This Does
 
-`Sources/UI/` contains the current app surfaces for Transcripted's active features:
+`Sources/UI/` contains the current app surfaces for Transcripted's active features.
+The directory is grouped by surface so the live UI tree is easier to scan:
 
-- dictation overlay
-- meeting overlay
-- menubar popover
-- permissions onboarding
-- settings
-- speaker naming and agent-connect helpers
+- `Overlay/`
+- `MenuBar/`
+- `Settings/`
+- `AgentConnect/`
+- `Shared/`
 
 Draft-mode UI is not an active product path in this worktree.
 
 ## Files (32 Swift files)
 
-### Dictation Overlay
+### Overlay/
 
-- `DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
-- `FloatingOverlayController.swift` — owns the overlay panel lifecycle and Combine subscriptions
-- `FloatingOverlayPanel.swift` — non-activating NSPanel for the dictation overlay
-- `OverlayDraftingView.swift` — drafting/processing state view
-- `OverlayHeaderView.swift` — overlay title bar with controls
-- `OverlayRootView.swift` — top-level SwiftUI container switching between overlay states
-- `OverlayTokens.swift` — design tokens (colors, spacing, sizing) for overlay views
-- `PanelDragView.swift` — drag handle for repositioning the overlay panel
-- `WaveformLayer.swift` — Core Animation layer drawing the audio waveform
+- `Overlay/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
+- `Overlay/FloatingOverlayController.swift` — owns the dictation overlay panel lifecycle and Combine subscriptions
+- `Overlay/FloatingOverlayPanel.swift` — non-activating NSPanel for the dictation overlay
+- `Overlay/OverlayDraftingView.swift` — drafting/processing state view
+- `Overlay/OverlayHeaderView.swift` — overlay title bar with controls
+- `Overlay/OverlayRootView.swift` — top-level AppKit view switching between overlay states
+- `Overlay/OverlayTokens.swift` — design tokens (colors, spacing, sizing) for overlay views
+- `Overlay/PanelDragView.swift` — drag handle for repositioning the overlay panel
+- `Overlay/WaveformLayer.swift` — Core Animation layer drawing the audio waveform
+- `Overlay/MeetingOverlayController.swift` — non-activating panel for detected-meeting prompts, model warmup, recording, and transcription status
 
-The current dictation overlay is compact and state-driven. It does not keep the
-older review / diff / streaming subviews that were part of the removed draft
-mode.
+The overlay area holds both live transient recording surfaces: the compact
+dictation overlay and the meeting prompt / recording overlay.
 
-### Meeting Overlay
+### MenuBar/
 
-- `MeetingOverlayController.swift` — non-activating panel for detected-meeting prompts, model warmup, recording, and transcription status
-- `SpeakerNamingSheet.swift` — sheet for renaming speakers in a completed meeting
+- `MenuBar/MenuAgentConnectPageView.swift` — agent connection page in the menubar popover
+- `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover
+- `MenuBar/MenuBarHeaderView.swift` — popover header with app name and status
+- `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar
+- `MenuBar/MenuBarRecentMeetingsView.swift` — recent meetings list in the popover
+- `MenuBar/MenuBarSettingsView.swift` — settings actions in the popover footer
+- `MenuBar/MenuBarShortcutsView.swift` — keyboard shortcut hints in the popover
+- `MenuBar/MenuIconButton.swift` — icon-only button style for menubar items
+- `MenuBar/MenuOutlineButton.swift` — outlined button style for menubar actions
+- `MenuBar/MenuTokens.swift` — design tokens for menubar views
 
-### Menubar
+### AgentConnect/
 
-- `MenuAgentConnectPageView.swift` — agent connection page in menubar popover
-- `MenuBarContentView.swift` — root content view for the menubar popover
-- `MenuBarHeaderView.swift` — popover header with app name and status
-- `MenuBarPanelController.swift` — NSPopover controller for the menubar
-- `MenuBarRecentMeetingsView.swift` — recent meetings list in the popover
-- `MenuBarSettingsView.swift` — settings actions in the popover footer
-- `MenuBarShortcutsView.swift` — keyboard shortcut hints in the popover
-- `MenuIconButton.swift` — icon-only button style for menubar items
-- `MenuOutlineButton.swift` — outlined button style for menubar actions
-- `MenuTokens.swift` — design tokens for menubar views
-
-### Agent Connect
-
-- `AgentConnectionGuide.swift` — shared smart-prompt, MCP setup, and folder fallback copy for the agent-connect flow
-- `AgentConnectionWindowController.swift` — `AgentConnectionWindowCoordinator` and `NSWindowController` for the standalone agent-connect window
-- `AgentConnectionWindowView.swift` — SwiftUI content for the standalone agent-connect window
+- `AgentConnect/AgentConnectionGuide.swift` — shared smart-prompt, MCP setup, and folder fallback copy for the agent-connect flow
+- `AgentConnect/AgentConnectionWindowController.swift` — `AgentConnectionWindowCoordinator` and `NSWindowController` for the standalone agent-connect window
+- `AgentConnect/AgentConnectionWindowView.swift` — SwiftUI content for the standalone agent-connect window
 
 The current agent-connect surfaces should keep one simple mental model:
 
@@ -61,19 +56,20 @@ The current agent-connect surfaces should keep one simple mental model:
 - let that prompt prefer MCP when available and fall back to folders when not
 - keep manual folder paths and MCP setup secondary, not primary
 
-### Settings and Onboarding
+### Settings/
 
-- `HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
-- `PermissionsOnboardingView.swift` — first-launch permissions walkthrough
-- `SpeakerClipPlayback.swift` — simple shared audio-preview helper for persisted speaker sample clips
-- `SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, naming, merging, previewing, and deleting saved speaker profiles
-- `TranscriptedPermissionAccess.swift` — accessibility, screen recording, and calendar permission checks
-- `TranscriptedSettingsView.swift` — main settings view
-- `TranscriptedSettingsWindowController.swift` — NSWindowController for settings
+- `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
+- `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
+- `Settings/SpeakerClipPlayback.swift` — audio-preview helper for persisted speaker sample clips
+- `Settings/SpeakerNamingSheet.swift` — sheet for renaming speakers in a completed meeting
+- `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, naming, merging, previewing, and deleting saved speaker profiles
+- `Settings/TranscriptedPermissionAccess.swift` — accessibility, screen recording, and calendar permission checks
+- `Settings/TranscriptedSettingsView.swift` — main settings view
+- `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 
-### Shared
+### Shared/
 
-- `AppSoundPlayer.swift` — UI sound preferences and playback helpers
+- `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
 
 ## Observation Pattern
 

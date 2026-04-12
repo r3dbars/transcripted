@@ -39,6 +39,7 @@ For helper and legacy scripts, see `scripts/README.md`.
 ## Directory Map
 
 - `Sources/` — macOS app target
+- `Sources/UI/` — app-facing UI grouped into `Overlay/`, `MenuBar/`, `Settings/`, `AgentConnect/`, and `Shared/`
 - `Sources/Support/` — shared app utilities such as paths, hotkeys, and constants
 - `Sources/Dictation/` — dictation persistence
 - `Sources/Meeting/` — app-side meeting bridge into `TranscriptedCore`

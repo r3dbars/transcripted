@@ -101,7 +101,7 @@ The codebase is organized around the current Transcripted app:
 | App entry + state | `Sources/` | app lifecycle, hotkeys, paths, shared state |
 | Dictation capture and storage | `Sources/Speech/`, `Sources/Dictation/`, `Sources/Capture/` | speech capture, trigger routing, saved dictation transcripts |
 | Meeting pipeline | `Sources/Meeting/` | meeting recording, model warmup, transcript flow |
-| UI | `Sources/UI/` | overlay, menubar, onboarding, agent connection |
+| UI | `Sources/UI/` | grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `AgentConnect/`, `Shared/` |
 | Shared meeting core | `Sources/TranscriptedCore/` | extracted meeting/transcription library and agent artifacts |
 
 Some internal folders still use `Draft` naming while the repo and product are

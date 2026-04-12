@@ -125,7 +125,7 @@ APP_SOURCES=(
     "Sources/TranscriptedCore/Models/TranscriptionTypes.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerProfile.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift"
-    "Sources/UI/AppSoundPlayer.swift"
+    "Sources/UI/Shared/AppSoundPlayer.swift"
 )
 
 echo "Compiling tests..."

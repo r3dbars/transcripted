@@ -12,7 +12,7 @@
 
 ## Flow
 
-1. `Sources/UI/DictationSessionController.swift` transcribes audio with `STTRouter`.
+1. `Sources/UI/Overlay/DictationSessionController.swift` transcribes audio with `STTRouter`.
 2. The session tries to paste the text back into the target app.
 3. The session records whether delivery was `pasted`, `copied`, or `failed`.
 4. `DictationTranscriptWriter.save(...)` appends a new section to that day's markdown file.
@@ -42,4 +42,4 @@ Each section captures:
 
 - If you change the markdown layout, update the tests.
 - Dictation artifacts are append-only by day; do not assume one file per session.
-- This directory is about persistence and timing helpers only. Recording lifecycle changes belong in `Sources/UI/DictationSessionController.swift` and `Sources/Speech/`.
+- This directory is about persistence and timing helpers only. Recording lifecycle changes belong in `Sources/UI/Overlay/DictationSessionController.swift` and `Sources/Speech/`.
