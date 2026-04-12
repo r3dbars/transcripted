@@ -7,6 +7,7 @@ struct TranscriptedSettingsView: View {
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
+    @State private var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
     @State private var sentryTestStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
@@ -64,7 +65,7 @@ struct TranscriptedSettingsView: View {
                     .foregroundStyle(.secondary)
                 }
 
-                SettingsSection(title: "Diagnostics", detail: "Crash and error reports help fix reliability issues without sending transcript text, audio, meeting titles, or speaker names.") {
+                SettingsSection(title: "Diagnostics", detail: "Crash reports and anonymous usage statistics stay separate, scoped, and scrubbed before anything leaves this Mac.") {
                     Toggle("Send crash and error reports", isOn: Binding(
                         get: { crashReportingEnabled },
                         set: { newValue in
@@ -75,6 +76,15 @@ struct TranscriptedSettingsView: View {
                         }
                     ))
                     .disabled(!CrashReporter.isAvailable)
+
+                    Toggle("Send anonymous usage statistics", isOn: Binding(
+                        get: { anonymousAnalyticsEnabled },
+                        set: { newValue in
+                            anonymousAnalyticsEnabled = newValue
+                            AnalyticsPreferences.setEnabled(newValue)
+                        }
+                    ))
+                    .disabled(!AnalyticsReporter.isAvailable)
 
                     HStack {
                         Button("Send Test Sentry Event") {
@@ -90,6 +100,10 @@ struct TranscriptedSettingsView: View {
                     }
 
                     Text(crashReportingFootnote)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text(analyticsFootnote)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -147,6 +161,7 @@ struct TranscriptedSettingsView: View {
             rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
             uiSoundsEnabled = UISoundPreferences.isEnabled()
             crashReportingEnabled = CrashReportingPreferences.isEnabled()
+            anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
         }
     }
 
@@ -173,6 +188,15 @@ struct TranscriptedSettingsView: View {
                 : "Off. Transcripted will keep crash and error details on this Mac only."
         }
         return "This build does not have a Sentry DSN configured yet, so crash and error reporting stay local."
+    }
+
+    private var analyticsFootnote: String {
+        if AnalyticsReporter.isAvailable {
+            return anonymousAnalyticsEnabled
+                ? "Enabled. Transcripted will send only allowlisted anonymous product events such as launches, dictation completions, and meeting workflow milestones using coarse buckets instead of raw content."
+                : "Off. Transcripted will not send anonymous usage statistics unless you turn this on."
+        }
+        return "This build does not have a PostHog project key configured yet, so anonymous usage statistics stay disabled."
     }
 
     private func sendTestSentryEvent() {

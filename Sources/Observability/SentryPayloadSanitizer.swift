@@ -53,6 +53,31 @@ enum SentryPayloadSanitizer {
         return sanitized
     }
 
+    static func sanitizeAnyDictionary(_ dictionary: [String: Any]) -> [String: Any] {
+        var sanitized: [String: Any] = [:]
+
+        for (key, value) in dictionary.sorted(by: { $0.key < $1.key }) {
+            guard !shouldDrop(key: key) else { continue }
+            guard let cleaned = sanitizeAnyValue(value) else { continue }
+            sanitized[key] = cleaned
+        }
+
+        return sanitized
+    }
+
+    static func sanitizeEventContexts(_ contexts: [String: [String: Any]]) -> [String: [String: Any]] {
+        var sanitized: [String: [String: Any]] = [:]
+
+        for (key, value) in contexts.sorted(by: { $0.key < $1.key }) {
+            guard !shouldDrop(key: key) else { continue }
+            let cleaned = sanitizeAnyDictionary(value)
+            guard !cleaned.isEmpty else { continue }
+            sanitized[key] = cleaned
+        }
+
+        return sanitized
+    }
+
     static func sanitizeText(_ text: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
@@ -76,6 +101,25 @@ enum SentryPayloadSanitizer {
         }
 
         return result
+    }
+
+    private static func sanitizeAnyValue(_ value: Any) -> Any? {
+        switch value {
+        case let string as String:
+            let cleaned = sanitizeText(string)
+            return cleaned.isEmpty ? nil : cleaned
+        case let number as NSNumber:
+            return number
+        case let array as [Any]:
+            let cleaned = array.compactMap(sanitizeAnyValue)
+            return cleaned.isEmpty ? nil : cleaned
+        case let dictionary as [String: Any]:
+            let cleaned = sanitizeAnyDictionary(dictionary)
+            return cleaned.isEmpty ? nil : cleaned
+        default:
+            let cleaned = sanitizeText(String(describing: value))
+            return cleaned.isEmpty ? nil : cleaned
+        }
     }
 
     private static func shouldDrop(key: String) -> Bool {

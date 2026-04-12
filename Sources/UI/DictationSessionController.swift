@@ -172,6 +172,12 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
+        AnalyticsReporter.track(
+            "dictation_started",
+            properties: [
+                "trigger": trigger.rawValue,
+            ]
+        )
 
         if appState.sttRouter.isModelLoaded {
             overlayController.state = .listening
@@ -337,7 +343,15 @@ class DictationSessionController: ObservableObject {
             }
             isDictating = false
             appState.logger.log("DICTATION | completed with outcome \(pasteOutcome)")
-            EventTracker.track("dictation.completed", with: ["word_count": "\(text.split(whereSeparator: \.isWhitespace).count)"])
+            AnalyticsReporter.track(
+                "dictation_completed",
+                properties: [
+                    "delivery": pasteOutcome.delivery.rawValue,
+                    "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                    "trigger": currentDictationTrigger.rawValue,
+                    "word_count_bucket": AnalyticsReporter.wordCountBucket(text.split(whereSeparator: \.isWhitespace).count),
+                ]
+            )
             #if BETA_BUILD
             let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
             BetaTelemetry.shared.sendEvent(
@@ -382,6 +396,13 @@ class DictationSessionController: ObservableObject {
                     "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000))"
                 ]
             )
+        )
+        AnalyticsReporter.track(
+            "dictation_cancelled",
+            properties: [
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                "trigger": currentDictationTrigger.rawValue,
+            ]
         )
         #if BETA_BUILD
         let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime

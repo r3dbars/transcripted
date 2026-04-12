@@ -22,6 +22,7 @@ FLUID_AUDIO_VERSION="${FLUID_AUDIO_VERSION:-0.7.9}"
 MLX_SWIFT_LM_REVISION="${MLX_SWIFT_LM_REVISION:-25b00d4}"
 SWIFT_TRANSFORMERS_VERSION="${SWIFT_TRANSFORMERS_VERSION:-1.2.1}"
 SPARKLE_VERSION="${SPARKLE_VERSION:-2.9.1}"
+SENTRY_COCOA_VERSION="${SENTRY_COCOA_VERSION:-9.10.0}"
 
 download_sparkle_distribution() {
     local sparkle_root="$DEPS_BUILD/sparkle"
@@ -51,6 +52,27 @@ download_sparkle_distribution() {
     fi
 
     chmod +x "$DEPS_TOOLS/sparkle/bin/"*
+}
+
+download_sentry_distribution() {
+    local sentry_root="$DEPS_BUILD/sentry"
+    local sentry_zip="$sentry_root/Sentry-Dynamic.xcframework.zip"
+    local sentry_url="https://github.com/getsentry/sentry-cocoa/releases/download/${SENTRY_COCOA_VERSION}/Sentry-Dynamic.xcframework.zip"
+    local unpacked_root="$sentry_root/unpacked"
+    local framework_src="$unpacked_root/Sentry-Dynamic.xcframework/macos-arm64_x86_64/Sentry.framework"
+
+    echo "Downloading Sentry Cocoa $SENTRY_COCOA_VERSION..."
+    mkdir -p "$sentry_root"
+    curl --fail --location --silent --show-error "$sentry_url" -o "$sentry_zip"
+    unzip -q "$sentry_zip" -d "$unpacked_root"
+
+    if [ ! -d "$framework_src" ]; then
+        echo "[build-deps] ERROR: Sentry.framework not found in downloaded distribution"
+        exit 1
+    fi
+
+    rm -rf "$DEPS_FRAMEWORKS/Sentry.framework"
+    ditto "$framework_src" "$DEPS_FRAMEWORKS/Sentry.framework"
 }
 
 resolve_package_graph() {
@@ -169,12 +191,13 @@ echo "[build-deps] Using TranscriptedCore from: $TRANSCRIPTED_ROOT"
 # Skip if already built (use --force to rebuild).
 # libExternalDeps.a was added later for SPM-based `swift test`, so require it too;
 # otherwise legacy worktrees would keep skipping while missing the archive.
-if [ -f "$DEPS_LIBS/libDraftDeps.a" ] && [ -f "$DEPS_LIBS/libExternalDeps.a" ] && [ -d "$DEPS_MODULES" ] && [ -d "$DEPS_FRAMEWORKS/ESpeakNG.framework" ] && [ -d "$DEPS_FRAMEWORKS/Sparkle.framework" ] && [ -x "$DEPS_TOOLS/sparkle/bin/generate_appcast" ] && [ "${1:-}" != "--force" ]; then
+if [ -f "$DEPS_LIBS/libDraftDeps.a" ] && [ -f "$DEPS_LIBS/libExternalDeps.a" ] && [ -d "$DEPS_MODULES" ] && [ -d "$DEPS_FRAMEWORKS/ESpeakNG.framework" ] && [ -d "$DEPS_FRAMEWORKS/Sentry.framework" ] && [ -d "$DEPS_FRAMEWORKS/Sparkle.framework" ] && [ -x "$DEPS_TOOLS/sparkle/bin/generate_appcast" ] && [ "${1:-}" != "--force" ]; then
     echo "Dependencies already built. Use --force to rebuild."
     echo "  libs:    $DEPS_LIBS/libDraftDeps.a"
     echo "           $DEPS_LIBS/libExternalDeps.a"
     echo "  modules: $DEPS_MODULES/"
     echo "  frameworks: $DEPS_FRAMEWORKS/ESpeakNG.framework"
+    echo "              $DEPS_FRAMEWORKS/Sentry.framework"
     echo "              $DEPS_FRAMEWORKS/Sparkle.framework"
     echo "  tools:      $DEPS_TOOLS/sparkle/bin/generate_appcast"
     exit 0
@@ -383,6 +406,7 @@ fi
 rm -rf "$DEPS_FRAMEWORKS/ESpeakNG.framework"
 ditto "$ESPEAK_FRAMEWORK_SRC" "$DEPS_FRAMEWORKS/ESpeakNG.framework"
 
+download_sentry_distribution
 download_sparkle_distribution
 
 # --- Metal libraries: compile MLX Metal shaders ---

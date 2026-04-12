@@ -35,6 +35,7 @@ BETA_CONFIG_BACKUP="$(mktemp -t transcripted-beta-config)"
 BETA_ENTITLEMENTS="config/entitlements/beta.plist"
 DEPS_FRAMEWORK_ROOT="deps-frameworks"
 ESPEAK_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/ESpeakNG.framework"
+SENTRY_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sentry.framework"
 SPARKLE_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sparkle.framework"
 TRANSCRIPTED_CORE_MODULE="deps-modules/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
 
@@ -110,10 +111,11 @@ if [ ! -f "$BETA_ENTITLEMENTS" ]; then
     exit 1
 fi
 
-if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -d "$ESPEAK_FRAMEWORK" ] || [ ! -d "$SPARKLE_FRAMEWORK" ]; then
+if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -d "$ESPEAK_FRAMEWORK" ] || [ ! -d "$SENTRY_FRAMEWORK" ] || [ ! -d "$SPARKLE_FRAMEWORK" ]; then
     echo "❌ Dependencies missing or stale — required for beta builds"
     echo "   Missing module: $TRANSCRIPTED_CORE_MODULE"
     echo "   Missing framework: $ESPEAK_FRAMEWORK"
+    echo "   Missing framework: $SENTRY_FRAMEWORK"
     echo "   Missing framework: $SPARKLE_FRAMEWORK"
     echo "   Run build-deps.sh --force first to rebuild dependencies."
     exit 1
@@ -170,6 +172,7 @@ for metallib in deps-libs/*.metallib; do
 done
 
 cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
+cp -R "$SENTRY_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 
 # Compile with BETA_BUILD flag
@@ -194,6 +197,7 @@ swiftc \
     -framework Vision \
     -framework MetalPerformanceShaders \
     -framework MetalPerformanceShadersGraph \
+    -framework Sentry \
     -framework Sparkle \
     -lsqlite3 \
     -lc++ \
