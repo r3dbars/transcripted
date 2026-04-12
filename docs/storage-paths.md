@@ -76,4 +76,4 @@ The standalone tools do not all resolve paths the same way:
 
 - `TranscriptedCLI` prefers `~/Library/Application Support/Transcripted/captures/{meetings,dictations}/`, then falls back to legacy Draft `.../transcripts/` folders, then `~/Documents/Transcripted/`
 - `TranscriptedMCP` follows the same Transcripted -> Draft -> `~/Documents/Transcripted/` order and keeps its SQLite index under `~/Library/Application Support/Transcripted/cache/` by default
-- `TranscriptedQA` still defaults to the legacy Draft meetings root today unless you pass an explicit override
+- `TranscriptedQA` now defaults to the current Transcripted meetings/state/log layout, falls back to legacy Draft and then `~/Documents/Transcripted/`, and accepts explicit `--path`, `--state-dir`, and `--log-path` overrides for nonstandard setups

@@ -11,7 +11,7 @@ struct CheckHealth: ParsableCommand {
     @OptionGroup var formatOpts: FormatOptions
 
     func run() throws {
-        let results = HealthChecker(dataPath: pathOpts.resolvedPath).validate()
+        let results = HealthChecker(paths: pathOpts.resolved).validate()
         try runValidation(results: results, format: formatOpts.format)
     }
 }

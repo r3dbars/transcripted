@@ -1,10 +1,10 @@
 import Foundation
 
 struct HealthChecker {
-    let dataPath: URL
+    let paths: QADataDirectories
 
-    init(dataPath: URL? = nil) {
-        self.dataPath = dataPath ?? transcriptedMeetingDirectory()
+    init(paths: QADataDirectories = .resolve()) {
+        self.paths = paths
     }
 
     func validate() -> [ValidationResult] {
@@ -12,18 +12,26 @@ struct HealthChecker {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser
 
-        // Transcript directory
-        let transcriptDir = dataPath
-        if fm.isWritableFile(atPath: transcriptDir.path) {
-            results.append(.pass("health/transcript-dir", target: transcriptDir.path))
-        } else if fm.fileExists(atPath: transcriptDir.path) {
-            results.append(.fail("health/transcript-dir", target: transcriptDir.path, detail: "Directory exists but is not writable"))
+        // Meetings capture directory
+        if fm.isWritableFile(atPath: paths.meetingsDir.path) {
+            results.append(.pass("health/meetings-dir", target: paths.meetingsDir.path))
+        } else if fm.fileExists(atPath: paths.meetingsDir.path) {
+            results.append(.fail("health/meetings-dir", target: paths.meetingsDir.path, detail: "Directory exists but is not writable"))
         } else {
-            results.append(.fail("health/transcript-dir", target: transcriptDir.path, detail: "Directory does not exist"))
+            results.append(.fail("health/meetings-dir", target: paths.meetingsDir.path, detail: "Directory does not exist"))
+        }
+
+        // State directory
+        if fm.isWritableFile(atPath: paths.stateDir.path) {
+            results.append(.pass("health/state-dir", target: paths.stateDir.path))
+        } else if fm.fileExists(atPath: paths.stateDir.path) {
+            results.append(.fail("health/state-dir", target: paths.stateDir.path, detail: "Directory exists but is not writable"))
+        } else {
+            results.append(.warn("health/state-dir", target: paths.stateDir.path, detail: "Directory does not exist"))
         }
 
         // Logs directory
-        let logsDir = home.appendingPathComponent("Library/Logs/Transcripted", isDirectory: true)
+        let logsDir = paths.logsDirectory
         if fm.fileExists(atPath: logsDir.path) {
             results.append(.pass("health/logs-dir", target: logsDir.path))
         } else {

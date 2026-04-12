@@ -77,6 +77,9 @@ transcripted-qa validate-transcripts
 transcripted-qa validate-index
 transcripted-qa validate-logs
 
+# Override nonstandard locations when captures are relocated
+transcripted-qa validate-all --path /path/to/meetings --state-dir /path/to/state --log-path /path/to/app.jsonl
+
 # Test data generation
 transcripted-qa generate-fixtures --output /tmp/my-test-data
 transcripted-qa round-trip
@@ -109,4 +112,6 @@ transcripted-qa stress-test --transcripts 100 --speakers-per-transcript 4 --utte
 - SQLite readers use dedicated utility queues for thread safety
 - Validation results are structured for programmatic consumption
 - Error messages are human-readable for CLI output
-- Defaults still target the legacy Draft meetings tree under `~/Library/Application Support/Draft/meetings`, while log validation defaults to `~/Library/Logs/Transcripted/app.jsonl`
+- Defaults now prefer `~/Library/Application Support/Transcripted/captures/meetings`, `~/Library/Application Support/Transcripted/state/`, and `~/Library/Application Support/Transcripted/logs/app.jsonl`
+- If current Transcripted paths are missing, the resolver falls back to legacy Draft exports and then `~/Documents/Transcripted/`
+- `--path` overrides the meetings capture directory only; use `--state-dir` and `--log-path` when validating unusual layouts
