@@ -2,27 +2,31 @@
 
 ## What this repo is
 
-`main` is the current Transcripted app: a local macOS menu bar app for:
+`main` is the current Transcripted app, derived from the earlier Draft codebase. The active product on `main` is a macOS menubar app for:
 
 - dictation
-- meeting capture and transcription
+- meeting capture and local transcription
 
-The older drafting / ghostwriting flow is not the active product path here.
-Compatibility stubs remain in a few places, but they are not the center of the
-runtime.
+The old standalone Transcripted app is preserved on:
+
+- branch `legacy/transcripted-standalone`
+- tag `pre-draft-takeover-2026-04-06`
+
+The older drafting / ghostwriting flow does not live on `main` anymore. `DictationSessionController` still exposes compatibility stubs for removed draft-mode entry points.
 
 ## First reads
+
+Read these before making assumptions about the codebase:
 
 1. `README.md`
 2. `AGENTS.md`
 3. `docs/agent-onboarding.md`
-4. `docs/storage-paths.md`
-5. `Sources/CLAUDE.md`
-6. `Sources/Dictation/CLAUDE.md`
-7. `Sources/Meeting/CLAUDE.md`
-8. `Sources/TranscriptedCore/CLAUDE.md`
-9. `Sources/Reliability/CLAUDE.md`
-10. `Tests/README.md`
+4. `Sources/CLAUDE.md`
+5. `Sources/Dictation/CLAUDE.md`
+6. `Sources/Meeting/CLAUDE.md`
+7. `Sources/TranscriptedCore/CLAUDE.md`
+8. `Tests/README.md`
+9. `docs/storage-paths.md`
 
 ## Build and test
 
@@ -43,38 +47,17 @@ Rules:
 
 ## Current architecture
 
-- `Sources/TranscriptedApp.swift` wires the menu bar app, overlays, popover, onboarding, and detected-meeting prompts.
-- `Sources/TranscriptedAppState.swift` owns shared runtime services: `ContextCaptureEngine`, `STTRouter`, wake recovery, and the lazy `MeetingSessionController`.
-- `Sources/UI/DictationSessionController.swift` handles dictation orchestration only; removed draft-mode entry points now surface a fixed message.
-- `Sources/Meeting/` adapts app-owned pieces like `ParakeetEngine`, capture storage, and UI state into `TranscriptedCore`.
-- `Sources/TranscriptedCore/` contains the reusable meeting transcription pipeline.
-- `Tools/TranscriptedMCP/` and `Tools/TranscriptedCLI/` expose saved captures outside the app.
-
-## Storage reality
-
-Transcripted now separates user captures from app-owned state.
-
-Default root:
-
-- `~/Library/Application Support/Transcripted/`
-
-Default captures:
-
-- `~/Library/Application Support/Transcripted/captures/meetings/`
-- `~/Library/Application Support/Transcripted/captures/dictations/`
-
-App-owned state:
-
-- `~/Library/Application Support/Transcripted/state/`
-- `~/Library/Application Support/Transcripted/cache/`
-- `~/Library/Application Support/Transcripted/logs/`
-- `~/Library/Application Support/Transcripted/tmp/recordings/`
-
-The capture library can be relocated in Settings. Legacy `Draft` and
-`~/Documents/Transcripted` paths are compatibility inputs for some tools, not
-the default app layout on `main`.
+- `Sources/TranscriptedApp.swift` wires the menubar app, popover, dictation overlay, meeting overlay, and detected-meeting prompt flow.
+- `Sources/TranscriptedAppState.swift` owns app-wide services: `STTRouter`, `ContextCaptureEngine`, the lazily built `MeetingSessionController`, and a `WakeRecoveryCoordinator` for handling sleep / wake transitions during active recording.
+- `Sources/UI/DictationSessionController.swift` now handles dictation only. Removed draft-mode entry points surface a fixed error message.
+- `Sources/Meeting/` adapts app-owned pieces like `ParakeetEngine` into `TranscriptedCore`, including meeting-link detection and app-level transcription queueing.
+- `Sources/Reliability/` holds the `WakeRecoveryCoordinator` used by the app state above.
+- `Sources/TranscriptedCore/` contains the reusable meeting transcription library.
+- Root `Package.swift` exists so `TranscriptedCore` can be tested as a standalone package surface.
 
 ## Documentation status
 
-Repo-level and local `CLAUDE.md` files are intended to match the live tree.
-Historical planning and merge material lives under `docs/archive/`.
+Most repo-level docs have now been resynced to the current dictation +
+meetings codebase. Historical context now lives mainly under `docs/archive/`,
+with the old beta worker archived under `archive/backend-beta-worker/`, plus
+the old `.claude` QA skill.

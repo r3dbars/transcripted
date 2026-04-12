@@ -1,57 +1,46 @@
-# Dictation Persistence
+# Dictation persistence
 
-## What this directory owns
+## What this directory does
 
-`Sources/Dictation/` owns the on-disk artifacts written after a dictation
-finishes. It does not own recording or live STT.
+`Sources/Dictation/` owns the small persistence helpers behind completed dictation sessions. It does not handle audio capture or STT itself; that stays in `DictationSessionController` and `Speech/`.
 
-## Important files
+## Files
 
-- `DictationStoragePaths.swift` — capture-library-backed storage root for dictation exports
-- `DictationTranscriptWriter.swift` — appends completed dictations into one markdown file per day
-- `DictationAgentOutput.swift` — Codable day / entry models plus JSON-sidecar helpers for agent-oriented dictation output
-- `DictationSessionTimeout.swift` — shared timeout helper for long-running dictation sessions
-
-## Current storage model
-
-Default folder:
-
-- `~/Library/Application Support/Transcripted/captures/dictations/`
-
-Current app behavior centers on daily markdown files written directly into that
-folder:
-
-- `Dictations_YYYY-MM-DD.md`
-
-Each entry records:
-
-- entry ID
-- capture timestamp
-- source app name and bundle ID
-- delivery result (`pasted`, `copied`, or `failed`)
-- word count and character count
-- final dictated text
+- `DictationAgentOutput.swift` — Codable models (`AgentDictationDay`, `AgentDictationEntry`) for the JSON sidecar written alongside each day's markdown
+- `DictationSessionTimeout.swift` — uptime-based timeout helper so sleep does not consume a session's remaining record window
+- `DictationStoragePaths.swift` — Draft-named storage root for dictation artifacts
+- `DictationTranscriptWriter.swift` — groups completed dictations into one markdown file per day
 
 ## Flow
 
 1. `Sources/UI/DictationSessionController.swift` transcribes audio with `STTRouter`.
 2. The session tries to paste the text back into the target app.
-3. The session records the delivery outcome.
-4. `DictationTranscriptWriter.save(...)` appends the entry to that day’s markdown file.
+3. The session records whether delivery was `pasted`, `copied`, or `failed`.
+4. `DictationTranscriptWriter.save(...)` appends a new section to that day's markdown file and updates the JSON sidecar.
 
-## Guardrails
+## Storage
 
-- treat dictation artifacts as append-by-day, not one-file-per-session
-- storage changes here should preserve stable markdown output for tools and agents
-- recording lifecycle changes belong in `Sources/UI/DictationSessionController.swift` or `Sources/Speech/`
+- root: `~/Library/Application Support/Draft/dictations/`
+- transcript folder: `~/Library/Application Support/Draft/dictations/transcripts/`
+- file shape: one `Dictations_YYYY-MM-DD.md` file per day, with multiple timestamped sections
 
-## Verify
+Each section captures:
 
-```bash
-bash build.sh
-bash run-tests.sh
-```
+- a generated title
+- source app name and bundle id
+- delivery outcome
+- timestamp
+- word count and character count
+- final dictated text
 
-Relevant tests:
+## Test coverage
 
+- `Tests/DictationAgentOutputTests.swift`
+- `Tests/DictationSessionTimeoutTests.swift`
 - `Tests/DictationTranscriptWriterTests.swift`
+
+## Agent notes
+
+- If you change the markdown layout, update the tests.
+- Dictation artifacts are append-only by day; do not assume one file per session.
+- This directory is about persistence and timing helpers only. Recording lifecycle changes belong in `Sources/UI/DictationSessionController.swift` and `Sources/Speech/`.

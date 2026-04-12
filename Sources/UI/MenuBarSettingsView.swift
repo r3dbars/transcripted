@@ -17,6 +17,11 @@ final class MenuBarSettingsView: NSView {
         accessibilityLabel: "Open settings",
         toolTip: "Open settings"
     )
+    private let updatesButton = MenuIconButton(
+        symbolName: "arrow.triangle.2.circlepath.circle",
+        accessibilityLabel: "Check for updates",
+        toolTip: "Check for updates"
+    )
     private let feedbackButton = MenuIconButton(
         symbolName: "bubble.left",
         accessibilityLabel: "Send feedback",
@@ -30,6 +35,7 @@ final class MenuBarSettingsView: NSView {
 
     weak var appState: TranscriptedAppState?
     var onOpenSettings: (() -> Void)?
+    var onCheckForUpdates: (() -> Void)?
     var onOpenAgentConnect: (() -> Void)?
 
     override init(frame: NSRect) {
@@ -47,10 +53,12 @@ final class MenuBarSettingsView: NSView {
         connectAgentButton.action = #selector(openAgentConnect)
         addSubview(connectAgentButton)
 
-        [settingsButton, feedbackButton, quitButton].forEach { addSubview($0) }
+        [settingsButton, updatesButton, feedbackButton, quitButton].forEach { addSubview($0) }
 
         settingsButton.target = self
         settingsButton.action = #selector(openSettings)
+        updatesButton.target = self
+        updatesButton.action = #selector(checkForUpdates)
         feedbackButton.target = self
         feedbackButton.action = #selector(sendFeedback)
         quitButton.target = self
@@ -69,8 +77,14 @@ final class MenuBarSettingsView: NSView {
             width: buttonSize,
             height: buttonSize
         )
-        settingsButton.frame = NSRect(
+        updatesButton.frame = NSRect(
             x: feedbackButton.frame.minX - 8 - buttonSize,
+            y: buttonY,
+            width: buttonSize,
+            height: buttonSize
+        )
+        settingsButton.frame = NSRect(
+            x: updatesButton.frame.minX - 8 - buttonSize,
             y: buttonY,
             width: buttonSize,
             height: buttonSize
@@ -98,6 +112,10 @@ final class MenuBarSettingsView: NSView {
 
     @objc private func openSettings() {
         onOpenSettings?()
+    }
+
+    @objc private func checkForUpdates() {
+        onCheckForUpdates?()
     }
 
     @objc private func openAgentConnect() {

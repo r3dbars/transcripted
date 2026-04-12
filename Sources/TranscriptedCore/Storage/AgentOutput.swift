@@ -274,75 +274,16 @@ public enum AgentOutput {
         AppLogger.pipeline.info("Agent index written", ["transcripts": "\(entries.count)", "speakers": "\(knownSpeakers.count)"])
     }
 
-    /// Content shared by both CLAUDE.md and AGENT.md in the output directory.
-    private static let agentReadmeContent = """
-    # Transcripted — Meeting Data
+    private static let legacyAgentHelperFilenames = ["CLAUDE.md", "AGENT.md"]
 
-    Transcripted records, transcribes, and diarizes voice conversations locally on macOS.
-    This directory contains structured data for AI agents to consume.
-
-    ## File Structure
-
-    | File | Purpose |
-    |------|---------|
-    | `transcripted.json` | Index of all transcripts with metadata |
-    | `Call_*.json` | Structured JSON sidecar for each transcript |
-    | `Call_*.md` | Human-readable Markdown transcript |
-
-    ## Data Model
-
-    ### transcripted.json (Index)
-
-    ```json
-    {
-      "version": "1.0",
-      "updated_at": "ISO 8601",
-      "transcript_count": 47,
-      "transcripts": [{ "filename", "date", "duration_seconds", "speaker_count", "word_count", "speakers" }],
-      "known_speakers": [{ "persistent_id", "name", "call_count" }]
-    }
-    ```
-
-    ### Call_*.json (Transcript Sidecar)
-
-    ```json
-    {
-      "version": "1.0",
-      "recording": { "date", "duration_seconds", "dropped_segments", "engines": { "stt", "diarization" } },
-      "speakers": [{ "id", "persistent_speaker_id", "name", "confidence", "word_count", "speaking_seconds" }],
-      "utterances": [{ "start", "end", "speaker_id", "text" }]
-    }
-    ```
-
-    ### Speaker Tracking
-
-    - Each speaker has an `id` (e.g., `mic_0`, `system_0`) unique within one transcript
-    - `persistent_speaker_id` is a UUID that tracks the same person across meetings
-    - `known_speakers` in the index lists all named speakers with their call count
-    - `name` stays generic until a speaker match is confirmed by the user or auto-accepted
-    - Confidence: `"high"` (voice match > 85%), `"medium"` (voice match > 70%), or `null`
-
-    ## Common Agent Tasks
-
-    **Summarize latest meeting:**
-    Read `transcripted.json` → find newest transcript → read its `.json` sidecar → summarize utterances
-
-    **Extract action items:**
-    Read sidecar → filter utterances containing task-like language → attribute to speakers
-
-    **Track speaker across meetings:**
-    Use `persistent_speaker_id` to find all transcripts where a person spoke
-
-    **Search by topic:**
-    Read index → scan utterance text across sidecars for keyword matches
-    """
-
-    /// Write CLAUDE.md and AGENT.md to the save directory (only if missing).
-    public static func writeAgentReadme(to folder: URL) {
-        for filename in ["CLAUDE.md", "AGENT.md"] {
+    /// Remove legacy helper docs from the meetings folder now that agent connection
+    /// is driven by the in-app copy flow instead of folder-local markdown guides.
+    public static func removeLegacyAgentHelperFiles(from folder: URL) {
+        let fm = FileManager.default
+        for filename in legacyAgentHelperFilenames {
             let fileURL = folder.appendingPathComponent(filename)
-            guard !FileManager.default.fileExists(atPath: fileURL.path) else { continue }
-            try? agentReadmeContent.write(to: fileURL, atomically: true, encoding: .utf8)
+            guard fm.fileExists(atPath: fileURL.path) else { continue }
+            try? fm.removeItem(at: fileURL)
         }
     }
 
@@ -353,9 +294,9 @@ public enum AgentOutput {
         My transcripts are saved at: \(folder.path)
 
         To get started:
-        1. Read AGENT.md for the data model
-        2. Read transcripted.json for the full index of all transcripts
-        3. Read any .json sidecar for structured transcript data
+        1. Read transcripted.json for the full index of all transcripts if it exists
+        2. Read the most relevant .json sidecar for structured transcript data
+        3. Use the matching .md transcript when you want the human-readable version
 
         Each transcript has persistent speaker IDs that track people across meetings.
         """

@@ -1,11 +1,19 @@
 import SwiftUI
 import AppKit
+import TranscriptedCore
 
 struct TranscriptedSettingsView: View {
+    @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
+    @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
+    @State private var sentryTestStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
+
+    init(speakerPeopleModel: SpeakerPeopleSettingsViewModel) {
+        self.speakerPeopleModel = speakerPeopleModel
+    }
 
     var body: some View {
         ScrollView {
@@ -56,6 +64,36 @@ struct TranscriptedSettingsView: View {
                     .foregroundStyle(.secondary)
                 }
 
+                SettingsSection(title: "Diagnostics", detail: "Crash and error reports help fix reliability issues without sending transcript text, audio, meeting titles, or speaker names.") {
+                    Toggle("Send crash and error reports", isOn: Binding(
+                        get: { crashReportingEnabled },
+                        set: { newValue in
+                            crashReportingEnabled = newValue
+                            CrashReportingPreferences.setEnabled(newValue)
+                            CrashReporter.shared.refreshPreference()
+                            sentryTestStatus = nil
+                        }
+                    ))
+                    .disabled(!CrashReporter.isAvailable)
+
+                    HStack {
+                        Button("Send Test Sentry Event") {
+                            sendTestSentryEvent()
+                        }
+                        .disabled(!CrashReporter.isAvailable || !crashReportingEnabled)
+
+                        if let sentryTestStatus {
+                            Text(sentryTestStatus)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Text(crashReportingFootnote)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 SettingsSection(title: "Permissions", detail: "Transcripted only asks for permissions that support local capture, paste-back, and optional meeting prompts.") {
                     ForEach(TranscriptedPermissionKind.allCases) { kind in
                         PermissionStatusRow(kind: kind, granted: permissionStates[kind] ?? false) {
@@ -71,6 +109,8 @@ struct TranscriptedSettingsView: View {
                         }
                     }
                 }
+
+                SpeakerPeopleSettingsSection(model: speakerPeopleModel)
 
                 SettingsSection(title: "Storage", detail: "Captures can live anywhere you want, while app state stays separated under Application Support.") {
                     StorageRow(title: "Capture library", url: captureLibraryURL)
@@ -106,6 +146,7 @@ struct TranscriptedSettingsView: View {
             refreshStoragePaths()
             rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
             uiSoundsEnabled = UISoundPreferences.isEnabled()
+            crashReportingEnabled = CrashReportingPreferences.isEnabled()
         }
     }
 
@@ -123,6 +164,34 @@ struct TranscriptedSettingsView: View {
 
     private var recordingsFolder: URL {
         FileManager.default.transcriptedRecordingsDir
+    }
+
+    private var crashReportingFootnote: String {
+        if CrashReporter.isAvailable {
+            return crashReportingEnabled
+                ? "Enabled. Transcripted will send scrubbed crash and error data to Sentry so reliability issues are easier to diagnose. Use the test button to verify your dashboard wiring."
+                : "Off. Transcripted will keep crash and error details on this Mac only."
+        }
+        return "This build does not have a Sentry DSN configured yet, so crash and error reporting stay local."
+    }
+
+    private func sendTestSentryEvent() {
+        guard CrashReporter.isAvailable else {
+            sentryTestStatus = "Sentry is not configured in this build yet."
+            return
+        }
+
+        guard crashReportingEnabled else {
+            sentryTestStatus = "Turn on crash and error reports first."
+            return
+        }
+
+        guard let eventID = CrashReporter.shared.sendTestEvent() else {
+            sentryTestStatus = "Sentry test event could not be queued."
+            return
+        }
+
+        sentryTestStatus = "Queued test event \(eventID.prefix(8)). Check Sentry in a few seconds."
     }
 
     private func refreshPermissions() {
@@ -163,7 +232,7 @@ private struct PermissionSnapshot {
     }
 }
 
-private struct SettingsSection<Content: View>: View {
+struct SettingsSection<Content: View>: View {
     let title: String
     let detail: String
     @ViewBuilder var content: Content

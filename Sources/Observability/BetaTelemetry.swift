@@ -11,7 +11,7 @@ import Foundation
 final class BetaTelemetry {
     static let shared = BetaTelemetry()
     private init() {}
-    private static let tokenPlaceholder = "BETA_TOKEN_PLACEHOLDER"
+    nonisolated private static let tokenPlaceholder = "BETA_TOKEN_PLACEHOLDER"
 
     // Byte offsets — only ship content written since last successful upload
     private var debugLogOffset: UInt64 = 0
@@ -123,12 +123,12 @@ final class BetaTelemetry {
         }
     }
 
-    private static func activeToken() -> String? {
+    nonisolated private static func activeToken() -> String? {
         let token = BetaConfig.userToken
         return token == tokenPlaceholder ? nil : token
     }
 
-    private static func makeJSONRequest(
+    nonisolated private static func makeJSONRequest(
         path: String,
         token: String,
         body: [String: Any],

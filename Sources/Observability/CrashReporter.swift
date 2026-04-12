@@ -1,124 +1,246 @@
 // CrashReporter.swift
-// Lightweight Sentry crash reporting via raw HTTP — no SDK, no dependencies.
+// Privacy-safe Sentry reporting via raw HTTP — no SDK dependency required.
 //
 // HOW IT WORKS:
-//   1. NSSetUncaughtExceptionHandler catches ObjC/SwiftUI runtime exceptions.
-//   2. call CrashReporter.shared.capture(error:) anywhere you catch a Swift error.
-//   3. Events POST to Sentry's Store API asynchronously (fire-and-forget).
-//
-// SETUP:
-//   1. Create a Sentry project at sentry.io (free tier, Cocoa platform)
-//   2. Copy the DSN from Project Settings → Client Keys
-//   3. Replace the placeholder below with your real DSN
-//   4. Call CrashReporter.setup() in applicationDidFinishLaunching
+//   1. Reads Sentry DSN/config from Info.plist or process environment.
+//   2. Respects the user-facing crash reporting toggle in Settings.
+//   3. Scrubs sensitive values before sending crash and non-fatal error events.
 
 import Foundation
 
-// MARK: - Configuration
+private enum SentryRuntimeConfiguration {
+    static let dsnInfoKey = "TranscriptedSentryDSN"
+    static let environmentInfoKey = "TranscriptedSentryEnvironment"
 
-/// Paste your Sentry DSN here. Format: https://KEY@HOST/PROJECT_ID
-/// Leave empty to disable crash reporting (development builds).
-private let sentryDSN = ""   // ← fill in before shipping
+    static func dsn() -> String? {
+        firstNonEmpty(
+            Bundle.main.object(forInfoDictionaryKey: dsnInfoKey) as? String,
+            ProcessInfo.processInfo.environment["SENTRY_DSN"]
+        )
+    }
+
+    static func environment() -> String {
+        firstNonEmpty(
+            Bundle.main.object(forInfoDictionaryKey: environmentInfoKey) as? String,
+            ProcessInfo.processInfo.environment["SENTRY_ENVIRONMENT"]
+        ) ?? "production"
+    }
+
+    static func releaseName() -> String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        return "transcripted@\(version)"
+    }
+
+    static func dist() -> String? {
+        firstNonEmpty(Bundle.main.infoDictionary?["CFBundleVersion"] as? String)
+    }
+
+    private static func firstNonEmpty(_ candidates: String?...) -> String? {
+        candidates
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty })
+    }
+}
 
 // MARK: - CrashReporter
 
 final class CrashReporter {
     static let shared = CrashReporter()
+
+    static var isAvailable: Bool {
+        SentryRuntimeConfiguration.dsn() != nil
+    }
+
     private init() {}
 
-    private var projectID: String = ""
-    private var publicKey: String = ""
-    private var host: String = ""
-    private var isEnabled = false
+    private var projectID = ""
+    private var publicKey = ""
+    private var host = ""
+    private var environment = "production"
+    private var releaseName = "transcripted@unknown"
+    private var dist: String?
+    private var isConfigured = false
+    private var handlerInstalled = false
+    private var userEnabled = CrashReportingPreferences.isEnabled()
 
     // MARK: - Setup
 
     /// Call once in applicationDidFinishLaunching.
-    static func setup(dsn: String = sentryDSN) {
-        guard !dsn.isEmpty else { return }
+    static func setup(dsn: String? = SentryRuntimeConfiguration.dsn()) {
+        guard let dsn else { return }
         shared.configure(dsn: dsn)
-        shared.installUncaughtExceptionHandler()
+        shared.refreshPreference()
+        shared.installUncaughtExceptionHandlerIfNeeded()
+    }
+
+    func refreshPreference() {
+        userEnabled = CrashReportingPreferences.isEnabled()
+    }
+
+    private var isEnabled: Bool {
+        isConfigured && userEnabled
     }
 
     private func configure(dsn: String) {
-        // Parse: https://KEY@HOST/PROJECT_ID
         guard let url = URL(string: dsn),
               let key = url.user,
               let host = url.host else {
-            print("[CrashReporter] Invalid DSN — crash reporting disabled")
+            fputs("[CrashReporter] Invalid DSN — crash reporting disabled\n", stderr)
+            isConfigured = false
             return
         }
-        self.publicKey = key
+
+        publicKey = key
         self.host = host
-        self.projectID = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        self.isEnabled = !projectID.isEmpty && !publicKey.isEmpty
+        projectID = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        environment = SentryRuntimeConfiguration.environment()
+        releaseName = SentryRuntimeConfiguration.releaseName()
+        dist = SentryRuntimeConfiguration.dist()
+        isConfigured = !projectID.isEmpty && !publicKey.isEmpty
     }
 
-    private func installUncaughtExceptionHandler() {
+    private func installUncaughtExceptionHandlerIfNeeded() {
+        guard isConfigured, !handlerInstalled else { return }
+
         NSSetUncaughtExceptionHandler { exception in
-            let message = exception.reason ?? "Unknown exception"
             let name = exception.name.rawValue
             let symbols = exception.callStackSymbols.prefix(20).joined(separator: "\n")
             CrashReporter.shared.sendEvent(
                 level: "fatal",
                 title: name,
-                message: message,
+                message: "Uncaught exception",
+                tags: ["source": "uncaught_exception"],
                 extra: ["callstack": symbols]
             )
-            // Brief sleep so the async POST can fire before process dies
             Thread.sleep(forTimeInterval: 1.0)
         }
+
+        handlerInstalled = true
     }
 
     // MARK: - Manual Capture
 
     /// Call inside catch blocks to report Swift errors.
     func capture(error: Error, context: String = "") {
-        let message = context.isEmpty ? error.localizedDescription
-                                      : "\(context): \(error.localizedDescription)"
-        sendEvent(level: "error", title: String(describing: type(of: error)), message: message)
+        _ = context
+        sendEvent(
+            level: "error",
+            title: String(describing: type(of: error)),
+            message: "Swift error captured",
+            tags: ["source": "swift_error"]
+        )
     }
 
     /// Report a non-fatal message with optional context dict.
     func capture(message: String, level: String = "warning", extra: [String: String] = [:]) {
-        sendEvent(level: level, title: message, message: message, extra: extra)
+        _ = sendEvent(
+            level: level,
+            title: message,
+            message: message,
+            tags: ["source": "manual_message"],
+            extra: extra
+        )
+    }
+
+    /// Forward structured observability errors into Sentry with a stable grouping key.
+    func captureObservabilityEvent(
+        level: EventLevel,
+        engine: String,
+        event: String,
+        message: String,
+        context: [String: String]
+    ) {
+        _ = sendEvent(
+            level: level.rawValue,
+            title: "\(engine).\(event)",
+            message: message,
+            tags: [
+                "source": "observability",
+                "engine": engine,
+                "event": event,
+            ],
+            extra: context,
+            fingerprint: [engine, event]
+        )
+    }
+
+    /// Send a safe manual test event so Sentry wiring can be verified without crashing the app.
+    @discardableResult
+    func sendTestEvent() -> String? {
+        sendEvent(
+            level: "warning",
+            title: "sentry_test_event",
+            message: "Manual Sentry verification from Transcripted Settings",
+            tags: [
+                "source": "manual_test",
+                "engine": "settings",
+                "event": "sentry_test_event",
+            ],
+            extra: [
+                "recommended_check": "Search for sentry_test_event in the Sentry issue list",
+            ],
+            fingerprint: ["settings", "sentry_test_event"]
+        )
     }
 
     // MARK: - HTTP
 
+    @discardableResult
     private func sendEvent(
         level: String,
         title: String,
         message: String,
-        extra: [String: String] = [:]
-    ) {
-        guard isEnabled else { return }
+        tags: [String: String] = [:],
+        extra: [String: String] = [:],
+        fingerprint: [String]? = nil
+    ) -> String? {
+        guard isEnabled else { return nil }
+
+        let eventID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        let sanitizedTitle = SentryPayloadSanitizer.sanitizeText(title)
+        let sanitizedMessage = SentryPayloadSanitizer.sanitizeText(message)
+        let sanitizedTags = SentryPayloadSanitizer.sanitizeTags(tags)
+        let sanitizedExtra = SentryPayloadSanitizer.sanitizeContext(extra)
 
         var payload: [String: Any] = [
-            "event_id": UUID().uuidString.replacingOccurrences(of: "-", with: ""),
+            "event_id": eventID,
             "timestamp": ISO8601DateFormatter().string(from: Date()),
             "platform": "cocoa",
+            "environment": environment,
+            "release": releaseName,
             "level": level,
             "logger": "CrashReporter",
-            "message": ["formatted": "\(title): \(message)"],
+            "message": ["formatted": "\(sanitizedTitle): \(sanitizedMessage)"],
             "contexts": [
                 "os": [
                     "name": "macOS",
-                    "version": ProcessInfo.processInfo.operatingSystemVersionString
+                    "version": ProcessInfo.processInfo.operatingSystemVersionString,
                 ],
                 "app": [
                     "app_name": "Transcripted",
-                    "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
-                ]
-            ]
+                    "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+                ],
+            ],
         ]
 
-        if !extra.isEmpty {
-            payload["extra"] = extra
+        if let dist, !dist.isEmpty {
+            payload["dist"] = dist
+        }
+
+        if !sanitizedTags.isEmpty {
+            payload["tags"] = sanitizedTags
+        }
+
+        if !sanitizedExtra.isEmpty {
+            payload["extra"] = sanitizedExtra
+        }
+
+        if let fingerprint, !fingerprint.isEmpty {
+            payload["fingerprint"] = fingerprint
         }
 
         guard let url = URL(string: "https://\(host)/api/\(projectID)/store/"),
-              let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
+              let body = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -131,5 +253,6 @@ final class CrashReporter {
         request.timeoutInterval = 5
 
         URLSession.shared.dataTask(with: request).resume()
+        return eventID
     }
 }

@@ -10,6 +10,7 @@ class TranscriptedAppState: ObservableObject {
     private static let wakeHotkeyRetryAttempts = 3
     private static let wakeHotkeyRetryDelay: UInt64 = 500_000_000
     let logger = AppLogger()
+    let sparkleUpdater = SparkleUpdaterController()
     let contextCapture = ContextCaptureEngine()
     let sttRouter = STTRouter()
     #if BETA_BUILD
@@ -74,6 +75,8 @@ class TranscriptedAppState: ObservableObject {
             payload: [:]
         )
         #endif
+
+        sparkleUpdater.performStartupUpdateCheckIfNeeded()
 
         // Kick off shared runtime prep once; wake recovery can await or reuse it.
         startRuntimeReadinessIfNeeded()

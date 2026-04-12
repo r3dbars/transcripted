@@ -13,6 +13,8 @@ struct RecentMeetingItem {
 
 @MainActor
 enum RecentMeetingsScanner {
+    private static let excludedMarkdownFilenames: Set<String> = ["AGENT.md", "CLAUDE.md"]
+
     static func loadRecent(limit: Int = 3) -> [RecentMeetingItem] {
         let dir = MeetingStoragePaths.transcriptsFolder
         let fm = FileManager.default
@@ -25,7 +27,7 @@ enum RecentMeetingsScanner {
             options: [.skipsHiddenFiles]
         ) else { return [] }
 
-        let markdowns = urls.filter { $0.pathExtension == "md" }
+        let markdowns = urls.filter { isMeetingTranscript($0, fileManager: fm) }
         let items: [(url: URL, date: Date)] = markdowns.compactMap { url in
             let values = try? url.resourceValues(forKeys: Set(keys))
             let date = values?.creationDate ?? values?.contentModificationDate ?? .distantPast
@@ -41,6 +43,20 @@ enum RecentMeetingsScanner {
                     return RecentMeetingItem(title: styled.title, date: entry.date, transcriptURL: styled.url)
                 }
         )
+    }
+
+    private static func isMeetingTranscript(_ url: URL, fileManager: FileManager) -> Bool {
+        guard url.pathExtension == "md", !excludedMarkdownFilenames.contains(url.lastPathComponent) else {
+            return false
+        }
+
+        let sidecarURL = url.deletingPathExtension().appendingPathExtension("json")
+        if fileManager.fileExists(atPath: sidecarURL.path) {
+            return true
+        }
+
+        guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return false }
+        return raw.hasPrefix("---\n") && (raw.contains("\n## Full Transcript") || raw.contains("\n## Transcript"))
     }
 }
 

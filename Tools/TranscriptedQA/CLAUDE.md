@@ -1,58 +1,112 @@
-# TranscriptedQA
+# TranscriptedQA - QA Testing CLI Tool
 
-Standalone QA CLI for validating Transcripted artifact sets on disk.
+QA testing suite for Transcripted. 23 Swift files total: `Package.swift` plus 22 files under `Sources/TranscriptedQA/`.
 
-## Current scope
+## File Index
 
-This tool is strongest for validating meeting-artifact directories, indexes,
-logs, and related databases. It is not the authoritative app test runner.
+### Package Root (1 file)
 
-## Important layout
+| File | Purpose |
+|------|---------|
+| `Package.swift` | Swift package manifest for the standalone QA CLI |
 
-- `TranscriptedQA.swift` — `@main` command root, shared path helpers, and subcommand registration
-- `Commands/` — user-facing commands such as `validate-all`, `validate-database`, `validate-index`, `check-health`, `round-trip`, and `stress-test`
-- `Validators/` — database, transcript, artifact, index, log, and health validators
-- `Generators/` — shared fixture generation
-- `Utilities/` — SQLite and YAML helpers
-- `Models/ValidationResult.swift` — structured validation output
+### Root (1 file)
 
-## Default paths
+| File | Purpose |
+|------|---------|
+| `TranscriptedQA.swift` | CLI entry point (`@main`), shared path helpers, and subcommand registration |
 
-This tool still defaults to the legacy Draft meetings tree unless you pass a
-custom path:
+### Commands/ (10 files)
 
-- meetings root: `~/Library/Application Support/Draft/meetings/`
-- transcripts under that root: `transcripts/`
-- log target checked by validators: `~/Library/Logs/Transcripted/app.jsonl`
+| File | Purpose |
+|------|---------|
+| `CheckHealth.swift` | Quick health check: DB integrity, model presence, disk space |
+| `GenerateFixtures.swift` | Generate valid test data (transcripts, sidecars, DB records) for CI or manual verification |
+| `RoundTrip.swift` | Generate test data, validate, corrupt, re-validate, and confirm validators catch real defects |
+| `StressTest.swift` | Generate large datasets and validate performance + correctness |
+| `ValidateAll.swift` | Run all validators: transcripts, DB, index, logs, artifacts |
+| `ValidateArtifacts.swift` | Check transcript sidecars (`.json`), YAML frontmatter, speaker clips |
+| `ValidateDatabase.swift` | SpeakerDB and StatsDB integrity, schema validation, corruption check |
+| `ValidateIndex.swift` | Transcript index consistency, missing sidecars, orphan files |
+| `ValidateLogs.swift` | Log file analysis and `app.jsonl` format validation |
+| `ValidateTranscripts.swift` | Transcript content validation, speaker attribution, timestamp checks |
 
-That makes it useful for legacy artifact sets or targeted validation runs, but
-it is not yet aligned with the app’s new default capture-library layout unless
-you provide `--path`.
+### Generators/ (1 file)
 
-## Commands
+| File | Purpose |
+|------|---------|
+| `TestDataGenerator.swift` | Shared fixture builder used by `GenerateFixtures`, `RoundTrip`, and `StressTest` |
 
-- `transcripted-qa validate-all`
-- `transcripted-qa validate-transcripts`
-- `transcripted-qa validate-database`
-- `transcripted-qa validate-logs`
-- `transcripted-qa validate-artifacts`
-- `transcripted-qa validate-index`
-- `transcripted-qa check-health`
-- `transcripted-qa generate-fixtures`
-- `transcripted-qa round-trip`
-- `transcripted-qa stress-test`
+### Validators/ (7 files)
+
+| File | Purpose |
+|------|---------|
+| `HealthChecker.swift` | System health: disk space, model files, DB existence |
+| `IndexValidator.swift` | Index consistency, transcript / sidecar pairing |
+| `JSONSidecarValidator.swift` | YAML frontmatter and agent JSON structure |
+| `LogValidator.swift` | Log file parsing and error pattern detection |
+| `SpeakerDBValidator.swift` | SpeakerDB schema, record count, embedding integrity |
+| `StatsDBValidator.swift` | StatsDB schema, recording history, daily activity |
+| `TranscriptValidator.swift` | Transcript content, speaker attribution, timestamp validity |
+
+### Utilities/ (2 files)
+
+| File | Purpose |
+|------|---------|
+| `SQLiteReader.swift` | SQLite file reading, query execution, result parsing |
+| `YAMLParser.swift` | YAML frontmatter parsing and metadata extraction |
+
+### Models/ (1 file)
+
+| File | Purpose |
+|------|---------|
+| `ValidationResult.swift` | Validation outcome: success/failure, error details, warnings, and metrics |
 
 ## Usage
 
 ```bash
-cd Tools/TranscriptedQA
-swift build
-swift run transcripted-qa validate-all
-swift run transcripted-qa validate-all --path /path/to/meetings-root
+# Health check
+transcripted-qa check-health
+
+# Validate all
+transcripted-qa validate-all
+
+# Validate specific areas
+transcripted-qa validate-database
+transcripted-qa validate-transcripts
+transcripted-qa validate-index
+transcripted-qa validate-logs
+
+# Test data generation
+transcripted-qa generate-fixtures --output /tmp/my-test-data
+transcripted-qa round-trip
+transcripted-qa stress-test --transcripts 100 --speakers-per-transcript 4 --utterances-per-transcript 200
 ```
 
-## Notes
+## Validation Results
 
-- validators run synchronously and are designed for CLI output plus structured machine-readable reports
-- `--path` points at the meetings root, not the transcript file itself
-- this tool complements `bash build.sh`, `bash run-tests.sh`, and `bash run-integration-smoke.sh`; it does not replace them
+`ValidationResult` / `ValidationReport` capture:
+- `success: Bool` - Overall validation status
+- `errors: [String]` - List of errors found
+- `warnings: [String]` - Non-critical warnings
+- `metrics` - Validation metrics (record counts, file sizes, etc.)
+
+## Key Features
+
+- **Health checks**: Quick system status before deep validation
+- **Database integrity**: SpeakerDB and StatsDB corruption detection with backup / recreate pattern
+- **Transcript validation**: Content, speaker attribution, timestamp consistency
+- **Index validation**: Transcript / sidecar pairing, orphan file detection
+- **Log analysis**: Error pattern detection, warning frequency tracking
+- **Artifact validation**: YAML frontmatter, JSON sidecars, speaker clips
+- **Fixture generation**: `generate-fixtures` creates valid test data for use in CI or manual testing
+- **Round-trip testing**: `round-trip` validates that validators correctly catch injected corruption
+- **Stress testing**: `stress-test` generates large datasets to surface performance and correctness issues
+
+## Gotchas
+
+- All validators run synchronously on background threads
+- SQLite readers use dedicated utility queues for thread safety
+- Validation results are structured for programmatic consumption
+- Error messages are human-readable for CLI output
+- Defaults target the Draft app-support tree under `~/Library/Application Support/Draft/`, including `meetings/` artifacts and `logs/app.jsonl`
