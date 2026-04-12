@@ -3,6 +3,7 @@
 // removed draft mode.
 
 import AppKit
+import AVFoundation
 import Combine
 
 @MainActor
@@ -88,6 +89,7 @@ class DictationSessionController: ObservableObject {
     private var startupTask: Task<Void, Never>?
     private var streamingTask: Task<Void, Never>?
     private var clipboardRestoreTask: Task<Void, Never>?
+    private var recordingStartRetryTask: Task<Void, Never>?
     private var sessionTimeoutTask: Task<Void, Never>?
     private var sessionStartTime: CFAbsoluteTime = 0
     private var currentDictationTrigger: DictationTrigger = .unknown
@@ -95,11 +97,14 @@ class DictationSessionController: ObservableObject {
     /// Max duration for a listening session before auto-cancel (5 minutes).
     /// Prevents stuck sessions when the user walks away from the computer.
     private static let sessionTimeoutNanos: UInt64 = 5 * 60 * 1_000_000_000
+    private static let recordingStartRetryAttempts = 4
+    private static let recordingStartRetryDelay: UInt64 = 350_000_000
 
     deinit {
         startupTask?.cancel()
         streamingTask?.cancel()
         clipboardRestoreTask?.cancel()
+        recordingStartRetryTask?.cancel()
         sessionTimeoutTask?.cancel()
     }
 
@@ -113,6 +118,8 @@ class DictationSessionController: ObservableObject {
                 if self.isInSession {
                     self.cancelSession(message: Self.removedDraftModeMessage)
                 } else if self.isDictating {
+                    self.recordingStartRetryTask?.cancel()
+                    self.recordingStartRetryTask = nil
                     self.isDictating = false
                     self.overlayController?.showError("Audio device changed")
                 }
@@ -143,6 +150,8 @@ class DictationSessionController: ObservableObject {
         streamingTask = nil
         clipboardRestoreTask?.cancel()
         clipboardRestoreTask = nil
+        recordingStartRetryTask?.cancel()
+        recordingStartRetryTask = nil
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
         isInSession = false
@@ -191,30 +200,92 @@ class DictationSessionController: ObservableObject {
 
     /// Actually start dictation recording — called directly from startDictation
     private func beginDictationRecording(sourceApp: NSRunningApplication?) {
-        guard let appState = appState, let overlayController = overlayController else { return }
+        guard let overlayController = overlayController else { return }
         guard isDictating else { return }
 
         overlayController.state = .listening
+        attemptBeginDictationRecording(sourceApp: sourceApp, attempt: 1)
+    }
 
-        guard appState.sttRouter.startRecording() else {
-            appState.logger.log("DICTATION | recording failed to start")
+    private func attemptBeginDictationRecording(sourceApp: NSRunningApplication?, attempt: Int) {
+        guard let appState = appState, let overlayController = overlayController else { return }
+        guard isDictating else { return }
+
+        if appState.sttRouter.startRecording() {
+            recordingStartRetryTask?.cancel()
+            recordingStartRetryTask = nil
+            overlayController.state = .listening
+            resizePanelToCompact()
+            appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
+            AppSoundPlayer.shared.play(.dictationStart)
+            installSessionTimeout()
+            return
+        }
+
+        appState.logger.log("DICTATION | recording start attempt \(attempt) failed")
+
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
             DiagnosticsTrail.record(
                 logger: appState.logger,
                 level: .error,
                 engine: "dictation",
                 event: "dictation_recording_failed",
                 message: "Dictation recording failed to start",
-                context: dictationContext(extra: ["audio_device": appState.sttRouter.inputDeviceName])
+                context: dictationContext(
+                    extra: [
+                        "attempt": "\(attempt)",
+                        "audio_device": appState.sttRouter.inputDeviceName
+                    ]
+                )
             )
             overlayController.showError("Microphone unavailable")
             isDictating = false
             return
         }
-        appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
-        AppSoundPlayer.shared.play(.dictationStart)
 
-        // Start session timeout — auto-cancel after 5 minutes to prevent stuck sessions
-        installSessionTimeout()
+        if attempt < Self.recordingStartRetryAttempts {
+            let nextAttempt = attempt + 1
+            DiagnosticsTrail.record(
+                logger: appState.logger,
+                level: .warning,
+                engine: "dictation",
+                event: "dictation_recording_retry",
+                message: "Retrying dictation recording while audio hardware settles",
+                context: dictationContext(
+                    extra: [
+                        "attempt": "\(nextAttempt)",
+                        "audio_device": appState.sttRouter.inputDeviceName
+                    ]
+                )
+            )
+            overlayController.showLoadingState(
+                near: sourceApp,
+                presentation: microphoneRecoveryPresentation(for: nextAttempt)
+            )
+            recordingStartRetryTask?.cancel()
+            recordingStartRetryTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: Self.recordingStartRetryDelay)
+                guard let self = self else { return }
+                self.attemptBeginDictationRecording(sourceApp: sourceApp, attempt: nextAttempt)
+            }
+            return
+        }
+
+        DiagnosticsTrail.record(
+            logger: appState.logger,
+            level: .error,
+            engine: "dictation",
+            event: "dictation_recording_failed",
+            message: "Dictation recording failed to start",
+            context: dictationContext(
+                extra: [
+                    "attempt": "\(attempt)",
+                    "audio_device": appState.sttRouter.inputDeviceName
+                ]
+            )
+        )
+        overlayController.showError("Microphone unavailable")
+        isDictating = false
     }
 
     /// Stop dictation and paste — Parakeet batch transcription
@@ -275,6 +346,8 @@ class DictationSessionController: ObservableObject {
         }
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
+        recordingStartRetryTask?.cancel()
+        recordingStartRetryTask = nil
 
         appState.sttRouter.stopRecording()
         streamingTask?.cancel()
@@ -364,6 +437,8 @@ class DictationSessionController: ObservableObject {
         streamingTask = nil
         clipboardRestoreTask?.cancel()
         clipboardRestoreTask = nil
+        recordingStartRetryTask?.cancel()
+        recordingStartRetryTask = nil
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
         if appState.sttRouter.isRecording {
@@ -486,6 +561,17 @@ class DictationSessionController: ObservableObject {
                 status: "Model load failed"
             )
         }
+    }
+
+    private func microphoneRecoveryPresentation(for attempt: Int) -> FloatingOverlayController.LoadingPresentation {
+        let clampedAttempt = max(1, min(attempt, Self.recordingStartRetryAttempts))
+        let progress = min(0.9, 0.18 + (Double(clampedAttempt - 1) * 0.18))
+        return .init(
+            title: "Switching microphone",
+            detail: "Transcripted is reconnecting to the current microphone after the audio device changed. Recording starts automatically when the new route is ready.",
+            progress: progress,
+            status: "Retry \(clampedAttempt) of \(Self.recordingStartRetryAttempts)"
+        )
     }
 
     /// Shrink the panel to compact (header-only) height without animation.
