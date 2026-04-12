@@ -151,8 +151,8 @@ extension TranscriptionTaskManager {
             }
         }
 
-        // Keep placeholder labels tied to persistent speaker UUIDs so later confirmation,
-        // retroactive renames, and agent sidecars can update the same person cleanly.
+        // Keep placeholder labels tied to persistent speaker UUIDs so later confirmation
+        // and retroactive renames can update the same person cleanly.
         for sid in speakerDbIds.keys where speakerMappings["system_\(sid)"] == nil {
             speakerMappings["system_\(sid)"] = SpeakerMapping(speakerId: sid)
             speakerSources[sid] = "db_pending"

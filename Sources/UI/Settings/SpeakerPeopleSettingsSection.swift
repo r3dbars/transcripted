@@ -8,18 +8,15 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     @Published var searchText: String = ""
 
     private let speakerDatabase: SpeakerDatabase
-    private let transcriptsDirectory: URL
     private let preferredClipsDirectory: URL
     private let legacyClipsDirectory: URL
 
     init(
         speakerDatabase: SpeakerDatabase,
-        transcriptsDirectory: URL,
         preferredClipsDirectory: URL,
         legacyClipsDirectory: URL = CoreStoragePaths.default.speakerClips
     ) {
         self.speakerDatabase = speakerDatabase
-        self.transcriptsDirectory = transcriptsDirectory
         self.preferredClipsDirectory = preferredClipsDirectory
         self.legacyClipsDirectory = legacyClipsDirectory
         refresh()
@@ -119,7 +116,6 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     func delete(profile: SpeakerProfile) {
         let profileId = profile.id
         let speakerDatabase = self.speakerDatabase
-        let transcriptsDirectory = self.transcriptsDirectory
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
 
@@ -130,7 +126,6 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 preferredClipsDirectory: preferredClipsDirectory,
                 legacyClipsDirectory: legacyClipsDirectory
             )
-            try? AgentOutput.writeIndex(to: transcriptsDirectory, speakerStore: speakerDatabase)
             let profiles = Self.sortedProfiles(from: speakerDatabase)
             DispatchQueue.main.async {
                 self?.profiles = profiles

@@ -13,14 +13,14 @@ agents later.
 
 - Dictate into any app and paste text back
 - Record meetings locally
-- Save human-readable Markdown and agent-readable JSON files on disk
+- Save plain Markdown files on disk
 - Let Claude, Codex, OpenClaw, or any other agent work from those files later
 
 ## How It Works
 
 1. Capture dictation or a meeting.
 2. Transcripted processes the audio locally on your Mac.
-3. It saves durable Markdown and JSON artifacts to disk.
+3. It saves durable Markdown artifacts to disk.
 4. Your agent can load the right slice later instead of rereading everything.
 
 ## Artifacts, Not A Black Box
@@ -40,28 +40,6 @@ Thanks for making time today.
 
 **[00:04] [System/Alex]**
 Happy to help. Let's get started.
-```
-
-Example meeting sidecar:
-
-```json
-{
-  "version": "1.0",
-  "recording": {
-    "duration_seconds": 750,
-    "engines": {
-      "stt": "parakeet-tdt-v3",
-      "diarization": "pyannote-offline"
-    }
-  },
-  "speakers": [
-    { "id": "mic_0", "name": "You" },
-    { "id": "system_0", "name": "Alex" }
-  ],
-  "utterances": [
-    { "start": 0.0, "end": 4.0, "speaker_id": "mic_0", "text": "Thanks for making time today." }
-  ]
-}
 ```
 
 Example dictation artifact:

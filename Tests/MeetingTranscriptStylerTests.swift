@@ -3,7 +3,7 @@ import Foundation
 func testMeetingTranscriptStyler() {
     runSuite("MeetingTranscriptStylerTests") {
         testMeetingTranscriptStylerRenamesArtifacts()
-        testMeetingTranscriptStylerRenamesSiblingArtifacts()
+        testMeetingTranscriptStylerDoesNotCreateSiblingArtifacts()
         testMeetingTranscriptStylerIsIdempotent()
     }
 }
@@ -26,30 +26,20 @@ private func testMeetingTranscriptStylerRenamesArtifacts() {
     assertTrue(updatedMarkdown?.contains("# Meeting with Alex") == true, "Markdown body should be rewritten with the canonical title")
 }
 
-private func testMeetingTranscriptStylerRenamesSiblingArtifacts() {
+private func testMeetingTranscriptStylerDoesNotCreateSiblingArtifacts() {
     let directory = makeTemporaryTestDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
 
     let originalStem = "Call_2026-04-07_09-14-00"
     let transcriptURL = directory.appendingPathComponent("\(originalStem).md")
-    let sidecarURL = directory.appendingPathComponent("\(originalStem).json")
-    let indexURL = directory.appendingPathComponent("transcripted.json")
 
     try? sampleMeetingTranscript().write(to: transcriptURL, atomically: true, encoding: .utf8)
-    try? """
-    {"version":"1.0","transcript_id":"abc","recording":{"date":"2026-04-07T09:14:00-0500","duration_seconds":750,"dropped_segments":0,"engines":{"stt":"parakeet-tdt-v3","diarization":"pyannote-offline"}},"speakers":[],"utterances":[]}
-    """.write(to: sidecarURL, atomically: true, encoding: .utf8)
-    try? """
-    {"version":"1.0","updated_at":"2026-04-07T09:14:00-0500","transcript_count":1,"transcripts":[{"filename":"\(originalStem)","date":"2026-04-07","duration_seconds":750,"speaker_count":1,"word_count":42,"speakers":["Alex"]}],"known_speakers":[]}
-    """.write(to: indexURL, atomically: true, encoding: .utf8)
 
     let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
-    let renamedSidecar = directory.appendingPathComponent("Meeting with Alex.json")
-    let indexText = try? String(contentsOf: indexURL, encoding: .utf8)
+    let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+    let jsonArtifacts = files.filter { $0.pathExtension == "json" }
 
-    assertTrue(FileManager.default.fileExists(atPath: renamedSidecar.path), "Styler should move the sibling JSON sidecar with the markdown file")
-    assertFalse(FileManager.default.fileExists(atPath: sidecarURL.path), "Original JSON sidecar should be replaced")
-    assertTrue(indexText?.contains("\"filename\" : \"Meeting with Alex\"") == true, "Styler should update transcripted.json to the renamed stem")
+    assertTrue(jsonArtifacts.isEmpty, "Styler should not create or depend on sibling JSON artifacts")
     assertTrue(styled.url.lastPathComponent == "Meeting with Alex.md", "Markdown rename should still use the canonical title")
 }
 

@@ -21,13 +21,13 @@ QA testing suite for Transcripted. 23 Swift files total: `Package.swift` plus 22
 | File | Purpose |
 |------|---------|
 | `CheckHealth.swift` | Quick health check: DB integrity, model presence, disk space |
-| `GenerateFixtures.swift` | Generate valid test data (transcripts, sidecars, DB records) for CI or manual verification |
+| `GenerateFixtures.swift` | Generate valid test data (transcripts, legacy JSON artifacts, DB records) for CI or manual verification |
 | `RoundTrip.swift` | Generate test data, validate, corrupt, re-validate, and confirm validators catch real defects |
 | `StressTest.swift` | Generate large datasets and validate performance + correctness |
 | `ValidateAll.swift` | Run all validators: transcripts, DB, index, logs, artifacts |
-| `ValidateArtifacts.swift` | Check transcript sidecars (`.json`), YAML frontmatter, speaker clips |
+| `ValidateArtifacts.swift` | Check optional legacy JSON artifacts, YAML frontmatter, speaker clips |
 | `ValidateDatabase.swift` | SpeakerDB and StatsDB integrity, schema validation, corruption check |
-| `ValidateIndex.swift` | Transcript index consistency, missing sidecars, orphan files |
+| `ValidateIndex.swift` | Legacy transcripted.json consistency and orphan-file checks |
 | `ValidateLogs.swift` | Log file analysis and `app.jsonl` format validation |
 | `ValidateTranscripts.swift` | Transcript content validation, speaker attribution, timestamp checks |
 
@@ -42,7 +42,7 @@ QA testing suite for Transcripted. 23 Swift files total: `Package.swift` plus 22
 | File | Purpose |
 |------|---------|
 | `HealthChecker.swift` | System health: disk space, model files, DB existence |
-| `IndexValidator.swift` | Index consistency, transcript / sidecar pairing |
+| `IndexValidator.swift` | Legacy index consistency and orphan-file checks |
 | `JSONSidecarValidator.swift` | YAML frontmatter and agent JSON structure |
 | `LogValidator.swift` | Log file parsing and error pattern detection |
 | `SpeakerDBValidator.swift` | SpeakerDB schema, record count, embedding integrity |
@@ -99,9 +99,9 @@ transcripted-qa stress-test --transcripts 100 --speakers-per-transcript 4 --utte
 - **Health checks**: Quick system status before deep validation
 - **Database integrity**: SpeakerDB and StatsDB corruption detection with backup / recreate pattern
 - **Transcript validation**: Content, speaker attribution, timestamp consistency
-- **Index validation**: Transcript / sidecar pairing, orphan file detection
+- **Index validation**: Legacy `transcripted.json` checks when that file exists
 - **Log analysis**: Error pattern detection, warning frequency tracking
-- **Artifact validation**: YAML frontmatter, JSON sidecars, speaker clips
+- **Artifact validation**: YAML frontmatter, optional legacy JSON artifacts, speaker clips
 - **Fixture generation**: `generate-fixtures` creates valid test data for use in CI or manual testing
 - **Round-trip testing**: `round-trip` validates that validators correctly catch injected corruption
 - **Stress testing**: `stress-test` generates large datasets to surface performance and correctness issues

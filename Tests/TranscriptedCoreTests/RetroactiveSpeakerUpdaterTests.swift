@@ -78,7 +78,6 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let speakerId = UUID()
         let transcriptURL = temporaryDirectory.appendingPathComponent("generic.md")
         try genericMarkdown().write(to: transcriptURL, atomically: true, encoding: .utf8)
-        try writeGenericAgentSidecar(nextTo: transcriptURL)
         let updated = TranscriptSaver.updateSpeakerNames(
             transcriptURL: transcriptURL,
             updates: [
@@ -98,13 +97,6 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertTrue(markdown.contains(#"db_id: "\#(speakerId.uuidString)""#))
         XCTAssertTrue(markdown.contains(#"name: "Alex""#))
         XCTAssertTrue(markdown.contains("[System/Alex]"))
-
-        let jsonURL = transcriptURL.deletingPathExtension().appendingPathExtension("json")
-        let data = try Data(contentsOf: jsonURL)
-        let transcript = try JSONDecoder().decode(AgentTranscript.self, from: data)
-        let systemSpeaker = try XCTUnwrap(transcript.speakers.first(where: { $0.id == "system_0" }))
-        XCTAssertEqual(systemSpeaker.persistentSpeakerId, speakerId.uuidString)
-        XCTAssertEqual(systemSpeaker.name, "Alex")
     }
 
     private struct MarkdownSpeaker {
@@ -262,36 +254,6 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         """
     }
 
-    private func writeGenericAgentSidecar(nextTo transcriptURL: URL) throws {
-        let jsonURL = transcriptURL.deletingPathExtension().appendingPathExtension("json")
-        let transcript = AgentTranscript(
-            version: "1.0",
-            transcriptId: nil,
-            recording: AgentRecording(
-                date: "2026-04-09T21:00:00-0500",
-                durationSeconds: 1,
-                droppedSegments: 0,
-                engines: AgentEngines(stt: "parakeet", diarization: "sortformer")
-            ),
-            speakers: [
-                AgentSpeaker(
-                    id: "system_0",
-                    persistentSpeakerId: nil,
-                    name: "Speaker 0",
-                    confidence: "medium",
-                    wordCount: 2,
-                    speakingSeconds: 1
-                )
-            ],
-            utterances: [
-                AgentUtterance(start: 0, end: 1, speakerId: "system_0", text: "hello there")
-            ]
-        )
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(transcript).write(to: jsonURL, options: .atomic)
-    }
     func testResolveTranscriptURLFindsRenamedTranscriptByStableId() throws {
         let transcriptId = UUID()
         let originalURL = tempDirectory.appendingPathComponent("Call_2026-04-10_15-01-23.md")

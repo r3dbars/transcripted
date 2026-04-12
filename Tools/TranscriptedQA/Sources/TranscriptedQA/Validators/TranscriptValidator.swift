@@ -103,12 +103,12 @@ struct TranscriptValidator {
                 results.append(.fail("transcript/body-has-sections", target: name, detail: "Missing expected document sections"))
             }
 
-            // Sidecar exists
+            // Legacy sidecar (optional)
             let jsonName = file.deletingPathExtension().appendingPathExtension("json")
             if fm.fileExists(atPath: jsonName.path) {
-                results.append(.pass("transcript/sidecar-exists", target: name))
+                results.append(.warn("transcript/legacy-sidecar-present", target: name, detail: "Legacy .json artifact is present"))
             } else {
-                results.append(.fail("transcript/sidecar-exists", target: name, detail: "No .json sidecar found"))
+                results.append(.pass("transcript/legacy-sidecar-optional", target: name))
             }
 
             // File permissions
