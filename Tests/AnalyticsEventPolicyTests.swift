@@ -10,4 +10,16 @@ func testAnalyticsEventPolicy() {
         assertEqual(meetingFailed?.allowedProperties.contains("failure_kind"), true, "meeting failures should allow normalized failure kinds")
         assertNil(unknown, "unreviewed analytics events should not be allowed")
     }
+
+    runSuite("AnalyticsEventPolicy meeting_recording_stopped system_stream_present key is not silently filtered") {
+        let policy = AnalyticsEventPolicy.policy(forEvent: "meeting_recording_stopped")
+        assertEqual(policy?.allowedProperties.contains("system_stream_present"), true, "system_stream_present should be in the allowlist")
+
+        // Verify the key passes sanitization — it must not contain a sensitive fragment
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            ["system_stream_present": "true"],
+            allowedKeys: ["system_stream_present"]
+        )
+        assertEqual(sanitized["system_stream_present"], "true", "system_stream_present must survive sanitization — if empty the metric is always missing")
+    }
 }
