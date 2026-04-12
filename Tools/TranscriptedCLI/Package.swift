@@ -7,6 +7,17 @@ let repoRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
     .deletingLastPathComponent()
     .path
+let fileManager = FileManager.default
+let depsModulesRoot = "\(repoRoot)/deps-modules"
+let depsFrameworksRoot = "\(repoRoot)/deps-frameworks"
+let depsLibsRoot = "\(repoRoot)/deps-libs"
+let fluidAudioModuleCandidates = [
+    "\(depsModulesRoot)/FluidAudio.swiftmodule",
+    "\(depsModulesRoot)/FluidAudio.swiftmodule/arm64-apple-macos.swiftmodule",
+]
+let hasDiarizationDeps = fluidAudioModuleCandidates.contains(where: { fileManager.fileExists(atPath: $0) })
+    && fileManager.fileExists(atPath: "\(depsLibsRoot)/libDraftDeps.a")
+    && fileManager.fileExists(atPath: "\(depsFrameworksRoot)/ESpeakNG.framework")
 
 let package = Package(
     name: "TranscriptedCLI",
@@ -21,19 +32,20 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
             path: "Sources/TranscriptedCLI",
-            swiftSettings: [
+            swiftSettings: hasDiarizationDeps ? [
+                .define("TRANSCRIPTEDCLI_WITH_DIARIZATION"),
                 .unsafeFlags([
-                    "-F", "\(repoRoot)/deps-frameworks",
-                    "-I", "\(repoRoot)/deps-modules",
-                    "-I", "\(repoRoot)/deps-modules/FastClusterWrapper",
-                    "-I", "\(repoRoot)/deps-modules/MachTaskSelfWrapper",
-                    "-I", "\(repoRoot)/deps-modules/yyjson",
+                    "-F", depsFrameworksRoot,
+                    "-I", depsModulesRoot,
+                    "-I", "\(depsModulesRoot)/FastClusterWrapper",
+                    "-I", "\(depsModulesRoot)/MachTaskSelfWrapper",
+                    "-I", "\(depsModulesRoot)/yyjson",
                 ]),
-            ],
-            linkerSettings: [
+            ] : [],
+            linkerSettings: hasDiarizationDeps ? [
                 .unsafeFlags([
-                    "-F\(repoRoot)/deps-frameworks",
-                    "-L\(repoRoot)/deps-libs",
+                    "-F\(depsFrameworksRoot)",
+                    "-L\(depsLibsRoot)",
                     "-lDraftDeps",
                     "-lc++",
                 ]),
@@ -45,7 +57,7 @@ let package = Package(
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("Network"),
-            ]
+            ] : []
         ),
     ]
 )
