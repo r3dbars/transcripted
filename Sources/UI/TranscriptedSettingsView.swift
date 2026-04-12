@@ -8,6 +8,7 @@ struct TranscriptedSettingsView: View {
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
     @State private var sentryTestStatus: String?
+    @State private var postHogTestStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
 
@@ -90,6 +91,25 @@ struct TranscriptedSettingsView: View {
                     }
 
                     Text(crashReportingFootnote)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Divider()
+
+                    HStack {
+                        Button("Send Test PostHog Event") {
+                            sendTestPostHogEvent()
+                        }
+                        .disabled(!PostHogTracker.isAvailable)
+
+                        if let postHogTestStatus {
+                            Text(postHogTestStatus)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Text(postHogFootnote)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -192,6 +212,29 @@ struct TranscriptedSettingsView: View {
         }
 
         sentryTestStatus = "Queued test event \(eventID.prefix(8)). Check Sentry in a few seconds."
+    }
+
+    private var postHogFootnote: String {
+        if PostHogTracker.isAvailable {
+            return "Enabled. Transcripted forwards privacy-safe app events to PostHog from local builds too, without transcript text, audio, meeting titles, speaker names, or source-app identifiers."
+        }
+        return "This build does not have PostHog configured yet, so usage analytics stay local in events.jsonl only."
+    }
+
+    private func sendTestPostHogEvent() {
+        guard PostHogTracker.isAvailable else {
+            postHogTestStatus = "PostHog is not configured in this build yet."
+            return
+        }
+
+        EventReporter.shared.capture(
+            level: .info,
+            engine: "analytics",
+            event: "posthog_test_event",
+            message: "Manual PostHog verification from Transcripted Settings",
+            context: ["source": "manual_test"]
+        )
+        postHogTestStatus = "Queued PostHog test event. Check PostHog in a few seconds."
     }
 
     private func refreshPermissions() {

@@ -1,5 +1,5 @@
 // EventReporter.swift
-// Centralized event tracking — structured JSONL for local diagnostics + optional Sentry forwarding.
+// Centralized event tracking — structured JSONL for local diagnostics + optional Sentry/PostHog forwarding.
 //
 // Design: @MainActor singleton + actor-based file writer (same pattern as AppLogger).
 // Fire-and-forget via Task.detached — capture() never blocks the caller.
@@ -157,6 +157,8 @@ final class EventReporter {
         Task.detached(priority: .utility) { [writer, entry] in
             await writer.append(entry)
         }
+
+        PostHogTracker.shared.capture(event: entry)
 
         if level == .error,
            let sentryPolicy = SentryEventPolicy.policy(forEngine: engine, event: event) {

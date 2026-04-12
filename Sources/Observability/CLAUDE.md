@@ -15,7 +15,9 @@ optional beta shipping, and Sparkle update plumbing.
 - `CrashReportingPreferences.swift` — Settings-backed crash reporting preference
 - `SentryEventPolicy.swift` — explicit allowlist of non-fatal events permitted to reach Sentry
 - `SentryPayloadSanitizer.swift` — strips obvious sensitive values before Sentry sends
-- `EventTracker.swift` — lightweight analytics hook
+- `PostHogTracker.swift` — privacy-safe PostHog forwarding for structured app events
+- `PostHogPayloadSanitizer.swift` — strips obviously sensitive analytics properties
+- `EventTracker.swift` — legacy analytics compatibility shim
 - `BetaTelemetry.swift` — beta-only log/event shipping
 - `SparkleUpdaterController.swift` — live Sparkle update controller used by the menubar app
 
@@ -32,6 +34,12 @@ optional beta shipping, and Sparkle update plumbing.
 - Sentry DSN/config is read from `Info.plist` (`TranscriptedSentryDSN`) or
   process environment for local testing, and crash reports must stay scrubbed of
   transcript/audio/title/path data
+- PostHog config is read from `Info.plist` (`TranscriptedPostHogAPIKey`,
+  `TranscriptedPostHogHost`) or process environment (`POSTHOG_API_KEY`,
+  `POSTHOG_HOST`) so local builds can report into the same analytics project
+- `EventReporter` is the single structured-event pipeline: it writes local
+  `events.jsonl`, forwards allowlisted errors to Sentry, and forwards
+  privacy-safe event names plus coarse diagnostics to PostHog
 - Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should
   not automatically assume they are safe to send off-device.
 

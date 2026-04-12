@@ -117,6 +117,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/Observability/SentryEventPolicy.swift"
     "Sources/Observability/SentryPayloadSanitizer.swift"
+    "Sources/Observability/PostHogPayloadSanitizer.swift"
     "Sources/Reliability/WakeRecoveryCoordinator.swift"
     "Sources/TranscriptedCore/Audio/MicRecordingSegment.swift"
     "Sources/TranscriptedCore/Models/TranscriptionTypes.swift"

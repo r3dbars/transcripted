@@ -79,8 +79,6 @@ class TranscriptedAppState: ObservableObject {
         startRuntimeReadinessIfNeeded()
 
         logger.log("APP LAUNCHED | modes: dictation + meetings")
-        EventTracker.track("app.launched")
-
         // Wire EventReporter with live engine state for context enrichment
         EventReporter.shared.setEngineStateSummary { [weak self] in
             guard let self else { return [:] }

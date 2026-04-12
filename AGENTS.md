@@ -140,6 +140,15 @@ Rules:
    - `bash build.sh`
    - `bash run-tests.sh`
    - confirm `Tests/SentryEventPolicyTests.swift` and `Tests/SentryPayloadSanitizerTests.swift` still pass through `run-tests.sh`
+9. PostHog runtime config for app analytics lives in `Info.plist` under:
+   - `TranscriptedPostHogAPIKey`
+   - `TranscriptedPostHogHost`
+10. Local overrides for PostHog testing can come from process environment:
+   - `POSTHOG_API_KEY`
+   - `POSTHOG_HOST`
+11. PostHog forwarding must stay privacy-safe too. Keep transcript text, audio
+    references, meeting titles, speaker names, emails, source-app identifiers,
+    tokens, and absolute file paths out of analytics payloads.
 
 ## Testing gotchas
 

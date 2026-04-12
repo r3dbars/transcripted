@@ -337,7 +337,6 @@ class DictationSessionController: ObservableObject {
             }
             isDictating = false
             appState.logger.log("DICTATION | completed with outcome \(pasteOutcome)")
-            EventTracker.track("dictation.completed", with: ["word_count": "\(text.split(whereSeparator: \.isWhitespace).count)"])
             #if BETA_BUILD
             let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
             BetaTelemetry.shared.sendEvent(
