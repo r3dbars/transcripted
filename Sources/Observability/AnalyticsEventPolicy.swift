@@ -55,7 +55,7 @@ struct AnalyticsEventPolicy: Equatable {
                 "capture_quality",
                 "duration_bucket",
                 "reason",
-                "system_audio_present",
+                "system_stream_present",
             ]
         ),
         "meeting_transcript_saved": .init(
