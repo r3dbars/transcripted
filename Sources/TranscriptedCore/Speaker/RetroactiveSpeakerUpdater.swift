@@ -28,20 +28,20 @@ extension TranscriptSaver {
         )
     }
 
-    /// Extended overload for app embedders that supply an explicit directory and speaker store
-    /// for index rebuilding. Not part of the `TranscriptStorage` protocol.
+    /// Extended overload for app embedders that supply an explicit directory.
+    /// Not part of the `TranscriptStorage` protocol.
     public static func retroactivelyUpdateSpeaker(
         dbId: UUID,
         newName: String,
         directory: URL? = nil,
-        speakerStoreForIndex: (any SpeakerStore)? = nil
+        speakerStoreForIndex _: (any SpeakerStore)? = nil
     ) {
         fileUpdateQueue.sync {
             _retroactivelyUpdateSpeakerImpl(
                 dbId: dbId,
                 newName: newName,
                 directory: directory ?? defaultSaveDirectory,
-                speakerStoreForIndex: speakerStoreForIndex
+                speakerStoreForIndex: nil
             )
         }
     }
@@ -50,7 +50,7 @@ extension TranscriptSaver {
         dbId: UUID,
         newName: String,
         directory: URL,
-        speakerStoreForIndex: (any SpeakerStore)?
+        speakerStoreForIndex _: (any SpeakerStore)?
     ) {
         let dir = directory
         guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
@@ -96,11 +96,6 @@ extension TranscriptSaver {
         }
 
         if updatedCount > 0 {
-            updateAgentSidecars(
-                in: dir,
-                nameOverrides: [dbId: newName]
-            )
-            rebuildAgentIndexIfNeeded(in: dir, speakerStore: speakerStoreForIndex)
             AppLogger.pipeline.info("Retroactively updated speaker in transcripts",
                 ["dbId": dbIdString, "name": newName, "files": "\(updatedCount)"])
         }
@@ -114,7 +109,7 @@ extension TranscriptSaver {
         into targetDbId: UUID,
         newName: String,
         directory: URL? = nil,
-        speakerStoreForIndex: (any SpeakerStore)? = nil
+        speakerStoreForIndex _: (any SpeakerStore)? = nil
     ) {
         fileUpdateQueue.sync {
             _retroactivelyMergeSpeakerImpl(
@@ -122,7 +117,7 @@ extension TranscriptSaver {
                 targetDbId: targetDbId,
                 newName: newName,
                 directory: directory ?? defaultSaveDirectory,
-                speakerStoreForIndex: speakerStoreForIndex
+                speakerStoreForIndex: nil
             )
         }
     }
@@ -132,7 +127,7 @@ extension TranscriptSaver {
         targetDbId: UUID,
         newName: String,
         directory: URL,
-        speakerStoreForIndex: (any SpeakerStore)?
+        speakerStoreForIndex _: (any SpeakerStore)?
     ) {
         guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter({ $0.pathExtension == "md" }) else { return }
@@ -179,12 +174,6 @@ extension TranscriptSaver {
         }
 
         if updatedCount > 0 {
-            updateAgentSidecars(
-                in: directory,
-                persistentIdRemap: [sourceDbId: targetDbId],
-                nameOverrides: [targetDbId: newName]
-            )
-            rebuildAgentIndexIfNeeded(in: directory, speakerStore: speakerStoreForIndex)
             AppLogger.pipeline.info("Retroactively merged speaker in transcripts", [
                 "sourceDbId": sourceDbIdString,
                 "targetDbId": targetDbIdString,
@@ -199,8 +188,8 @@ extension TranscriptSaver {
     // MARK: - Speaker Name Updating (Post-Naming Flow)
 
     /// Simplified overload for transcripts that started with generic speaker labels and have no
-    /// TranscriptionResult available. Updates frontmatter db_id/name, replaces generic speaker
-    /// labels in the body, and patches the adjacent JSON sidecar with persistent speaker IDs.
+    /// TranscriptionResult available. Updates frontmatter db_id/name and replaces generic speaker
+    /// labels in the body.
     /// Thread-safe: serialized via fileUpdateQueue.
     @discardableResult
     public static func updateSpeakerNames(
@@ -234,58 +223,11 @@ extension TranscriptSaver {
                 return false
             }
 
-            // Patch the adjacent JSON sidecar with persistent speaker IDs.
-            let jsonURL = transcriptURL.deletingPathExtension().appendingPathExtension("json")
-            _updateAgentSidecar(at: jsonURL, with: updates)
-
             AppLogger.pipeline.info("Updated generic speaker names in transcript", [
                 "path": transcriptURL.lastPathComponent,
                 "updates": "\(updates.count)"
             ])
             return true
-        }
-    }
-
-    /// Patch persistent_speaker_id and name in the adjacent JSON sidecar for the given updates.
-    private static func _updateAgentSidecar(at jsonURL: URL, with updates: [SpeakerNameUpdate]) {
-        guard let data = try? Data(contentsOf: jsonURL),
-              let transcript = try? JSONDecoder().decode(AgentTranscript.self, from: data) else {
-            return
-        }
-
-        let updatesBySpeakerKey = Dictionary(uniqueKeysWithValues: updates.map { update in
-            ("system_\(update.sortformerSpeakerId)", update)
-        })
-
-        var changed = false
-        let updatedSpeakers: [AgentSpeaker] = transcript.speakers.map { speaker in
-            guard let update = updatesBySpeakerKey[speaker.id] else { return speaker }
-            let resolvedId = (update.resolvedPersistentSpeakerId ?? update.persistentSpeakerId).uuidString
-            changed = true
-            return AgentSpeaker(
-                id: speaker.id,
-                persistentSpeakerId: resolvedId,
-                name: update.newName,
-                confidence: speaker.confidence,
-                wordCount: speaker.wordCount,
-                speakingSeconds: speaker.speakingSeconds
-            )
-        }
-
-        guard changed else { return }
-
-        let updatedTranscript = AgentTranscript(
-            version: transcript.version,
-            transcriptId: transcript.transcriptId,
-            recording: transcript.recording,
-            speakers: updatedSpeakers,
-            utterances: transcript.utterances
-        )
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let encodedData = try? encoder.encode(updatedTranscript) {
-            try? encodedData.write(to: jsonURL, options: .atomic)
         }
     }
 
@@ -303,7 +245,7 @@ extension TranscriptSaver {
         transcriptURL: URL,
         updates: [SpeakerNameUpdate],
         transcriptionResult: TranscriptionResult,
-        speakerStore: (any SpeakerStore)? = nil
+        speakerStore _: (any SpeakerStore)? = nil
     ) -> Bool {
         guard !updates.isEmpty else { return true }
 
@@ -365,9 +307,6 @@ extension TranscriptSaver {
                 return false
             }
 
-            updateAgentSidecar(nextTo: transcriptURL, updates: updates)
-            rebuildAgentIndexIfNeeded(in: transcriptURL.deletingLastPathComponent(), speakerStore: speakerStore)
-
             AppLogger.pipeline.info("Updated speaker names in transcript", [
                 "path": transcriptURL.lastPathComponent,
                 "updates": "\(updates.count)"
@@ -375,46 +314,6 @@ extension TranscriptSaver {
 
             return true
         }
-    }
-
-    private static func updateAgentSidecar(at jsonURL: URL, updates: [SpeakerNameUpdate]) {
-        guard let data = try? Data(contentsOf: jsonURL),
-              let transcript = try? JSONDecoder().decode(AgentTranscript.self, from: data) else { return }
-
-        var updatedSpeakers = transcript.speakers
-        var changed = false
-
-        for i in updatedSpeakers.indices {
-            let speakerId = updatedSpeakers[i].id
-            guard speakerId.hasPrefix("system_") else { continue }
-            let sortformerKey = String(speakerId.dropFirst("system_".count))
-            guard let update = updates.first(where: { $0.sortformerSpeakerId == sortformerKey }) else { continue }
-
-            let resolvedId = (update.resolvedPersistentSpeakerId ?? update.persistentSpeakerId).uuidString
-            updatedSpeakers[i] = AgentSpeaker(
-                id: updatedSpeakers[i].id,
-                persistentSpeakerId: resolvedId,
-                name: update.newName,
-                confidence: updatedSpeakers[i].confidence,
-                wordCount: updatedSpeakers[i].wordCount,
-                speakingSeconds: updatedSpeakers[i].speakingSeconds
-            )
-            changed = true
-        }
-
-        guard changed else { return }
-
-        let updated = AgentTranscript(
-            version: transcript.version,
-            transcriptId: transcript.transcriptId,
-            recording: transcript.recording,
-            speakers: updatedSpeakers,
-            utterances: transcript.utterances
-        )
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try? encoder.encode(updated).write(to: jsonURL, options: .atomic)
     }
 
     /// Resolve a transcript URL that may have been renamed by MeetingTranscriptStyler.
@@ -931,125 +830,6 @@ extension TranscriptSaver {
             || content.contains("\naliases:\n  - \"Meeting ")
     }
 
-    private static func updateAgentSidecar(
-        nextTo transcriptURL: URL,
-        updates: [SpeakerNameUpdate]
-    ) {
-        let sidecarURL = transcriptURL.deletingPathExtension().appendingPathExtension("json")
-        guard let data = try? Data(contentsOf: sidecarURL) else { return }
-
-        let decoder = JSONDecoder()
-        guard let transcript = try? decoder.decode(AgentTranscript.self, from: data) else { return }
-
-        let updatesBySpeakerId = Dictionary(uniqueKeysWithValues: updates.map {
-            (
-                "system_\($0.sortformerSpeakerId)",
-                (
-                    persistentSpeakerId: ($0.resolvedPersistentSpeakerId ?? $0.persistentSpeakerId).uuidString,
-                    newName: $0.newName
-                )
-            )
-        })
-
-        var didChange = false
-        let updatedSpeakers = transcript.speakers.map { speaker -> AgentSpeaker in
-            guard let update = updatesBySpeakerId[speaker.id] else { return speaker }
-            if speaker.persistentSpeakerId == update.persistentSpeakerId, speaker.name == update.newName {
-                return speaker
-            }
-
-            didChange = true
-            return AgentSpeaker(
-                id: speaker.id,
-                persistentSpeakerId: update.persistentSpeakerId,
-                name: update.newName,
-                confidence: speaker.confidence,
-                wordCount: speaker.wordCount,
-                speakingSeconds: speaker.speakingSeconds
-            )
-        }
-
-        guard didChange else { return }
-
-        let updatedTranscript = AgentTranscript(
-            version: transcript.version,
-            transcriptId: transcript.transcriptId,
-            recording: transcript.recording,
-            speakers: updatedSpeakers,
-            utterances: transcript.utterances
-        )
-
-        writeAgentTranscript(updatedTranscript, to: sidecarURL)
-    }
-
-    private static func updateAgentSidecars(
-        in directory: URL,
-        persistentIdRemap: [UUID: UUID] = [:],
-        nameOverrides: [UUID: String] = [:]
-    ) {
-        let fm = FileManager.default
-        guard let sidecars = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter({
-                $0.pathExtension == "json"
-                    && $0.lastPathComponent != "transcripted.json"
-                    && $0.lastPathComponent != "failed_transcriptions.json"
-            }) else { return }
-
-        let decoder = JSONDecoder()
-        for sidecarURL in sidecars {
-            guard let data = try? Data(contentsOf: sidecarURL),
-                  let transcript = try? decoder.decode(AgentTranscript.self, from: data) else { continue }
-
-            var didChange = false
-            let updatedSpeakers = transcript.speakers.map { speaker -> AgentSpeaker in
-                guard let persistentSpeakerId = speaker.persistentSpeakerId.flatMap(UUID.init(uuidString:)) else {
-                    return speaker
-                }
-
-                let resolvedPersistentId = persistentIdRemap[persistentSpeakerId] ?? persistentSpeakerId
-                let resolvedName = nameOverrides[resolvedPersistentId] ?? speaker.name
-
-                guard resolvedPersistentId != persistentSpeakerId || resolvedName != speaker.name else {
-                    return speaker
-                }
-
-                didChange = true
-                return AgentSpeaker(
-                    id: speaker.id,
-                    persistentSpeakerId: resolvedPersistentId.uuidString,
-                    name: resolvedName,
-                    confidence: speaker.confidence,
-                    wordCount: speaker.wordCount,
-                    speakingSeconds: speaker.speakingSeconds
-                )
-            }
-
-            guard didChange else { continue }
-
-            let updatedTranscript = AgentTranscript(
-                version: transcript.version,
-                transcriptId: transcript.transcriptId,
-                recording: transcript.recording,
-                speakers: updatedSpeakers,
-                utterances: transcript.utterances
-            )
-            writeAgentTranscript(updatedTranscript, to: sidecarURL)
-        }
-    }
-
-    private static func writeAgentTranscript(_ transcript: AgentTranscript, to url: URL) {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-
-        guard let data = try? encoder.encode(transcript) else { return }
-        try? data.write(to: url, options: .atomic)
-        FileManager.default.restrictToOwnerOnly(atPath: url.path)
-    }
-
-    private static func rebuildAgentIndexIfNeeded(in directory: URL, speakerStore: (any SpeakerStore)?) {
-        guard let speakerStore else { return }
-        try? AgentOutput.writeIndex(to: directory, speakerStore: speakerStore)
-    }
 }
 
 enum SpeakerBreakdownConsolidator {

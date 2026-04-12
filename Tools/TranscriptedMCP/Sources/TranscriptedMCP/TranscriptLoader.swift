@@ -1,14 +1,14 @@
 import Foundation
 
-enum ContextSidecarKind {
+enum ContextArtifactKind {
     case meeting
     case dictationDay
 }
 
-struct ContextSidecarFile {
+struct ContextArtifactFile {
     let url: URL
     let modDate: TimeInterval
-    let kind: ContextSidecarKind
+    let kind: ContextArtifactKind
 }
 
 private struct MarkdownFrontmatter {
@@ -152,7 +152,7 @@ enum TranscriptLoader {
         )
     }
 
-    static func sidecarKind(for url: URL) -> ContextSidecarKind? {
+    static func artifactKind(for url: URL) -> ContextArtifactKind? {
         guard url.pathExtension == "md" else { return nil }
 
         let filename = url.deletingPathExtension().lastPathComponent
@@ -162,7 +162,7 @@ enum TranscriptLoader {
         return .meeting
     }
 
-    static func enumerateSidecars(in directory: URL) -> [ContextSidecarFile] {
+    static func enumerateArtifacts(in directory: URL) -> [ContextArtifactFile] {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(
             at: directory,
@@ -173,10 +173,10 @@ enum TranscriptLoader {
 
         return files.compactMap { url in
             guard case .valid(let safeURL) = PathSecurity.validateExistingFile(url, under: directory),
-                  let kind = sidecarKind(for: safeURL) else { return nil }
+                  let kind = artifactKind(for: safeURL) else { return nil }
             let modDate = (try? safeURL.resourceValues(forKeys: [.contentModificationDateKey])
                 .contentModificationDate?.timeIntervalSince1970) ?? 0
-            return ContextSidecarFile(url: safeURL, modDate: modDate, kind: kind)
+            return ContextArtifactFile(url: safeURL, modDate: modDate, kind: kind)
         }
     }
 

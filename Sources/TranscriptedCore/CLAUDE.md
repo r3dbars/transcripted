@@ -14,8 +14,8 @@
 - `Services/` (7 files) — DI container (`AppServices`), model bundle / download management, path indirection, recording validation, diarization, and failed-transcription persistence
 - `Speaker/` (10 files) — speaker DB, embedding matching / clustering, clip extraction, naming policy / coordinator, profile merging, retroactive transcript updates
 - `Stats/` (4 files) — recording stats database, models, queries, and service
-- `Storage/` (4 files) — transcript save, scanner, formatter, JSON sidecar output
-- `Utilities/` (2 files) — date formatting and file permission helpers
+- `Storage/` (3 files) — transcript save, scanner, formatter
+- `Utilities/` (3 files) — date formatting, legacy folder cleanup, and file permission helpers
 
 ## The seams embedders should know
 
@@ -47,11 +47,7 @@ The app still injects app-specific `CoreStoragePaths` for meetings so the
 capture folder follows the selected capture library rather than a hard-coded
 default path.
 
-`TranscriptSaver.saveTranscript(...)` also writes:
-
-- a markdown transcript
-- an agent JSON sidecar
-- an index file
+`TranscriptSaver.saveTranscript(...)` writes a markdown transcript.
 
 ## Editing rules
 

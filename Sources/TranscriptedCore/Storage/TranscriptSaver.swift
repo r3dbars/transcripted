@@ -156,39 +156,11 @@ public class TranscriptSaver {
             healthInfo: healthInfo
         )
 
-        let artifactSpeakerStore = speakerStore ?? SpeakerDatabase.shared
-
         // Serialize file writes to prevent concurrent corruption with retroactive speaker updates
         let savedURL: URL? = fileUpdateQueue.sync {
             do {
                 try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
                 FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
-
-                let stem = fileURL.deletingPathExtension().lastPathComponent
-                do {
-                    try AgentOutput.writeTranscriptJSON(
-                        from: result,
-                        transcriptId: transcriptId,
-                        speakerMappings: speakerMappings,
-                        speakerDbIds: speakerDbIds,
-                        to: saveDir,
-                        stem: stem
-                    )
-                } catch {
-                    AppLogger.pipeline.error("Failed to write agent JSON sidecar", [
-                        "error": error.localizedDescription,
-                        "file": "\(stem).json"
-                    ])
-                }
-
-                do {
-                    try AgentOutput.writeIndex(to: saveDir, speakerStore: artifactSpeakerStore)
-                } catch {
-                    AppLogger.pipeline.error("Failed to write agent index", [
-                        "error": error.localizedDescription,
-                        "file": "transcripted.json"
-                    ])
-                }
 
                 AppLogger.pipeline.info("Transcript saved", ["path": fileURL.path])
 

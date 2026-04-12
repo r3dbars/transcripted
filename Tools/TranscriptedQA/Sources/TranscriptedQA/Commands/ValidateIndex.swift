@@ -4,7 +4,7 @@ import Foundation
 struct ValidateIndex: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "validate-index",
-        abstract: "Validate transcripted.json index file cross-references."
+        abstract: "Validate the legacy transcripted.json index file if it exists."
     )
 
     @OptionGroup var pathOpts: PathOptions

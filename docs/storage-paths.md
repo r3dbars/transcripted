@@ -33,8 +33,6 @@ Meeting captures live under:
 The meetings capture folder contains user-facing artifacts:
 
 - markdown transcripts: `<capture-library>/meetings/*.md`
-- JSON sidecars: `<capture-library>/meetings/*.json`
-- meeting index: `<capture-library>/meetings/transcripted.json`
 
 App-owned meeting state is stored separately under:
 

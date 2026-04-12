@@ -37,10 +37,6 @@ Current local folders:
 - meetings: `~/Library/Application Support/Transcripted/captures/meetings`
 - dictations: `~/Library/Application Support/Transcripted/captures/dictations`
 
-The meetings folder also contains:
-
-- `transcripted.json` — index of saved meeting transcripts
-
 ## Optional: MCP
 
 Use MCP when your client supports it and you want direct read-only tools instead

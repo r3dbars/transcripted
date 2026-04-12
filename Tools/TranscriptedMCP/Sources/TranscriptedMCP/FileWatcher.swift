@@ -65,7 +65,7 @@ final class FileWatcher: @unchecked Sendable {
     }
 
     private func scanForChanges() {
-        let files = TranscriptLoader.enumerateSidecars(in: directory)
+        let files = TranscriptLoader.enumerateArtifacts(in: directory)
 
         for file in files {
             let filename = file.url.deletingPathExtension().lastPathComponent

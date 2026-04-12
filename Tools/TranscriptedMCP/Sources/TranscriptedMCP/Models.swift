@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - JSON Sidecar Input Types (copied from AgentOutput.swift)
+// MARK: - Transcript Context Types
 
 struct AgentTranscript: Codable {
     let version: String

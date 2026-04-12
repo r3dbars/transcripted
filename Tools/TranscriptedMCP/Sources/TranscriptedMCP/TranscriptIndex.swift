@@ -179,12 +179,12 @@ final class TranscriptIndex: @unchecked Sendable {
 
     func reconcile(meetingsDir: URL, dictationsDir: URL) throws {
         try queue.sync {
-            let diskFiles: [ContextSidecarFile]
+            let diskFiles: [ContextArtifactFile]
             if meetingsDir.standardizedFileURL == dictationsDir.standardizedFileURL {
-                diskFiles = TranscriptLoader.enumerateSidecars(in: meetingsDir)
+                diskFiles = TranscriptLoader.enumerateArtifacts(in: meetingsDir)
             } else {
-                diskFiles = TranscriptLoader.enumerateSidecars(in: meetingsDir)
-                    + TranscriptLoader.enumerateSidecars(in: dictationsDir)
+                diskFiles = TranscriptLoader.enumerateArtifacts(in: meetingsDir)
+                    + TranscriptLoader.enumerateArtifacts(in: dictationsDir)
             }
             let diskMap = Dictionary(uniqueKeysWithValues: diskFiles.map {
                 ($0.url.deletingPathExtension().lastPathComponent, $0)
@@ -212,7 +212,7 @@ final class TranscriptIndex: @unchecked Sendable {
 
     func indexSingleFile(_ url: URL) throws {
         try queue.sync {
-            guard let kind = TranscriptLoader.sidecarKind(for: url) else { return }
+            guard let kind = TranscriptLoader.artifactKind(for: url) else { return }
             let filename = url.deletingPathExtension().lastPathComponent
             try reindex(file: url, filename: filename, kind: kind)
         }
@@ -238,7 +238,7 @@ final class TranscriptIndex: @unchecked Sendable {
         return result
     }
 
-    private func indexOne(file url: URL, filename: String, modDate: TimeInterval, kind: ContextSidecarKind) throws {
+    private func indexOne(file url: URL, filename: String, modDate: TimeInterval, kind: ContextArtifactKind) throws {
         switch kind {
         case .meeting:
             try indexMeeting(file: url, filename: filename, modDate: modDate)
@@ -339,7 +339,7 @@ final class TranscriptIndex: @unchecked Sendable {
         log("Indexed dictation day: \(filename) (\(day.entries.count) entries)")
     }
 
-    private func reindex(file url: URL, filename: String, kind: ContextSidecarKind) throws {
+    private func reindex(file url: URL, filename: String, kind: ContextArtifactKind) throws {
         try removeFromIndex(filename: filename)
         let modDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey])
             .contentModificationDate?.timeIntervalSince1970) ?? Date().timeIntervalSince1970

@@ -303,8 +303,6 @@ enum MeetingTranscriptStyler {
 
         do {
             try fm.moveItem(at: url, to: targetURL)
-            renameSiblingJSONIfNeeded(in: url.deletingLastPathComponent(), fromStem: url.deletingPathExtension().lastPathComponent, toStem: targetURL.deletingPathExtension().lastPathComponent)
-            updateAgentIndexIfNeeded(in: url.deletingLastPathComponent(), fromStem: url.deletingPathExtension().lastPathComponent, toStem: targetURL.deletingPathExtension().lastPathComponent)
             return targetURL
         } catch {
             return url
@@ -341,49 +339,6 @@ enum MeetingTranscriptStyler {
             candidateStem = "\(preferredStem) \(suffix)"
             suffix += 1
         }
-    }
-
-    private static func renameSiblingJSONIfNeeded(in directory: URL, fromStem: String, toStem: String) {
-        guard fromStem != toStem else { return }
-
-        let fm = FileManager.default
-        let originalURL = directory.appendingPathComponent(fromStem).appendingPathExtension("json")
-        let targetURL = directory.appendingPathComponent(toStem).appendingPathExtension("json")
-
-        guard fm.fileExists(atPath: originalURL.path),
-              !fm.fileExists(atPath: targetURL.path) else { return }
-
-        try? fm.moveItem(at: originalURL, to: targetURL)
-    }
-
-    private static func updateAgentIndexIfNeeded(in directory: URL, fromStem: String, toStem: String) {
-        guard fromStem != toStem else { return }
-
-        let indexURL = directory.appendingPathComponent("transcripted.json")
-        guard let data = try? Data(contentsOf: indexURL),
-              var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              var transcripts = json["transcripts"] as? [[String: Any]] else {
-            return
-        }
-
-        var didChange = false
-        for idx in transcripts.indices {
-            guard let filename = transcripts[idx]["filename"] as? String,
-                  filename == fromStem else {
-                continue
-            }
-            transcripts[idx]["filename"] = toStem
-            didChange = true
-        }
-
-        guard didChange else { return }
-
-        json["transcripts"] = transcripts
-        guard let updated = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) else {
-            return
-        }
-
-        try? updated.write(to: indexURL, options: .atomic)
     }
 }
 

@@ -4,7 +4,7 @@ import Foundation
 struct ValidateArtifacts: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "validate-artifacts",
-        abstract: "Validate .json sidecar files for schema and consistency."
+        abstract: "Validate optional legacy JSON artifacts for schema and consistency."
     )
 
     @OptionGroup var pathOpts: PathOptions

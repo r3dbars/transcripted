@@ -41,8 +41,6 @@
 Meeting capture artifacts live under `<capture-library>/meetings/`:
 
 - `*.md`
-- `*.json`
-- `transcripted.json`
 
 App-owned meeting state lives under `~/Library/Application Support/Transcripted/state/`:
 

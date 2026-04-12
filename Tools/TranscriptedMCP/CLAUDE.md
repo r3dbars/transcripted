@@ -52,7 +52,7 @@ Path overrides:
 | `TranscriptIndexTests.swift` | Full index lifecycle: reconcile, query, date filters, speaker search, and mixed-context indexing |
 | `TranscriptLoaderTests.swift` | Markdown and YAML frontmatter parsing edge cases, including path-safety checks |
 | `NameVariantsTests.swift` | Name variant matching accuracy |
-| `TestHelpers.swift` | Shared fixture builders for sample sidecars and temp directories |
+| `TestHelpers.swift` | Shared fixture builders for sample transcripts and temp directories |
 
 ## MCP Tools
 
@@ -73,13 +73,11 @@ All tools are read-only.
 ## Data Flow
 
 ```text
-meetings/*.json + dictations/*.json
+meetings/*.md + dictations/*.md
+  -> TranscriptLoader direct reads for read_meeting and read_dictation
   -> TranscriptIndex.reconcile() on startup
   -> FileWatcher incremental updates on change
   -> SQLite index
-
-meetings/*.md + dictations/*.md
-  -> TranscriptLoader direct reads for read_meeting and read_dictation
 ```
 
 ## Index Shape
@@ -121,7 +119,7 @@ Binary path after build:
 
 ## Relationships
 
-- reads meeting sidecars written by `Sources/TranscriptedCore/Storage/AgentOutput.swift`
+- reads meeting markdown transcripts written by `Sources/TranscriptedCore/Storage/TranscriptSaver.swift`
 - reads dictation markdown day files written by `Sources/Dictation/DictationTranscriptWriter.swift`
 - mirrors speaker-name matching logic from the app with `NameVariants.swift`
 - has no compile-time dependency on the main Transcripted app target

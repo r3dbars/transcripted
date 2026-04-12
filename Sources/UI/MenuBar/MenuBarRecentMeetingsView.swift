@@ -50,9 +50,9 @@ enum RecentMeetingsScanner {
             return false
         }
 
-        let sidecarURL = url.deletingPathExtension().appendingPathExtension("json")
-        if fileManager.fileExists(atPath: sidecarURL.path) {
-            return true
+        if let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
+           values.isRegularFile == false {
+            return false
         }
 
         guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return false }

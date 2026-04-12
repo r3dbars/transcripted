@@ -36,15 +36,15 @@ final class TranscriptLoaderTests: XCTestCase {
         XCTAssertNil(transcript)
     }
 
-    func testEnumerateSidecars() throws {
+    func testEnumerateArtifacts() throws {
         try writeFixture(makeFixtureJSON(), filename: "Call_2026-03-29_10-00-00", to: tempDir)
         try writeFixture(makeFixtureJSON(), filename: "Call_2026-03-30_10-00-00", to: tempDir)
         try writeFixture(makeDictationDayJSON(), filename: "Dictations_2026-04-07", to: tempDir)
         try "other file".data(using: .utf8)!.write(to: tempDir.appendingPathComponent("notes.json"))
         try "not json".data(using: .utf8)!.write(to: tempDir.appendingPathComponent("readme.txt"))
 
-        let sidecars = TranscriptLoader.enumerateSidecars(in: tempDir)
-        XCTAssertEqual(sidecars.count, 3)
+        let artifacts = TranscriptLoader.enumerateArtifacts(in: tempDir)
+        XCTAssertEqual(artifacts.count, 3)
     }
 
     func testLoadDictationDayMarkdown() throws {
@@ -56,7 +56,7 @@ final class TranscriptLoaderTests: XCTestCase {
         XCTAssertEqual(day?.entries.first?.title, "Morning note")
     }
 
-    func testEnumerateSidecarsSkipsSymlinkedFiles() throws {
+    func testEnumerateArtifactsSkipsSymlinkedFiles() throws {
         let outsideDir = makeTempDir()
         defer { removeTempDir(outsideDir) }
 
@@ -66,8 +66,8 @@ final class TranscriptLoaderTests: XCTestCase {
         let symlinkURL = tempDir.appendingPathComponent("Call_2026-03-29_10-00-00.md")
         try FileManager.default.createSymbolicLink(at: symlinkURL, withDestinationURL: outsideFile)
 
-        let sidecars = TranscriptLoader.enumerateSidecars(in: tempDir)
-        XCTAssertTrue(sidecars.isEmpty)
+        let artifacts = TranscriptLoader.enumerateArtifacts(in: tempDir)
+        XCTAssertTrue(artifacts.isEmpty)
     }
 
     func testResolveReadableFileRejectsSymlinkEscape() throws {

@@ -227,8 +227,8 @@ extension Transcription {
 
                 // Ghost speakers have unreliable embeddings (laughter, coughs, codec artifacts).
                 // Prefer force-merging into the closest real speaker, but if every detected
-                // speaker is a ghost we still need a persistent UUID for transcript sidecars
-                // and later naming updates, so fall back to creating a best-effort profile.
+                // speaker is a ghost we still need a persistent UUID for later transcript
+                // metadata updates, so fall back to creating a best-effort profile.
                 if isGhost {
                     var bestNonGhostId: Int?
                     var bestSimilarity: Double = -1
