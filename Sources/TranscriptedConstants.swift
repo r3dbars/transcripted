@@ -10,14 +10,6 @@ enum TranscriptedConstants {
 
     static let appPipelineVersion = 2
 
-    // MARK: - Generation
-
-    /// Default max tokens for draft responses
-    static let draftMaxTokens = 1024
-
-    /// Max tokens for analysis calls
-    static let analysisMaxTokens = 2048
-
     // MARK: - Audio & Speech
 
     /// Audio buffer pre-allocation capacity in seconds
@@ -78,33 +70,6 @@ enum TranscriptedConstants {
     /// Clipboard restore timeout in seconds
     static let clipboardRestoreTimeout: Double = 2.0
 
-    // MARK: - Style & Refinement
-
-    /// Edit distance threshold — below this, profile is "working well" (refine less often)
-    static let editDistanceStabilizedThreshold: Double = 0.25
-
-    /// Number of recent examples to send for style refinement (8 keeps within 4B model's effective attention)
-    static let refinementExampleWindow = 8
-
-    /// Number of recent edit distances to check for stabilization
-    static let refinementDistanceWindow = 10
-
-    // MARK: - Analysis Engine
-
-    /// Debounce window for feedback file watcher (seconds)
-    static let analysisDebounceSeconds: Double = 30.0
-
-    /// Minimum feedback entries before triggering analysis
-    static let analysisMinFeedbackEntries = 5
-
-    // MARK: - Data Limits
-
-    /// Recent feedback lines for analysis engine
-    static let analysisFeedbackLines = 50
-
-    /// Recent suggestion lines for analysis engine
-    static let analysisSuggestionLines = 20
-
     // MARK: - Debug Logging
 
     /// Debug log rotation threshold in bytes
@@ -138,48 +103,6 @@ enum TranscriptedConstants {
     /// Minimum interval between accepted hotkey actions.
     /// Prevents rapid repeat presses from racing session state transitions.
     static let hotkeyActionDebounceInterval: TimeInterval = 0.2
-
-    // MARK: - Training Toast
-
-    /// Duration to show training toast after accepting an edited draft (nanoseconds)
-    static let trainingToastDuration: UInt64 = 2_500_000_000  // 2.5 seconds
-
-    /// Fade-out animation duration for the training toast (seconds)
-    static let trainingToastFadeDuration: Double = 0.3
-
-    /// Vertical gap between the overlay panel and the training toast (points)
-    static let trainingToastOffset: CGFloat = 8
-
-    // MARK: - Local Inference
-
-    /// Max tokens for local style refinement
-    static let localRefinementMaxTokens = 2048
-
-    /// Max tokens for local bulk analysis during onboarding
-    static let localBulkAnalysisMaxTokens = 2048
-
-    /// OCR text truncation limit (total characters kept from screenshot)
-    static let ocrMaxCharacters = 3000
-
-    /// OCR header prefix to keep (app chrome, contact name)
-    static let ocrHeaderCharacters = 500
-
-    /// OCR recent suffix to keep (latest messages)
-    static let ocrRecentCharacters = 2500
-
-    // MARK: - Gemini API
-
-    /// Gemini API base URL
-    static let geminiBaseURL = "https://generativelanguage.googleapis.com/v1beta"
-
-    /// Gemini model identifier
-    static let geminiModel = "gemini-3-flash"
-
-    /// Timeout for Gemini API requests (seconds)
-    static let geminiRequestTimeout: TimeInterval = 30.0
-
-    /// Max tokens for Gemini draft responses
-    static let geminiDraftMaxTokens = 1024
 
     // MARK: - Async Utilities
 

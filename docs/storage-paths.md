@@ -52,10 +52,15 @@ and then injected into `TranscriptedCore` through `CoreStoragePaths`.
 
 ## Logs And Events
 
-Observability output currently lives under:
+App-side observability output currently lives under:
 
 - debug log: `~/Library/Application Support/Transcripted/logs/debug.log`
 - events: `~/Library/Application Support/Transcripted/logs/events.jsonl`
+
+The embedded `TranscriptedCore` logger also writes JSONL under the same logs
+directory:
+
+- core pipeline log: `~/Library/Application Support/Transcripted/logs/app.jsonl`
 
 ## `TranscriptedCore` Defaults
 
@@ -76,4 +81,4 @@ The standalone tools do not all resolve paths the same way:
 
 - `TranscriptedCLI` prefers `~/Library/Application Support/Transcripted/captures/{meetings,dictations}/`, then falls back to legacy Draft `.../transcripts/` folders, then `~/Documents/Transcripted/`
 - `TranscriptedMCP` follows the same Transcripted -> Draft -> `~/Documents/Transcripted/` order and keeps its SQLite index under `~/Library/Application Support/Transcripted/cache/` by default
-- `TranscriptedQA` now defaults to the current Transcripted meetings/state/log layout, falls back to legacy Draft and then `~/Documents/Transcripted/`, and accepts explicit `--path`, `--state-dir`, and `--log-path` overrides for nonstandard setups
+- `TranscriptedQA` now defaults to the current Transcripted meetings/state/log layout, uses `~/Library/Application Support/Transcripted/logs/app.jsonl` for log validation, falls back to legacy Draft and then `~/Documents/Transcripted/`, and accepts explicit `--path`, `--state-dir`, and `--log-path` overrides for nonstandard setups
