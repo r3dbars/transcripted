@@ -63,10 +63,16 @@ swift run transcripted-cli list-dictations --count 5
 swift run transcripted-cli diarize /path/to/audio.wav --json
 ```
 
+When the repo-level dependency bundle is missing, `swift build` still builds the
+local context commands so agent retrieval can work on a fresh checkout. The
+offline audio commands (`diarize` and `batch`) then exit with an explicit
+instruction to run `bash build-deps.sh` from the repo root before rebuilding.
+
 ## Gotchas
 
 - the context commands and the diarization commands serve different users, do not describe the whole package as diarization-only
 - the diarization commands depend on repo-level artifacts, so run `bash build-deps.sh` first when those are missing
+- retrieval-only commands should still build and run even when the diarization bundle is absent
 - the default context resolver prefers Transcripted capture folders, then falls back to Draft-era exports, then `~/Documents/Transcripted/`
 - `DiarizerConfigCompatibility.swift` currently keeps old bounded-speaker call sites compiling; it does not reintroduce upstream behavior by itself
 - changes here should be verified independently from the app build

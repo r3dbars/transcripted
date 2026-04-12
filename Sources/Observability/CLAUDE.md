@@ -44,3 +44,4 @@ Useful files while testing:
 
 - `~/Library/Application Support/Transcripted/logs/debug.log`
 - `~/Library/Application Support/Transcripted/logs/events.jsonl`
+- `~/Library/Application Support/Transcripted/logs/app.jsonl` for embedded `TranscriptedCore` JSONL logs and QA validation

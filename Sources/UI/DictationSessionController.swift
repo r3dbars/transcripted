@@ -378,6 +378,15 @@ class DictationSessionController: ObservableObject {
                 appState.logger.log("DICTATION | no transcription, cancelling")
                 EventReporter.shared.capture(level: .warning, engine: "overlay", event: "no_voice_input",
                     message: "Dictation transcription empty")
+                AnalyticsReporter.track(
+                    "dictation_no_speech",
+                    properties: [
+                        "duration_bucket": AnalyticsReporter.durationBucket(
+                            seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime
+                        ),
+                        "trigger": currentDictationTrigger.rawValue,
+                    ]
+                )
                 AppSoundPlayer.shared.play(.noSpeech)
                 overlayController.showNoSpeechAndDismiss()
                 isDictating = false

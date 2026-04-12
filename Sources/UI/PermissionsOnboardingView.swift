@@ -198,7 +198,6 @@ struct PermissionsOnboardingView: View {
     private func updateCrashReportingPreference(_ enabled: Bool) {
         crashReportingEnabled = enabled
         CrashReportingPreferences.setEnabled(enabled)
-        CrashReporter.shared.refreshPreference()
     }
 
     private func updateAnalyticsPreference(_ enabled: Bool) {

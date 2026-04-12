@@ -20,7 +20,7 @@
 8. `Tests/README.md`
 9. `docs/storage-paths.md`
 10. `Sources/Reliability/CLAUDE.md` when touching wake / sleep recovery or hotkey recovery
-11. `Sources/Observability/CLAUDE.md` when touching crash reporting, event forwarding, beta telemetry, or app updates
+11. `Sources/Observability/CLAUDE.md` when touching crash reporting, event forwarding, anonymous analytics, or app updates
 12. `docs/release-packaging.md` when touching packaging, signing, notarization, or user-facing releases
 13. `docs/sparkle-updates.md` when touching app updates or cutting a release users should receive in-app
 
@@ -149,10 +149,16 @@ Rules:
 
 ## Storage
 
-Current persisted data on `main` uses Draft-named compatibility roots:
+Current persisted data on `main` defaults to Transcripted-named Application
+Support roots:
 
-- app support root: `~/Library/Application Support/Draft/`
-- dictations: `~/Library/Application Support/Draft/dictations/`
-- meetings: `~/Library/Application Support/Draft/meetings/`
+- app support root: `~/Library/Application Support/Transcripted/`
+- default capture library: `~/Library/Application Support/Transcripted/captures/`
+- dictations: `~/Library/Application Support/Transcripted/captures/dictations/`
+- meetings: `~/Library/Application Support/Transcripted/captures/meetings/`
+
+The user can relocate the capture library in Settings via
+`transcriptSaveLocation`. App-owned state, cache, logs, and temp files stay
+under `~/Library/Application Support/Transcripted/`.
 
 See `docs/storage-paths.md` for the full map, including `TranscriptedCore` standalone defaults.

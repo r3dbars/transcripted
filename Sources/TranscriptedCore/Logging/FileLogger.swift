@@ -26,10 +26,10 @@ final class FileLogger: @unchecked Sendable {
         return f
     }()
 
-    init(paths: CoreStoragePaths = .default) {
+    init(paths: CoreStoragePaths = .default, isDisabledOverride: Bool? = nil) {
         // Disable file logging during test runs to avoid polluting production logs
         let isTestRun = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-        self.isDisabled = isTestRun
+        self.isDisabled = isDisabledOverride ?? isTestRun
 
         let logsDir = paths.logs
         try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
@@ -88,6 +88,7 @@ final class FileLogger: @unchecked Sendable {
             // when multiple app instances write to the same log file simultaneously
             let fd = handle.fileDescriptor
             flock(fd, LOCK_EX)
+            handle.seekToEndOfFile()
             handle.write(data)
             flock(fd, LOCK_UN)
         }
