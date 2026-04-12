@@ -114,6 +114,7 @@ APP_SOURCES=(
     "Sources/TranscriptedConstants.swift"
     "Sources/Speech/ParakeetShortAudioGate.swift"
     "Sources/Speech/RecordedAudioTimeline.swift"
+    "Sources/Meeting/MeetingFailureCopy.swift"
     "Sources/Meeting/MeetingPromptHeuristics.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/Observability/AnalyticsReporter.swift"
