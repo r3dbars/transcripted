@@ -6,10 +6,11 @@
 
 ## Important file
 
-- `BetaConfig.swift` — `#if BETA_BUILD` constants for proxy token, proxy base URL, app version, and update URL
+- `BetaConfig.swift` — `#if BETA_BUILD` constants for proxy token and proxy base URL
 
 ## Notes
 
 - the core dictation and meeting flows do not depend on a live app-side API client here
+- the current app no longer consumes `/config`-driven version or update fields from the archived beta worker
 - networked beta behavior lives mostly in `Sources/Observability/`
 - older docs mentioning `GeminiEngine`, keychain helpers, or chat-drafting HTTP paths do not match the current tree

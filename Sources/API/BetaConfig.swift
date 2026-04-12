@@ -11,15 +11,8 @@ enum BetaConfig {
     /// build-beta.sh replaces BETA_TOKEN_PLACEHOLDER with the actual token.
     static let userToken = "BETA_TOKEN_PLACEHOLDER"
 
-    /// Proxy base URL — telemetry events and log shipping route through here
+    /// Proxy base URL for beta-only telemetry and proxy traffic.
     static let proxyBaseURL = "https://draft-proxy.tz427gsydr.workers.dev"
-
-    /// Current app version — compared against /config min_version to prompt updates.
-    /// Bump this in each release. build-beta.sh can also inject it via sed.
-    static let appVersion = "1.0.3"
-
-    /// Where to download the latest DMG (GitHub Releases or similar)
-    static let updateURL = "https://github.com/r3dbars/transcripted/releases/latest"
 }
 
 #endif
