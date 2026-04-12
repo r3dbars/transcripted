@@ -94,7 +94,7 @@ public final class StatsDatabase {
     /// Called on both initial open and corruption-recovery re-open.
     private func configureOpenDatabase() {
         isDatabaseOpen = true
-        FileManager.default.restrictToOwnerOnly(atPath: dbPath.path)
+        FileManager.default.restrictSQLiteArtifactsToOwnerOnly(atPath: dbPath.path)
         // Security: check each PRAGMA return value so a silent failure (e.g. WAL mode refused
         // because another process holds the db) is logged rather than silently misconfiguring
         // the database. Matches the same pattern used in SpeakerDatabase.configureOpenDatabase().
@@ -191,6 +191,7 @@ public final class StatsDatabase {
         executeSQL(createDailyActivityTable)
         executeSQL(createDateIndex)
         executeSQL(createDateTimeIndex)
+        FileManager.default.restrictSQLiteArtifactsToOwnerOnly(atPath: dbPath.path)
     }
 
     func executeSQL(_ sql: String) {

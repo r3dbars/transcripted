@@ -46,6 +46,8 @@ PostHog controls described below.
    `~/Library/Application Support/Transcripted/observability-overrides.plist`
    and set `TranscriptedPostHogAPIKey` there so the token never lands in git
    history. The older Draft path is still read as a fallback.
+   history. The app still falls back to the legacy Draft path if you already
+   have `~/Library/Application Support/Draft/observability-overrides.plist`.
 5. Run `bash build-deps.sh --force` once to download the pinned Sentry and
    Sparkle frameworks.
 6. Run `bash build.sh` and `bash run-tests.sh`.
@@ -63,6 +65,7 @@ PostHog controls described below.
 - `dictation_started`
 - `dictation_completed`
 - `dictation_cancelled`
+- `dictation_no_speech`
 - `meeting_recording_started`
 - `meeting_recording_stopped`
 - `meeting_transcript_saved`

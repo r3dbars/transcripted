@@ -43,6 +43,13 @@ struct AnalyticsEventPolicy: Equatable {
                 "trigger",
             ]
         ),
+        "dictation_no_speech": .init(
+            name: "dictation_no_speech",
+            allowedProperties: [
+                "duration_bucket",
+                "trigger",
+            ]
+        ),
         "meeting_recording_started": .init(
             name: "meeting_recording_started",
             allowedProperties: [

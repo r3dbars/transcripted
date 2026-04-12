@@ -2,17 +2,16 @@
 
 ## Test Surfaces
 
-This repo has three distinct verification layers:
+This repo has four distinct verification layers:
 
 1. `bash run-tests.sh`
    Curated fast test runner built with raw `swiftc`
-2. `swift test`
-   Swift Package tests for the standalone `TranscriptedCore` package surface
-3. `bash run-integration-smoke.sh`
+2. `bash run-integration-smoke.sh`
    App-to-core linkage smoke test
-
-`bash build.sh` is also part of normal verification because the app build is
-not driven by Xcode or package test discovery.
+3. `swift test`
+   Swift Package tests for the standalone `TranscriptedCore` package surface
+4. `bash build.sh`
+   Authoritative app build for the menubar target
 
 ## Fast Test Runner
 
@@ -46,6 +45,8 @@ Use this when changing:
 
 `bash run-integration-smoke.sh` verifies that the app-side dependency bundle
 still exposes the `TranscriptedCore` types that `Sources/Meeting/` depends on.
+It also runs the wake-recovery smoke binary and currently finishes with
+`swift test --filter MicRecordingFileMergerTests`.
 
 The smoke sources now live under `Tests/Integration/` so the repo’s verification
 surface stays under one top-level `Tests/` umbrella.

@@ -109,6 +109,10 @@ Current app builds on `main` default to Transcripted-named Application Support p
 - meetings: `~/Library/Application Support/Transcripted/captures/meetings/`
 - dictations: `~/Library/Application Support/Transcripted/captures/dictations/`
 
+The user can relocate the capture library in Settings via
+`transcriptSaveLocation`. App-owned state, cache, logs, and temp files stay
+under `~/Library/Application Support/Transcripted/`.
+
 Historic `Draft` paths still exist for migration and standalone-tool fallback.
 
 See `docs/storage-paths.md` for the canonical storage map, including legacy fallbacks and `TranscriptedCore` standalone defaults.
