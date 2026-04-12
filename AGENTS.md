@@ -20,7 +20,7 @@
 8. `Tests/README.md`
 9. `docs/storage-paths.md`
 10. `Sources/Reliability/CLAUDE.md` when touching wake / sleep recovery or hotkey recovery
-11. `Sources/Observability/CLAUDE.md` when touching crash reporting, event forwarding, beta telemetry, or app updates
+11. `Sources/Observability/CLAUDE.md` when touching crash reporting, event forwarding, anonymous analytics, or app updates
 12. `docs/release-packaging.md` when touching packaging, signing, notarization, or user-facing releases
 13. `docs/sparkle-updates.md` when touching app updates or cutting a release users should receive in-app
 

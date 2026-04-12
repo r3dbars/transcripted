@@ -121,7 +121,7 @@ Binary path after build:
 ## Relationships
 
 - reads meeting sidecars written by `Sources/TranscriptedCore/Storage/AgentOutput.swift`
-- reads dictation sidecars written by `Sources/Dictation/DictationAgentOutput.swift`
+- reads dictation day files written by `Sources/Dictation/DictationTranscriptWriter.swift`
 - mirrors speaker-name matching logic from the app with `NameVariants.swift`
 - has no compile-time dependency on the main Transcripted app target
 

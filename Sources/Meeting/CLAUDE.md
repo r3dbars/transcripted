@@ -15,6 +15,7 @@
 - `MeetingSessionController.swift` — top-level meeting state machine, model warmup, capture start/stop, queued transcription handoff, failed-meeting actions, and transcript restyling
 - `MeetingStoragePaths.swift` — current split meeting storage layout across the capture library, app state, logs, and temp folders
 - `MeetingTranscriptStyler.swift` — restyles saved transcripts and renames files after save
+- `TranscriptSaver+AppSpeakerMaintenance.swift` — app-side `TranscriptSaver` extension for settings-driven speaker rename flows
 
 ## End-to-end flow
 
