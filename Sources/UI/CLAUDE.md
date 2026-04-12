@@ -13,7 +13,7 @@
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (40 Swift files)
+## Files (32 Swift files)
 
 ### Dictation Overlay
 
