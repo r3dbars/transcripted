@@ -1,6 +1,6 @@
 import Foundation
 
-private enum AnalyticsRuntimeConfiguration {
+enum AnalyticsRuntimeConfiguration {
     static let apiKeyInfoKey = "TranscriptedPostHogAPIKey"
     static let hostInfoKey = "TranscriptedPostHogHost"
     private static let localOverridesFileName = "observability-overrides.plist"
@@ -21,19 +21,37 @@ private enum AnalyticsRuntimeConfiguration {
         )
     }
 
-    private static func localOverrideValue(forKey key: String) -> String? {
-        guard let overrides = NSDictionary(contentsOf: localOverridesURL) as? [String: Any] else {
-            return nil
-        }
-        return overrides[key] as? String
+    static func localOverrideValue(forKey key: String) -> String? {
+        localOverrideValue(forKey: key, appSupportDirectory: applicationSupportDirectory())
     }
 
-    private static var localOverridesURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+    static func localOverrideValue(forKey key: String, appSupportDirectory: URL) -> String? {
+        for url in localOverridesSearchURLs(appSupportDirectory: appSupportDirectory) {
+            guard let overrides = NSDictionary(contentsOf: url) as? [String: Any] else {
+                continue
+            }
+            if let value = firstNonEmpty(overrides[key] as? String) {
+                return value
+            }
+        }
+
+        return nil
+    }
+
+    static func localOverridesSearchURLs(appSupportDirectory: URL) -> [URL] {
+        [
+            appSupportDirectory
+                .appendingPathComponent("Transcripted", isDirectory: true)
+                .appendingPathComponent(localOverridesFileName),
+            appSupportDirectory
+                .appendingPathComponent("Draft", isDirectory: true)
+                .appendingPathComponent(localOverridesFileName),
+        ]
+    }
+
+    private static func applicationSupportDirectory() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support", isDirectory: true)
-        return appSupport
-            .appendingPathComponent("Draft", isDirectory: true)
-            .appendingPathComponent(localOverridesFileName)
     }
 
     private static func firstNonEmpty(_ candidates: String?...) -> String? {
