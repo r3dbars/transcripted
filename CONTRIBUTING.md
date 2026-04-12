@@ -58,6 +58,8 @@ Build note: `build.sh` is the authoritative app build and uses raw `swiftc`.
 `Package.swift` exists for `TranscriptedCore` compilation and testing, but it
 is not the main app build.
 
+For the current script surface and legacy helpers, see `scripts/README.md`.
+
 ## Product Framing
 
 When you change README copy, onboarding text, or public docs, keep these rules

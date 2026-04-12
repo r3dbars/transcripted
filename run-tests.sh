@@ -107,7 +107,7 @@ $manifest_entries
 EOF
 
 APP_SOURCES=(
-    "Sources/DraftPaths.swift"
+    "Sources/Support/TranscriptedStoragePaths.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"

@@ -1,8 +1,8 @@
-# API
+# Beta
 
 ## Current status
 
-`Sources/API/` currently contains only beta-build configuration.
+`Sources/Beta/` currently contains only beta-build configuration.
 
 ## Important file
 

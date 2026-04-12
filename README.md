@@ -227,6 +227,8 @@ If you touch meeting integration or `TranscriptedCore`, also run:
 bash run-integration-smoke.sh
 ```
 
+For build, release, and legacy helper scripts, see `scripts/README.md`.
+
 ## Transition Notes
 
 The old standalone Transcripted app is preserved on:
@@ -234,13 +236,9 @@ The old standalone Transcripted app is preserved on:
 - branch: `legacy/transcripted-standalone`
 - tag: `pre-draft-takeover-2026-04-06`
 
-This repo currently uses the manual migration path:
+The current app defaults to Transcripted-named storage, while the standalone tools still recognize older Draft and `~/Documents/Transcripted/` layouts as fallback.
 
-- existing standalone Transcripted installs do not auto-upgrade into this app
-- current app builds default to Transcripted-named Application Support paths
-- captures can be relocated in Settings without moving app state or logs
-- standalone tools still recognize older Draft and `~/Documents/Transcripted/` layouts as fallback
-- permissions and settings do not carry over automatically
+See `docs/storage-paths.md` for the canonical path map and migration details.
 
 ## Contributing And Security
 

@@ -1,7 +1,7 @@
 #!/bin/bash
-# run-integration-smoke.sh — Lane B Task #6 verification
+# run-integration-smoke.sh — App/Core smoke verification
 #
-# Compiles and runs SmokeTests/CoreIntegrationSmoke.swift against deps-libs/
+# Compiles and runs SmokeTests/AppCoreIntegrationSmoke.swift against deps-libs/
 # libDraftDeps.a to confirm TranscriptedCore is bundled and the Core types
 # Meeting code depends on (CoreStoragePaths, Audio, DiarizationService,
 # SpeakerDatabase, FailedTranscriptionManager, TranscriptionTaskManager)
@@ -13,22 +13,22 @@
 
 set -e
 
-DRAFT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SMOKE_BIN="$DRAFT_DIR/build/core-integration-smoke"
-WAKE_SMOKE_BIN="$DRAFT_DIR/build/wake-recovery-smoke"
-DEPS_FRAMEWORK_ROOT="$DRAFT_DIR/deps-frameworks"
+REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+SMOKE_BIN="$REPO_ROOT/build/app-core-integration-smoke"
+WAKE_SMOKE_BIN="$REPO_ROOT/build/wake-recovery-integration-smoke"
+DEPS_FRAMEWORK_ROOT="$REPO_ROOT/deps-frameworks"
 ESPEAK_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/ESpeakNG.framework"
 
-if [ ! -f "$DRAFT_DIR/deps-libs/libDraftDeps.a" ] || [ ! -d "$DRAFT_DIR/deps-modules" ] || [ ! -d "$ESPEAK_FRAMEWORK" ]; then
+if [ ! -f "$REPO_ROOT/deps-libs/libDraftDeps.a" ] || [ ! -d "$REPO_ROOT/deps-modules" ] || [ ! -d "$ESPEAK_FRAMEWORK" ]; then
     echo "Dependencies not found — run build-deps.sh first."
     exit 1
 fi
 
-mkdir -p "$DRAFT_DIR/build"
+mkdir -p "$REPO_ROOT/build"
 
 # Build the -I flags for every module directory in deps-modules.
 DEPS_MODULE_FLAGS="-Ideps-modules"
-for dir in "$DRAFT_DIR"/deps-modules/*/; do
+for dir in "$REPO_ROOT"/deps-modules/*/; do
     [ -d "$dir" ] || continue
     case "$(basename "$dir")" in
         *.swiftmodule) continue ;;
@@ -57,8 +57,8 @@ swiftc \
     $DEPS_MODULE_FLAGS \
     $DEPS_FRAMEWORK_FLAGS \
     -Ldeps-libs -lDraftDeps \
-    -Xlinker -rpath -Xlinker "$DRAFT_DIR/deps-frameworks" \
-    "$DRAFT_DIR/SmokeTests/CoreIntegrationSmoke.swift" \
+    -Xlinker -rpath -Xlinker "$REPO_ROOT/deps-frameworks" \
+    "$REPO_ROOT/SmokeTests/AppCoreIntegrationSmoke.swift" \
     -parse-as-library \
     -target arm64-apple-macos14.0 \
     -Xlinker -rpath -Xlinker "$DEPS_FRAMEWORK_ROOT" \
@@ -68,8 +68,8 @@ echo "Compiling wake recovery smoke…"
 swiftc \
     -O \
     -o "$WAKE_SMOKE_BIN" \
-    "$DRAFT_DIR/Sources/Reliability/WakeRecoveryCoordinator.swift" \
-    "$DRAFT_DIR/SmokeTests/WakeRecoverySmoke.swift" \
+    "$REPO_ROOT/Sources/Reliability/WakeRecoveryCoordinator.swift" \
+    "$REPO_ROOT/SmokeTests/WakeRecoveryIntegrationSmoke.swift" \
     -parse-as-library \
     -target arm64-apple-macos14.0 \
     2>&1

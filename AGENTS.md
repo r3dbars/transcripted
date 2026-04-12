@@ -149,10 +149,13 @@ Rules:
 
 ## Storage
 
-Current persisted data on `main` uses Draft-named compatibility roots:
+Current app builds on `main` default to Transcripted-named Application Support paths:
 
-- app support root: `~/Library/Application Support/Draft/`
-- dictations: `~/Library/Application Support/Draft/dictations/`
-- meetings: `~/Library/Application Support/Draft/meetings/`
+- app support root: `~/Library/Application Support/Transcripted/`
+- capture library: `~/Library/Application Support/Transcripted/captures/`
+- meetings: `~/Library/Application Support/Transcripted/captures/meetings/`
+- dictations: `~/Library/Application Support/Transcripted/captures/dictations/`
 
-See `docs/storage-paths.md` for the full map, including `TranscriptedCore` standalone defaults.
+Historic `Draft` paths still exist for migration and standalone-tool fallback.
+
+See `docs/storage-paths.md` for the canonical storage map, including legacy fallbacks and `TranscriptedCore` standalone defaults.

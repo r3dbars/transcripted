@@ -3,7 +3,7 @@
 set -euo pipefail
 
 if [ $# -ne 1 ]; then
-    echo "Usage: bash scripts/generate-sparkle-appcast.sh /path/to/updates-folder"
+    echo "Usage: bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder"
     exit 1
 fi
 

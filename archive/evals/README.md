@@ -16,7 +16,7 @@ The eval script replays your `raw_text` inputs through any model, measures how c
 ## Setup
 
 ```bash
-cd evals
+cd archive/evals
 pip install anthropic   # optional — script uses urllib directly, no deps required
 ```
 

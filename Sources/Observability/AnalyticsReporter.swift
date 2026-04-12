@@ -31,9 +31,19 @@ private enum AnalyticsRuntimeConfiguration {
     private static var localOverridesURL: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support", isDirectory: true)
-        return appSupport
+        let transcriptedURL = appSupport
+            .appendingPathComponent("Transcripted", isDirectory: true)
+            .appendingPathComponent(localOverridesFileName)
+        let draftFallbackURL = appSupport
             .appendingPathComponent("Draft", isDirectory: true)
             .appendingPathComponent(localOverridesFileName)
+        if FileManager.default.fileExists(atPath: transcriptedURL.path) {
+            return transcriptedURL
+        }
+        if FileManager.default.fileExists(atPath: draftFallbackURL.path) {
+            return draftFallbackURL
+        }
+        return transcriptedURL
     }
 
     private static func firstNonEmpty(_ candidates: String?...) -> String? {

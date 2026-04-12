@@ -33,7 +33,7 @@ Future agents should treat this as a release requirement:
 3. Run:
 
 ```bash
-bash scripts/generate-sparkle-appcast.sh /path/to/updates-folder
+bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder
 ```
 
 4. The script copies the generated `appcast.xml` back into `docs/appcast.xml`.

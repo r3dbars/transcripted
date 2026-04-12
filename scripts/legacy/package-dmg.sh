@@ -1,5 +1,5 @@
 #!/bin/bash
-# Package Transcripted.app into a distributable DMG
+# Legacy helper: package Transcripted.app into a simple unsigned DMG
 
 APP_NAME="Transcripted"
 BUILD_DIR="build"
