@@ -3,7 +3,7 @@
 ## What This Does
 
 This directory contains the app's logging, diagnostics, crash reporting,
-anonymous analytics, and update plumbing.
+anonymous analytics, and Sparkle update plumbing.
 
 ## Key Files
 
@@ -19,25 +19,17 @@ anonymous analytics, and update plumbing.
 - `AnalyticsPayloadSanitizer.swift` — strips sensitive analytics properties before send
 - `SentryEventPolicy.swift` — explicit allowlist of non-fatal events permitted to reach Sentry
 - `SentryPayloadSanitizer.swift` — strips obvious sensitive values before Sentry sends
-- `UpdateManager.swift` — beta updater flow
+- `SparkleUpdaterController.swift` — live Sparkle update controller used by the menubar app
 
 ## Current Notes
 
-- Treat this directory as shared infrastructure for the current dictation +
-  meetings app
-- Do not assume older draft/style/analysis event flows are still active just
-  because they appear in historical docs or event logs
-- `build.sh` and beta behavior can affect logs, signing, and permissions during
-  local testing
-- Sentry DSN/config is read from `Info.plist` (`TranscriptedSentryDSN`) or
-  process environment for local testing, and crash reports must stay scrubbed of
-  transcript/audio/title/path data
-- PostHog config is read from `Info.plist` (`TranscriptedPostHogAPIKey`,
-  `TranscriptedPostHogHost`) or process environment (`POSTHOG_API_KEY`,
-  `POSTHOG_HOST`), and anonymous analytics must stay event-allowlisted and
-  bucketed rather than sending raw payloads
-- Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should
-  not automatically assume they are safe to send off-device.
+- Treat this directory as shared infrastructure for the current dictation + meetings app
+- Sparkle is the live in-app update path on `main`; the older beta DMG self-update flow is no longer part of the app target
+- Do not assume older draft/style/analysis event flows are still active just because they appear in historical docs or event logs
+- `build.sh` and beta behavior can affect logs, signing, and permissions during local testing
+- Sentry DSN/config is read from `Info.plist` (`TranscriptedSentryDSN`) or process environment for local testing, and crash reports must stay scrubbed of transcript/audio/title/path data
+- PostHog config is read from `Info.plist` (`TranscriptedPostHogAPIKey`, `TranscriptedPostHogHost`) or process environment (`POSTHOG_API_KEY`, `POSTHOG_HOST`), and anonymous analytics must stay event-allowlisted and bucketed rather than sending raw payloads
+- Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should not automatically assume they are safe to send off-device.
 
 ## Verification
 
@@ -50,5 +42,5 @@ bash run-tests.sh
 
 Useful files while testing:
 
-- `~/draft-debug.log`
-- `~/Library/Application Support/Draft/events.jsonl`
+- `~/Library/Application Support/Transcripted/logs/debug.log`
+- `~/Library/Application Support/Transcripted/logs/events.jsonl`

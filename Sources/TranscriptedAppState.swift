@@ -13,9 +13,6 @@ class TranscriptedAppState: ObservableObject {
     let sparkleUpdater = SparkleUpdaterController()
     let contextCapture = ContextCaptureEngine()
     let sttRouter = STTRouter()
-    #if BETA_BUILD
-    let updateManager = UpdateManager()
-    #endif
 
     /// Meeting-mode pipeline (Lane B). Lazily instantiated so unit tests that
     /// don't exercise the meeting feature don't pay the construction cost.

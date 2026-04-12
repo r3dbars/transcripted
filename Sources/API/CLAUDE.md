@@ -1,17 +1,16 @@
-# API directory
+# API
 
 ## Current status
 
-`Sources/API/` currently contains only `BetaConfig.swift`.
+`Sources/API/` currently contains only beta-build configuration.
 
-The older `GeminiEngine` / `KeychainHelper` documentation that used to live here does not match the current tree on `main`.
+## Important file
 
-## Current file
+- `BetaConfig.swift` — `#if BETA_BUILD` constants for proxy token and proxy base URL
 
-- `BetaConfig.swift` — `#if BETA_BUILD` constants for the beta token, app version, and update URL
+## Notes
 
-## Agent notes
-
-- Core dictation and meeting flows on `main` do not depend on a live app-side API client in this directory.
-- If you need beta distribution context, read `archive/backend-beta-worker/README.md` and the beta-only update files in `Sources/API/` and `Sources/Observability/`.
-- Verify any old references to `GeminiEngine`, API keys, or chat-drafting HTTP paths against the actual source tree before changing code.
+- the core dictation and meeting flows do not depend on a live app-side API client here
+- the current app no longer consumes `/config`-driven version or update fields from the archived beta worker
+- if you need beta distribution or backend context, read `archive/backend-beta-worker/README.md`
+- older docs mentioning `GeminiEngine`, keychain helpers, or chat-drafting HTTP paths do not match the current tree

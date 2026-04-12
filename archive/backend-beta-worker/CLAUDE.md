@@ -33,7 +33,7 @@ on `main` does not depend on this worker.
 - `POST /logs`
   Stores uploaded debug/event log batches.
 - `GET /config`
-  Returns per-user beta config like update message and download URL.
+  Returns retained per-user beta config like update message and download URL.
 - `GET /admin/usage`
   Admin-token-gated usage summary.
 
@@ -45,6 +45,9 @@ the D1 `users` table.
 This worker still proxies Anthropic for beta paths, while the main app on
 `main` is otherwise local-first. Treat backend docs as beta/distribution
 context, not as the primary app architecture.
+
+The current macOS app on `main` no longer consumes `/config` for DMG
+self-update checks; that endpoint remains backend/beta-ops context.
 
 ## Data Model
 

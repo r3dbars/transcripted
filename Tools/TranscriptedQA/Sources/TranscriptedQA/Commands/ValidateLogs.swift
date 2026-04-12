@@ -13,7 +13,7 @@ struct ValidateLogs: ParsableCommand {
     @OptionGroup var formatOpts: FormatOptions
 
     func run() throws {
-        let logPath = path ?? transcriptedLogFilePath()
+        let logPath = path ?? QADataDirectories.resolve().logFilePath
         let results = LogValidator(logPath: logPath).validate()
         try runValidation(results: results, format: formatOpts.format)
     }

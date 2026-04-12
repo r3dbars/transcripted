@@ -8,7 +8,7 @@ Quick repo orientation before you jump in:
 - `main` is the current Transcripted product built from the Draft codebase
 - the old standalone Transcripted app is preserved on `legacy/transcripted-standalone`
   and `pre-draft-takeover-2026-04-06`
-- some storage paths still use `Draft` names for compatibility while the transition settles
+- persisted app paths now default to Transcripted-named storage, though some helper names and standalone-tool fallbacks still reflect the Draft transition
 
 In public docs and user-facing copy, prefer concrete present-tense claims about
 what the product does today. The broader "audio as a context layer" thesis is
@@ -100,7 +100,6 @@ The codebase is organized around the current Transcripted app:
 | Meeting pipeline | `Sources/Meeting/` | meeting recording, model warmup, transcript flow |
 | UI | `Sources/UI/` | overlay, menubar, onboarding, agent connection |
 | Shared meeting core | `Sources/TranscriptedCore/` | extracted meeting/transcription library and agent artifacts |
-| Text and style helpers | `Sources/Text/`, `Sources/Style/` | formatting, refusal heuristics, and lightweight pure helpers |
 
 Some internal folders still use `Draft` naming while the repo and product are
 being aligned publicly around Transcripted. Treat those as implementation
@@ -166,10 +165,10 @@ Open a GitHub issue with:
 - steps to reproduce
 - expected vs actual behavior
 - whether the issue affects dictation, meetings, or agent artifacts
-- relevant logs from `~/Library/Application Support/Transcripted/events.jsonl` or the legacy `Draft` path
+- relevant logs from `~/Library/Application Support/Transcripted/logs/events.jsonl` or `~/Library/Application Support/Transcripted/logs/debug.log`
 
-If your machine still uses the legacy `Draft` Application Support folder,
-mention that in the report.
+If your machine uses a custom capture library or you are reproducing against
+legacy Draft-era artifacts, mention that in the report.
 
 ## Questions?
 

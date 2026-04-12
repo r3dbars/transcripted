@@ -11,10 +11,10 @@ struct ValidateDatabase: ParsableCommand {
     @OptionGroup var formatOpts: FormatOptions
 
     func run() throws {
-        let dir = pathOpts.resolvedPath
+        let paths = pathOpts.resolved
         var results: [ValidationResult] = []
-        results += SpeakerDBValidator(dbPath: dir.appendingPathComponent("speakers.sqlite").path).validate()
-        results += StatsDBValidator(dbPath: dir.appendingPathComponent("stats.sqlite").path).validate()
+        results += SpeakerDBValidator(dbPath: paths.stateDir.appendingPathComponent("speakers.sqlite").path).validate()
+        results += StatsDBValidator(dbPath: paths.stateDir.appendingPathComponent("stats.sqlite").path).validate()
         try runValidation(results: results, format: formatOpts.format)
     }
 }

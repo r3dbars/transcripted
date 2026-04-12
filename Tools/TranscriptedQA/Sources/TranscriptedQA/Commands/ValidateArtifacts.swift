@@ -11,7 +11,7 @@ struct ValidateArtifacts: ParsableCommand {
     @OptionGroup var formatOpts: FormatOptions
 
     func run() throws {
-        let results = JSONSidecarValidator(directory: transcriptedTranscriptDirectory(relativeTo: pathOpts.resolvedPath)).validate()
+        let results = JSONSidecarValidator(directory: pathOpts.resolved.meetingsDir).validate()
         try runValidation(results: results, format: formatOpts.format)
     }
 }

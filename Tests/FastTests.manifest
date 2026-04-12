@@ -1,17 +1,12 @@
 # Fast test manifest
 # Format: <TestFile.swift>:<top-level entry function>
 
-CapturedContextTests.swift:testCapturedContext
 AnalyticsEventPolicyTests.swift:testAnalyticsEventPolicy
 AnalyticsPayloadSanitizerTests.swift:testAnalyticsPayloadSanitizer
-RefusalHeuristicsTests.swift:testRefusalHeuristics
-StyleUtilsTests.swift:testStyleUtils
-DiffSummaryTests.swift:testDiffSummary
 MeetingTranscriptStylerTests.swift:testMeetingTranscriptStyler
 MeetingPromptHeuristicsTests.swift:testMeetingPromptHeuristics
 SpeakerNamingPolicyTests.swift:testSpeakerNamingPolicy
 DictationTranscriptWriterTests.swift:testDictationTranscriptWriter
-DictationAgentOutputTests.swift:testDictationAgentOutput
 DictationSoundsTests.swift:testDictationSounds
 DictationSessionTimeoutTests.swift:testDictationSessionTimeout
 MicRecordingMergePlanTests.swift:testMicRecordingMergePlan
@@ -19,3 +14,4 @@ RecordedAudioTimelineTests.swift:testRecordedAudioTimeline
 WakeRecoveryCoordinatorTests.swift:testWakeRecoveryCoordinator
 SentryPayloadSanitizerTests.swift:testSentryPayloadSanitizer
 SentryEventPolicyTests.swift:testSentryEventPolicy
+TranscriptedConstantsTests.swift:testTranscriptedConstants

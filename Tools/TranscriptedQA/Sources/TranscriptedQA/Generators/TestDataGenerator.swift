@@ -281,8 +281,8 @@ struct TestDataGenerator {
     // MARK: - Log File (app.jsonl)
 
     func generateLogFile(entryCount: Int, errorRate: Double) throws {
-        // LogValidator expects the log at ~/Library/Logs/Transcripted/app.jsonl
-        // but for testing we create a logs/ subdir in our output
+        // Fixture runs keep logs inside a local Logs/ subdirectory so round-trip
+        // and stress commands can validate everything from one temp root.
         let logsDir = outputDir.appendingPathComponent("Logs")
         try FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
 

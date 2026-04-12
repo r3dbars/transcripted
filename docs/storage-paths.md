@@ -1,50 +1,79 @@
 # Storage Paths
 
-## Current App Paths On `main`
+## Current App Layout On `main`
 
-The current Transcripted app on `main` still uses Draft-named compatibility
-roots in Application Support.
+The current Transcripted app defaults to a Transcripted-named Application
+Support root:
 
-App support root:
+- app support root: `~/Library/Application Support/Transcripted/`
+- default capture library: `~/Library/Application Support/Transcripted/captures/`
 
-`~/Library/Application Support/Draft/`
+Users can move the capture library in Settings via the `transcriptSaveLocation`
+preference. When that happens, meetings and dictations move under the selected
+folder, while app-owned state, cache, logs, and temp files stay under
+`~/Library/Application Support/Transcripted/`.
 
 ## Dictation
 
-- folder: `~/Library/Application Support/Draft/dictations/`
-- transcripts: `~/Library/Application Support/Draft/dictations/transcripts/`
-- format: daily markdown files written by `DictationTranscriptWriter`
+Dictation artifacts live under:
+
+- root: `<capture-library>/dictations/`
+- current runtime output: daily markdown files like `Dictations_2026-04-11.md`
+
+`DictationStoragePaths.transcriptsFolder` points directly at the dictations
+folder. There is no extra `transcripts/` subdirectory in the current app
+layout.
 
 ## Meetings
 
-Meeting storage is isolated under:
+Meeting captures live under:
 
-`~/Library/Application Support/Draft/meetings/`
+- root: `<capture-library>/meetings/`
 
-Key paths:
+The meetings capture folder contains user-facing artifacts:
 
-- transcripts: `~/Library/Application Support/Draft/meetings/transcripts/`
-- speaker DB: `~/Library/Application Support/Draft/meetings/speakers.sqlite`
-- stats DB: `~/Library/Application Support/Draft/meetings/stats.sqlite`
-- failed queue: `~/Library/Application Support/Draft/meetings/failed_transcriptions.json`
-- speaker clips: `~/Library/Application Support/Draft/meetings/speaker_clips/`
-- recording scratch: `~/Library/Application Support/Draft/meetings/recordings/`
+- markdown transcripts: `<capture-library>/meetings/*.md`
+- JSON sidecars: `<capture-library>/meetings/*.json`
+- meeting index: `<capture-library>/meetings/transcripted.json`
+
+App-owned meeting state is stored separately under:
+
+- speaker DB: `~/Library/Application Support/Transcripted/state/speakers.sqlite`
+- stats DB: `~/Library/Application Support/Transcripted/state/stats.sqlite`
+- failed queue: `~/Library/Application Support/Transcripted/state/failed_transcriptions.json`
+
+Temporary audio scratch paths live under:
+
+- raw recordings: `~/Library/Application Support/Transcripted/tmp/recordings/`
+- speaker clips: `~/Library/Application Support/Transcripted/tmp/recordings/speaker_clips/`
 
 These paths are defined on the app side in `Sources/Meeting/MeetingStoragePaths.swift`
 and then injected into `TranscriptedCore` through `CoreStoragePaths`.
 
 ## Logs And Events
 
-- debug log: `~/draft-debug.log`
-- events: `~/Library/Application Support/Draft/events.jsonl`
-- core/app logs folder: `~/Library/Logs/Transcripted/` for logging infrastructure and beta-related paths
+Observability output currently lives under:
 
-## Standalone `TranscriptedCore` Defaults
+- debug log: `~/Library/Application Support/Transcripted/logs/debug.log`
+- events: `~/Library/Application Support/Transcripted/logs/events.jsonl`
 
-When `TranscriptedCore` runs with `CoreStoragePaths.default`, it points to the
-historic standalone Transcripted layout:
+## `TranscriptedCore` Defaults
 
-- transcripts and DBs: `~/Documents/Transcripted/`
-- logs: `~/Library/Logs/Transcripted/`
+`CoreStoragePaths.default` now uses the same Transcripted-named Application
+Support layout:
 
-Draft does **not** use those defaults for meetings on `main`.
+- meeting captures: `~/Library/Application Support/Transcripted/captures/meetings/`
+- databases + failed queue: `~/Library/Application Support/Transcripted/state/`
+- raw audio scratch: `~/Library/Application Support/Transcripted/tmp/recordings/`
+- logs: `~/Library/Application Support/Transcripted/logs/`
+
+The app still injects its own `CoreStoragePaths` so the meeting capture folder
+can follow the user-selected capture library.
+
+## Standalone Tool Fallbacks
+
+The standalone tools do not all resolve paths the same way:
+
+- `TranscriptedCLI` prefers `~/Library/Application Support/Transcripted/captures/{meetings,dictations}/`, then falls back to legacy Draft `.../transcripts/` folders, then `~/Documents/Transcripted/`
+- `TranscriptedMCP` follows the same Transcripted -> Draft -> `~/Documents/Transcripted/` order and keeps its SQLite index under `~/Library/Application Support/Transcripted/cache/` by default
+- `TranscriptedQA` now defaults to the current Transcripted meetings/state/log layout, falls back to legacy Draft and then `~/Documents/Transcripted/`, and accepts explicit `--path`, `--state-dir`, and `--log-path` overrides for nonstandard setups

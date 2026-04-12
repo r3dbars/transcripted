@@ -8,12 +8,13 @@ It is read-only, independent from the app target, and builds its own SQLite inde
 
 Default locations:
 
-- meetings: `~/Library/Application Support/Draft/meetings/transcripts`
-- dictations: `~/Library/Application Support/Draft/dictations/transcripts`
-- index: meetings folder by default
+- meetings: `~/Library/Application Support/Transcripted/captures/meetings`
+- dictations: `~/Library/Application Support/Transcripted/captures/dictations`
+- index: `~/Library/Application Support/Transcripted/cache`
 
 Legacy fallback:
 
+- `~/Library/Application Support/Draft/{meetings,dictations}/transcripts`
 - `~/Documents/Transcripted`
 
 Path overrides:

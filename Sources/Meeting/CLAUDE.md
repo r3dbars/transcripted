@@ -13,7 +13,7 @@
 - `MeetingPromptHeuristics.swift` — shared scoring and snooze rules for calendar- and runtime-based prompt candidates
 - `MeetingSTTAdapter.swift` — adapts the app's shared `ParakeetEngine` to `TranscriptedCore.SpeechToTextEngine`
 - `MeetingSessionController.swift` — top-level meeting state machine, model warmup, capture start/stop, queued transcription handoff, failed-meeting actions, and transcript restyling
-- `MeetingStoragePaths.swift` — current meeting storage layout under the Draft-named compatibility root
+- `MeetingStoragePaths.swift` — current split meeting storage layout across the capture library, app state, logs, and temp folders
 - `MeetingTranscriptStyler.swift` — restyles saved transcripts and renames files after save
 
 ## End-to-end flow
@@ -31,23 +31,31 @@
 
 - `TranscriptedCore` owns the reusable pipeline. App code in this directory should prefer adapters and protocol seams over direct core edits.
 - `MeetingSTTAdapter.cleanup()` is intentionally a no-op. `TranscriptedAppState` owns `ParakeetEngine` lifecycle for the whole app.
-- Meeting storage must stay under the current Draft-named app-support paths, not `TranscriptedCore.default` standalone paths.
+- Meeting captures should follow the current capture library, while databases, logs, and temp recordings stay under the app-owned Transcripted Application Support folders.
 - `MeetingPromptDetector` can prompt from either upcoming calendar events or recently active supported meeting apps (Zoom, Teams, Webex, FaceTime, plus browser-hosted providers like Google Meet).
 - `TranscriptionTaskManager` stays single-flight. App-level queueing belongs in `MeetingSessionController`, not in ad hoc background tasks.
 - Live PCM handlers installed through `MeetingCaptureBridge` run on capture threads. Keep them real-time safe.
 
 ## Storage
 
-Meeting artifacts live under `~/Library/Application Support/Draft/meetings/`:
+Meeting capture artifacts live under `<capture-library>/meetings/`:
 
-- `transcripts/`
+- `*.md`
+- `*.json`
+- `transcripted.json`
+
+App-owned meeting state lives under `~/Library/Application Support/Transcripted/state/`:
+
 - `speakers.sqlite`
 - `stats.sqlite`
 - `failed_transcriptions.json`
-- `speaker_clips/`
-- `recordings/`
 
-Core logging for the embedded meeting pipeline is redirected to `~/Library/Application Support/Draft/logs/`.
+Temporary meeting scratch paths live under `~/Library/Application Support/Transcripted/tmp/recordings/`:
+
+- raw audio captures
+- `speaker_clips/`
+
+Core logging for the embedded meeting pipeline is redirected to `~/Library/Application Support/Transcripted/logs/`.
 
 See `docs/storage-paths.md` for the full map.
 

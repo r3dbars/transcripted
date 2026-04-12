@@ -209,7 +209,7 @@ struct SpeakerPeopleSettingsSection: View {
     var body: some View {
         SettingsSection(
             title: "People",
-            detail: "Review the speaker database Draft uses for meeting matching. Rename or merge people to keep future matches clean. Deleting a person stops future matching but does not rewrite past transcripts."
+            detail: "Review the speaker database Transcripted uses for meeting matching. Rename or merge people to keep future matches clean. Deleting a person stops future matching but does not rewrite past transcripts."
         ) {
             HStack(spacing: 12) {
                 TextField("Search people or IDs", text: $model.searchText)

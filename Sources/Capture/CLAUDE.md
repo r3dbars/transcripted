@@ -14,8 +14,6 @@ It no longer owns a live screenshot-driven draft mode.
 
 - `ContextCaptureEngine.swift` — Carbon hotkey registration, hotkey debounce,
   right-Option tap detection, and routing into dictation or meeting handlers
-- `CapturedContext.swift` — legacy structured screenshot-context helper retained
-  for tests and compatibility code; not the center of the current runtime path
 
 ## Current Hotkey Flow
 
@@ -28,8 +26,8 @@ It no longer owns a live screenshot-driven draft mode.
 
 - Keep the C-level Carbon callback tiny and bounce into `@MainActor` work
 - Keep meeting routing separate from dictation routing
-- Do not reintroduce screenshot/OCR assumptions here unless the source files
-  come back in the same change
+- Do not reintroduce screenshot/OCR assumptions here unless that feature
+  returns in the same change
 
 ## Verification
 

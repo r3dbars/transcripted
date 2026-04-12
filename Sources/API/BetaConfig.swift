@@ -1,5 +1,5 @@
 // BetaConfig.swift
-// Per-user beta update configuration — only compiled into beta builds.
+// Per-user beta configuration — only compiled into beta builds.
 // The token placeholder is replaced by build-beta.sh via sed for each user's DMG.
 
 #if BETA_BUILD
@@ -11,12 +11,8 @@ enum BetaConfig {
     /// build-beta.sh replaces BETA_TOKEN_PLACEHOLDER with the actual token.
     static let userToken = "BETA_TOKEN_PLACEHOLDER"
 
-    /// Current app version — compared against /config min_version to prompt updates.
-    /// Bump this in each release. build-beta.sh can also inject it via sed.
-    static let appVersion = "1.0.3"
-
-    /// Where to download the latest DMG (GitHub Releases or similar)
-    static let updateURL = "https://github.com/r3dbars/transcripted/releases/latest"
+    /// Proxy base URL for beta-only proxy traffic.
+    static let proxyBaseURL = "https://draft-proxy.tz427gsydr.workers.dev"
 }
 
 #endif

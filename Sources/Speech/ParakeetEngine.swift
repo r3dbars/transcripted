@@ -865,12 +865,27 @@ class ParakeetEngine: ObservableObject {
         samples.removeAll()
         print("🔄 PARAKEET | resampled \(nativeCount) → \(resampled.count) samples")
 
+        let audioDuration = Double(resampled.count) / TranscriptedConstants.parakeetSampleRate
+        guard TranscriptedConstants.hasMinimumParakeetAudioSamples(resampled.count) else {
+            print("⚠️ PARAKEET | skipping transcription for short audio (\(String(format: "%.2f", audioDuration))s)")
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_too_short",
+                message: "Dictation audio too short for transcription",
+                context: [
+                    "native_samples": "\(nativeCount)",
+                    "samples": "\(resampled.count)",
+                    "audio_duration_s": String(format: "%.2f", audioDuration),
+                    "minimum_samples": "\(TranscriptedConstants.parakeetMinimumInferenceSamples)",
+                ])
+            isTranscribing = false
+            sampleBuffer.removeAll(keepingCapacity: true)
+            return nil
+        }
+
         do {
             let result = try await manager.transcribe(resampled, source: .microphone)
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            let audioDuration = Double(resampled.count) / 16000.0
             let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
             print("✅ PARAKEET | transcribed in \(String(format: "%.2f", elapsed))s: \"\(trimmed.prefix(80))...\"")
 
@@ -931,13 +946,25 @@ class ParakeetEngine: ObservableObject {
             ])
         }
         guard !samples.isEmpty else { return "" }
+        guard TranscriptedConstants.hasMinimumParakeetAudioSamples(samples.count) else {
+            let audioDuration = Double(samples.count) / TranscriptedConstants.parakeetSampleRate
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "segment_too_short",
+                message: "Skipped short audio segment before Parakeet transcription",
+                context: [
+                    "samples": "\(samples.count)",
+                    "audio_duration_s": String(format: "%.2f", audioDuration),
+                    "minimum_samples": "\(TranscriptedConstants.parakeetMinimumInferenceSamples)",
+                    "source": source == .microphone ? "microphone" : "system",
+                ])
+            return ""
+        }
 
         let startTime = CFAbsoluteTimeGetCurrent()
         let result = try await manager.transcribe(samples, source: source)
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
         let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let audioDuration = Double(samples.count) / 16000.0
+        let audioDuration = Double(samples.count) / TranscriptedConstants.parakeetSampleRate
         let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
         EventReporter.shared.capture(level: .info, engine: "parakeet", event: "meeting_segment_transcribed",
             message: "Meeting segment transcribed in \(String(format: "%.2f", elapsed))s",

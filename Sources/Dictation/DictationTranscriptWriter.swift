@@ -7,7 +7,6 @@ import Foundation
 struct SavedDictationTranscript {
     let url: URL
     let title: String
-    let sidecarURL: URL?
 }
 
 enum DictationDelivery: String {
@@ -39,13 +38,6 @@ enum DictationTranscriptWriter {
         return formatter
     }()
 
-    private static let frontmatterTimeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "HH:mm:ss"
-        return formatter
-    }()
-
     private static let entryIdFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -57,14 +49,6 @@ enum DictationTranscriptWriter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "h:mm a"
-        return formatter
-    }()
-
-    private static let detailFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale.current
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
         return formatter
     }()
 
@@ -127,7 +111,7 @@ enum DictationTranscriptWriter {
         try body.write(to: url, atomically: true, encoding: .utf8)
         FileManager.default.restrictFileToOwnerOnly(at: url)
 
-        return SavedDictationTranscript(url: url, title: title, sidecarURL: nil)
+        return SavedDictationTranscript(url: url, title: title)
     }
 
     static func dailyFileURL(for date: Date, in directory: URL) -> URL {

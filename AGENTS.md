@@ -19,9 +19,10 @@
 7. `Sources/TranscriptedCore/CLAUDE.md` when touching the shared library
 8. `Tests/README.md`
 9. `docs/storage-paths.md`
-10. `Sources/Observability/CLAUDE.md` when touching crash reporting, event forwarding, beta telemetry, or app updates
-11. `docs/release-packaging.md` when touching packaging, signing, notarization, or user-facing releases
-12. `docs/sparkle-updates.md` when touching app updates or cutting a release users should receive in-app
+10. `Sources/Reliability/CLAUDE.md` when touching wake / sleep recovery or hotkey recovery
+11. `Sources/Observability/CLAUDE.md` when touching crash reporting, event forwarding, beta telemetry, or app updates
+12. `docs/release-packaging.md` when touching packaging, signing, notarization, or user-facing releases
+13. `docs/sparkle-updates.md` when touching app updates or cutting a release users should receive in-app
 
 ## Directory map
 
@@ -49,6 +50,7 @@ Current source-of-truth docs:
 - `Sources/CLAUDE.md`
 - `Sources/Dictation/CLAUDE.md`
 - `Sources/Meeting/CLAUDE.md`
+- `Sources/Reliability/CLAUDE.md`
 - `Sources/Observability/CLAUDE.md`
 - `Sources/TranscriptedCore/CLAUDE.md`
 - `Tests/README.md`
