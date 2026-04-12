@@ -3,10 +3,13 @@ import Foundation
 func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy only permits reviewed analytics events") {
         let dictationCompleted = AnalyticsEventPolicy.policy(forEvent: "dictation_completed")
+        let dictationNoSpeech = AnalyticsEventPolicy.policy(forEvent: "dictation_no_speech")
         let meetingFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
         let unknown = AnalyticsEventPolicy.policy(forEvent: "raw_transcript_uploaded")
 
         assertEqual(dictationCompleted?.allowedProperties.contains("word_count_bucket"), true, "dictation completion should allow bucketed word counts")
+        assertEqual(dictationNoSpeech?.allowedProperties.contains("duration_bucket"), true, "dictation no-speech should keep a coarse duration bucket")
+        assertEqual(dictationNoSpeech?.allowedProperties.contains("trigger"), true, "dictation no-speech should preserve trigger attribution")
         assertEqual(meetingFailed?.allowedProperties.contains("failure_kind"), true, "meeting failures should allow normalized failure kinds")
         assertNil(unknown, "unreviewed analytics events should not be allowed")
     }
