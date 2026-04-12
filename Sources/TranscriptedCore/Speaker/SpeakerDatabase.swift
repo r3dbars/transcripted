@@ -83,7 +83,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
     /// Called on both initial open and corruption-recovery re-open.
     private func configureOpenDatabase() {
         isDatabaseOpen = true
-        FileManager.default.restrictToOwnerOnly(atPath: dbPath.path)
+        FileManager.default.restrictSQLiteArtifactsToOwnerOnly(atPath: dbPath.path)
         // WAL mode for crash safety, busy timeout to avoid SQLITE_BUSY, NORMAL sync for performance
         let pragmas = [
             ("journal_mode=WAL", "WAL"),
@@ -133,6 +133,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
         );
         """
         executeSQL(sql)
+        FileManager.default.restrictSQLiteArtifactsToOwnerOnly(atPath: dbPath.path)
         migrateSchema()
     }
 
