@@ -4,11 +4,25 @@ This repo keeps the live day-to-day command surface intentionally small.
 
 ## Active root entry points
 
+These stay at the repo root as thin wrappers so the public command surface stays
+stable and the docs can keep pointing at the same commands:
+
 - `build-deps.sh` — build and cache the shared dependency bundle
 - `build.sh` — local app build
 - `build-beta.sh` — signed beta/distribution build
 - `run-tests.sh` — curated fast test runner
 - `run-integration-smoke.sh` — app/core smoke verification
+
+## Entrypoint implementations
+
+The actual script bodies live under `scripts/entrypoints/` so the repo root does
+not have to carry the full operational logic:
+
+- `scripts/entrypoints/build-deps.sh`
+- `scripts/entrypoints/build.sh`
+- `scripts/entrypoints/build-beta.sh`
+- `scripts/entrypoints/run-tests.sh`
+- `scripts/entrypoints/run-integration-smoke.sh`
 
 ## Active helper scripts
 
