@@ -93,6 +93,27 @@ private enum CoreAudioInputDeviceLookup {
     }
 }
 
+private func unregisterDefaultInputDeviceListener(_ listener: AudioObjectPropertyListenerBlock?) {
+    guard let listener else { return }
+
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultInputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+
+    let status = AudioObjectRemovePropertyListenerBlock(
+        AudioObjectID(kAudioObjectSystemObject),
+        &address,
+        .main,
+        listener
+    )
+
+    if status != noErr {
+        print("⚠️ PARAKEET | failed to remove default input listener (\(status))")
+    }
+}
+
 // FluidAudio 0.7.9 no longer exposes the older streaming EOU manager used by
 // this dormant live-display path. Keep a no-op shim so the disabled code path
 // still compiles until we rewire live transcripts to the newer streaming API.
@@ -139,6 +160,7 @@ class ParakeetEngine: ObservableObject {
     private nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
     private var isEnginePrewarmed = false
     private var wakeObserver: NSObjectProtocol?
+    private var inputDeviceChangeListener: AudioObjectPropertyListenerBlock?
 
     // Live streaming text is intentionally disabled — the product focuses on
     // stable capture and final transcription rather than provisional text.
@@ -330,6 +352,7 @@ class ParakeetEngine: ObservableObject {
 
     func prewarm() {
         guard !isEnginePrewarmed, !isRecording else { return }
+        installAudioObserversIfNeeded()
         do {
             let inputNode = audioEngine.inputNode
             let nativeFormat = inputNode.outputFormat(forBus: 0)
@@ -349,34 +372,88 @@ class ParakeetEngine: ObservableObject {
             try audioEngine.start()
             isEnginePrewarmed = true
             print("🔥 PARAKEET | engine pre-warmed (\(inputDeviceName), \(nativeSampleRate)Hz)")
-
-            if configChangeObserver == nil {
-                configChangeObserver = NotificationCenter.default.addObserver(
-                    forName: .AVAudioEngineConfigurationChange,
-                    object: audioEngine,
-                    queue: .main
-                ) { [weak self] _ in
-                    Task { @MainActor [weak self] in
-                        self?.handleAudioConfigChange()
-                    }
-                }
-            }
-
-            if wakeObserver == nil {
-                wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
-                    forName: NSWorkspace.didWakeNotification,
-                    object: nil,
-                    queue: .main
-                ) { [weak self] _ in
-                    Task { @MainActor [weak self] in
-                        self?.handleSystemWake()
-                    }
-                }
-            }
         } catch {
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "prewarm_failed",
                 message: error.localizedDescription, context: ["audio_device": inputDeviceName])
         }
+    }
+
+    private func installAudioObserversIfNeeded() {
+        if configChangeObserver == nil {
+            configChangeObserver = NotificationCenter.default.addObserver(
+                forName: .AVAudioEngineConfigurationChange,
+                object: audioEngine,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.handleAudioConfigChange()
+                }
+            }
+        }
+
+        if wakeObserver == nil {
+            wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didWakeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.handleSystemWake()
+                }
+            }
+        }
+
+        installInputDeviceChangeListenerIfNeeded()
+    }
+
+    private func installInputDeviceChangeListenerIfNeeded() {
+        guard inputDeviceChangeListener == nil else { return }
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                print("🎤 PARAKEET | default input changed → \(self.inputDeviceName)")
+                EventReporter.shared.capture(
+                    level: .info,
+                    engine: "parakeet",
+                    event: "default_input_device_changed",
+                    message: "Default input device changed",
+                    context: ["audio_device": self.inputDeviceName]
+                )
+                self.handleAudioConfigChange()
+            }
+        }
+
+        let status = AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            .main,
+            listener
+        )
+
+        guard status == noErr else {
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "parakeet",
+                event: "default_input_listener_failed",
+                message: "Failed to register default input device listener",
+                context: ["status": "\(status)"]
+            )
+            return
+        }
+
+        inputDeviceChangeListener = listener
+    }
+
+    private func removeInputDeviceChangeListener() {
+        unregisterDefaultInputDeviceListener(inputDeviceChangeListener)
+        inputDeviceChangeListener = nil
     }
 
     private func handleAudioConfigChange() {
@@ -543,6 +620,32 @@ class ParakeetEngine: ObservableObject {
         // another. installTap asserts they match. Detect and fix by
         // restarting the engine so CoreAudio rebuilds the graph.
         let hwFormat = inputNode.inputFormat(forBus: 0)
+        guard nativeFormat.sampleRate > 0,
+              nativeFormat.channelCount > 0,
+              hwFormat.sampleRate > 0,
+              hwFormat.channelCount > 0 else {
+            print("⚠️ PARAKEET | input format unavailable: output=\(nativeFormat.sampleRate)Hz/\(nativeFormat.channelCount)ch hw=\(hwFormat.sampleRate)Hz/\(hwFormat.channelCount)ch")
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "parakeet",
+                event: "audio_format_unavailable",
+                message: "Audio hardware format not ready while starting dictation",
+                context: [
+                    "audio_device": inputDeviceName,
+                    "output_rate": "\(nativeFormat.sampleRate)",
+                    "output_channels": "\(nativeFormat.channelCount)",
+                    "hw_rate": "\(hwFormat.sampleRate)",
+                    "hw_channels": "\(hwFormat.channelCount)",
+                ]
+            )
+            audioEngine.stop()
+            isEnginePrewarmed = false
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
+                self?.prewarm()
+            }
+            return false
+        }
         if nativeFormat.sampleRate != hwFormat.sampleRate && hwFormat.sampleRate > 0 {
             print("⚠️ PARAKEET | format mismatch: output=\(nativeFormat.sampleRate)Hz hw=\(hwFormat.sampleRate)Hz — resyncing engine")
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "format_mismatch_resync",
@@ -608,18 +711,11 @@ class ParakeetEngine: ObservableObject {
             return false
         }
 
-        guard let monoFormat = AVAudioFormat(standardFormatWithSampleRate: nativeSampleRate, channels: 1) else {
-            print("❌ PARAKEET | failed to create mono audio format at \(nativeSampleRate)Hz")
-            EventReporter.shared.capture(level: .error, engine: "parakeet", event: "audio_format_failed",
-                message: "AVAudioFormat creation failed", context: ["sample_rate": "\(nativeSampleRate)"])
-            return false
-        }
-
-        let tapSampleRate = nativeSampleRate
-        inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: monoFormat) { [weak self] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nativeFormat) { [weak self] buffer, _ in
             guard let self = self,
-                  let channelData = buffer.floatChannelData?[0] else { return }
-            let frameLength = Int(buffer.frameLength)
+                  let monoSamples = self.extractMonoSamples(from: buffer) else { return }
+            let frameLength = monoSamples.count
+            guard frameLength > 0 else { return }
 
             if !self.didReceiveAudioSamples && frameLength > 0 {
                 self.didReceiveAudioSamples = true
@@ -628,7 +724,8 @@ class ParakeetEngine: ObservableObject {
                         message: "Audio samples started flowing",
                         context: [
                             "audio_device": self.inputDeviceName,
-                            "sample_rate": "\(tapSampleRate)",
+                            "sample_rate": "\(self.nativeSampleRate)",
+                            "channels": "\(buffer.format.channelCount)",
                             "frames": "\(frameLength)"
                         ])
                 }
@@ -636,8 +733,7 @@ class ParakeetEngine: ObservableObject {
 
             // Consumer 1: optional live streaming display (currently disabled).
             if self.liveDisplayEnabled, let eou = self.eouManager {
-                let rawSamples = Array(UnsafeBufferPointer(start: channelData, count: frameLength))
-                let resampled = AudioResampler.resample(rawSamples, from: tapSampleRate, to: 16000)
+                let resampled = AudioResampler.resample(monoSamples, from: self.nativeSampleRate, to: 16000)
                 self.streamingSamplesLock.lock()
                 self.streamingSampleBuffer.append(contentsOf: resampled)
                 var chunk: [Float]? = nil
@@ -657,9 +753,8 @@ class ParakeetEngine: ObservableObject {
             }
 
             // Consumer 2: Parakeet sample buffer — lock-protected
-            let samples = Array(UnsafeBufferPointer(start: channelData, count: frameLength))
             self.pendingSamplesLock.lock()
-            self.pendingSamples.append(contentsOf: samples)
+            self.pendingSamples.append(contentsOf: monoSamples)
             // Enforce hard cap — keep only the most recent audioBufferCapacitySeconds of audio.
             // Amortized compaction: trim once per second of overflow rather than on every tap
             // callback, to avoid O(n) memmoves at ~47Hz.
@@ -675,8 +770,8 @@ class ParakeetEngine: ObservableObject {
             self.lastLevelUpdate = now
 
             var sumOfSquares: Float = 0
-            for i in 0..<frameLength {
-                let s = channelData[i]
+            for sample in monoSamples {
+                let s = sample
                 sumOfSquares += s * s
             }
             let rms = sqrt(sumOfSquares / Float(max(1, frameLength)))
@@ -727,6 +822,43 @@ class ParakeetEngine: ObservableObject {
         }
 
         return true
+    }
+
+    private func extractMonoSamples(from buffer: AVAudioPCMBuffer) -> [Float]? {
+        let frameCount = Int(buffer.frameLength)
+        let channelCount = Int(buffer.format.channelCount)
+
+        guard frameCount > 0, channelCount > 0 else { return [] }
+
+        if channelCount == 1 {
+            guard let channelData = buffer.floatChannelData?[0] else { return nil }
+            return Array(UnsafeBufferPointer(start: channelData, count: frameCount))
+        }
+
+        var monoSamples = Array<Float>(repeating: 0, count: frameCount)
+
+        if buffer.format.isInterleaved {
+            guard let interleavedData = buffer.floatChannelData?[0] else { return nil }
+            for frame in 0..<frameCount {
+                let baseIndex = frame * channelCount
+                var sum: Float = 0
+                for channel in 0..<channelCount {
+                    sum += interleavedData[baseIndex + channel]
+                }
+                monoSamples[frame] = sum / Float(channelCount)
+            }
+            return monoSamples
+        }
+
+        guard let channelData = buffer.floatChannelData else { return nil }
+        for frame in 0..<frameCount {
+            var sum: Float = 0
+            for channel in 0..<channelCount {
+                sum += channelData[channel][frame]
+            }
+            monoSamples[frame] = sum / Float(channelCount)
+        }
+        return monoSamples
     }
 
     /// Watchdog that detects zombie audio engines — running but producing no samples.
@@ -1016,6 +1148,7 @@ class ParakeetEngine: ObservableObject {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
             wakeObserver = nil
         }
+        removeInputDeviceChangeListener()
         let mgr = asrManager
         asrManager = nil
         asrManagerReady = false
@@ -1031,6 +1164,7 @@ class ParakeetEngine: ObservableObject {
         if let observer = wakeObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
+        unregisterDefaultInputDeviceListener(inputDeviceChangeListener)
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
         let mgr = asrManager
