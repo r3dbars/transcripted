@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transcripted Health Brief - April 12, 2026</title>
+  <style>
+    :root {
+      --bg: #f4ecdf;
+      --bg-deep: #e8dcc6;
+      --paper: rgba(255, 250, 242, 0.88);
+      --paper-strong: rgba(255, 252, 247, 0.96);
+      --ink: #1e2933;
+      --muted: #596670;
+      --line: rgba(65, 54, 42, 0.12);
+      --teal: #0f766e;
+      --teal-soft: rgba(15, 118, 110, 0.12);
+      --amber: #b45309;
+      --amber-soft: rgba(180, 83, 9, 0.12);
+      --red: #b91c1c;
+      --red-soft: rgba(185, 28, 28, 0.12);
+      --slate: #334155;
+      --slate-soft: rgba(51, 65, 85, 0.1);
+      --green: #166534;
+      --green-soft: rgba(22, 101, 52, 0.12);
+      --shadow: 0 24px 60px rgba(86, 63, 30, 0.14);
+      --radius-xl: 28px;
+      --radius-lg: 22px;
+      --radius-md: 16px;
+      --radius-sm: 999px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.13), transparent 28%),
+        radial-gradient(circle at top right, rgba(180, 83, 9, 0.14), transparent 34%),
+        linear-gradient(180deg, #fbf5ea 0%, var(--bg) 42%, var(--bg-deep) 100%);
+      line-height: 1.5;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.45), transparent 70%);
+    }
+
+    a {
+      color: inherit;
+      text-decoration-color: rgba(15, 118, 110, 0.45);
+      text-underline-offset: 0.16em;
+    }
+
+    code {
+      font-family: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+      font-size: 0.93em;
+      background: rgba(30, 41, 51, 0.05);
+      border: 1px solid rgba(30, 41, 51, 0.08);
+      border-radius: 0.45rem;
+      padding: 0.1rem 0.38rem;
+      white-space: nowrap;
+    }
+
+    .page {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 32px auto 64px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 34px 34px 30px;
+      border-radius: var(--radius-xl);
+      background:
+        linear-gradient(135deg, rgba(255, 253, 248, 0.98), rgba(249, 242, 231, 0.92)),
+        linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(180, 83, 9, 0.08));
+      border: 1px solid rgba(79, 63, 41, 0.12);
+      box-shadow: var(--shadow);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -60px;
+      top: -60px;
+      width: 240px;
+      height: 240px;
+      background: radial-gradient(circle, rgba(15, 118, 110, 0.15), transparent 62%);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .hero-top,
+    .hero-chips,
+    .stat-grid,
+    .issue-grid,
+    .two-up,
+    .signal-grid,
+    .footer-links {
+      display: grid;
+      gap: 16px;
+    }
+
+    .hero-top {
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      align-items: center;
+      margin-bottom: 18px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--teal);
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-size: 0.82rem;
+    }
+
+    .timestamp {
+      justify-self: end;
+      color: var(--muted);
+      font-size: 0.96rem;
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+      line-height: 1.06;
+    }
+
+    h1 {
+      max-width: 14ch;
+      font-size: clamp(2.5rem, 5vw, 4.2rem);
+      letter-spacing: -0.04em;
+      margin-bottom: 14px;
+    }
+
+    .hero p {
+      max-width: 74ch;
+      color: var(--muted);
+      font-size: 1.02rem;
+      margin: 0;
+    }
+
+    .hero-chips {
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      margin-top: 24px;
+    }
+
+    .chip {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 14px 16px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.56);
+      backdrop-filter: blur(10px);
+    }
+
+    .chip-label {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.74rem;
+      font-weight: 700;
+    }
+
+    .chip strong {
+      font-size: 1.06rem;
+      letter-spacing: -0.02em;
+    }
+
+    .section {
+      margin-top: 22px;
+      padding: 26px;
+      border-radius: var(--radius-lg);
+      background: var(--paper);
+      border: 1px solid rgba(79, 63, 41, 0.1);
+      box-shadow: 0 12px 34px rgba(81, 59, 31, 0.08);
+      backdrop-filter: blur(10px);
+    }
+
+    .section-header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .section-header h2 {
+      font-size: clamp(1.5rem, 2.5vw, 2.1rem);
+      letter-spacing: -0.035em;
+    }
+
+    .section-header p {
+      margin: 0;
+      color: var(--muted);
+      max-width: 52ch;
+    }
+
+    .stat-grid {
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .stat-card,
+    .issue-card,
+    .signal-card,
+    .fix-card {
+      position: relative;
+      overflow: hidden;
+      border-radius: 20px;
+      border: 1px solid var(--line);
+      background: var(--paper-strong);
+      padding: 18px;
+    }
+
+    .stat-card::before,
+    .issue-card::before,
+    .signal-card::before,
+    .fix-card::before {
+      content: "";
+      position: absolute;
+      inset: auto 0 0 0;
+      height: 3px;
+      background: linear-gradient(90deg, rgba(15, 118, 110, 0.82), rgba(180, 83, 9, 0.82));
+      opacity: 0.85;
+    }
+
+    .stat-card h3,
+    .issue-card h3,
+    .signal-card h3,
+    .fix-card h3 {
+      font-size: 1.1rem;
+      margin-bottom: 8px;
+      letter-spacing: -0.02em;
+    }
+
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 0.78rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+    }
+
+    .critical { background: var(--red-soft); color: var(--red); }
+    .watch { background: var(--amber-soft); color: var(--amber); }
+    .stable { background: var(--teal-soft); color: var(--teal); }
+    .noise { background: var(--slate-soft); color: var(--slate); }
+    .good { background: var(--green-soft); color: var(--green); }
+
+    .big-number {
+      font-size: clamp(2rem, 4vw, 3rem);
+      letter-spacing: -0.06em;
+      margin-bottom: 4px;
+      font-weight: 800;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .issue-grid {
+      grid-template-columns: repeat(auto-fit, minmax(245px, 1fr));
+    }
+
+    .issue-meta,
+    .signal-list,
+    .fix-list,
+    .footer-links {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .issue-meta li,
+    .signal-list li,
+    .fix-list li {
+      padding: 10px 0;
+      border-top: 1px solid rgba(79, 63, 41, 0.09);
+    }
+
+    .issue-meta li:first-child,
+    .signal-list li:first-child,
+    .fix-list li:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    .issue-card p,
+    .signal-card p,
+    .fix-card p {
+      margin: 0 0 10px;
+      color: var(--muted);
+    }
+
+    .issue-link {
+      font-weight: 700;
+    }
+
+    .two-up {
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+      align-items: start;
+    }
+
+    .test-table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.55);
+    }
+
+    .test-table th,
+    .test-table td {
+      text-align: left;
+      vertical-align: top;
+      padding: 14px 14px 16px;
+      border-bottom: 1px solid rgba(79, 63, 41, 0.1);
+    }
+
+    .test-table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .test-table th {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 800;
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    .signal-grid {
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    }
+
+    .footer-links {
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      margin-top: 18px;
+    }
+
+    .footer-links a {
+      display: block;
+      padding: 14px 16px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.62);
+      font-weight: 700;
+    }
+
+    .small {
+      font-size: 0.94rem;
+    }
+
+    @media (max-width: 900px) {
+      .two-up {
+        grid-template-columns: 1fr;
+      }
+
+      .section-header {
+        display: block;
+      }
+
+      .section-header p {
+        margin-top: 8px;
+      }
+
+      .timestamp {
+        justify-self: start;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .page {
+        width: min(100vw - 20px, 100%);
+        margin: 14px auto 36px;
+      }
+
+      .hero,
+      .section {
+        padding: 20px;
+      }
+
+      .test-table,
+      .test-table thead,
+      .test-table tbody,
+      .test-table th,
+      .test-table td,
+      .test-table tr {
+        display: block;
+      }
+
+      .test-table thead {
+        display: none;
+      }
+
+      .test-table td {
+        padding: 10px 0 12px;
+        border-bottom: 0;
+      }
+
+      .test-table tr {
+        padding: 12px 14px;
+        border-bottom: 1px solid rgba(79, 63, 41, 0.1);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div class="hero-top">
+        <div class="eyebrow">Transcripted Health Brief</div>
+        <div class="timestamp">Snapshot taken April 12, 2026</div>
+      </div>
+      <h1>One real shipped bug, light real usage, and a cleaner path to what matters next.</h1>
+      <p>
+        The current Transcripted picture is straightforward: the only clear production bug in Sentry is a Parakeet short-audio failure on
+        <code>1.0.3</code>, the underlying guard is already on <code>main</code>, and the rest of the visible issue board is mostly test or dashboard noise.
+      </p>
+      <div class="hero-chips">
+        <div class="chip">
+          <span class="chip-label">Release</span>
+          <strong><code>1.0.3</code> live, short-audio guard not shipped yet</strong>
+        </div>
+        <div class="chip">
+          <span class="chip-label">Most Real Signal</span>
+          <strong>Dictation is being used; meetings are not yet showing up</strong>
+        </div>
+        <div class="chip">
+          <span class="chip-label">Repo Mode</span>
+          <strong>Reliability, privacy, and update-plumbing hardening</strong>
+        </div>
+        <div class="chip">
+          <span class="chip-label">Overall Call</span>
+          <strong>Ship the next release, then clean the Sentry board</strong>
+        </div>
+      </div>
+    </header>
+
+    <section class="section">
+      <div class="section-header">
+        <h2>At A Glance</h2>
+        <p>This is the fast-read view: the live bug, the only product usage that really shows up, and whether traffic is outrunning conversion.</p>
+      </div>
+      <div class="stat-grid">
+        <article class="stat-card">
+          <div class="kicker critical">Fix Now</div>
+          <h3>Sentry APPLE-MACOS-3</h3>
+          <div class="big-number">4</div>
+          <p>Production errors on April 11, 2026 tied to <code>transcripted@1.0.3</code> and short Parakeet inputs.</p>
+        </article>
+        <article class="stat-card">
+          <div class="kicker stable">Product Usage</div>
+          <h3>Dictation Funnel</h3>
+          <div class="big-number">68.4%</div>
+          <p><code>19</code> dictation starts and <code>13</code> completions in the last 7 days. Meetings show <code>0</code> recorded saves.</p>
+        </article>
+        <article class="stat-card">
+          <div class="kicker good">GitHub Momentum</div>
+          <h3>Interest Is Up</h3>
+          <div class="big-number">+8</div>
+          <p>New stars in 14 days, with <code>511</code> views, <code>85</code> unique viewers, and <code>24</code> downloads for the latest release.</p>
+        </article>
+        <article class="stat-card">
+          <div class="kicker watch">Website State</div>
+          <h3>Fresh Enough, Under-Instrumented</h3>
+          <div class="big-number">2</div>
+          <p>Both sites deployed successfully, but Cloudflare analytics are incomplete and <code>r3d.br</code> currently resolves to <code>r3d.bar</code>.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <h2>Sentry: Real Vs Noise</h2>
+        <p>There are four unresolved issues, but only one currently looks like user-facing Transcripted product pain.</p>
+      </div>
+      <div class="issue-grid">
+        <article class="issue-card">
+          <div class="kicker critical">Real Bug</div>
+          <h3><a class="issue-link" href="https://r3dbars.sentry.io/issues/APPLE-MACOS-3">APPLE-MACOS-3</a></h3>
+          <p><strong>Parakeet transcription failed.</strong> This is the only issue that clearly belongs in the current fix queue.</p>
+          <ul class="issue-meta">
+            <li><strong>Scope:</strong> 4 events, 1 user, all in <code>production</code> on <code>transcripted@1.0.3</code>.</li>
+            <li><strong>Pattern:</strong> Sentry captured “Invalid audio data provided. Must be at least 1 second of 16kHz audio.”</li>
+            <li><strong>Interpretation:</strong> This looks like the shipped build hit Parakeet with sub-threshold audio before the new guard landed.</li>
+            <li><strong>Main code path:</strong> <a href="../Sources/Speech/ParakeetEngine.swift">ParakeetEngine</a> now skips short dictation clips at <code>868-881</code> and short meeting segments at <code>949-959</code>.</li>
+          </ul>
+        </article>
+
+        <article class="issue-card">
+          <div class="kicker watch">Watch</div>
+          <h3><a class="issue-link" href="https://r3dbars.sentry.io/issues/APPLE-MACOS-4">APPLE-MACOS-4</a></h3>
+          <p><strong>App hang for at least 2000 ms.</strong> Important enough to watch, not strong enough yet to drive immediate code changes.</p>
+          <ul class="issue-meta">
+            <li><strong>Scope:</strong> 1 event, 0 impacted users, first and last seen April 12, 2026.</li>
+            <li><strong>Signal quality:</strong> One isolated hang with no clear first-party culprit.</li>
+            <li><strong>Working read:</strong> Keep it on the watchlist and only escalate if it repeats.</li>
+          </ul>
+        </article>
+
+        <article class="issue-card">
+          <div class="kicker noise">Noise</div>
+          <h3><a class="issue-link" href="https://r3dbars.sentry.io/issues/APPLE-MACOS-2">APPLE-MACOS-2</a></h3>
+          <p><strong>Sentry test event.</strong> This is expected verification traffic from Transcripted Settings.</p>
+          <ul class="issue-meta">
+            <li><strong>Scope:</strong> 2 events, 1 user, tagged <code>source=manual_test</code>.</li>
+            <li><strong>Meaning:</strong> Good proof that Sentry wiring works.</li>
+            <li><strong>Action:</strong> Ignore or resolve it so the issue board stays usable.</li>
+          </ul>
+        </article>
+
+        <article class="issue-card">
+          <div class="kicker noise">Noise</div>
+          <h3><a class="issue-link" href="https://r3dbars.sentry.io/issues/APPLE-MACOS-1">APPLE-MACOS-1</a></h3>
+          <p><strong>Sentry dashboard JavaScript error.</strong> This is not a Transcripted macOS app failure.</p>
+          <ul class="issue-meta">
+            <li><strong>Scope:</strong> 1 event, culprit in <code>../../sentry/scripts/views.js</code>.</li>
+            <li><strong>Meaning:</strong> Dashboard/sample-event noise leaking into the project.</li>
+            <li><strong>Action:</strong> Ignore it and do not spend engineering time on it.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <h2>What To Test</h2>
+        <p>These are the tests worth running next if the goal is to turn the live Sentry picture into confidence instead of guesses.</p>
+      </div>
+      <div class="two-up">
+        <div>
+          <table class="test-table">
+            <thead>
+              <tr>
+                <th>Scenario</th>
+                <th>Why</th>
+                <th>Pass Condition</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Dictation under 1 second</strong></td>
+                <td>This directly targets APPLE-MACOS-3.</td>
+                <td>Transcripted quietly skips transcription, inserts nothing, and does <em>not</em> emit <code>parakeet.transcription_failed</code>.</td>
+              </tr>
+              <tr>
+                <td><strong>Boundary dictation around 1 second</strong></td>
+                <td>Confirms the new threshold behaves sanely at the edge.</td>
+                <td><code>0.9s</code> gets skipped cleanly, while <code>1.0s-1.2s</code> either transcribes or returns empty without Sentry noise.</td>
+              </tr>
+              <tr>
+                <td><strong>Meeting transcription with short speaker turns</strong></td>
+                <td>Main already guards short meeting segments too.</td>
+                <td>Short segments are dropped cleanly and the overall meeting transcript still saves without a failure surfacing to the user.</td>
+              </tr>
+              <tr>
+                <td><strong>Launch and settings modal flows</strong></td>
+                <td>This is the cheapest smoke pass for the one app-hang event.</td>
+                <td>No repeated hangs while opening settings, permission prompts, or other blocking UI flows.</td>
+              </tr>
+              <tr>
+                <td><strong>Sentry test button</strong></td>
+                <td>Keeps observability honest without mistaking it for product pain.</td>
+                <td>The verification event lands once, is obviously tagged as test traffic, and can be ignored cleanly in triage.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="fix-card">
+          <div class="kicker stable">Code Paths To Watch</div>
+          <h3>Where The Current Guard Lives</h3>
+          <p>The short-audio protection is already in the codebase. The question is shipping it and validating behavior, not inventing a new approach.</p>
+          <ul class="fix-list">
+            <li><strong><a href="../Sources/Speech/ParakeetEngine.swift">ParakeetEngine</a></strong>: dictation guard at <code>868-881</code>, failure emit path at <code>912-920</code>.</li>
+            <li><strong><a href="../Sources/Speech/ParakeetEngine.swift">ParakeetEngine</a></strong>: meeting segment guard at <code>949-959</code>.</li>
+            <li><strong><a href="../Sources/TranscriptedConstants.swift">TranscriptedConstants</a></strong>: minimum threshold defined at <code>39-48</code>.</li>
+            <li><strong><a href="../Tests/TranscriptedConstantsTests.swift">TranscriptedConstantsTests</a></strong>: constant coverage exists, but behavior coverage is still thin.</li>
+            <li><strong><a href="../Sources/Observability/SentryEventPolicy.swift">SentryEventPolicy</a></strong>: <code>parakeet.transcription_failed</code> is still allowlisted, so noisy regressions will show up fast if this path remains reachable.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <h2>What To Fix</h2>
+        <p>This is the actual order of operations if the goal is better product health, not just a cleaner dashboard.</p>
+      </div>
+      <div class="signal-grid">
+        <article class="signal-card">
+          <div class="kicker critical">1. Ship</div>
+          <h3>Release the short-audio guard</h3>
+          <p>The highest leverage fix is to ship a build newer than <code>1.0.3</code> so users actually get the guard that now exists on <code>main</code>.</p>
+          <ul class="signal-list">
+            <li>Current shipped issue is on the live release, not on current <code>main</code>.</li>
+            <li>If you want users to discover it in-app, the next release also needs appcast updates.</li>
+          </ul>
+        </article>
+
+        <article class="signal-card">
+          <div class="kicker watch">2. Cover</div>
+          <h3>Add behavior tests, not just threshold tests</h3>
+          <p>The repo proves the sample threshold constant, but not the user-facing behavior around skipped short audio.</p>
+          <ul class="signal-list">
+            <li>Add a focused test for “short audio returns nil or empty and does not emit <code>transcription_failed</code>.”</li>
+            <li>Add one meeting-path test to verify short segments are skipped without breaking transcript save.</li>
+          </ul>
+        </article>
+
+        <article class="signal-card">
+          <div class="kicker noise">3. Triage</div>
+          <h3>Clean the Sentry board</h3>
+          <p>Two of the four unresolved issues are not product work and should stop stealing attention.</p>
+          <ul class="signal-list">
+            <li>Ignore or resolve APPLE-MACOS-2 and APPLE-MACOS-1.</li>
+            <li>Leave APPLE-MACOS-4 open as a watch item unless it repeats.</li>
+          </ul>
+        </article>
+
+        <article class="signal-card">
+          <div class="kicker stable">4. Instrument</div>
+          <h3>Only deepen hang work if the signal repeats</h3>
+          <p>The app-hang issue is too sparse to justify a speculative fix right now.</p>
+          <ul class="signal-list">
+            <li>If it comes back, add targeted breadcrumbs around launch-time alerts and settings modal flows.</li>
+            <li>Until then, keep this as a smoke-test item, not a blocker.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <h2>Support Signal</h2>
+        <p>These numbers matter because they tell us whether we are debugging a widely used path or hardening ahead of growth.</p>
+      </div>
+      <div class="signal-grid">
+        <article class="signal-card">
+          <div class="kicker stable">PostHog</div>
+          <h3>Real Usage Is Light And Dictation-Led</h3>
+          <ul class="signal-list">
+            <li><strong>7-day active devices:</strong> <code>1</code></li>
+            <li><strong>App launches:</strong> <code>7</code></li>
+            <li><strong>Dictation:</strong> <code>19</code> started, <code>13</code> completed, <code>68.4%</code> completion</li>
+            <li><strong>Meetings:</strong> no recorded saves or failures surfaced in the last 7 days</li>
+          </ul>
+        </article>
+
+        <article class="signal-card">
+          <div class="kicker good">GitHub</div>
+          <h3>Interest Is Outpacing Product Telemetry</h3>
+          <ul class="signal-list">
+            <li><strong>Stars:</strong> <code>11</code> total, <code>+8</code> in the last 14 days</li>
+            <li><strong>Traffic:</strong> <code>511</code> views, <code>85</code> unique viewers, <code>4683</code> clones</li>
+            <li><strong>Latest release:</strong> <code>v1.0.3</code> with <code>24</code> DMG downloads</li>
+            <li><strong>Repo risk:</strong> open issue <a href="https://github.com/r3dbars/transcripted/issues/246">#246</a> says nightly CI still points at the removed Xcode project</li>
+          </ul>
+        </article>
+
+        <article class="signal-card">
+          <div class="kicker watch">Websites</div>
+          <h3>Fresh Deployments, Partial Visibility</h3>
+          <ul class="signal-list">
+            <li><strong><a href="https://transcripted.app">transcripted.app</a>:</strong> production deploy succeeded on April 8, 2026, but Cloudflare web analytics are not configured</li>
+            <li><strong>Requested:</strong> <code>r3d.br</code> <strong>matched:</strong> <a href="https://r3d.bar">r3d.bar</a></li>
+            <li><strong><a href="https://r3d.bar">r3d.bar</a>:</strong> production deploy succeeded on April 11, 2026</li>
+            <li><strong>Cloudflare analytics:</strong> zone-level analytics reads are currently blocked by token permissions</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <h2>Bottom Line</h2>
+        <p>If you only remember three things from this page, make them these.</p>
+      </div>
+      <div class="signal-grid">
+        <article class="signal-card">
+          <div class="kicker critical">Fix Now</div>
+          <h3>Ship the next release from <code>main</code></h3>
+          <p>That is the path that turns APPLE-MACOS-3 from a live production problem into a likely closed issue.</p>
+        </article>
+        <article class="signal-card">
+          <div class="kicker watch">Fix Next</div>
+          <h3>Add short-audio behavior coverage</h3>
+          <p>The threshold exists. The next confidence boost is proving the real behavior through tests.</p>
+        </article>
+        <article class="signal-card">
+          <div class="kicker stable">Set Up Next</div>
+          <h3>Make the dashboards cleaner than the product is noisy</h3>
+          <p>Ignore Sentry noise, repair nightly CI, and improve meeting-path instrumentation only where it helps decisions.</p>
+        </article>
+      </div>
+
+      <div class="footer-links">
+        <a href="https://r3dbars.sentry.io/issues/?project=apple-macos&amp;query=is%3Aunresolved">Open unresolved Sentry issues</a>
+        <a href="https://r3dbars.sentry.io/issues/APPLE-MACOS-3">Open APPLE-MACOS-3</a>
+        <a href="https://github.com/r3dbars/transcripted/releases">Open Transcripted releases</a>
+        <a href="https://github.com/r3dbars/transcripted/issues/246">Open nightly CI issue</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
