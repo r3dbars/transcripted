@@ -41,17 +41,17 @@ When docs disagree, prefer:
 
 ## Validation Layers
 
-This repo has three different test/build surfaces that agents should treat as
+This repo has four different verification surfaces that agents should treat as
 distinct:
 
 - `bash build.sh`
   The authoritative app build.
 - `bash run-tests.sh`
   Curated fast tests for app-facing logic.
-- `swift test`
-  SPM tests for `TranscriptedCore`.
 - `bash run-integration-smoke.sh`
   App/Core integration smoke.
+- `swift test`
+  SPM tests for `TranscriptedCore`.
 
 Rule of thumb:
 
