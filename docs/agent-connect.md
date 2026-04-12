@@ -94,7 +94,7 @@ Example Claude Desktop config:
 Notes:
 
 - `transcripted-mcp` communicates over stdio, not HTTP.
-- By default it reads Transcripted data from the current Draft-named app-support folders.
+- By default it resolves Transcripted capture folders first, then falls back to legacy Draft or `~/Documents/Transcripted/` layouts if those are the only artifacts on disk.
 - If needed, override paths with `TRANSCRIPTED_DATA_DIR`,
   `TRANSCRIPTED_MEETINGS_DIR`, `TRANSCRIPTED_DICTATIONS_DIR`, and
   `TRANSCRIPTED_INDEX_DIR`.

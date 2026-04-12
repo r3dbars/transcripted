@@ -12,7 +12,7 @@ Important entry points:
 
 - `TranscriptedApp.swift` — app entry point, menubar wiring, popover, overlay setup, and detected-meeting prompt wiring
 - `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, wake-recovery coordination, and lazy `MeetingSessionController`
-- `DraftPaths.swift` — app-support path helpers for the current Draft-named compatibility tree
+- `DraftPaths.swift` — app-support path helpers for the Transcripted capture-library, state, cache, logs, and tmp layout
 - `HotkeyPreferences.swift` — persisted hotkey settings used by capture routing
 - `TranscriptedConstants.swift` — shared timing and behavior constants used across the app target
 - `Capture/ContextCaptureEngine.swift` — right-option dictation handling, keyboard hotkeys, meeting hotkey routing

@@ -38,10 +38,14 @@ These seams exist specifically so the app can embed the library without adopting
 
 Standalone `TranscriptedCore.default` paths point to:
 
-- `~/Documents/Transcripted/` for transcripts, databases, clips, and failed queue
-- `~/Library/Logs/Transcripted/` for logs
+- `~/Library/Application Support/Transcripted/captures/meetings/` for meeting captures
+- `~/Library/Application Support/Transcripted/state/` for databases and failed queue
+- `~/Library/Application Support/Transcripted/tmp/recordings/` for clips and raw audio scratch
+- `~/Library/Application Support/Transcripted/logs/` for logs
 
-The app does **not** use those defaults for meetings. `Sources/Meeting/MeetingSessionController.swift` injects app-specific `CoreStoragePaths` rooted in the current Draft-named compatibility tree.
+The app still injects app-specific `CoreStoragePaths` for meetings so the
+capture folder follows the selected capture library rather than a hard-coded
+default path.
 
 `TranscriptSaver.saveTranscript(...)` also writes:
 

@@ -91,10 +91,17 @@ Rules:
 
 ## Storage
 
-Current persisted data on `main` uses Draft-named compatibility roots:
+Current persisted data on `main` defaults to Transcripted-named roots:
 
-- app support root: `~/Library/Application Support/Draft/`
-- dictations: `~/Library/Application Support/Draft/dictations/`
-- meetings: `~/Library/Application Support/Draft/meetings/`
+- app support root: `~/Library/Application Support/Transcripted/`
+- default capture library: `~/Library/Application Support/Transcripted/captures/`
+- dictations: `<capture-library>/dictations/`
+- meetings: `<capture-library>/meetings/`
+- app-owned state: `~/Library/Application Support/Transcripted/state/`
+- logs: `~/Library/Application Support/Transcripted/logs/`
+- temporary recordings: `~/Library/Application Support/Transcripted/tmp/recordings/`
+
+The capture library can be moved in Settings. Legacy `Draft` paths remain only
+for migration/cleanup flows and some standalone-tool fallback logic.
 
 See `docs/storage-paths.md` for the full map, including `TranscriptedCore` standalone defaults.

@@ -6,8 +6,9 @@
 //
 // Boot sequence:
 //   1. init() constructs all Core services with app-owned CoreStoragePaths
-//      so transcripts, speakers DB, stats DB, failed-queue, clips, and logs all
-//      live under ~/Library/Application Support/Draft/meetings/.
+//      so meeting captures follow the selected capture library while speakers DB,
+//      stats DB, failed-queue, logs, and scratch audio stay under the app-owned
+//      Transcripted Application Support folders.
 //   2. prepareModels() loads Parakeet + PyAnnote/WeSpeaker/Sortformer. Safe to
 //      call multiple times — each engine is idempotent.
 //   3. startRecording() begins capture via MeetingCaptureBridge.

@@ -41,7 +41,7 @@ public class TranscriptSaver {
     /// - Parameters:
     ///   - text: The transcript text to save
     ///   - duration: Recording duration in seconds
-    ///   - directory: Optional custom directory (defaults to ~/Documents/Transcripted/)
+    ///   - directory: Optional custom directory (defaults to `CoreStoragePaths.default.transcripts`)
     ///   - notifier: Optional notifier; invoked on the main actor after a successful save.
     /// - Returns: URL of saved file, or nil if save failed
     @discardableResult

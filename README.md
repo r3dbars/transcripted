@@ -153,13 +153,19 @@ Transcripted keeps its core workflows on-device:
 - meeting capture, transcription, and saved transcripts stay on your Mac
 - agent-facing artifacts are plain local files you can inspect directly
 
-Fresh installs use:
+Default locations on a new install are:
 
-- `~/Library/Application Support/Transcripted/dictations/`
-- `~/Library/Application Support/Transcripted/meetings/`
+- capture library: `~/Library/Application Support/Transcripted/captures/`
+- meetings: `~/Library/Application Support/Transcripted/captures/meetings/`
+- dictations: `~/Library/Application Support/Transcripted/captures/dictations/`
+- app state, logs, and temp files: `~/Library/Application Support/Transcripted/{state,logs,tmp}/`
 
-If a legacy `Draft` Application Support folder already exists, current builds
-continue using that location for compatibility while the rename settles.
+You can move the capture library in Settings. Transcripted keeps its databases,
+logs, cache, and temporary recordings under `~/Library/Application Support/Transcripted/`
+even when captures live somewhere else.
+
+Historic `Draft` paths remain in the repo for migration/cleanup flows and for
+standalone tool fallback when older artifacts are the only data on disk.
 
 Operational caveats:
 
@@ -230,8 +236,9 @@ The old standalone Transcripted app is preserved on:
 This repo currently uses the manual migration path:
 
 - existing standalone Transcripted installs do not auto-upgrade into this app
-- fresh installs use Transcripted-named Application Support paths
-- existing Draft-named Application Support folders are still reused for compatibility
+- current app builds default to Transcripted-named Application Support paths
+- captures can be relocated in Settings without moving app state or logs
+- standalone tools still recognize older Draft and `~/Documents/Transcripted/` layouts as fallback
 - permissions and settings do not carry over automatically
 
 ## Contributing And Security

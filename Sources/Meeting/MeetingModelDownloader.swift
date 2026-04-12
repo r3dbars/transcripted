@@ -1,8 +1,8 @@
 // MeetingModelDownloader.swift
 // Gates the meeting pipeline on the STT + diarization models being loaded.
 // Delegates the actual download work to TranscriptedCore (DiarizationService
-// initializes PyAnnote + WeSpeaker + Sortformer) and Draft (ParakeetEngine
-// loads Parakeet TDT V3). This file only coordinates the two calls and
+// initializes PyAnnote + WeSpeaker + Sortformer) and the app's ParakeetEngine
+// (which loads Parakeet TDT V3). This file only coordinates the two calls and
 // surfaces a single await point for the session controller.
 
 import Foundation

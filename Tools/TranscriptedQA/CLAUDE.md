@@ -109,4 +109,4 @@ transcripted-qa stress-test --transcripts 100 --speakers-per-transcript 4 --utte
 - SQLite readers use dedicated utility queues for thread safety
 - Validation results are structured for programmatic consumption
 - Error messages are human-readable for CLI output
-- Defaults target the Draft app-support tree under `~/Library/Application Support/Draft/`, including `meetings/` artifacts and `logs/app.jsonl`
+- Defaults still target the legacy Draft meetings tree under `~/Library/Application Support/Draft/meetings`, while log validation defaults to `~/Library/Logs/Transcripted/app.jsonl`
