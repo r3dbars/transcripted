@@ -3,7 +3,7 @@
 ## What This Does
 
 This directory contains the app's logging, diagnostics, crash reporting,
-optional beta shipping, and update plumbing.
+optional beta shipping, and Sparkle update plumbing.
 
 ## Key Files
 
@@ -17,12 +17,14 @@ optional beta shipping, and update plumbing.
 - `SentryPayloadSanitizer.swift` — strips obvious sensitive values before Sentry sends
 - `EventTracker.swift` — lightweight analytics hook
 - `BetaTelemetry.swift` — beta-only log/event shipping
-- `UpdateManager.swift` — beta updater flow
+- `SparkleUpdaterController.swift` — live Sparkle update controller used by the menubar app
 
 ## Current Notes
 
 - Treat this directory as shared infrastructure for the current dictation +
   meetings app
+- Sparkle is the live in-app update path on `main`; the older beta DMG
+  self-update flow is no longer part of the app target
 - Do not assume older draft/style/analysis event flows are still active just
   because they appear in historical docs or event logs
 - `build.sh` and beta behavior can affect logs, signing, and permissions during
