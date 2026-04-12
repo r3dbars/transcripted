@@ -166,7 +166,7 @@ class ParakeetEngine: ObservableObject {
     private var asrManager: AsrManager?
     private var audioWatchdogTask: Task<Void, Never>?
     private var asrManagerReady = false
-    private var didReceiveAudioSamples = false
+    private nonisolated(unsafe) var didReceiveAudioSamples = false
 
     var isModelLoaded: Bool { asrManagerReady }
 
@@ -615,6 +615,7 @@ class ParakeetEngine: ObservableObject {
             return false
         }
 
+        let tapSampleRate = nativeSampleRate
         inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: monoFormat) { [weak self] buffer, _ in
             guard let self = self,
                   let channelData = buffer.floatChannelData?[0] else { return }
@@ -627,7 +628,7 @@ class ParakeetEngine: ObservableObject {
                         message: "Audio samples started flowing",
                         context: [
                             "audio_device": self.inputDeviceName,
-                            "sample_rate": "\(self.nativeSampleRate)",
+                            "sample_rate": "\(tapSampleRate)",
                             "frames": "\(frameLength)"
                         ])
                 }
@@ -636,7 +637,7 @@ class ParakeetEngine: ObservableObject {
             // Consumer 1: optional live streaming display (currently disabled).
             if self.liveDisplayEnabled, let eou = self.eouManager {
                 let rawSamples = Array(UnsafeBufferPointer(start: channelData, count: frameLength))
-                let resampled = AudioResampler.resample(rawSamples, from: self.nativeSampleRate, to: 16000)
+                let resampled = AudioResampler.resample(rawSamples, from: tapSampleRate, to: 16000)
                 self.streamingSamplesLock.lock()
                 self.streamingSampleBuffer.append(contentsOf: resampled)
                 var chunk: [Float]? = nil
