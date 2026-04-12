@@ -71,7 +71,6 @@ struct TranscriptedSettingsView: View {
                         set: { newValue in
                             crashReportingEnabled = newValue
                             CrashReportingPreferences.setEnabled(newValue)
-                            CrashReporter.shared.refreshPreference()
                             sentryTestStatus = nil
                         }
                     ))

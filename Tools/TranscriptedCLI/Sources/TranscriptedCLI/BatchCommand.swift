@@ -1,5 +1,7 @@
 import ArgumentParser
 import Foundation
+
+#if TRANSCRIPTEDCLI_WITH_DIARIZATION
 import FluidAudio
 
 struct Batch: AsyncParsableCommand {
@@ -109,3 +111,29 @@ struct Batch: AsyncParsableCommand {
         print(summaryJSON)
     }
 }
+#else
+struct Batch: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Run offline diarization on all audio files in a directory."
+    )
+
+    @Argument(help: "Directory containing audio files.")
+    var audioDir: String
+
+    @Option(name: .long, help: "Path to JSON config file for diarizer parameters.")
+    var config: String?
+
+    @Option(name: .long, help: "Path to directory containing diarization models.")
+    var modelsDir: String?
+
+    @Option(name: .long, help: "Output directory for RTTM files. Defaults to audio directory.")
+    var outputDir: String?
+
+    @Option(name: .long, help: "Audio file extension to process.")
+    var ext: String = "m4a"
+
+    func run() async throws {
+        throw ValidationError("Offline diarization dependencies are unavailable. Run `bash build-deps.sh` from the repo root, then rebuild `transcripted-cli`.")
+    }
+}
+#endif

@@ -1,6 +1,6 @@
 import Foundation
 
-private enum AnalyticsRuntimeConfiguration {
+enum AnalyticsRuntimeConfiguration {
     static let apiKeyInfoKey = "TranscriptedPostHogAPIKey"
     static let hostInfoKey = "TranscriptedPostHogHost"
     private static let localOverridesFileName = "observability-overrides.plist"
@@ -21,19 +21,37 @@ private enum AnalyticsRuntimeConfiguration {
         )
     }
 
-    private static func localOverrideValue(forKey key: String) -> String? {
-        guard let overrides = NSDictionary(contentsOf: localOverridesURL) as? [String: Any] else {
-            return nil
-        }
-        return overrides[key] as? String
+    static func localOverrideValue(forKey key: String) -> String? {
+        localOverrideValue(forKey: key, appSupportDirectory: applicationSupportDirectory())
     }
 
-    private static var localOverridesURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+    static func localOverrideValue(forKey key: String, appSupportDirectory: URL) -> String? {
+        for url in localOverridesSearchURLs(appSupportDirectory: appSupportDirectory) {
+            guard let overrides = NSDictionary(contentsOf: url) as? [String: Any] else {
+                continue
+            }
+            if let value = firstNonEmpty(overrides[key] as? String) {
+                return value
+            }
+        }
+
+        return nil
+    }
+
+    static func localOverridesSearchURLs(appSupportDirectory: URL) -> [URL] {
+        [
+            appSupportDirectory
+                .appendingPathComponent("Transcripted", isDirectory: true)
+                .appendingPathComponent(localOverridesFileName),
+            appSupportDirectory
+                .appendingPathComponent("Draft", isDirectory: true)
+                .appendingPathComponent(localOverridesFileName),
+        ]
+    }
+
+    private static func applicationSupportDirectory() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support", isDirectory: true)
-        return appSupport
-            .appendingPathComponent("Draft", isDirectory: true)
-            .appendingPathComponent(localOverridesFileName)
     }
 
     private static func firstNonEmpty(_ candidates: String?...) -> String? {
@@ -47,7 +65,7 @@ final class AnalyticsReporter {
     static let shared = AnalyticsReporter()
 
     static var isAvailable: Bool {
-        AnalyticsRuntimeConfiguration.apiKey() != nil && AnalyticsRuntimeConfiguration.host() != nil
+        shared.apiKey != nil && shared.captureHost != nil
     }
 
     static func track(_ event: String, properties: [String: String] = [:]) {
@@ -101,6 +119,10 @@ final class AnalyticsReporter {
 
     private init() {}
 
+    // Config is read once from env/plist/overrides file and cached for the app lifetime.
+    private let apiKey: String? = AnalyticsRuntimeConfiguration.apiKey()
+    private let captureHost: String? = AnalyticsRuntimeConfiguration.host()
+    private static let isoDateFormatter = ISO8601DateFormatter()
     private let storageKey = "observability-anonymous-analytics-id"
     private let sessionID = UUID().uuidString
     private let session: URLSession = {
@@ -121,8 +143,8 @@ final class AnalyticsReporter {
 
     private func trackEvent(_ event: String, properties: [String: String]) {
         guard AnalyticsPreferences.isEnabled() else { return }
-        guard let apiKey = AnalyticsRuntimeConfiguration.apiKey(),
-              let host = AnalyticsRuntimeConfiguration.host(),
+        guard let apiKey,
+              let captureHost,
               let policy = AnalyticsEventPolicy.policy(forEvent: event) else {
             return
         }
@@ -142,12 +164,12 @@ final class AnalyticsReporter {
             "api_key": apiKey,
             "event": policy.name,
             "distinct_id": distinctID,
-            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "timestamp": Self.isoDateFormatter.string(from: Date()),
             "properties": eventProperties,
         ]
 
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let url = URL(string: normalizedCaptureURL(from: host)) else {
+              let url = URL(string: normalizedCaptureURL(from: captureHost)) else {
             return
         }
 

@@ -23,6 +23,7 @@
 - [ ] Privacy / local-first behavior reviewed
 - [ ] Storage path or migration impact reviewed
 - [ ] Public-facing copy stays concrete and matches current product scope
+- [ ] Release/update impact reviewed (`CFBundleShortVersionString`, `docs/appcast.xml`, or user-facing caveats if applicable)
 
 ## Notes
 
