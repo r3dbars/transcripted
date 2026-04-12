@@ -19,9 +19,10 @@
 7. `Sources/TranscriptedCore/CLAUDE.md` when touching the shared library
 8. `Tests/README.md`
 9. `docs/storage-paths.md`
-10. `Sources/Observability/CLAUDE.md` when touching crash reporting, event forwarding, beta telemetry, or app updates
-11. `docs/release-packaging.md` when touching packaging, signing, notarization, or user-facing releases
-12. `docs/sparkle-updates.md` when touching app updates or cutting a release users should receive in-app
+10. `Sources/Reliability/CLAUDE.md` when touching wake / sleep recovery or hotkey recovery
+11. `Sources/Observability/CLAUDE.md` when touching crash reporting, event forwarding, beta telemetry, or app updates
+12. `docs/release-packaging.md` when touching packaging, signing, notarization, or user-facing releases
+13. `docs/sparkle-updates.md` when touching app updates or cutting a release users should receive in-app
 
 ## Directory map
 
@@ -49,6 +50,7 @@ Current source-of-truth docs:
 - `Sources/CLAUDE.md`
 - `Sources/Dictation/CLAUDE.md`
 - `Sources/Meeting/CLAUDE.md`
+- `Sources/Reliability/CLAUDE.md`
 - `Sources/Observability/CLAUDE.md`
 - `Sources/TranscriptedCore/CLAUDE.md`
 - `Tests/README.md`
@@ -147,17 +149,10 @@ Rules:
 
 ## Storage
 
-Current persisted data on `main` defaults to Transcripted-named roots:
+Current persisted data on `main` uses Draft-named compatibility roots:
 
-- app support root: `~/Library/Application Support/Transcripted/`
-- default capture library: `~/Library/Application Support/Transcripted/captures/`
-- dictations: `<capture-library>/dictations/`
-- meetings: `<capture-library>/meetings/`
-- app-owned state: `~/Library/Application Support/Transcripted/state/`
-- logs: `~/Library/Application Support/Transcripted/logs/`
-- temporary recordings: `~/Library/Application Support/Transcripted/tmp/recordings/`
-
-The capture library can be moved in Settings. Legacy `Draft` paths remain only
-for migration/cleanup flows and some standalone-tool fallback logic.
+- app support root: `~/Library/Application Support/Draft/`
+- dictations: `~/Library/Application Support/Draft/dictations/`
+- meetings: `~/Library/Application Support/Draft/meetings/`
 
 See `docs/storage-paths.md` for the full map, including `TranscriptedCore` standalone defaults.
