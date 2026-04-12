@@ -46,6 +46,8 @@ let package = Package(
                 .unsafeFlags([
                     "-F\(depsFrameworksRoot)",
                     "-L\(depsLibsRoot)",
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", depsFrameworksRoot,
                     "-lDraftDeps",
                     "-lc++",
                 ]),

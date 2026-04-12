@@ -58,14 +58,16 @@ struct CLIContextDirectories {
             ?? env["TRANSCRIPTED_MEETINGS_DIR"].map(URL.init(fileURLWithPath:))
         let dictationsURL = dictationsDir.map(URL.init(fileURLWithPath:))
             ?? env["TRANSCRIPTED_DICTATIONS_DIR"].map(URL.init(fileURLWithPath:))
+        let currentTranscriptedCapturesExist = FileManager.default.fileExists(atPath: defaultMeetings.path)
+            || FileManager.default.fileExists(atPath: defaultDictations.path)
 
         let useLegacyDraft = meetingsURL == nil
             && dictationsURL == nil
-            && !FileManager.default.fileExists(atPath: defaultMeetings.path)
+            && !currentTranscriptedCapturesExist
             && FileManager.default.fileExists(atPath: legacyDraftMeetings.path)
         let useLegacyShared = meetingsURL == nil
             && dictationsURL == nil
-            && !FileManager.default.fileExists(atPath: defaultMeetings.path)
+            && !currentTranscriptedCapturesExist
             && !FileManager.default.fileExists(atPath: legacyDraftMeetings.path)
             && FileManager.default.fileExists(atPath: legacyShared.path)
 

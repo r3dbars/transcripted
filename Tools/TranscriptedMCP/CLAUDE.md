@@ -24,11 +24,11 @@ Path overrides:
 - `TRANSCRIPTED_DICTATIONS_DIR` — dictations directory override
 - `TRANSCRIPTED_INDEX_DIR` — SQLite index directory override
 
-## Package Layout (14 Swift files)
+## Package Layout (15 Swift files)
 
 - `Package.swift` — Swift package manifest for the standalone MCP server
 - `Sources/TranscriptedMCP/` — 9 source files for server startup, directory resolution, path validation, indexing, and tool handlers
-- `Tests/TranscriptedMCPTests/` — 4 test files for index lifecycle, markdown loading, name variants, and shared fixtures
+- `Tests/TranscriptedMCPTests/` — 5 test files for directory resolution, index lifecycle, markdown loading, name variants, and shared fixtures
 
 ## File Index
 
@@ -48,6 +48,7 @@ Path overrides:
 
 | File | Purpose |
 |------|---------|
+| `DataDirectoriesTests.swift` | Directory-resolution coverage for current Transcripted captures vs legacy Draft fallback |
 | `TranscriptIndexTests.swift` | Full index lifecycle: reconcile, query, date filters, speaker search, and mixed-context indexing |
 | `TranscriptLoaderTests.swift` | Markdown and YAML frontmatter parsing edge cases, including path-safety checks |
 | `NameVariantsTests.swift` | Name variant matching accuracy |
