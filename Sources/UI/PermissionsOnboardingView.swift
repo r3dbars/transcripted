@@ -11,6 +11,7 @@ struct PermissionsOnboardingView: View {
     @State private var micGranted = false
     @State private var accessibilityGranted = false
     @State private var screenRecordingGranted = false
+    @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
     @State private var pollTimer: Timer?
 
     var body: some View {
@@ -48,6 +49,12 @@ struct PermissionsOnboardingView: View {
                     OptionalPermissionsCard(
                         optionalPermissions: optionalPermissions,
                         isGranted: isGranted
+                    )
+
+                    DiagnosticConsentCard(
+                        crashReportingEnabled: $crashReportingEnabled,
+                        isAvailable: CrashReporter.isAvailable,
+                        onToggle: updateCrashReportingPreference
                     )
 
                     VStack(alignment: .leading, spacing: 10) {
@@ -103,6 +110,7 @@ struct PermissionsOnboardingView: View {
         .background(MenuTokens.cardBackground)
         .onAppear {
             checkAllPermissions()
+            crashReportingEnabled = CrashReportingPreferences.isEnabled()
             startPolling()
         }
         .onDisappear {
@@ -172,6 +180,12 @@ struct PermissionsOnboardingView: View {
         guard hasRequiredPermissions else { return }
         stopPolling()
         onComplete()
+    }
+
+    private func updateCrashReportingPreference(_ enabled: Bool) {
+        crashReportingEnabled = enabled
+        CrashReportingPreferences.setEnabled(enabled)
+        CrashReporter.shared.refreshPreference()
     }
 
     static var hasCompleted: Bool {
@@ -308,6 +322,57 @@ private struct OptionalPermissionsCard: View {
                         .stroke(MenuTokens.cardBorder, lineWidth: 1)
                 )
         )
+    }
+}
+
+private struct DiagnosticConsentCard: View {
+    @Binding var crashReportingEnabled: Bool
+    let isAvailable: Bool
+    let onToggle: (Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Crash and error reports")
+                .font(.subheadline.weight(.semibold))
+
+            Text("Transcripted can send technical crash and error information to help fix bugs faster. It does not send transcript text, audio, meeting titles, or speaker names.")
+                .font(.caption)
+                .foregroundStyle(MenuTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle(
+                "Help improve Transcripted with crash and error reports",
+                isOn: Binding(
+                    get: { crashReportingEnabled },
+                    set: onToggle
+                )
+            )
+            .disabled(!isAvailable)
+
+            Text(footnote)
+                .font(.caption)
+                .foregroundStyle(MenuTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(MenuTokens.cardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(MenuTokens.cardBorder, lineWidth: 1)
+                )
+        )
+    }
+
+    private var footnote: String {
+        if !isAvailable {
+            return "This build does not have Sentry configured yet, so crash and error reports stay on this Mac only. You can still change this later from Settings."
+        }
+
+        return crashReportingEnabled
+            ? "On by default. You can turn this off now or later from Settings."
+            : "Off. You can change this later from Settings if you want to help improve Transcripted."
     }
 }
 

@@ -9,8 +9,8 @@
 
 The old standalone Transcripted app is preserved on:
 
-- `legacy/transcripted-standalone`
-- `pre-draft-takeover-2026-04-06`
+- branch `legacy/transcripted-standalone`
+- tag `pre-draft-takeover-2026-04-06`
 
 The older drafting / ghostwriting flow does not live on `main` anymore. `DictationSessionController` still exposes compatibility stubs for removed draft-mode entry points.
 
@@ -48,9 +48,10 @@ Rules:
 ## Current architecture
 
 - `Sources/TranscriptedApp.swift` wires the menubar app, popover, dictation overlay, meeting overlay, and detected-meeting prompt flow.
-- `Sources/TranscriptedAppState.swift` owns app-wide services: `STTRouter`, `ContextCaptureEngine`, and the lazily built `MeetingSessionController`.
+- `Sources/TranscriptedAppState.swift` owns app-wide services: `STTRouter`, `ContextCaptureEngine`, the lazily built `MeetingSessionController`, and a `WakeRecoveryCoordinator` for handling sleep / wake transitions during active recording.
 - `Sources/UI/DictationSessionController.swift` now handles dictation only. Removed draft-mode entry points surface a fixed error message.
 - `Sources/Meeting/` adapts app-owned pieces like `ParakeetEngine` into `TranscriptedCore`, including meeting-link detection and app-level transcription queueing.
+- `Sources/Reliability/` holds the `WakeRecoveryCoordinator` used by the app state above.
 - `Sources/TranscriptedCore/` contains the reusable meeting transcription library.
 - Root `Package.swift` exists so `TranscriptedCore` can be tested as a standalone package surface.
 

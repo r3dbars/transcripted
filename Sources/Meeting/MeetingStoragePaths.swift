@@ -14,15 +14,11 @@ enum MeetingStoragePaths {
 
     /// Meeting captures live directly in the meetings folder.
     static var transcriptsFolder: URL {
-        let url = root
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
+        root
     }
 
     static var stateFolder: URL {
-        let url = FileManager.default.transcriptedStateDir
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
+        FileManager.default.transcriptedStateDir
     }
 
     static var speakersDatabase: URL {
@@ -55,8 +51,6 @@ enum MeetingStoragePaths {
 
     /// Temporary scratch directory for in-progress recordings. Cleaned on a best-effort basis.
     static var recordingsScratch: URL {
-        let url = FileManager.default.transcriptedRecordingsDir
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
+        FileManager.default.transcriptedRecordingsDir
     }
 }

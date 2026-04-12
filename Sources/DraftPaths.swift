@@ -55,9 +55,7 @@ extension FileManager {
     }
 
     var transcriptedDefaultCaptureLibraryDir: URL {
-        let url = transcriptedAppSupportDir.appendingPathComponent("captures", isDirectory: true)
-        try? createPrivateDirectory(at: url)
-        return url
+        transcriptedAppSupportDir.appendingPathComponent("captures", isDirectory: true)
     }
 
     var transcriptedCaptureLibraryDir: URL {
@@ -67,33 +65,23 @@ extension FileManager {
     }
 
     var transcriptedStateDir: URL {
-        let url = transcriptedAppSupportDir.appendingPathComponent("state", isDirectory: true)
-        try? createPrivateDirectory(at: url)
-        return url
+        transcriptedAppSupportDir.appendingPathComponent("state", isDirectory: true)
     }
 
     var transcriptedCacheDir: URL {
-        let url = transcriptedAppSupportDir.appendingPathComponent("cache", isDirectory: true)
-        try? createPrivateDirectory(at: url)
-        return url
+        transcriptedAppSupportDir.appendingPathComponent("cache", isDirectory: true)
     }
 
     var transcriptedLogsDir: URL {
-        let url = transcriptedAppSupportDir.appendingPathComponent("logs", isDirectory: true)
-        try? createPrivateDirectory(at: url)
-        return url
+        transcriptedAppSupportDir.appendingPathComponent("logs", isDirectory: true)
     }
 
     var transcriptedTemporaryDir: URL {
-        let url = transcriptedAppSupportDir.appendingPathComponent("tmp", isDirectory: true)
-        try? createPrivateDirectory(at: url)
-        return url
+        transcriptedAppSupportDir.appendingPathComponent("tmp", isDirectory: true)
     }
 
     var transcriptedRecordingsDir: URL {
-        let url = transcriptedTemporaryDir.appendingPathComponent("recordings", isDirectory: true)
-        try? createPrivateDirectory(at: url)
-        return url
+        transcriptedTemporaryDir.appendingPathComponent("recordings", isDirectory: true)
     }
 
     /// <capture-library>/meetings/

@@ -51,7 +51,6 @@ Meeting recordings become:
 - a Markdown transcript
 - a structured JSON sidecar
 - a `transcripted.json` index of saved meetings
-- `AGENT.md` and `CLAUDE.md` helper docs for external agents
 
 Dictation becomes:
 

@@ -27,7 +27,7 @@ enum AgentConnectionGuide {
 
     static var meetingsFolder: URL {
         let url = MeetingStoragePaths.transcriptsFolder
-        AgentOutput.writeAgentReadme(to: url)
+        AgentOutput.removeLegacyAgentHelperFiles(from: url)
         return url
     }
 
@@ -62,7 +62,8 @@ enum AgentConnectionGuide {
         - Dictations: \(dictationsFolder.path)
 
         When using folders:
-        - Read AGENT.md and transcripted.json in the meetings folder if they exist.
+        - Read transcripted.json in the meetings folder if it exists.
+        - Otherwise inspect the newest or most relevant meeting `.json` sidecar directly.
         - Prefer the most direct source available.
         - Use exact filenames, dates, and speaker names when relevant.
         - Do not invent access or claim data you cannot read.

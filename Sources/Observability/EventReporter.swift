@@ -157,5 +157,16 @@ final class EventReporter {
         Task.detached(priority: .utility) { [writer, entry] in
             await writer.append(entry)
         }
+
+        if level == .error,
+           let sentryPolicy = SentryEventPolicy.policy(forEngine: engine, event: event) {
+            CrashReporter.shared.captureObservabilityEvent(
+                level: level,
+                engine: sentryPolicy.engine,
+                event: sentryPolicy.event,
+                message: sentryPolicy.summary,
+                context: mergedContext
+            )
+        }
     }
 }
