@@ -38,6 +38,16 @@ enum TranscriptedConstants {
     /// Target sample rate for Parakeet inference
     static let parakeetSampleRate: Double = 16000.0
 
+    /// Minimum audio duration required by Parakeet for stable batch inference.
+    static let parakeetMinimumAudioDuration: TimeInterval = 1.0
+
+    /// Minimum sample count required by Parakeet at the target sample rate.
+    static let parakeetMinimumInferenceSamples = Int(parakeetSampleRate * parakeetMinimumAudioDuration)
+
+    static func hasMinimumParakeetAudioSamples(_ sampleCount: Int) -> Bool {
+        sampleCount >= parakeetMinimumInferenceSamples
+    }
+
     /// Delay for audio engine re-warm after device change (nanoseconds)
     static let audioRecoveryDelay: UInt64 = 300_000_000  // 300ms
 

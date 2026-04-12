@@ -1,15 +1,17 @@
 # Accessibility
 
-## What This Contains
+## What this directory owns
 
-Accessibility and AXUIElement helpers for positioning Transcripted near the focused text field and reading editable text context.
+`Sources/Accessibility/` is the small AX bridge used to understand the
+currently focused editor so Transcripted can place UI near it and recover text
+context safely.
 
-Current Swift files: **1**
+## Important file
 
-| File | Purpose |
-|---|---|
-| `AccessibilityBridge.swift` | AXUIElement queries for focused-element metadata, text values, bounds, and related accessibility helpers |
+- `AccessibilityBridge.swift` — AXUIElement queries for focused-element metadata, text values, bounds, and related accessibility helpers
 
-## Notes
-- This directory is intentionally small and focused.
-- Use it when the app needs to discover where to place UI relative to the currently focused editor.
+## Guardrails
+
+- keep this directory small and focused
+- prefer reading focused-element metadata over adding product logic here
+- changes here can affect overlay placement and paste-back behavior across the app
