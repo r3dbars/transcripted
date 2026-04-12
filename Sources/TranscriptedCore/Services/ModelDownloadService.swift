@@ -377,11 +377,21 @@ public enum ModelDownloadService {
         )
     }
 
-    /// Compute the SHA-256 hex digest of a file.
-    /// Security: used to verify model file integrity after download from mirrors.
+    /// Compute the SHA-256 hex digest of a file by streaming it in chunks.
+    /// Security: avoids loading large model files (potentially several GB) entirely into memory.
+    /// A naive Data(contentsOf:) call could exhaust RAM and crash the app before the integrity
+    /// check completes, letting a compromised mirror bypass SHA-256 verification by serving an
+    /// oversized file. Streaming caps peak memory at one chunk (1MB) regardless of file size.
     static func sha256Hex(of url: URL) throws -> String {
-        let data = try Data(contentsOf: url)
-        let digest = CryptoKit.SHA256.hash(data: data)
+        let fileHandle = try FileHandle(forReadingFrom: url)
+        defer { try? fileHandle.close() }
+        var hasher = CryptoKit.SHA256()
+        let chunkSize = 1024 * 1024 // 1MB chunks — large enough for throughput, small enough for memory safety
+        while true {
+            guard let chunk = try fileHandle.read(upToCount: chunkSize), !chunk.isEmpty else { break }
+            hasher.update(data: chunk)
+        }
+        let digest = hasher.finalize()
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
