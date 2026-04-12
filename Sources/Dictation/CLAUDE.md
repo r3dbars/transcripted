@@ -6,7 +6,6 @@
 
 ## Files
 
-- `DictationAgentOutput.swift` — Codable models + helper for a JSON day-sidecar format retained in the repo; the current app session flow writes markdown only
 - `DictationSessionTimeout.swift` — uptime-based timeout helper so sleep does not consume a session's remaining record window
 - `DictationStoragePaths.swift` — capture-library-backed storage root for dictation artifacts
 - `DictationTranscriptWriter.swift` — groups completed dictations into one markdown file per day
@@ -36,7 +35,6 @@ Each section captures:
 
 ## Test coverage
 
-- `Tests/DictationAgentOutputTests.swift`
 - `Tests/DictationSessionTimeoutTests.swift`
 - `Tests/DictationTranscriptWriterTests.swift`
 
@@ -44,5 +42,4 @@ Each section captures:
 
 - If you change the markdown layout, update the tests.
 - Dictation artifacts are append-only by day; do not assume one file per session.
-- `DictationAgentOutput.swift` is currently a retained helper, not part of the live dictation save path. If you wire it back in, update docs and tests in the same change.
 - This directory is about persistence and timing helpers only. Recording lifecycle changes belong in `Sources/UI/DictationSessionController.swift` and `Sources/Speech/`.
