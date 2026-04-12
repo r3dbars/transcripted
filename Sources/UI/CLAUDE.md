@@ -18,21 +18,18 @@ Draft-mode UI is not an active product path in this worktree.
 ### Dictation Overlay
 
 - `DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
-- `ReviewTextView.swift` — editable NSTextView for dictation preview
 - `FloatingOverlayController.swift` — owns the overlay panel lifecycle and Combine subscriptions
 - `FloatingOverlayPanel.swift` — non-activating NSPanel for the dictation overlay
-- `OverlayDiffStripView.swift` — side-by-side diff indicator in review state
 - `OverlayDraftingView.swift` — drafting/processing state view
 - `OverlayHeaderView.swift` — overlay title bar with controls
-- `OverlayListeningView.swift` — waveform and status during active dictation
-- `OverlayReviewView.swift` — post-dictation review before paste
 - `OverlayRootView.swift` — top-level SwiftUI container switching between overlay states
-- `OverlayStreamingView.swift` — streaming transcript display during dictation
-- `OverlayToastView.swift` — ephemeral toast notifications in the overlay
 - `OverlayTokens.swift` — design tokens (colors, spacing, sizing) for overlay views
-- `OverlayToolbarView.swift` — action buttons in the overlay footer
 - `PanelDragView.swift` — drag handle for repositioning the overlay panel
 - `WaveformLayer.swift` — Core Animation layer drawing the audio waveform
+
+The current dictation overlay is compact and state-driven. It does not keep the
+older review / diff / streaming subviews that were part of the removed draft
+mode.
 
 ### Meeting Overlay
 
@@ -44,7 +41,6 @@ Draft-mode UI is not an active product path in this worktree.
 - `MenuAgentConnectPageView.swift` — agent connection page in menubar popover
 - `MenuBarContentView.swift` — root content view for the menubar popover
 - `MenuBarHeaderView.swift` — popover header with app name and status
-- `MenuBarModelDownloadView.swift` — model download progress in the menubar
 - `MenuBarPanelController.swift` — NSPopover controller for the menubar
 - `MenuBarRecentMeetingsView.swift` — recent meetings list in the popover
 - `MenuBarSettingsView.swift` — settings actions in the popover footer
