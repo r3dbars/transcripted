@@ -43,8 +43,10 @@ PostHog controls described below.
 3. Keep `TranscriptedPostHogHost` at `https://us.i.posthog.com` unless you are
    using EU or self-hosted PostHog.
 4. For local-only secrets, you can instead create
-   `~/Library/Application Support/Draft/observability-overrides.plist` and set
-   `TranscriptedPostHogAPIKey` there so the token never lands in git history.
+   `~/Library/Application Support/Transcripted/observability-overrides.plist`
+   and set `TranscriptedPostHogAPIKey` there so the token never lands in git
+   history. The app still falls back to the legacy Draft path if you already
+   have `~/Library/Application Support/Draft/observability-overrides.plist`.
 5. Run `bash build-deps.sh --force` once to download the pinned Sentry and
    Sparkle frameworks.
 6. Run `bash build.sh` and `bash run-tests.sh`.
