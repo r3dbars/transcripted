@@ -14,6 +14,7 @@ DEPS_ARCHIVE="deps-libs/libDraftDeps.a"
 DEPS_MODULE_ROOT="deps-modules"
 DEPS_FRAMEWORK_ROOT="deps-frameworks"
 ESPEAK_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/ESpeakNG.framework"
+SPARKLE_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sparkle.framework"
 TRANSCRIPTED_CORE_MODULE="$DEPS_MODULE_ROOT/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
 
 ensure_build_prerequisites() {
@@ -24,7 +25,7 @@ ensure_build_prerequisites() {
 }
 
 ensure_deps_ready() {
-    if [ -f "$DEPS_ARCHIVE" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -d "$ESPEAK_FRAMEWORK" ]; then
+    if [ -f "$DEPS_ARCHIVE" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -d "$ESPEAK_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
         return 0
     fi
 
@@ -34,6 +35,7 @@ ensure_deps_ready() {
     echo "  $DEPS_MODULE_ROOT/"
     echo "  $TRANSCRIPTED_CORE_MODULE"
     echo "  $ESPEAK_FRAMEWORK"
+    echo "  $SPARKLE_FRAMEWORK"
     echo ""
     echo "Run: bash build-deps.sh --force"
     exit 1
@@ -73,6 +75,17 @@ sign_embedded_code() {
     local sign_hash="$1"
     local framework_path
     local metallib_path
+    local nested_code_path
+
+    while IFS= read -r -d '' nested_code_path; do
+        codesign --force --sign "$sign_hash" "$nested_code_path"
+    done < <(
+        find "$APP_BUNDLE/Contents/Frameworks" \
+            \( -path "*/Sparkle.framework/Versions/*/Updater.app" \
+            -o -path "*/Sparkle.framework/Versions/*/XPCServices/*.xpc" \
+            -o -path "*/Sparkle.framework/Versions/*/Autoupdate" \) \
+            -print0 | sort -z
+    )
 
     for framework_path in "$APP_BUNDLE"/Contents/Frameworks/*.framework; do
         [ -d "$framework_path" ] || continue
@@ -153,6 +166,7 @@ done
 
 # Bundle FluidAudio's binary framework dependency.
 cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
+cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 
 # Compile
 echo "Compiling..."
@@ -175,6 +189,7 @@ swiftc \
     -framework Vision \
     -framework MetalPerformanceShaders \
     -framework MetalPerformanceShadersGraph \
+    -framework Sparkle \
     -lc++ \
     $DEPS_FLAGS \
     $SOURCE_FILES \

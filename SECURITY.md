@@ -35,6 +35,7 @@ Data stored locally today:
 Operational caveats:
 
 - first launch may download local models from HuggingFace if they are not already cached
+- signed builds can optionally fetch the Sparkle appcast for in-app updates
 - beta builds can optionally contact the update/log proxy for update checks and diagnostics shipping
 - core dictation and transcription do not require cloud APIs
 

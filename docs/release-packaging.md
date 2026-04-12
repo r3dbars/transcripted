@@ -6,6 +6,10 @@ Use `build-beta.sh` for anything you intend to hand to another machine. That is
 the path that applies hardened runtime signing, builds a DMG, and optionally
 submits it for notarization.
 
+Transcripted's Sparkle update plumbing is documented in `docs/sparkle-updates.md`.
+`build-deps.sh` now downloads the pinned Sparkle framework and release tools
+into `deps-frameworks/` and `deps-tools/sparkle/`.
+
 The two build flows intentionally use separate committed entitlement files:
 
 - `config/entitlements/local.plist`
@@ -44,6 +48,10 @@ bash build-deps.sh --force
 NOTARY_PROFILE=<profile-name> bash build-beta.sh <beta-token> <user-name>
 ```
 
+If you expect existing installs of Transcripted to discover the new version
+inside the app, do not stop after the DMG is built. You must also complete the
+Sparkle steps in `docs/sparkle-updates.md`.
+
 For a dry run that still validates the signed app and DMG assembly:
 
 ```bash
@@ -57,6 +65,7 @@ SKIP_NOTARIZATION=1 bash build-beta.sh <beta-token> <user-name>
 - `codesign --verify --deep --strict` passes for the `.app`
 - the DMG is signed when a Developer ID identity is available
 - notarized runs staple a ticket and then pass `spctl` checks for the app and DMG
+- the release process updates `docs/appcast.xml` if users should receive the build through Sparkle
 
 If notarization is intentionally skipped, Gatekeeper rejection for the signed
 app is expected until the artifact is notarized and stapled.

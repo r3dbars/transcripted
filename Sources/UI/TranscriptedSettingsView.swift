@@ -136,8 +136,6 @@ struct TranscriptedSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-
-                SpeakerPeopleSettingsSection(model: speakerPeopleModel)
             }
             .padding(24)
         }

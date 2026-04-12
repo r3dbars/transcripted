@@ -39,6 +39,7 @@ final class MenuBarPanelController: NSViewController {
         content.shortcutsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
         content.shortcutsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
         content.settingsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu() }
+        content.settingsView.onCheckForUpdates = { [weak self] in self?.checkForUpdatesFromMenu() }
         content.settingsView.onOpenAgentConnect = { [weak self] in self?.openAgentConnectFromMenu() }
         view = content
         contentView = content
@@ -159,6 +160,11 @@ final class MenuBarPanelController: NSViewController {
     private func openSettingsFromMenu() {
         dismissPopover()
         openSettingsWindow()
+    }
+
+    private func checkForUpdatesFromMenu() {
+        dismissPopover()
+        appState.sparkleUpdater.checkForUpdates()
     }
 
     private func openAgentConnectFromMenu() {

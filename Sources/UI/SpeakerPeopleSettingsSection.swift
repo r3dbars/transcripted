@@ -70,10 +70,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             speakerDatabase.setDisplayName(id: profileId, name: trimmed, source: NameSource.userManual)
             speakerDatabase.resetDisputeCount(id: profileId)
-            TranscriptSaver.retroactivelyUpdateSpeaker(
-                dbId: profileId,
-                newName: trimmed
-            )
+            TranscriptSaver.retroactivelyUpdateSpeaker(dbId: profileId, newName: trimmed)
             let profiles = Self.sortedProfiles(from: speakerDatabase)
             DispatchQueue.main.async {
                 self?.profiles = profiles
@@ -111,10 +108,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 ?? sourceName
                 ?? "Speaker \(targetId.uuidString.prefix(8))"
 
-            TranscriptSaver.retroactivelyUpdateSpeaker(
-                dbId: sourceId,
-                newName: resolvedName
-            )
+            TranscriptSaver.retroactivelyUpdateSpeaker(dbId: sourceId, newName: resolvedName)
             let profiles = Self.sortedProfiles(from: speakerDatabase)
             DispatchQueue.main.async {
                 self?.profiles = profiles
