@@ -114,6 +114,12 @@ Rules:
    - `bash build.sh`
    - `bash run-tests.sh`
    - `SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>` for packaging smoke, or the full notarized path when cutting a real release
+8. Before calling a Sparkle-backed release done, verify the user path, not just the packaging path:
+   - confirm the live appcast URL resolves and includes the new version
+   - confirm the appcast enclosure URL for the new version is reachable and serves the signed archive users will download
+   - confirm a build older than the appcast version shows Sparkle's update prompt (`Skip This Version` / `Remind Me Later` / install action) when `Check for updates` is triggered
+   - if possible for the release, smoke-test the download -> install -> relaunch flow from Sparkle, not just feed discovery
+9. Transcripted is a menu bar / background app, so agents should not assume launch-time background checks alone are sufficient proof of user-visible update UX. If a release depends on users noticing the update prompt, verify the prompt appears in a foreground/manual check path.
 
 ## Observability and Sentry
 
