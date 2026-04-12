@@ -14,6 +14,9 @@ The repo root should only expose:
 If a file or folder does not fit one of those jobs, it should usually live
 under `scripts/`, `Tools/`, `docs/archive/`, or `archive/`.
 
+When a root shell command is part of the public repo surface, prefer a thin
+wrapper at the root and keep the implementation under `scripts/`.
+
 ## Main Commands
 
 Use these as the active command surface:
@@ -30,6 +33,7 @@ Command ownership:
 
 - `build-deps.sh` — thin root wrapper for the dependency build entrypoint
 - `build.sh` — thin root wrapper for the authoritative local app build
+- `build-beta.sh` — thin root wrapper for signed beta/distribution builds
 - `run-tests.sh` — thin root wrapper for curated fast tests
 - `run-integration-smoke.sh` — thin root wrapper for app/core smoke verification
 - `swift test` — `TranscriptedCore` package seam tests

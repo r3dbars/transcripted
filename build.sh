@@ -1,4 +1,5 @@
 #!/bin/bash
+# Keep the familiar root command while the implementation lives under scripts/entrypoints.
 
 set -euo pipefail
 

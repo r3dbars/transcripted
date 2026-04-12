@@ -5,7 +5,7 @@ This repo keeps the live day-to-day command surface intentionally small.
 ## Active root entry points
 
 These stay at the repo root as thin wrappers so the public command surface stays
-stable:
+stable and the docs can keep pointing at the same commands:
 
 - `build-deps.sh` — build and cache the shared dependency bundle
 - `build.sh` — local app build
