@@ -2,47 +2,47 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key>
-    <string>Transcripted</string>
-    <key>CFBundleDisplayName</key>
-    <string>Transcripted</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.justinbetker.draft</string>
-    <key>CFBundleVersion</key>
-    <string>1.0.3</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0.3</string>
-    <key>TranscriptedSentryDSN</key>
-    <string>https://137ddd7f72199a8d7a06f1644224dce5@o4511202804170752.ingest.us.sentry.io/4511202823045120</string>
-    <key>TranscriptedSentryEnvironment</key>
-    <string>production</string>
-    <key>TranscriptedPostHogAPIKey</key>
-    <string>phc_zQu8kX7TpsuVFqjrmPaK4XXpoSuuxSMrvzpP8cZTS63o</string>
-    <key>TranscriptedPostHogHost</key>
-    <string>https://us.i.posthog.com</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleExecutable</key>
-    <string>Transcripted</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <key>LSUIElement</key>
-    <true/>
-    <key>SUEnableAutomaticChecks</key>
-    <true/>
-    <key>SUFeedURL</key>
-    <string>https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml</string>
-    <key>SUPublicEDKey</key>
-    <string>Ib6MHm4eeZYjhsZblNT0DEo3LzK9fYvBLkmqvw/Vo7Q=</string>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>Transcripted needs microphone access for dictation and to capture your side of meetings.</string>
-    <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Transcripted uses speech recognition to turn your voice into text.</string>
-    <key>NSScreenCaptureUsageDescription</key>
-    <string>Transcripted needs screen recording access so meeting capture can access system audio from calls, videos, and other apps.</string>
-    <key>NSAudioCaptureUsageDescription</key>
-    <string>Transcripted records system audio alongside your microphone so meetings can be transcribed locally on your Mac.</string>
-    <key>NSCalendarsFullAccessUsageDescription</key>
-    <string>Transcripted can optionally use your calendar to spot upcoming meetings and offer a local record prompt right when they start.</string>
+	<key>CFBundleName</key>
+	<string>Transcripted</string>
+	<key>CFBundleDisplayName</key>
+	<string>Transcripted</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.justinbetker.draft</string>
+	<key>CFBundleVersion</key>
+	<string>1.0.4</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.4</string>
+	<key>TranscriptedSentryDSN</key>
+	<string>https://137ddd7f72199a8d7a06f1644224dce5@o4511202804170752.ingest.us.sentry.io/4511202823045120</string>
+	<key>TranscriptedSentryEnvironment</key>
+	<string>production</string>
+	<key>TranscriptedPostHogAPIKey</key>
+	<string>phc_zQu8kX7TpsuVFqjrmPaK4XXpoSuuxSMrvzpP8cZTS63o</string>
+	<key>TranscriptedPostHogHost</key>
+	<string>https://us.i.posthog.com</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleExecutable</key>
+	<string>Transcripted</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>Ib6MHm4eeZYjhsZblNT0DEo3LzK9fYvBLkmqvw/Vo7Q=</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Transcripted needs microphone access for dictation and to capture your side of meetings.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Transcripted uses speech recognition to turn your voice into text.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Transcripted needs screen recording access so meeting capture can access system audio from calls, videos, and other apps.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Transcripted records system audio alongside your microphone so meetings can be transcribed locally on your Mac.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Transcripted can optionally use your calendar to spot upcoming meetings and offer a local record prompt right when they start.</string>
 </dict>
 </plist>
