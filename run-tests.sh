@@ -107,8 +107,6 @@ $manifest_entries
 EOF
 
 APP_SOURCES=(
-    "Sources/Capture/CapturedContext.swift"
-    "Sources/Text/RefusalHeuristics.swift"
     "Sources/Style/StyleUtils.swift"
     "Sources/DraftPaths.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
