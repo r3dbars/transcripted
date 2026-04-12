@@ -6,9 +6,10 @@ struct JSONSidecarValidator {
     func validate() -> [ValidationResult] {
         var results: [ValidationResult] = []
         let fm = FileManager.default
+        let ignoredFilenames = Set(["transcripted.json", "failed_transcriptions.json"])
 
         guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter({ $0.pathExtension == "json" && $0.lastPathComponent.hasPrefix("Call_") }) else {
+            .filter({ $0.pathExtension == "json" && !ignoredFilenames.contains($0.lastPathComponent) }) else {
             return [.fail("artifact/dir-readable", target: directory.path, detail: "Cannot read directory")]
         }
 

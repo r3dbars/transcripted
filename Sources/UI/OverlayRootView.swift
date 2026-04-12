@@ -12,7 +12,6 @@ final class OverlayRootView: NSView {
     private let topDivider = NSView()
     private let contentContainer = NSView()
     private let bottomDivider = NSView()
-    let toolbarView = OverlayToolbarView(frame: .zero)
 
     // MARK: - Lazy content children (only drafting/error is still used in the compact dictation flow)
 

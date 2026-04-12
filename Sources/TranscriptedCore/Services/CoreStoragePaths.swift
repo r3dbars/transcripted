@@ -2,8 +2,8 @@ import Foundation
 
 /// Centralized filesystem layout for the TranscriptedCore library.
 ///
-/// Instead of hard-coding `~/Documents/Transcripted` in every component, each
-/// consumer (SpeakerDatabase, StatsDatabase, FailedTranscriptionManager,
+/// Instead of hard-coding a home-directory Transcripted folder in every
+/// component, each consumer (SpeakerDatabase, StatsDatabase, FailedTranscriptionManager,
 /// TranscriptSaver, SpeakerClipExtractor, FileLogger, Audio mic/system WAV
 /// writers) takes a `CoreStoragePaths` instance at init and uses it to resolve
 /// concrete URLs.

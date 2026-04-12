@@ -6,9 +6,10 @@ struct TranscriptValidator {
     func validate() -> [ValidationResult] {
         var results: [ValidationResult] = []
         let fm = FileManager.default
+        let ignoredFilenames = Set(["AGENT.md", "CLAUDE.md", "README.md"])
 
         guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter({ $0.pathExtension == "md" && $0.lastPathComponent.hasPrefix("Call_") }) else {
+            .filter({ $0.pathExtension == "md" && !ignoredFilenames.contains($0.lastPathComponent) }) else {
             return [.fail("transcript/dir-readable", target: directory.path, detail: "Cannot read directory")]
         }
 
@@ -93,7 +94,9 @@ struct TranscriptValidator {
             }
 
             // Body has content
-            let bodyHasContent = yaml.body.contains("## Full Transcript") || yaml.body.contains("## Summary")
+            let bodyHasContent = yaml.body.contains("## Full Transcript")
+                || yaml.body.contains("## Transcript")
+                || yaml.body.contains("## Summary")
             if bodyHasContent {
                 results.append(.pass("transcript/body-has-sections", target: name))
             } else {

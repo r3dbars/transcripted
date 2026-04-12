@@ -1,32 +1,119 @@
 import ArgumentParser
 import Foundation
 
-func transcriptedAppSupportDirectory() -> URL {
-    let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        ?? FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support", isDirectory: true)
-    return appSupport.appendingPathComponent("Draft", isDirectory: true)
+private func transcriptedQAApplicationSupportDirectory(fileManager: FileManager = .default) -> URL {
+    fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
 }
 
-func transcriptedMeetingDirectory() -> URL {
-    transcriptedAppSupportDirectory().appendingPathComponent("meetings", isDirectory: true)
-}
+struct QADataDirectories {
+    let meetingsDir: URL
+    let stateDir: URL
+    let logFilePath: String
 
-func transcriptedTranscriptDirectory(relativeTo meetingsRoot: URL = transcriptedMeetingDirectory()) -> URL {
-    meetingsRoot.appendingPathComponent("transcripts", isDirectory: true)
-}
+    static func resolve(
+        meetingsDir: String? = nil,
+        stateDir: String? = nil,
+        logPath: String? = nil,
+        fileManager: FileManager = .default
+    ) -> QADataDirectories {
+        let appSupport = transcriptedQAApplicationSupportDirectory(fileManager: fileManager)
+        let home = fileManager.homeDirectoryForCurrentUser
 
-func transcriptedLogFilePath(relativeTo meetingsRoot: URL = transcriptedMeetingDirectory()) -> String {
-    FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Logs/Transcripted", isDirectory: true)
-        .appendingPathComponent("app.jsonl").path
+        let currentRoot = appSupport.appendingPathComponent("Transcripted", isDirectory: true)
+        let current = QADataDirectories(
+            meetingsDir: currentRoot.appendingPathComponent("captures/meetings", isDirectory: true),
+            stateDir: currentRoot.appendingPathComponent("state", isDirectory: true),
+            logFilePath: currentRoot.appendingPathComponent("logs/app.jsonl", isDirectory: false).path
+        )
+
+        let draftRoot = appSupport.appendingPathComponent("Draft", isDirectory: true)
+        let legacyDraft = QADataDirectories(
+            meetingsDir: draftRoot.appendingPathComponent("meetings/transcripts", isDirectory: true),
+            stateDir: draftRoot.appendingPathComponent("meetings", isDirectory: true),
+            logFilePath: home.appendingPathComponent("Library/Logs/Transcripted/app.jsonl", isDirectory: false).path
+        )
+
+        let legacySharedRoot = home.appendingPathComponent("Documents/Transcripted", isDirectory: true)
+        let legacyShared = QADataDirectories(
+            meetingsDir: legacySharedRoot,
+            stateDir: legacySharedRoot,
+            logFilePath: home.appendingPathComponent("Library/Logs/Transcripted/app.jsonl", isDirectory: false).path
+        )
+
+        let selectedBase: QADataDirectories
+        if let meetingsDir, !meetingsDir.isEmpty {
+            let normalizedMeetings = normalizeMeetingsDirectory(URL(fileURLWithPath: meetingsDir), fileManager: fileManager)
+            let inferredBase = inferBaseLayout(
+                for: normalizedMeetings,
+                current: current,
+                legacyDraft: legacyDraft,
+                legacyShared: legacyShared
+            )
+            selectedBase = QADataDirectories(
+                meetingsDir: normalizedMeetings,
+                stateDir: stateDir.map { URL(fileURLWithPath: $0).standardizedFileURL } ?? inferredBase.stateDir,
+                logFilePath: logPath ?? inferredBase.logFilePath
+            )
+        } else {
+            let defaultBase: QADataDirectories
+            if fileManager.fileExists(atPath: current.meetingsDir.path) || fileManager.fileExists(atPath: current.stateDir.path) {
+                defaultBase = current
+            } else if fileManager.fileExists(atPath: legacyDraft.meetingsDir.path) || fileManager.fileExists(atPath: legacyDraft.stateDir.path) {
+                defaultBase = legacyDraft
+            } else if fileManager.fileExists(atPath: legacyShared.meetingsDir.path) {
+                defaultBase = legacyShared
+            } else {
+                defaultBase = current
+            }
+
+            selectedBase = QADataDirectories(
+                meetingsDir: defaultBase.meetingsDir,
+                stateDir: stateDir.map { URL(fileURLWithPath: $0).standardizedFileURL } ?? defaultBase.stateDir,
+                logFilePath: logPath ?? defaultBase.logFilePath
+            )
+        }
+
+        return selectedBase
+    }
+
+    var logsDirectory: URL {
+        URL(fileURLWithPath: logFilePath).deletingLastPathComponent()
+    }
+
+    private static func normalizeMeetingsDirectory(_ candidate: URL, fileManager: FileManager) -> URL {
+        let standardized = candidate.standardizedFileURL
+        if standardized.lastPathComponent == "meetings" {
+            let legacyTranscriptSubdir = standardized.appendingPathComponent("transcripts", isDirectory: true)
+            if fileManager.fileExists(atPath: legacyTranscriptSubdir.path) {
+                return legacyTranscriptSubdir
+            }
+        }
+        return standardized
+    }
+
+    private static func inferBaseLayout(
+        for meetingsDir: URL,
+        current: QADataDirectories,
+        legacyDraft: QADataDirectories,
+        legacyShared: QADataDirectories
+    ) -> QADataDirectories {
+        let path = meetingsDir.standardizedFileURL.path
+        if path.hasPrefix(legacyDraft.stateDir.standardizedFileURL.path) {
+            return legacyDraft
+        }
+        if path.hasPrefix(legacyShared.meetingsDir.standardizedFileURL.path) {
+            return legacyShared
+        }
+        return current
+    }
 }
 
 @main
 struct TranscriptedQA: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "transcripted-qa",
-        abstract: "Validate Transcripted on-disk artifacts under the Draft app support tree.",
+        abstract: "Validate Transcripted on-disk meeting artifacts, state databases, and logs.",
         subcommands: [
             ValidateAll.self,
             ValidateTranscripts.self,
@@ -46,14 +133,17 @@ struct TranscriptedQA: ParsableCommand {
 // MARK: - Shared Options
 
 struct PathOptions: ParsableArguments {
-    @Option(name: .long, help: "Path to the Transcripted meetings root (defaults to ~/Library/Application Support/Draft/meetings)")
+    @Option(name: .long, help: "Path to the meetings capture directory. Defaults to ~/Library/Application Support/Transcripted/captures/meetings, with legacy Draft/Documents fallback.")
     var path: String?
 
-    var resolvedPath: URL {
-        if let path = path {
-            return URL(fileURLWithPath: path)
-        }
-        return transcriptedMeetingDirectory()
+    @Option(name: .long, help: "Path to the state directory containing speakers.sqlite and stats.sqlite. Defaults follow the selected layout.")
+    var stateDir: String?
+
+    @Option(name: .long, help: "Path to app.jsonl. Defaults follow the selected layout.")
+    var logPath: String?
+
+    var resolved: QADataDirectories {
+        QADataDirectories.resolve(meetingsDir: path, stateDir: stateDir, logPath: logPath)
     }
 }
 

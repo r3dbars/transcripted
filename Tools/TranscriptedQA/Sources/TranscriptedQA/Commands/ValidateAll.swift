@@ -10,19 +10,17 @@ struct ValidateAll: ParsableCommand {
     @OptionGroup var formatOpts: FormatOptions
 
     func run() throws {
-        let dir = pathOpts.resolvedPath
-        let transcriptsDir = transcriptedTranscriptDirectory(relativeTo: dir)
-        let logsPath = transcriptedLogFilePath(relativeTo: dir)
+        let paths = pathOpts.resolved
 
         var results: [ValidationResult] = []
 
-        results += TranscriptValidator(directory: transcriptsDir).validate()
-        results += JSONSidecarValidator(directory: transcriptsDir).validate()
-        results += SpeakerDBValidator(dbPath: dir.appendingPathComponent("speakers.sqlite").path).validate()
-        results += StatsDBValidator(dbPath: dir.appendingPathComponent("stats.sqlite").path).validate()
-        results += LogValidator(logPath: logsPath).validate()
-        results += IndexValidator(directory: transcriptsDir).validate()
-        results += HealthChecker(dataPath: dir).validate()
+        results += TranscriptValidator(directory: paths.meetingsDir).validate()
+        results += JSONSidecarValidator(directory: paths.meetingsDir).validate()
+        results += SpeakerDBValidator(dbPath: paths.stateDir.appendingPathComponent("speakers.sqlite").path).validate()
+        results += StatsDBValidator(dbPath: paths.stateDir.appendingPathComponent("stats.sqlite").path).validate()
+        results += LogValidator(logPath: paths.logFilePath).validate()
+        results += IndexValidator(directory: paths.meetingsDir).validate()
+        results += HealthChecker(paths: paths).validate()
 
         try runValidation(results: results, format: formatOpts.format)
     }

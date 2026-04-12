@@ -44,5 +44,5 @@ bash run-tests.sh
 
 Useful files while testing:
 
-- `~/draft-debug.log`
-- `~/Library/Application Support/Draft/events.jsonl`
+- `~/Library/Application Support/Transcripted/logs/debug.log`
+- `~/Library/Application Support/Transcripted/logs/events.jsonl`

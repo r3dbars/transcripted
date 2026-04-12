@@ -13,23 +13,27 @@ Its core product workflows are:
 Those artifacts are written as files you can inspect directly rather than being
 hidden behind a cloud-only backend.
 
-Fresh installs default to Transcripted-named storage. If a legacy `Draft`
-Application Support folder already exists, current builds continue using it for
-compatibility while the rename settles.
+The app now defaults to Transcripted-named storage. Meeting and dictation
+captures can be relocated through the app's capture-library setting, while app
+state, logs, cache, and temporary recordings stay under
+`~/Library/Application Support/Transcripted/`.
+
+Historic `Draft` paths remain in the repo for migration, validation, and
+standalone-tool fallback when older artifacts are the only data on disk.
 
 Data stored locally today:
 
 | Data | Location | Format |
 |------|----------|--------|
-| Meeting transcripts | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | Markdown |
-| Meeting sidecars + index | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | JSON |
-| Speaker database | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | SQLite |
-| Speaker clips | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | WAV |
-| Dictation logs | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | Markdown |
-| App events | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | JSON Lines |
-| Feedback log | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | JSON Lines |
-| Style profile | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | Markdown |
-| Prompt overrides | `~/Library/Application Support/Transcripted/...` or legacy `Draft/...` | JSON |
+| Meeting transcripts | `<capture-library>/meetings/*.md` | Markdown |
+| Meeting sidecars + index | `<capture-library>/meetings/*.json`, `<capture-library>/meetings/transcripted.json` | JSON |
+| Speaker database | `~/Library/Application Support/Transcripted/state/speakers.sqlite` | SQLite |
+| Stats database | `~/Library/Application Support/Transcripted/state/stats.sqlite` | SQLite |
+| Failed transcription queue | `~/Library/Application Support/Transcripted/state/failed_transcriptions.json` | JSON |
+| Dictation logs | `<capture-library>/dictations/*.md` | Markdown |
+| App debug log | `~/Library/Application Support/Transcripted/logs/debug.log` | Text |
+| App events | `~/Library/Application Support/Transcripted/logs/events.jsonl` | JSON Lines |
+| Temporary speaker clips + raw recordings | `~/Library/Application Support/Transcripted/tmp/recordings/` | WAV |
 | Model cache | `~/Library/Caches/models/mlx-community/` | MLX / CoreML |
 
 Operational caveats:
@@ -67,7 +71,7 @@ Given that Transcripted is local-first software, the main security concerns are:
 
 - audio capture permissions and ensuring capture only happens when the user intends
 - accessibility and paste-back safety when Transcripted writes into another app
-- local data protection for transcripts, sidecars, and feedback files
+- local data protection for transcripts, sidecars, databases, and diagnostics logs
 - model integrity for downloaded local ML artifacts
 - memory safety in CoreAudio and audio-processing code
 - any optional network paths used for beta updates or diagnostics

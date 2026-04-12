@@ -107,17 +107,12 @@ $manifest_entries
 EOF
 
 APP_SOURCES=(
-    "Sources/Capture/CapturedContext.swift"
-    "Sources/Text/RefusalHeuristics.swift"
-    "Sources/Style/StyleUtils.swift"
     "Sources/DraftPaths.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
-    "Sources/Dictation/DictationAgentOutput.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"
     "Sources/TranscriptedConstants.swift"
     "Sources/Speech/RecordedAudioTimeline.swift"
-    "Sources/Text/DiffSummary.swift"
     "Sources/Meeting/MeetingPromptHeuristics.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/Observability/SentryEventPolicy.swift"

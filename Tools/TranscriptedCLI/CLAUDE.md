@@ -15,8 +15,13 @@ It does not build or run the app target.
 
 By default these commands read:
 
-- meetings: `~/Library/Application Support/Draft/meetings/transcripts`
-- dictations: `~/Library/Application Support/Draft/dictations/transcripts`
+- meetings: `~/Library/Application Support/Transcripted/captures/meetings`
+- dictations: `~/Library/Application Support/Transcripted/captures/dictations`
+
+Fallback order when the Transcripted capture folders do not exist yet:
+
+- legacy Draft exports: `~/Library/Application Support/Draft/{meetings,dictations}/transcripts`
+- older shared layout: `~/Documents/Transcripted`
 
 They also honor:
 
@@ -62,6 +67,6 @@ swift run transcripted-cli diarize /path/to/audio.wav --json
 
 - the context commands and the diarization commands serve different users, do not describe the whole package as diarization-only
 - the diarization commands depend on repo-level artifacts, so run `bash build-deps.sh` first when those are missing
-- the default context paths now point at `~/Library/Application Support/Draft/`, not only the older `~/Documents/Transcripted/` layout
+- the default context resolver prefers Transcripted capture folders, then falls back to Draft-era exports, then `~/Documents/Transcripted/`
 - `DiarizerConfigCompatibility.swift` currently keeps old bounded-speaker call sites compiling; it does not reintroduce upstream behavior by itself
 - changes here should be verified independently from the app build
