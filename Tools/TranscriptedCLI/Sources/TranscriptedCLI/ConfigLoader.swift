@@ -1,4 +1,6 @@
 import Foundation
+
+#if TRANSCRIPTEDCLI_WITH_DIARIZATION
 import FluidAudio
 
 /// JSON-decodable config that maps 1:1 to OfflineDiarizerConfig's flat init.
@@ -41,3 +43,4 @@ enum ConfigLoader {
         return config.toOfflineDiarizerConfig()
     }
 }
+#endif

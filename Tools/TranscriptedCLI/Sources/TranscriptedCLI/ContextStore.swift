@@ -604,9 +604,26 @@ enum CLIContextStore {
     }
 
     private static func parseDictationEntries(from body: String) -> [CLIClientDictationEntry] {
-        let sections = body.components(separatedBy: "\n## ").filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        return sections.compactMap { rawSection in
-            let section = rawSection.hasPrefix("## ") ? rawSection : "## " + rawSection
+        let lines = body.components(separatedBy: "\n")
+        var sections: [String] = []
+        var currentSection: [String] = []
+
+        for line in lines {
+            if line.hasPrefix("## ") {
+                if !currentSection.isEmpty {
+                    sections.append(currentSection.joined(separator: "\n"))
+                }
+                currentSection = [line]
+            } else if !currentSection.isEmpty {
+                currentSection.append(line)
+            }
+        }
+
+        if !currentSection.isEmpty {
+            sections.append(currentSection.joined(separator: "\n"))
+        }
+
+        return sections.compactMap { section in
             let lines = section.components(separatedBy: "\n")
             guard let heading = lines.first, heading.hasPrefix("## ") else { return nil }
             let title = heading.replacingOccurrences(of: "## ", with: "")
@@ -623,13 +640,14 @@ enum CLIContextStore {
             var characterCount = 0
             var bodyLines: [String] = []
             var inBody = false
+            var sawMetadata = false
 
             for line in lines.dropFirst() {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 if trimmed.isEmpty {
-                    if !inBody {
+                    if !inBody, sawMetadata {
                         inBody = true
-                    } else {
+                    } else if inBody {
                         bodyLines.append("")
                     }
                     continue
@@ -641,29 +659,40 @@ enum CLIContextStore {
                 }
 
                 if trimmed.hasPrefix("Entry ID:") {
+                    sawMetadata = true
                     entryId = trimmed.replacingOccurrences(of: "Entry ID:", with: "")
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
                 } else if trimmed.hasPrefix("Captured:") {
+                    sawMetadata = true
                     createdAt = trimmed.replacingOccurrences(of: "Captured:", with: "")
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                 } else if trimmed.hasPrefix("Source app:") {
+                    sawMetadata = true
                     sourceAppName = trimmed.replacingOccurrences(of: "Source app:", with: "")
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                 } else if trimmed.hasPrefix("Bundle ID:") {
+                    sawMetadata = true
                     sourceAppBundleId = trimmed.replacingOccurrences(of: "Bundle ID:", with: "")
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
                 } else if trimmed.hasPrefix("Delivery:") {
+                    sawMetadata = true
                     delivery = trimmed.replacingOccurrences(of: "Delivery:", with: "")
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                 } else if trimmed.hasPrefix("Words:") {
+                    sawMetadata = true
                     wordCount = Int(trimmed.replacingOccurrences(of: "Words:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
                 } else if trimmed.hasPrefix("Characters:") {
+                    sawMetadata = true
                     characterCount = Int(trimmed.replacingOccurrences(of: "Characters:", with: "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
                 } else if trimmed.hasPrefix("Timestamp:") {
+                    sawMetadata = true
                     createdAt = trimmed.replacingOccurrences(of: "Timestamp:", with: "")
                         .trimmingCharacters(in: .whitespacesAndNewlines)
+                } else if !sawMetadata {
+                    inBody = true
+                    bodyLines.append(line)
                 }
             }
 

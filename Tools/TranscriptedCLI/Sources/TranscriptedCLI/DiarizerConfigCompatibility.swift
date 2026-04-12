@@ -1,3 +1,4 @@
+#if TRANSCRIPTEDCLI_WITH_DIARIZATION
 import FluidAudio
 
 extension OfflineDiarizerConfig {
@@ -12,3 +13,4 @@ extension OfflineDiarizerConfig {
         return self
     }
 }
+#endif
