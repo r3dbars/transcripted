@@ -7,9 +7,12 @@ historical, and which local doc to read before editing a subsystem.
 ## Read Order
 
 1. `README.md`
-2. `AGENTS.md` or root `CLAUDE.md`
-3. the nearest local `CLAUDE.md`
-4. source comments
+2. `docs/repo-layout.md`
+3. `AGENTS.md` or root `CLAUDE.md`
+4. the nearest local `CLAUDE.md`
+5. source comments
+
+For the active directory map and command surface, prefer `docs/repo-layout.md`.
 
 ## Current Documentation Layers
 

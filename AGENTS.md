@@ -12,67 +12,20 @@
 
 1. `README.md`
 2. `AGENTS.md`
-3. `docs/agent-onboarding.md`
-4. `Sources/CLAUDE.md`
-5. `Sources/Dictation/CLAUDE.md` when touching dictation persistence
-6. `Sources/Meeting/CLAUDE.md` when touching meeting capture or meeting UI
-7. `Sources/TranscriptedCore/CLAUDE.md` when touching the shared library
-8. `Tests/README.md`
-9. `docs/storage-paths.md`
-10. `Sources/Reliability/CLAUDE.md` when touching wake / sleep recovery or hotkey recovery
-11. `Sources/Observability/CLAUDE.md` when touching crash reporting, event forwarding, anonymous analytics, or app updates
-12. `docs/release-packaging.md` when touching packaging, signing, notarization, or user-facing releases
-13. `docs/sparkle-updates.md` when touching app updates or cutting a release users should receive in-app
+3. `docs/repo-layout.md`
+4. `docs/agent-onboarding.md`
+5. `Sources/CLAUDE.md`
+6. `Sources/Dictation/CLAUDE.md` when touching dictation persistence
+7. `Sources/Meeting/CLAUDE.md` when touching meeting capture or meeting UI
+8. `Sources/TranscriptedCore/CLAUDE.md` when touching the shared library
+9. `Tests/README.md`
+10. `docs/storage-paths.md`
+11. `Sources/Reliability/CLAUDE.md` when touching wake / sleep recovery or hotkey recovery
+12. `Sources/Observability/CLAUDE.md` when touching crash reporting, event forwarding, anonymous analytics, or app updates
+13. `docs/release-packaging.md` when touching packaging, signing, notarization, or user-facing releases
+14. `docs/sparkle-updates.md` when touching app updates or cutting a release users should receive in-app
 
-## Directory map
-
-- `Sources/` — app shell, hotkeys, speech, dictation UI, meeting bridge, shared app paths
-- `Sources/Dictation/` — markdown persistence for completed dictations
-- `Sources/Meeting/` — app-side bridge into `TranscriptedCore`
-- `Sources/Reliability/` — wake / sleep recovery coordination for active recording flows
-- `Sources/TranscriptedCore/` — reusable meeting transcription library
-- `Tests/` — fast custom Swift test runner plus `TranscriptedCore` package tests
-- `Tests/Integration/` — integration smoke for the bundled core library seam, plus a wake-recovery smoke check
-- `Tools/TranscriptedCLI/` — standalone CLI for local context queries and offline diarization
-- `Tools/TranscriptedMCP/` — read-only MCP server for saved meeting and dictation artifacts
-- `Tools/TranscriptedQA/` — artifact validation CLI
-- `archive/backend-beta-worker/` — archived beta proxy / telemetry backend
-
-## Documentation status
-
-The repo has both current docs and historical docs from the earlier drafting-focused codebase.
-
-Current source-of-truth docs:
-
-- `AGENTS.md`
-- `CLAUDE.md`
-- `docs/agent-onboarding.md`
-- `Sources/CLAUDE.md`
-- `Sources/Dictation/CLAUDE.md`
-- `Sources/Meeting/CLAUDE.md`
-- `Sources/Reliability/CLAUDE.md`
-- `Sources/Observability/CLAUDE.md`
-- `Sources/TranscriptedCore/CLAUDE.md`
-- `Tests/README.md`
-- `docs/storage-paths.md`
-- `docs/release-packaging.md`
-- `docs/sparkle-updates.md`
-- `Tools/TranscriptedCLI/CLAUDE.md`
-- `Tools/TranscriptedMCP/CLAUDE.md`
-- `Tools/TranscriptedQA/CLAUDE.md`
-
-Beta/distribution-only docs:
-
-- `archive/backend-beta-worker/README.md`
-
-Historical or planning-heavy docs:
-
-- `docs/archive/`
-- `.claude/skills/transcripted-qa/SKILL.md`
-
-The remaining `Sources/*/CLAUDE.md` files describe either live subsystems or
-small retained utility areas. The historical merge/todo docs now live under
-`docs/archive/`, and the old placeholder-only source docs were removed.
+Use `docs/repo-layout.md` as the canonical directory map and doc hierarchy.
 
 ## Build and test
 

@@ -59,6 +59,7 @@ Build note: `build.sh` is the authoritative app build and uses raw `swiftc`.
 is not the main app build.
 
 For the current script surface and legacy helpers, see `scripts/README.md`.
+For the active repo map and directory responsibilities, see `docs/repo-layout.md`.
 
 ## Product Framing
 
@@ -106,6 +107,8 @@ The codebase is organized around the current Transcripted app:
 Some internal folders still use `Draft` naming while the repo and product are
 being aligned publicly around Transcripted. Treat those as implementation
 details unless a change specifically affects compatibility paths.
+
+For the canonical root and directory map, see `docs/repo-layout.md`.
 
 ### Artifact-First Principle
 

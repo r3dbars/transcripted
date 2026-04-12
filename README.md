@@ -228,6 +228,7 @@ bash run-integration-smoke.sh
 ```
 
 For build, release, and legacy helper scripts, see `scripts/README.md`.
+For the active repo map and command surface, see `docs/repo-layout.md`.
 
 ## Transition Notes
 
@@ -244,3 +245,4 @@ See `docs/storage-paths.md` for the canonical path map and migration details.
 
 - See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and architecture notes
 - See [SECURITY.md](SECURITY.md) for privacy architecture and vulnerability reporting
+- See `docs/repo-layout.md` for the current directory map and canonical command surface

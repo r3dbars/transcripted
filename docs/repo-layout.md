@@ -1,0 +1,77 @@
+# Repo Layout
+
+This is the canonical map of the live repo surface on `main`.
+
+## Root Contract
+
+The repo root should only expose:
+
+- live product code and assets
+- canonical build and verification entry points
+- public project policy docs
+- clearly marked historical/archive zones
+
+If a file or folder does not fit one of those jobs, it should usually live
+under `scripts/`, `Tools/`, `docs/archive/`, or `archive/`.
+
+## Main Commands
+
+Use these as the active command surface:
+
+```bash
+bash build-deps.sh
+bash build.sh
+bash run-tests.sh
+bash run-integration-smoke.sh
+swift test
+```
+
+Command ownership:
+
+- `build-deps.sh` — build and cache shared dependency artifacts
+- `build.sh` — authoritative local app build
+- `run-tests.sh` — curated fast tests
+- `run-integration-smoke.sh` — app/core smoke verification
+- `swift test` — `TranscriptedCore` package seam tests
+
+For helper and legacy scripts, see `scripts/README.md`.
+
+## Directory Map
+
+- `Sources/` — macOS app target
+- `Sources/Support/` — shared app utilities such as paths, hotkeys, and constants
+- `Sources/Dictation/` — dictation persistence
+- `Sources/Meeting/` — app-side meeting bridge into `TranscriptedCore`
+- `Sources/Reliability/` — wake/sleep recovery
+- `Sources/TranscriptedCore/` — reusable meeting transcription library
+- `Tests/` — fast tests, package tests, and integration smoke sources
+- `Tools/` — standalone sibling packages; see `Tools/README.md`
+- `docs/` — live project docs
+- `docs/archive/` — archived planning, reviews, and historical notes
+- `archive/` — historical code and legacy tooling kept out of the live product surface
+- `config/` — app config artifacts such as entitlements
+- `Resources/` — bundled app assets
+
+## Docs Map
+
+Use these docs for these jobs:
+
+- `README.md` — public product overview and quick start
+- `CONTRIBUTING.md` — contributor setup and contribution norms
+- `AGENTS.md` — Codex-specific workflow rules
+- `CLAUDE.md` — Claude-specific repo orientation
+- `docs/agent-onboarding.md` — how to interpret the repo’s doc layers
+- `docs/storage-paths.md` — canonical storage and fallback path map
+- `docs/release-packaging.md` — release packaging flow
+- `docs/sparkle-updates.md` — Sparkle update contract
+- `Tests/README.md` — verification surfaces and fast-test runner behavior
+- `Sources/*/CLAUDE.md` — subsystem-local ownership and verification notes
+
+## Historical Zones
+
+Treat these as reference, not current product surface:
+
+- `archive/backend-beta-worker/`
+- `archive/evals/`
+- `docs/archive/`
+- `.claude/`
