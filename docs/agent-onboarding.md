@@ -7,9 +7,12 @@ historical, and which local doc to read before editing a subsystem.
 ## Read Order
 
 1. `README.md`
-2. `AGENTS.md` or root `CLAUDE.md`
-3. the nearest local `CLAUDE.md`
-4. source comments
+2. `docs/repo-layout.md`
+3. `AGENTS.md` or root `CLAUDE.md`
+4. the nearest local `CLAUDE.md`
+5. source comments
+
+For the active directory map and command surface, prefer `docs/repo-layout.md`.
 
 ## Current Documentation Layers
 
@@ -23,8 +26,6 @@ historical, and which local doc to read before editing a subsystem.
   App bootstrap and initialization order.
 - `Sources/*/CLAUDE.md`
   Local subsystem docs.
-- `archive/backend-beta-worker/CLAUDE.md`
-  Archived beta worker contract.
 - `Tools/*/CLAUDE.md`
   Standalone tool package docs where present.
 - `docs/archive/`
@@ -67,8 +68,6 @@ Rule of thumb:
   App/Core bridge, meeting storage, runtime lifecycle.
 - `Sources/TranscriptedCore/CLAUDE.md`
   Library boundary, pipeline layout, embedder seams.
-- `archive/backend-beta-worker/CLAUDE.md`
-  Archived beta worker endpoints and data model.
 - `Tools/TranscriptedCLI/CLAUDE.md`
   Standalone diarization CLI.
 
@@ -77,6 +76,7 @@ Rule of thumb:
 Treat these as reference, not source of truth for runtime behavior on `main`:
 
 - `docs/archive/*`
+- `archive/backend-beta-worker/*`
 - older cloud/API references in comments or outdated docs
 
 ## When To Update Docs

@@ -6,6 +6,7 @@ treated as current source-of-truth for the live app.
 Current subfolders:
 
 - `merge/` - old merge / extraction planning notes
+- `reviews/` - dated audit artifacts kept for historical reference
 - `todo/` - archived backlog and review notes
 
 Use the live repo docs for current behavior, build steps, and storage guidance.

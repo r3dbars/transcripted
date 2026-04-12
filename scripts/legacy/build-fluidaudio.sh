@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build FluidAudio as linkable artifacts for Draft
+# Legacy helper: build FluidAudio as standalone linkable artifacts for older Draft-era workflows
 # Run once — artifacts go into fluidaudio-libs/ and fluidaudio-modules/
 # Pattern follows build-whisper.sh: expensive build runs once, build.sh reuses cached artifacts
 

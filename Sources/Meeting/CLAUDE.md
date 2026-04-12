@@ -70,9 +70,9 @@ Relevant direct coverage:
 - `Tests/MeetingPromptHeuristicsTests.swift`
 - `Tests/MeetingTranscriptStylerTests.swift`
 - `Tests/SpeakerNamingPolicyTests.swift`
-- `SmokeTests/CoreIntegrationSmoke.swift`
+- `Tests/Integration/AppCoreIntegrationSmoke.swift`
 
 ## Agent notes
 
 - `MeetingSessionController` is the right place for app-level meeting behavior. If a change belongs to the reusable library, move down into `Sources/TranscriptedCore/`.
-- The menubar's recent-meetings UI is part of the meeting feature surface. Meeting changes often require checking `Sources/UI/MenuBarRecentMeetingsView.swift` and `Sources/UI/MeetingOverlayController.swift`.
+- The menubar's recent-meetings UI is part of the meeting feature surface. Meeting changes often require checking `Sources/UI/MenuBar/MenuBarRecentMeetingsView.swift` and `Sources/UI/Overlay/MeetingOverlayController.swift`.

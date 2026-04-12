@@ -48,5 +48,5 @@ npm run deploy
 
 - This directory is isolated from the Swift app build.
 - The current macOS app still uses the worker for beta telemetry/proxy paths, but not for DMG self-update checks.
-- If you touch beta-only Swift code in `Sources/Observability/` or `Sources/API/BetaConfig.swift`, verify whether the change also requires a backend change here.
+- If you touch beta-only Swift code in `Sources/Observability/` or `Sources/Beta/BetaConfig.swift`, verify whether the change also requires a backend change here.
 - There is currently no local test harness documented for the Worker; review the SQL schema and endpoint contracts directly before refactoring.

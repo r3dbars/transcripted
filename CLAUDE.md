@@ -20,23 +20,19 @@ Read these before making assumptions about the codebase:
 
 1. `README.md`
 2. `AGENTS.md`
-3. `docs/agent-onboarding.md`
-4. `Sources/CLAUDE.md`
-5. `Sources/Dictation/CLAUDE.md`
-6. `Sources/Meeting/CLAUDE.md`
-7. `Sources/TranscriptedCore/CLAUDE.md`
-8. `Tests/README.md`
-9. `docs/storage-paths.md`
+3. `docs/repo-layout.md`
+4. `docs/agent-onboarding.md`
+5. `Sources/CLAUDE.md`
+6. `Sources/Dictation/CLAUDE.md`
+7. `Sources/Meeting/CLAUDE.md`
+8. `Sources/TranscriptedCore/CLAUDE.md`
+9. `Tests/README.md`
+10. `docs/storage-paths.md`
 
 ## Build and test
 
-```bash
-bash build-deps.sh
-bash build.sh
-bash run-tests.sh
-bash run-integration-smoke.sh
-swift test
-```
+Use `docs/repo-layout.md`, `Tests/README.md`, and `scripts/README.md` as the
+canonical command map.
 
 Rules:
 
@@ -45,19 +41,7 @@ Rules:
 3. If you change `Package.swift` or the public `TranscriptedCore` seam, also run `swift test`.
 4. `Sources/TranscriptedCore/` is a library boundary. Do not compile it directly into the app target.
 
-## Current architecture
+## Repo map
 
-- `Sources/TranscriptedApp.swift` wires the menubar app, popover, dictation overlay, meeting overlay, and detected-meeting prompt flow.
-- `Sources/TranscriptedAppState.swift` owns app-wide services: `STTRouter`, `ContextCaptureEngine`, the lazily built `MeetingSessionController`, and a `WakeRecoveryCoordinator` for handling sleep / wake transitions during active recording.
-- `Sources/UI/DictationSessionController.swift` now handles dictation only. Removed draft-mode entry points surface a fixed error message.
-- `Sources/Meeting/` adapts app-owned pieces like `ParakeetEngine` into `TranscriptedCore`, including meeting-link detection and app-level transcription queueing.
-- `Sources/Reliability/` holds the `WakeRecoveryCoordinator` used by the app state above.
-- `Sources/TranscriptedCore/` contains the reusable meeting transcription library.
-- Root `Package.swift` exists so `TranscriptedCore` can be tested as a standalone package surface.
-
-## Documentation status
-
-Most repo-level docs have now been resynced to the current dictation +
-meetings codebase. Historical context now lives mainly under `docs/archive/`,
-with the old beta worker archived under `archive/backend-beta-worker/`, plus
-the old `.claude` QA skill.
+Use `docs/repo-layout.md` for the active directory map, doc hierarchy, and
+historical-zone boundaries.

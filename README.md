@@ -5,67 +5,23 @@
 Transcripted is a local Mac app for dictation and meeting capture that turns
 spoken words into structured files your agent can actually use.
 
-Use it today as a practical dictation and meeting tool. Longer term, I think
-audio is the first useful layer of AI context, because it captures without asking you to maintain a second brain by hand.
+Today it is a practical dictation and meeting tool. It keeps the capture flow
+local, saves plain files on disk, and makes that context easy to hand off to
+agents later.
 
-
-## What You Get Today
+## What It Does
 
 - Dictate into any app and paste text back
 - Record meetings locally
 - Save human-readable Markdown and agent-readable JSON files on disk
-- Point Claude, Codex, OpenClaw or any agent at those files
-
-## Why This Exists
-
-A lot of important context never makes it into your notes/docs.
-
-Important context gets lost in:
-
-- a call where a decision was made
-- thinking out loud through a hard problem
-
-Most of that context disappears as soon as the conversation ends.
-
-Transcripted preserves that high signal context, then turns
-it into files that stay on device.
+- Let Claude, Codex, OpenClaw, or any other agent work from those files later
 
 ## How It Works
 
-### 1. Capture spoken work
-
-Transcripted supports two concrete workflows today:
-
-- dictation into any app
-- meeting recording and transcription
-
-### 2. Process it locally
-
-Transcripted transcribes audio on-device and keeps the resulting files on
-your Mac.
-
-### 3. Save Files
-
-Meeting recordings become:
-
-- a Markdown transcript
-- a structured JSON sidecar
-- a `transcripted.json` index of saved meetings
-
-Dictation becomes:
-
-- daily Markdown logs like `Dictations_2026-04-07.md`
-- timestamped sections with source-app metadata and delivery status
-
-### 4. Load the right slice later
-
-Instead of asking an agent to read everything all the time, Transcripted gives
-you durable files that can be loaded when needed:
-
-- latest meeting
-- meetings for a named speaker
-- dictations from a specific day
-- transcripts related to a topic or decision
+1. Capture dictation or a meeting.
+2. Transcripted processes the audio locally on your Mac.
+3. It saves durable Markdown and JSON artifacts to disk.
+4. Your agent can load the right slice later instead of rereading everything.
 
 ## Artifacts, Not A Black Box
 
@@ -125,26 +81,6 @@ Timestamp: 2026-04-07 09:15:00
 first note from the morning
 ```
 
-## Why Audio First
-
-We do not think the answer is "capture everything."
-
-We think the better path is:
-
-- start with a signal people already produce during real work
-- structure it into useful artifacts automatically
-- let agents load more context only when they need it
-
-Audio is a good first wedge because it is:
-
-- high signal
-- already part of meetings and messaging
-- less invasive than full screen capture
-- easier to structure than a full visual memory system
-
-That does not make Transcripted an "ambient context layer" yet. It means audio
-is the first practical layer of one.
-
 ## Local By Default
 
 Transcripted keeps its core workflows on-device:
@@ -164,42 +100,8 @@ You can move the capture library in Settings. Transcripted keeps its databases,
 logs, cache, and temporary recordings under `~/Library/Application Support/Transcripted/`
 even when captures live somewhere else.
 
-Historic `Draft` paths remain in the repo for migration/cleanup flows and for
-standalone tool fallback when older artifacts are the only data on disk.
-
-Operational caveats:
-
-- first launch may download local models from HuggingFace if they are not cached
-- signed builds can check Transcripted's Sparkle appcast for in-app updates
-- beta builds can optionally contact the update/log proxy for update checks and diagnostics
-
-
-## What Exists Today
-
-Today, Transcripted is already useful as:
-
-- a local dictation tool
-- a local meeting recorder and transcription tool
-- a file-based handoff point for external agents
-
-The current product is not a full passive memory system. Capture is still
-explicitly user-invoked. The value is that what you capture becomes durable,
-structured, and reusable instead of disappearing.
-
-## Where This Goes Next
-
-The broader direction is to improve the audio context layer before expanding
-scope.
-
-That likely means:
-
-- better summarization and extraction from saved artifacts
-- more selective retrieval for agents
-- stronger cross-meeting speaker and topic navigation
-- light non-audio context later, where it clearly improves usefulness
-
-The goal is not to make context gathering feel like a job. The goal is to make
-useful context accumulate quietly, then make the right slice easy to load.
+For the full storage map, compatibility paths, and migration details, see
+`docs/storage-paths.md`.
 
 ## Build
 
@@ -227,22 +129,14 @@ If you touch meeting integration or `TranscriptedCore`, also run:
 bash run-integration-smoke.sh
 ```
 
-## Transition Notes
+For build, release, and legacy helper scripts, see `scripts/README.md`.
+For the active repo map and command surface, see `docs/repo-layout.md`.
 
-The old standalone Transcripted app is preserved on:
-
-- branch: `legacy/transcripted-standalone`
-- tag: `pre-draft-takeover-2026-04-06`
-
-This repo currently uses the manual migration path:
-
-- existing standalone Transcripted installs do not auto-upgrade into this app
-- current app builds default to Transcripted-named Application Support paths
-- captures can be relocated in Settings without moving app state or logs
-- standalone tools still recognize older Draft and `~/Documents/Transcripted/` layouts as fallback
-- permissions and settings do not carry over automatically
+Legacy Draft and standalone Transcripted storage layouts are still recognized
+for compatibility. See `docs/storage-paths.md` for details.
 
 ## Contributing And Security
 
 - See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and architecture notes
 - See [SECURITY.md](SECURITY.md) for privacy architecture and vulnerability reporting
+- See `docs/repo-layout.md` for the current directory map and canonical command surface

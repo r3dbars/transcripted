@@ -48,6 +48,9 @@ still exposes the `TranscriptedCore` types that `Sources/Meeting/` depends on.
 It also runs the wake-recovery smoke binary and currently finishes with
 `swift test --filter MicRecordingFileMergerTests`.
 
+The smoke sources now live under `Tests/Integration/` so the repo’s verification
+surface stays under one top-level `Tests/` umbrella.
+
 Run it whenever you touch:
 
 - `Sources/Meeting/`

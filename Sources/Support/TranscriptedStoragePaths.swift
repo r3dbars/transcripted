@@ -1,4 +1,4 @@
-// DraftPaths.swift
+// TranscriptedStoragePaths.swift
 // Shared storage layout helpers for Transcripted.
 
 import Foundation

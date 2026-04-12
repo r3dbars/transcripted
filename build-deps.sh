@@ -4,7 +4,7 @@
 # to prevent duplicate symbol conflicts.
 #
 # Run once — artifacts go into deps-libs/ and deps-modules/
-# Pattern follows build-fluidaudio.sh: expensive build runs once, build.sh reuses cached artifacts
+# Pattern follows the older FluidAudio-only helper now parked under scripts/legacy/: expensive build runs once, build.sh reuses cached artifacts
 
 set -e
 

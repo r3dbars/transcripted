@@ -58,6 +58,9 @@ Build note: `build.sh` is the authoritative app build and uses raw `swiftc`.
 `Package.swift` exists for `TranscriptedCore` compilation and testing, but it
 is not the main app build.
 
+For the current script surface and legacy helpers, see `scripts/README.md`.
+For the active repo map and directory responsibilities, see `docs/repo-layout.md`.
+
 ## Product Framing
 
 When you change README copy, onboarding text, or public docs, keep these rules
@@ -98,12 +101,14 @@ The codebase is organized around the current Transcripted app:
 | App entry + state | `Sources/` | app lifecycle, hotkeys, paths, shared state |
 | Dictation capture and storage | `Sources/Speech/`, `Sources/Dictation/`, `Sources/Capture/` | speech capture, trigger routing, saved dictation transcripts |
 | Meeting pipeline | `Sources/Meeting/` | meeting recording, model warmup, transcript flow |
-| UI | `Sources/UI/` | overlay, menubar, onboarding, agent connection |
+| UI | `Sources/UI/` | grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `AgentConnect/`, `Shared/` |
 | Shared meeting core | `Sources/TranscriptedCore/` | extracted meeting/transcription library and agent artifacts |
 
 Some internal folders still use `Draft` naming while the repo and product are
 being aligned publicly around Transcripted. Treat those as implementation
 details unless a change specifically affects compatibility paths.
+
+For the canonical root and directory map, see `docs/repo-layout.md`.
 
 ### Artifact-First Principle
 

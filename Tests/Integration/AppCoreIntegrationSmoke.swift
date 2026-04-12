@@ -1,13 +1,13 @@
-// CoreIntegrationSmoke.swift
-// Verifies that TranscriptedCore links cleanly against Draft's deps-libs and
+// AppCoreIntegrationSmoke.swift
+// Verifies that TranscriptedCore links cleanly against the app's bundled deps-libs and
 // that the pieces MeetingSessionController wires up can be constructed.
 //
 // Does NOT construct MeetingSessionController itself — that type lives inside
-// the Draft app target and depends on Draft-internal ParakeetEngine. Instead
+// the app target and depends on app-internal ParakeetEngine. Instead
 // we exercise the Core surface that Meeting code touches (CoreStoragePaths,
 // DiarizationService, SpeakerDatabase, FailedTranscriptionManager, Audio,
 // TranscriptionTaskManager, AppServices), so any breakage in the bundled
-// Core-in-libDraftDeps.a shows up here rather than at Draft launch time.
+// Core-in-libDraftDeps.a shows up here rather than at app launch time.
 
 import Foundation
 import TranscriptedCore
@@ -16,7 +16,7 @@ import TranscriptedCore
 func runSmoke() async -> Int32 {
     print("[smoke] CoreStoragePaths default…")
     let tmpRoot = FileManager.default.temporaryDirectory
-        .appendingPathComponent("DraftMeetingSmoke-\(UUID().uuidString)")
+        .appendingPathComponent("TranscriptedMeetingSmoke-\(UUID().uuidString)")
     try? FileManager.default.createDirectory(at: tmpRoot, withIntermediateDirectories: true)
 
     let paths = CoreStoragePaths(
@@ -42,7 +42,7 @@ func runSmoke() async -> Int32 {
     // Audio.setup() opens AVAudioEngine and blocks waiting for mic permissions
     // the smoke binary has no entitlements for; DiarizationService touches
     // CoreML bundles we cannot download from a standalone tool. Their
-    // construction is exercised implicitly by the Draft app launch path
+    // construction is exercised implicitly by the app build path
     // (bash build.sh), which this script runs alongside.
 
     print("[smoke] DiarizationService type reachable…")
@@ -57,7 +57,7 @@ func runSmoke() async -> Int32 {
 
     print("[smoke] AppServices(...) DI container…")
     // NOTE: AppServices wants a concrete SpeechToTextEngine. The smoke binary
-    // cannot see Draft's MeetingSTTAdapter (Draft module isn't importable from
+    // cannot see the app's MeetingSTTAdapter (the app module isn't importable from
     // a standalone tool), so we skip the full AppServices construction and
     // instead verify TranscriptionTaskManager's init signature compiles with
     // the protocol-typed service surface.
@@ -76,7 +76,7 @@ func runSmoke() async -> Int32 {
     // Clean up the tmp root we created.
     try? FileManager.default.removeItem(at: tmpRoot)
 
-    print("[smoke] OK — TranscriptedCore is reachable from Draft's dep chain")
+    print("[smoke] OK — TranscriptedCore is reachable from the app's dependency chain")
     return 0
 }
 

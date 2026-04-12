@@ -45,6 +45,7 @@ PostHog controls described below.
 4. For local-only secrets, you can instead create
    `~/Library/Application Support/Transcripted/observability-overrides.plist`
    and set `TranscriptedPostHogAPIKey` there so the token never lands in git
+   history. The older Draft path is still read as a fallback.
    history. The app still falls back to the legacy Draft path if you already
    have `~/Library/Application Support/Draft/observability-overrides.plist`.
 5. Run `bash build-deps.sh --force` once to download the pinned Sentry and
