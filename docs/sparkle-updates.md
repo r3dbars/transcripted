@@ -2,6 +2,14 @@
 
 Transcripted now uses Sparkle for in-app update checks.
 
+Future agents should treat this as a release requirement:
+
+- if a build is meant to reach existing users through the app's updater, the
+  release is not done until `docs/appcast.xml` has been updated and pushed to
+  the branch that serves the live feed
+- uploading a DMG to GitHub Releases by itself is not enough for current
+  installs to discover the update
+
 ## What is configured in the app
 
 - `Info.plist` points Sparkle at `https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml`
@@ -31,6 +39,9 @@ bash scripts/generate-sparkle-appcast.sh /path/to/updates-folder
 4. The script copies the generated `appcast.xml` back into `docs/appcast.xml`.
 5. Upload the release archive to GitHub Releases.
 6. Commit and push the updated `docs/appcast.xml`.
+
+If step 6 has not happened yet, Sparkle clients will keep seeing the old
+version.
 
 Sparkle will then discover the new version from the appcast URL on the next app launch.
 

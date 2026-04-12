@@ -19,6 +19,8 @@
 7. `Sources/TranscriptedCore/CLAUDE.md` when touching the shared library
 8. `Tests/README.md`
 9. `docs/storage-paths.md`
+10. `docs/release-packaging.md` when touching packaging, signing, notarization, or user-facing releases
+11. `docs/sparkle-updates.md` when touching app updates or cutting a release users should receive in-app
 
 ## Directory map
 
@@ -79,6 +81,32 @@ Rules:
 2. If you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash run-integration-smoke.sh`.
 3. If you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam, also run `swift test`.
 4. `build.sh` must not compile `Sources/TranscriptedCore/` directly into the app target.
+
+## Releases and Sparkle
+
+When the task is a user-facing release, package handoff, or update-path change,
+agents must treat Sparkle as part of the release contract, not as optional
+follow-up work.
+
+Rules:
+
+1. Read `docs/release-packaging.md` and `docs/sparkle-updates.md` before changing release flow.
+2. For builds intended for other machines, use `build-beta.sh`, not `build.sh`.
+3. A release is not complete just because a DMG exists. For in-app updates to work, the release flow must also:
+   - publish the signed archive where users can fetch it
+   - update `docs/appcast.xml`
+   - push the updated appcast to the branch that backs the live feed
+4. If Sparkle metadata was not updated, say explicitly that existing installs will not discover the new release in-app yet.
+5. If the release artifact URL, appcast URL, public key, or Sparkle tooling changes, update the docs in the same change.
+6. Keep `Info.plist` Sparkle settings aligned with the actual release feed:
+   - `SUFeedURL`
+   - `SUPublicEDKey`
+   - any automatic-check / automatic-download flags
+7. Preferred release verification for Sparkle-related changes:
+   - `bash build-deps.sh --force` when dependency tooling changes
+   - `bash build.sh`
+   - `bash run-tests.sh`
+   - `SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>` for packaging smoke, or the full notarized path when cutting a real release
 
 ## Testing gotchas
 
