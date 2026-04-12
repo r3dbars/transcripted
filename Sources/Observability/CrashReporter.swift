@@ -82,8 +82,6 @@ final class CrashReporter {
         shared.hasStarted = true
     }
 
-    func refreshPreference() {}
-
     func capture(error: Error, context: String = "") {
         var extra: [String: String] = [:]
         if !context.isEmpty {
