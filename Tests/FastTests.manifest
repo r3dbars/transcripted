@@ -1,8 +1,6 @@
 # Fast test manifest
 # Format: <TestFile.swift>:<top-level entry function>
 
-StyleUtilsTests.swift:testStyleUtils
-DiffSummaryTests.swift:testDiffSummary
 MeetingTranscriptStylerTests.swift:testMeetingTranscriptStyler
 MeetingPromptHeuristicsTests.swift:testMeetingPromptHeuristics
 SpeakerNamingPolicyTests.swift:testSpeakerNamingPolicy

@@ -100,7 +100,6 @@ The codebase is organized around the current Transcripted app:
 | Meeting pipeline | `Sources/Meeting/` | meeting recording, model warmup, transcript flow |
 | UI | `Sources/UI/` | overlay, menubar, onboarding, agent connection |
 | Shared meeting core | `Sources/TranscriptedCore/` | extracted meeting/transcription library and agent artifacts |
-| Text and style helpers | `Sources/Text/`, `Sources/Style/` | formatting, refusal heuristics, and lightweight pure helpers |
 
 Some internal folders still use `Draft` naming while the repo and product are
 being aligned publicly around Transcripted. Treat those as implementation

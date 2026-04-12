@@ -107,7 +107,6 @@ $manifest_entries
 EOF
 
 APP_SOURCES=(
-    "Sources/Style/StyleUtils.swift"
     "Sources/DraftPaths.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
@@ -115,7 +114,6 @@ APP_SOURCES=(
     "Sources/Dictation/DictationTranscriptWriter.swift"
     "Sources/TranscriptedConstants.swift"
     "Sources/Speech/RecordedAudioTimeline.swift"
-    "Sources/Text/DiffSummary.swift"
     "Sources/Meeting/MeetingPromptHeuristics.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/Reliability/WakeRecoveryCoordinator.swift"

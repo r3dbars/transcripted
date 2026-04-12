@@ -31,14 +31,16 @@ Important entry points:
 - `Observability/` — events, debug log, telemetry, beta updater, crash reporting
 - `Reliability/` — wake / sleep recovery coordination
 - `Speech/` — Parakeet STT, router, and recorded-audio buffering helpers
-- `Style/` — pure text heuristics retained from the older style-learning system
-- `Text/` — small pure text utilities retained from the earlier drafting flow
 - `TranscriptedCore/` — shared library boundary
 - `UI/` — menubar, overlays, settings, recent meetings, speaker naming, and agent-connect
 
 The historical planning docs that used to live alongside older placeholder
 areas were moved under `docs/archive/` so the source tree reads more like the
 live app surface and less like a half-finished subsystem map.
+
+Some older drafting-era utility folders have now been trimmed out of the live
+app target entirely. If a historical doc still mentions `Sources/Text/` or
+`Sources/Style/`, prefer the current file tree.
 
 ## Read before editing
 
