@@ -31,7 +31,7 @@ Important entry points:
 - `Observability/` — events, debug log, anonymous analytics, Sparkle updater, and crash reporting
 - `Reliability/` — wake / sleep recovery coordination
 - `Speech/` — Parakeet STT, router, and recorded-audio buffering helpers
-- `Support/` — app-wide path, storage, hotkey, and shared constant helpers
+- `Support/` — app-wide path, storage, permission, hotkey, and shared constant helpers
 - `TranscriptedCore/` — shared library boundary
 - `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `AgentConnect/`, and `Shared/`
 

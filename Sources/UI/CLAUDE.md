@@ -46,7 +46,6 @@ dictation overlay and the meeting prompt / recording overlay.
 
 ### AgentConnect/
 
-- `AgentConnect/AgentConnectionGuide.swift` — shared smart-prompt, MCP setup, and folder fallback copy for the agent-connect flow
 - `AgentConnect/AgentConnectionWindowController.swift` — `AgentConnectionWindowCoordinator` and `NSWindowController` for the standalone agent-connect window
 - `AgentConnect/AgentConnectionWindowView.swift` — SwiftUI content for the standalone agent-connect window
 
@@ -60,16 +59,20 @@ The current agent-connect surfaces should keep one simple mental model:
 
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
-- `Settings/SpeakerClipPlayback.swift` — audio-preview helper for persisted speaker sample clips
 - `Settings/SpeakerNamingSheet.swift` — sheet for renaming speakers in a completed meeting
 - `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, naming, merging, previewing, and deleting saved speaker profiles
-- `Settings/TranscriptedPermissionAccess.swift` — accessibility, screen recording, and calendar permission checks
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 
 ### Shared/
 
+- `Shared/AgentConnectionGuide.swift` — shared smart-prompt, MCP setup, and folder fallback copy for the agent-connect flow
 - `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
+- `Shared/SpeakerClipPlayback.swift` — reusable audio-preview helper for persisted speaker sample clips
+
+Cross-cutting permission checks now live in `Sources/Support/TranscriptedPermissionAccess.swift`
+so the meeting prompt detector and the settings/onboarding flows share the same
+app-level permission logic outside the UI tree.
 
 ## Observation Pattern
 
