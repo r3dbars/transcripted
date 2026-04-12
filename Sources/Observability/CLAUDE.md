@@ -3,7 +3,7 @@
 ## What This Does
 
 This directory contains the app's logging, diagnostics, crash reporting,
-optional beta shipping, and update plumbing.
+anonymous analytics, and update plumbing.
 
 ## Key Files
 
@@ -19,7 +19,6 @@ optional beta shipping, and update plumbing.
 - `AnalyticsPayloadSanitizer.swift` — strips sensitive analytics properties before send
 - `SentryEventPolicy.swift` — explicit allowlist of non-fatal events permitted to reach Sentry
 - `SentryPayloadSanitizer.swift` — strips obvious sensitive values before Sentry sends
-- `BetaTelemetry.swift` — beta-only log/event shipping
 - `UpdateManager.swift` — beta updater flow
 
 ## Current Notes

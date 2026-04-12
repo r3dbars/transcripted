@@ -9,6 +9,10 @@ This repo now uses three separate observability lanes:
 The point of splitting them is to keep product analytics, crash triage, and
 release delivery from bleeding into each other.
 
+There is no separate beta-only off-device telemetry path anymore. Beta builds
+keep the updater flow, but diagnostics still go through the same Sentry and
+PostHog controls described below.
+
 ## Privacy contract
 
 - never send transcript text

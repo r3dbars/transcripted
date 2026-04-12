@@ -1,5 +1,5 @@
 // BetaConfig.swift
-// Per-user beta configuration — only compiled into beta builds.
+// Per-user beta update configuration — only compiled into beta builds.
 // The token placeholder is replaced by build-beta.sh via sed for each user's DMG.
 
 #if BETA_BUILD
@@ -10,9 +10,6 @@ enum BetaConfig {
     /// Per-user beta token, baked in at build time.
     /// build-beta.sh replaces BETA_TOKEN_PLACEHOLDER with the actual token.
     static let userToken = "BETA_TOKEN_PLACEHOLDER"
-
-    /// Proxy base URL — telemetry events and log shipping route through here
-    static let proxyBaseURL = "https://draft-proxy.tz427gsydr.workers.dev"
 
     /// Current app version — compared against /config min_version to prompt updates.
     /// Bump this in each release. build-beta.sh can also inject it via sed.

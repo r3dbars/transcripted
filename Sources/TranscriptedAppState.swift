@@ -65,15 +65,6 @@ class TranscriptedAppState: ObservableObject {
             EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_failed",
                 message: error.localizedDescription)
         }
-
-        // Start periodic telemetry shipping (60s incremental uploads)
-        BetaTelemetry.shared.startPeriodicShipping()
-
-        // Report app launch to proxy
-        BetaTelemetry.shared.sendEvent(
-            type: "app_launched",
-            payload: [:]
-        )
         #endif
 
         sparkleUpdater.performStartupUpdateCheckIfNeeded()
@@ -96,10 +87,6 @@ class TranscriptedAppState: ObservableObject {
         EventReporter.shared.capture(level: .info, engine: "app", event: "app_launched",
             message: "Transcripted initialized for dictation and meetings")
     }
-
-    #if BETA_BUILD
-    // Beta config check removed — no cloud dependency
-    #endif
 
     // MARK: - Wake Recovery
 
@@ -133,9 +120,6 @@ class TranscriptedAppState: ObservableObject {
     }
 
     func shutdown() {
-        #if BETA_BUILD
-        BetaTelemetry.shared.stopPeriodicShipping()
-        #endif
         wakeRecoveryCoordinator.cancel()
         runtimeReadinessTask?.cancel()
         runtimeReadinessTask = nil

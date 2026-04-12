@@ -28,7 +28,7 @@ Important entry points:
 - `Capture/` — hotkeys, context parsing, capture routing
 - `Dictation/` — dictation transcript persistence and timeout helpers
 - `Meeting/` — app-side meeting bridge, prompts, storage, and transcript restyling
-- `Observability/` — events, debug log, telemetry, beta updater, crash reporting
+- `Observability/` — events, debug log, anonymous analytics, beta updater, crash reporting
 - `Reliability/` — wake / sleep recovery coordination
 - `Speech/` — Parakeet STT, router, and recorded-audio buffering helpers
 - `Style/` — pure text heuristics retained from the older style-learning system

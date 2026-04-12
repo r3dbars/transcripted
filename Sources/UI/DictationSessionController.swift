@@ -352,17 +352,6 @@ class DictationSessionController: ObservableObject {
                     "word_count_bucket": AnalyticsReporter.wordCountBucket(text.split(whereSeparator: \.isWhitespace).count),
                 ]
             )
-            #if BETA_BUILD
-            let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
-            BetaTelemetry.shared.sendEvent(
-                type: "dictation_completed",
-                sourceApp: sessionSourceApp?.bundleIdentifier,
-                payload: [
-                    "chars": text.count,
-                    "duration_s": Int(duration),
-                ]
-            )
-            #endif
         }
     }
 
@@ -404,14 +393,6 @@ class DictationSessionController: ObservableObject {
                 "trigger": currentDictationTrigger.rawValue,
             ]
         )
-        #if BETA_BUILD
-        let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
-        BetaTelemetry.shared.sendEvent(
-            type: "dictation_cancelled",
-            sourceApp: sessionSourceApp?.bundleIdentifier,
-            payload: ["duration_s": Int(duration)]
-        )
-        #endif
     }
 
     // MARK: - Private

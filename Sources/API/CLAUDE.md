@@ -8,10 +8,10 @@ The older `GeminiEngine` / `KeychainHelper` documentation that used to live here
 
 ## Current file
 
-- `BetaConfig.swift` — `#if BETA_BUILD` constants for the beta proxy token, proxy base URL, app version, and update URL
+- `BetaConfig.swift` — `#if BETA_BUILD` constants for the beta token, app version, and update URL
 
 ## Agent notes
 
 - Core dictation and meeting flows on `main` do not depend on a live app-side API client in this directory.
-- If you need network or beta-backend context, read `archive/backend-beta-worker/README.md` and the beta-only files under `Sources/Observability/`.
+- If you need beta distribution context, read `archive/backend-beta-worker/README.md` and the beta-only update files in `Sources/API/` and `Sources/Observability/`.
 - Verify any old references to `GeminiEngine`, API keys, or chat-drafting HTTP paths against the actual source tree before changing code.
