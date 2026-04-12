@@ -196,8 +196,8 @@ struct TranscriptedSettingsView: View {
     private var analyticsFootnote: String {
         if AnalyticsReporter.isAvailable {
             return anonymousAnalyticsEnabled
-                ? "Enabled. Transcripted will send only allowlisted anonymous product events such as launches, dictation completions, and meeting workflow milestones using coarse buckets instead of raw content. You can turn this off at any time."
-                : "Off. Transcripted will not send anonymous usage statistics unless you turn this on."
+                ? "Enabled by default. Transcripted will send only allowlisted anonymous product events such as launches, dictation completions, and meeting workflow milestones using coarse buckets instead of raw content. You can turn this off at any time."
+                : "Off. Transcripted will not send anonymous usage statistics unless you turn this back on."
         }
         return "This build does not have a PostHog project key configured yet, so anonymous usage statistics stay disabled."
     }

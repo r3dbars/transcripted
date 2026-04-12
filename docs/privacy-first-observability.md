@@ -39,7 +39,7 @@ PostHog controls described below.
 ## Setup checklist
 
 1. Create a PostHog project.
-2. Copy the project API key into `Info.plist` under `TranscriptedPostHogAPIKey`.
+2. Keep the release PostHog project API key in `Info.plist` under `TranscriptedPostHogAPIKey`.
 3. Keep `TranscriptedPostHogHost` at `https://us.i.posthog.com` unless you are
    using EU or self-hosted PostHog.
 4. For local-only secrets, you can instead create
@@ -50,11 +50,14 @@ PostHog controls described below.
 5. Run `bash build-deps.sh --force` once to download the pinned Sentry and
    Sparkle frameworks.
 6. Run `bash build.sh` and `bash run-tests.sh`.
-7. In the app, verify Settings shows separate toggles for:
+7. In the app, verify onboarding shows two separate default-on questions for:
    - crash and error reports
    - anonymous usage statistics
-8. Use `Send Test Sentry Event` to verify Sentry wiring.
-9. Turn on anonymous usage statistics and verify only allowlisted events arrive
+8. Verify Settings also shows separate toggles for:
+   - crash and error reports
+   - anonymous usage statistics
+9. Use `Send Test Sentry Event` to verify Sentry wiring.
+10. Leave anonymous usage statistics on and verify only allowlisted events arrive
    in PostHog.
 
 ## Allowlisted analytics events
