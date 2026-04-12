@@ -24,7 +24,7 @@
 4. `MeetingSessionController.startRecording(...)` uses `MeetingCaptureBridge` to start core audio capture into app-owned scratch paths.
 5. `MeetingSessionController.stopRecording(...)` awaits mic/system audio files from the bridge, then either starts transcription immediately or queues it behind the active job.
 6. `TranscriptionTaskManager` runs one diarize → transcribe → save pipeline at a time.
-7. A subscription on `taskManager.$lastSavedTranscriptURL` calls `MeetingTranscriptStyler.restyleTranscript(...)` and updates the recent-meetings UI state.
+7. A subscription on `taskManager.$lastSavedTranscriptURL` kicks transcript restyling onto a utility-priority task, then updates the recent-meetings UI state on the main actor once styling completes.
 8. Failed meetings can be retried, deleted, or dismissed from the menubar recent-meetings section.
 
 ## Key invariants

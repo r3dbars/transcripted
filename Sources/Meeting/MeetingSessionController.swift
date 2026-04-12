@@ -149,6 +149,7 @@ final class MeetingSessionController: ObservableObject {
     private var retryingFailedMeetingIDs: Set<UUID> = []
     private var queuedTranscriptionJobs: [QueuedTranscriptionJob] = []
     private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
+    private var transcriptStylingTask: Task<Void, Never>?
 
     // MARK: - Init
 
@@ -511,20 +512,43 @@ final class MeetingSessionController: ObservableObject {
             .sink { [weak self] url in
                 guard let self else { return }
                 guard let url else {
+                    self.transcriptStylingTask?.cancel()
+                    self.transcriptStylingTask = nil
                     self.lastSavedTranscriptURL = nil
                     self.lastSavedTitle = nil
                     return
                 }
 
-                let styled = MeetingTranscriptStyler.restyleTranscript(at: url)
-                self.lastSavedTranscriptURL = styled.url
-                self.lastSavedTitle = styled.title
-                DiagnosticsTrail.record(
-                    engine: "meeting",
-                    event: "meeting_transcript_artifact_ready",
-                    message: "Meeting transcript artifact is ready",
-                    context: self.baseDiagnosticsContext()
-                )
+                self.transcriptStylingTask?.cancel()
+                // Restyling can touch multi-megabyte transcripts, so keep it off the main actor.
+                self.transcriptStylingTask = Task { [weak self] in
+                    let result = await Task.detached(priority: .utility) {
+                        let startTime = CFAbsoluteTimeGetCurrent()
+                        let styled = MeetingTranscriptStyler.restyleTranscript(at: url)
+                        let durationMs = Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000)
+                        let fileSizeKB = (try? styled.url.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+                            .map { max(1, $0 / 1024) } ?? 0
+                        return (styled: styled, durationMs: durationMs, fileSizeKB: fileSizeKB)
+                    }.value
+
+                    guard let self, !Task.isCancelled else { return }
+
+                    self.transcriptStylingTask = nil
+                    self.lastSavedTranscriptURL = result.styled.url
+                    self.lastSavedTitle = result.styled.title
+                    DiagnosticsTrail.record(
+                        level: result.durationMs >= 250 ? .warning : .info,
+                        engine: "meeting",
+                        event: "meeting_transcript_artifact_ready",
+                        message: "Meeting transcript artifact is ready",
+                        context: self.baseDiagnosticsContext(
+                            extra: [
+                                "style_duration_ms": "\(result.durationMs)",
+                                "styled_file_kb": "\(result.fileSizeKB)"
+                            ]
+                        )
+                    )
+                }
             }
             .store(in: &cancellables)
 
