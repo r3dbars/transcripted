@@ -3,19 +3,37 @@ import Foundation
 private enum AnalyticsRuntimeConfiguration {
     static let apiKeyInfoKey = "TranscriptedPostHogAPIKey"
     static let hostInfoKey = "TranscriptedPostHogHost"
+    private static let localOverridesFileName = "observability-overrides.plist"
 
     static func apiKey() -> String? {
         firstNonEmpty(
-            Bundle.main.object(forInfoDictionaryKey: apiKeyInfoKey) as? String,
-            ProcessInfo.processInfo.environment["POSTHOG_API_KEY"]
+            ProcessInfo.processInfo.environment["POSTHOG_API_KEY"],
+            localOverrideValue(forKey: apiKeyInfoKey),
+            Bundle.main.object(forInfoDictionaryKey: apiKeyInfoKey) as? String
         )
     }
 
     static func host() -> String? {
         firstNonEmpty(
-            Bundle.main.object(forInfoDictionaryKey: hostInfoKey) as? String,
-            ProcessInfo.processInfo.environment["POSTHOG_HOST"]
+            ProcessInfo.processInfo.environment["POSTHOG_HOST"],
+            localOverrideValue(forKey: hostInfoKey),
+            Bundle.main.object(forInfoDictionaryKey: hostInfoKey) as? String
         )
+    }
+
+    private static func localOverrideValue(forKey key: String) -> String? {
+        guard let overrides = NSDictionary(contentsOf: localOverridesURL) as? [String: Any] else {
+            return nil
+        }
+        return overrides[key] as? String
+    }
+
+    private static var localOverridesURL: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support", isDirectory: true)
+        return appSupport
+            .appendingPathComponent("Draft", isDirectory: true)
+            .appendingPathComponent(localOverridesFileName)
     }
 
     private static func firstNonEmpty(_ candidates: String?...) -> String? {

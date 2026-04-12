@@ -38,14 +38,17 @@ release delivery from bleeding into each other.
 2. Copy the project API key into `Info.plist` under `TranscriptedPostHogAPIKey`.
 3. Keep `TranscriptedPostHogHost` at `https://us.i.posthog.com` unless you are
    using EU or self-hosted PostHog.
-4. Run `bash build-deps.sh --force` once to download the pinned Sentry and
+4. For local-only secrets, you can instead create
+   `~/Library/Application Support/Draft/observability-overrides.plist` and set
+   `TranscriptedPostHogAPIKey` there so the token never lands in git history.
+5. Run `bash build-deps.sh --force` once to download the pinned Sentry and
    Sparkle frameworks.
-5. Run `bash build.sh` and `bash run-tests.sh`.
-6. In the app, verify Settings shows separate toggles for:
+6. Run `bash build.sh` and `bash run-tests.sh`.
+7. In the app, verify Settings shows separate toggles for:
    - crash and error reports
    - anonymous usage statistics
-7. Use `Send Test Sentry Event` to verify Sentry wiring.
-8. Turn on anonymous usage statistics and verify only allowlisted events arrive
+8. Use `Send Test Sentry Event` to verify Sentry wiring.
+9. Turn on anonymous usage statistics and verify only allowlisted events arrive
    in PostHog.
 
 ## Allowlisted analytics events
