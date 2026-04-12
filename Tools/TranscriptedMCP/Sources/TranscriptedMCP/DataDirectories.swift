@@ -21,7 +21,8 @@ struct TranscriptedDataDirectories {
 
     static func resolve(
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        homeDirectory: URL? = nil
     ) -> TranscriptedDataDirectories {
         if let sharedPath = environment["TRANSCRIPTED_DATA_DIR"], !sharedPath.isEmpty {
             let sharedURL = URL(fileURLWithPath: sharedPath)
@@ -44,7 +45,7 @@ struct TranscriptedDataDirectories {
             )
         }
 
-        let home = fileManager.homeDirectoryForCurrentUser
+        let home = homeDirectory ?? fileManager.homeDirectoryForCurrentUser
         let transcriptedRoot = home
             .appendingPathComponent("Library", isDirectory: true)
             .appendingPathComponent("Application Support", isDirectory: true)
@@ -72,14 +73,16 @@ struct TranscriptedDataDirectories {
         let meetingsOverride = environment["TRANSCRIPTED_MEETINGS_DIR"].map(URL.init(fileURLWithPath:))
         let dictationsOverride = environment["TRANSCRIPTED_DICTATIONS_DIR"].map(URL.init(fileURLWithPath:))
         let indexOverride = environment["TRANSCRIPTED_INDEX_DIR"].map(URL.init(fileURLWithPath:))
+        let currentTranscriptedCapturesExist = fileManager.fileExists(atPath: defaultMeetings.path)
+            || fileManager.fileExists(atPath: defaultDictations.path)
 
         let useLegacyDraft = meetingsOverride == nil
             && dictationsOverride == nil
-            && !fileManager.fileExists(atPath: defaultMeetings.path)
+            && !currentTranscriptedCapturesExist
             && fileManager.fileExists(atPath: legacyDraftMeetings.path)
         let useLegacyShared = meetingsOverride == nil
             && dictationsOverride == nil
-            && !fileManager.fileExists(atPath: defaultMeetings.path)
+            && !currentTranscriptedCapturesExist
             && !fileManager.fileExists(atPath: legacyDraftMeetings.path)
             && fileManager.fileExists(atPath: legacyShared.path)
 
