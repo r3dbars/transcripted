@@ -7,8 +7,9 @@ the path that applies hardened runtime signing, builds a DMG, and optionally
 submits it for notarization.
 
 Transcripted's Sparkle update plumbing is documented in `docs/sparkle-updates.md`.
-`build-deps.sh` now downloads the pinned Sparkle framework and release tools
-into `deps-frameworks/` and `deps-tools/sparkle/`.
+`build-deps.sh` now downloads the pinned Sparkle framework and release tools,
+plus the pinned Sentry framework, into `deps-frameworks/` and
+`deps-tools/sparkle/`.
 
 The two build flows intentionally use separate committed entitlement files:
 

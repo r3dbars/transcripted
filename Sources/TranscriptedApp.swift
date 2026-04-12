@@ -136,9 +136,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         if #available(macOS 14.0, *) {
             meetingPromptDetector.stop()
         }
-        #if BETA_BUILD
-        BetaTelemetry.shared.shipLogs()
-        #endif
         appState.shutdown()
     }
 

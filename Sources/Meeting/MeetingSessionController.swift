@@ -306,6 +306,12 @@ final class MeetingSessionController: ObservableObject {
             message: "Meeting recording started",
             context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
         )
+        AnalyticsReporter.track(
+            "meeting_recording_started",
+            properties: [
+                "trigger": trigger.rawValue,
+            ]
+        )
     }
 
     /// Stop capture and queue the finished meeting for background transcription.
@@ -381,6 +387,15 @@ final class MeetingSessionController: ObservableObject {
                     "queue_depth": "\(queueDepth)"
                 ]
             )
+        )
+        AnalyticsReporter.track(
+            "meeting_recording_stopped",
+            properties: [
+                "capture_quality": healthInfo.captureQuality.rawValue,
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
+                "reason": reason.rawValue,
+                "system_audio_present": boolString(files.systemURL != nil),
+            ]
         )
     }
 
@@ -753,6 +768,12 @@ final class MeetingSessionController: ObservableObject {
                     ]
                 )
             )
+            AnalyticsReporter.track(
+                "meeting_transcript_saved",
+                properties: [
+                    "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
+                ]
+            )
             AppSoundPlayer.shared.play(.meetingTranscriptComplete)
         case .failed(let message):
             lastTerminalTranscriptionOutcome = .failed(message)
@@ -767,6 +788,13 @@ final class MeetingSessionController: ObservableObject {
                         "queue_depth": "\(queuedTranscriptionJobs.count)"
                     ]
                 )
+            )
+            AnalyticsReporter.track(
+                "meeting_transcript_failed",
+                properties: [
+                    "failure_kind": analyticsFailureKind(from: message),
+                    "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
+                ]
             )
         case .gettingReady:
             if previousStatus.diagnosticName != status.diagnosticName {
@@ -833,6 +861,25 @@ final class MeetingSessionController: ObservableObject {
             status.meetingsStatus,
             "\(Int(status.progress * 10))"
         ].joined(separator: "|")
+    }
+
+    private func analyticsFailureKind(from message: String) -> String {
+        let normalized = message.lowercased()
+
+        if normalized.contains("system audio") || normalized.contains("screen recording") {
+            return "system_audio"
+        }
+        if normalized.contains("recording too short") {
+            return "recording_too_short"
+        }
+        if normalized.contains("save") {
+            return "save_failed"
+        }
+        if normalized.contains("model") || normalized.contains("load") {
+            return "model_load"
+        }
+
+        return "other"
     }
 
     private func baseDiagnosticsContext(extra: [String: String] = [:]) -> [String: String] {

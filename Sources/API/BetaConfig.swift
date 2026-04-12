@@ -11,7 +11,7 @@ enum BetaConfig {
     /// build-beta.sh replaces BETA_TOKEN_PLACEHOLDER with the actual token.
     static let userToken = "BETA_TOKEN_PLACEHOLDER"
 
-    /// Proxy base URL for beta-only telemetry and proxy traffic.
+    /// Proxy base URL for beta-only proxy traffic.
     static let proxyBaseURL = "https://draft-proxy.tz427gsydr.workers.dev"
 }
 

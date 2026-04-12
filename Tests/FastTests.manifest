@@ -1,6 +1,8 @@
 # Fast test manifest
 # Format: <TestFile.swift>:<top-level entry function>
 
+AnalyticsEventPolicyTests.swift:testAnalyticsEventPolicy
+AnalyticsPayloadSanitizerTests.swift:testAnalyticsPayloadSanitizer
 MeetingTranscriptStylerTests.swift:testMeetingTranscriptStyler
 MeetingPromptHeuristicsTests.swift:testMeetingPromptHeuristics
 SpeakerNamingPolicyTests.swift:testSpeakerNamingPolicy

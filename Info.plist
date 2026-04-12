@@ -16,6 +16,10 @@
     <string>https://137ddd7f72199a8d7a06f1644224dce5@o4511202804170752.ingest.us.sentry.io/4511202823045120</string>
     <key>TranscriptedSentryEnvironment</key>
     <string>production</string>
+    <key>TranscriptedPostHogAPIKey</key>
+    <string></string>
+    <key>TranscriptedPostHogHost</key>
+    <string>https://us.i.posthog.com</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>

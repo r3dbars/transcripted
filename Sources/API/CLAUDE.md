@@ -12,5 +12,5 @@
 
 - the core dictation and meeting flows do not depend on a live app-side API client here
 - the current app no longer consumes `/config`-driven version or update fields from the archived beta worker
-- networked beta behavior lives mostly in `Sources/Observability/`
+- if you need beta distribution or backend context, read `archive/backend-beta-worker/README.md`
 - older docs mentioning `GeminiEngine`, keychain helpers, or chat-drafting HTTP paths do not match the current tree

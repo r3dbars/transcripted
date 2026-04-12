@@ -14,6 +14,7 @@ DEPS_ARCHIVE="deps-libs/libDraftDeps.a"
 DEPS_MODULE_ROOT="deps-modules"
 DEPS_FRAMEWORK_ROOT="deps-frameworks"
 ESPEAK_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/ESpeakNG.framework"
+SENTRY_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sentry.framework"
 SPARKLE_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sparkle.framework"
 TRANSCRIPTED_CORE_MODULE="$DEPS_MODULE_ROOT/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
 
@@ -25,7 +26,7 @@ ensure_build_prerequisites() {
 }
 
 ensure_deps_ready() {
-    if [ -f "$DEPS_ARCHIVE" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -d "$ESPEAK_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
+    if [ -f "$DEPS_ARCHIVE" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -d "$ESPEAK_FRAMEWORK" ] && [ -d "$SENTRY_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
         return 0
     fi
 
@@ -35,6 +36,7 @@ ensure_deps_ready() {
     echo "  $DEPS_MODULE_ROOT/"
     echo "  $TRANSCRIPTED_CORE_MODULE"
     echo "  $ESPEAK_FRAMEWORK"
+    echo "  $SENTRY_FRAMEWORK"
     echo "  $SPARKLE_FRAMEWORK"
     echo ""
     echo "Run: bash build-deps.sh --force"
@@ -166,6 +168,7 @@ done
 
 # Bundle FluidAudio's binary framework dependency.
 cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
+cp -R "$SENTRY_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 
 # Compile
@@ -189,6 +192,7 @@ swiftc \
     -framework Vision \
     -framework MetalPerformanceShaders \
     -framework MetalPerformanceShadersGraph \
+    -framework Sentry \
     -framework Sparkle \
     -lc++ \
     $DEPS_FLAGS \

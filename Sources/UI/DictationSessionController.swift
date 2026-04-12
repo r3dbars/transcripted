@@ -172,6 +172,12 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
+        AnalyticsReporter.track(
+            "dictation_started",
+            properties: [
+                "trigger": trigger.rawValue,
+            ]
+        )
 
         if appState.sttRouter.isModelLoaded {
             overlayController.state = .listening
@@ -337,18 +343,15 @@ class DictationSessionController: ObservableObject {
             }
             isDictating = false
             appState.logger.log("DICTATION | completed with outcome \(pasteOutcome)")
-            EventTracker.track("dictation.completed", with: ["word_count": "\(text.split(whereSeparator: \.isWhitespace).count)"])
-            #if BETA_BUILD
-            let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
-            BetaTelemetry.shared.sendEvent(
-                type: "dictation_completed",
-                sourceApp: sessionSourceApp?.bundleIdentifier,
-                payload: [
-                    "chars": text.count,
-                    "duration_s": Int(duration),
+            AnalyticsReporter.track(
+                "dictation_completed",
+                properties: [
+                    "delivery": pasteOutcome.delivery.rawValue,
+                    "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                    "trigger": currentDictationTrigger.rawValue,
+                    "word_count_bucket": AnalyticsReporter.wordCountBucket(text.split(whereSeparator: \.isWhitespace).count),
                 ]
             )
-            #endif
         }
     }
 
@@ -383,14 +386,13 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
-        #if BETA_BUILD
-        let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
-        BetaTelemetry.shared.sendEvent(
-            type: "dictation_cancelled",
-            sourceApp: sessionSourceApp?.bundleIdentifier,
-            payload: ["duration_s": Int(duration)]
+        AnalyticsReporter.track(
+            "dictation_cancelled",
+            properties: [
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                "trigger": currentDictationTrigger.rawValue,
+            ]
         )
-        #endif
     }
 
     // MARK: - Private

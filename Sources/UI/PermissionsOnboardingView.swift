@@ -12,6 +12,7 @@ struct PermissionsOnboardingView: View {
     @State private var accessibilityGranted = false
     @State private var screenRecordingGranted = false
     @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
+    @State private var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
     @State private var pollTimer: Timer?
 
     var body: some View {
@@ -51,10 +52,13 @@ struct PermissionsOnboardingView: View {
                         isGranted: isGranted
                     )
 
-                    DiagnosticConsentCard(
+                    ObservabilityConsentCard(
                         crashReportingEnabled: $crashReportingEnabled,
-                        isAvailable: CrashReporter.isAvailable,
-                        onToggle: updateCrashReportingPreference
+                        anonymousAnalyticsEnabled: $anonymousAnalyticsEnabled,
+                        crashReportingAvailable: CrashReporter.isAvailable,
+                        analyticsAvailable: AnalyticsReporter.isAvailable,
+                        onCrashToggle: updateCrashReportingPreference,
+                        onAnalyticsToggle: updateAnalyticsPreference
                     )
 
                     VStack(alignment: .leading, spacing: 10) {
@@ -111,6 +115,7 @@ struct PermissionsOnboardingView: View {
         .onAppear {
             checkAllPermissions()
             crashReportingEnabled = CrashReportingPreferences.isEnabled()
+            anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
             startPolling()
         }
         .onDisappear {
@@ -179,6 +184,14 @@ struct PermissionsOnboardingView: View {
     private func completeOnboarding() {
         guard hasRequiredPermissions else { return }
         stopPolling()
+        AnalyticsReporter.track(
+            "onboarding_completed",
+            properties: [
+                "anonymous_usage_enabled": anonymousAnalyticsEnabled ? "true" : "false",
+                "crash_reporting_enabled": crashReportingEnabled ? "true" : "false",
+                "screen_recording_enabled": screenRecordingGranted ? "true" : "false",
+            ]
+        )
         onComplete()
     }
 
@@ -186,6 +199,11 @@ struct PermissionsOnboardingView: View {
         crashReportingEnabled = enabled
         CrashReportingPreferences.setEnabled(enabled)
         CrashReporter.shared.refreshPreference()
+    }
+
+    private func updateAnalyticsPreference(_ enabled: Bool) {
+        anonymousAnalyticsEnabled = enabled
+        AnalyticsPreferences.setEnabled(enabled)
     }
 
     static var hasCompleted: Bool {
@@ -325,31 +343,48 @@ private struct OptionalPermissionsCard: View {
     }
 }
 
-private struct DiagnosticConsentCard: View {
+private struct ObservabilityConsentCard: View {
     @Binding var crashReportingEnabled: Bool
-    let isAvailable: Bool
-    let onToggle: (Bool) -> Void
+    @Binding var anonymousAnalyticsEnabled: Bool
+    let crashReportingAvailable: Bool
+    let analyticsAvailable: Bool
+    let onCrashToggle: (Bool) -> Void
+    let onAnalyticsToggle: (Bool) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Crash and error reports")
+            Text("Optional diagnostics")
                 .font(.subheadline.weight(.semibold))
 
-            Text("Transcripted can send technical crash and error information to help fix bugs faster. It does not send transcript text, audio, meeting titles, or speaker names.")
+            Text("Both options are optional, and you can change either one later in Settings. Transcripted never sends transcript text, audio, meeting titles, speaker names, source app names, emails, file paths, or raw URLs.")
                 .font(.caption)
                 .foregroundStyle(MenuTokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             Toggle(
-                "Help improve Transcripted with crash and error reports",
+                "Share crash and error reports",
                 isOn: Binding(
                     get: { crashReportingEnabled },
-                    set: onToggle
+                    set: onCrashToggle
                 )
             )
-            .disabled(!isAvailable)
+            .disabled(!crashReportingAvailable)
 
-            Text(footnote)
+            Toggle(
+                "Share anonymous usage statistics",
+                isOn: Binding(
+                    get: { anonymousAnalyticsEnabled },
+                    set: onAnalyticsToggle
+                )
+            )
+            .disabled(!analyticsAvailable)
+
+            Text(crashFootnote)
+                .font(.caption)
+                .foregroundStyle(MenuTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(analyticsFootnote)
                 .font(.caption)
                 .foregroundStyle(MenuTokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -365,14 +400,24 @@ private struct DiagnosticConsentCard: View {
         )
     }
 
-    private var footnote: String {
-        if !isAvailable {
+    private var crashFootnote: String {
+        if !crashReportingAvailable {
             return "This build does not have Sentry configured yet, so crash and error reports stay on this Mac only. You can still change this later from Settings."
         }
 
         return crashReportingEnabled
             ? "On by default. You can turn this off now or later from Settings."
             : "Off. You can change this later from Settings if you want to help improve Transcripted."
+    }
+
+    private var analyticsFootnote: String {
+        if !analyticsAvailable {
+            return "This build does not have PostHog configured yet, so anonymous usage statistics stay off until a project key is added."
+        }
+
+        return anonymousAnalyticsEnabled
+            ? "On. Transcripted will send only allowlisted, bucketed product events with an anonymous device ID."
+            : "Off by default. Turn this on only if you want to share anonymous usage trends."
     }
 }
 

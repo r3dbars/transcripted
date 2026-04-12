@@ -42,4 +42,21 @@ func testSentryPayloadSanitizer() {
         assertTrue(sanitized.contains("[redacted-host]"), "redacted hostname marker should remain")
         assertTrue(sanitized.contains("[redacted-path]"), "redacted path marker should remain")
     }
+
+    runSuite("SentryPayloadSanitizer.sanitizeAnyDictionary redacts nested free-form values") {
+        let sanitized = SentryPayloadSanitizer.sanitizeAnyDictionary([
+            "safe_count": 3,
+            "title": "Private meeting",
+            "nested": [
+                "path": "/Users/redbars/Library/Application Support/Draft/demo.md",
+                "state": "recording",
+            ],
+        ])
+
+        assertEqual(sanitized["safe_count"] as? NSNumber, 3, "numeric values should remain")
+        assertNil(sanitized["title"], "sensitive top-level keys should be dropped")
+        let nested = sanitized["nested"] as? [String: Any]
+        assertNil(nested?["path"], "nested sensitive keys should be dropped")
+        assertEqual(nested?["state"] as? String, "recording", "safe nested values should remain")
+    }
 }

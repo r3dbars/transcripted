@@ -115,6 +115,8 @@ APP_SOURCES=(
     "Sources/Speech/RecordedAudioTimeline.swift"
     "Sources/Meeting/MeetingPromptHeuristics.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
+    "Sources/Observability/AnalyticsEventPolicy.swift"
+    "Sources/Observability/AnalyticsPayloadSanitizer.swift"
     "Sources/Observability/SentryEventPolicy.swift"
     "Sources/Observability/SentryPayloadSanitizer.swift"
     "Sources/Reliability/WakeRecoveryCoordinator.swift"
