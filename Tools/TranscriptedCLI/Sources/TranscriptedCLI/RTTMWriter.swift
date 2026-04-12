@@ -1,4 +1,6 @@
 import Foundation
+
+#if TRANSCRIPTEDCLI_WITH_DIARIZATION
 import FluidAudio
 
 enum RTTMWriter {
@@ -24,3 +26,4 @@ enum RTTMWriter {
         }
     }
 }
+#endif

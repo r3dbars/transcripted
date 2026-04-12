@@ -394,7 +394,7 @@ final class MeetingSessionController: ObservableObject {
                 "capture_quality": healthInfo.captureQuality.rawValue,
                 "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
                 "reason": reason.rawValue,
-                "system_audio_present": boolString(files.systemURL != nil),
+                "system_stream_present": boolString(files.systemURL != nil),
             ]
         )
     }

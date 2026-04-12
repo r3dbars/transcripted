@@ -201,6 +201,10 @@ final class MeetingOverlayRootView: NSView {
             layoutPrompt()
             return
         }
+        if case .error = currentState {
+            layoutError()
+            return
+        }
 
         let pad: CGFloat = 12
         let dotSize = MeetingOverlayTokens.dotSize
@@ -345,6 +349,31 @@ final class MeetingOverlayRootView: NSView {
         )
     }
 
+    private func layoutError() {
+        let pad: CGFloat = 12
+        let dotSize = MeetingOverlayTokens.dotSize
+        let topY = bounds.height - 22
+
+        statusDot.frame = NSRect(x: pad, y: topY - dotSize / 2, width: dotSize, height: dotSize)
+
+        let titleX = statusDot.frame.maxX + 8
+        let titleWidth = max(0, bounds.width - titleX - pad)
+        let titleSize = titleLabel.fittingSize
+        titleLabel.frame = NSRect(
+            x: titleX,
+            y: topY - titleSize.height / 2,
+            width: min(titleWidth, titleSize.width),
+            height: titleSize.height
+        )
+
+        detailLabel.frame = NSRect(
+            x: pad,
+            y: 16,
+            width: bounds.width - pad * 2,
+            height: 16
+        )
+    }
+
     private func layoutWarmup() {
         let pad: CGFloat = 16
         let contentWidth = bounds.width - pad * 2
@@ -375,10 +404,16 @@ final class MeetingOverlayRootView: NSView {
 
         let isPreparing = state == .preparing
         let isPrompting = state == .prompt
+        let isErrorState: Bool
+        if case .error = state {
+            isErrorState = true
+        } else {
+            isErrorState = false
+        }
         statusDot.isHidden = isPreparing
         titleLabel.isHidden = isPreparing
         timerLabel.isHidden = isPreparing || (state != .recording && !isPrompting)
-        detailLabel.isHidden = !isPrompting
+        detailLabel.isHidden = !(isPrompting || isErrorState)
         micLabel.isHidden = isPreparing || isPrompting
         systemLabel.isHidden = isPreparing || isPrompting
         micWaveform.isHidden = isPreparing || isPrompting
@@ -445,9 +480,14 @@ final class MeetingOverlayRootView: NSView {
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotSaved.cgColor
             detailLabel.stringValue = ""
         case .error(let message):
-            titleLabel.stringValue = displayErrorTitle(for: message)
+            let copy = MeetingFailureCopy.make(
+                forMessage: message,
+                shortErrorMessage: message,
+                isRetryable: true
+            )
+            titleLabel.stringValue = copy.title
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotError.cgColor
-            detailLabel.stringValue = ""
+            detailLabel.stringValue = copy.detail
         }
 
         if state == .recording {
@@ -469,24 +509,6 @@ final class MeetingOverlayRootView: NSView {
         let m = total / 60
         let s = total % 60
         return String(format: "%02d:%02d", m, s)
-    }
-
-    private func displayErrorTitle(for message: String) -> String {
-        let lowercased = message.lowercased()
-
-        if lowercased.contains("system audio is required") || lowercased.contains("screen recording") {
-            return "Turn on Screen Recording"
-        }
-
-        if lowercased.contains("recording too short") || lowercased.contains("at least") {
-            return "Recording was too short"
-        }
-
-        if lowercased.contains("no samples recorded") || lowercased.contains("empty audio") {
-            return "No audio was captured"
-        }
-
-        return "Transcript needs retry"
     }
 
     @objc private func handleSecondaryAction() {
@@ -519,6 +541,7 @@ enum MeetingOverlayTokens {
     static let panelHeight: CGFloat = 48
     static let promptHeight: CGFloat = 88
     static let warmupHeight: CGFloat = 96
+    static let errorHeight: CGFloat = 72
     static let cornerRadius: CGFloat = OverlayTokens.cornerRadius
     static let dotSize: CGFloat     = 8
 }
@@ -802,6 +825,8 @@ final class MeetingOverlayController {
             return MeetingOverlayTokens.warmupHeight
         case .prompt:
             return MeetingOverlayTokens.promptHeight
+        case .error:
+            return MeetingOverlayTokens.errorHeight
         default:
             return MeetingOverlayTokens.panelHeight
         }
