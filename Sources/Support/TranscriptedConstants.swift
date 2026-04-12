@@ -1,4 +1,4 @@
-// TranscriptedConstants.swift
+// Support/TranscriptedConstants.swift
 // Centralized configuration constants — timeouts, thresholds, limits, buffer sizes.
 // Animation durations and UI dimensions stay in their respective files (OverlayTokens, etc.)
 

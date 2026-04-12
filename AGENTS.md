@@ -32,7 +32,7 @@
 - `Sources/Reliability/` — wake / sleep recovery coordination for active recording flows
 - `Sources/TranscriptedCore/` — reusable meeting transcription library
 - `Tests/` — fast custom Swift test runner plus `TranscriptedCore` package tests
-- `SmokeTests/` — integration smoke for the bundled core library seam, plus a wake-recovery smoke check
+- `Tests/Integration/` — integration smoke for the bundled core library seam, plus a wake-recovery smoke check
 - `Tools/TranscriptedCLI/` — standalone CLI for local context queries and offline diarization
 - `Tools/TranscriptedMCP/` — read-only MCP server for saved meeting and dictation artifacts
 - `Tools/TranscriptedQA/` — artifact validation CLI

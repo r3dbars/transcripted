@@ -47,6 +47,9 @@ Use this when changing:
 `bash run-integration-smoke.sh` verifies that the app-side dependency bundle
 still exposes the `TranscriptedCore` types that `Sources/Meeting/` depends on.
 
+The smoke sources now live under `Tests/Integration/` so the repo’s verification
+surface stays under one top-level `Tests/` umbrella.
+
 Run it whenever you touch:
 
 - `Sources/Meeting/`

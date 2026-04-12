@@ -13,8 +13,8 @@ Important entry points:
 - `TranscriptedApp.swift` — app entry point, menubar wiring, popover, overlay setup, and detected-meeting prompt wiring
 - `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, wake-recovery coordination, and lazy `MeetingSessionController`
 - `Support/TranscriptedStoragePaths.swift` — app-support path helpers for the Transcripted capture-library, state, cache, logs, and tmp layout
-- `HotkeyPreferences.swift` — persisted hotkey settings used by capture routing
-- `TranscriptedConstants.swift` — shared timing and behavior constants used across the app target
+- `Support/HotkeyPreferences.swift` — persisted hotkey settings used by capture routing
+- `Support/TranscriptedConstants.swift` — shared timing and behavior constants used across the app target
 - `Capture/ContextCaptureEngine.swift` — right-option dictation handling, keyboard hotkeys, meeting hotkey routing
 - `UI/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
 - `Meeting/MeetingPromptDetector.swift` — Calendar and runtime-app meeting detection used to offer one-tap meeting capture prompts
@@ -31,7 +31,7 @@ Important entry points:
 - `Observability/` — events, debug log, anonymous analytics, Sparkle updater, and crash reporting
 - `Reliability/` — wake / sleep recovery coordination
 - `Speech/` — Parakeet STT, router, and recorded-audio buffering helpers
-- `Support/` — app-wide path and storage helpers
+- `Support/` — app-wide path, storage, hotkey, and shared constant helpers
 - `TranscriptedCore/` — shared library boundary
 - `UI/` — menubar, overlays, settings, recent meetings, speaker naming, and agent-connect
 

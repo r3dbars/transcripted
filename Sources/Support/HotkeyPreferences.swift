@@ -1,4 +1,4 @@
-// HotkeyPreferences.swift
+// Support/HotkeyPreferences.swift
 // Data model, persistence, display, and validation for customizable keyboard shortcuts.
 // Stateless enum to keep persistence and display helpers easy to test.
 

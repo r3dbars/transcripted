@@ -71,7 +71,7 @@ Relevant direct coverage:
 - `Tests/MeetingPromptHeuristicsTests.swift`
 - `Tests/MeetingTranscriptStylerTests.swift`
 - `Tests/SpeakerNamingPolicyTests.swift`
-- `SmokeTests/AppCoreIntegrationSmoke.swift`
+- `Tests/Integration/AppCoreIntegrationSmoke.swift`
 
 ## Agent notes
 

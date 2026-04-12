@@ -111,7 +111,7 @@ APP_SOURCES=(
     "Sources/Dictation/DictationSessionTimeout.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"
-    "Sources/TranscriptedConstants.swift"
+    "Sources/Support/TranscriptedConstants.swift"
     "Sources/Speech/ParakeetShortAudioGate.swift"
     "Sources/Speech/RecordedAudioTimeline.swift"
     "Sources/Meeting/MeetingPromptHeuristics.swift"

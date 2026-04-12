@@ -83,6 +83,6 @@ Current direct core coverage includes:
 - `Tests/TranscriptedCoreTests/SpeakerProfileMergerTests.swift`
 - `Tests/TranscriptedCoreTests/StatsDatabaseTests.swift`
 - `Tests/TranscriptedCoreTests/TranscriptionPipelineHelpersTests.swift`
-- `SmokeTests/AppCoreIntegrationSmoke.swift`
+- `Tests/Integration/AppCoreIntegrationSmoke.swift`
 
 Core coverage is still selective, but it is no longer limited just to the package seam. Speaker reconciliation, file merging, stats, and storage-path behavior now have direct tests.

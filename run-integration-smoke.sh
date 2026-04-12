@@ -1,7 +1,7 @@
 #!/bin/bash
 # run-integration-smoke.sh — App/Core smoke verification
 #
-# Compiles and runs SmokeTests/AppCoreIntegrationSmoke.swift against deps-libs/
+# Compiles and runs Tests/Integration/AppCoreIntegrationSmoke.swift against deps-libs/
 # libDraftDeps.a to confirm TranscriptedCore is bundled and the Core types
 # Meeting code depends on (CoreStoragePaths, Audio, DiarizationService,
 # SpeakerDatabase, FailedTranscriptionManager, TranscriptionTaskManager)
@@ -58,7 +58,7 @@ swiftc \
     $DEPS_FRAMEWORK_FLAGS \
     -Ldeps-libs -lDraftDeps \
     -Xlinker -rpath -Xlinker "$REPO_ROOT/deps-frameworks" \
-    "$REPO_ROOT/SmokeTests/AppCoreIntegrationSmoke.swift" \
+    "$REPO_ROOT/Tests/Integration/AppCoreIntegrationSmoke.swift" \
     -parse-as-library \
     -target arm64-apple-macos14.0 \
     -Xlinker -rpath -Xlinker "$DEPS_FRAMEWORK_ROOT" \
@@ -69,7 +69,7 @@ swiftc \
     -O \
     -o "$WAKE_SMOKE_BIN" \
     "$REPO_ROOT/Sources/Reliability/WakeRecoveryCoordinator.swift" \
-    "$REPO_ROOT/SmokeTests/WakeRecoveryIntegrationSmoke.swift" \
+    "$REPO_ROOT/Tests/Integration/WakeRecoveryIntegrationSmoke.swift" \
     -parse-as-library \
     -target arm64-apple-macos14.0 \
     2>&1
