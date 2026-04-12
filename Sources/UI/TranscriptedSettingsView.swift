@@ -65,7 +65,7 @@ struct TranscriptedSettingsView: View {
                     .foregroundStyle(.secondary)
                 }
 
-                SettingsSection(title: "Diagnostics", detail: "Crash reports and anonymous usage statistics stay separate, scoped, and scrubbed before anything leaves this Mac.") {
+                SettingsSection(title: "Diagnostics", detail: "Both controls are optional. Crash reports and anonymous usage statistics stay separate, scoped, and scrubbed before anything leaves this Mac.") {
                     Toggle("Send crash and error reports", isOn: Binding(
                         get: { crashReportingEnabled },
                         set: { newValue in
@@ -98,6 +98,10 @@ struct TranscriptedSettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+
+                    Text("Transcripted never sends transcript text, audio, meeting titles, speaker names, source app names, emails, file paths, or raw URLs through either path.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
                     Text(crashReportingFootnote)
                         .font(.caption)
@@ -193,7 +197,7 @@ struct TranscriptedSettingsView: View {
     private var analyticsFootnote: String {
         if AnalyticsReporter.isAvailable {
             return anonymousAnalyticsEnabled
-                ? "Enabled. Transcripted will send only allowlisted anonymous product events such as launches, dictation completions, and meeting workflow milestones using coarse buckets instead of raw content."
+                ? "Enabled. Transcripted will send only allowlisted anonymous product events such as launches, dictation completions, and meeting workflow milestones using coarse buckets instead of raw content. You can turn this off at any time."
                 : "Off. Transcripted will not send anonymous usage statistics unless you turn this on."
         }
         return "This build does not have a PostHog project key configured yet, so anonymous usage statistics stay disabled."

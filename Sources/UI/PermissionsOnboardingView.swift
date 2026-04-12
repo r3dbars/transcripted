@@ -353,16 +353,16 @@ private struct ObservabilityConsentCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Privacy-first diagnostics")
+            Text("Optional diagnostics")
                 .font(.subheadline.weight(.semibold))
 
-            Text("Transcripted can send technical crash reports and separate anonymous usage statistics. Neither path sends transcript text, audio, meeting titles, speaker names, or source app names.")
+            Text("Both options are optional, and you can change either one later in Settings. Transcripted never sends transcript text, audio, meeting titles, speaker names, source app names, emails, file paths, or raw URLs.")
                 .font(.caption)
                 .foregroundStyle(MenuTokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             Toggle(
-                "Help improve Transcripted with crash and error reports",
+                "Share crash and error reports",
                 isOn: Binding(
                     get: { crashReportingEnabled },
                     set: onCrashToggle
