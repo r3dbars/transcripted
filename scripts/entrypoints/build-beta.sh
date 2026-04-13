@@ -18,6 +18,7 @@ cd "$REPO_ROOT"
 BETA_TOKEN="${1:-}"
 USER_NAME="${2:-beta}"
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
+REQUIRE_BUNDLED_PARAKEET_MODELS="${REQUIRE_BUNDLED_PARAKEET_MODELS:-1}"
 
 if [ -z "$BETA_TOKEN" ]; then
     echo "Usage: ./build-beta.sh <beta-token> <user-name>"
@@ -263,7 +264,17 @@ if [ -d "$PARAKEET_SRC/Encoder.mlmodelc" ]; then
     mkdir -p "$APP_BUNDLE/Contents/Resources/parakeet-models"
     cp -R "$PARAKEET_SRC" "$APP_BUNDLE/Contents/Resources/parakeet-models/"
 else
-    echo "⚠️  Parakeet models not found — Parakeet engine will attempt runtime download"
+    if [ "$REQUIRE_BUNDLED_PARAKEET_MODELS" = "0" ]; then
+        echo "⚠️  Parakeet models not found — proceeding because REQUIRE_BUNDLED_PARAKEET_MODELS=0"
+        echo "   Runtime model download may still occur on first launch."
+    else
+        echo "❌ Missing local Parakeet models: $PARAKEET_SRC"
+        echo "   build-beta.sh now requires bundled Parakeet models by default so"
+        echo "   distribution builds do not fall back to a runtime download on first launch."
+        echo "   If you intentionally want a thin local test build, rerun with:"
+        echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>"
+        exit 1
+    fi
 fi
 
 # Copy Info.plist

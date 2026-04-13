@@ -34,8 +34,8 @@ before signature validation runs.
 1. Install a `Developer ID Application` certificate.
 2. Store a notarytool profile in the login keychain.
 3. Build the unified dependency bundle once with exact pinned versions.
-4. Make sure local Parakeet models are present if you want them bundled into
-   the app instead of downloaded at runtime.
+4. Make sure local Parakeet models are present so `build-beta.sh` can bundle
+   them into the app.
 
 Useful checks:
 
@@ -49,6 +49,16 @@ To force a specific certificate for either build flow:
 ```bash
 SIGN_IDENTITY=<sha-or-name-fragment> bash build.sh
 SIGNING_IDENTITY=<sha-or-name-fragment> bash build-beta.sh <beta-token> <user-name>
+```
+
+`build-beta.sh` now fails by default when the local Parakeet model bundle is
+missing. That protects distribution builds from quietly shipping a DMG that has
+to download the speech model on first launch.
+
+If you deliberately want a thin local test artifact, you can opt out:
+
+```bash
+REQUIRE_BUNDLED_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>
 ```
 
 ## Release Flow

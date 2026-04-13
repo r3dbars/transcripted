@@ -231,36 +231,46 @@ class ParakeetEngine: ObservableObject {
         modelDownloadState = .loading
         print("🔄 PARAKEET | initializing models...")
 
+        var failureStage: ParakeetModelInitStage = .authorizationRequest
+        var loadSource: ParakeetModelLoadSource = .unresolved
+        let bundledModelPath = bundledModelPath(subdirectory: "parakeet-tdt-0.6b-v3-coreml", checkFile: "Encoder.mlmodelc")
+        let bundledModelPresent = bundledModelPath != nil
+
         do {
             let models: AsrModels
-            let loadSource: String
+            let loadSourceName: String
 
             // Try loading from app bundle first (bundled by build.sh)
-            if let bundlePath = bundledModelPath(subdirectory: "parakeet-tdt-0.6b-v3-coreml", checkFile: "Encoder.mlmodelc") {
+            if let bundlePath = bundledModelPath {
+                failureStage = .bundleLoad
+                loadSource = .bundle
                 print("📦 PARAKEET | loading from bundle: \(bundlePath.path)")
                 models = try await AsrModels.load(from: bundlePath, version: .v3)
-                loadSource = "bundle"
+                loadSourceName = loadSource.rawValue
             } else {
                 // Fallback: download from HuggingFace (~600MB on first run)
+                failureStage = .downloadModels
+                loadSource = .download
                 print("🌐 PARAKEET | models not bundled, downloading (~600MB)...")
                 modelDownloadState = .downloading(progress: 0.0)
                 let downloadedPath = try await AsrModels.download(version: .v3)
                 modelDownloadState = .loading
                 print("🌐 PARAKEET | loading downloaded models from: \(downloadedPath.path)")
                 models = try await AsrModels.load(from: downloadedPath, version: .v3)
-                loadSource = "download"
+                loadSourceName = loadSource.rawValue
             }
 
+            failureStage = .managerInitialize
             let manager = AsrManager(config: .default)
             try await manager.initialize(models: models)
 
             asrManager = manager
             asrManagerReady = true
             modelDownloadState = .ready
-            print("✅ PARAKEET | TDT V3 models loaded (source: \(loadSource))")
+            print("✅ PARAKEET | TDT V3 models loaded (source: \(loadSourceName))")
             EventReporter.shared.capture(level: .info, engine: "parakeet", event: "models_loaded",
                 message: "Parakeet ASR models initialized successfully",
-                context: ["load_source": loadSource])
+                context: ["load_source": loadSourceName])
 
             if liveDisplayEnabled {
                 await initializeEouModel()
@@ -270,7 +280,13 @@ class ParakeetEngine: ObservableObject {
             modelDownloadState = .failed(error.localizedDescription)
             print("❌ PARAKEET | model initialization failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "model_init_failed",
-                message: error.localizedDescription)
+                message: error.localizedDescription,
+                context: ParakeetModelInitDiagnostics.failureContext(
+                    stage: failureStage,
+                    loadSource: loadSource,
+                    bundledModelPresent: bundledModelPresent,
+                    microphoneStatus: AVCaptureDevice.authorizationStatus(for: .audio)
+                ))
         }
     }
 
