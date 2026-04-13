@@ -32,6 +32,37 @@ func testFirstRunExperience() {
         )
     }
 
+    runSuite("FirstRunExperience.primaryAction — keeps first dictation available after model warmup failed") {
+        let action = FirstRunExperience.primaryAction(
+            hasRequiredPermissions: true,
+            hasPasteTarget: true,
+            modelState: .failed("Model load failed")
+        )
+
+        assertEqual(action.title, "Start first dictation", "failed warmup should still preserve the first dictation CTA")
+        assertTrue(action.isEnabled, "failed warmup should not dead-end onboarding")
+        assertTrue(action.shouldStartDictation, "failed warmup should retry dictation when Transcripted knows the target app")
+        assertTrue(
+            action.detail.lowercased().contains("retry the local voice model"),
+            "failed warmup copy should explain that starting dictation retries local setup"
+        )
+    }
+
+    runSuite("FirstRunExperience.primaryAction — explains retry path when model warmup failed without a paste target") {
+        let action = FirstRunExperience.primaryAction(
+            hasRequiredPermissions: true,
+            hasPasteTarget: false,
+            modelState: .failed("Model load failed")
+        )
+
+        assertEqual(action.title, "Continue to Transcripted", "failed warmup fallback should keep onboarding moving")
+        assertFalse(action.shouldStartDictation, "continue CTA should not attempt dictation without a known target app")
+        assertTrue(
+            action.detail.lowercased().contains("needs another try"),
+            "fallback copy should explain that local model setup still needs a retry"
+        )
+    }
+
     runSuite("FirstRunExperience.dictationAction — stays enabled while dictation is still downloading") {
         let state = FirstRunExperience.dictationAction(for: .downloading(progress: 0.35))
 
