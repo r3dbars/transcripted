@@ -34,6 +34,24 @@ enum ParakeetShortAudioGate {
         )
     }
 
+    static func dictationFallback(
+        nativeSampleCount: Int,
+        resampledSampleCount: Int,
+        errorMessage: String
+    ) -> ParakeetTranscriptionDecision? {
+        guard shouldTreatFailureAsShortAudio(
+            sampleCount: resampledSampleCount,
+            errorMessage: errorMessage
+        ) else {
+            return nil
+        }
+
+        return dictation(
+            nativeSampleCount: nativeSampleCount,
+            resampledSampleCount: resampledSampleCount
+        )
+    }
+
     static func meetingSegment(sampleCount: Int, sourceDescription: String) -> ParakeetTranscriptionDecision {
         guard !TranscriptedConstants.hasMinimumParakeetAudioSamples(sampleCount) else {
             return .transcribe
@@ -51,5 +69,38 @@ enum ParakeetShortAudioGate {
                 "source": sourceDescription,
             ]
         )
+    }
+
+    static func meetingSegmentFallback(
+        sampleCount: Int,
+        sourceDescription: String,
+        errorMessage: String
+    ) -> ParakeetTranscriptionDecision? {
+        guard shouldTreatFailureAsShortAudio(
+            sampleCount: sampleCount,
+            errorMessage: errorMessage
+        ) else {
+            return nil
+        }
+
+        return meetingSegment(
+            sampleCount: sampleCount,
+            sourceDescription: sourceDescription
+        )
+    }
+
+    private static func shouldTreatFailureAsShortAudio(
+        sampleCount: Int,
+        errorMessage: String
+    ) -> Bool {
+        if !TranscriptedConstants.hasMinimumParakeetAudioSamples(sampleCount) {
+            return true
+        }
+
+        let normalized = errorMessage.lowercased()
+        return normalized.contains("at least 1 second")
+            || normalized.contains("invalid audio data")
+            || normalized.contains("recording too short")
+            || normalized.contains("too short")
     }
 }

@@ -36,4 +36,36 @@ func testParakeetShortAudioGate() {
         assertNil(transcribes.event, "transcribable segments should not attach a skip event")
         assertEqual(transcribes.context, [:], "transcribable segments should not attach skip-only diagnostics")
     }
+
+    runSuite("ParakeetShortAudioGate.dictationFallback — treats invalid-audio errors as short-audio skips") {
+        let decision = ParakeetShortAudioGate.dictationFallback(
+            nativeSampleCount: 43_200,
+            resampledSampleCount: 14_400,
+            errorMessage: "Invalid audio data provided. Must be at least 1 second of 16kHz audio."
+        )
+
+        assertEqual(decision?.event, "recording_too_short", "short-audio failures should collapse into the dedicated skip event")
+        assertEqual(decision?.context["samples"], "14400", "fallback skips should preserve the failing sample count")
+    }
+
+    runSuite("ParakeetShortAudioGate.meetingSegmentFallback — protects the meeting pipeline from short-audio throws") {
+        let decision = ParakeetShortAudioGate.meetingSegmentFallback(
+            sampleCount: 15_500,
+            sourceDescription: "microphone",
+            errorMessage: "Recording too short for inference"
+        )
+
+        assertEqual(decision?.event, "segment_too_short", "meeting fallback should reuse the dedicated short-segment event")
+        assertEqual(decision?.context["source"], "microphone", "meeting fallback should preserve which stream failed")
+    }
+
+    runSuite("ParakeetShortAudioGate.dictationFallback — ignores unrelated inference failures when audio is long enough") {
+        let decision = ParakeetShortAudioGate.dictationFallback(
+            nativeSampleCount: 96_000,
+            resampledSampleCount: 32_000,
+            errorMessage: "GPU memory pressure"
+        )
+
+        assertNil(decision, "non-short-audio failures should still surface as real transcription errors")
+    }
 }
