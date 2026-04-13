@@ -3,11 +3,13 @@ import AppKit
 
 @MainActor
 final class TranscriptedOnboardingWindowController: NSWindowController {
+    private let makeView: () -> PermissionsOnboardingView
     private let hostingController: NSHostingController<PermissionsOnboardingView>
 
-    init(onComplete: @escaping () -> Void) {
+    init(makeView: @escaping () -> PermissionsOnboardingView) {
+        self.makeView = makeView
         self.hostingController = NSHostingController(
-            rootView: PermissionsOnboardingView(onComplete: onComplete)
+            rootView: makeView()
         )
 
         let window = NSWindow(
@@ -43,6 +45,7 @@ final class TranscriptedOnboardingWindowController: NSWindowController {
 
     func present() {
         guard let window else { return }
+        hostingController.rootView = makeView()
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)

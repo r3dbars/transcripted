@@ -15,6 +15,7 @@ class DictationSessionController: ObservableObject {
         case keyboardShortcut = "keyboard_shortcut"
         case overlayButton = "overlay_button"
         case menu = "menu"
+        case onboarding = "onboarding"
         case unknown = "unknown"
     }
 
@@ -118,10 +119,7 @@ class DictationSessionController: ObservableObject {
                 if self.isInSession {
                     self.cancelSession(message: Self.removedDraftModeMessage)
                 } else if self.isDictating {
-                    self.recordingStartRetryTask?.cancel()
-                    self.recordingStartRetryTask = nil
-                    self.isDictating = false
-                    self.overlayController?.showError("Audio device changed")
+                    self.handleDictationInterruption()
                 }
             }
     }
@@ -146,14 +144,7 @@ class DictationSessionController: ObservableObject {
 
     private func cancelSession(message: String) {
         guard let (_, overlayController) = readyState() else { return }
-        streamingTask?.cancel()
-        streamingTask = nil
-        clipboardRestoreTask?.cancel()
-        clipboardRestoreTask = nil
-        recordingStartRetryTask?.cancel()
-        recordingStartRetryTask = nil
-        sessionTimeoutTask?.cancel()
-        sessionTimeoutTask = nil
+        cancelActiveTasks(cancelRecording: false)
         isInSession = false
         overlayController.showError(message)
     }
@@ -224,7 +215,8 @@ class DictationSessionController: ObservableObject {
 
         appState.logger.log("DICTATION | recording start attempt \(attempt) failed")
 
-        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+        let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        guard microphoneStatus == .authorized else {
             DiagnosticsTrail.record(
                 logger: appState.logger,
                 level: .error,
@@ -234,11 +226,12 @@ class DictationSessionController: ObservableObject {
                 context: dictationContext(
                     extra: [
                         "attempt": "\(attempt)",
-                        "audio_device": appState.sttRouter.inputDeviceName
+                        "audio_device": appState.sttRouter.inputDeviceName,
+                        "mic_status": microphoneStatus.diagnosticName
                     ]
                 )
             )
-            overlayController.showError("Microphone unavailable")
+            overlayController.showError(microphoneUnavailableMessage(for: microphoneStatus))
             isDictating = false
             return
         }
@@ -284,7 +277,7 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
-        overlayController.showError("Microphone unavailable")
+        overlayController.showError(microphoneUnavailableMessage(for: .authorized))
         isDictating = false
     }
 
@@ -440,19 +433,7 @@ class DictationSessionController: ObservableObject {
     /// Cancel dictation without pasting
     func cancelDictation() {
         guard let (appState, overlayController) = readyState() else { return }
-        startupTask?.cancel()
-        startupTask = nil
-        streamingTask?.cancel()
-        streamingTask = nil
-        clipboardRestoreTask?.cancel()
-        clipboardRestoreTask = nil
-        recordingStartRetryTask?.cancel()
-        recordingStartRetryTask = nil
-        sessionTimeoutTask?.cancel()
-        sessionTimeoutTask = nil
-        if appState.sttRouter.isRecording {
-            appState.sttRouter.cancel()
-        }
+        cancelActiveTasks(cancelRecording: true)
         AppSoundPlayer.shared.play(.dictationCancelled)
         overlayController.hideWithCancelAnimation()
         isDictating = false
@@ -486,6 +467,7 @@ class DictationSessionController: ObservableObject {
 
         startupTask?.cancel()
         updateLoadingOverlay(sourceApp: sourceApp)
+        retryModelWarmupIfNeeded()
 
         startupTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -520,6 +502,19 @@ class DictationSessionController: ObservableObject {
             self.startupTask = nil
             self.isDictating = false
             overlayController.showError("Dictation is still loading. Please try again in a moment.")
+        }
+    }
+
+    private func retryModelWarmupIfNeeded() {
+        guard let appState else { return }
+
+        switch appState.sttRouter.parakeetEngine.modelDownloadState {
+        case .notLoaded, .failed:
+            Task { @MainActor [weak appState] in
+                await appState?.sttRouter.parakeetEngine.initialize()
+            }
+        case .downloading, .loading, .ready:
+            break
         }
     }
 
@@ -620,6 +615,55 @@ class DictationSessionController: ObservableObject {
         case .streaming: return "streaming"
         case .review: return "review"
         case .diffFlash: return "diff_flash"
+        }
+    }
+
+    private func cancelActiveTasks(cancelRecording: Bool) {
+        startupTask?.cancel()
+        startupTask = nil
+        streamingTask?.cancel()
+        streamingTask = nil
+        clipboardRestoreTask?.cancel()
+        clipboardRestoreTask = nil
+        recordingStartRetryTask?.cancel()
+        recordingStartRetryTask = nil
+        sessionTimeoutTask?.cancel()
+        sessionTimeoutTask = nil
+
+        guard cancelRecording, let appState, appState.sttRouter.isRecording else { return }
+        appState.sttRouter.cancel()
+    }
+
+    private func handleDictationInterruption() {
+        cancelActiveTasks(cancelRecording: true)
+        isDictating = false
+        appState?.logger.log("DICTATION | interrupted")
+        DiagnosticsTrail.record(
+            logger: appState?.logger,
+            level: .warning,
+            engine: "dictation",
+            event: "dictation_recording_interrupted",
+            message: "Dictation recording was interrupted",
+            context: dictationContext(
+                extra: [
+                    "trigger": currentDictationTrigger.rawValue,
+                    "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000))"
+                ]
+            )
+        )
+        overlayController?.showError("Recording was interrupted. Try again.")
+    }
+
+    private func microphoneUnavailableMessage(for status: AVAuthorizationStatus) -> String {
+        switch status {
+        case .notDetermined:
+            return "Transcripted is still waiting for microphone permission."
+        case .denied, .restricted:
+            return "Microphone access is off. Turn it on in System Settings."
+        case .authorized:
+            return "Microphone unavailable. Check your audio input and try again."
+        @unknown default:
+            return "Microphone unavailable. Check your audio input and try again."
         }
     }
 
@@ -742,5 +786,22 @@ class DictationSessionController: ObservableObject {
         }
 
         return context
+    }
+}
+
+private extension AVAuthorizationStatus {
+    var diagnosticName: String {
+        switch self {
+        case .notDetermined:
+            return "not_determined"
+        case .restricted:
+            return "restricted"
+        case .denied:
+            return "denied"
+        case .authorized:
+            return "authorized"
+        @unknown default:
+            return "unknown"
+        }
     }
 }

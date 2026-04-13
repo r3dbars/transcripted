@@ -6,7 +6,30 @@ import AVFoundation
 import ApplicationServices
 import AppKit
 
+extension FirstRunLocalModelState {
+    init(_ state: ParakeetModelState) {
+        switch state {
+        case .notLoaded:
+            self = .notLoaded
+        case .downloading(let progress):
+            self = .downloading(progress: progress)
+        case .loading:
+            self = .loading
+        case .ready:
+            self = .ready
+        case .failed(let message):
+            self = .failed(message)
+        }
+    }
+}
+
 struct PermissionsOnboardingView: View {
+    private static let completionKey = "permissionsOnboardingCompleted"
+    private static let forceKey = "forcePermissionsOnboarding"
+
+    @ObservedObject private var parakeetEngine: ParakeetEngine
+    let canStartDictation: Bool
+    var onStartDictation: (() -> Void)?
     var onComplete: () -> Void
 
     @State private var micGranted = false
@@ -15,6 +38,18 @@ struct PermissionsOnboardingView: View {
     @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
     @State private var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
     @State private var pollTimer: Timer?
+
+    init(
+        parakeetEngine: ParakeetEngine,
+        canStartDictation: Bool = false,
+        onStartDictation: (() -> Void)? = nil,
+        onComplete: @escaping () -> Void
+    ) {
+        _parakeetEngine = ObservedObject(wrappedValue: parakeetEngine)
+        self.canStartDictation = canStartDictation
+        self.onStartDictation = onStartDictation
+        self.onComplete = onComplete
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -28,6 +63,21 @@ struct PermissionsOnboardingView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    ForEach(requiredPermissions) { kind in
+                        PermissionSetupCard(
+                            kind: kind,
+                            granted: isGranted(kind),
+                            action: { TranscriptedPermissionAccess.openSettings(for: kind) }
+                        )
+                    }
+
+                    LocalDictationModelCard(status: modelStatus)
+
+                    OptionalPermissionsCard(
+                        optionalPermissions: optionalPermissions,
+                        isGranted: isGranted
+                    )
+
                     ObservabilityConsentCard(
                         crashReportingEnabled: $crashReportingEnabled,
                         anonymousAnalyticsEnabled: $anonymousAnalyticsEnabled,
@@ -37,19 +87,6 @@ struct PermissionsOnboardingView: View {
                         onAnalyticsToggle: updateAnalyticsPreference
                     )
 
-                    ForEach(requiredPermissions) { kind in
-                        PermissionSetupCard(
-                            kind: kind,
-                            granted: isGranted(kind),
-                            action: { TranscriptedPermissionAccess.openSettings(for: kind) }
-                        )
-                    }
-
-                    OptionalPermissionsCard(
-                        optionalPermissions: optionalPermissions,
-                        isGranted: isGranted
-                    )
-
                     VStack(alignment: .leading, spacing: 10) {
                         Text("What happens next")
                             .font(.subheadline.weight(.semibold))
@@ -57,7 +94,9 @@ struct PermissionsOnboardingView: View {
                         QuickStartRow(
                             icon: "mic.fill",
                             title: "Dictation",
-                            detail: "Use the Dictation button or your shortcut to speak into any app."
+                            detail: canStartDictation
+                                ? "Use Start first dictation below and Transcripted will guide you into the first capture."
+                                : "Click back into any text field, then use Dictation from the Transcripted menu."
                         )
 
                         QuickStartRow(
@@ -86,15 +125,15 @@ struct PermissionsOnboardingView: View {
                 .overlay(MenuTokens.cardBorder)
 
             VStack(alignment: .leading, spacing: 10) {
-                Text(footerMessage)
+                Text(primaryAction.detail)
                     .font(.caption)
                     .foregroundStyle(MenuTokens.textSecondary)
 
-                Button(continueButtonTitle) {
-                    completeOnboarding()
+                Button(primaryAction.title) {
+                    handlePrimaryAction()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!hasRequiredPermissions)
+                .disabled(!primaryAction.isEnabled)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
@@ -124,18 +163,16 @@ struct PermissionsOnboardingView: View {
         TranscriptedPermissionKind.allCases.filter { !$0.isRequiredOnFirstLaunch }
     }
 
-    private var continueButtonTitle: String {
-        "Continue to the menu bar"
+    private var modelStatus: FirstRunModelCardState {
+        FirstRunExperience.modelCard(for: FirstRunLocalModelState(parakeetEngine.modelDownloadState))
     }
 
-    private var footerMessage: String {
-        if hasRequiredPermissions {
-            return screenRecordingGranted
-                ? "Everything is ready. Transcripted lives in your menu bar, and we’ll open it there next."
-                : "Dictation is ready now. Transcripted lives in your menu bar, and you can add meeting audio later from Settings."
-        }
-
-        return "Allow microphone and accessibility first. Those are the two pieces Transcripted needs before the menu bar controls can start dictating into other apps."
+    private var primaryAction: FirstRunPrimaryActionState {
+        FirstRunExperience.primaryAction(
+            hasRequiredPermissions: hasRequiredPermissions,
+            hasPasteTarget: canStartDictation && onStartDictation != nil,
+            modelState: FirstRunLocalModelState(parakeetEngine.modelDownloadState)
+        )
     }
 
     private func isGranted(_ kind: TranscriptedPermissionKind) -> Bool {
@@ -170,7 +207,12 @@ struct PermissionsOnboardingView: View {
         pollTimer = nil
     }
 
-    private func completeOnboarding() {
+    private func handlePrimaryAction() {
+        guard primaryAction.isEnabled else { return }
+        completeOnboarding(startFirstDictation: primaryAction.shouldStartDictation)
+    }
+
+    private func completeOnboarding(startFirstDictation: Bool = false) {
         guard hasRequiredPermissions else { return }
         stopPolling()
         AnalyticsReporter.track(
@@ -181,6 +223,10 @@ struct PermissionsOnboardingView: View {
                 "screen_recording_enabled": screenRecordingGranted ? "true" : "false",
             ]
         )
+        if startFirstDictation, let onStartDictation {
+            onStartDictation()
+            return
+        }
         onComplete()
     }
 
@@ -195,11 +241,81 @@ struct PermissionsOnboardingView: View {
     }
 
     static var hasCompleted: Bool {
-        UserDefaults.standard.bool(forKey: "permissionsOnboardingCompleted")
+        if UserDefaults.standard.bool(forKey: forceKey) {
+            return false
+        }
+        return UserDefaults.standard.bool(forKey: completionKey)
     }
 
     static func markCompleted() {
-        UserDefaults.standard.set(true, forKey: "permissionsOnboardingCompleted")
+        UserDefaults.standard.set(true, forKey: completionKey)
+    }
+}
+
+private struct LocalDictationModelCard: View {
+    let status: FirstRunModelCardState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: iconName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(iconColor)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(status.title)
+                        .font(.subheadline.weight(.semibold))
+
+                    Text(status.detail)
+                        .font(.caption)
+                        .foregroundStyle(MenuTokens.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                Text(status.status)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(iconColor)
+            }
+
+            if let progress = status.progress, status.tone != .ready {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .tint(iconColor)
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(MenuTokens.cardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(MenuTokens.cardBorder, lineWidth: 1)
+                )
+        )
+    }
+
+    private var iconName: String {
+        switch status.tone {
+        case .ready:
+            return "checkmark.circle.fill"
+        case .working:
+            return "arrow.down.circle.fill"
+        case .failed:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var iconColor: Color {
+        switch status.tone {
+        case .ready:
+            return MenuTokens.statusGreen
+        case .working:
+            return Color.accentColor
+        case .failed:
+            return Color.orange
+        }
     }
 }
 

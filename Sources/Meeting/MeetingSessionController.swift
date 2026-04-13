@@ -274,6 +274,44 @@ final class MeetingSessionController: ObservableObject {
         )
 
         switch state {
+        case .recording:
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "meeting_start_ignored",
+                message: "Meeting start ignored because another meeting flow is active",
+                context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+            )
+            return
+        case .idle, .loadingModels, .ready, .transcribing, .error:
+            break
+        }
+
+        let startDecision = MeetingRecordingStartGate.evaluate(
+            microphoneGranted: TranscriptedPermissionAccess.isGranted(.microphone),
+            screenRecordingGranted: TranscriptedPermissionAccess.isGranted(.screenRecording)
+        )
+        guard startDecision.canStart else {
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "meeting_start_blocked_permission",
+                message: "Meeting recording blocked because a required permission is missing",
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "trigger": trigger.rawValue,
+                        "failure_reason": startDecision.failureReason ?? "permissions",
+                        "missing_permissions": startDecision.missingPermissions.joined(separator: ",")
+                    ]
+                )
+            )
+            state = .error(
+                startDecision.errorMessage
+                    ?? "Turn on the required permissions in System Settings before recording a meeting."
+            )
+            return
+        }
+
+        switch state {
         case .idle, .loadingModels, .error:
             await prepareModels()
             guard case .ready = state else {
@@ -289,12 +327,6 @@ final class MeetingSessionController: ObservableObject {
         case .ready, .transcribing:
             break
         case .recording:
-            DiagnosticsTrail.record(
-                engine: "meeting",
-                event: "meeting_start_ignored",
-                message: "Meeting start ignored because another meeting flow is active",
-                context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
-            )
             return
         }
 

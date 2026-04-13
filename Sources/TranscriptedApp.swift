@@ -25,9 +25,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private var hasPresentedInitialOnboarding = false
     private lazy var settingsWindowController = TranscriptedSettingsWindowController(appState: appState)
     private lazy var onboardingWindowController = TranscriptedOnboardingWindowController(
-        onComplete: { [weak self] in
-            self?.completeOnboarding()
-        }
+        makeView: { [unowned self] in self.makeOnboardingView() }
     )
     private lazy var menuPanelController = MenuBarPanelController(
         appState: appState,
@@ -146,6 +144,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     @objc func togglePopover() {
         if !PermissionsOnboardingView.hasCompleted {
+            _ = resolvedSourceApp()
             onboardingWindowController.present()
             return
         }
@@ -174,6 +173,20 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         AgentConnectionWindowCoordinator.shared.show()
     }
 
+    private func makeOnboardingView() -> PermissionsOnboardingView {
+        let hasPasteTarget = resolvedSourceApp() != nil
+        return PermissionsOnboardingView(
+            parakeetEngine: appState.sttRouter.parakeetEngine,
+            canStartDictation: hasPasteTarget,
+            onStartDictation: { [weak self] in
+                self?.finishOnboardingAndStartDictation()
+            },
+            onComplete: { [weak self] in
+                self?.finishOnboarding()
+            }
+        )
+    }
+
     private func presentInitialOnboardingIfNeeded() {
         guard !PermissionsOnboardingView.hasCompleted, !hasPresentedInitialOnboarding else { return }
         hasPresentedInitialOnboarding = true
@@ -184,7 +197,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
     }
 
-    private func completeOnboarding() {
+    private func finishOnboarding() {
         PermissionsOnboardingView.markCompleted()
         onboardingWindowController.dismiss()
         closePopover()
@@ -196,16 +209,36 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
     }
 
-    private func showMainPopover(relativeTo button: NSStatusBarButton, popover: NSPopover) {
-        if let frontmost = NSWorkspace.shared.frontmostApplication,
-           frontmost.bundleIdentifier != Bundle.main.bundleIdentifier {
-            lastExternalApplication = frontmost
-        }
+    private func finishOnboardingAndStartDictation() {
+        let sourceApp = resolvedSourceApp()
+        PermissionsOnboardingView.markCompleted()
+        onboardingWindowController.dismiss()
+        closePopover()
+        sourceApp?.activate(options: [])
+        sessionController.startDictation(sourceApp: sourceApp, trigger: .onboarding)
+    }
 
+    private func showMainPopover(relativeTo button: NSStatusBarButton, popover: NSPopover) {
+        _ = resolvedSourceApp()
         menuPanelController.refresh()
         popover.contentViewController = menuPanelController
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func resolvedSourceApp() -> NSRunningApplication? {
+        if let frontmost = NSWorkspace.shared.frontmostApplication,
+           frontmost.bundleIdentifier != Bundle.main.bundleIdentifier {
+            lastExternalApplication = frontmost
+            return frontmost
+        }
+
+        if let lastExternalApplication,
+           lastExternalApplication.bundleIdentifier != Bundle.main.bundleIdentifier {
+            return lastExternalApplication
+        }
+
+        return nil
     }
 
     // MARK: - NSPopoverDelegate
