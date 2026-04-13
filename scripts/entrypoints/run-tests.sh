@@ -150,4 +150,4 @@ swiftc \
 
 echo "Running tests..."
 echo ""
-./build/tests
+TRANSCRIPTED_DISABLE_FILE_LOGGER=1 ./build/tests

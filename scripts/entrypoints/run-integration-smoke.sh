@@ -79,12 +79,12 @@ swiftc \
 
 echo ""
 echo "Running core smoke…"
-"$SMOKE_BIN"
+TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$SMOKE_BIN"
 
 echo ""
 echo "Running wake smoke…"
-"$WAKE_SMOKE_BIN"
+TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$WAKE_SMOKE_BIN"
 
 echo ""
 echo "Running recovery merge package tests…"
-swift test --filter MicRecordingFileMergerTests
+TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift test --filter MicRecordingFileMergerTests
