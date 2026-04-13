@@ -123,6 +123,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingRecordingStartGate.swift"
     "Sources/Meeting/MeetingFailureCopy.swift"
     "Sources/Meeting/MeetingPromptHeuristics.swift"
+    "Sources/Meeting/MeetingSessionUIPolicy.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/Observability/AnalyticsReporter.swift"
     "Sources/Observability/AnalyticsEventPolicy.swift"
