@@ -52,7 +52,13 @@ final class MenuBarPanelController: NSViewController {
     func refresh() {
         guard let content = contentView else { return }
         let warmupStatus = appState.meetingSession.warmupStatus
-        let isReady = warmupStatus == .ready
+        let dictationState = FirstRunExperience.dictationAction(
+            for: FirstRunLocalModelState(appState.sttRouter.parakeetEngine.modelDownloadState)
+        )
+        let meetingState = FirstRunExperience.meetingAction(
+            dictationReady: appState.sttRouter.isModelLoaded,
+            meetingsStatus: warmupStatus.meetingsStatus
+        )
 
         content.headerView.update(
             warmupStatus: warmupStatus,
@@ -62,7 +68,8 @@ final class MenuBarPanelController: NSViewController {
         content.shortcutsView.update(
             dictationKey: appState.contextCapture.dictationShortcutDisplay,
             meetingKey: appState.contextCapture.meetingShortcutDisplay,
-            isEnabled: isReady
+            dictationState: dictationState,
+            meetingState: meetingState
         )
 
         if #available(macOS 14.0, *) {

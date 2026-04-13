@@ -19,3 +19,4 @@ SentryPayloadSanitizerTests.swift:testSentryPayloadSanitizer
 SentryEventPolicyTests.swift:testSentryEventPolicy
 TranscriptedConstantsTests.swift:testTranscriptedConstants
 ParakeetShortAudioGateTests.swift:testParakeetShortAudioGate
+FirstRunExperienceTests.swift:testFirstRunExperience

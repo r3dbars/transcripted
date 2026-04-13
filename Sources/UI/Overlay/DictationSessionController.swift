@@ -15,6 +15,7 @@ class DictationSessionController: ObservableObject {
         case keyboardShortcut = "keyboard_shortcut"
         case overlayButton = "overlay_button"
         case menu = "menu"
+        case onboarding = "onboarding"
         case unknown = "unknown"
     }
 
@@ -486,6 +487,7 @@ class DictationSessionController: ObservableObject {
 
         startupTask?.cancel()
         updateLoadingOverlay(sourceApp: sourceApp)
+        retryModelWarmupIfNeeded()
 
         startupTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -520,6 +522,19 @@ class DictationSessionController: ObservableObject {
             self.startupTask = nil
             self.isDictating = false
             overlayController.showError("Dictation is still loading. Please try again in a moment.")
+        }
+    }
+
+    private func retryModelWarmupIfNeeded() {
+        guard let appState else { return }
+
+        switch appState.sttRouter.parakeetEngine.modelDownloadState {
+        case .notLoaded, .failed:
+            Task { @MainActor [weak appState] in
+                await appState?.sttRouter.parakeetEngine.initialize()
+            }
+        case .downloading, .loading, .ready:
+            break
         }
     }
 
