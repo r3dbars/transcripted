@@ -106,8 +106,9 @@ class TranscriptedAppState: ObservableObject {
             )
         }
 
-        // ParakeetEngine handles its own wake recovery via NSWorkspace.didWakeNotification
-        // observer installed during prewarm(). No action needed here.
+        // ParakeetEngine handles its own wake recovery once its audio lifecycle
+        // observers are armed during first recording/prewarm. No app-level
+        // action needed here.
         EventReporter.shared.capture(
             level: result.hotkeysRecovered ? .info : .warning,
             engine: "app",
@@ -135,7 +136,9 @@ class TranscriptedAppState: ObservableObject {
             guard let self else { return }
             defer { self.runtimeReadinessTask = nil }
 
-            self.sttRouter.parakeetEngine.prewarm()
+            // Loading models at launch keeps first-use latency down without
+            // touching AVAudioEngine input nodes on the main thread. Sentry app
+            // hang reports showed launch-time prewarm blocking inside CoreAudio.
             guard !Task.isCancelled else { return }
             await self.sttRouter.parakeetEngine.initialize()
             guard !Task.isCancelled else { return }

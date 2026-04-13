@@ -27,6 +27,7 @@ not have to carry the full operational logic:
 ## Active helper scripts
 
 - `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast from an updates folder and copy it into `docs/appcast.xml`
+- `scripts/dev/onboarding.sh` — inspect, reset, or force the first-run onboarding state while iterating on copy and layout
 
 ## Legacy scripts
 

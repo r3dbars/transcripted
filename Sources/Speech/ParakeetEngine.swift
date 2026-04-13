@@ -211,6 +211,13 @@ class ParakeetEngine: ObservableObject {
             return
         }
 
+        switch modelDownloadState {
+        case .downloading, .loading:
+            return
+        case .notLoaded, .ready, .failed:
+            break
+        }
+
         // Request microphone permission early so it's granted before first recording
         if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
             let granted = await withCheckedContinuation { continuation in
@@ -629,6 +636,7 @@ class ParakeetEngine: ObservableObject {
             return false
         }
 
+        installAudioObserversIfNeeded()
         recordingInterrupted = false
         didReceiveAudioSamples = false
         sampleBuffer.removeAll(keepingCapacity: true)

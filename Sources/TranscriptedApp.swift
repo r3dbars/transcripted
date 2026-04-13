@@ -150,12 +150,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
             if !PermissionsOnboardingView.hasCompleted {
                 popover.contentViewController = NSHostingController(
-                    rootView: PermissionsOnboardingView(onComplete: { [weak self] in
-                        PermissionsOnboardingView.markCompleted()
-                        guard let self else { return }
-                        self.menuPanelController.refresh()
-                        self.popover?.contentViewController = self.menuPanelController
-                    })
+                    rootView: makeOnboardingView()
                 )
             } else {
                 menuPanelController.refresh()
@@ -182,6 +177,33 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         AgentConnectionWindowCoordinator.shared.show()
     }
 
+    private func makeOnboardingView() -> PermissionsOnboardingView {
+        PermissionsOnboardingView(
+            parakeetEngine: appState.sttRouter.parakeetEngine,
+            canStartDictation: lastExternalApplication != nil,
+            onStartDictation: { [weak self] in
+                self?.finishOnboardingAndStartDictation()
+            },
+            onComplete: { [weak self] in
+                self?.finishOnboarding()
+            }
+        )
+    }
+
+    private func finishOnboarding() {
+        PermissionsOnboardingView.markCompleted()
+        menuPanelController.refresh()
+        popover?.contentViewController = menuPanelController
+    }
+
+    private func finishOnboardingAndStartDictation() {
+        let sourceApp = resolvedSourceApp()
+        finishOnboarding()
+        closePopover()
+        sourceApp?.activate(options: [])
+        sessionController.startDictation(sourceApp: sourceApp, trigger: .onboarding)
+    }
+
     private func presentInitialOnboardingIfNeeded() {
         guard !PermissionsOnboardingView.hasCompleted, !hasPresentedInitialOnboarding else { return }
         hasPresentedInitialOnboarding = true
@@ -190,6 +212,20 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             guard let self, self.popover?.isShown != true, !PermissionsOnboardingView.hasCompleted else { return }
             self.togglePopover()
         }
+    }
+
+    private func resolvedSourceApp() -> NSRunningApplication? {
+        if let lastExternalApplication,
+           lastExternalApplication.bundleIdentifier != Bundle.main.bundleIdentifier {
+            return lastExternalApplication
+        }
+
+        if let frontmost = NSWorkspace.shared.frontmostApplication,
+           frontmost.bundleIdentifier != Bundle.main.bundleIdentifier {
+            return frontmost
+        }
+
+        return nil
     }
 
     // MARK: - NSPopoverDelegate

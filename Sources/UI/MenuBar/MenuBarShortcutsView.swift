@@ -19,7 +19,8 @@ final class MenuBarShortcutsView: NSView {
     )
     private var keyMonitor: Any?
     private var recordingTarget: RecordingTarget?
-    private var rowsEnabled = true
+    private var currentDictationState = MenuBarPrimaryActionState(isEnabled: true, subtitle: "Paste spoken text anywhere")
+    private var currentMeetingState = MenuBarPrimaryActionState(isEnabled: true, subtitle: "Capture mic and system audio")
 
     private enum RecordingTarget {
         case dictation
@@ -49,7 +50,7 @@ final class MenuBarShortcutsView: NSView {
 
     private func setupViews() {
         dictationRow.onPrimaryAction = { [weak self] in
-            guard let self, self.rowsEnabled, self.recordingTarget == nil else { return }
+            guard let self, self.currentDictationState.isEnabled, self.recordingTarget == nil else { return }
             self.onStartDictation?()
         }
         dictationRow.onEditShortcut = { [weak self] in
@@ -57,7 +58,7 @@ final class MenuBarShortcutsView: NSView {
         }
 
         meetingRow.onPrimaryAction = { [weak self] in
-            guard let self, self.rowsEnabled, self.recordingTarget == nil else { return }
+            guard let self, self.currentMeetingState.isEnabled, self.recordingTarget == nil else { return }
             self.onStartMeeting?()
         }
         meetingRow.onEditShortcut = { [weak self] in
@@ -97,23 +98,27 @@ final class MenuBarShortcutsView: NSView {
         )
     }
 
-    func update(dictationKey: String, meetingKey: String, isEnabled: Bool) {
-        rowsEnabled = isEnabled
-        resetButton.isEnabled = isEnabled && recordingTarget == nil
-        resetHintLabel.alphaValue = isEnabled ? 1.0 : 0.72
-        resetHintLabel.stringValue = isEnabled
-            ? "Click a shortcut badge to edit"
-            : "Shortcuts unlock when Transcripted finishes loading"
+    func update(
+        dictationKey: String,
+        meetingKey: String,
+        dictationState: MenuBarPrimaryActionState,
+        meetingState: MenuBarPrimaryActionState
+    ) {
+        currentDictationState = dictationState
+        currentMeetingState = meetingState
+        resetButton.isEnabled = recordingTarget == nil
+        resetHintLabel.alphaValue = 1.0
+        resetHintLabel.stringValue = "Click a shortcut badge to edit"
 
         dictationRow.update(
             symbolName: "mic.fill",
             title: "Dictation",
             subtitle: recordingTarget == .dictation
                 ? "Press shortcut…"
-                : (isEnabled ? "Paste spoken text anywhere" : "Local voice model is still loading"),
+                : dictationState.subtitle,
             key: recordingTarget == .dictation ? "Type keys" : dictationKey,
             isEditing: recordingTarget == .dictation,
-            isEnabled: isEnabled
+            isEnabled: dictationState.isEnabled
         )
 
         meetingRow.update(
@@ -121,17 +126,16 @@ final class MenuBarShortcutsView: NSView {
             title: "Record meeting",
             subtitle: recordingTarget == .meeting
                 ? "Press shortcut…"
-                : (isEnabled ? "Capture mic and system audio" : "Meeting tools unlock after startup warmup"),
+                : meetingState.subtitle,
             key: recordingTarget == .meeting ? "Type keys" : meetingKey,
             isEditing: recordingTarget == .meeting,
-            isEnabled: isEnabled
+            isEnabled: meetingState.isEnabled
         )
 
         needsLayout = true
     }
 
     private func startRecording(_ target: RecordingTarget) {
-        guard rowsEnabled else { return }
         stopRecording()
         recordingTarget = target
         refreshFromPreferences()
@@ -180,7 +184,8 @@ final class MenuBarShortcutsView: NSView {
         update(
             dictationKey: HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding()),
             meetingKey: HotkeyPreferences.displayString(for: HotkeyPreferences.meetingBinding()),
-            isEnabled: rowsEnabled
+            dictationState: currentDictationState,
+            meetingState: currentMeetingState
         )
     }
 
