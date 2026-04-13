@@ -19,10 +19,10 @@ enum MeetingRecordingStartGate {
         "Optional on first launch. Required before Transcripted can capture meeting audio from other apps."
 
     static let screenRecordingQuickStart =
-        "Turn on Screen Recording before you record meetings so Transcripted can capture the other side of Zoom, Meet, and similar apps."
+        "Turn on Screen Recording before you record meetings. After you enable it, quit and reopen Transcripted so macOS can hand over system audio."
 
     static let optionalPermissionsFootnote =
-        "You can start dictating without these. Turn on Screen Recording before you record meetings, and add Calendar later if you want meeting prompts."
+        "You can start dictating without these. Turn on Screen Recording before you record meetings, then reopen Transcripted. Add Calendar later if you want meeting prompts."
 
     static func evaluate(
         microphoneGranted: Bool,
@@ -41,7 +41,7 @@ enum MeetingRecordingStartGate {
         case ["microphone", "screen_recording"]:
             return MeetingRecordingStartDecision(
                 canStart: false,
-                errorMessage: "Turn on Microphone and Screen Recording in System Settings before recording a meeting.",
+                errorMessage: "Turn on Microphone and Screen Recording in System Settings, then quit and reopen Transcripted before recording a meeting.",
                 failureReason: "microphone_and_screen_recording",
                 missingPermissions: missingPermissions
             )
@@ -55,7 +55,7 @@ enum MeetingRecordingStartGate {
         case ["screen_recording"]:
             return MeetingRecordingStartDecision(
                 canStart: false,
-                errorMessage: "Turn on Screen Recording in System Settings before recording a meeting.",
+                errorMessage: "Turn on Screen Recording in System Settings, then quit and reopen Transcripted before recording a meeting.",
                 failureReason: "screen_recording",
                 missingPermissions: missingPermissions
             )

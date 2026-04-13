@@ -87,6 +87,7 @@ enum TranscriptedPermissionAccess {
         }
     }
 
+    @MainActor
     static func openSettings(for kind: TranscriptedPermissionKind) {
         switch kind {
         case .microphone:
@@ -94,6 +95,7 @@ enum TranscriptedPermissionAccess {
             case .authorized:
                 break
             case .notDetermined:
+                activateForPermissionPrompt()
                 AVCaptureDevice.requestAccess(for: .audio) { granted in
                     guard !granted else { return }
                     Task { @MainActor in
@@ -112,12 +114,12 @@ enum TranscriptedPermissionAccess {
             }
             openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
         case .screenRecording:
-            if #available(macOS 15.0, *) {
-                _ = CGRequestScreenCaptureAccess()
-            }
+            activateForPermissionPrompt()
+            _ = CGRequestScreenCaptureAccess()
             openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
         case .calendar:
             Task { @MainActor in
+                activateForPermissionPrompt()
                 let granted = await requestCalendarAccessIfNeeded()
                 guard !granted else { return }
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")
@@ -162,10 +164,14 @@ enum TranscriptedPermissionAccess {
         CGPreflightScreenCaptureAccess()
     }
 
+    @MainActor
+    private static func activateForPermissionPrompt() {
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @MainActor
     private static func openSystemSettings(_ urlString: String) {
         guard let url = URL(string: urlString) else { return }
-        Task { @MainActor in
-            NSWorkspace.shared.open(url)
-        }
+        NSWorkspace.shared.open(url)
     }
 }

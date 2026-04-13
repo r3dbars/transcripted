@@ -19,7 +19,7 @@ func testMeetingRecordingStartGate() {
         assertFalse(decision.canStart, "meeting capture should fail fast when Screen Recording is missing")
         assertEqual(
             decision.errorMessage,
-            "Turn on Screen Recording in System Settings before recording a meeting.",
+            "Turn on Screen Recording in System Settings, then quit and reopen Transcripted before recording a meeting.",
             "screen recording failures should tell the user exactly what to fix"
         )
         assertEqual(decision.failureReason, "screen_recording", "screen recording failures should stay classified for diagnostics")
@@ -35,7 +35,7 @@ func testMeetingRecordingStartGate() {
         assertFalse(decision.canStart, "meeting capture should not start when both required permissions are missing")
         assertEqual(
             decision.errorMessage,
-            "Turn on Microphone and Screen Recording in System Settings before recording a meeting.",
+            "Turn on Microphone and Screen Recording in System Settings, then quit and reopen Transcripted before recording a meeting.",
             "combined permission failures should mention both missing requirements"
         )
         assertEqual(
@@ -53,13 +53,13 @@ func testMeetingRecordingStartGate() {
         )
         assertEqual(
             MeetingRecordingStartGate.screenRecordingQuickStart,
-            "Turn on Screen Recording before you record meetings so Transcripted can capture the other side of Zoom, Meet, and similar apps.",
-            "quick-start copy should stop implying that full meeting capture works without screen recording"
+            "Turn on Screen Recording before you record meetings. After you enable it, quit and reopen Transcripted so macOS can hand over system audio.",
+            "quick-start copy should explain that screen recording changes need a relaunch before meeting capture works"
         )
         assertEqual(
             MeetingRecordingStartGate.optionalPermissionsFootnote,
-            "You can start dictating without these. Turn on Screen Recording before you record meetings, and add Calendar later if you want meeting prompts.",
-            "onboarding footnote should match the current meeting recording requirement"
+            "You can start dictating without these. Turn on Screen Recording before you record meetings, then reopen Transcripted. Add Calendar later if you want meeting prompts.",
+            "onboarding footnote should match the current meeting recording requirement and relaunch guidance"
         )
     }
 }

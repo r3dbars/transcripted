@@ -218,15 +218,9 @@ class ParakeetEngine: ObservableObject {
             break
         }
 
-        // Request microphone permission early so it's granted before first recording
-        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
-            let granted = await withCheckedContinuation { continuation in
-                AVCaptureDevice.requestAccess(for: .audio) { granted in
-                    continuation.resume(returning: granted)
-                }
-            }
-            print("🎤 PARAKEET | microphone permission \(granted ? "granted" : "denied")")
-        }
+        // Keep background model warmup quiet. The onboarding/settings surfaces
+        // own microphone permission requests so launch-time initialization does
+        // not surprise users with a hidden or out-of-context prompt.
 
         modelDownloadState = .loading
         print("🔄 PARAKEET | initializing models...")

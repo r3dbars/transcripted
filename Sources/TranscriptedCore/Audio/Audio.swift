@@ -332,14 +332,10 @@ public class Audio: ObservableObject {
 
         AppLogger.audioMic.info("Using system default microphone")
 
-        // Request microphone permission
-        AVCaptureDevice.requestAccess(for: .audio) { granted in
-            if !granted {
-                DispatchQueue.main.async {
-                    self.error = "Microphone permission denied. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted."
-                }
-            }
-        }
+        // Do not prompt for microphone access during object construction.
+        // MeetingSessionController creates Audio during background warmup, and
+        // prompting here makes permission dialogs appear before the user has
+        // explicitly asked to record a meeting.
 
         // Initialize system audio capture (macOS 14.2+)
         if #available(macOS 14.2, *) {
