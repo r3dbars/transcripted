@@ -25,4 +25,14 @@ func testAnalyticsEventPolicy() {
         )
         assertEqual(sanitized["system_stream_present"], "true", "system_stream_present must survive sanitization — if empty the metric is always missing")
     }
+
+    runSuite("AnalyticsEventPolicy allows coarse meeting prompt telemetry") {
+        let shown = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_shown")
+        let dismissed = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_dismissed")
+        let recorded = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_record_selected")
+
+        assertEqual(shown?.allowedProperties.contains("provider"), true, "prompt shown should allow provider attribution")
+        assertEqual(dismissed?.allowedProperties.contains("source"), true, "prompt dismiss should allow source attribution")
+        assertEqual(recorded?.allowedProperties.contains("provider"), true, "prompt accept should allow provider attribution")
+    }
 }

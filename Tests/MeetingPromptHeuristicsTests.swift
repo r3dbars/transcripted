@@ -65,4 +65,34 @@ func testMeetingPromptHeuristics() {
 
         assertEqual(interval, 30 * 60, "calendar prompts should preserve the longer snooze")
     }
+
+    runSuite("MeetingPromptWindowPolicy.shouldOfferCalendarPrompt — only prompts in the one-minute lead window") {
+        assertFalse(
+            MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(
+                startsIn: MeetingPromptHeuristics.calendarReminderLeadTime + 1
+            ),
+            "calendar prompts should not fire earlier than one minute before the meeting"
+        )
+        assertTrue(
+            MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(
+                startsIn: MeetingPromptHeuristics.calendarReminderLeadTime
+            ),
+            "calendar prompts should fire at one minute before the meeting"
+        )
+    }
+
+    runSuite("MeetingPromptWindowPolicy.shouldOfferCalendarPrompt — keeps a short grace period after start") {
+        assertTrue(
+            MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(
+                startsIn: -MeetingPromptHeuristics.calendarReminderPostStartGrace
+            ),
+            "calendar prompts should still be eligible during the short after-start grace period"
+        )
+        assertFalse(
+            MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(
+                startsIn: -(MeetingPromptHeuristics.calendarReminderPostStartGrace + 1)
+            ),
+            "calendar prompts should expire after the post-start grace period"
+        )
+    }
 }

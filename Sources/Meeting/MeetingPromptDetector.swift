@@ -2,6 +2,42 @@ import AppKit
 import EventKit
 import Foundation
 
+enum MeetingPromptProvider: String, CaseIterable, Hashable {
+    case zoom
+    case googleMeet
+    case teams
+    case webex
+    case facetime
+
+    var browserHosted: Bool {
+        switch self {
+        case .googleMeet, .teams, .webex:
+            return true
+        case .zoom, .facetime:
+            return false
+        }
+    }
+
+    var activeBundleIdentifiers: Set<String> {
+        switch self {
+        case .zoom:
+            return ["us.zoom.xos"]
+        case .googleMeet:
+            return []
+        case .teams:
+            return ["com.microsoft.teams", "com.microsoft.teams2"]
+        case .webex:
+            return ["com.cisco.webexmeetingsapp", "com.webex.meetingmanager"]
+        case .facetime:
+            return ["com.apple.FaceTime"]
+        }
+    }
+
+    var supportsNativeRuntimePrompt: Bool {
+        !activeBundleIdentifiers.isEmpty
+    }
+}
+
 @available(macOS 14.0, *)
 @MainActor
 final class MeetingPromptDetector {
@@ -9,46 +45,11 @@ final class MeetingPromptDetector {
         let id: String
         let title: String
         let detail: String
+        let provider: MeetingPromptProvider
         let source: MeetingPromptSource
         let startDate: Date
         let endDate: Date
         let meetingURL: URL?
-    }
-
-    private enum Provider: String, CaseIterable, Hashable {
-        case zoom
-        case googleMeet
-        case teams
-        case webex
-        case facetime
-
-        var browserHosted: Bool {
-            switch self {
-            case .googleMeet, .teams, .webex:
-                return true
-            case .zoom, .facetime:
-                return false
-            }
-        }
-
-        var activeBundleIdentifiers: Set<String> {
-            switch self {
-            case .zoom:
-                return ["us.zoom.xos"]
-            case .googleMeet:
-                return []
-            case .teams:
-                return ["com.microsoft.teams", "com.microsoft.teams2"]
-            case .webex:
-                return ["com.cisco.webexmeetingsapp", "com.webex.meetingmanager"]
-            case .facetime:
-                return ["com.apple.FaceTime"]
-            }
-        }
-
-        var supportsNativeRuntimePrompt: Bool {
-            !activeBundleIdentifiers.isEmpty
-        }
     }
 
     private struct ScoredCandidate {
@@ -63,7 +64,8 @@ final class MeetingPromptDetector {
     private var workspaceObservers: [NSObjectProtocol] = []
     private var snoozedUntil: [String: Date] = [:]
     private var pendingUntil: [String: Date] = [:]
-    private var recentNativeActivity: [Provider: Date] = [:]
+    private var recentNativeActivity: [MeetingPromptProvider: Date] = [:]
+    private var runtimeSuppressedUntil: [MeetingPromptProvider: Date] = [:]
 
     private let defaultSnoozeInterval: TimeInterval = 30 * 60
     private let pendingCooldown: TimeInterval = 90
@@ -117,10 +119,13 @@ final class MeetingPromptDetector {
         case .calendarEvent:
             until = max(
                 now.addingTimeInterval(baseInterval),
-                candidate.endDate.addingTimeInterval(5 * 60)
+                candidate.endDate.addingTimeInterval(MeetingPromptHeuristics.calendarReminderPostStartGrace)
             )
+            suppressRuntimePrompts(for: candidate.provider, until: until)
         case .runtimeApp:
-            until = now.addingTimeInterval(baseInterval)
+            until = nextRuntimePromptResumeDate(for: candidate.provider, now: now)
+                ?? now.addingTimeInterval(MeetingPromptHeuristics.runtimeDismissFallbackInterval)
+            suppressRuntimePrompts(for: candidate.provider, until: until)
         }
         snoozedUntil[candidate.id] = until
         pendingUntil[candidate.id] = until
@@ -131,21 +136,26 @@ final class MeetingPromptDetector {
         let until: Date
         switch candidate.source {
         case .calendarEvent:
-            until = max(now.addingTimeInterval(defaultSnoozeInterval), candidate.endDate.addingTimeInterval(5 * 60))
+            until = max(
+                now.addingTimeInterval(defaultSnoozeInterval),
+                candidate.endDate.addingTimeInterval(MeetingPromptHeuristics.calendarReminderPostStartGrace)
+            )
+            suppressRuntimePrompts(for: candidate.provider, until: until)
         case .runtimeApp:
-            until = now.addingTimeInterval(defaultSnoozeInterval)
+            until = runtimeSuppressionEndDate(for: candidate.provider, now: now)
+                ?? now.addingTimeInterval(defaultSnoozeInterval)
+            suppressRuntimePrompts(for: candidate.provider, until: until)
         }
         snoozedUntil[candidate.id] = until
         pendingUntil[candidate.id] = until
     }
 
     private func evaluate() async {
-        pruneExpiredEntries()
-
         let now = Date()
         let runningApplications = NSWorkspace.shared.runningApplications
         let runningBundleIDs = Set(runningApplications.compactMap(\.bundleIdentifier))
         let frontmostBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        pruneExpiredEntries(now: now)
         seedNativeActivityIfNeeded(frontmostBundleID: frontmostBundleID, now: now)
 
         var candidates: [ScoredCandidate] = []
@@ -219,9 +229,12 @@ final class MeetingPromptDetector {
         runningBundleIDs: Set<String>,
         frontmostBundleID: String?
     ) -> [ScoredCandidate] {
-        Provider.allCases.compactMap { provider in
+        MeetingPromptProvider.allCases.compactMap { provider in
             guard provider.supportsNativeRuntimePrompt else { return nil }
             guard provider.activeBundleIdentifiers.contains(where: runningBundleIDs.contains) else { return nil }
+            if let suppressedUntil = runtimeSuppressedUntil[provider], suppressedUntil > now {
+                return nil
+            }
 
             let isFrontmost = frontmostBundleID.map(provider.activeBundleIdentifiers.contains) ?? false
             guard let presentation = MeetingPromptHeuristics.runtimePresentation(
@@ -236,6 +249,7 @@ final class MeetingPromptDetector {
                     id: "runtime:\(provider.rawValue)",
                     title: presentation.title,
                     detail: presentation.detail,
+                    provider: provider,
                     source: .runtimeApp,
                     startDate: now,
                     endDate: now.addingTimeInterval(MeetingPromptHeuristics.runtimeReminderSnoozeInterval),
@@ -284,15 +298,13 @@ final class MeetingPromptDetector {
         guard let meetingURL = extractMeetingURL(from: event), let provider = provider(for: meetingURL) else { return nil }
 
         let startsIn = event.startDate.timeIntervalSince(now)
-        let genericWindow = (-90.0 ... 5 * 60).contains(startsIn)
+        let genericWindow = MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(startsIn: startsIn)
         let runtimeReason = activeRuntimeReason(
             for: provider,
             runningBundleIDs: runningBundleIDs,
             frontmostBundleID: frontmostBundleID
         )
-        let extendedRuntimeWindow = runtimeReason != nil && (-5 * 60 ... 10 * 60).contains(startsIn)
-
-        guard genericWindow || extendedRuntimeWindow else { return nil }
+        guard genericWindow else { return nil }
 
         let eventTitle = trimmedTitle(from: event)
         let detail = buildDetail(eventTitle: eventTitle, startsIn: startsIn, runtimeReason: runtimeReason)
@@ -303,6 +315,7 @@ final class MeetingPromptDetector {
                 id: "calendar:\(event.calendarItemIdentifier)",
                 title: "Meeting detected",
                 detail: detail,
+                provider: provider,
                 source: .calendarEvent,
                 startDate: event.startDate,
                 endDate: event.endDate,
@@ -351,7 +364,7 @@ final class MeetingPromptDetector {
     }
 
     private func activeRuntimeReason(
-        for provider: Provider,
+        for provider: MeetingPromptProvider,
         runningBundleIDs: Set<String>,
         frontmostBundleID: String?
     ) -> String? {
@@ -369,7 +382,7 @@ final class MeetingPromptDetector {
         return nil
     }
 
-    private func displayName(for provider: Provider) -> String {
+    private func displayName(for provider: MeetingPromptProvider) -> String {
         switch provider {
         case .zoom:
             return "Zoom"
@@ -413,7 +426,7 @@ final class MeetingPromptDetector {
         return nil
     }
 
-    private func provider(for url: URL) -> Provider? {
+    private func provider(for url: URL) -> MeetingPromptProvider? {
         guard let host = url.host?.lowercased() else { return nil }
 
         if host.contains("zoom.us") {
@@ -435,14 +448,59 @@ final class MeetingPromptDetector {
         return nil
     }
 
-    private func provider(forBundleIdentifier bundleIdentifier: String) -> Provider? {
-        Provider.allCases.first { $0.activeBundleIdentifiers.contains(bundleIdentifier) }
+    private func provider(forBundleIdentifier bundleIdentifier: String) -> MeetingPromptProvider? {
+        MeetingPromptProvider.allCases.first { $0.activeBundleIdentifiers.contains(bundleIdentifier) }
     }
 
-    private func pruneExpiredEntries() {
-        let now = Date()
+    private func suppressRuntimePrompts(for provider: MeetingPromptProvider, until: Date) {
+        let existing = runtimeSuppressedUntil[provider] ?? .distantPast
+        runtimeSuppressedUntil[provider] = max(existing, until)
+    }
+
+    private func nextRuntimePromptResumeDate(for provider: MeetingPromptProvider, now: Date) -> Date? {
+        guard let event = nextRelevantCalendarEvent(for: provider, after: now) else { return nil }
+
+        let promptDate = event.startDate.addingTimeInterval(-MeetingPromptHeuristics.calendarReminderLeadTime)
+        if promptDate > now {
+            return promptDate
+        }
+
+        return event.endDate.addingTimeInterval(MeetingPromptHeuristics.calendarReminderPostStartGrace)
+    }
+
+    private func runtimeSuppressionEndDate(for provider: MeetingPromptProvider, now: Date) -> Date? {
+        nextRelevantCalendarEvent(for: provider, after: now)?
+            .endDate
+            .addingTimeInterval(MeetingPromptHeuristics.calendarReminderPostStartGrace)
+    }
+
+    private func nextRelevantCalendarEvent(
+        for targetProvider: MeetingPromptProvider,
+        after now: Date
+    ) -> EKEvent? {
+        guard TranscriptedPermissionAccess.calendarAccessGranted() else { return nil }
+
+        let searchStart = now.addingTimeInterval(-MeetingPromptHeuristics.calendarReminderPostStartGrace)
+        let searchEnd = now.addingTimeInterval(12 * 60 * 60)
+        let predicate = eventStore.predicateForEvents(withStart: searchStart, end: searchEnd, calendars: nil)
+
+        return eventStore.events(matching: predicate)
+            .filter { !$0.isAllDay && $0.endDate > now }
+            .compactMap { event -> (EKEvent, MeetingPromptProvider)? in
+                guard let url = extractMeetingURL(from: event),
+                      let eventProvider = provider(for: url),
+                      eventProvider == targetProvider else { return nil }
+                return (event, eventProvider)
+            }
+            .map(\.0)
+            .sorted { $0.startDate < $1.startDate }
+            .first
+    }
+
+    private func pruneExpiredEntries(now: Date) {
         snoozedUntil = snoozedUntil.filter { $0.value > now }
         pendingUntil = pendingUntil.filter { $0.value > now }
+        runtimeSuppressedUntil = runtimeSuppressedUntil.filter { $0.value > now }
         recentNativeActivity = recentNativeActivity.filter {
             now.timeIntervalSince($0.value) <= MeetingPromptHeuristics.runtimeActivityFreshness
         }

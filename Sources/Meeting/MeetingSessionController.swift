@@ -703,6 +703,13 @@ final class MeetingSessionController: ObservableObject {
         taskManager.activeCount > 0 || taskManager.speakerNamingRequest != nil || !queuedTranscriptionJobs.isEmpty
     }
 
+    private var hasVisibleBackgroundTranscriptionWork: Bool {
+        MeetingSessionUIPolicy.shouldShowTranscribing(
+            activeTranscriptions: taskManager.activeCount,
+            queuedTranscriptions: queuedTranscriptionJobs.count
+        )
+    }
+
     private var canStartQueuedTranscriptionImmediately: Bool {
         taskManager.activeCount == 0 && taskManager.speakerNamingRequest == nil
     }
@@ -760,6 +767,11 @@ final class MeetingSessionController: ObservableObject {
             return
         }
 
+        if !hasVisibleBackgroundTranscriptionWork {
+            finalizeBackgroundTranscriptionStateIfNeeded()
+            return
+        }
+
         if !isCaptureSessionActive {
             state = .transcribing
         }
@@ -771,7 +783,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func finalizeBackgroundTranscriptionStateIfNeeded() {
-        guard !hasBackgroundTranscriptionWork else { return }
+        guard !hasVisibleBackgroundTranscriptionWork else { return }
         guard !isCaptureSessionActive else { return }
 
         switch lastTerminalTranscriptionOutcome {
