@@ -116,6 +116,7 @@ APP_SOURCES=(
     "Sources/Dictation/DictationStoragePaths.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"
     "Sources/Support/TranscriptedConstants.swift"
+    "Sources/Speech/ParakeetModelInitDiagnostics.swift"
     "Sources/Speech/ParakeetPrewarmPolicy.swift"
     "Sources/Speech/ParakeetShortAudioGate.swift"
     "Sources/Speech/RecordedAudioTimeline.swift"
