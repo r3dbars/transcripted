@@ -6,6 +6,8 @@
 	<string>Transcripted</string>
 	<key>CFBundleDisplayName</key>
 	<string>Transcripted</string>
+	<key>CFBundleIconFile</key>
+	<string>Transcripted</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.justinbetker.draft</string>
 	<key>CFBundleVersion</key>

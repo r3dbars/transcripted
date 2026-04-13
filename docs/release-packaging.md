@@ -6,6 +6,15 @@ Use `build-beta.sh` for anything you intend to hand to another machine. That is
 the path that applies hardened runtime signing, builds a DMG, and optionally
 submits it for notarization.
 
+The distribution DMG now uses committed release art:
+
+- app icon: `Resources/Transcripted.icns`
+- DMG install background: `scripts/release/assets/dmg-background.png`
+
+`build-beta.sh` uses that art for the preferred `create-dmg` path and also for
+the built-in Finder-layout fallback, so polished install windows no longer
+depend on `create-dmg` being present just to avoid a blank DMG.
+
 Transcripted's Sparkle update plumbing is documented in `docs/sparkle-updates.md`.
 `build-deps.sh` now downloads the pinned Sparkle framework and release tools,
 plus the pinned Sentry framework, into `deps-frameworks/` and
@@ -52,6 +61,11 @@ NOTARY_PROFILE=<profile-name> bash build-beta.sh <beta-token> <user-name>
 If you expect existing installs of Transcripted to discover the new version
 inside the app, do not stop after the DMG is built. You must also complete the
 Sparkle steps in `docs/sparkle-updates.md`.
+
+Even after a DMG is properly signed, notarized, and stapled, users should still
+expect the normal macOS first-open confirmation for an app downloaded from the
+Internet. The healthy path is the standard one-click confirmation dialog, not a
+Gatekeeper rejection or “developer cannot be verified” block.
 
 For a dry run that still validates the signed app and DMG assembly:
 

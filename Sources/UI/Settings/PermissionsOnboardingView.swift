@@ -4,6 +4,7 @@
 import SwiftUI
 import AVFoundation
 import ApplicationServices
+import AppKit
 
 extension FirstRunLocalModelState {
     init(_ state: ParakeetModelState) {
@@ -52,19 +53,7 @@ struct PermissionsOnboardingView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Welcome to Transcripted")
-                    .font(.title3.weight(.semibold))
-
-                Text("Start with one short dictation. Turn on Microphone and Accessibility first. Meeting audio and meeting prompts can wait until later.")
-                    .font(.callout)
-                    .foregroundStyle(MenuTokens.textSecondary)
-
-                HStack(spacing: 8) {
-                    FeaturePill(icon: "mic.fill", title: "Dictation first")
-                    FeaturePill(icon: "record.circle.fill", title: "Meetings later")
-                }
-            }
+            OnboardingHeroCard()
             .padding(.horizontal, 20)
             .padding(.top, 20)
             .padding(.bottom, 14)
@@ -149,7 +138,7 @@ struct PermissionsOnboardingView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
         }
-        .frame(width: MenuTokens.panelWidth, height: MenuTokens.panelHeight)
+        .frame(width: MenuTokens.onboardingWindowWidth, height: MenuTokens.onboardingWindowHeight)
         .background(MenuTokens.cardBackground)
         .onAppear {
             checkAllPermissions()
@@ -327,6 +316,82 @@ private struct LocalDictationModelCard: View {
         case .failed:
             return Color.orange
         }
+    }
+}
+
+private struct OnboardingHeroCard: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 14) {
+                AppIconPreview()
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Welcome to Transcripted")
+                        .font(.title2.weight(.semibold))
+
+                    Text("We’ll get the core permissions ready here, then open the menu bar controls so you can start dictating right away.")
+                        .font(.callout)
+                        .foregroundStyle(MenuTokens.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            HStack(spacing: 8) {
+                FeaturePill(icon: "menubar.rectangle", title: "Menu bar utility")
+                FeaturePill(icon: "mic.fill", title: "Dictation first")
+                FeaturePill(icon: "record.circle.fill", title: "Meetings later")
+            }
+
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(MenuTokens.textSecondary)
+                    .frame(width: 16)
+
+                Text("After setup, Transcripted lives in your menu bar. Use that icon to start dictation, record a meeting, open settings, or check for updates.")
+                    .font(.caption)
+                    .foregroundStyle(MenuTokens.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(MenuTokens.pillBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(MenuTokens.pillBorder, lineWidth: 1)
+                    )
+            )
+        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(MenuTokens.cardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(MenuTokens.cardBorder, lineWidth: 1)
+                )
+        )
+    }
+}
+
+private struct AppIconPreview: View {
+    private var iconImage: NSImage {
+        if let icon = NSApplication.shared.applicationIconImage,
+           icon.size.width > 0,
+           icon.size.height > 0 {
+            return icon
+        }
+        return NSImage(systemSymbolName: "waveform.and.mic", accessibilityDescription: "Transcripted") ?? NSImage()
+    }
+
+    var body: some View {
+        Image(nsImage: iconImage)
+            .resizable()
+            .interpolation(.high)
+            .frame(width: 68, height: 68)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
     }
 }
 
