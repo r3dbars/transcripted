@@ -27,6 +27,7 @@ anonymous analytics, and Sparkle update plumbing.
 - Sparkle is the live in-app update path on `main`; the older beta DMG self-update flow is no longer part of the app target
 - Do not assume older draft/style/analysis event flows are still active just because they appear in historical docs or event logs
 - `build.sh` and beta behavior can affect logs, signing, and permissions during local testing
+- `TRANSCRIPTED_DISABLE_FILE_LOGGER=1` disables `app.jsonl` writes for test and smoke runs so local production logs stay clean
 - Sentry DSN/config is read from `Info.plist` (`TranscriptedSentryDSN`) or process environment for local testing, and crash reports must stay scrubbed of transcript/audio/title/path data
 - PostHog config is read from `Info.plist` (`TranscriptedPostHogAPIKey`, `TranscriptedPostHogHost`) or process environment (`POSTHOG_API_KEY`, `POSTHOG_HOST`), and anonymous analytics must stay event-allowlisted and bucketed rather than sending raw payloads
 - Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should not automatically assume they are safe to send off-device.

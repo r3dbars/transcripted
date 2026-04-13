@@ -51,6 +51,9 @@ It also runs the wake-recovery smoke binary and currently finishes with
 The smoke sources now live under `Tests/Integration/` so the repo’s verification
 surface stays under one top-level `Tests/` umbrella.
 
+Fast tests and smoke runs set `TRANSCRIPTED_DISABLE_FILE_LOGGER=1` so they do
+not append test-only entries into the real `~/Library/Application Support/Transcripted/logs/app.jsonl`.
+
 Run it whenever you touch:
 
 - `Sources/Meeting/`

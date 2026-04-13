@@ -27,8 +27,10 @@ final class FileLogger: @unchecked Sendable {
     }()
 
     init(paths: CoreStoragePaths = .default, isDisabledOverride: Bool? = nil) {
-        // Disable file logging during test runs to avoid polluting production logs
-        let isTestRun = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        // Disable file logging during test runs to avoid polluting production logs.
+        let env = ProcessInfo.processInfo.environment
+        let isTestRun = env["XCTestConfigurationFilePath"] != nil
+            || Self.isEnabledFlag(env["TRANSCRIPTED_DISABLE_FILE_LOGGER"])
         self.isDisabled = isDisabledOverride ?? isTestRun
 
         let logsDir = paths.logs
@@ -147,5 +149,15 @@ final class FileLogger: @unchecked Sendable {
     deinit {
         fileHandle?.synchronizeFile()
         fileHandle?.closeFile()
+    }
+
+    private static func isEnabledFlag(_ value: String?) -> Bool {
+        guard let value else { return false }
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "yes", "on":
+            return true
+        default:
+            return false
+        }
     }
 }
