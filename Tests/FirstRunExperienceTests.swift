@@ -96,6 +96,10 @@ func testFirstRunExperience() {
             card.detail.contains("one-time download"),
             "model card should explain why the download is happening"
         )
+        assertTrue(
+            card.detail.contains("Parakeet"),
+            "model card should name the current local speech model"
+        )
         assertEqual(card.status, "50% complete", "model card should surface live progress")
         assertNotNil(card.progress, "model card should show a progress bar during downloads")
     }

@@ -91,7 +91,7 @@ enum FirstRunExperience {
         case .notLoaded:
             return FirstRunModelCardState(
                 title: "Getting local dictation ready",
-                detail: "Transcripted starts the on-device voice model the first time you use it.",
+                detail: "Transcripted starts \(TranscriptedModelInfo.speechToTextName) the first time you use dictation.",
                 status: "Starting",
                 progress: 0.06,
                 tone: .working
@@ -99,7 +99,7 @@ enum FirstRunExperience {
         case .downloading(let progress):
             return FirstRunModelCardState(
                 title: "Downloading local dictation",
-                detail: "This one-time download stays on this Mac so dictation can run locally.",
+                detail: "This one-time download keeps \(TranscriptedModelInfo.speechToTextName) on this Mac so dictation can run locally.",
                 status: "\(Int(progress * 100))% complete",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 tone: .working
@@ -107,7 +107,7 @@ enum FirstRunExperience {
         case .loading:
             return FirstRunModelCardState(
                 title: "Finishing local dictation setup",
-                detail: "Transcripted has the files and is loading them into memory.",
+                detail: "Transcripted has the \(TranscriptedModelInfo.speechToTextName) files and is loading them into memory.",
                 status: "Almost ready",
                 progress: 0.92,
                 tone: .working
@@ -115,7 +115,7 @@ enum FirstRunExperience {
         case .ready:
             return FirstRunModelCardState(
                 title: "Local dictation is ready",
-                detail: "Your first dictation can start immediately.",
+                detail: "\(TranscriptedModelInfo.speechToTextName) is ready for local dictation.",
                 status: "Ready",
                 progress: 1.0,
                 tone: .ready

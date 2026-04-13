@@ -284,6 +284,16 @@ private struct LocalDictationModelCard: View {
                     .progressViewStyle(.linear)
                     .tint(iconColor)
             }
+
+            VStack(alignment: .leading, spacing: 6) {
+                ModelDisclosureLine(title: "Model", detail: TranscriptedModelInfo.speechToTextSummary)
+                ModelDisclosureLine(title: "Languages", detail: TranscriptedModelInfo.speechToTextLanguageSummary)
+                ModelDisclosureLine(title: "Setup network", detail: TranscriptedModelInfo.downloadHostSummary)
+
+                if status.tone == .failed {
+                    ModelDisclosureLine(title: "Why this error appears", detail: TranscriptedModelInfo.secureConnectionSummary)
+                }
+            }
         }
         .padding(14)
         .background(
@@ -315,6 +325,24 @@ private struct LocalDictationModelCard: View {
             return Color.accentColor
         case .failed:
             return Color.orange
+        }
+    }
+}
+
+private struct ModelDisclosureLine: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("\(title):")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(MenuTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

@@ -65,6 +65,23 @@ struct TranscriptedSettingsView: View {
                     .foregroundStyle(.secondary)
                 }
 
+                SettingsSection(title: "Models & Downloads", detail: "Transcripted keeps transcription local. This section explains which models it uses today and why setup may briefly touch the network.") {
+                    ModelInfoRow(title: "Speech to text", detail: TranscriptedModelInfo.speechToTextSummary)
+                    ModelInfoRow(title: "Language support", detail: TranscriptedModelInfo.speechToTextLanguageSummary)
+                    ModelInfoRow(title: "Meetings", detail: TranscriptedModelInfo.meetingModelSummary)
+                    ModelInfoRow(title: "One-time setup", detail: TranscriptedModelInfo.downloadSummary)
+
+                    Text(TranscriptedModelInfo.secureConnectionSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(TranscriptedModelInfo.pickerSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 SettingsSection(title: "Diagnostics", detail: "Both controls are optional. Crash reports and anonymous usage statistics stay separate, scoped, and scrubbed before anything leaves this Mac.") {
                     Toggle("Send crash and error reports", isOn: Binding(
                         get: { crashReportingEnabled },
@@ -286,6 +303,23 @@ struct SettingsSection<Content: View>: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(Color.primary.opacity(0.06), lineWidth: 1)
             )
+        }
+    }
+}
+
+private struct ModelInfoRow: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
