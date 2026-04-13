@@ -44,4 +44,22 @@ func testMeetingRecordingStartGate() {
             "combined permission failures should preserve a stable missing-permission list"
         )
     }
+
+    runSuite("MeetingPermissionCopy — keeps screen recording copy aligned with the meeting gate") {
+        assertEqual(
+            MeetingRecordingStartGate.screenRecordingSummary,
+            "Optional on first launch. Required before Transcripted can capture meeting audio from other apps.",
+            "shared summary copy should explain that screen recording is optional for dictation setup but required for meetings"
+        )
+        assertEqual(
+            MeetingRecordingStartGate.screenRecordingQuickStart,
+            "Turn on Screen Recording before you record meetings so Transcripted can capture the other side of Zoom, Meet, and similar apps.",
+            "quick-start copy should stop implying that full meeting capture works without screen recording"
+        )
+        assertEqual(
+            MeetingRecordingStartGate.optionalPermissionsFootnote,
+            "You can start dictating without these. Turn on Screen Recording before you record meetings, and add Calendar later if you want meeting prompts.",
+            "onboarding footnote should match the current meeting recording requirement"
+        )
+    }
 }

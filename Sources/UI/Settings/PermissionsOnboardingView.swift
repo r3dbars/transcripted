@@ -104,7 +104,7 @@ struct PermissionsOnboardingView: View {
                             title: "Meetings",
                             detail: screenRecordingGranted
                                 ? "Meeting audio is ready too. Calendar prompts stay optional."
-                                : "You can enable Screen Recording later when you want call audio from Zoom, Meet, or other apps."
+                                : MeetingRecordingStartGate.screenRecordingQuickStart
                         )
                     }
                     .padding(14)
@@ -481,7 +481,7 @@ private struct OptionalPermissionsCard: View {
             Text("Optional later")
                 .font(.subheadline.weight(.semibold))
 
-            Text("You can start dictating without these. Add them later from Settings when you want richer meeting capture.")
+            Text(MeetingRecordingStartGate.optionalPermissionsFootnote)
                 .font(.caption)
                 .foregroundStyle(MenuTokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
