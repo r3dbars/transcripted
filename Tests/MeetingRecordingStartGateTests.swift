@@ -1,6 +1,23 @@
 import Foundation
 
 func testMeetingRecordingStartGate() {
+    let screenRecordingError: String
+    let combinedPermissionsError: String
+    let quickStartCopy: String
+    let optionalPermissionsCopy: String
+
+    if #available(macOS 26.0, *) {
+        screenRecordingError = "Turn on System Audio Recording in System Settings before recording a meeting."
+        combinedPermissionsError = "Turn on Microphone and System Audio Recording in System Settings before recording a meeting."
+        quickStartCopy = "Turn on System Audio Recording before you record meetings so Transcripted can capture the other side of Zoom, Meet, and similar apps."
+        optionalPermissionsCopy = "You can start dictating without these. Turn on System Audio Recording before you record meetings, and add Calendar later if you want meeting prompts."
+    } else {
+        screenRecordingError = "Turn on Screen Recording in System Settings, then quit and reopen Transcripted before recording a meeting."
+        combinedPermissionsError = "Turn on Microphone and Screen Recording in System Settings, then quit and reopen Transcripted before recording a meeting."
+        quickStartCopy = "Turn on Screen Recording before you record meetings. After you enable it, quit and reopen Transcripted so macOS can hand over system audio."
+        optionalPermissionsCopy = "You can start dictating without these. Turn on Screen Recording before you record meetings, then reopen Transcripted. Add Calendar later if you want meeting prompts."
+    }
+
     runSuite("MeetingRecordingStartGate.evaluate — allows meeting capture when required permissions exist") {
         let decision = MeetingRecordingStartGate.evaluate(
             microphoneGranted: true,
@@ -19,7 +36,7 @@ func testMeetingRecordingStartGate() {
         assertFalse(decision.canStart, "meeting capture should fail fast when Screen Recording is missing")
         assertEqual(
             decision.errorMessage,
-            "Turn on Screen Recording in System Settings, then quit and reopen Transcripted before recording a meeting.",
+            screenRecordingError,
             "screen recording failures should tell the user exactly what to fix"
         )
         assertEqual(decision.failureReason, "screen_recording", "screen recording failures should stay classified for diagnostics")
@@ -35,7 +52,7 @@ func testMeetingRecordingStartGate() {
         assertFalse(decision.canStart, "meeting capture should not start when both required permissions are missing")
         assertEqual(
             decision.errorMessage,
-            "Turn on Microphone and Screen Recording in System Settings, then quit and reopen Transcripted before recording a meeting.",
+            combinedPermissionsError,
             "combined permission failures should mention both missing requirements"
         )
         assertEqual(
@@ -53,13 +70,13 @@ func testMeetingRecordingStartGate() {
         )
         assertEqual(
             MeetingRecordingStartGate.screenRecordingQuickStart,
-            "Turn on Screen Recording before you record meetings. After you enable it, quit and reopen Transcripted so macOS can hand over system audio.",
-            "quick-start copy should explain that screen recording changes need a relaunch before meeting capture works"
+            quickStartCopy,
+            "quick-start copy should reflect the current meeting-audio permission path"
         )
         assertEqual(
             MeetingRecordingStartGate.optionalPermissionsFootnote,
-            "You can start dictating without these. Turn on Screen Recording before you record meetings, then reopen Transcripted. Add Calendar later if you want meeting prompts.",
-            "onboarding footnote should match the current meeting recording requirement and relaunch guidance"
+            optionalPermissionsCopy,
+            "onboarding footnote should match the current meeting recording requirement"
         )
     }
 }

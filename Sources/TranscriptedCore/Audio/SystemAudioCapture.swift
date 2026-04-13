@@ -1,6 +1,7 @@
 import Foundation
 import AudioToolbox
 import AVFoundation
+import Combine
 import QuartzCore  // CACurrentMediaTime — real-time-safe monotonic clock
 
 /// Captures system-wide audio output using CoreAudio process taps (macOS 14.2+)
@@ -16,7 +17,12 @@ import QuartzCore  // CACurrentMediaTime — real-time-safe monotonic clock
 /// - `AudioObjectRemovePropertyListener: no object with given ID` - Cleanup race condition (harmless)
 /// These are internal CoreAudio logs that cannot be suppressed from user code and don't affect functionality.
 @available(macOS 14.2, *)
-class SystemAudioCapture: ObservableObject {
+class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine {
+
+    var errorMessagePublisher: AnyPublisher<String?, Never> {
+        $errorMessage.eraseToAnyPublisher()
+    }
+
     @Published var isCapturing: Bool = false
     @Published var errorMessage: String?
 

@@ -15,14 +15,23 @@ struct MeetingRecordingStartDecision: Equatable {
 }
 
 enum MeetingRecordingStartGate {
-    static let screenRecordingSummary =
+    static var screenRecordingSummary: String {
         "Optional on first launch. Required before Transcripted can capture meeting audio from other apps."
+    }
 
-    static let screenRecordingQuickStart =
-        "Turn on Screen Recording before you record meetings. After you enable it, quit and reopen Transcripted so macOS can hand over system audio."
+    static var screenRecordingQuickStart: String {
+        if #available(macOS 26.0, *) {
+            return "Turn on System Audio Recording before you record meetings so Transcripted can capture the other side of Zoom, Meet, and similar apps."
+        }
+        return "Turn on Screen Recording before you record meetings. After you enable it, quit and reopen Transcripted so macOS can hand over system audio."
+    }
 
-    static let optionalPermissionsFootnote =
-        "You can start dictating without these. Turn on Screen Recording before you record meetings, then reopen Transcripted. Add Calendar later if you want meeting prompts."
+    static var optionalPermissionsFootnote: String {
+        if #available(macOS 26.0, *) {
+            return "You can start dictating without these. Turn on System Audio Recording before you record meetings, and add Calendar later if you want meeting prompts."
+        }
+        return "You can start dictating without these. Turn on Screen Recording before you record meetings, then reopen Transcripted. Add Calendar later if you want meeting prompts."
+    }
 
     static func evaluate(
         microphoneGranted: Bool,
@@ -39,9 +48,15 @@ enum MeetingRecordingStartGate {
 
         switch missingPermissions {
         case ["microphone", "screen_recording"]:
+            let message: String
+            if #available(macOS 26.0, *) {
+                message = "Turn on Microphone and System Audio Recording in System Settings before recording a meeting."
+            } else {
+                message = "Turn on Microphone and Screen Recording in System Settings, then quit and reopen Transcripted before recording a meeting."
+            }
             return MeetingRecordingStartDecision(
                 canStart: false,
-                errorMessage: "Turn on Microphone and Screen Recording in System Settings, then quit and reopen Transcripted before recording a meeting.",
+                errorMessage: message,
                 failureReason: "microphone_and_screen_recording",
                 missingPermissions: missingPermissions
             )
@@ -53,9 +68,15 @@ enum MeetingRecordingStartGate {
                 missingPermissions: missingPermissions
             )
         case ["screen_recording"]:
+            let message: String
+            if #available(macOS 26.0, *) {
+                message = "Turn on System Audio Recording in System Settings before recording a meeting."
+            } else {
+                message = "Turn on Screen Recording in System Settings, then quit and reopen Transcripted before recording a meeting."
+            }
             return MeetingRecordingStartDecision(
                 canStart: false,
-                errorMessage: "Turn on Screen Recording in System Settings, then quit and reopen Transcripted before recording a meeting.",
+                errorMessage: message,
                 failureReason: "screen_recording",
                 missingPermissions: missingPermissions
             )

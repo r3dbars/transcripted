@@ -68,6 +68,7 @@ let package = Package(
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("Network"),
+                .linkedFramework("ScreenCaptureKit"),
             ]
         ),
         .testTarget(
@@ -106,6 +107,7 @@ let package = Package(
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("Network"),
+                .linkedFramework("ScreenCaptureKit"),
             ]
         ),
     ]
