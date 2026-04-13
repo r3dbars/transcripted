@@ -53,7 +53,7 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         case .accessibility:
             return "Needed for global shortcuts and pasting text back into the app you were using."
         case .screenRecording:
-            return "Optional for meeting capture. Needed when you want call audio from other apps."
+            return MeetingRecordingStartGate.screenRecordingSummary
         case .calendar:
             return "Optional for meeting prompts. Lets Transcripted notice upcoming meetings from Apple Calendar, Google, or Exchange calendars synced to your Mac."
         }

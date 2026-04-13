@@ -15,6 +15,15 @@ struct MeetingRecordingStartDecision: Equatable {
 }
 
 enum MeetingRecordingStartGate {
+    static let screenRecordingSummary =
+        "Optional on first launch. Required before Transcripted can capture meeting audio from other apps."
+
+    static let screenRecordingQuickStart =
+        "Turn on Screen Recording before you record meetings so Transcripted can capture the other side of Zoom, Meet, and similar apps."
+
+    static let optionalPermissionsFootnote =
+        "You can start dictating without these. Turn on Screen Recording before you record meetings, and add Calendar later if you want meeting prompts."
+
     static func evaluate(
         microphoneGranted: Bool,
         screenRecordingGranted: Bool
