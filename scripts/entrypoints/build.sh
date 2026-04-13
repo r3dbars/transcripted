@@ -22,6 +22,44 @@ SENTRY_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sentry.framework"
 SPARKLE_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sparkle.framework"
 TRANSCRIPTED_CORE_MODULE="$DEPS_MODULE_ROOT/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
 
+stop_running_transcripted_instances() {
+    local running_pids
+    local pid
+    local command
+    local attempt
+
+    running_pids="$(pgrep -x "$APP_NAME" || true)"
+    if [ -z "$running_pids" ]; then
+        return 0
+    fi
+
+    echo "Stopping running $APP_NAME instances..."
+    while IFS= read -r pid; do
+        [ -n "$pid" ] || continue
+        command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+        if [ -n "$command" ]; then
+            echo "  pid $pid: $command"
+        else
+            echo "  pid $pid"
+        fi
+        kill "$pid" >/dev/null 2>&1 || true
+    done <<< "$running_pids"
+
+    for attempt in {1..20}; do
+        running_pids="$(pgrep -x "$APP_NAME" || true)"
+        if [ -z "$running_pids" ]; then
+            return 0
+        fi
+        sleep 0.25
+    done
+
+    echo "Force stopping remaining $APP_NAME instances..."
+    while IFS= read -r pid; do
+        [ -n "$pid" ] || continue
+        kill -9 "$pid" >/dev/null 2>&1 || true
+    done <<< "$running_pids"
+}
+
 ensure_build_prerequisites() {
     if [ ! -f "$LOCAL_ENTITLEMENTS" ]; then
         echo "Missing entitlements file: $LOCAL_ENTITLEMENTS"
@@ -108,6 +146,7 @@ echo "Building Transcripted..."
 
 ensure_build_prerequisites
 ensure_deps_ready
+stop_running_transcripted_instances
 
 # Clean
 rm -rf "$BUILD_DIR"
