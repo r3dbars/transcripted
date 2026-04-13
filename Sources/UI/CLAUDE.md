@@ -13,7 +13,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (32 Swift files)
+## Files (33 Swift files)
 
 ### Overlay/
 
@@ -69,6 +69,7 @@ The current agent-connect surfaces should keep one simple mental model:
 
 - `Shared/AgentConnectionGuide.swift` — shared smart-prompt, MCP setup, and folder fallback copy for the agent-connect flow
 - `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
+- `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
 - `Shared/SpeakerClipPlayback.swift` — reusable audio-preview helper for persisted speaker sample clips
 
 Cross-cutting permission checks now live in `Sources/Support/TranscriptedPermissionAccess.swift`
@@ -96,4 +97,6 @@ Manual checks:
 - meeting overlay warms up and records cleanly
 - menubar popover renders shortcuts, recents, settings actions, and the agent-connect page cleanly
 - speaker settings can preview clips and rename / merge people cleanly
-- permissions onboarding and settings window still open correctly
+- permissions onboarding and first-run onboarding window still open correctly
+- first-run CTA copy updates correctly as permissions and local-model state change
+- settings window still opens correctly
