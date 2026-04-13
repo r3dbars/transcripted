@@ -32,7 +32,7 @@ extension Audio {
         // Start system audio capture
         // CRITICAL: Create audio file BEFORE starting I/O proc to avoid CPU overload
         // Creating files in the audio callback causes HALC_ProxyIOContext::IOWorkLoop overload
-        if #available(macOS 14.2, *), let capture = systemAudioCapture as? SystemAudioCapture {
+        if let capture = systemAudioCapture {
             AppLogger.audioSystem.info("System audio capture object exists, setting up")
             let captureDir = self.paths.audioCaptures
             try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
@@ -138,7 +138,11 @@ extension Audio {
                 } catch {
                     AppLogger.audioSystem.warning("System audio failed", ["error": error.localizedDescription])
                     DispatchQueue.main.async {
+                        if #available(macOS 26.0, *) {
+                        strongSelf.error = "System audio unavailable \u{2014} can only record your microphone. To capture Zoom/Teams audio, go to System Settings \u{2192} Privacy & Security \u{2192} System Audio Recording and enable Transcripted."
+                    } else {
                         strongSelf.error = "System audio unavailable \u{2014} can only record your microphone. To capture Zoom/Teams audio, go to System Settings \u{2192} Privacy & Security \u{2192} Screen Recording and enable Transcripted."
+                    }
                         strongSelf.systemAudioFailed = true
                     }
                 }

@@ -217,7 +217,7 @@ public class Audio: ObservableObject {
     @Published var systemAudioFailed: Bool = false
 
     // System audio capture
-    var systemAudioCapture: Any? // SystemAudioCapture (macOS 14.2+)
+    var systemAudioCapture: (any SystemAudioCaptureEngine)?
 
     // Audio file recording
     var systemAudioFile: AVAudioFile?
@@ -341,14 +341,21 @@ public class Audio: ObservableObject {
             }
         }
 
-        // Initialize system audio capture (macOS 14.2+)
-        if #available(macOS 14.2, *) {
+        // Initialize system audio capture.
+        // macOS 26+: ScreenCaptureKit audio-only → lighter "System Audio Recording Only" permission
+        // macOS 14.2–25: CoreAudio process taps → full "Screen Recording" permission
+        if #available(macOS 26.0, *) {
+            let capture = SCKAudioCapture()
+            systemAudioCapture = capture
+            systemAudioCancellable = capture.errorMessagePublisher
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] errorMessage in
+                    self?.updateSystemAudioStatus(fromError: errorMessage)
+                }
+        } else if #available(macOS 14.2, *) {
             let capture = SystemAudioCapture()
             systemAudioCapture = capture
-
-            // Observe SystemAudioCapture's errorMessage to update status
-            // This allows the UI to react to device changes and failures
-            systemAudioCancellable = capture.$errorMessage
+            systemAudioCancellable = capture.errorMessagePublisher
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] errorMessage in
                     self?.updateSystemAudioStatus(fromError: errorMessage)
@@ -558,9 +565,7 @@ public class Audio: ObservableObject {
         }
 
         // Stop system audio capture
-        if #available(macOS 14.2, *), let capture = systemAudioCapture as? SystemAudioCapture {
-            capture.stop()
-        }
+        systemAudioCapture?.stop()
 
         // Use the original mic URL (set at recording start), not the potentially-overwritten
         // recovery URL. Device recovery creates a new WAV segment but the original file
@@ -648,7 +653,7 @@ public class Audio: ObservableObject {
         }
 
         // Start system audio capture for level metering only (no file writing)
-        if #available(macOS 14.2, *), let capture = systemAudioCapture as? SystemAudioCapture {
+        if let capture = systemAudioCapture {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 do {
                     try capture.prepare()
@@ -681,9 +686,7 @@ public class Audio: ObservableObject {
             }
         }
 
-        if #available(macOS 14.2, *), let capture = systemAudioCapture as? SystemAudioCapture {
-            capture.stopSync()  // Synchronous — avoids race where delayed cleanup destroys the next recording's tap
-        }
+        systemAudioCapture?.stopSync()  // Synchronous — avoids race where delayed cleanup destroys the next recording's tap
 
         DispatchQueue.main.async {
             self.isMonitoring = false

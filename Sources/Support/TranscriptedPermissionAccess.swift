@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import ApplicationServices
 import EventKit
+import ScreenCaptureKit
 
 enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
     case microphone
@@ -40,6 +41,9 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         case .accessibility:
             return "Accessibility"
         case .screenRecording:
+            if #available(macOS 26.0, *) {
+                return "System Audio Recording"
+            }
             return "Screen Recording"
         case .calendar:
             return "Calendar"
@@ -112,10 +116,15 @@ enum TranscriptedPermissionAccess {
             }
             openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
         case .screenRecording:
-            if #available(macOS 15.0, *) {
-                _ = CGRequestScreenCaptureAccess()
+            if #available(macOS 26.0, *) {
+                // macOS 26: direct to the lighter "System Audio Recording Only" section
+                openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
+            } else {
+                if #available(macOS 15.0, *) {
+                    _ = CGRequestScreenCaptureAccess()
+                }
+                openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
             }
-            openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
         case .calendar:
             Task { @MainActor in
                 let granted = await requestCalendarAccessIfNeeded()
@@ -159,7 +168,16 @@ enum TranscriptedPermissionAccess {
     }
 
     static func screenRecordingGranted() -> Bool {
-        CGPreflightScreenCaptureAccess()
+        if #available(macOS 26.0, *) {
+            // On macOS 26, ScreenCaptureKit presents an inline permission dialog
+            // when SCStream.startCapture() is called — the user can approve it
+            // on the spot without visiting System Settings. CGPreflightScreenCaptureAccess()
+            // returns false before that dialog has been shown, which would incorrectly
+            // block the recording flow. Return true so the gate lets the flow proceed
+            // to SCKAudioCapture, where startCapture() will trigger the dialog.
+            return true
+        }
+        return CGPreflightScreenCaptureAccess()
     }
 
     private static func openSystemSettings(_ urlString: String) {
