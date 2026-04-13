@@ -47,6 +47,45 @@ SENTRY_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sentry.framework"
 SPARKLE_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sparkle.framework"
 TRANSCRIPTED_CORE_MODULE="deps-modules/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
 
+mask_secret() {
+    local value="$1"
+
+    if [ -z "$value" ]; then
+        printf '%s' "[redacted]"
+        return
+    fi
+
+    local length=${#value}
+    if [ "$length" -le 6 ]; then
+        printf '%s' "[redacted]"
+        return
+    fi
+
+    printf '%s...%s' "${value:0:4}" "${value: -2}"
+}
+
+escape_for_swift_string_literal() {
+    local value="$1"
+
+    value=${value//\\/\\\\}
+    value=${value//\"/\\\"}
+    value=${value//$'\n'/\\n}
+    value=${value//$'\r'/\\r}
+    value=${value//$'\t'/\\t}
+
+    printf '%s' "$value"
+}
+
+inject_beta_token() {
+    local escaped_token
+    escaped_token="$(escape_for_swift_string_literal "$BETA_TOKEN")"
+
+    BETA_TOKEN_SWIFT_LITERAL="$escaped_token" perl -0pi -e '
+        my $replacement = $ENV{BETA_TOKEN_SWIFT_LITERAL};
+        s/BETA_TOKEN_PLACEHOLDER/$replacement/g;
+    ' "$BETA_CONFIG_PATH"
+}
+
 validate_signed_app() {
     echo "Validating app signature..."
     codesign --verify --deep --strict --verbose=4 "$APP_BUNDLE"
@@ -248,7 +287,7 @@ if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ] || [ ! -f "$TR
     exit 1
 fi
 
-echo "🔨 Building Transcripted Beta for $USER_NAME (token: $BETA_TOKEN)..."
+echo "🔨 Building Transcripted Beta for $USER_NAME (token: $(mask_secret "$BETA_TOKEN"))..."
 
 # Clean app bundle only (preserve previously built DMGs)
 rm -rf "$APP_BUNDLE"
@@ -277,7 +316,7 @@ fi
 # Inject the user's beta token after dependency preflight succeeds.
 echo "Injecting token for $USER_NAME..."
 cp "$BETA_CONFIG_PATH" "$BETA_CONFIG_BACKUP"
-sed -i '' "s/BETA_TOKEN_PLACEHOLDER/$BETA_TOKEN/" "$BETA_CONFIG_PATH"
+inject_beta_token
 
 # Unified dependencies (FluidAudio + mlx-swift-lm)
 echo "Dependencies found"
@@ -439,7 +478,7 @@ fi
 echo ""
 echo "✅ Done! DMG ready: $BUILD_DIR/$DMG_NAME"
 echo "   Size: $(du -sh "$BUILD_DIR/$DMG_NAME" | cut -f1)"
-echo "   Token: $BETA_TOKEN"
+echo "   Token: $(mask_secret "$BETA_TOKEN")"
 echo "   User: $USER_NAME"
 if [ "$SKIP_NOTARIZATION" = "1" ] || [[ ! "$SIGNING_DISPLAY_NAME" == Developer\ ID* ]]; then
     echo "   Note: this build is not notarized yet, so Gatekeeper rejection is still expected."

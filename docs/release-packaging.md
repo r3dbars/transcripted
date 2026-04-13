@@ -15,6 +15,10 @@ The distribution DMG now uses committed release art:
 the built-in Finder-layout fallback, so polished install windows no longer
 depend on `create-dmg` being present just to avoid a blank DMG.
 
+`build-beta.sh` also treats the per-user beta token as sensitive build input:
+it escapes the token before injecting it into `Sources/Beta/BetaConfig.swift`
+and only prints a masked preview in build logs.
+
 Transcripted's Sparkle update plumbing is documented in `docs/sparkle-updates.md`.
 `build-deps.sh` now downloads the pinned Sparkle framework and release tools,
 plus the pinned Sentry framework, into `deps-frameworks/` and
