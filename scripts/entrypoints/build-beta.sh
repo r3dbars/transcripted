@@ -7,7 +7,7 @@
 # - Developer ID Application certificate installed
 # - Notarization credentials stored locally via xcrun notarytool
 # - NOTARY_PROFILE set to the local keychain profile name for notarytool
-# - optional: brew install create-dmg for the custom DMG layout
+# - optional: brew install create-dmg for the fastest DMG layout path
 
 set -euo pipefail
 
@@ -31,6 +31,10 @@ APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 STAGED_APP_BINARY="$BUILD_DIR/$APP_NAME-beta-bin"
 DMG_NAME="Transcripted-${USER_NAME}.dmg"
+DMG_VOLUME_NAME="Install Transcripted"
+DMG_WINDOW_WIDTH=720
+DMG_WINDOW_HEIGHT=460
+DMG_BACKGROUND_PATH="scripts/release/assets/dmg-background.png"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-${SIGN_IDENTITY:-}}"
 SIGNING_DISPLAY_NAME=""
 NOTARY_PROFILE="${NOTARY_PROFILE:-}"
@@ -68,6 +72,101 @@ validate_notarized_artifacts() {
     fi
 
     return 1
+}
+
+create_finder_layout_dmg() {
+    local output_path="$1"
+    local staging_dir="$BUILD_DIR/dmg-staging"
+    local rw_dmg="$BUILD_DIR/${DMG_NAME%.dmg}-layout.dmg"
+    local staging_size_mb
+    local image_size_mb
+    local attach_output
+    local device
+    local mount_dir
+
+    echo "ℹ️  create-dmg not found — using built-in Finder layout fallback"
+
+    rm -rf "$staging_dir"
+    rm -f "$rw_dmg"
+    mkdir -p "$staging_dir"
+    cp -R "$APP_BUNDLE" "$staging_dir/"
+    ln -s /Applications "$staging_dir/Applications"
+
+    if [ -f "$DMG_BACKGROUND_PATH" ]; then
+        mkdir -p "$staging_dir/.background"
+        cp "$DMG_BACKGROUND_PATH" "$staging_dir/.background/dmg-background.png"
+        chflags hidden "$staging_dir/.background" || true
+    fi
+
+    staging_size_mb="$(du -sm "$staging_dir" | awk '{print $1}')"
+    image_size_mb=$((staging_size_mb + 160))
+
+    hdiutil create \
+        -srcfolder "$staging_dir" \
+        -volname "$DMG_VOLUME_NAME" \
+        -fs HFS+ \
+        -format UDRW \
+        -size "${image_size_mb}m" \
+        "$rw_dmg" >/dev/null
+
+    if [ -d "/Volumes/$DMG_VOLUME_NAME" ]; then
+        hdiutil detach "/Volumes/$DMG_VOLUME_NAME" -force >/dev/null 2>&1 || true
+    fi
+
+    attach_output="$(
+        hdiutil attach \
+        -readwrite \
+        -noverify \
+        -noautoopen \
+        "$rw_dmg"
+    )"
+    device="$(printf '%s\n' "$attach_output" | awk '/Apple_HFS/ {print $1; exit}')"
+    mount_dir="$(printf '%s\n' "$attach_output" | awk '/Apple_HFS/ {$1=""; $2=""; sub(/^  +/, ""); print; exit}')"
+
+    bless --folder "$mount_dir" --openfolder "$mount_dir" >/dev/null 2>&1 || true
+
+    if ! osascript <<EOF >/dev/null
+tell application "Finder"
+    tell disk "$DMG_VOLUME_NAME"
+        open
+        delay 1
+        set current view of container window to icon view
+        set toolbar visible of container window to false
+        set statusbar visible of container window to false
+        set the bounds of container window to {200, 120, $((200 + DMG_WINDOW_WIDTH)), $((120 + DMG_WINDOW_HEIGHT))}
+        set viewOptions to the icon view options of container window
+        set arrangement of viewOptions to not arranged
+        set icon size of viewOptions to 116
+        set text size of viewOptions to 16
+        if exists file ".background:dmg-background.png" of disk "$DMG_VOLUME_NAME" then
+            set background picture of viewOptions to file ".background:dmg-background.png"
+        end if
+        set position of item "$APP_NAME.app" of container window to {190, 245}
+        set position of item "Applications" of container window to {530, 245}
+        update without registering applications
+        delay 1
+        close
+        open
+        delay 1
+    end tell
+end tell
+EOF
+    then
+        hdiutil detach "$device" -force >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    sync
+    hdiutil detach "$device" >/dev/null
+
+    hdiutil convert \
+        "$rw_dmg" \
+        -format UDZO \
+        -imagekey zlib-level=9 \
+        -o "$output_path" >/dev/null
+
+    rm -f "$rw_dmg"
+    rm -rf "$staging_dir"
 }
 
 resolve_sign_identity() {
@@ -278,39 +377,26 @@ echo "Creating DMG..."
 rm -f "$BUILD_DIR/$DMG_NAME"
 
 if command -v create-dmg >/dev/null 2>&1; then
-    # Check for custom background
-    DMG_BG_FLAGS=""
-    if [ -f "assets/dmg-background.png" ]; then
-        DMG_BG_FLAGS="--background assets/dmg-background.png"
+    DMG_BG_FLAGS=()
+    if [ -f "$DMG_BACKGROUND_PATH" ]; then
+        DMG_BG_FLAGS+=(--background "$DMG_BACKGROUND_PATH")
     fi
 
     create-dmg \
-        --volname "Transcripted Beta" \
+        --volname "$DMG_VOLUME_NAME" \
         --window-pos 200 120 \
-        --window-size 600 400 \
-        --icon-size 100 \
-        --icon "Transcripted.app" 175 190 \
-        --hide-extension "Transcripted.app" \
-        --app-drop-link 425 190 \
+        --window-size "$DMG_WINDOW_WIDTH" "$DMG_WINDOW_HEIGHT" \
+        --icon-size 116 \
+        --icon "$APP_NAME.app" 190 245 \
+        --hide-extension "$APP_NAME.app" \
+        --app-drop-link 530 245 \
         --no-internet-enable \
-        $DMG_BG_FLAGS \
+        "${DMG_BG_FLAGS[@]}" \
         "$BUILD_DIR/$DMG_NAME" \
         "$APP_BUNDLE" \
         2>&1 || true
 else
-    echo "⚠️  create-dmg not found — using hdiutil fallback"
-    STAGING_DIR="$BUILD_DIR/dmg-staging"
-    rm -rf "$STAGING_DIR"
-    mkdir -p "$STAGING_DIR"
-    cp -R "$APP_BUNDLE" "$STAGING_DIR/"
-    ln -s /Applications "$STAGING_DIR/Applications"
-    hdiutil create \
-        -volname "Transcripted Beta" \
-        -srcfolder "$STAGING_DIR" \
-        -ov \
-        -format UDZO \
-        "$BUILD_DIR/$DMG_NAME" 2>&1
-    rm -rf "$STAGING_DIR"
+    create_finder_layout_dmg "$BUILD_DIR/$DMG_NAME"
 fi
 
 if [ ! -f "$BUILD_DIR/$DMG_NAME" ]; then
@@ -355,3 +441,9 @@ echo "✅ Done! DMG ready: $BUILD_DIR/$DMG_NAME"
 echo "   Size: $(du -sh "$BUILD_DIR/$DMG_NAME" | cut -f1)"
 echo "   Token: $BETA_TOKEN"
 echo "   User: $USER_NAME"
+if [ "$SKIP_NOTARIZATION" = "1" ] || [[ ! "$SIGNING_DISPLAY_NAME" == Developer\ ID* ]]; then
+    echo "   Note: this build is not notarized yet, so Gatekeeper rejection is still expected."
+else
+    echo "   Note: notarized downloads still show the standard macOS first-open confirmation once."
+fi
+echo "   If this build should update existing installs, regenerate docs/appcast.xml after you upload the DMG."
