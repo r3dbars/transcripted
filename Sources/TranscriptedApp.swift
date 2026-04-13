@@ -67,6 +67,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingOverlayController.setup(meetingSession: meetingSession)
             meetingOverlayController.onPromptRecord = { [weak self] candidate in
                 guard let self else { return }
+                AnalyticsReporter.track(
+                    "meeting_prompt_record_selected",
+                    properties: self.analyticsProperties(for: candidate)
+                )
                 self.meetingPromptDetector.markAccepted(candidate: candidate)
                 Task { @MainActor [weak self] in
                     guard let self else { return }
@@ -74,11 +78,24 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 }
             }
             meetingOverlayController.onPromptDismiss = { [weak self] candidate in
-                self?.meetingPromptDetector.snooze(candidate: candidate)
+                guard let self else { return }
+                AnalyticsReporter.track(
+                    "meeting_prompt_dismissed",
+                    properties: self.analyticsProperties(for: candidate)
+                )
+                self.meetingPromptDetector.snooze(candidate: candidate)
             }
             meetingPromptDetector.onPromptRequest = { [weak self] candidate in
                 guard PermissionsOnboardingView.hasCompleted else { return false }
-                return self?.meetingOverlayController.presentDetectedMeetingPrompt(candidate) ?? false
+                guard let self else { return false }
+                let presented = self.meetingOverlayController.presentDetectedMeetingPrompt(candidate)
+                if presented {
+                    AnalyticsReporter.track(
+                        "meeting_prompt_shown",
+                        properties: self.analyticsProperties(for: candidate)
+                    )
+                }
+                return presented
             }
             meetingPromptDetector.start()
             appState.contextCapture.onMeetingToggle = { [weak self] in
@@ -241,12 +258,32 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         return nil
     }
 
+    @available(macOS 14.0, *)
+    private func analyticsProperties(for candidate: MeetingPromptDetector.Candidate) -> [String: String] {
+        [
+            "provider": candidate.provider.rawValue,
+            "source": candidate.source.analyticsValue,
+        ]
+    }
+
     // MARK: - NSPopoverDelegate
 
     func popoverDidClose(_ notification: Notification) {
         menuPanelController.prepareForClose()
         if popover?.contentViewController !== menuPanelController {
             popover?.contentViewController = nil
+        }
+    }
+}
+
+@available(macOS 14.0, *)
+private extension MeetingPromptSource {
+    var analyticsValue: String {
+        switch self {
+        case .calendarEvent:
+            return "calendar_event"
+        case .runtimeApp:
+            return "runtime_app"
         }
     }
 }

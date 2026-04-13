@@ -5,6 +5,13 @@ enum MeetingPromptSource: Equatable {
     case runtimeApp
 }
 
+enum MeetingPromptWindowPolicy {
+    static func shouldOfferCalendarPrompt(startsIn: TimeInterval) -> Bool {
+        (-MeetingPromptHeuristics.calendarReminderPostStartGrace ... MeetingPromptHeuristics.calendarReminderLeadTime)
+            .contains(startsIn)
+    }
+}
+
 struct RuntimeMeetingPromptPresentation: Equatable {
     let title: String
     let detail: String
@@ -13,7 +20,10 @@ struct RuntimeMeetingPromptPresentation: Equatable {
 
 enum MeetingPromptHeuristics {
     static let runtimeReminderSnoozeInterval: TimeInterval = 2 * 60
+    static let runtimeDismissFallbackInterval: TimeInterval = 30 * 60
     static let runtimeActivityFreshness: TimeInterval = 5 * 60
+    static let calendarReminderLeadTime: TimeInterval = 60
+    static let calendarReminderPostStartGrace: TimeInterval = 5 * 60
 
     static func snoozeInterval(
         for source: MeetingPromptSource,

@@ -56,6 +56,27 @@ struct AnalyticsEventPolicy: Equatable {
                 "trigger",
             ]
         ),
+        "meeting_prompt_shown": .init(
+            name: "meeting_prompt_shown",
+            allowedProperties: [
+                "provider",
+                "source",
+            ]
+        ),
+        "meeting_prompt_dismissed": .init(
+            name: "meeting_prompt_dismissed",
+            allowedProperties: [
+                "provider",
+                "source",
+            ]
+        ),
+        "meeting_prompt_record_selected": .init(
+            name: "meeting_prompt_record_selected",
+            allowedProperties: [
+                "provider",
+                "source",
+            ]
+        ),
         "meeting_recording_stopped": .init(
             name: "meeting_recording_stopped",
             allowedProperties: [
