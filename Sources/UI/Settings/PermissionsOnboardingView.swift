@@ -23,6 +23,9 @@ extension FirstRunLocalModelState {
 }
 
 struct PermissionsOnboardingView: View {
+    private static let completionKey = "permissionsOnboardingCompleted"
+    private static let forceKey = "forcePermissionsOnboarding"
+
     @ObservedObject private var parakeetEngine: ParakeetEngine
     let canStartDictation: Bool
     var onStartDictation: (() -> Void)?
@@ -249,11 +252,14 @@ struct PermissionsOnboardingView: View {
     }
 
     static var hasCompleted: Bool {
-        UserDefaults.standard.bool(forKey: "permissionsOnboardingCompleted")
+        if UserDefaults.standard.bool(forKey: forceKey) {
+            return false
+        }
+        return UserDefaults.standard.bool(forKey: completionKey)
     }
 
     static func markCompleted() {
-        UserDefaults.standard.set(true, forKey: "permissionsOnboardingCompleted")
+        UserDefaults.standard.set(true, forKey: completionKey)
     }
 }
 
