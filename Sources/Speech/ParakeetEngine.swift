@@ -360,6 +360,29 @@ class ParakeetEngine: ObservableObject {
     func prewarm() {
         guard !isEnginePrewarmed, !isRecording else { return }
         installAudioObserversIfNeeded()
+
+        let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        switch ParakeetPrewarmPolicy.decision(for: microphoneStatus) {
+        case .proceed:
+            break
+        case .skip(let level, let event, let message, let context):
+            let eventLevel: EventLevel
+            switch level {
+            case .info:
+                eventLevel = .info
+            case .warning:
+                eventLevel = .warning
+            }
+            EventReporter.shared.capture(
+                level: eventLevel,
+                engine: "parakeet",
+                event: event,
+                message: message,
+                context: context
+            )
+            return
+        }
+
         do {
             let inputNode = audioEngine.inputNode
             let nativeFormat = inputNode.outputFormat(forBus: 0)
@@ -1056,6 +1079,25 @@ class ParakeetEngine: ObservableObject {
             return trimmed
         } catch {
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+            if let fallbackDecision = ParakeetShortAudioGate.dictationFallback(
+                nativeSampleCount: nativeCount,
+                resampledSampleCount: resampled.count,
+                errorMessage: error.localizedDescription
+            ) {
+                var fallbackContext = fallbackDecision.context
+                fallbackContext["elapsed"] = String(format: "%.2f", elapsed)
+                EventReporter.shared.capture(
+                    level: .warning,
+                    engine: "parakeet",
+                    event: fallbackDecision.event ?? "recording_too_short",
+                    message: fallbackDecision.message ?? "Dictation audio too short for transcription",
+                    context: fallbackContext
+                )
+                isTranscribing = false
+                sampleBuffer.removeAll(keepingCapacity: true)
+                return nil
+            }
+
             print("❌ PARAKEET | transcription failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "transcription_failed",
                 message: error.localizedDescription,
@@ -1107,9 +1149,30 @@ class ParakeetEngine: ObservableObject {
         }
 
         let startTime = CFAbsoluteTimeGetCurrent()
-        let result = try await manager.transcribe(samples, source: source)
+        let sourceDescription = source == .microphone ? "microphone" : "system"
+        let resultText: String
+        do {
+            let result = try await manager.transcribe(samples, source: source)
+            resultText = result.text
+        } catch {
+            if let fallbackDecision = ParakeetShortAudioGate.meetingSegmentFallback(
+                sampleCount: samples.count,
+                sourceDescription: sourceDescription,
+                errorMessage: error.localizedDescription
+            ) {
+                EventReporter.shared.capture(
+                    level: .warning,
+                    engine: "parakeet",
+                    event: fallbackDecision.event ?? "segment_too_short",
+                    message: fallbackDecision.message ?? "Skipped short audio segment before Parakeet transcription",
+                    context: fallbackDecision.context
+                )
+                return ""
+            }
+            throw error
+        }
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-        let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = resultText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let audioDuration = Double(samples.count) / TranscriptedConstants.parakeetSampleRate
         let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
