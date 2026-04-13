@@ -24,6 +24,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private var lastExternalApplication: NSRunningApplication?
     private var hasPresentedInitialOnboarding = false
     private lazy var settingsWindowController = TranscriptedSettingsWindowController(appState: appState)
+    private lazy var onboardingWindowController = TranscriptedOnboardingWindowController(
+        onComplete: { [weak self] in
+            self?.completeOnboarding()
+        }
+    )
     private lazy var menuPanelController = MenuBarPanelController(
         appState: appState,
         preferredSourceAppProvider: { [weak self] in self?.lastExternalApplication },
@@ -140,29 +145,16 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     @objc func togglePopover() {
+        if !PermissionsOnboardingView.hasCompleted {
+            onboardingWindowController.present()
+            return
+        }
+
         guard let button = statusItem?.button, let popover = popover else { return }
         if popover.isShown {
             closePopover()
         } else {
-            if let frontmost = NSWorkspace.shared.frontmostApplication,
-               frontmost.bundleIdentifier != Bundle.main.bundleIdentifier {
-                lastExternalApplication = frontmost
-            }
-            if !PermissionsOnboardingView.hasCompleted {
-                popover.contentViewController = NSHostingController(
-                    rootView: PermissionsOnboardingView(onComplete: { [weak self] in
-                        PermissionsOnboardingView.markCompleted()
-                        guard let self else { return }
-                        self.menuPanelController.refresh()
-                        self.popover?.contentViewController = self.menuPanelController
-                    })
-                )
-            } else {
-                menuPanelController.refresh()
-                popover.contentViewController = menuPanelController
-            }
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            NSApp.activate(ignoringOtherApps: true)
+            showMainPopover(relativeTo: button, popover: popover)
         }
     }
 
@@ -187,9 +179,33 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         hasPresentedInitialOnboarding = true
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self, self.popover?.isShown != true, !PermissionsOnboardingView.hasCompleted else { return }
-            self.togglePopover()
+            guard let self, !self.onboardingWindowController.isVisible, !PermissionsOnboardingView.hasCompleted else { return }
+            self.onboardingWindowController.present()
         }
+    }
+
+    private func completeOnboarding() {
+        PermissionsOnboardingView.markCompleted()
+        onboardingWindowController.dismiss()
+        closePopover()
+
+        guard let button = statusItem?.button, let popover = popover else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self else { return }
+            self.showMainPopover(relativeTo: button, popover: popover)
+        }
+    }
+
+    private func showMainPopover(relativeTo button: NSStatusBarButton, popover: NSPopover) {
+        if let frontmost = NSWorkspace.shared.frontmostApplication,
+           frontmost.bundleIdentifier != Bundle.main.bundleIdentifier {
+            lastExternalApplication = frontmost
+        }
+
+        menuPanelController.refresh()
+        popover.contentViewController = menuPanelController
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: - NSPopoverDelegate
