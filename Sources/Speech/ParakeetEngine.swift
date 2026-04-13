@@ -606,6 +606,7 @@ class ParakeetEngine: ObservableObject {
             return false
         }
 
+        installAudioObserversIfNeeded()
         recordingInterrupted = false
         didReceiveAudioSamples = false
         sampleBuffer.removeAll(keepingCapacity: true)
