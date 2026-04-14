@@ -223,7 +223,7 @@ cat > "$DEPS_BUILD/Package.swift" << 'PACKAGE_EOF'
 import PackageDescription
 let package = Package(
     name: "DraftDeps",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("26.0")],
     dependencies: [
         .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "FLUID_AUDIO_VERSION_PLACEHOLDER"),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm", revision: "MLX_SWIFT_LM_REVISION_PLACEHOLDER"),
@@ -434,7 +434,7 @@ if [ -n "$CMLX_SRC" ]; then
                 -I "$METAL_KERNELS/steel/gemm" \
                 -I "$METAL_KERNELS/steel/attn" \
                 -I "$METAL_KERNELS/steel/conv" \
-                -target air64-apple-macos14.0 \
+                -target air64-apple-macos26.0 \
                 "$metal_file" -o "$METAL_OUT/$name.air" 2>&1
         done
 

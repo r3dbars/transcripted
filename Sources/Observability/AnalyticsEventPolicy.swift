@@ -18,7 +18,7 @@ struct AnalyticsEventPolicy: Equatable {
             allowedProperties: [
                 "anonymous_usage_enabled",
                 "crash_reporting_enabled",
-                "screen_recording_enabled",
+                "system_audio_recording_enabled",
             ]
         ),
         "dictation_started": .init(

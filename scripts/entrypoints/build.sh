@@ -187,7 +187,6 @@ swiftc \
     -framework SwiftUI \
     -framework Combine \
     -framework EventKit \
-    -framework Speech \
     -framework Security \
     -framework Carbon \
     -framework Metal \
@@ -196,13 +195,14 @@ swiftc \
     -framework Vision \
     -framework MetalPerformanceShaders \
     -framework MetalPerformanceShadersGraph \
+    -framework ScreenCaptureKit \
     -framework Sentry \
     -framework Sparkle \
     -lc++ \
     $DEPS_FLAGS \
     $SOURCE_FILES \
     -parse-as-library \
-    -target arm64-apple-macos14.0 \
+    -target arm64-apple-macos26.0 \
     -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
     2>&1
 

@@ -27,7 +27,7 @@
 	<key>CFBundleExecutable</key>
 	<string>Transcripted</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>14.0</string>
+	<string>26.0</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>SUEnableAutomaticChecks</key>
@@ -38,8 +38,6 @@
 	<string>Ib6MHm4eeZYjhsZblNT0DEo3LzK9fYvBLkmqvw/Vo7Q=</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Transcripted needs microphone access for dictation and to capture your side of meetings.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Transcripted uses speech recognition to turn your voice into text.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Transcripted needs screen recording access so meeting capture can access system audio from calls, videos, and other apps.</string>
 	<key>NSAudioCaptureUsageDescription</key>

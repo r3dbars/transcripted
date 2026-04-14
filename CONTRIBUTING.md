@@ -19,7 +19,7 @@ state already exists.
 
 ### Prerequisites
 
-- macOS 14+
+- macOS 26+
 - Xcode command line tools
 - Apple Silicon
 

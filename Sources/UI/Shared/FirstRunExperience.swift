@@ -42,8 +42,8 @@ enum FirstRunExperience {
     ) -> FirstRunPrimaryActionState {
         guard hasRequiredPermissions else {
             return FirstRunPrimaryActionState(
-                title: "Turn on microphone and accessibility",
-                detail: "Turn on Microphone and Accessibility first. That's enough for your first dictation.",
+                title: "Turn on the required permissions",
+                detail: "Turn on Microphone, Accessibility, and System Audio Recording first so dictation and meetings are ready right away.",
                 isEnabled: false,
                 shouldStartDictation: false
             )

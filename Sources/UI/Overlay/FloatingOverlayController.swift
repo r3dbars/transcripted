@@ -54,6 +54,8 @@ class FloatingOverlayController {
     var reviewText: String = ""
     var streamingText: String = ""
     var errorMessage: String = ""
+    private var errorActionTitle: String?
+    private var errorActionHandler: (() -> Void)?
     var loadingElapsedSeconds: Int = 0 {
         didSet { pushStateToViews() }
     }
@@ -178,6 +180,8 @@ class FloatingOverlayController {
             state,
             dictationShortcutHint: dictationShortcutHint,
             errorMessage: errorMessage,
+            errorActionTitle: errorActionTitle,
+            onErrorAction: errorActionHandler,
             loadingPresentation: loadingPresentation,
             loadingElapsedSeconds: loadingElapsedSeconds,
             isTranscribing: sttRouter?.isTranscribing ?? false,
@@ -366,6 +370,8 @@ class FloatingOverlayController {
     func showLoadingState(near sourceApp: NSRunningApplication? = nil, presentation: LoadingPresentation? = nil) {
         errorDismissTask?.cancel()
         errorMessage = ""
+        errorActionTitle = nil
+        errorActionHandler = nil
         if let presentation {
             loadingPresentation = presentation
         }
@@ -395,23 +401,32 @@ class FloatingOverlayController {
         }
     }
 
-    func showError(_ message: String) {
+    func showError(
+        _ message: String,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) {
         errorDismissTask?.cancel()
         loadingTimerTask?.cancel()
         loadingTimerTask = nil
         errorMessage = message
+        errorActionTitle = actionTitle
+        errorActionHandler = action
         state = .drafting
-        resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
+        resizePanel(to: errorPanelSize())
         if !isVisible {
             showPanel(near: nil)
         }
         pushStateToViews()  // Force update for error message
+        guard actionTitle == nil else { return }
         errorDismissTask = Task { @MainActor [weak self] in
             do {
                 try await Task.sleep(nanoseconds: TranscriptedConstants.errorDismissDelay)
             } catch { return }
             guard let self = self, !self.errorMessage.isEmpty else { return }
             self.errorMessage = ""
+            self.errorActionTitle = nil
+            self.errorActionHandler = nil
             self.hideWithCancelAnimation()
         }
     }
@@ -420,6 +435,8 @@ class FloatingOverlayController {
     func showNoSpeechAndDismiss() {
         errorDismissTask?.cancel()
         errorMessage = "No speech detected"
+        errorActionTitle = nil
+        errorActionHandler = nil
         state = .drafting
         resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
         if !isVisible {
@@ -441,6 +458,8 @@ class FloatingOverlayController {
         loadingTimerTask?.cancel()
         successDismissTask?.cancel()
         errorMessage = ""
+        errorActionTitle = nil
+        errorActionHandler = nil
         state = .success
         resizePanelToCompact()
         if !isVisible {
@@ -478,6 +497,8 @@ class FloatingOverlayController {
         reviewText = ""
         streamingText = ""
         errorMessage = ""
+        errorActionTitle = nil
+        errorActionHandler = nil
         loadingPresentation = .initial
     }
 
@@ -540,11 +561,18 @@ class FloatingOverlayController {
         case .loading:
             return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
         case .drafting where !errorMessage.isEmpty:
-            return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight)
+            return errorPanelSize()
         case .idle, .listening, .drafting, .success:
             return NSSize(width: OverlayTokens.panelCompactWidth, height: OverlayTokens.panelCompactHeight)
         default:
             return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight)
         }
+    }
+
+    private func errorPanelSize() -> NSSize {
+        let height = errorActionTitle == nil
+            ? OverlayTokens.panelMinHeight
+            : OverlayTokens.panelActionErrorHeight
+        return NSSize(width: OverlayTokens.panelWidth, height: height)
     }
 }

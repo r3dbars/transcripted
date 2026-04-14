@@ -217,6 +217,7 @@ class DictationSessionController: ObservableObject {
 
         let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         guard microphoneStatus == .authorized else {
+            let shouldOfferSettingsAction = shouldOfferMicrophoneSettingsAction(for: microphoneStatus)
             DiagnosticsTrail.record(
                 logger: appState.logger,
                 level: .error,
@@ -231,7 +232,16 @@ class DictationSessionController: ObservableObject {
                     ]
                 )
             )
-            overlayController.showError(microphoneUnavailableMessage(for: microphoneStatus))
+            overlayController.showError(
+                microphoneUnavailableMessage(
+                    for: microphoneStatus,
+                    openedSettings: false
+                ),
+                actionTitle: shouldOfferSettingsAction ? "Open Microphone Settings" : nil,
+                action: shouldOfferSettingsAction ? {
+                    TranscriptedPermissionAccess.openSettings(for: .microphone)
+                } : nil
+            )
             isDictating = false
             return
         }
@@ -654,11 +664,28 @@ class DictationSessionController: ObservableObject {
         overlayController?.showError("Recording was interrupted. Try again.")
     }
 
-    private func microphoneUnavailableMessage(for status: AVAuthorizationStatus) -> String {
+    private func shouldOfferMicrophoneSettingsAction(for status: AVAuthorizationStatus) -> Bool {
+        switch status {
+        case .denied, .restricted:
+            return true
+        case .notDetermined, .authorized:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    private func microphoneUnavailableMessage(
+        for status: AVAuthorizationStatus,
+        openedSettings: Bool = false
+    ) -> String {
         switch status {
         case .notDetermined:
             return "Transcripted is still waiting for microphone permission."
         case .denied, .restricted:
+            if openedSettings {
+                return "Microphone access is off. Transcripted opened the Microphone pane in System Settings."
+            }
             return "Microphone access is off. Turn it on in System Settings."
         case .authorized:
             return "Microphone unavailable. Check your audio input and try again."

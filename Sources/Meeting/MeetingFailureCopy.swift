@@ -11,10 +11,12 @@ struct MeetingFailureCopy: Equatable {
     ) -> MeetingFailureCopy {
         let message = errorMessage.lowercased()
 
-        if message.contains("system audio is required") || message.contains("screen recording") {
+        if message.contains("system audio is required")
+            || message.contains("system audio recording")
+            || message.contains("screen recording") {
             return MeetingFailureCopy(
-                title: "Turn on Screen Recording",
-                detail: "Turn on Screen Recording in System Settings, then retry the meeting."
+                title: "Turn on System Audio Recording",
+                detail: "Turn on System Audio Recording in System Settings, then retry the meeting."
             )
         }
 

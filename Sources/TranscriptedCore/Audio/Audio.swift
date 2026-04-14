@@ -31,7 +31,7 @@ public enum SystemAudioStatus: Equatable {
         case .healthy: return ""
         case .reconnecting: return "Reconnecting..."
         case .silent: return "System audio silent"
-        case .failed: return "System audio unavailable \u{2014} enable Screen Recording for Transcripted in System Settings"
+        case .failed: return "System audio unavailable \u{2014} enable System Audio Recording for Transcripted in System Settings"
         }
     }
 }
@@ -217,7 +217,7 @@ public class Audio: ObservableObject {
     @Published var systemAudioFailed: Bool = false
 
     // System audio capture
-    var systemAudioCapture: Any? // SystemAudioCapture (macOS 14.2+)
+    var systemAudioCapture: (any SystemAudioCaptureEngine)?
 
     // Audio file recording
     var systemAudioFile: AVAudioFile?
@@ -332,28 +332,22 @@ public class Audio: ObservableObject {
 
         AppLogger.audioMic.info("Using system default microphone")
 
-        // Request microphone permission
-        AVCaptureDevice.requestAccess(for: .audio) { granted in
-            if !granted {
-                DispatchQueue.main.async {
-                    self.error = "Microphone permission denied. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted."
-                }
+        // Do not prompt for microphone access during object construction.
+        // MeetingSessionController creates Audio during background warmup, and
+        // prompting here makes permission dialogs appear before the user has
+        // explicitly asked to record a meeting.
+
+        // Initialize system audio capture using the macOS 26+ audio-only
+        // ScreenCaptureKit path. This keeps meeting audio on the narrower
+        // "System Audio Recording" permission tier and avoids restart-required
+        // Screen Recording flows.
+        let capture = SCKAudioCapture()
+        systemAudioCapture = capture
+        systemAudioCancellable = capture.errorMessagePublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] errorMessage in
+                self?.updateSystemAudioStatus(fromError: errorMessage)
             }
-        }
-
-        // Initialize system audio capture (macOS 14.2+)
-        if #available(macOS 14.2, *) {
-            let capture = SystemAudioCapture()
-            systemAudioCapture = capture
-
-            // Observe SystemAudioCapture's errorMessage to update status
-            // This allows the UI to react to device changes and failures
-            systemAudioCancellable = capture.$errorMessage
-                .receive(on: DispatchQueue.main)
-                .sink { [weak self] errorMessage in
-                    self?.updateSystemAudioStatus(fromError: errorMessage)
-                }
-        }
 
         // MARK: - Sleep/Wake Observers (Phase 1: Invisible Reliability)
         // Handle macOS sleep/wake to prevent AVAudioEngine crashes and log gaps
@@ -558,9 +552,7 @@ public class Audio: ObservableObject {
         }
 
         // Stop system audio capture
-        if #available(macOS 14.2, *), let capture = systemAudioCapture as? SystemAudioCapture {
-            capture.stop()
-        }
+        systemAudioCapture?.stop()
 
         // Use the original mic URL (set at recording start), not the potentially-overwritten
         // recovery URL. Device recovery creates a new WAV segment but the original file
@@ -648,7 +640,7 @@ public class Audio: ObservableObject {
         }
 
         // Start system audio capture for level metering only (no file writing)
-        if #available(macOS 14.2, *), let capture = systemAudioCapture as? SystemAudioCapture {
+        if let capture = systemAudioCapture {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 do {
                     try capture.prepare()
@@ -681,9 +673,7 @@ public class Audio: ObservableObject {
             }
         }
 
-        if #available(macOS 14.2, *), let capture = systemAudioCapture as? SystemAudioCapture {
-            capture.stopSync()  // Synchronous — avoids race where delayed cleanup destroys the next recording's tap
-        }
+        systemAudioCapture?.stopSync()  // Synchronous — avoids race where delayed cleanup destroys the next recording's tap
 
         DispatchQueue.main.async {
             self.isMonitoring = false

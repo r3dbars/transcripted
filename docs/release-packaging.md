@@ -6,6 +6,10 @@ Use `build-beta.sh` for anything you intend to hand to another machine. That is
 the path that applies hardened runtime signing, builds a DMG, and optionally
 submits it for notarization.
 
+Transcripted now targets macOS 26+ for app builds and packaged releases. If a
+build is meant to ship to users, keep the bundle metadata, build targets, and
+Sparkle release metadata aligned with that floor.
+
 The distribution DMG now uses committed release art:
 
 - app icon: `Resources/Transcripted.icns`

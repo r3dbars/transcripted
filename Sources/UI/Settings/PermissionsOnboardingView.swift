@@ -34,7 +34,7 @@ struct PermissionsOnboardingView: View {
 
     @State private var micGranted = false
     @State private var accessibilityGranted = false
-    @State private var screenRecordingGranted = false
+    @State private var systemAudioRecordingGranted = false
     @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
     @State private var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
     @State private var pollTimer: Timer?
@@ -102,9 +102,9 @@ struct PermissionsOnboardingView: View {
                         QuickStartRow(
                             icon: "record.circle.fill",
                             title: "Meetings",
-                            detail: screenRecordingGranted
+                            detail: systemAudioRecordingGranted
                                 ? "Meeting audio is ready too. Calendar prompts stay optional."
-                                : MeetingRecordingStartGate.screenRecordingQuickStart
+                                : MeetingRecordingStartGate.systemAudioRecordingQuickStart
                         )
                     }
                     .padding(14)
@@ -152,7 +152,7 @@ struct PermissionsOnboardingView: View {
     }
 
     private var hasRequiredPermissions: Bool {
-        micGranted && accessibilityGranted
+        micGranted && accessibilityGranted && systemAudioRecordingGranted
     }
 
     private var requiredPermissions: [TranscriptedPermissionKind] {
@@ -181,8 +181,8 @@ struct PermissionsOnboardingView: View {
             return micGranted
         case .accessibility:
             return accessibilityGranted
-        case .screenRecording:
-            return screenRecordingGranted
+        case .systemAudioRecording:
+            return systemAudioRecordingGranted
         case .calendar:
             return TranscriptedPermissionAccess.isGranted(.calendar)
         }
@@ -191,7 +191,7 @@ struct PermissionsOnboardingView: View {
     private func checkAllPermissions() {
         micGranted = TranscriptedPermissionAccess.isGranted(.microphone)
         accessibilityGranted = TranscriptedPermissionAccess.isGranted(.accessibility)
-        screenRecordingGranted = TranscriptedPermissionAccess.isGranted(.screenRecording)
+        systemAudioRecordingGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
     }
 
     private func startPolling() {
@@ -220,7 +220,7 @@ struct PermissionsOnboardingView: View {
             properties: [
                 "anonymous_usage_enabled": anonymousAnalyticsEnabled ? "true" : "false",
                 "crash_reporting_enabled": crashReportingEnabled ? "true" : "false",
-                "screen_recording_enabled": screenRecordingGranted ? "true" : "false",
+                "system_audio_recording_enabled": systemAudioRecordingGranted ? "true" : "false",
             ]
         )
         if startFirstDictation, let onStartDictation {

@@ -76,6 +76,10 @@ Cross-cutting permission checks now live in `Sources/Support/TranscriptedPermiss
 so the meeting prompt detector and the settings/onboarding flows share the same
 app-level permission logic outside the UI tree.
 
+Keep user-visible TCC prompts user-initiated. Background warmup paths should
+not request microphone, system-audio-recording, or calendar access on their own;
+onboarding and Settings own those prompts so the dialogs appear in context.
+
 ## Observation Pattern
 
 Controllers own Combine subscriptions and push explicit `update(...)` calls into

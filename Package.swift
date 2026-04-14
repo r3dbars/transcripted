@@ -26,7 +26,7 @@ let repoRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 
 let package = Package(
     name: "TranscriptedCore",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("26.0")],
     products: [
         .library(
             name: "TranscriptedCore",
@@ -68,6 +68,7 @@ let package = Package(
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("Network"),
+                .linkedFramework("ScreenCaptureKit"),
             ]
         ),
         .testTarget(
@@ -106,6 +107,7 @@ let package = Package(
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("Network"),
+                .linkedFramework("ScreenCaptureKit"),
             ]
         ),
     ]

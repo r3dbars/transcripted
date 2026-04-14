@@ -63,7 +63,7 @@ swiftc \
     -Xlinker -rpath -Xlinker "$REPO_ROOT/deps-frameworks" \
     "$REPO_ROOT/Tests/Integration/AppCoreIntegrationSmoke.swift" \
     -parse-as-library \
-    -target arm64-apple-macos14.0 \
+    -target arm64-apple-macos26.0 \
     -Xlinker -rpath -Xlinker "$DEPS_FRAMEWORK_ROOT" \
     2>&1
 
@@ -74,7 +74,7 @@ swiftc \
     "$REPO_ROOT/Sources/Reliability/WakeRecoveryCoordinator.swift" \
     "$REPO_ROOT/Tests/Integration/WakeRecoveryIntegrationSmoke.swift" \
     -parse-as-library \
-    -target arm64-apple-macos14.0 \
+    -target arm64-apple-macos26.0 \
     2>&1
 
 echo ""
