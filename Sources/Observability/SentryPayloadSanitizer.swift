@@ -22,8 +22,15 @@ enum SentryPayloadSanitizer {
 
     private static let userPathRegex = try! NSRegularExpression(pattern: #"/Users/[^/\s]+/"#)
     private static let absolutePathRegex = try! NSRegularExpression(pattern: #"(?<!https:)(?<!http:)/(?:Users|private|var|tmp|Volumes|Applications)[^\s"]*"#)
+    private static let rawURLRegex = try! NSRegularExpression(pattern: #"https?://[^\s"]+"#, options: [.caseInsensitive])
     private static let apiKeyRegex = try! NSRegularExpression(pattern: #"sk-[A-Za-z0-9_-]+"#)
+    private static let commonSecretRegex = try! NSRegularExpression(
+        pattern: #"\b(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|phc_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|xoxx-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}\.[A-Za-z0-9._-]{10,})\b"#
+    )
     private static let bearerRegex = try! NSRegularExpression(pattern: #"Bearer [A-Za-z0-9._-]+"#)
+    private static let secretAssignmentRegex = try! NSRegularExpression(
+        pattern: #"(?i)\b((?:access_)?token|refresh_token|api[_-]?key|x-api-key|signature|x-amz-signature)\s*[:=]\s*([^\s,;]+)"#
+    )
     private static let emailRegex = try! NSRegularExpression(pattern: #"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}"#, options: [.caseInsensitive])
     private static let localHostnameRegex = try! NSRegularExpression(pattern: #"\b[a-zA-Z0-9._-]+\.local\b"#)
 
@@ -88,9 +95,15 @@ enum SentryPayloadSanitizer {
         range = NSRange(result.startIndex..., in: result)
         result = absolutePathRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-path]")
         range = NSRange(result.startIndex..., in: result)
+        result = rawURLRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-url]")
+        range = NSRange(result.startIndex..., in: result)
         result = apiKeyRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "sk-****")
         range = NSRange(result.startIndex..., in: result)
+        result = commonSecretRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-secret]")
+        range = NSRange(result.startIndex..., in: result)
         result = bearerRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "Bearer ****")
+        range = NSRange(result.startIndex..., in: result)
+        result = secretAssignmentRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1=[redacted-secret]")
         range = NSRange(result.startIndex..., in: result)
         result = emailRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-email]")
         range = NSRange(result.startIndex..., in: result)
