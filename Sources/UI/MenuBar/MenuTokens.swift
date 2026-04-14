@@ -51,18 +51,21 @@ enum MenuTokens {
     // SwiftUI wrappers still used by onboarding
     static let statusGreen = Color.green
     static let statusOrange = Color.orange
+    static let textPrimary = Color(MenuTokens.textPrimaryNS)
     static let textSecondary = Color(MenuTokens.textSecondaryNS)
     static let textMuted = Color(MenuTokens.textMutedNS)
     static let cardBackground = Color(MenuTokens.surfaceBackgroundNS)
     static let cardBorder = Color(MenuTokens.surfaceStrokeNS)
     static let pillBackground = Color(MenuTokens.badgeBackgroundNS)
     static let pillBorder = Color(MenuTokens.badgeBorderNS)
+    static let savedBackground = Color(MenuTokens.savedBackgroundNS)
+    static let savedBorder = Color(MenuTokens.savedBorderNS)
 
     // Layout
     static let panelWidth: CGFloat = 360
     static let panelHeight: CGFloat = 408
-    static let onboardingWindowWidth: CGFloat = 560
-    static let onboardingWindowHeight: CGFloat = 660
+    static let onboardingWindowWidth: CGFloat = 620
+    static let onboardingWindowHeight: CGFloat = 760
     static let innerPadding: CGFloat = 14
     static let sectionSpacing: CGFloat = 8
     static let surfaceCornerRadius: CGFloat = 16

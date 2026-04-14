@@ -54,15 +54,27 @@ struct PermissionsOnboardingView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             OnboardingHeroCard()
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 14)
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 14)
 
             Divider()
                 .overlay(MenuTokens.cardBorder)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Required now")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(MenuTokens.textPrimary)
+
+                        Text("Turn on these first so Transcripted can start dictation and paste text back into the app you were using.")
+                            .font(.footnote)
+                            .foregroundStyle(MenuTokens.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.bottom, 2)
+
                     ForEach(requiredPermissions) { kind in
                         PermissionSetupCard(
                             kind: kind,
@@ -89,7 +101,8 @@ struct PermissionsOnboardingView: View {
 
                     VStack(alignment: .leading, spacing: 10) {
                         Text("What happens next")
-                            .font(.subheadline.weight(.semibold))
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(MenuTokens.textPrimary)
 
                         QuickStartRow(
                             icon: "mic.fill",
@@ -126,13 +139,19 @@ struct PermissionsOnboardingView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 Text(primaryAction.detail)
-                    .font(.caption)
+                    .font(.footnote)
                     .foregroundStyle(MenuTokens.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                Button(primaryAction.title) {
+                Button {
                     handlePrimaryAction()
+                } label: {
+                    Text(primaryAction.title)
+                        .font(.headline.weight(.semibold))
+                        .frame(minWidth: 220)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .disabled(!primaryAction.isEnabled)
             }
             .padding(.horizontal, 20)
@@ -140,6 +159,7 @@ struct PermissionsOnboardingView: View {
         }
         .frame(width: MenuTokens.onboardingWindowWidth, height: MenuTokens.onboardingWindowHeight)
         .background(MenuTokens.cardBackground)
+        .preferredColorScheme(.dark)
         .onAppear {
             checkAllPermissions()
             crashReportingEnabled = CrashReportingPreferences.isEnabled()
@@ -264,10 +284,11 @@ private struct LocalDictationModelCard: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(status.title)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(MenuTokens.textPrimary)
 
                     Text(status.detail)
-                        .font(.caption)
+                        .font(.footnote)
                         .foregroundStyle(MenuTokens.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -275,7 +296,7 @@ private struct LocalDictationModelCard: View {
                 Spacer(minLength: 8)
 
                 Text(status.status)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.footnote.weight(.semibold))
                     .foregroundStyle(iconColor)
             }
 
@@ -288,10 +309,10 @@ private struct LocalDictationModelCard: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(MenuTokens.cardBackground)
+                .fill(cardFill)
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(MenuTokens.cardBorder, lineWidth: 1)
+                        .stroke(cardStroke, lineWidth: 1)
                 )
         )
     }
@@ -317,20 +338,39 @@ private struct LocalDictationModelCard: View {
             return Color.orange
         }
     }
+
+    private var cardFill: Color {
+        switch status.tone {
+        case .ready:
+            return MenuTokens.savedBackground
+        case .working, .failed:
+            return MenuTokens.cardBackground
+        }
+    }
+
+    private var cardStroke: Color {
+        switch status.tone {
+        case .ready:
+            return MenuTokens.savedBorder
+        case .working, .failed:
+            return MenuTokens.cardBorder
+        }
+    }
 }
 
 private struct OnboardingHeroCard: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 16) {
                 AppIconPreview()
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Welcome to Transcripted")
-                        .font(.title2.weight(.semibold))
+                        .font(.system(size: 30, weight: .semibold))
+                        .foregroundStyle(MenuTokens.textPrimary)
 
                     Text("We’ll get the core permissions ready here, then open the menu bar controls so you can start dictating right away.")
-                        .font(.callout)
+                        .font(.title3.weight(.medium))
                         .foregroundStyle(MenuTokens.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -344,16 +384,16 @@ private struct OnboardingHeroCard: View {
 
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(MenuTokens.textSecondary)
                     .frame(width: 16)
 
                 Text("After setup, Transcripted lives in your menu bar. Use that icon to start dictation, record a meeting, open settings, or check for updates.")
-                    .font(.caption)
+                    .font(.footnote)
                     .foregroundStyle(MenuTokens.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(12)
+            .padding(14)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(MenuTokens.pillBackground)
@@ -389,7 +429,7 @@ private struct AppIconPreview: View {
         Image(nsImage: iconImage)
             .resizable()
             .interpolation(.high)
-            .frame(width: 68, height: 68)
+            .frame(width: 76, height: 76)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
     }
@@ -402,13 +442,13 @@ private struct FeaturePill: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.caption.weight(.semibold))
+                .font(.footnote.weight(.semibold))
             Text(title)
-                .font(.caption.weight(.medium))
+                .font(.footnote.weight(.semibold))
         }
-        .foregroundStyle(.primary)
+        .foregroundStyle(MenuTokens.textPrimary)
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.vertical, 7)
         .background(
             Capsule()
                 .fill(MenuTokens.pillBackground)
@@ -425,27 +465,29 @@ private struct PermissionSetupCard: View {
     let action: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
                 ZStack {
                     Circle()
                         .fill(MenuTokens.pillBackground)
-                        .frame(width: 34, height: 34)
+                        .frame(width: 40, height: 40)
 
                     Image(systemName: kind.icon)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(MenuTokens.textPrimary)
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
                         Text(kind.title)
-                            .font(.subheadline.weight(.semibold))
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(MenuTokens.textPrimary)
 
                         RequirementBadge(title: kind.isRequiredOnFirstLaunch ? "Required" : "Optional")
                     }
 
                     Text(kind.summary)
-                        .font(.caption)
+                        .font(.callout)
                         .foregroundStyle(MenuTokens.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -477,38 +519,18 @@ private struct OptionalPermissionsCard: View {
     let isGranted: (TranscriptedPermissionKind) -> Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Optional later")
-                .font(.subheadline.weight(.semibold))
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(MenuTokens.textPrimary)
 
             Text(MeetingRecordingStartGate.optionalPermissionsFootnote)
-                .font(.caption)
+                .font(.footnote)
                 .foregroundStyle(MenuTokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             ForEach(optionalPermissions) { kind in
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: kind.icon)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(MenuTokens.textMuted)
-                        .frame(width: 16, height: 16)
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text(kind.title)
-                                .font(.caption.weight(.semibold))
-
-                            Text(isGranted(kind) ? "Ready" : "Later")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(isGranted(kind) ? MenuTokens.statusGreen : MenuTokens.textMuted)
-                        }
-
-                        Text(kind.summary)
-                            .font(.caption)
-                            .foregroundStyle(MenuTokens.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
+                OptionalPermissionRow(kind: kind, granted: isGranted(kind))
             }
         }
         .padding(14)
@@ -532,36 +554,35 @@ private struct ObservabilityConsentCard: View {
     let onAnalyticsToggle: (Bool) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Help improve Transcripted")
-                .font(.subheadline.weight(.semibold))
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(MenuTokens.textPrimary)
 
             Text("These start on by default for this release, and you can turn either one off right now or later in Settings. Transcripted never sends transcript text, audio, meeting titles, speaker names, source app names, emails, file paths, or raw URLs.")
-                .font(.caption)
+                .font(.footnote)
                 .foregroundStyle(MenuTokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             ObservabilityQuestionRow(
                 icon: "bolt.shield.fill",
-                question: "Share crash and error reports to help diagnose broken releases?",
+                title: "Share crash and error reports",
                 detail: crashFootnote,
                 isOn: Binding(
                     get: { crashReportingEnabled },
                     set: { onCrashToggle($0) }
                 ),
-                toggleTitle: "Share crash and error reports",
                 isAvailable: crashReportingAvailable
             )
 
             ObservabilityQuestionRow(
                 icon: "chart.bar.xaxis",
-                question: "Share anonymized usage stats to show what parts of Transcripted people actually use?",
+                title: "Share anonymous usage stats",
                 detail: analyticsFootnote,
                 isOn: Binding(
                     get: { anonymousAnalyticsEnabled },
                     set: { onAnalyticsToggle($0) }
                 ),
-                toggleTitle: "Share anonymous usage stats",
                 isAvailable: analyticsAvailable
             )
         }
@@ -599,38 +620,41 @@ private struct ObservabilityConsentCard: View {
 
 private struct ObservabilityQuestionRow: View {
     let icon: String
-    let question: String
+    let title: String
     let detail: String
     @Binding var isOn: Bool
-    let toggleTitle: String
     let isAvailable: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(MenuTokens.pillBackground)
-                        .frame(width: 34, height: 34)
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(MenuTokens.pillBackground)
+                    .frame(width: 40, height: 40)
 
-                    Image(systemName: icon)
-                        .font(.system(size: 14, weight: .semibold))
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(question)
-                        .font(.subheadline.weight(.semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(MenuTokens.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(MenuTokens.textPrimary)
             }
 
-            Toggle(toggleTitle, isOn: $isOn)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(MenuTokens.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(MenuTokens.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 12)
+
+            Toggle("", isOn: $isOn)
+                .labelsHidden()
                 .disabled(!isAvailable)
+                .accessibilityLabel(title)
         }
         .padding(14)
         .background(
@@ -649,7 +673,7 @@ private struct RequirementBadge: View {
 
     var body: some View {
         Text(title)
-            .font(.system(size: 10, weight: .semibold))
+            .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(MenuTokens.textMuted)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
@@ -669,18 +693,18 @@ private struct StatusBadge: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: granted ? "checkmark.circle.fill" : "circle.dashed")
-                .font(.caption.weight(.semibold))
+                .font(.footnote.weight(.semibold))
             Text(granted ? "Ready" : "Pending")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
         }
         .foregroundStyle(granted ? MenuTokens.statusGreen : MenuTokens.textMuted)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(
             Capsule()
-                .fill(MenuTokens.pillBackground)
+                .fill(granted ? MenuTokens.savedBackground : MenuTokens.pillBackground)
                 .overlay(
-                    Capsule().stroke(MenuTokens.pillBorder, lineWidth: 1)
+                    Capsule().stroke(granted ? MenuTokens.savedBorder : MenuTokens.pillBorder, lineWidth: 1)
                 )
         )
     }
@@ -693,19 +717,79 @@ private struct QuickStartRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(MenuTokens.textSecondary)
-                .frame(width: 16)
+            ZStack {
+                Circle()
+                    .fill(MenuTokens.pillBackground)
+                    .frame(width: 28, height: 28)
 
-            VStack(alignment: .leading, spacing: 2) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(MenuTokens.textPrimary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.caption.weight(.semibold))
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(MenuTokens.textPrimary)
                 Text(detail)
-                    .font(.caption)
+                    .font(.footnote)
                     .foregroundStyle(MenuTokens.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(MenuTokens.pillBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(MenuTokens.pillBorder, lineWidth: 1)
+                )
+        )
+    }
+}
+
+private struct OptionalPermissionRow: View {
+    let kind: TranscriptedPermissionKind
+    let granted: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(MenuTokens.pillBackground)
+                    .frame(width: 32, height: 32)
+
+                Image(systemName: kind.icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(MenuTokens.textPrimary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(kind.title)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(MenuTokens.textPrimary)
+
+                    Text(granted ? "Ready" : "Later")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(granted ? MenuTokens.statusGreen : MenuTokens.textMuted)
+                }
+
+                Text(kind.summary)
+                    .font(.footnote)
+                    .foregroundStyle(MenuTokens.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(MenuTokens.pillBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(MenuTokens.pillBorder, lineWidth: 1)
+                )
+        )
     }
 }
