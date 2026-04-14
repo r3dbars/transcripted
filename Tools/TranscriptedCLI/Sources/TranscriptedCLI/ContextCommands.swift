@@ -129,7 +129,7 @@ struct ReadDictation: ParsableCommand {
         abstract: "Read a dictation day file or one specific dictation entry."
     )
 
-    @Argument(help: "Dictation day filename, with or without .json.")
+    @Argument(help: "Dictation day filename, with or without .md.")
     var filename: String
 
     @OptionGroup var paths: CLIContextPathOptions
