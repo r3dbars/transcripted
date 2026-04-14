@@ -122,6 +122,7 @@ APP_SOURCES=(
     "Sources/Speech/RecordedAudioTimeline.swift"
     "Sources/Meeting/MeetingRecordingStartGate.swift"
     "Sources/Meeting/MeetingFailureCopy.swift"
+    "Sources/Meeting/MeetingFailureKind.swift"
     "Sources/Meeting/MeetingPromptHeuristics.swift"
     "Sources/Meeting/MeetingSessionUIPolicy.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
