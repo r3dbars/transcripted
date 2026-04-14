@@ -217,6 +217,7 @@ class DictationSessionController: ObservableObject {
 
         let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         guard microphoneStatus == .authorized else {
+            let openedMicrophoneSettings = shouldOpenMicrophoneSettings(for: microphoneStatus)
             DiagnosticsTrail.record(
                 logger: appState.logger,
                 level: .error,
@@ -231,7 +232,15 @@ class DictationSessionController: ObservableObject {
                     ]
                 )
             )
-            overlayController.showError(microphoneUnavailableMessage(for: microphoneStatus))
+            if openedMicrophoneSettings {
+                TranscriptedPermissionAccess.openSettings(for: .microphone)
+            }
+            overlayController.showError(
+                microphoneUnavailableMessage(
+                    for: microphoneStatus,
+                    openedSettings: openedMicrophoneSettings
+                )
+            )
             isDictating = false
             return
         }
@@ -654,11 +663,28 @@ class DictationSessionController: ObservableObject {
         overlayController?.showError("Recording was interrupted. Try again.")
     }
 
-    private func microphoneUnavailableMessage(for status: AVAuthorizationStatus) -> String {
+    private func shouldOpenMicrophoneSettings(for status: AVAuthorizationStatus) -> Bool {
+        switch status {
+        case .denied, .restricted:
+            return true
+        case .notDetermined, .authorized:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    private func microphoneUnavailableMessage(
+        for status: AVAuthorizationStatus,
+        openedSettings: Bool = false
+    ) -> String {
         switch status {
         case .notDetermined:
             return "Transcripted is still waiting for microphone permission."
         case .denied, .restricted:
+            if openedSettings {
+                return "Microphone access is off. Transcripted opened the Microphone pane in System Settings."
+            }
             return "Microphone access is off. Turn it on in System Settings."
         case .authorized:
             return "Microphone unavailable. Check your audio input and try again."
