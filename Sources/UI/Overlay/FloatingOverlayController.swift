@@ -1,9 +1,23 @@
 // FloatingOverlayController.swift
-// State machine, animations, panel lifecycle, and global Escape monitor for the floating overlay
-// Pure AppKit — no SwiftUI, no NSHostingView, no AttributeGraph
+// State machine, animations, panel lifecycle, and global Escape monitor for the floating overlay.
+// The shell stays AppKit; an optional SwiftUI listening pill can be enabled for experiments.
 
 import AppKit
 import Combine
+import SwiftUI
+
+private enum OverlayExperiments {
+    static var experimentalListeningOverlayEnabled: Bool {
+        if let rawValue = ProcessInfo.processInfo.environment["TRANSCRIPTED_EXPERIMENTAL_GLASS_OVERLAY"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        {
+            return ["1", "true", "yes", "on"].contains(rawValue)
+        }
+
+        return UserDefaults.standard.bool(forKey: "ExperimentalGlassOverlay")
+    }
+}
 
 @MainActor
 class FloatingOverlayController {
@@ -70,9 +84,13 @@ class FloatingOverlayController {
 
     private var panel: FloatingOverlayPanel?
     private var rootView: OverlayRootView?
+    private var overlayContentView: NSView?
     private var glassContainerView: NSGlassEffectContainerView?
     private var glassSurfaceView: NSGlassEffectView?
     private var dragHandleView: PanelDragView?
+    private let usesExperimentalListeningOverlay = OverlayExperiments.experimentalListeningOverlayEnabled
+    private var experimentalListeningModel: ExperimentalListeningOverlayModel?
+    private var experimentalListeningHostingView: TransparentHostingView<ExperimentalListeningOverlayView>?
     private var escapeMonitor: Any?
 
     /// Generation counter — incremented on every showPanel(), checked in async _performHide()
@@ -126,15 +144,39 @@ class FloatingOverlayController {
         glassStageView.addSubview(glassSurfaceView)
         self.glassSurfaceView = glassSurfaceView
 
-        // Pure AppKit root view kept inside the effect view so labels and controls
-        // can inherit system vibrancy without reintroducing SwiftUI hosting.
-        let rootView = OverlayRootView(frame: glassSurfaceView.bounds)
+        let overlayContentView = NSView(frame: glassSurfaceView.bounds)
+        overlayContentView.autoresizingMask = [.width, .height]
+        glassSurfaceView.contentView = overlayContentView
+        self.overlayContentView = overlayContentView
+
+        // The AppKit root view remains the default renderer and fallback path.
+        let rootView = OverlayRootView(frame: overlayContentView.bounds)
         rootView.autoresizingMask = [.width, .height]
         rootView.headerView.onStopRequested = { [weak self] in
             self?.onStopListening?()
         }
-        glassSurfaceView.contentView = rootView
+        overlayContentView.addSubview(rootView)
         self.rootView = rootView
+
+        if usesExperimentalListeningOverlay {
+            let listeningModel = ExperimentalListeningOverlayModel()
+            listeningModel.onStopRequested = { [weak self] in
+                self?.onStopListening?()
+            }
+
+            let hostingView = TransparentHostingView(
+                rootView: ExperimentalListeningOverlayView(model: listeningModel)
+            )
+            hostingView.frame = overlayContentView.bounds
+            hostingView.autoresizingMask = [.width, .height]
+            hostingView.wantsLayer = true
+            hostingView.layer?.backgroundColor = NSColor.clear.cgColor
+            hostingView.isHidden = true
+            overlayContentView.addSubview(hostingView)
+
+            self.experimentalListeningModel = listeningModel
+            self.experimentalListeningHostingView = hostingView
+        }
 
         // Drag handle at the top — pure AppKit, above the root view
         let headerHeight: CGFloat = OverlayTokens.headerHeight
@@ -166,6 +208,7 @@ class FloatingOverlayController {
             .receive(on: RunLoop.main)
             .sink { [weak self] level in
                 self?.rootView?.headerView.updateWaveformLevel(level)
+                self?.experimentalListeningModel?.audioLevel = CGFloat(max(0, min(1, level)))
             }
             .store(in: &subscriptions)
 
@@ -181,7 +224,6 @@ class FloatingOverlayController {
 
     /// Push current state to the AppKit view hierarchy. Called on state changes.
     private func pushStateToViews() {
-        updatePanelAppearance()
         rootView?.updateForState(
             state,
             dictationShortcutHint: dictationShortcutHint,
@@ -193,6 +235,8 @@ class FloatingOverlayController {
             isTranscribing: sttRouter?.isTranscribing ?? false,
             liveTranscript: sttRouter?.liveTranscript ?? ""
         )
+        syncExperimentalOverlayVisibility()
+        updatePanelAppearance()
     }
 
     // MARK: - Panel Show/Hide
@@ -512,8 +556,8 @@ class FloatingOverlayController {
     // MARK: - System Wake Recovery & Periodic AG Refresh
 
     func handleSystemWake() {
-        // No NSHostingView to recreate. AppKit views survive sleep/wake without corruption.
-        // Reset state to idle as a safety measure.
+        // The panel shell still lives in AppKit. The experimental SwiftUI pill is only
+        // used while listening, so resetting to idle on wake drops back to the safe path.
         guard !isVisible else { return }
         state = .idle
     }
@@ -585,8 +629,25 @@ class FloatingOverlayController {
         return NSSize(width: OverlayTokens.panelWidth, height: height)
     }
 
+    private func syncExperimentalOverlayVisibility() {
+        let shouldShowExperimentalListeningOverlay = usesExperimentalListeningOverlay && state == .listening
+        rootView?.isHidden = shouldShowExperimentalListeningOverlay
+        experimentalListeningHostingView?.isHidden = !shouldShowExperimentalListeningOverlay
+
+        if shouldShowExperimentalListeningOverlay {
+            experimentalListeningModel?.audioLevel = CGFloat(max(0, min(1, sttRouter?.audioLevel ?? 0)))
+        }
+    }
+
     private func updatePanelAppearance() {
         guard let glassSurfaceView else { return }
+
+        if usesExperimentalListeningOverlay && state == .listening {
+            glassSurfaceView.cornerRadius = OverlayTokens.compactCornerRadius
+            glassSurfaceView.style = .clear
+            glassSurfaceView.tintColor = .clear
+            return
+        }
 
         let usesExpandedChrome = state == .loading || state == .drafting
         let cornerRadius = usesExpandedChrome

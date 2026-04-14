@@ -58,7 +58,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         sessionController.overlayController = overlayController
         appState.contextCapture.sessionController = sessionController
 
-        // Set up the floating overlay panel (pure AppKit — no NSHostingView)
+        // Set up the floating overlay panel. The shell stays AppKit; the listening
+        // pill can opt into an experimental SwiftUI glass renderer.
         overlayController.setup(sttRouter: appState.sttRouter)
 
         // Meeting overlay + hotkey + speaker naming — Lane C wiring.
