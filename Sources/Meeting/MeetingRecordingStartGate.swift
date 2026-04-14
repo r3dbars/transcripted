@@ -20,11 +20,11 @@ enum MeetingRecordingStartGate {
     }
 
     static var systemAudioRecordingQuickStart: String {
-        "Turn on System Audio Recording so Transcripted can capture the other side of Zoom, Meet, and similar apps."
+        "Transcripted will ask for System Audio Recording the first time you record a meeting so it can capture the other side of Zoom, Meet, and similar apps."
     }
 
     static var optionalPermissionsFootnote: String {
-        "Calendar is optional. Add it later if you want Transcripted to spot upcoming meetings and offer a record prompt."
+        "System Audio Recording is requested when you record your first meeting. Calendar is optional if you want Transcripted to spot upcoming meetings and offer a record prompt."
     }
 
     static func evaluate(
