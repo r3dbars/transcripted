@@ -1,120 +1,113 @@
-<img width="625" height="329" alt="Screenshot 2026-04-10 at 7 31 17 PM" src="https://github.com/user-attachments/assets/86453a3e-9eee-4525-b985-777366296cf5" />
+<img width="625" height="329" alt="Screenshot 2026-04-10 at 7 31 17 PM" src="https://github.com/user-attachments/assets/86453a3e-9eee-4525-b985-777366296cf5" />
 
+# Transcripted
 
-## Transcripted
-Transcripted is a local Mac app for dictation and meeting capture that turns
-spoken words into structured files your agent can actually use.
+Turn meetings and dictation into clean notes.
 
-Today it is a practical dictation and meeting tool. It keeps the capture flow
-local, saves plain files on disk, and makes that context easy to hand off to
-agents later.
+Transcripted is a local Mac app that records meetings, captures dictation, and
+saves clean Markdown files on your Mac. You can read them yourself, or point
+your agent at the folder later.
 
-## What It Does
+[Download the latest release](https://github.com/r3dbars/transcripted/releases/latest)
+· [Visit transcripted.app](https://transcripted.app)
 
-- Dictate into any app and paste text back
-- Record meetings locally
-- Save plain Markdown files on disk
-- Let Claude, Codex, OpenClaw, or any other agent work from those files later
+## What You Get
 
-## How It Works
+- Clean meeting notes with speaker names
+- Dictation notes for your follow-up thoughts
+- Plain Markdown files on disk
+- Files you can hand to your agent later
+- Local-first storage you can inspect yourself
 
-1. Capture dictation or a meeting.
-2. Transcripted processes the audio locally on your Mac.
-3. It saves durable Markdown artifacts to disk.
-4. Your agent can load the right slice later instead of rereading everything.
+## How To Get Started
 
-## Artifacts, Not A Black Box
+1. Download Transcripted from the latest GitHub release.
+2. Record a meeting or capture a dictation on your Mac.
+3. Open the saved Markdown files yourself, or point your agent at the folder.
 
-Transcripted is opinionated about file output because inspectable artifacts are
-more useful than opaque app state.
+## Just Markdown. Not A Black Box.
 
-Example meeting transcript:
+Transcripted starts with readable Markdown. You do not need to learn a
+proprietary format to get value from it.
 
-```md
-# Meeting with Alex
-
-## Full Transcript
-
-**[00:00] [Mic/You]**
-Thanks for making time today.
-
-**[00:04] [System/Alex]**
-Happy to help. Let's get started.
-```
-
-Example dictation artifact:
+Meeting example:
 
 ```md
----
-title: "Dictations for April 7, 2026"
-date: 2026-04-07
-capture_type: dictation_day
----
+# Product Review
 
-## 9:15 AM - First note from the morning
+## Summary
 
-Source app: Messages
-Timestamp: 2026-04-07 09:15:00
+Keep annual pricing manual for now.
+Onboarding friction is still the blocker.
 
-first note from the morning
+## Transcript
+
+[00:00] Sarah: Keep annual pricing manual for now.
+[00:04] Michael: Onboarding friction is still the blocker.
 ```
+
+Dictation example:
+
+```md
+# Dictation
+2026-04-07 9:15 AM
+
+Need to test the onboarding changes before touching pricing.
+```
+
+The main thing is simple: Transcripted saves readable Markdown files you can
+open anywhere.
 
 ## Local By Default
 
-Transcripted keeps its core workflows on-device:
-
-- dictation capture and saved dictation logs stay on your Mac
-- meeting capture, transcription, and saved transcripts stay on your Mac
-- agent-facing artifacts are plain local files you can inspect directly
-
-Default locations on a new install are:
-
-- capture library: `~/Library/Application Support/Transcripted/captures/`
-- meetings: `~/Library/Application Support/Transcripted/captures/meetings/`
-- dictations: `~/Library/Application Support/Transcripted/captures/dictations/`
-- app state, logs, and temp files: `~/Library/Application Support/Transcripted/{state,logs,tmp}/`
-
-You can move the capture library in Settings. Transcripted keeps its databases,
-logs, cache, and temporary recordings under `~/Library/Application Support/Transcripted/`
-even when captures live somewhere else.
+- Audio stays on your Mac
+- Saved files stay on your Mac
+- Transcripted records from your Mac and does not join as a meeting bot
+- By default, captures live under `~/Library/Application Support/Transcripted/captures/`
 
 For the full storage map, compatibility paths, and migration details, see
-`docs/storage-paths.md`.
+[docs/storage-paths.md](docs/storage-paths.md).
 
-## Build
+## Works With Your Agent
+
+Point Claude, Codex, Cursor, Obsidian, or any other file-reading tool at your
+Transcripted folder.
+
+On supported agents, Transcripted also includes a read-only local MCP server
+for search, recap, and direct file access.
+
+## Build From Source
 
 ```bash
 bash build-deps.sh
 bash build.sh
 ```
 
-`build.sh` is the local development path. It expects the unified dependency
-artifacts from `build-deps.sh` and then signs the app for stable local
-permissions on the current machine.
+`build.sh` is the main app build. `Package.swift` exists for
+`TranscriptedCore` tests and smoke coverage, not as the primary app build.
 
-For signed DMG packaging and notarization workflow notes, see
-`docs/release-packaging.md`.
-
-## Tests
+## Run Tests
 
 ```bash
 bash run-tests.sh
 ```
 
-If you touch meeting integration or `TranscriptedCore`, also run:
+If you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run:
 
 ```bash
 bash run-integration-smoke.sh
 ```
 
-For build, release, and legacy helper scripts, see `scripts/README.md`.
-For the active repo map and command surface, see `docs/repo-layout.md`.
+If you touch `Package.swift` or the public `TranscriptedCore` seam, also run:
 
-Legacy Draft and standalone Transcripted storage layouts are still recognized
-for compatibility. See `docs/storage-paths.md` for details.
+```bash
+swift test
+```
+
+For build and release details, see [scripts/README.md](scripts/README.md) and
+[docs/repo-layout.md](docs/repo-layout.md).
 
 ## Contributing And Security
 
 - See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and architecture notes
 - See [SECURITY.md](SECURITY.md) for privacy architecture and vulnerability reporting
-- See `docs/repo-layout.md` for the current directory map and canonical command surface
