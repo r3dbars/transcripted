@@ -13,63 +13,74 @@ final class TransparentHostingView<Content: View>: NSHostingView<Content> {
 
 struct ExperimentalListeningOverlayView: View {
     @ObservedObject var model: ExperimentalListeningOverlayModel
+    @Namespace private var glassNamespace
 
     var body: some View {
         GlassEffectContainer(spacing: 10) {
             HStack(spacing: 10) {
-                HStack(spacing: 10) {
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color(nsColor: OverlayTokens.accentColor))
+                statusCluster
+                    .glassEffect(.regular.interactive(), in: .rect(corners: .concentric(minimum: .fixed(14)), isUniform: true))
+                    .glassEffectID("status", in: glassNamespace)
 
-                    Text("Listening")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.primary)
-
-                    ExperimentalListeningLevelView(level: model.audioLevel)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .glassEffect(
-                    .regular
-                        .tint(Color(nsColor: OverlayTokens.accentColor).opacity(0.18))
-                        .interactive(),
-                    in: Capsule()
-                )
+                ExperimentalListeningLevelView(level: model.audioLevel)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .glassEffect(.regular.interactive(), in: .rect(corners: .concentric(minimum: .fixed(14)), isUniform: true))
+                    .glassEffectID("meter", in: glassNamespace)
 
                 Button(action: model.onStopRequested) {
                     Image(systemName: "stop.fill")
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.system(size: 11, weight: .bold))
                         .frame(width: 30, height: 30)
                 }
+                .controlSize(.small)
                 .buttonStyle(.glassProminent)
                 .tint(Color(nsColor: OverlayTokens.warningColor))
+                .glassEffectID("stop", in: glassNamespace)
                 .help("Stop dictation")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(Color.clear)
+    }
+
+    private var statusCluster: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "mic.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.primary)
+
+            Text("Listening")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.primary)
+
+            Circle()
+                .fill(Color(nsColor: OverlayTokens.accentColor))
+                .frame(width: 7, height: 7)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 }
 
 private struct ExperimentalListeningLevelView: View {
     let level: CGFloat
 
-    private let multipliers: [CGFloat] = [0.72, 1.0, 0.86, 1.12, 0.78]
+    private let multipliers: [CGFloat] = [0.76, 1.0, 0.84, 1.08]
 
     var body: some View {
         HStack(alignment: .center, spacing: 3) {
             ForEach(Array(multipliers.enumerated()), id: \.offset) { _, multiplier in
-                let normalized = max(0.18, min(1.0, level * multiplier + 0.08))
+                let normalized = max(0.16, min(1.0, level * multiplier + 0.06))
 
-                Capsule()
-                    .fill(.primary.opacity(0.24 + normalized * 0.42))
-                    .frame(width: 4, height: 8 + normalized * 12)
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(.primary.opacity(0.28 + normalized * 0.34))
+                    .frame(width: 3, height: 8 + normalized * 10)
             }
         }
-        .frame(width: 38, alignment: .leading)
+        .frame(width: 24, alignment: .center)
         .animation(.easeInOut(duration: 0.16), value: level)
     }
 }
