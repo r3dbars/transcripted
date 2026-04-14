@@ -68,7 +68,7 @@ struct PermissionsOnboardingView: View {
                             .font(.headline.weight(.semibold))
                             .foregroundStyle(MenuTokens.textPrimary)
 
-                        Text("Turn on these first so Transcripted can start dictation and paste text back into the app you were using.")
+                        Text("Turn on these first so Transcripted can start dictation and paste text back into the app you were using. System Audio Recording and Calendar can wait until later.")
                             .font(.footnote)
                             .foregroundStyle(MenuTokens.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -87,7 +87,8 @@ struct PermissionsOnboardingView: View {
 
                     OptionalPermissionsCard(
                         optionalPermissions: optionalPermissions,
-                        isGranted: isGranted
+                        isGranted: isGranted,
+                        footnote: "System Audio Recording and Calendar are optional for now. Add them later when you want meeting capture and prompts."
                     )
 
                     ObservabilityConsentCard(
@@ -172,15 +173,15 @@ struct PermissionsOnboardingView: View {
     }
 
     private var hasRequiredPermissions: Bool {
-        micGranted && accessibilityGranted && systemAudioRecordingGranted
+        micGranted && accessibilityGranted
     }
 
     private var requiredPermissions: [TranscriptedPermissionKind] {
-        TranscriptedPermissionKind.allCases.filter(\.isRequiredOnFirstLaunch)
+        FirstRunExperience.onboardingRequiredPermissionKeys().compactMap(TranscriptedPermissionKind.init(rawValue:))
     }
 
     private var optionalPermissions: [TranscriptedPermissionKind] {
-        TranscriptedPermissionKind.allCases.filter { !$0.isRequiredOnFirstLaunch }
+        FirstRunExperience.onboardingOptionalPermissionKeys().compactMap(TranscriptedPermissionKind.init(rawValue:))
     }
 
     private var modelStatus: FirstRunModelCardState {
@@ -202,7 +203,7 @@ struct PermissionsOnboardingView: View {
         case .accessibility:
             return accessibilityGranted
         case .systemAudioRecording:
-            return systemAudioRecordingGranted
+            return systemAudioRecordingGranted && !legacySystemAudioRecordingGrantBridgeActive
         case .calendar:
             return TranscriptedPermissionAccess.isGranted(.calendar)
         }
@@ -258,6 +259,11 @@ struct PermissionsOnboardingView: View {
     private func updateAnalyticsPreference(_ enabled: Bool) {
         anonymousAnalyticsEnabled = enabled
         AnalyticsPreferences.setEnabled(enabled)
+    }
+
+    private var legacySystemAudioRecordingGrantBridgeActive: Bool {
+        UserDefaults.standard.bool(forKey: "permissionsOnboardingCompleted")
+            && !UserDefaults.standard.bool(forKey: "systemAudioRecordingPermissionKnown")
     }
 
     static var hasCompleted: Bool {
@@ -517,6 +523,7 @@ private struct PermissionSetupCard: View {
 private struct OptionalPermissionsCard: View {
     let optionalPermissions: [TranscriptedPermissionKind]
     let isGranted: (TranscriptedPermissionKind) -> Bool
+    let footnote: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -524,7 +531,7 @@ private struct OptionalPermissionsCard: View {
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(MenuTokens.textPrimary)
 
-            Text(MeetingRecordingStartGate.optionalPermissionsFootnote)
+            Text(footnote)
                 .font(.footnote)
                 .foregroundStyle(MenuTokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

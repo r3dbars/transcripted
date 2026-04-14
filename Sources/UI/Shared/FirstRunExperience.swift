@@ -35,6 +35,14 @@ struct MenuBarPrimaryActionState: Equatable {
 }
 
 enum FirstRunExperience {
+    static func onboardingRequiredPermissionKeys() -> [String] {
+        ["microphone", "accessibility"]
+    }
+
+    static func onboardingOptionalPermissionKeys() -> [String] {
+        ["systemAudioRecording", "calendar"]
+    }
+
     static func primaryAction(
         hasRequiredPermissions: Bool,
         hasPasteTarget: Bool,
@@ -43,7 +51,7 @@ enum FirstRunExperience {
         guard hasRequiredPermissions else {
             return FirstRunPrimaryActionState(
                 title: "Turn on the required permissions",
-                detail: "Turn on Microphone, Accessibility, and System Audio Recording first so dictation and meetings are ready right away.",
+                detail: "Turn on Microphone and Accessibility first so dictation can start. System Audio Recording and Calendar can wait until later.",
                 isEnabled: false,
                 shouldStartDictation: false
             )
