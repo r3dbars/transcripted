@@ -2,17 +2,17 @@ import Foundation
 
 func testFirstRunExperience() {
     runSuite("FirstRunExperience.onboardingPermissions — keeps dictation setup separate from later meeting permissions") {
-        let required = FirstRunExperience.onboardingRequiredPermissionKeys()
-        let optional = FirstRunExperience.onboardingOptionalPermissionKeys()
+        let required = FirstRunExperience.onboardingRequiredPermissions()
+        let optional = FirstRunExperience.onboardingOptionalPermissions()
 
         assertEqual(
             required,
-            ["microphone", "accessibility"],
+            [.microphone, .accessibility],
             "first-run onboarding should only require dictation-critical permissions"
         )
         assertEqual(
             optional,
-            ["systemAudioRecording", "calendar"],
+            [.systemAudioRecording, .calendar],
             "system audio and calendar should stay in the later optional group"
         )
     }

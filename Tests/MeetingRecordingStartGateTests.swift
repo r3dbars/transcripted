@@ -3,8 +3,8 @@ import Foundation
 func testMeetingRecordingStartGate() {
     let systemAudioRecordingError = "Turn on System Audio Recording before recording a meeting."
     let combinedPermissionsError = "Turn on Microphone and System Audio Recording before recording a meeting."
-    let quickStartCopy = "Turn on System Audio Recording so Transcripted can capture the other side of Zoom, Meet, and similar apps."
-    let optionalPermissionsCopy = "Calendar is optional. Add it later if you want Transcripted to spot upcoming meetings and offer a record prompt."
+    let quickStartCopy = "Transcripted will ask for System Audio Recording the first time you record a meeting so it can capture the other side of Zoom, Meet, and similar apps."
+    let optionalPermissionsCopy = "System Audio Recording is requested when you record your first meeting. Calendar is optional if you want Transcripted to spot upcoming meetings and offer a record prompt."
 
     runSuite("MeetingRecordingStartGate.evaluate — allows meeting capture when required permissions exist") {
         let decision = MeetingRecordingStartGate.evaluate(

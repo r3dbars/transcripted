@@ -35,12 +35,12 @@ struct MenuBarPrimaryActionState: Equatable {
 }
 
 enum FirstRunExperience {
-    static func onboardingRequiredPermissionKeys() -> [String] {
-        ["microphone", "accessibility"]
+    static func onboardingRequiredPermissions() -> [TranscriptedPermissionKind] {
+        [.microphone, .accessibility]
     }
 
-    static func onboardingOptionalPermissionKeys() -> [String] {
-        ["systemAudioRecording", "calendar"]
+    static func onboardingOptionalPermissions() -> [TranscriptedPermissionKind] {
+        [.systemAudioRecording, .calendar]
     }
 
     static func primaryAction(

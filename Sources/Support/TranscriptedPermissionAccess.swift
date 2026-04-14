@@ -28,9 +28,9 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
 
     var isRequiredOnFirstLaunch: Bool {
         switch self {
-        case .microphone, .accessibility, .systemAudioRecording:
+        case .microphone, .accessibility:
             return true
-        case .calendar:
+        case .systemAudioRecording, .calendar:
             return false
         }
     }
@@ -78,7 +78,6 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
 enum TranscriptedPermissionAccess {
     private static let systemAudioRecordingGrantedKey = "systemAudioRecordingPermissionGranted"
     private static let systemAudioRecordingKnownKey = "systemAudioRecordingPermissionKnown"
-    private static let permissionsOnboardingCompletedKey = "permissionsOnboardingCompleted"
     @MainActor private static var activeSystemAudioRequester: SystemAudioPermissionRequester?
 
     static func isGranted(_ kind: TranscriptedPermissionKind) -> Bool {
@@ -127,9 +126,7 @@ enum TranscriptedPermissionAccess {
             }
 
             Task { @MainActor in
-                activateForPermissionPrompt()
-                let granted = await requestSystemAudioRecordingAccess()
-                setSystemAudioRecordingGranted(granted)
+                let granted = await requestSystemAudioRecordingAccessIfNeeded()
                 guard !granted else { return }
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
             }
@@ -177,20 +174,9 @@ enum TranscriptedPermissionAccess {
     }
 
     static func systemAudioRecordingGranted() -> Bool {
-        if UserDefaults.standard.bool(forKey: systemAudioRecordingKnownKey) {
-            return UserDefaults.standard.bool(forKey: systemAudioRecordingGrantedKey)
-        }
-
-        // Older installs may have completed onboarding before Transcripted
-        // tracked system-audio permission state explicitly. Keep those users on
-        // the optimistic path so existing meeting capture can still reach the
-        // inline ScreenCaptureKit prompt or succeed immediately if permission
-        // was already granted.
-        if UserDefaults.standard.bool(forKey: permissionsOnboardingCompletedKey) {
-            return true
-        }
-
-        return UserDefaults.standard.bool(forKey: systemAudioRecordingGrantedKey)
+        let known = UserDefaults.standard.bool(forKey: systemAudioRecordingKnownKey)
+        let granted = UserDefaults.standard.bool(forKey: systemAudioRecordingGrantedKey)
+        return known && granted
     }
 
     private static func setSystemAudioRecordingGranted(_ granted: Bool) {
@@ -199,11 +185,32 @@ enum TranscriptedPermissionAccess {
     }
 
     @MainActor
-    private static func requestSystemAudioRecordingAccess() async -> Bool {
+    static func requestSystemAudioRecordingAccessIfNeeded() async -> Bool {
         if systemAudioRecordingGranted() {
             return true
         }
 
+        activateForPermissionPrompt()
+        let granted = await performSystemAudioRecordingAccessRequest()
+        setSystemAudioRecordingGranted(granted)
+        return granted
+    }
+
+    @MainActor
+    static func requestSystemAudioRecordingAccessIfNeeded(
+        requester: @escaping @MainActor () async -> Bool
+    ) async -> Bool {
+        if systemAudioRecordingGranted() {
+            return true
+        }
+
+        let granted = await requester()
+        setSystemAudioRecordingGranted(granted)
+        return granted
+    }
+
+    @MainActor
+    private static func performSystemAudioRecordingAccessRequest() async -> Bool {
         return await withCheckedContinuation { continuation in
             let requester = SystemAudioPermissionRequester()
             activeSystemAudioRequester = requester

@@ -88,7 +88,7 @@ struct PermissionsOnboardingView: View {
                     OptionalPermissionsCard(
                         optionalPermissions: optionalPermissions,
                         isGranted: isGranted,
-                        footnote: "System Audio Recording and Calendar are optional for now. Add them later when you want meeting capture and prompts."
+                        footnote: MeetingRecordingStartGate.optionalPermissionsFootnote
                     )
 
                     ObservabilityConsentCard(
@@ -177,11 +177,11 @@ struct PermissionsOnboardingView: View {
     }
 
     private var requiredPermissions: [TranscriptedPermissionKind] {
-        FirstRunExperience.onboardingRequiredPermissionKeys().compactMap(TranscriptedPermissionKind.init(rawValue:))
+        FirstRunExperience.onboardingRequiredPermissions()
     }
 
     private var optionalPermissions: [TranscriptedPermissionKind] {
-        FirstRunExperience.onboardingOptionalPermissionKeys().compactMap(TranscriptedPermissionKind.init(rawValue:))
+        FirstRunExperience.onboardingOptionalPermissions()
     }
 
     private var modelStatus: FirstRunModelCardState {
@@ -203,7 +203,7 @@ struct PermissionsOnboardingView: View {
         case .accessibility:
             return accessibilityGranted
         case .systemAudioRecording:
-            return systemAudioRecordingGranted && !legacySystemAudioRecordingGrantBridgeActive
+            return systemAudioRecordingGranted
         case .calendar:
             return TranscriptedPermissionAccess.isGranted(.calendar)
         }
@@ -259,11 +259,6 @@ struct PermissionsOnboardingView: View {
     private func updateAnalyticsPreference(_ enabled: Bool) {
         anonymousAnalyticsEnabled = enabled
         AnalyticsPreferences.setEnabled(enabled)
-    }
-
-    private var legacySystemAudioRecordingGrantBridgeActive: Bool {
-        UserDefaults.standard.bool(forKey: "permissionsOnboardingCompleted")
-            && !UserDefaults.standard.bool(forKey: "systemAudioRecordingPermissionKnown")
     }
 
     static var hasCompleted: Bool {
