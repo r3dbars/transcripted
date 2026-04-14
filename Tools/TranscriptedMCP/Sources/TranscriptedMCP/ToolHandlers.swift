@@ -14,6 +14,10 @@ private extension DateFormatter {
     }()
 }
 
+private func textResult(_ text: String, isError: Bool = false) -> CallTool.Result {
+    .init(content: [.text(text: text, annotations: nil, _meta: nil)], isError: isError)
+}
+
 func registerToolHandlers(server: Server, index: TranscriptIndex, directories: TranscriptedDataDirectories) async {
     await server.withMethodHandler(ListTools.self) { _ in
         .init(tools: [
@@ -253,10 +257,10 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             case "recap":
                 return try handleRecap(params: params, index: index, meetingsDir: directories.meetingsDir)
             default:
-                return .init(content: [.text(text: "Unknown tool: \(params.name)")], isError: true)
+                return textResult("Unknown tool: \(params.name)", isError: true)
             }
         } catch {
-            return .init(content: [.text(text: "Error: \(error.localizedDescription)")], isError: true)
+            return textResult("Error: \(error.localizedDescription)", isError: true)
         }
     }
 }
@@ -284,11 +288,11 @@ private func handleListMeetings(params: CallTool.Parameters, index: TranscriptIn
     }
 
     if results.isEmpty {
-        return .init(content: [.text(text: "No meetings found.")])
+        return textResult("No meetings found.")
     }
 
     let json = try JSONEncoder.pretty.encode(results)
-    return .init(content: [.text(text: String(data: json, encoding: .utf8) ?? "[]")])
+    return textResult(String(data: json, encoding: .utf8) ?? "[]")
 }
 
 private func handleListDictations(params: CallTool.Parameters, index: TranscriptIndex) throws -> CallTool.Result {
@@ -300,11 +304,11 @@ private func handleListDictations(params: CallTool.Parameters, index: Transcript
     let results = try index.listDictationDays(count: count, dateFrom: dateFrom, dateTo: dateTo)
 
     if results.isEmpty {
-        return .init(content: [.text(text: "No dictations found.")])
+        return textResult("No dictations found.")
     }
 
     let json = try JSONEncoder.pretty.encode(results)
-    return .init(content: [.text(text: String(data: json, encoding: .utf8) ?? "[]")])
+    return textResult(String(data: json, encoding: .utf8) ?? "[]")
 }
 
 /// Extract title from markdown YAML frontmatter
@@ -337,7 +341,7 @@ private func extractDialogueLines(from content: String) -> [String] {
 
 private func handleReadMeeting(params: CallTool.Parameters, meetingsDir: URL) throws -> CallTool.Result {
     guard let filename = params.arguments?["filename"]?.stringValue, !filename.isEmpty else {
-        return .init(content: [.text(text: "Missing required parameter: filename")], isError: true)
+        return textResult("Missing required parameter: filename", isError: true)
     }
 
     let section = params.arguments?["section"]?.stringValue ?? "full"
@@ -347,19 +351,19 @@ private func handleReadMeeting(params: CallTool.Parameters, meetingsDir: URL) th
     case .valid(let url):
         mdURL = url
     case .missing:
-        return .init(content: [.text(text: "Meeting not found: \(filename). Use list_meetings to see available meetings.")], isError: true)
+        return textResult("Meeting not found: \(filename). Use list_meetings to see available meetings.", isError: true)
     case .invalid:
-        return .init(content: [.text(text: "Invalid filename: \(filename)")], isError: true)
+        return textResult("Invalid filename: \(filename)", isError: true)
     }
 
     guard let content = try? String(contentsOf: mdURL, encoding: .utf8) else {
-        return .init(content: [.text(text: "Meeting not found: \(filename). Use list_meetings to see available meetings.")], isError: true)
+        return textResult("Meeting not found: \(filename). Use list_meetings to see available meetings.", isError: true)
     }
 
     switch section {
     case "transcript":
         let dialogue = extractDialogueLines(from: content).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        return .init(content: [.text(text: dialogue.isEmpty ? content : dialogue)])
+        return textResult(dialogue.isEmpty ? content : dialogue)
 
     case "speakers":
         // Return YAML frontmatter + speaker analytics section
@@ -375,16 +379,16 @@ private func handleReadMeeting(params: CallTool.Parameters, meetingsDir: URL) th
                 result += "\n" + String(content[analyticsRange.lowerBound...])
             }
         }
-        return .init(content: [.text(text: result.isEmpty ? content : result)])
+        return textResult(result.isEmpty ? content : result)
 
     default: // "full"
-        return .init(content: [.text(text: content)])
+        return textResult(content)
     }
 }
 
 private func handleReadDictation(params: CallTool.Parameters, dictationsDir: URL) throws -> CallTool.Result {
     guard let filename = params.arguments?["filename"]?.stringValue, !filename.isEmpty else {
-        return .init(content: [.text(text: "Missing required parameter: filename")], isError: true)
+        return textResult("Missing required parameter: filename", isError: true)
     }
 
     let entryId = params.arguments?["entry_id"]?.stringValue
@@ -393,18 +397,18 @@ private func handleReadDictation(params: CallTool.Parameters, dictationsDir: URL
     case .valid(let url):
         markdownURL = url
     case .missing:
-        return .init(content: [.text(text: "Dictation not found: \(filename). Use list_dictations to see available days.")], isError: true)
+        return textResult("Dictation not found: \(filename). Use list_dictations to see available days.", isError: true)
     case .invalid:
-        return .init(content: [.text(text: "Invalid filename: \(filename)")], isError: true)
+        return textResult("Invalid filename: \(filename)", isError: true)
     }
 
     guard let day = TranscriptLoader.loadDictationDay(markdownURL) else {
-        return .init(content: [.text(text: "Dictation not found: \(filename). Use list_dictations to see available days.")], isError: true)
+        return textResult("Dictation not found: \(filename). Use list_dictations to see available days.", isError: true)
     }
 
     if let entryId {
         guard let entry = day.entries.first(where: { $0.id == entryId }) else {
-            return .init(content: [.text(text: "Entry not found: \(entryId). Use recent_context or search_context to inspect entry IDs.")], isError: true)
+            return textResult("Entry not found: \(entryId). Use recent_context or search_context to inspect entry IDs.", isError: true)
         }
 
         let result = """
@@ -417,22 +421,22 @@ private func handleReadDictation(params: CallTool.Parameters, dictationsDir: URL
 
         \(entry.text)
         """
-        return .init(content: [.text(text: result)])
+        return textResult(result)
     }
 
     guard let content = try? String(contentsOf: markdownURL, encoding: .utf8) else {
         let json = try JSONEncoder.pretty.encode(day)
-        return .init(content: [.text(text: String(data: json, encoding: .utf8) ?? "{}")])
+        return textResult(String(data: json, encoding: .utf8) ?? "{}")
     }
 
-    return .init(content: [.text(text: content)])
+    return textResult(content)
 }
 
 // MARK: - search
 
 private func handleSearch(params: CallTool.Parameters, index: TranscriptIndex) throws -> CallTool.Result {
     guard let query = params.arguments?["query"]?.stringValue, !query.isEmpty else {
-        return .init(content: [.text(text: "Missing required parameter: query")], isError: true)
+        return textResult("Missing required parameter: query", isError: true)
     }
 
     let speaker = params.arguments?["speaker"]?.stringValue
@@ -444,16 +448,16 @@ private func handleSearch(params: CallTool.Parameters, index: TranscriptIndex) t
     if results.results.isEmpty {
         var msg = "No results found for \"\(query)\""
         if let s = speaker { msg += " by \(s)" }
-        return .init(content: [.text(text: msg)])
+        return textResult(msg)
     }
 
     let json = try JSONEncoder.pretty.encode(results)
-    return .init(content: [.text(text: String(data: json, encoding: .utf8) ?? "[]")])
+    return textResult(String(data: json, encoding: .utf8) ?? "[]")
 }
 
 private func handleSearchContext(params: CallTool.Parameters, index: TranscriptIndex, meetingsDir: URL) throws -> CallTool.Result {
     guard let query = params.arguments?["query"]?.stringValue, !query.isEmpty else {
-        return .init(content: [.text(text: "Missing required parameter: query")], isError: true)
+        return textResult("Missing required parameter: query", isError: true)
     }
 
     let kind = parseContextKind(params.arguments?["kind"]?.stringValue)
@@ -474,11 +478,11 @@ private func handleSearchContext(params: CallTool.Parameters, index: TranscriptI
     hydrateMeetingTitles(in: &results.results, kind: \.kind, filename: \.filename, title: \.title, meetingsDir: meetingsDir)
 
     if results.results.isEmpty {
-        return .init(content: [.text(text: "No context found for \"\(query)\".")])
+        return textResult("No context found for \"\(query)\".")
     }
 
     let json = try JSONEncoder.pretty.encode(results)
-    return .init(content: [.text(text: String(data: json, encoding: .utf8) ?? "{}")])
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
 
 private func handleRecentContext(params: CallTool.Parameters, index: TranscriptIndex, meetingsDir: URL) throws -> CallTool.Result {
@@ -491,28 +495,28 @@ private func handleRecentContext(params: CallTool.Parameters, index: TranscriptI
     hydrateMeetingTitles(in: &result.items, kind: \.kind, filename: \.filename, title: \.title, meetingsDir: meetingsDir)
 
     if result.items.isEmpty {
-        return .init(content: [.text(text: "No recent context found.")])
+        return textResult("No recent context found.")
     }
 
     let json = try JSONEncoder.pretty.encode(result)
-    return .init(content: [.text(text: String(data: json, encoding: .utf8) ?? "{}")])
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
 
 // MARK: - who_is
 
 private func handleWhoIs(params: CallTool.Parameters, index: TranscriptIndex) throws -> CallTool.Result {
     guard let speaker = params.arguments?["speaker"]?.stringValue, !speaker.isEmpty else {
-        return .init(content: [.text(text: "Missing required parameter: speaker")], isError: true)
+        return textResult("Missing required parameter: speaker", isError: true)
     }
 
     let profile = try index.getPersonProfile(speaker: speaker)
 
     if profile.meetingCount == 0 {
-        return .init(content: [.text(text: "No meetings found for \"\(speaker)\". Try a different name or use list_meetings to see known speakers.")])
+        return textResult("No meetings found for \"\(speaker)\". Try a different name or use list_meetings to see known speakers.")
     }
 
     let json = try JSONEncoder.pretty.encode(profile)
-    return .init(content: [.text(text: String(data: json, encoding: .utf8) ?? "{}")])
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
 
 // MARK: - recap
@@ -526,7 +530,7 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
     let meetings = try index.listMeetings(count: 50, dateFrom: dateFrom, dateTo: dateTo)
 
     if meetings.isEmpty {
-        return .init(content: [.text(text: "No meetings found from \(dateFrom) to \(dateTo).")])
+        return textResult("No meetings found from \(dateFrom) to \(dateTo).")
     }
 
     var recapParts: [RecapEntry] = []
@@ -564,7 +568,7 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
     )
 
     let json = try JSONEncoder.pretty.encode(result)
-    return .init(content: [.text(text: String(data: json, encoding: .utf8) ?? "[]")])
+    return textResult(String(data: json, encoding: .utf8) ?? "[]")
 }
 
 // MARK: - Output Types
