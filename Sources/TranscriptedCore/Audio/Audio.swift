@@ -31,7 +31,7 @@ public enum SystemAudioStatus: Equatable {
         case .healthy: return ""
         case .reconnecting: return "Reconnecting..."
         case .silent: return "System audio silent"
-        case .failed: return "System audio unavailable \u{2014} enable Screen Recording for Transcripted in System Settings"
+        case .failed: return "System audio unavailable \u{2014} enable System Audio Recording for Transcripted in System Settings"
         }
     }
 }
@@ -337,26 +337,17 @@ public class Audio: ObservableObject {
         // prompting here makes permission dialogs appear before the user has
         // explicitly asked to record a meeting.
 
-        // Initialize system audio capture.
-        // macOS 26+: ScreenCaptureKit audio-only → lighter "System Audio Recording Only" permission
-        // macOS 14.2–25: CoreAudio process taps → full "Screen Recording" permission
-        if #available(macOS 26.0, *) {
-            let capture = SCKAudioCapture()
-            systemAudioCapture = capture
-            systemAudioCancellable = capture.errorMessagePublisher
-                .receive(on: DispatchQueue.main)
-                .sink { [weak self] errorMessage in
-                    self?.updateSystemAudioStatus(fromError: errorMessage)
-                }
-        } else if #available(macOS 14.2, *) {
-            let capture = SystemAudioCapture()
-            systemAudioCapture = capture
-            systemAudioCancellable = capture.errorMessagePublisher
-                .receive(on: DispatchQueue.main)
-                .sink { [weak self] errorMessage in
-                    self?.updateSystemAudioStatus(fromError: errorMessage)
-                }
-        }
+        // Initialize system audio capture using the macOS 26+ audio-only
+        // ScreenCaptureKit path. This keeps meeting audio on the narrower
+        // "System Audio Recording" permission tier and avoids restart-required
+        // Screen Recording flows.
+        let capture = SCKAudioCapture()
+        systemAudioCapture = capture
+        systemAudioCancellable = capture.errorMessagePublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] errorMessage in
+                self?.updateSystemAudioStatus(fromError: errorMessage)
+            }
 
         // MARK: - Sleep/Wake Observers (Phase 1: Invisible Reliability)
         // Handle macOS sleep/wake to prevent AVAudioEngine crashes and log gaps

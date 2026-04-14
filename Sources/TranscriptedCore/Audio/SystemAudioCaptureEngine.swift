@@ -3,11 +3,12 @@ import Combine
 
 /// Common interface for system audio capture backends.
 ///
-/// Two implementations exist:
-/// - `SystemAudioCapture` (macOS 14.2+) — CoreAudio process taps, requires full Screen Recording permission
-/// - `SCKAudioCapture` (macOS 26+) — ScreenCaptureKit audio-only stream, requires lighter "System Audio Recording Only" permission
+/// The current app uses `SCKAudioCapture` (macOS 26+) — a ScreenCaptureKit
+/// audio-only stream that stays on the lighter "System Audio Recording Only"
+/// permission tier.
 ///
-/// `Audio` creates the right one at init time and uses this protocol everywhere else.
+/// Legacy `SystemAudioCapture` still conforms to this protocol for older or
+/// standalone paths, but the live Transcripted app no longer routes through it.
 public protocol SystemAudioCaptureEngine: AnyObject {
     /// Audio format available after `prepare()`. Used to create the WAV file before starting capture.
     var audioFormat: AVAudioFormat? { get }

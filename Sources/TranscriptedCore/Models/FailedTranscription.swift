@@ -60,7 +60,8 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
             "Invalid audio data",
             "Recording too short",
             "Invalid audio format",
-            "System audio is required"
+            "System audio is required",
+            "System Audio Recording"
         ]
         return !permanent.contains(where: { errorMessage.localizedCaseInsensitiveContains($0) })
     }
@@ -77,7 +78,8 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         if errorMessage.contains("Invalid audio") {
             return .invalidAudioFormat(detail: errorMessage)
         }
-        if errorMessage.contains("System audio is required") {
+        if errorMessage.contains("System audio is required")
+            || errorMessage.contains("System Audio Recording") {
             return .missingSystemAudio
         }
         if errorMessage.contains("model not loaded") {

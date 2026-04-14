@@ -288,7 +288,7 @@ final class MeetingSessionController: ObservableObject {
 
         let startDecision = MeetingRecordingStartGate.evaluate(
             microphoneGranted: TranscriptedPermissionAccess.isGranted(.microphone),
-            screenRecordingGranted: TranscriptedPermissionAccess.isGranted(.screenRecording)
+            systemAudioRecordingGranted: TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
         )
         guard startDecision.canStart else {
             DiagnosticsTrail.record(

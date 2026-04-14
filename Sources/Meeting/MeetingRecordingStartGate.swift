@@ -15,31 +15,25 @@ struct MeetingRecordingStartDecision: Equatable {
 }
 
 enum MeetingRecordingStartGate {
-    static var screenRecordingSummary: String {
-        "Optional on first launch. Required before Transcripted can capture meeting audio from other apps."
+    static var systemAudioRecordingSummary: String {
+        "Needed so Transcripted can capture the other side of calls, videos, and other meeting audio."
     }
 
-    static var screenRecordingQuickStart: String {
-        if #available(macOS 26.0, *) {
-            return "Turn on System Audio Recording before you record meetings so Transcripted can capture the other side of Zoom, Meet, and similar apps."
-        }
-        return "Turn on Screen Recording before you record meetings. After you enable it, quit and reopen Transcripted so macOS can hand over system audio."
+    static var systemAudioRecordingQuickStart: String {
+        "Turn on System Audio Recording so Transcripted can capture the other side of Zoom, Meet, and similar apps."
     }
 
     static var optionalPermissionsFootnote: String {
-        if #available(macOS 26.0, *) {
-            return "You can start dictating without these. Turn on System Audio Recording before you record meetings, and add Calendar later if you want meeting prompts."
-        }
-        return "You can start dictating without these. Turn on Screen Recording before you record meetings, then reopen Transcripted. Add Calendar later if you want meeting prompts."
+        "Calendar is optional. Add it later if you want Transcripted to spot upcoming meetings and offer a record prompt."
     }
 
     static func evaluate(
         microphoneGranted: Bool,
-        screenRecordingGranted: Bool
+        systemAudioRecordingGranted: Bool
     ) -> MeetingRecordingStartDecision {
         let missingPermissions = [
             microphoneGranted ? nil : "microphone",
-            screenRecordingGranted ? nil : "screen_recording"
+            systemAudioRecordingGranted ? nil : "system_audio_recording"
         ].compactMap { $0 }
 
         guard !missingPermissions.isEmpty else {
@@ -47,17 +41,11 @@ enum MeetingRecordingStartGate {
         }
 
         switch missingPermissions {
-        case ["microphone", "screen_recording"]:
-            let message: String
-            if #available(macOS 26.0, *) {
-                message = "Turn on Microphone and System Audio Recording in System Settings before recording a meeting."
-            } else {
-                message = "Turn on Microphone and Screen Recording in System Settings, then quit and reopen Transcripted before recording a meeting."
-            }
+        case ["microphone", "system_audio_recording"]:
             return MeetingRecordingStartDecision(
                 canStart: false,
-                errorMessage: message,
-                failureReason: "microphone_and_screen_recording",
+                errorMessage: "Turn on Microphone and System Audio Recording before recording a meeting.",
+                failureReason: "microphone_and_system_audio_recording",
                 missingPermissions: missingPermissions
             )
         case ["microphone"]:
@@ -67,17 +55,11 @@ enum MeetingRecordingStartGate {
                 failureReason: "microphone",
                 missingPermissions: missingPermissions
             )
-        case ["screen_recording"]:
-            let message: String
-            if #available(macOS 26.0, *) {
-                message = "Turn on System Audio Recording in System Settings before recording a meeting."
-            } else {
-                message = "Turn on Screen Recording in System Settings, then quit and reopen Transcripted before recording a meeting."
-            }
+        case ["system_audio_recording"]:
             return MeetingRecordingStartDecision(
                 canStart: false,
-                errorMessage: message,
-                failureReason: "screen_recording",
+                errorMessage: "Turn on System Audio Recording before recording a meeting.",
+                failureReason: "system_audio_recording",
                 missingPermissions: missingPermissions
             )
         default:

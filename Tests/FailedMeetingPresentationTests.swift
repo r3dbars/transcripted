@@ -16,17 +16,17 @@ func testFailedMeetingPresentation() {
         )
     }
 
-    runSuite("FailedMeetingPresentation screen recording failures point to settings") {
+    runSuite("FailedMeetingPresentation system audio failures point to settings") {
         let copy = MeetingFailureCopy.make(
-            forMessage: "System audio is required. Turn on Screen Recording and retry.",
-            shortErrorMessage: "System audio is required. Turn on Screen Recording and retry.",
+            forMessage: "System audio is required. Turn on System Audio Recording and retry.",
+            shortErrorMessage: "System audio is required. Turn on System Audio Recording and retry.",
             isRetryable: false
         )
 
-        assertEqual(copy.title, "Turn on Screen Recording", "permission failures should name the missing permission")
+        assertEqual(copy.title, "Turn on System Audio Recording", "permission failures should name the missing permission")
         assertEqual(
             copy.detail,
-            "Turn on Screen Recording in System Settings, then retry the meeting.",
+            "Turn on System Audio Recording in System Settings, then retry the meeting.",
             "permission failures should point to the recovery step"
         )
     }

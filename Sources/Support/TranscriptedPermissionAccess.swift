@@ -1,12 +1,14 @@
 import AppKit
 import AVFoundation
 import ApplicationServices
+import CoreMedia
 import EventKit
+import ScreenCaptureKit
 
 enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
     case microphone
     case accessibility
-    case screenRecording
+    case systemAudioRecording
     case calendar
 
     var id: String { rawValue }
@@ -17,8 +19,8 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
             return "mic.fill"
         case .accessibility:
             return "hand.raised.fill"
-        case .screenRecording:
-            return "rectangle.on.rectangle"
+        case .systemAudioRecording:
+            return "speaker.wave.2.fill"
         case .calendar:
             return "calendar"
         }
@@ -26,9 +28,9 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
 
     var isRequiredOnFirstLaunch: Bool {
         switch self {
-        case .microphone, .accessibility:
+        case .microphone, .accessibility, .systemAudioRecording:
             return true
-        case .screenRecording, .calendar:
+        case .calendar:
             return false
         }
     }
@@ -39,11 +41,8 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
             return "Microphone"
         case .accessibility:
             return "Accessibility"
-        case .screenRecording:
-            if #available(macOS 26.0, *) {
-                return "System Audio Recording"
-            }
-            return "Screen Recording"
+        case .systemAudioRecording:
+            return "System Audio Recording"
         case .calendar:
             return "Calendar"
         }
@@ -55,8 +54,8 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
             return "Needed for dictation and your side of meetings."
         case .accessibility:
             return "Needed for global shortcuts and pasting text back into the app you were using."
-        case .screenRecording:
-            return MeetingRecordingStartGate.screenRecordingSummary
+        case .systemAudioRecording:
+            return MeetingRecordingStartGate.systemAudioRecordingSummary
         case .calendar:
             return "Optional for meeting prompts. Lets Transcripted notice upcoming meetings from Apple Calendar, Google, or Exchange calendars synced to your Mac."
         }
@@ -68,8 +67,8 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
             return "Allow microphone"
         case .accessibility:
             return "Allow accessibility"
-        case .screenRecording:
-            return "Enable meeting audio"
+        case .systemAudioRecording:
+            return "Allow system audio recording"
         case .calendar:
             return "Enable meeting prompts"
         }
@@ -77,14 +76,19 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
 }
 
 enum TranscriptedPermissionAccess {
+    private static let systemAudioRecordingGrantedKey = "systemAudioRecordingPermissionGranted"
+    private static let systemAudioRecordingKnownKey = "systemAudioRecordingPermissionKnown"
+    private static let permissionsOnboardingCompletedKey = "permissionsOnboardingCompleted"
+    @MainActor private static var activeSystemAudioRequester: SystemAudioPermissionRequester?
+
     static func isGranted(_ kind: TranscriptedPermissionKind) -> Bool {
         switch kind {
         case .microphone:
             return AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         case .accessibility:
             return AXIsProcessTrusted()
-        case .screenRecording:
-            return screenRecordingGranted()
+        case .systemAudioRecording:
+            return systemAudioRecordingGranted()
         case .calendar:
             return calendarAccessGranted()
         }
@@ -116,15 +120,18 @@ enum TranscriptedPermissionAccess {
                 _ = AXIsProcessTrustedWithOptions(options)
             }
             openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-        case .screenRecording:
-            if #available(macOS 26.0, *) {
-                // macOS 26: direct to the lighter "System Audio Recording Only" section
-                activateForPermissionPrompt()
+        case .systemAudioRecording:
+            if systemAudioRecordingGranted() {
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
-            } else {
+                return
+            }
+
+            Task { @MainActor in
                 activateForPermissionPrompt()
-                _ = CGRequestScreenCaptureAccess()
-                openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+                let granted = await requestSystemAudioRecordingAccess()
+                setSystemAudioRecordingGranted(granted)
+                guard !granted else { return }
+                openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
             }
         case .calendar:
             Task { @MainActor in
@@ -169,17 +176,44 @@ enum TranscriptedPermissionAccess {
         }
     }
 
-    static func screenRecordingGranted() -> Bool {
-        if #available(macOS 26.0, *) {
-            // On macOS 26, ScreenCaptureKit presents an inline permission dialog
-            // when SCStream.startCapture() is called — the user can approve it
-            // on the spot without visiting System Settings. CGPreflightScreenCaptureAccess()
-            // returns false before that dialog has been shown, which would incorrectly
-            // block the recording flow. Return true so the gate lets the flow proceed
-            // to SCKAudioCapture, where startCapture() will trigger the dialog.
+    static func systemAudioRecordingGranted() -> Bool {
+        if UserDefaults.standard.bool(forKey: systemAudioRecordingKnownKey) {
+            return UserDefaults.standard.bool(forKey: systemAudioRecordingGrantedKey)
+        }
+
+        // Older installs may have completed onboarding before Transcripted
+        // tracked system-audio permission state explicitly. Keep those users on
+        // the optimistic path so existing meeting capture can still reach the
+        // inline ScreenCaptureKit prompt or succeed immediately if permission
+        // was already granted.
+        if UserDefaults.standard.bool(forKey: permissionsOnboardingCompletedKey) {
             return true
         }
-        return CGPreflightScreenCaptureAccess()
+
+        return UserDefaults.standard.bool(forKey: systemAudioRecordingGrantedKey)
+    }
+
+    private static func setSystemAudioRecordingGranted(_ granted: Bool) {
+        UserDefaults.standard.set(true, forKey: systemAudioRecordingKnownKey)
+        UserDefaults.standard.set(granted, forKey: systemAudioRecordingGrantedKey)
+    }
+
+    @MainActor
+    private static func requestSystemAudioRecordingAccess() async -> Bool {
+        if systemAudioRecordingGranted() {
+            return true
+        }
+
+        return await withCheckedContinuation { continuation in
+            let requester = SystemAudioPermissionRequester()
+            activeSystemAudioRequester = requester
+            requester.requestAccess { granted in
+                Task { @MainActor in
+                    activeSystemAudioRequester = nil
+                    continuation.resume(returning: granted)
+                }
+            }
+        }
     }
 
     @MainActor
@@ -191,5 +225,72 @@ enum TranscriptedPermissionAccess {
     private static func openSystemSettings(_ urlString: String) {
         guard let url = URL(string: urlString) else { return }
         NSWorkspace.shared.open(url)
+    }
+}
+
+@available(macOS 26.0, *)
+private final class SystemAudioPermissionRequester: NSObject, SCStreamOutput {
+    private var stream: SCStream?
+    private let sampleHandlerQueue = DispatchQueue(label: "Transcripted.SystemAudioPermission")
+    private var completion: ((Bool) -> Void)?
+
+    func requestAccess(completion: @escaping (Bool) -> Void) {
+        self.completion = completion
+
+        SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { [weak self] content, error in
+            guard let self else { return }
+
+            if error != nil {
+                self.finish(granted: false)
+                return
+            }
+
+            guard let display = content?.displays.first else {
+                self.finish(granted: false)
+                return
+            }
+
+            let filter = SCContentFilter(display: display, excludingWindows: [])
+            let config = SCStreamConfiguration()
+            config.capturesAudio = true
+            config.excludesCurrentProcessAudio = true
+            config.sampleRate = 48000
+            config.channelCount = 2
+            config.width = 2
+            config.height = 2
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+
+            let stream = SCStream(filter: filter, configuration: config, delegate: nil)
+            self.stream = stream
+
+            do {
+                try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: self.sampleHandlerQueue)
+            } catch {
+                self.finish(granted: false)
+                return
+            }
+
+            stream.startCapture { [weak self] error in
+                guard let self else { return }
+
+                if error != nil {
+                    self.finish(granted: false)
+                    return
+                }
+
+                stream.stopCapture { [weak self] _ in
+                    self?.finish(granted: true)
+                }
+            }
+        }
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {}
+
+    private func finish(granted: Bool) {
+        stream = nil
+        let completion = completion
+        self.completion = nil
+        completion?(granted)
     }
 }

@@ -77,7 +77,7 @@ so the meeting prompt detector and the settings/onboarding flows share the same
 app-level permission logic outside the UI tree.
 
 Keep user-visible TCC prompts user-initiated. Background warmup paths should
-not request microphone, screen-recording, or calendar access on their own;
+not request microphone, system-audio-recording, or calendar access on their own;
 onboarding and Settings own those prompts so the dialogs appear in context.
 
 ## Observation Pattern

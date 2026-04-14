@@ -2,6 +2,9 @@
 
 Transcripted now uses Sparkle for in-app update checks.
 
+The live app now targets macOS 26+ only. When cutting a new release, the
+generated appcast entry for that release should advertise the same 26+ floor.
+
 Future agents should treat this as a release requirement:
 
 - if a build is meant to reach existing users through the app's updater, the

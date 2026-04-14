@@ -128,7 +128,7 @@ public enum PipelineError: LocalizedError {
         case .invalidAudioFormat(let detail):
             return "Invalid audio format: \(detail)"
         case .missingSystemAudio:
-            return "System audio is required. Please grant Screen Recording permission in System Settings."
+            return "System audio is required. Please grant System Audio Recording permission in System Settings."
         case .modelNotLoaded(let model):
             return "\(model) model not loaded"
         case .modelInferenceFailed(let model, let underlying):
