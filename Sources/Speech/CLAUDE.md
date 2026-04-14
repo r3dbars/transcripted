@@ -6,7 +6,8 @@
 
 ## Key Files
 
-- `ParakeetEngine.swift` — app-owned Parakeet STT engine, recording control, live transcript state, model initialization, permission-aware prewarm decisions, audio-device handling, short-audio gating, and wake-recovery support
+- `ParakeetEngine.swift` — app-owned Parakeet STT engine, recording control, live transcript state, model initialization, permission-aware prewarm decisions, audio-device handling, short-audio gating, wake-recovery support, and sanitized failure reporting for model init errors
+- `ParakeetModelInitDiagnostics.swift` — builds safe diagnostic context for model-initialization failures without leaking transcript or user-content data
 - `ParakeetPrewarmPolicy.swift` — central policy for deciding whether speech-engine prewarm should proceed or be skipped based on microphone authorization state
 - `ParakeetShortAudioGate.swift` — central policy for deciding when very short recordings should be dropped, surfaced as intentional empty results, or still transcribed
 - `RecordedAudioTimeline.swift` — in-memory segmented audio buffer used when recorded audio needs to be preserved across interruptions or recovery handoffs
@@ -17,6 +18,7 @@
 - This directory powers dictation.
 - `ParakeetEngine` consults `ParakeetPrewarmPolicy` before prewarming the local model, so microphone-permission-aware warmup behavior belongs here rather than in app startup glue.
 - `ParakeetEngine` consults `ParakeetShortAudioGate` before spending work on extremely short clips, so short-tap behavior changes belong here rather than in UI controllers.
+- `ParakeetEngine` reports model-init failures with `ParakeetModelInitDiagnostics.failureContext(...)`, which keeps diagnostics useful for packaging/download/debugging issues without shipping raw transcript or device content.
 - The meeting pipeline reuses the same app-owned `ParakeetEngine` through `Sources/Meeting/MeetingSTTAdapter.swift`.
 - Do not assume a separate local-LLM drafting path exists in this tree.
 
@@ -39,6 +41,7 @@ Manual checks:
 
 Relevant direct coverage:
 
+- `Tests/ParakeetModelInitDiagnosticsTests.swift`
 - `Tests/ParakeetPrewarmPolicyTests.swift`
 - `Tests/ParakeetShortAudioGateTests.swift`
 - `Tests/RecordedAudioTimelineTests.swift`
