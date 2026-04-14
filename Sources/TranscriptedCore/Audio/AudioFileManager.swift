@@ -12,9 +12,7 @@ extension Audio {
     // MARK: - Audio Capture Setup
 
     func startAudioCapture() async throws {
-        guard let engine = engine, let inputNode = inputNode else {
-            throw NSError(domain: "Audio", code: 1, userInfo: [NSLocalizedDescriptionKey: "Engine not initialized"])
-        }
+        let (engine, inputNode) = try ensureEngineInitialized()
 
         // Use system default microphone (whatever macOS has configured)
         // CRITICAL: Must use inputFormat(forBus: 1) to get ACTUAL hardware format
