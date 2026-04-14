@@ -4,69 +4,15 @@
 import AppKit
 
 @MainActor
-private final class OverlayPrimaryButton: NSButton {
-    override var title: String {
-        didSet {
-            updateTitleAppearance()
-            invalidateIntrinsicContentSize()
-        }
-    }
-
-    override var intrinsicContentSize: NSSize {
-        let base = super.intrinsicContentSize
-        return NSSize(width: base.width + 16, height: max(24, base.height + 6))
-    }
-
-    override var isHighlighted: Bool {
-        didSet { updateLayerAppearance() }
-    }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        commonInit()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    private func commonInit() {
-        isBordered = false
-        bezelStyle = .regularSquare
-        setButtonType(.momentaryPushIn)
-        wantsLayer = true
-        layer?.cornerRadius = 8
-        layer?.borderWidth = 1
-        focusRingType = .none
-        updateTitleAppearance()
-        updateLayerAppearance()
-    }
-
-    private func updateTitleAppearance() {
-        attributedTitle = NSAttributedString(
-            string: title,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
-                .foregroundColor: NSColor.black.withAlphaComponent(0.88)
-            ]
-        )
-    }
-
-    private func updateLayerAppearance() {
-        layer?.backgroundColor = (isHighlighted
-            ? NSColor.white.withAlphaComponent(0.78)
-            : NSColor.white.withAlphaComponent(0.94)
-        ).cgColor
-        layer?.borderColor = NSColor.black.withAlphaComponent(0.10).cgColor
-    }
-}
-
-@MainActor
 final class OverlayHeaderView: NSView {
+    override var allowsVibrancy: Bool { true }
+
+    private let stateIcon = NSImageView()
     private let modeLabel = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
     let waveformHost = WaveformHostView(frame: .zero)
     private let shortcutHint = NSTextField(labelWithString: "")
-    private let stopButton = OverlayPrimaryButton(frame: .zero)
+    private let stopButton = NSButton(title: "Stop", target: nil, action: nil)
     var onStopRequested: (() -> Void)?
 
     override init(frame: NSRect) {
@@ -78,8 +24,13 @@ final class OverlayHeaderView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func setupViews() {
+        stateIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        stateIcon.contentTintColor = OverlayTokens.textSecondary
+        stateIcon.isHidden = true
+        addSubview(stateIcon)
+
         // Mode label
-        modeLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+        modeLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         modeLabel.textColor = OverlayTokens.textSecondary
         modeLabel.isBezeled = false
         modeLabel.isEditable = false
@@ -95,11 +46,12 @@ final class OverlayHeaderView: NSView {
         addSubview(spinner)
 
         // Waveform (hidden by default)
+        waveformHost.tintColor = OverlayTokens.accentColor
         waveformHost.isHidden = true
         addSubview(waveformHost)
 
         // Shortcut hint
-        shortcutHint.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        shortcutHint.font = NSFont.systemFont(ofSize: 10, weight: .regular)
         shortcutHint.textColor = OverlayTokens.textMuted
         shortcutHint.isBezeled = false
         shortcutHint.isEditable = false
@@ -108,7 +60,15 @@ final class OverlayHeaderView: NSView {
         shortcutHint.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         addSubview(shortcutHint)
 
-        stopButton.title = "Stop"
+        stopButton.bezelStyle = .rounded
+        stopButton.controlSize = .small
+        stopButton.image = NSImage(
+            systemSymbolName: "stop.fill",
+            accessibilityDescription: "Stop dictation"
+        )
+        stopButton.imagePosition = .imageLeading
+        stopButton.imageScaling = .scaleProportionallyDown
+        stopButton.contentTintColor = OverlayTokens.textPrimary
         stopButton.isHidden = true
         stopButton.target = self
         stopButton.action = #selector(stopButtonPressed)
@@ -120,6 +80,8 @@ final class OverlayHeaderView: NSView {
         super.layout()
         let pad = OverlayTokens.contentPadding
         let h = bounds.height
+        let iconSize: CGFloat = 14
+        let showStateIcon = !stateIcon.isHidden
         let labelSize = modeLabel.fittingSize
         let hintSize = shortcutHint.fittingSize
         let stopSize = stopButton.fittingSize
@@ -129,13 +91,30 @@ final class OverlayHeaderView: NSView {
             let compactPad: CGFloat = 10
             let spacing: CGFloat = 6
             let preferredWaveWidth: CGFloat = 124
-            let availableWaveWidth = max(0, bounds.width - compactPad * 2 - labelSize.width - stopSize.width - spacing * 2)
+            let iconWidth = showStateIcon ? iconSize + spacing : 0
+            let availableWaveWidth = max(
+                0,
+                bounds.width - compactPad * 2 - iconWidth - labelSize.width - stopSize.width - spacing * 2
+            )
             let waveWidth = min(preferredWaveWidth, availableWaveWidth)
-            let groupWidth = labelSize.width + spacing + waveWidth + spacing + stopSize.width
+            let groupWidth = iconWidth + labelSize.width + spacing + waveWidth + spacing + stopSize.width
             let groupOriginX = max(compactPad, (bounds.width - groupWidth) / 2)
+            var currentX = groupOriginX
+
+            if showStateIcon {
+                stateIcon.frame = NSRect(
+                    x: currentX,
+                    y: (h - iconSize) / 2,
+                    width: iconSize,
+                    height: iconSize
+                )
+                currentX = stateIcon.frame.maxX + spacing
+            } else {
+                stateIcon.frame = .zero
+            }
 
             modeLabel.frame = NSRect(
-                x: groupOriginX,
+                x: currentX,
                 y: (h - labelSize.height) / 2,
                 width: labelSize.width,
                 height: labelSize.height
@@ -159,9 +138,21 @@ final class OverlayHeaderView: NSView {
             return
         }
 
-        // Mode label — left aligned, vertically centered
+        var leftEdge = pad
+        if showStateIcon {
+            stateIcon.frame = NSRect(
+                x: leftEdge,
+                y: (h - iconSize) / 2,
+                width: iconSize,
+                height: iconSize
+            )
+            leftEdge = stateIcon.frame.maxX + 6
+        } else {
+            stateIcon.frame = .zero
+        }
+
         modeLabel.frame = NSRect(
-            x: pad,
+            x: leftEdge,
             y: (h - labelSize.height) / 2,
             width: labelSize.width,
             height: labelSize.height
@@ -244,21 +235,27 @@ final class OverlayHeaderView: NSView {
         case .listening:
             modeLabel.stringValue = "Listening"
             modeLabel.textColor = OverlayTokens.textPrimary
+            applyStateSymbol(named: "mic.fill", tint: OverlayTokens.accentColor)
         case .drafting:
             modeLabel.stringValue = "Transcribing"
             modeLabel.textColor = OverlayTokens.textPrimary
+            stateIcon.isHidden = true
         case .success:
             modeLabel.stringValue = "Pasted"
             modeLabel.textColor = OverlayTokens.textPrimary
+            applyStateSymbol(named: "checkmark.circle.fill", tint: OverlayTokens.successColor)
         case .loading:
-            modeLabel.stringValue = loadingTitle ?? "Loading dictation"
+            modeLabel.stringValue = loadingTitle ?? "Starting dictation"
             modeLabel.textColor = OverlayTokens.textSecondary
+            stateIcon.isHidden = true
         case .idle:
             modeLabel.stringValue = "Dictation"
-            modeLabel.textColor = OverlayTokens.textMuted
+            modeLabel.textColor = OverlayTokens.textSecondary
+            applyStateSymbol(named: "mic", tint: OverlayTokens.textSecondary)
         default:
             modeLabel.stringValue = "Dictation"
             modeLabel.textColor = OverlayTokens.textSecondary
+            applyStateSymbol(named: "mic", tint: OverlayTokens.textSecondary)
         }
 
         // Spinner visibility
@@ -292,5 +289,14 @@ final class OverlayHeaderView: NSView {
         }
 
         needsLayout = true
+    }
+
+    private func applyStateSymbol(named symbolName: String, tint: NSColor) {
+        stateIcon.image = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: nil
+        )
+        stateIcon.contentTintColor = tint
+        stateIcon.isHidden = false
     }
 }

@@ -107,15 +107,14 @@ class FloatingOverlayController {
             defer: true
         )
 
-        // Glassmorphism: NSVisualEffectView behind content
+        // Native floating glass surface behind overlay content.
         let blurView = NSVisualEffectView()
-        blurView.appearance = NSAppearance(named: .darkAqua)
-        blurView.material = .underWindowBackground
+        blurView.material = .hudWindow
         blurView.blendingMode = .behindWindow
         blurView.state = .active
         blurView.wantsLayer = true
-        blurView.layer?.cornerRadius = OverlayTokens.cornerRadius
-        blurView.layer?.backgroundColor = OverlayTokens.panelBg.cgColor
+        blurView.layer?.cornerRadius = OverlayTokens.compactCornerRadius
+        blurView.layer?.backgroundColor = OverlayTokens.compactGlassTint.cgColor
         blurView.layer?.borderWidth = 1
         blurView.layer?.borderColor = OverlayTokens.panelStroke.cgColor
         blurView.frame = panel.contentView?.bounds ?? .zero
@@ -123,13 +122,14 @@ class FloatingOverlayController {
         panel.contentView?.addSubview(blurView)
         self.blurView = blurView
 
-        // Pure AppKit root view (replaces NSHostingView — no AttributeGraph, no AG corruption)
+        // Pure AppKit root view kept inside the effect view so labels and controls
+        // can inherit system vibrancy without reintroducing SwiftUI hosting.
         let rootView = OverlayRootView(frame: panel.contentView?.bounds ?? .zero)
         rootView.autoresizingMask = [.width, .height]
         rootView.headerView.onStopRequested = { [weak self] in
             self?.onStopListening?()
         }
-        panel.contentView?.addSubview(rootView, positioned: .above, relativeTo: blurView)
+        blurView.addSubview(rootView)
         self.rootView = rootView
 
         // Drag handle at the top — pure AppKit, above the root view
@@ -144,17 +144,17 @@ class FloatingOverlayController {
             height: headerHeight
         )
         dragView.autoresizingMask = [.width, .minYMargin]
-        panel.contentView?.addSubview(dragView, positioned: .above, relativeTo: rootView)
+        blurView.addSubview(dragView, positioned: .above, relativeTo: rootView)
         self.dragHandleView = dragView
 
         // Round corners on the panel's content view
         panel.contentView?.wantsLayer = true
-        panel.contentView?.layer?.cornerRadius = OverlayTokens.cornerRadius
+        panel.contentView?.layer?.cornerRadius = OverlayTokens.compactCornerRadius
         panel.contentView?.layer?.masksToBounds = true
-        panel.contentView?.layer?.borderWidth = 1
-        panel.contentView?.layer?.borderColor = OverlayTokens.panelStroke.cgColor
+        panel.contentView?.layer?.borderWidth = 0
 
         self.panel = panel
+        updatePanelAppearance()
 
         // Combine subscriptions: push live engine data to views
         sttRouter.$audioLevel
@@ -176,6 +176,7 @@ class FloatingOverlayController {
 
     /// Push current state to the AppKit view hierarchy. Called on state changes.
     private func pushStateToViews() {
+        updatePanelAppearance()
         rootView?.updateForState(
             state,
             dictationShortcutHint: dictationShortcutHint,
@@ -281,7 +282,7 @@ class FloatingOverlayController {
 
     func enterDraftingState() {
         state = .drafting
-        resizePanelToCompact()
+        resizePanel(to: preferredPanelSize(for: state))
     }
 
     func resizePanelToCompact() {
@@ -562,7 +563,9 @@ class FloatingOverlayController {
             return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
         case .drafting where !errorMessage.isEmpty:
             return errorPanelSize()
-        case .idle, .listening, .drafting, .success:
+        case .drafting:
+            return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight)
+        case .idle, .listening, .success:
             return NSSize(width: OverlayTokens.panelCompactWidth, height: OverlayTokens.panelCompactHeight)
         default:
             return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight)
@@ -574,5 +577,25 @@ class FloatingOverlayController {
             ? OverlayTokens.panelMinHeight
             : OverlayTokens.panelActionErrorHeight
         return NSSize(width: OverlayTokens.panelWidth, height: height)
+    }
+
+    private func updatePanelAppearance() {
+        guard let blurView else { return }
+
+        let usesExpandedChrome = state == .loading || state == .drafting
+        let cornerRadius = usesExpandedChrome
+            ? OverlayTokens.expandedCornerRadius
+            : OverlayTokens.compactCornerRadius
+
+        blurView.material = usesExpandedChrome ? .popover : .hudWindow
+        blurView.layer?.cornerRadius = cornerRadius
+        blurView.layer?.backgroundColor = (
+            usesExpandedChrome
+            ? OverlayTokens.expandedGlassTint
+            : OverlayTokens.compactGlassTint
+        ).cgColor
+        blurView.layer?.borderColor = OverlayTokens.panelStroke.cgColor
+
+        panel?.contentView?.layer?.cornerRadius = cornerRadius
     }
 }

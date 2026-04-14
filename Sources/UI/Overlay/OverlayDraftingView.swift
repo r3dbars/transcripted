@@ -4,69 +4,14 @@
 import AppKit
 
 @MainActor
-private final class OverlaySecondaryButton: NSButton {
-    override var title: String {
-        didSet {
-            updateTitleAppearance()
-            invalidateIntrinsicContentSize()
-        }
-    }
-
-    override var intrinsicContentSize: NSSize {
-        let base = super.intrinsicContentSize
-        return NSSize(width: base.width + 20, height: max(28, base.height + 8))
-    }
-
-    override var isHighlighted: Bool {
-        didSet { updateLayerAppearance() }
-    }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        commonInit()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    private func commonInit() {
-        isBordered = false
-        bezelStyle = .regularSquare
-        setButtonType(.momentaryPushIn)
-        wantsLayer = true
-        layer?.cornerRadius = 8
-        layer?.borderWidth = 1
-        focusRingType = .none
-        updateTitleAppearance()
-        updateLayerAppearance()
-    }
-
-    private func updateTitleAppearance() {
-        attributedTitle = NSAttributedString(
-            string: title,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-                .foregroundColor: OverlayTokens.textPrimary
-            ]
-        )
-    }
-
-    private func updateLayerAppearance() {
-        layer?.backgroundColor = (isHighlighted
-            ? NSColor.white.withAlphaComponent(0.12)
-            : NSColor.white.withAlphaComponent(0.07)
-        ).cgColor
-        layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
-    }
-}
-
-@MainActor
 final class OverlayDraftingView: NSView {
+    override var allowsVibrancy: Bool { true }
+
     private let spinner = NSProgressIndicator()
     private let statusLabel = NSTextField(labelWithString: "")
     private let errorIcon = NSImageView()
     private let errorLabel = NSTextField(labelWithString: "")
-    private let errorActionButton = OverlaySecondaryButton(frame: .zero)
+    private let errorActionButton = NSButton(title: "", target: nil, action: nil)
 
     // Secondary state: dimmed transcript + "Refining..." spinner
     private let dimmedTranscript = NSTextField(wrappingLabelWithString: "")
@@ -90,8 +35,8 @@ final class OverlayDraftingView: NSView {
         addSubview(spinner)
 
         // Status text
-        statusLabel.font = NSFont.systemFont(ofSize: 12)
-        statusLabel.textColor = OverlayTokens.textMuted
+        statusLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        statusLabel.textColor = OverlayTokens.textSecondary
         statusLabel.isBezeled = false
         statusLabel.isEditable = false
         statusLabel.drawsBackground = false
@@ -101,16 +46,16 @@ final class OverlayDraftingView: NSView {
         // Error icon
         if let image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "Error") {
             errorIcon.image = image
-            errorIcon.contentTintColor = NSColor.systemYellow
-            let config = NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
+            errorIcon.contentTintColor = OverlayTokens.warningColor
+            let config = NSImage.SymbolConfiguration(pointSize: 18, weight: .medium)
             errorIcon.symbolConfiguration = config
         }
         errorIcon.isHidden = true
         addSubview(errorIcon)
 
         // Error label
-        errorLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        errorLabel.textColor = OverlayTokens.textSecondary
+        errorLabel.font = NSFont.systemFont(ofSize: 12, weight: .regular)
+        errorLabel.textColor = OverlayTokens.textPrimary
         errorLabel.isBezeled = false
         errorLabel.isEditable = false
         errorLabel.drawsBackground = false
@@ -118,6 +63,9 @@ final class OverlayDraftingView: NSView {
         errorLabel.isHidden = true
         addSubview(errorLabel)
 
+        errorActionButton.bezelStyle = .rounded
+        errorActionButton.controlSize = .small
+        errorActionButton.contentTintColor = OverlayTokens.textPrimary
         errorActionButton.isHidden = true
         errorActionButton.target = self
         errorActionButton.action = #selector(handleErrorAction)
@@ -126,7 +74,7 @@ final class OverlayDraftingView: NSView {
         // Dimmed transcript (for showing text at reduced opacity during processing)
         dimmedTranscript.font = NSFont.systemFont(ofSize: 13)
         dimmedTranscript.textColor = OverlayTokens.textPrimary
-        dimmedTranscript.alphaValue = 0.45
+        dimmedTranscript.alphaValue = 0.62
         dimmedTranscript.isBezeled = false
         dimmedTranscript.isEditable = false
         dimmedTranscript.drawsBackground = false

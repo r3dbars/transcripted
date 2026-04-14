@@ -4,13 +4,19 @@
 import AppKit
 
 enum OverlayTokens {
-    // Colors (semi-transparent for glassmorphism blur)
-    static let panelBg       = NSColor.black.withAlphaComponent(0.82)
-    static let panelStroke   = NSColor.white.withAlphaComponent(0.10)
-    static let accentGreen   = NSColor(red: 0.07, green: 0.94, blue: 0.58, alpha: 1.0) // #13EF95 mint green
-    static let textPrimary   = NSColor.white
-    static let textSecondary = NSColor(white: 0.74, alpha: 1.0)
-    static let textMuted     = NSColor(white: 0.58, alpha: 1.0)
+    // Adaptive colors for a lighter, more native floating control.
+    static let compactGlassTint  = NSColor.windowBackgroundColor.withAlphaComponent(0.18)
+    static let expandedGlassTint = NSColor.windowBackgroundColor.withAlphaComponent(0.24)
+    static let panelStroke       = NSColor.separatorColor.withAlphaComponent(0.38)
+    static let contentCardTint   = NSColor.controlBackgroundColor.withAlphaComponent(0.46)
+    static let contentCardStroke = NSColor.separatorColor.withAlphaComponent(0.24)
+    static let accentColor       = NSColor.controlAccentColor
+    static let accentGreen       = accentColor
+    static let successColor      = NSColor.systemGreen
+    static let warningColor      = NSColor.systemOrange
+    static let textPrimary       = NSColor.labelColor
+    static let textSecondary     = NSColor.secondaryLabelColor
+    static let textMuted         = NSColor.tertiaryLabelColor
 
     // Diff colors
     static let diffDeleteText    = NSColor(red: 1.0, green: 0.4, blue: 0.4, alpha: 1.0)
@@ -23,17 +29,22 @@ enum OverlayTokens {
 
     // Layout
     static let panelWidth: CGFloat         = 360
-    static let panelCompactWidth: CGFloat  = 276
-    static let panelCompactHeight: CGFloat = 42   // header bar only, no content area
-    static let panelLoadingHeight: CGFloat = 100
-    static let panelMinHeight: CGFloat     = 92
-    static let panelActionErrorHeight: CGFloat = 122
+    static let panelCompactWidth: CGFloat  = 304
+    static let panelCompactHeight: CGFloat = 48
+    static let panelLoadingHeight: CGFloat = 138
+    static let panelMinHeight: CGFloat     = 140
+    static let panelActionErrorHeight: CGFloat = 156
     static let panelMaxHeight: CGFloat     = 340
-    static let cornerRadius: CGFloat   = 12
-    static let contentPadding: CGFloat = 12
+    static let compactCornerRadius: CGFloat = 18
+    static let expandedCornerRadius: CGFloat = 20
+    static let cornerRadius: CGFloat = expandedCornerRadius
+    static let contentCardCornerRadius: CGFloat = 16
+    static let panelChromeInset: CGFloat = 10
+    static let contentPadding: CGFloat = 14
+    static let contentGap: CGFloat = 8
 
     // Header
-    static let headerHeight: CGFloat = 32
+    static let headerHeight: CGFloat = 36
     static let toolbarHeight: CGFloat = 28
     static let dividerHeight: CGFloat = 1
 }

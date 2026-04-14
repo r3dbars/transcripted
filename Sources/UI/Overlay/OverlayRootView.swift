@@ -6,12 +6,14 @@ import AppKit
 
 @MainActor
 final class OverlayRootView: NSView {
+    override var allowsVibrancy: Bool { true }
+
     // MARK: - Always-visible children
 
     let headerView = OverlayHeaderView(frame: .zero)
-    private let topDivider = NSView()
     private let contentContainer = NSView()
-    private let bottomDivider = NSView()
+    private let contentGlassView = NSVisualEffectView()
+    private let contentInnerContainer = NSView()
 
     // MARK: - Lazy content children (only drafting/error is still used in the compact dictation flow)
 
@@ -20,7 +22,7 @@ final class OverlayRootView: NSView {
         if let v = _draftingView { return v }
         let v = OverlayDraftingView(frame: .zero)
         v.isHidden = true
-        contentContainer.addSubview(v)
+        contentInnerContainer.addSubview(v)
         _draftingView = v
         return v
     }
@@ -30,7 +32,7 @@ final class OverlayRootView: NSView {
         if let v = _loadingView { return v }
         let v = OverlayLoadingView(frame: .zero)
         v.isHidden = true
-        contentContainer.addSubview(v)
+        contentInnerContainer.addSubview(v)
         _loadingView = v
         return v
     }
@@ -51,18 +53,24 @@ final class OverlayRootView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func setupViews() {
-        // Dividers
-        topDivider.wantsLayer = true
-        topDivider.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
-        addSubview(topDivider)
-
-        bottomDivider.wantsLayer = true
-        bottomDivider.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
-        addSubview(bottomDivider)
-
         addSubview(headerView)
+
         contentContainer.wantsLayer = true
-        contentContainer.layer?.masksToBounds = true
+        contentContainer.layer?.masksToBounds = false
+
+        contentGlassView.material = .menu
+        contentGlassView.blendingMode = .withinWindow
+        contentGlassView.state = .active
+        contentGlassView.wantsLayer = true
+        contentGlassView.layer?.cornerRadius = OverlayTokens.contentCardCornerRadius
+        contentGlassView.layer?.masksToBounds = true
+        contentGlassView.layer?.backgroundColor = OverlayTokens.contentCardTint.cgColor
+        contentGlassView.layer?.borderWidth = 1
+        contentGlassView.layer?.borderColor = OverlayTokens.contentCardStroke.cgColor
+        contentContainer.addSubview(contentGlassView)
+
+        contentInnerContainer.wantsLayer = false
+        contentGlassView.addSubview(contentInnerContainer)
         addSubview(contentContainer)
     }
 
@@ -73,43 +81,40 @@ final class OverlayRootView: NSView {
 
         let w = bounds.width
         let headerH = OverlayTokens.headerHeight
-        let dividerH = OverlayTokens.dividerHeight
         let showContent = shouldShowContent()
 
         if showContent {
-            // Header at top when content is visible underneath it.
             headerView.frame = NSRect(x: 0, y: bounds.height - headerH, width: w, height: headerH)
 
-            // Top divider below header
-            topDivider.frame = NSRect(x: 0, y: bounds.height - headerH - dividerH, width: w, height: dividerH)
-            topDivider.isHidden = false
-
-            bottomDivider.isHidden = true
-
-            // Content fills the space beneath the header divider.
-            let contentTop = bounds.height - headerH - dividerH
-            let contentBottom: CGFloat = 0
+            let contentTop = bounds.height - headerH - OverlayTokens.contentGap
+            let contentBottom = OverlayTokens.panelChromeInset
             let contentH = max(0, contentTop - contentBottom)
-            contentContainer.frame = NSRect(x: 0, y: contentBottom, width: w, height: contentH)
+            let contentW = max(0, w - (OverlayTokens.panelChromeInset * 2))
+            contentContainer.frame = NSRect(
+                x: OverlayTokens.panelChromeInset,
+                y: contentBottom,
+                width: contentW,
+                height: contentH
+            )
             contentContainer.isHidden = false
 
-            // Size all content children to fill container
-            for subview in contentContainer.subviews {
-                subview.frame = contentContainer.bounds
+            contentGlassView.frame = contentContainer.bounds
+            contentInnerContainer.frame = contentGlassView.bounds.insetBy(
+                dx: OverlayTokens.contentPadding,
+                dy: OverlayTokens.contentPadding
+            )
+
+            for subview in contentInnerContainer.subviews {
+                subview.frame = contentInnerContainer.bounds
             }
         } else {
-            // Compact state: let the header occupy the full height so its contents can sit
-            // perfectly centered within the pill.
             headerView.frame = bounds
-            topDivider.isHidden = true
-            bottomDivider.isHidden = true
             contentContainer.isHidden = true
         }
     }
 
     private func shouldShowContent() -> Bool {
-        if currentState == .loading { return true }
-        return currentState == .drafting && !currentErrorMessage.isEmpty
+        currentState == .loading || currentState == .drafting
     }
 
     // MARK: - State Updates
@@ -136,8 +141,8 @@ final class OverlayRootView: NSView {
         )
 
         let showLoading = state == .loading
-        let showError = state == .drafting && !errorMessage.isEmpty
-        let showContent = showLoading || showError
+        let showDrafting = state == .drafting
+        let showContent = showLoading || showDrafting
 
         contentContainer.isHidden = !showContent
 
@@ -152,7 +157,7 @@ final class OverlayRootView: NSView {
             )
         }
 
-        if showError {
+        if showDrafting {
             draftingView.isHidden = false
             let statusText = isTranscribing ? "Transcribing..." : "Processing..."
             draftingView.update(
@@ -174,6 +179,8 @@ final class OverlayRootView: NSView {
 
 @MainActor
 final class OverlayLoadingView: NSView {
+    override var allowsVibrancy: Bool { true }
+
     private let titleLabel = NSTextField(labelWithString: "Getting ready")
     private let detailLabel = NSTextField(wrappingLabelWithString: "")
     private let progressBar = NSProgressIndicator()

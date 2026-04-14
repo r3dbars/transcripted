@@ -373,7 +373,7 @@ class DictationSessionController: ObservableObject {
                     return
                 }
             }
-            overlayController.state = .drafting
+            overlayController.enterDraftingState()
             let voiceText = await appState.sttRouter.transcribe()
             guard !Task.isCancelled else { return }
 
