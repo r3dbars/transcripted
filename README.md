@@ -55,8 +55,8 @@ Dictation example:
 Need to test the onboarding changes before touching pricing.
 ```
 
-If you want more structure, Transcripted can also save JSON sidecars and a
-local `transcripted.json` index next to the Markdown files.
+The main thing is simple: Transcripted saves readable Markdown files you can
+open anywhere.
 
 ## Local By Default
 
