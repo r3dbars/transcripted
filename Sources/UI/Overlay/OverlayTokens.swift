@@ -27,6 +27,7 @@ enum OverlayTokens {
     static let panelCompactHeight: CGFloat = 42   // header bar only, no content area
     static let panelLoadingHeight: CGFloat = 100
     static let panelMinHeight: CGFloat     = 92
+    static let panelActionErrorHeight: CGFloat = 122
     static let panelMaxHeight: CGFloat     = 340
     static let cornerRadius: CGFloat   = 12
     static let contentPadding: CGFloat = 12

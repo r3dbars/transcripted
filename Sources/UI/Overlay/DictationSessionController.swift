@@ -217,7 +217,7 @@ class DictationSessionController: ObservableObject {
 
         let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         guard microphoneStatus == .authorized else {
-            let openedMicrophoneSettings = shouldOpenMicrophoneSettings(for: microphoneStatus)
+            let shouldOfferSettingsAction = shouldOfferMicrophoneSettingsAction(for: microphoneStatus)
             DiagnosticsTrail.record(
                 logger: appState.logger,
                 level: .error,
@@ -232,14 +232,15 @@ class DictationSessionController: ObservableObject {
                     ]
                 )
             )
-            if openedMicrophoneSettings {
-                TranscriptedPermissionAccess.openSettings(for: .microphone)
-            }
             overlayController.showError(
                 microphoneUnavailableMessage(
                     for: microphoneStatus,
-                    openedSettings: openedMicrophoneSettings
-                )
+                    openedSettings: false
+                ),
+                actionTitle: shouldOfferSettingsAction ? "Open Microphone Settings" : nil,
+                action: shouldOfferSettingsAction ? {
+                    TranscriptedPermissionAccess.openSettings(for: .microphone)
+                } : nil
             )
             isDictating = false
             return
@@ -663,7 +664,7 @@ class DictationSessionController: ObservableObject {
         overlayController?.showError("Recording was interrupted. Try again.")
     }
 
-    private func shouldOpenMicrophoneSettings(for status: AVAuthorizationStatus) -> Bool {
+    private func shouldOfferMicrophoneSettingsAction(for status: AVAuthorizationStatus) -> Bool {
         switch status {
         case .denied, .restricted:
             return true

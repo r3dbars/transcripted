@@ -118,6 +118,8 @@ final class OverlayRootView: NSView {
         _ state: FloatingOverlayController.OverlayState,
         dictationShortcutHint: String,
         errorMessage: String,
+        errorActionTitle: String?,
+        onErrorAction: (() -> Void)?,
         loadingPresentation: FloatingOverlayController.LoadingPresentation,
         loadingElapsedSeconds: Int,
         isTranscribing: Bool,
@@ -155,6 +157,8 @@ final class OverlayRootView: NSView {
             let statusText = isTranscribing ? "Transcribing..." : "Processing..."
             draftingView.update(
                 error: errorMessage.isEmpty ? nil : errorMessage,
+                errorActionTitle: errorActionTitle,
+                onErrorAction: onErrorAction,
                 isTranscribing: isTranscribing,
                 transcriptText: liveTranscript,
                 statusText: statusText
