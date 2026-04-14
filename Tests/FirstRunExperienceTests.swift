@@ -1,6 +1,42 @@
 import Foundation
 
 func testFirstRunExperience() {
+    runSuite("FirstRunExperience.onboardingPermissions — keeps dictation setup separate from later meeting permissions") {
+        let required = FirstRunExperience.onboardingRequiredPermissions()
+        let optional = FirstRunExperience.onboardingOptionalPermissions()
+
+        assertEqual(
+            required,
+            [.microphone, .accessibility],
+            "first-run onboarding should only require dictation-critical permissions"
+        )
+        assertEqual(
+            optional,
+            [.systemAudioRecording, .calendar],
+            "system audio and calendar should stay in the later optional group"
+        )
+    }
+
+    runSuite("FirstRunExperience.primaryAction — explains only dictation-critical permissions are required up front") {
+        let action = FirstRunExperience.primaryAction(
+            hasRequiredPermissions: false,
+            hasPasteTarget: false,
+            modelState: .notLoaded
+        )
+
+        assertEqual(action.title, "Turn on the required permissions", "blocked onboarding should still use the required-permissions CTA")
+        assertFalse(action.isEnabled, "first-run CTA should stay disabled until the required dictation permissions are granted")
+        assertFalse(action.shouldStartDictation, "blocked onboarding should not try to launch dictation")
+        assertTrue(
+            action.detail.contains("Microphone and Accessibility"),
+            "blocked onboarding copy should name the dictation-critical permissions"
+        )
+        assertTrue(
+            action.detail.contains("System Audio Recording and Calendar can wait until later"),
+            "blocked onboarding copy should make the later permissions feel optional"
+        )
+    }
+
     runSuite("FirstRunExperience.primaryAction — starts dictation when permissions and a paste target are ready") {
         let action = FirstRunExperience.primaryAction(
             hasRequiredPermissions: true,

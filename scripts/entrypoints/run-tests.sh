@@ -111,6 +111,7 @@ $manifest_entries
 EOF
 
 APP_SOURCES=(
+    "Sources/Support/TranscriptedPermissionAccess.swift"
     "Sources/Support/TranscriptedStoragePaths.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
@@ -146,6 +147,11 @@ swiftc \
     "${FAST_TEST_SOURCES[@]}" \
     "${APP_SOURCES[@]}" \
     -framework AppKit \
+    -framework AVFoundation \
+    -framework ApplicationServices \
+    -framework CoreMedia \
+    -framework EventKit \
+    -framework ScreenCaptureKit \
     -parse-as-library \
     -o build/tests \
     2>&1

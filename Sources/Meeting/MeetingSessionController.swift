@@ -286,10 +286,43 @@ final class MeetingSessionController: ObservableObject {
             break
         }
 
-        let startDecision = MeetingRecordingStartGate.evaluate(
-            microphoneGranted: TranscriptedPermissionAccess.isGranted(.microphone),
-            systemAudioRecordingGranted: TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
+        let microphoneGranted = TranscriptedPermissionAccess.isGranted(.microphone)
+        var systemAudioRecordingGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
+        var startDecision = MeetingRecordingStartGate.evaluate(
+            microphoneGranted: microphoneGranted,
+            systemAudioRecordingGranted: systemAudioRecordingGranted
         )
+
+        if !startDecision.canStart,
+           startDecision.failureReason == "system_audio_recording",
+           microphoneGranted
+        {
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "meeting_start_requesting_system_audio_permission",
+                message: "Meeting start is requesting system audio permission",
+                context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+            )
+
+            systemAudioRecordingGranted = await TranscriptedPermissionAccess.requestSystemAudioRecordingAccessIfNeeded()
+            startDecision = MeetingRecordingStartGate.evaluate(
+                microphoneGranted: microphoneGranted,
+                systemAudioRecordingGranted: systemAudioRecordingGranted
+            )
+
+            DiagnosticsTrail.record(
+                level: systemAudioRecordingGranted ? .info : .warning,
+                engine: "meeting",
+                event: systemAudioRecordingGranted
+                    ? "meeting_start_system_audio_permission_granted"
+                    : "meeting_start_system_audio_permission_missing",
+                message: systemAudioRecordingGranted
+                    ? "System audio permission is ready for meeting capture"
+                    : "System audio permission is still missing for meeting capture",
+                context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+            )
+        }
+
         guard startDecision.canStart else {
             DiagnosticsTrail.record(
                 level: .warning,
