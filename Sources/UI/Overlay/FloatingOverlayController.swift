@@ -70,7 +70,8 @@ class FloatingOverlayController {
 
     private var panel: FloatingOverlayPanel?
     private var rootView: OverlayRootView?
-    private var blurView: NSVisualEffectView?
+    private var glassContainerView: NSGlassEffectContainerView?
+    private var glassSurfaceView: NSGlassEffectView?
     private var dragHandleView: PanelDragView?
     private var escapeMonitor: Any?
 
@@ -107,34 +108,37 @@ class FloatingOverlayController {
             defer: true
         )
 
-        // Native floating glass surface behind overlay content.
-        let blurView = NSVisualEffectView()
-        blurView.material = .hudWindow
-        blurView.blendingMode = .behindWindow
-        blurView.state = .active
-        blurView.wantsLayer = true
-        blurView.layer?.cornerRadius = OverlayTokens.compactCornerRadius
-        blurView.layer?.backgroundColor = OverlayTokens.compactGlassTint.cgColor
-        blurView.layer?.borderWidth = 1
-        blurView.layer?.borderColor = OverlayTokens.panelStroke.cgColor
-        blurView.frame = panel.contentView?.bounds ?? .zero
-        blurView.autoresizingMask = [.width, .height]
-        panel.contentView?.addSubview(blurView)
-        self.blurView = blurView
+        let glassContainerView = NSGlassEffectContainerView(frame: panel.contentView?.bounds ?? .zero)
+        glassContainerView.autoresizingMask = [.width, .height]
+        glassContainerView.spacing = OverlayTokens.glassGroupingSpacing
+
+        let glassStageView = NSView(frame: glassContainerView.bounds)
+        glassStageView.autoresizingMask = [.width, .height]
+        glassContainerView.contentView = glassStageView
+        panel.contentView?.addSubview(glassContainerView)
+        self.glassContainerView = glassContainerView
+
+        let glassSurfaceView = NSGlassEffectView(frame: glassStageView.bounds)
+        glassSurfaceView.autoresizingMask = [.width, .height]
+        glassSurfaceView.cornerRadius = OverlayTokens.compactCornerRadius
+        glassSurfaceView.style = .regular
+        glassSurfaceView.tintColor = OverlayTokens.compactGlassTint
+        glassStageView.addSubview(glassSurfaceView)
+        self.glassSurfaceView = glassSurfaceView
 
         // Pure AppKit root view kept inside the effect view so labels and controls
         // can inherit system vibrancy without reintroducing SwiftUI hosting.
-        let rootView = OverlayRootView(frame: panel.contentView?.bounds ?? .zero)
+        let rootView = OverlayRootView(frame: glassSurfaceView.bounds)
         rootView.autoresizingMask = [.width, .height]
         rootView.headerView.onStopRequested = { [weak self] in
             self?.onStopListening?()
         }
-        blurView.addSubview(rootView)
+        glassSurfaceView.contentView = rootView
         self.rootView = rootView
 
         // Drag handle at the top — pure AppKit, above the root view
         let headerHeight: CGFloat = OverlayTokens.headerHeight
-        let contentBounds = panel.contentView?.bounds ?? .zero
+        let contentBounds = glassStageView.bounds
         let dragView = PanelDragView()
         dragView.panel = panel
         dragView.frame = NSRect(
@@ -144,13 +148,14 @@ class FloatingOverlayController {
             height: headerHeight
         )
         dragView.autoresizingMask = [.width, .minYMargin]
-        blurView.addSubview(dragView, positioned: .above, relativeTo: rootView)
+        glassStageView.addSubview(dragView, positioned: .above, relativeTo: glassSurfaceView)
         self.dragHandleView = dragView
 
-        // Round corners on the panel's content view
+        // The panel itself stays clear; the visible glass comes from the AppKit
+        // glass effect views so the overlay feels like a native floating control.
         panel.contentView?.wantsLayer = true
-        panel.contentView?.layer?.cornerRadius = OverlayTokens.compactCornerRadius
-        panel.contentView?.layer?.masksToBounds = true
+        panel.contentView?.layer?.cornerRadius = 0
+        panel.contentView?.layer?.masksToBounds = false
         panel.contentView?.layer?.borderWidth = 0
 
         self.panel = panel
@@ -258,7 +263,7 @@ class FloatingOverlayController {
         panel.alphaValue = 0
         panel.orderFrontRegardless()
 
-        if let contentLayer = panel.contentView?.layer {
+        if let contentLayer = glassSurfaceView?.layer ?? panel.contentView?.layer {
             let spring = CASpringAnimation(keyPath: "transform.scale")
             spring.fromValue = 0.88
             spring.toValue = 1.0
@@ -313,7 +318,7 @@ class FloatingOverlayController {
             }
         })
 
-        if let contentLayer = panel.contentView?.layer {
+        if let contentLayer = glassSurfaceView?.layer ?? panel.contentView?.layer {
             let shrink = CABasicAnimation(keyPath: "transform.scale")
             shrink.fromValue = 1.0
             shrink.toValue = 0.93
@@ -485,6 +490,7 @@ class FloatingOverlayController {
         panel?.allowKeyStatus = false
         panel?.orderOut(nil)
         panel?.alphaValue = 1.0
+        glassSurfaceView?.layer?.removeAllAnimations()
         panel?.contentView?.layer?.removeAllAnimations()
 
         isVisible = false
@@ -580,22 +586,25 @@ class FloatingOverlayController {
     }
 
     private func updatePanelAppearance() {
-        guard let blurView else { return }
+        guard let glassSurfaceView else { return }
 
         let usesExpandedChrome = state == .loading || state == .drafting
         let cornerRadius = usesExpandedChrome
             ? OverlayTokens.expandedCornerRadius
             : OverlayTokens.compactCornerRadius
 
-        blurView.material = usesExpandedChrome ? .popover : .hudWindow
-        blurView.layer?.cornerRadius = cornerRadius
-        blurView.layer?.backgroundColor = (
-            usesExpandedChrome
-            ? OverlayTokens.expandedGlassTint
-            : OverlayTokens.compactGlassTint
-        ).cgColor
-        blurView.layer?.borderColor = OverlayTokens.panelStroke.cgColor
+        glassSurfaceView.cornerRadius = cornerRadius
+        glassSurfaceView.style = usesExpandedChrome ? .clear : .regular
 
-        panel?.contentView?.layer?.cornerRadius = cornerRadius
+        switch state {
+        case .listening:
+            glassSurfaceView.tintColor = OverlayTokens.listeningGlassTint
+        case .success:
+            glassSurfaceView.tintColor = OverlayTokens.successGlassTint
+        case .loading, .drafting:
+            glassSurfaceView.tintColor = OverlayTokens.expandedGlassTint
+        default:
+            glassSurfaceView.tintColor = OverlayTokens.compactGlassTint
+        }
     }
 }

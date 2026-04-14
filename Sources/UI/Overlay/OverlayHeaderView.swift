@@ -60,15 +60,16 @@ final class OverlayHeaderView: NSView {
         shortcutHint.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         addSubview(shortcutHint)
 
-        stopButton.bezelStyle = .rounded
+        stopButton.title = ""
+        stopButton.bezelStyle = .glass
         stopButton.controlSize = .small
         stopButton.image = NSImage(
             systemSymbolName: "stop.fill",
             accessibilityDescription: "Stop dictation"
         )
-        stopButton.imagePosition = .imageLeading
+        stopButton.imagePosition = .imageOnly
         stopButton.imageScaling = .scaleProportionallyDown
-        stopButton.contentTintColor = OverlayTokens.textPrimary
+        stopButton.contentTintColor = OverlayTokens.warningColor
         stopButton.isHidden = true
         stopButton.target = self
         stopButton.action = #selector(stopButtonPressed)

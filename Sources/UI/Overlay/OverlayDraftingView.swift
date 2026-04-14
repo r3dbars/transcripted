@@ -63,8 +63,8 @@ final class OverlayDraftingView: NSView {
         errorLabel.isHidden = true
         addSubview(errorLabel)
 
-        errorActionButton.bezelStyle = .rounded
-        errorActionButton.controlSize = .small
+        errorActionButton.bezelStyle = .glass
+        errorActionButton.controlSize = .regular
         errorActionButton.contentTintColor = OverlayTokens.textPrimary
         errorActionButton.isHidden = true
         errorActionButton.target = self

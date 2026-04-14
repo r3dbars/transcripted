@@ -12,7 +12,8 @@ final class OverlayRootView: NSView {
 
     let headerView = OverlayHeaderView(frame: .zero)
     private let contentContainer = NSView()
-    private let contentGlassView = NSVisualEffectView()
+    private let contentGlassView = NSGlassEffectView()
+    private let contentGlassHostView = NSView()
     private let contentInnerContainer = NSView()
 
     // MARK: - Lazy content children (only drafting/error is still used in the compact dictation flow)
@@ -58,19 +59,16 @@ final class OverlayRootView: NSView {
         contentContainer.wantsLayer = true
         contentContainer.layer?.masksToBounds = false
 
-        contentGlassView.material = .menu
-        contentGlassView.blendingMode = .withinWindow
-        contentGlassView.state = .active
-        contentGlassView.wantsLayer = true
-        contentGlassView.layer?.cornerRadius = OverlayTokens.contentCardCornerRadius
-        contentGlassView.layer?.masksToBounds = true
-        contentGlassView.layer?.backgroundColor = OverlayTokens.contentCardTint.cgColor
-        contentGlassView.layer?.borderWidth = 1
-        contentGlassView.layer?.borderColor = OverlayTokens.contentCardStroke.cgColor
+        contentGlassView.style = .regular
+        contentGlassView.cornerRadius = OverlayTokens.contentCardCornerRadius
+        contentGlassView.tintColor = OverlayTokens.contentCardTint
         contentContainer.addSubview(contentGlassView)
 
+        contentGlassHostView.autoresizingMask = [.width, .height]
+        contentGlassView.contentView = contentGlassHostView
+
         contentInnerContainer.wantsLayer = false
-        contentGlassView.addSubview(contentInnerContainer)
+        contentGlassHostView.addSubview(contentInnerContainer)
         addSubview(contentContainer)
     }
 
@@ -99,7 +97,8 @@ final class OverlayRootView: NSView {
             contentContainer.isHidden = false
 
             contentGlassView.frame = contentContainer.bounds
-            contentInnerContainer.frame = contentGlassView.bounds.insetBy(
+            contentGlassHostView.frame = contentGlassView.bounds
+            contentInnerContainer.frame = contentGlassHostView.bounds.insetBy(
                 dx: OverlayTokens.contentPadding,
                 dy: OverlayTokens.contentPadding
             )
@@ -155,6 +154,7 @@ final class OverlayRootView: NSView {
                 presentation: loadingPresentation,
                 elapsedSeconds: loadingElapsedSeconds
             )
+            contentGlassView.tintColor = OverlayTokens.contentCardTint
         }
 
         if showDrafting {
@@ -168,6 +168,13 @@ final class OverlayRootView: NSView {
                 transcriptText: liveTranscript,
                 statusText: statusText
             )
+            contentGlassView.tintColor = errorMessage.isEmpty
+                ? OverlayTokens.processingGlassTint
+                : OverlayTokens.warningGlassTint
+        }
+
+        if !showContent {
+            contentGlassView.tintColor = OverlayTokens.contentCardTint
         }
 
         // Trigger relayout

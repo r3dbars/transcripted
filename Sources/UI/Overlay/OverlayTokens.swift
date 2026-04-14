@@ -14,6 +14,10 @@ enum OverlayTokens {
     static let accentGreen       = accentColor
     static let successColor      = NSColor.systemGreen
     static let warningColor      = NSColor.systemOrange
+    static let listeningGlassTint = accentColor.withAlphaComponent(0.16)
+    static let processingGlassTint = accentColor.withAlphaComponent(0.08)
+    static let successGlassTint = successColor.withAlphaComponent(0.16)
+    static let warningGlassTint = warningColor.withAlphaComponent(0.12)
     static let textPrimary       = NSColor.labelColor
     static let textSecondary     = NSColor.secondaryLabelColor
     static let textMuted         = NSColor.tertiaryLabelColor
@@ -42,6 +46,7 @@ enum OverlayTokens {
     static let panelChromeInset: CGFloat = 10
     static let contentPadding: CGFloat = 14
     static let contentGap: CGFloat = 8
+    static let glassGroupingSpacing: CGFloat = 10
 
     // Header
     static let headerHeight: CGFloat = 36
