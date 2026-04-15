@@ -461,7 +461,7 @@ class DictationSessionController: ObservableObject {
                     "delivery": pasteOutcome.delivery.rawValue,
                     "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
                     "trigger": currentDictationTrigger.rawValue,
-                    "word_count_bucket": AnalyticsReporter.wordCountBucket(text.split(whereSeparator: \.isWhitespace).count),
+                    "word_count_bucket": AnalyticsReporter.wordCountBucket(wordCount),
                 ]
             )
         }
