@@ -12,6 +12,14 @@ public final class SpeakerDatabase: @unchecked Sendable {
     public static let shared = SpeakerDatabase()
 
     var db: OpaquePointer?
+    // Thread-safety invariant:
+    // - Writes happen only during `init` (single-threaded construction) inside
+    //   `openDatabase`/`configureOpenDatabase`.
+    // - Reads happen only inside `queue.sync { ... }` via the `*Impl` helpers
+    //   below. This serializes reader visibility through the queue's memory
+    //   barrier, which is why the class can safely be `@unchecked Sendable`
+    //   even though this field is a plain `var Bool`.
+    // If a new caller reads this outside the queue, add a queue.sync hop.
     var isDatabaseOpen = false
     let dbPath: URL
     let queue = DispatchQueue(label: "com.transcripted.speakerdb", qos: .utility)

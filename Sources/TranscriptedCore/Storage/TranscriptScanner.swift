@@ -160,6 +160,12 @@ public enum TranscriptScanner {
                         // Security: cap length to prevent unbounded strings from an adversarially
                         // crafted transcript file from being stored in the stats database.
                         // A legitimate UUID is 36 chars; 256 gives generous slack for any future formats.
+                        if value.count > 256 {
+                            AppLogger.pipeline.warning("TranscriptScanner: oversized capture_id truncated", [
+                                "path": fileURL.lastPathComponent,
+                                "length": "\(value.count)"
+                            ])
+                        }
                         captureID = String(value.prefix(256))
 
                     default:

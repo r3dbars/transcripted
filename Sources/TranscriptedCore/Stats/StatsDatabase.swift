@@ -9,6 +9,9 @@ public final class StatsDatabase {
     public static let shared = StatsDatabase()
 
     var db: OpaquePointer?
+    // Thread-safety invariant: writes happen only during `init`
+    // (single-threaded construction); reads happen only inside `queue.sync`.
+    // See the matching comment in `SpeakerDatabase` for the rationale.
     var isDatabaseOpen = false
     let dbPath: URL
 
