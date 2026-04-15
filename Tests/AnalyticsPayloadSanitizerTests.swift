@@ -48,4 +48,19 @@ func testAnalyticsPayloadSanitizer() {
         assertTrue(value.contains("[redacted-url]"), "URL marker should remain")
         assertTrue(value.contains("[redacted-secret]"), "secret marker should remain")
     }
+
+    runSuite("AnalyticsPayloadSanitizer redacts bearer headers and sk-style keys") {
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "failure_kind": "Request used Bearer abc123 and sk-proj-secret-value while retrying",
+            ],
+            allowedKeys: ["failure_kind"]
+        )
+
+        let value = sanitized["failure_kind"] ?? ""
+        assertFalse(value.contains("Bearer abc123"), "bearer headers should be redacted")
+        assertFalse(value.contains("sk-proj-secret-value"), "sk-style API keys should be redacted")
+        assertTrue(value.contains("Bearer ****"), "bearer marker should remain")
+        assertTrue(value.contains("sk-****"), "sk-style marker should remain")
+    }
 }
