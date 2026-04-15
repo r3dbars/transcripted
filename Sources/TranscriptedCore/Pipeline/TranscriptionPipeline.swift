@@ -11,16 +11,22 @@ extension Transcription {
     ///
     /// Pipeline:
     /// 1. Load & resample both audio files to 16kHz mono
-    /// 2. Run Sortformer on system audio -> speaker segments with timestamps + embeddings
-    /// 3. Transcribe each speaker segment individually with Parakeet
-    /// 4. Transcribe mic audio with Parakeet (full track, split by silence)
-    /// 5. Match speaker embeddings against persistent SpeakerDatabase
+    /// 2. Run PyAnnote offline diarization on system audio -> speaker segments with embeddings
+    /// 3. Transcribe each system-audio speaker segment with Parakeet
+    /// 4. Transcribe mic audio with Parakeet.
+    ///    - If `splitLocalSpeakers` is false (default), splits by silence and tags
+    ///      every utterance as the single "You" speaker.
+    ///    - If true, runs PyAnnote diarization on the mic channel too and threads
+    ///      per-speaker embeddings through the same classification/matching path
+    ///      used for system audio. Surfaces multiple local speakers in the naming sheet.
+    /// 5. Match speaker embeddings against persistent SpeakerDatabase (both channels)
     /// 6. Merge mic + system utterances chronologically
     ///
     /// Note: nonisolated to keep heavy compute off the main thread
     nonisolated func transcribeMultichannel(
         micURL: URL,
         systemURL: URL,
+        splitLocalSpeakers: Bool = false,
         onProgress: ((Double) -> Void)? = nil
     ) async throws -> TranscriptionResult {
 
@@ -392,49 +398,76 @@ extension Transcription {
 
             AppLogger.transcription.info("System audio transcribed", ["utterances": "\(systemUtterances.count)", "speakers": "\(Set(systemUtterances.map { $0.speakerId }).count)"])
 
-            // Step 4: Transcribe mic audio per-segment using energy-based silence detection
+            // Step 4: Transcribe mic audio.
+            // Two modes:
+            //   A) splitLocalSpeakers == false (default): silence-split, tag as single "You"
+            //   B) splitLocalSpeakers == true: diarize mic, run same classification path
+            //      used for system audio, emit per-speaker utterances
             await MainActor.run {
                 self.processingStatus = "Transcribing mic audio..."
             }
 
-            // Split mic audio into segments at silence boundaries for accurate timestamps
-            let micSegments = Self.detectSpeechSegments(samples: micSamples, sampleRate: 16000)
-            AppLogger.transcription.info("Mic audio segmented by silence", ["segments": "\(micSegments.count)"])
-
             var micUtterances: [TranscriptionUtterance] = []
+            var micSpeakerContexts: [String: ChannelSpeakerContext] = [:]
+            var newlyCreatedMicProfileIds: Set<UUID> = []
 
-            for (index, segment) in micSegments.enumerated() {
-                try Task.checkCancellation()
-
-                let segmentSamples = AudioResampler.extractSlice(
-                    from: micSamples,
-                    sampleRate: 16000,
-                    startTime: segment.start,
-                    endTime: segment.end
+            if splitLocalSpeakers {
+                // B) Mic diarization path
+                let micResult = try await Self.processMicChannelWithDiarization(
+                    samples: micSamples,
+                    diarization: diarization,
+                    parakeet: parakeet,
+                    speakerDB: speakerDB,
+                    existingProfiles: existingProfiles,
+                    droppedSegments: &droppedSegments,
+                    onProgress: onProgress
                 )
+                micUtterances = micResult.utterances
+                micSpeakerContexts = micResult.speakerContexts
+                newlyCreatedMicProfileIds = micResult.newlyCreatedProfileIds
+                AppLogger.transcription.info("Mic audio diarized + transcribed", [
+                    "utterances": "\(micUtterances.count)",
+                    "speakers": "\(Set(micUtterances.map { $0.speakerId }).count)",
+                    "newProfiles": "\(newlyCreatedMicProfileIds.count)"
+                ])
+            } else {
+                // A) Default: silence-split, single speaker
+                let micSegments = Self.detectSpeechSegments(samples: micSamples, sampleRate: 16000)
+                AppLogger.transcription.info("Mic audio segmented by silence", ["segments": "\(micSegments.count)"])
 
-                // Skip segments shorter than 1s — Parakeet requires at least 16,000 samples
-                guard segmentSamples.count >= 16000 else { droppedSegments += 1; continue }
+                for (index, segment) in micSegments.enumerated() {
+                    try Task.checkCancellation()
 
-                let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .microphone)
-                guard !text.isEmpty else { continue }
+                    let segmentSamples = AudioResampler.extractSlice(
+                        from: micSamples,
+                        sampleRate: 16000,
+                        startTime: segment.start,
+                        endTime: segment.end
+                    )
 
-                micUtterances.append(TranscriptionUtterance(
-                    start: segment.start,
-                    end: segment.end,
-                    channel: 0,
-                    speakerId: 0,
-                    persistentSpeakerId: nil,
-                    matchSimilarity: nil,
-                    transcript: text
-                ))
+                    // Skip segments shorter than 1s — Parakeet requires at least 16,000 samples
+                    guard segmentSamples.count >= 16000 else { droppedSegments += 1; continue }
 
-                // Update progress (65% to 90% during mic transcription)
-                let micProgress = 0.65 + (Double(index + 1) / Double(max(1, micSegments.count))) * 0.25
-                onProgress?(micProgress)
+                    let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .microphone)
+                    guard !text.isEmpty else { continue }
+
+                    micUtterances.append(TranscriptionUtterance(
+                        start: segment.start,
+                        end: segment.end,
+                        channel: 0,
+                        speakerId: 0,
+                        persistentSpeakerId: nil,
+                        matchSimilarity: nil,
+                        transcript: text
+                    ))
+
+                    // Update progress (65% to 90% during mic transcription)
+                    let micProgress = 0.65 + (Double(index + 1) / Double(max(1, micSegments.count))) * 0.25
+                    onProgress?(micProgress)
+                }
+
+                AppLogger.transcription.info("Mic audio transcribed", ["utterances": "\(micUtterances.count)"])
             }
-
-            AppLogger.transcription.info("Mic audio transcribed", ["utterances": "\(micUtterances.count)"])
 
             onProgress?(0.95)
 
@@ -468,6 +501,8 @@ extension Transcription {
                 micUtterances: mergedMicUtterances,
                 systemUtterances: mergedSystemUtterances,
                 systemSpeakerContexts: systemSpeakerContexts,
+                micSpeakerContexts: micSpeakerContexts,
+                newlyCreatedMicProfileIds: newlyCreatedMicProfileIds,
                 duration: duration,
                 processingTime: processingTime,
                 droppedSegments: droppedSegments
@@ -481,6 +516,207 @@ extension Transcription {
             }
             throw error
         }
+    }
+
+    // MARK: - Mic Channel Diarization
+
+    /// Result of running diarization + classification on the mic channel.
+    struct MicChannelResult {
+        let utterances: [TranscriptionUtterance]
+        let speakerContexts: [String: ChannelSpeakerContext]
+        let newlyCreatedProfileIds: Set<UUID>
+    }
+
+    /// Diarize + transcribe the mic channel when local-speaker split is on.
+    /// Mirrors the system-audio classification path but skips the cross-channel
+    /// contamination gate (there's nothing to gate against inside mic processing itself).
+    /// Uses the pre-run `existingProfiles` snapshot so both channels match against
+    /// the same stable set of DB profiles.
+    nonisolated static func processMicChannelWithDiarization(
+        samples: [Float],
+        diarization: any DiarizationEngine,
+        parakeet: any SpeechToTextEngine,
+        speakerDB: any SpeakerStore,
+        existingProfiles: [SpeakerProfile],
+        droppedSegments: inout Int,
+        onProgress: ((Double) -> Void)?
+    ) async throws -> MicChannelResult {
+
+        AppLogger.transcription.info("Running offline diarization on mic audio")
+        let rawSegments = try await diarization.diarizeOffline(samples: samples, sampleRate: 16000)
+
+        let speakerSegments = EmbeddingClusterer.postProcess(
+            segments: rawSegments,
+            existingProfiles: existingProfiles,
+            pairwiseMergeThreshold: 0.78
+        )
+
+        let rawSpeakerCount = Set(rawSegments.map { $0.speakerId }).count
+        let postProcessedSpeakerCount = Set(speakerSegments.map { $0.speakerId }).count
+        AppLogger.transcription.info("Post-processed mic speaker segments", [
+            "diarizer": "\(rawSpeakerCount)",
+            "after": "\(postProcessedSpeakerCount)",
+            "segments": "\(speakerSegments.count)"
+        ])
+
+        // Aggregate embeddings per diarizer speaker ID. Same quality gates as the system
+        // path (>=0.3 quality, >=1.0s duration). No cross-channel contamination gate —
+        // codex review flagged symmetric weighting as a recall killer for normal cross-talk.
+        var embeddingsPerSpeaker: [Int: [[Float]]] = [:]
+        var filteredSegmentCount = 0
+        for segment in speakerSegments {
+            if let embedding = segment.embedding, !embedding.isEmpty {
+                if segment.qualityScore < 0.3 { filteredSegmentCount += 1; continue }
+                if segment.duration < 1.0 { filteredSegmentCount += 1; continue }
+                embeddingsPerSpeaker[segment.speakerId, default: []].append(embedding)
+            }
+        }
+        if filteredSegmentCount > 0 {
+            AppLogger.transcription.info("Filtered low-quality mic segments", [
+                "filtered": "\(filteredSegmentCount)",
+                "total": "\(speakerSegments.count)"
+            ])
+        }
+
+        // Ghost speaker fix: same as system path.
+        let allSpeakerIds = Set(speakerSegments.map { $0.speakerId })
+        let ghostSpeakerIds = allSpeakerIds.subtracting(embeddingsPerSpeaker.keys)
+        var ghostSpeakerIdSet = Set<Int>()
+        for ghostId in ghostSpeakerIds {
+            let bestSegment = speakerSegments
+                .filter { $0.speakerId == ghostId && $0.embedding != nil && !$0.embedding!.isEmpty }
+                .max(by: { $0.qualityScore < $1.qualityScore })
+            if let segment = bestSegment, let embedding = segment.embedding {
+                embeddingsPerSpeaker[ghostId] = [embedding]
+                ghostSpeakerIdSet.insert(ghostId)
+            }
+        }
+
+        var speakerMatchResults: [Int: (persistentId: UUID, similarity: Double)] = [:]
+        var speakerNewProfiles: [Int: UUID] = [:]
+        var speakerIdRemap: [Int: Int] = [:]
+        var newlyCreatedProfileIds: Set<UUID> = []
+
+        for (speakerId, embeddings) in embeddingsPerSpeaker {
+            let meanEmbedding = Self.computeMeanEmbedding(embeddings)
+            let isGhost = ghostSpeakerIdSet.contains(speakerId)
+
+            if isGhost {
+                var bestNonGhostId: Int?
+                var bestSimilarity: Double = -1
+                for (otherId, otherEmbeddings) in embeddingsPerSpeaker where !ghostSpeakerIdSet.contains(otherId) {
+                    let otherMean = Self.computeMeanEmbedding(otherEmbeddings)
+                    let sim = Self.cosineSimilarityStatic(meanEmbedding, otherMean)
+                    if sim > bestSimilarity { bestSimilarity = sim; bestNonGhostId = otherId }
+                }
+                if let targetId = bestNonGhostId {
+                    speakerIdRemap[speakerId] = targetId
+                } else {
+                    let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
+                    speakerNewProfiles[speakerId] = newProfile.id
+                    newlyCreatedProfileIds.insert(newProfile.id)
+                }
+                continue
+            }
+
+            let adaptiveThreshold: Double = switch embeddings.count {
+                case 1: 0.85
+                case 2...3: 0.78
+                default: 0.70
+            }
+
+            if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold) {
+                speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity)
+                _ = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: matchResult.profileId)
+            } else {
+                let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
+                speakerNewProfiles[speakerId] = newProfile.id
+                newlyCreatedProfileIds.insert(newProfile.id)
+            }
+        }
+
+        // Cross-cluster merge: same-DB-profile speakers collapse.
+        let profileToSpeakers = Dictionary(grouping: speakerMatchResults.keys) { speakerMatchResults[$0]?.persistentId }
+        for (profileId, matchedSpeakerIds) in profileToSpeakers where profileId != nil && matchedSpeakerIds.count >= 2 {
+            let sorted = matchedSpeakerIds.sorted { a, b in
+                embeddingsPerSpeaker[a]?.count ?? 0 > embeddingsPerSpeaker[b]?.count ?? 0
+            }
+            let canonical = sorted[0]
+            for other in sorted.dropFirst() { speakerIdRemap[other] = canonical }
+        }
+
+        // Build speaker contexts keyed by effective speakerId (post-remap).
+        var speakerContexts: [String: ChannelSpeakerContext] = [:]
+        let effectiveSpeakerIds = Set(speakerSegments.map { speakerIdRemap[$0.speakerId] ?? $0.speakerId })
+        for effectiveSpeakerId in effectiveSpeakerIds {
+            let persistentId = speakerMatchResults[effectiveSpeakerId]?.persistentId
+                ?? speakerNewProfiles[effectiveSpeakerId]
+            guard let persistentId else { continue }
+
+            let sessionEmbedding: [Float]?
+            if let embeddings = embeddingsPerSpeaker[effectiveSpeakerId], !embeddings.isEmpty {
+                sessionEmbedding = Self.computeMeanEmbedding(embeddings)
+            } else {
+                sessionEmbedding = nil
+            }
+            let matchedProfileSnapshot = speakerMatchResults[effectiveSpeakerId]
+                .flatMap { match in existingProfiles.first(where: { $0.id == match.persistentId }) }
+
+            speakerContexts[String(effectiveSpeakerId)] = ChannelSpeakerContext(
+                persistentSpeakerId: persistentId,
+                sessionEmbedding: sessionEmbedding,
+                matchedProfileSnapshot: matchedProfileSnapshot,
+                matchSimilarity: speakerMatchResults[effectiveSpeakerId]?.similarity
+            )
+        }
+
+        // Transcribe each segment
+        var utterances: [TranscriptionUtterance] = []
+        let totalSegments = speakerSegments.count
+        for (index, segment) in speakerSegments.enumerated() {
+            try Task.checkCancellation()
+
+            let segmentSamples = AudioResampler.extractSlice(
+                from: samples,
+                sampleRate: 16000,
+                startTime: segment.startTime,
+                endTime: segment.endTime
+            )
+            guard segmentSamples.count >= 16000 else { droppedSegments += 1; continue }
+
+            let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .microphone)
+            guard !text.isEmpty else { continue }
+
+            let effectiveSpeakerId = speakerIdRemap[segment.speakerId] ?? segment.speakerId
+            let persistentId: UUID?
+            let similarity: Double?
+            if let match = speakerMatchResults[effectiveSpeakerId] {
+                persistentId = match.persistentId
+                similarity = match.similarity
+            } else {
+                persistentId = speakerNewProfiles[effectiveSpeakerId]
+                similarity = nil
+            }
+
+            utterances.append(TranscriptionUtterance(
+                start: segment.startTime,
+                end: segment.endTime,
+                channel: 0,  // mic
+                speakerId: effectiveSpeakerId,
+                persistentSpeakerId: persistentId,
+                matchSimilarity: similarity,
+                transcript: text
+            ))
+
+            let progress = 0.65 + (Double(index + 1) / Double(max(1, totalSegments))) * 0.25
+            onProgress?(progress)
+        }
+
+        return MicChannelResult(
+            utterances: utterances,
+            speakerContexts: speakerContexts,
+            newlyCreatedProfileIds: newlyCreatedProfileIds
+        )
     }
 
     // MARK: - Embedding Quality

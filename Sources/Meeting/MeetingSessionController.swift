@@ -802,7 +802,8 @@ final class MeetingSessionController: ObservableObject {
             micURL: job.micURL,
             systemURL: job.systemURL,
             outputFolder: storagePaths.transcripts,
-            healthInfo: job.healthInfo
+            healthInfo: job.healthInfo,
+            splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
         )
     }
 

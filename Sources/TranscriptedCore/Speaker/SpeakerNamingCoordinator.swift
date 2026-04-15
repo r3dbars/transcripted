@@ -23,9 +23,23 @@ extension TranscriptionTaskManager {
         let speakerDB = transcription.speakerDB
         let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map { ($0.diarizerSpeakerId, $0) })
 
+        // Partition updates: "Keep as You" collapsedToMe updates follow a different
+        // path (delete newly-created profiles, rewrite mic labels to "You") than
+        // regular name/merge/confirm updates. We process both during naming completion.
+        let collapsedUpdates = updates.filter {
+            if case .collapsedToMe = $0.action { return true }
+            return false
+        }
+        let regularUpdates = updates.filter {
+            if case .collapsedToMe = $0.action { return false }
+            return true
+        }
+        let newlyCreatedMicProfileIds = transcriptionResult.newlyCreatedMicProfileIds
+
         DispatchQueue.global(qos: .utility).async { [weak self] in
+            // Apply regular name/merge/confirm updates via existing resolution path.
             guard let resolvedUpdates = Self.applyNamingUpdates(
-                updates,
+                regularUpdates,
                 clipsBySpeakerId: clipsBySpeakerId,
                 speakerDB: speakerDB
             ) else {
@@ -42,6 +56,21 @@ extension TranscriptionTaskManager {
                     )
                 }
                 return
+            }
+
+            // Apply collapsedToMe updates: delete any newly-created mic profiles so the
+            // DB isn't polluted by the discarded local split. Profiles that were matched
+            // to existing named DB entries are intentionally NOT deleted — only profiles
+            // this meeting created get cleaned up.
+            for update in collapsedUpdates {
+                if newlyCreatedMicProfileIds.contains(update.persistentSpeakerId) {
+                    speakerDB.deleteSpeaker(id: update.persistentSpeakerId)
+                    SpeakerClipExtractor.deletePersistedClip(for: update.persistentSpeakerId)
+                    AppLogger.speakers.info("Collapsed mic speaker — deleted newly-created profile", [
+                        "profileId": update.persistentSpeakerId.uuidString,
+                        "diarizerSpeakerId": update.diarizerSpeakerId
+                    ])
+                }
             }
 
             guard let resolvedURL = TranscriptSaver.resolveTranscriptURL(
@@ -62,12 +91,24 @@ extension TranscriptionTaskManager {
                 }
                 return
             }
-            let didFinalizeTranscript = updates.isEmpty || TranscriptSaver.updateSpeakerNames(
-                transcriptURL: resolvedURL,
-                updates: resolvedUpdates,
-                transcriptionResult: transcriptionResult,
-                speakerStore: speakerDB
-            )
+
+            // Rewrite transcript: regular updates via the existing path, then collapse
+            // mic speakers to "You" if any collapsedToMe updates landed.
+            var didFinalizeTranscript = true
+            if !resolvedUpdates.isEmpty {
+                didFinalizeTranscript = TranscriptSaver.updateSpeakerNames(
+                    transcriptURL: resolvedURL,
+                    updates: resolvedUpdates,
+                    transcriptionResult: transcriptionResult,
+                    speakerStore: speakerDB
+                )
+            }
+            if didFinalizeTranscript && !collapsedUpdates.isEmpty {
+                didFinalizeTranscript = TranscriptSaver.collapseMicSpeakersToYou(
+                    transcriptURL: resolvedURL,
+                    collapsedUpdates: collapsedUpdates
+                )
+            }
 
             SpeakerClipExtractor.cleanupClips(clips)
             try? FileManager.default.removeItem(at: micURL)

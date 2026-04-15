@@ -116,8 +116,18 @@ final class SpeakerNamingContentView: NSView {
     private let saveButton = NSButton(title: "Save speaker decisions", target: nil, action: nil)
     private let cancelButton = NSButton(title: "Skip", target: nil, action: nil)
 
+    // Local (mic) section header + "Keep as You" batch toggle
+    private let localSectionLabel = NSTextField(labelWithString: "People in the room")
+    private let keepAsYouButton = NSButton(title: "Keep as You", target: nil, action: nil)
+    // Remote (system) section header
+    private let remoteSectionLabel = NSTextField(labelWithString: "Remote participants")
+
     private let request: SpeakerNamingRequest
-    private var rows: [SpeakerRowView] = []
+    private var micRows: [SpeakerRowView] = []
+    private var systemRows: [SpeakerRowView] = []
+    private var hasMicSection: Bool = false
+    private var hasSystemSection: Bool = false
+    private var localCollapsedToMe: Bool = false
 
     var onSave: (([SpeakerNameUpdate]) -> Void)?
     var onCancel: (() -> Void)?
@@ -162,16 +172,51 @@ final class SpeakerNamingContentView: NSView {
         cancelButton.target = self
         cancelButton.action = #selector(handleCancel)
         addSubview(cancelButton)
+
+        // Section headers live inside the document view so they scroll with rows.
+        localSectionLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        localSectionLabel.textColor = NSColor.labelColor
+        remoteSectionLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        remoteSectionLabel.textColor = NSColor.labelColor
+
+        keepAsYouButton.bezelStyle = .inline
+        keepAsYouButton.target = self
+        keepAsYouButton.action = #selector(handleKeepAsYouToggle)
     }
 
     private func buildRows() {
         documentView.subviews.forEach { $0.removeFromSuperview() }
-        rows.removeAll()
+        micRows.removeAll()
+        systemRows.removeAll()
+        localCollapsedToMe = false
 
-        for entry in request.speakers {
-            let row = SpeakerRowView(entry: entry, knownPeople: request.knownPeople)
-            documentView.addSubview(row)
-            rows.append(row)
+        let micEntries = request.speakers.filter { $0.channel == .mic }
+        let systemEntries = request.speakers.filter { $0.channel == .system }
+        hasMicSection = !micEntries.isEmpty
+        hasSystemSection = !systemEntries.isEmpty
+
+        // Mic section: header with "Keep as You" toggle + mic rows
+        if hasMicSection {
+            documentView.addSubview(localSectionLabel)
+            documentView.addSubview(keepAsYouButton)
+            keepAsYouButton.title = "Keep as You"
+            for entry in micEntries {
+                let row = SpeakerRowView(entry: entry, knownPeople: request.knownPeople)
+                documentView.addSubview(row)
+                micRows.append(row)
+            }
+        }
+
+        // System section: header (only if BOTH sections shown) + system rows
+        if hasSystemSection {
+            if hasMicSection {
+                documentView.addSubview(remoteSectionLabel)
+            }
+            for entry in systemEntries {
+                let row = SpeakerRowView(entry: entry, knownPeople: request.knownPeople)
+                documentView.addSubview(row)
+                systemRows.append(row)
+            }
         }
     }
 
@@ -221,15 +266,28 @@ final class SpeakerNamingContentView: NSView {
             height: scrollHeight
         )
 
-        // Layout rows inside the document view (flipped coordinates — rows
-        // stack top-down, but we lay them out using bottom-up math since the
-        // document view is not flipped).
+        // Layout rows + section headers inside the document view. Flipped coordinates:
+        // rows stack top-down visually, laid out with bottom-up math.
         let rowHeight: CGFloat = 128
         let rowSpacing: CGFloat = 10
-        let docHeight = max(
-            scrollView.frame.height,
-            CGFloat(rows.count) * (rowHeight + rowSpacing)
-        )
+        let headerHeight: CGFloat = 24
+        let headerGap: CGFloat = 14
+
+        let micCount = micRows.count
+        let systemCount = systemRows.count
+        var docHeight: CGFloat = 0
+        if hasMicSection {
+            docHeight += headerHeight + headerGap
+            docHeight += CGFloat(micCount) * (rowHeight + rowSpacing)
+        }
+        if hasSystemSection {
+            if hasMicSection {
+                docHeight += headerHeight + headerGap
+            }
+            docHeight += CGFloat(systemCount) * (rowHeight + rowSpacing)
+        }
+        docHeight = max(scrollView.frame.height, docHeight)
+
         documentView.frame = NSRect(
             x: 0, y: 0,
             width: scrollView.frame.width,
@@ -237,15 +295,46 @@ final class SpeakerNamingContentView: NSView {
         )
 
         var y = docHeight
-        for row in rows {
-            y -= rowHeight
-            row.frame = NSRect(
+        let docInnerWidth = documentView.frame.width
+
+        // Mic section
+        if hasMicSection {
+            y -= headerHeight
+            let btnSize = keepAsYouButton.fittingSize
+            let btnW = max(110, btnSize.width + 12)
+            localSectionLabel.frame = NSRect(
                 x: 0,
-                y: y,
-                width: documentView.frame.width,
-                height: rowHeight
+                y: y + 2,
+                width: docInnerWidth - btnW - 8,
+                height: headerHeight - 2
             )
-            y -= rowSpacing
+            keepAsYouButton.frame = NSRect(
+                x: docInnerWidth - btnW,
+                y: y + 1,
+                width: btnW,
+                height: headerHeight
+            )
+            y -= headerGap
+
+            for row in micRows {
+                y -= rowHeight
+                row.frame = NSRect(x: 0, y: y, width: docInnerWidth, height: rowHeight)
+                y -= rowSpacing
+            }
+        }
+
+        // System section
+        if hasSystemSection {
+            if hasMicSection {
+                y -= headerHeight
+                remoteSectionLabel.frame = NSRect(x: 0, y: y + 2, width: docInnerWidth, height: headerHeight - 2)
+                y -= headerGap
+            }
+            for row in systemRows {
+                y -= rowHeight
+                row.frame = NSRect(x: 0, y: y, width: docInnerWidth, height: rowHeight)
+                y -= rowSpacing
+            }
         }
     }
 
@@ -253,7 +342,20 @@ final class SpeakerNamingContentView: NSView {
 
     @objc private func handleSave() {
         var updates: [SpeakerNameUpdate] = []
-        for row in rows {
+        if localCollapsedToMe {
+            // Emit a .collapsedToMe update for every mic row, regardless of whether
+            // the user typed a name. The coordinator treats this as "don't rename,
+            // delete newly-created profiles instead."
+            for row in micRows {
+                updates.append(row.buildCollapsedToMeUpdate())
+            }
+        } else {
+            for row in micRows {
+                guard let update = row.buildUpdate() else { continue }
+                updates.append(update)
+            }
+        }
+        for row in systemRows {
             guard let update = row.buildUpdate() else { continue }
             updates.append(update)
         }
@@ -262,6 +364,14 @@ final class SpeakerNamingContentView: NSView {
 
     @objc private func handleCancel() {
         onCancel?()
+    }
+
+    @objc private func handleKeepAsYouToggle() {
+        localCollapsedToMe.toggle()
+        keepAsYouButton.title = localCollapsedToMe ? "Split into speakers" : "Keep as You"
+        for row in micRows {
+            row.setCollapsedToMe(localCollapsedToMe)
+        }
     }
 }
 
@@ -282,6 +392,8 @@ final class SpeakerRowView: NSView {
     private let confirmButton = NSButton(title: "Use Suggested", target: nil, action: nil)
 
     private var userConfirmed: Bool = false
+    private var isCollapsedToMe: Bool = false
+    private let collapsedOverlay = NSTextField(labelWithString: "Will be saved as \u{201C}You\u{201D}")
 
     init(entry: SpeakerNamingEntry, knownPeople: [SpeakerIdentityOption]) {
         self.entry = entry
@@ -290,6 +402,30 @@ final class SpeakerRowView: NSView {
         self.knownPeopleLabels = optionLabels.labels
         super.init(frame: .zero)
         setupViews()
+    }
+
+    /// Apply or lift the "Keep as You" visual state. Called by the content view when
+    /// the batch toggle is clicked.
+    func setCollapsedToMe(_ collapsed: Bool) {
+        isCollapsedToMe = collapsed
+        nameField.isEnabled = !collapsed
+        confirmButton.isEnabled = !collapsed
+        collapsedOverlay.isHidden = !collapsed
+        alphaValue = collapsed ? 0.55 : 1.0
+    }
+
+    /// Emit a SpeakerNameUpdate with `.collapsedToMe` for this row. Always used when
+    /// the batch "Keep as You" toggle is on; the coordinator treats this as "delete
+    /// newly-created mic profile, rewrite transcript back to 'You'."
+    func buildCollapsedToMeUpdate() -> SpeakerNameUpdate {
+        return SpeakerNameUpdate(
+            persistentSpeakerId: entry.id,
+            diarizerSpeakerId: entry.diarizerSpeakerId,
+            channel: entry.channel,
+            newName: "You",
+            previousName: entry.currentName,
+            action: .collapsedToMe
+        )
     }
 
     @available(*, unavailable)
@@ -344,6 +480,11 @@ final class SpeakerRowView: NSView {
         confirmButton.action = #selector(handleConfirm)
         confirmButton.isHidden = !(entry.needsConfirmation && entry.currentName != nil)
         addSubview(confirmButton)
+
+        collapsedOverlay.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        collapsedOverlay.textColor = NSColor.secondaryLabelColor
+        collapsedOverlay.isHidden = true
+        addSubview(collapsedOverlay)
     }
 
     override func layout() {
@@ -396,6 +537,15 @@ final class SpeakerRowView: NSView {
         } else {
             nameField.frame = NSRect(x: pad, y: pad, width: w, height: fieldH)
         }
+
+        // "Will be saved as 'You'" overlay, right-aligned near the combobox.
+        let overlaySize = collapsedOverlay.fittingSize
+        collapsedOverlay.frame = NSRect(
+            x: bounds.width - pad - overlaySize.width,
+            y: pad + (fieldH - overlaySize.height) / 2,
+            width: overlaySize.width,
+            height: overlaySize.height
+        )
     }
 
     @objc private func handlePlaySample() {
@@ -420,6 +570,7 @@ final class SpeakerRowView: NSView {
                 return SpeakerNameUpdate(
                     persistentSpeakerId: entry.id,
                     diarizerSpeakerId: entry.diarizerSpeakerId,
+                    channel: entry.channel,
                     newName: current,
                     action: .merged(targetProfileId: suggestedProfileId)
                 )
@@ -427,6 +578,7 @@ final class SpeakerRowView: NSView {
             return SpeakerNameUpdate(
                 persistentSpeakerId: entry.id,
                 diarizerSpeakerId: entry.diarizerSpeakerId,
+                channel: entry.channel,
                 newName: current,
                 previousName: current,
                 action: .confirmed
@@ -439,6 +591,7 @@ final class SpeakerRowView: NSView {
             return SpeakerNameUpdate(
                 persistentSpeakerId: entry.id,
                 diarizerSpeakerId: entry.diarizerSpeakerId,
+                channel: entry.channel,
                 newName: option.displayName,
                 action: .merged(targetProfileId: option.id)
             )
@@ -458,6 +611,7 @@ final class SpeakerRowView: NSView {
         return SpeakerNameUpdate(
             persistentSpeakerId: entry.id,
             diarizerSpeakerId: entry.diarizerSpeakerId,
+            channel: entry.channel,
             newName: typed,
             previousName: entry.currentName,
             action: action

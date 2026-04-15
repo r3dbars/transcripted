@@ -200,8 +200,29 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
 struct SpeakerPeopleSettingsSection: View {
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
+    @State private var splitLocalSpeakersEnabled: Bool = LocalSpeakerPreferences.isEnabled()
 
     var body: some View {
+        SettingsSection(
+            title: "People in the Room",
+            detail: "When you have multiple people physically in the same room speaking into the mic (and possibly others joining remotely), Transcripted can try to identify each local speaker separately."
+        ) {
+            Toggle(
+                "Identify multiple local speakers",
+                isOn: Binding(
+                    get: { splitLocalSpeakersEnabled },
+                    set: { newValue in
+                        splitLocalSpeakersEnabled = newValue
+                        LocalSpeakerPreferences.setEnabled(newValue)
+                    }
+                )
+            )
+
+            Text("After your first meeting with this on, name yourself once in the \u{201C}People in the room\u{201D} section of the review sheet. Future meetings will recognize your voice automatically. If the split looks wrong for any meeting, click \u{201C}Keep as You\u{201D} in the sheet.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
         SettingsSection(
             title: "People",
             detail: "Review the speaker database Transcripted uses for meeting matching. Rename or merge people to keep future matches clean. Deleting a person stops future matching but does not rewrite past transcripts."

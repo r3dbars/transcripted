@@ -316,6 +316,148 @@ extension TranscriptSaver {
         }
     }
 
+    /// Collapse mic speakers back to "You" after the user clicked "Keep as You" in the
+    /// naming sheet. Rewrites the saved transcript to:
+    ///   - Replace every `[Mic/Speaker N]` (or named) label with `[Mic/You]` in the body
+    ///   - Remove the "Local Speaker Breakdown" section if present
+    ///   - Change the mic section header back to "Microphone (You)"
+    ///   - Strip the per-mic-speaker entries from the YAML frontmatter
+    ///
+    /// Does not touch system speakers or Obsidian wiki links for mic speakers (the
+    /// label pattern `[Mic/...]` is the only place mic speakers appear by name in the
+    /// body today; Obsidian wiki links only wrap system-speaker names in the Full
+    /// Transcript section at render time).
+    @discardableResult
+    public static func collapseMicSpeakersToYou(
+        transcriptURL: URL,
+        collapsedUpdates: [SpeakerNameUpdate]
+    ) -> Bool {
+        guard !collapsedUpdates.isEmpty else { return true }
+
+        return fileUpdateQueue.sync {
+            guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
+                AppLogger.pipeline.error("Failed to read transcript for mic collapse", ["path": transcriptURL.path])
+                return false
+            }
+
+            // 1) Rewrite body mic labels. Replace `[Mic/<anything>]` with `[Mic/You]`.
+            //    Non-greedy match on bracketed content to avoid escaping other `]`.
+            do {
+                let pattern = #"\[Mic/[^\]]*\]"#
+                if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
+                    let range = NSRange(content.startIndex..., in: content)
+                    content = regex.stringByReplacingMatches(
+                        in: content,
+                        options: [],
+                        range: range,
+                        withTemplate: "[Mic/You]"
+                    )
+                }
+            }
+
+            // 2) Mic section header: "Microphone (People in the Room)" -> "Microphone (You)"
+            content = content.replacingOccurrences(
+                of: "### Microphone (People in the Room)",
+                with: "### Microphone (You)"
+            )
+
+            // 3) Remove the "Local Speaker Breakdown" subsection entirely. It spans from
+            //    the header line through the next blank line before the next `---` or `####`
+            //    / `###` heading. Conservative regex — only remove when the section is present.
+            do {
+                let pattern = #"(?s)\n#### Local Speaker Breakdown\n.*?\n\n"#
+                if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
+                    let range = NSRange(content.startIndex..., in: content)
+                    content = regex.stringByReplacingMatches(
+                        in: content,
+                        options: [],
+                        range: range,
+                        withTemplate: "\n"
+                    )
+                }
+            }
+
+            // 4) Strip mic speakers from the YAML frontmatter `speakers:` block.
+            //    Each mic entry is a 5-line group ending with `    source: ...`, tagged
+            //    by `channel: mic`. We remove all such groups.
+            content = stripYAMLSpeakerEntries(in: content, channel: "mic")
+
+            // 5) "Speakers Detected: N" line inside the mic stats block — drop it
+            //    since we're collapsing back to the single-speaker view.
+            do {
+                let pattern = #"\n- \*\*Speakers Detected:\*\* \d+\n"#
+                if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
+                    let range = NSRange(content.startIndex..., in: content)
+                    // Only replace the FIRST match (the mic block's one — remote block
+                    // is always written so removing both would break the remote stats).
+                    // We find the mic block anchor and scope to that.
+                    if let micHeaderRange = content.range(of: "### Microphone (You)") {
+                        let micSectionEnd = content.range(of: "\n\n### ", range: micHeaderRange.upperBound..<content.endIndex)?.lowerBound ?? content.endIndex
+                        let micSectionRange = NSRange(micHeaderRange.upperBound..<micSectionEnd, in: content)
+                        content = regex.stringByReplacingMatches(
+                            in: content,
+                            options: [],
+                            range: micSectionRange,
+                            withTemplate: "\n"
+                        )
+                    }
+                }
+            }
+
+            do {
+                try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            } catch {
+                AppLogger.pipeline.error("Failed to write collapsed transcript", ["error": error.localizedDescription])
+                return false
+            }
+
+            AppLogger.pipeline.info("Collapsed mic speakers to 'You'", [
+                "path": transcriptURL.lastPathComponent,
+                "collapsed": "\(collapsedUpdates.count)"
+            ])
+            return true
+        }
+    }
+
+    /// Remove speaker YAML entries whose `channel:` line matches `channel`.
+    /// Speaker entries have the structure:
+    ///   - id: "X"
+    ///     channel: mic|system
+    ///     db_id: "UUID"     (optional)
+    ///     name: "Foo"
+    ///     confidence: xxx
+    ///     source: xxx
+    /// We scan line-by-line and drop contiguous blocks that start with `  - id:` and
+    /// contain a matching `channel:` line before the next `  - id:` or block end.
+    private static func stripYAMLSpeakerEntries(in content: String, channel: String) -> String {
+        var lines = content.components(separatedBy: "\n")
+        var i = 0
+        while i < lines.count {
+            let line = lines[i]
+            if line.hasPrefix("  - id:") {
+                // Collect the block — lines that follow indented with 4 spaces until
+                // the next `  - id:` / end-of-speakers-block marker.
+                var blockEnd = i + 1
+                while blockEnd < lines.count {
+                    let next = lines[blockEnd]
+                    if next.hasPrefix("  - id:") { break }
+                    if !next.hasPrefix("    ") { break }
+                    blockEnd += 1
+                }
+                let block = lines[i..<blockEnd]
+                let hasMatchingChannel = block.contains(where: { $0.trimmingCharacters(in: .whitespaces) == "channel: \(channel)" })
+                if hasMatchingChannel {
+                    lines.removeSubrange(i..<blockEnd)
+                    continue  // don't advance i; next entry is now at i
+                }
+                i = blockEnd
+            } else {
+                i += 1
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
     /// Resolve a transcript URL that may have been renamed by MeetingTranscriptStyler.
     /// Uses the stable transcript_id written at initial save time.
     static func resolveTranscriptURL(_ url: URL, transcriptId: UUID) -> URL? {

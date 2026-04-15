@@ -123,7 +123,9 @@ extension TranscriptSaver {
             }
         }
 
-        // Add speaker identification metadata
+        // Add speaker identification metadata.
+        // Keys are channel-qualified ("mic_0" / "system_0") so mic and system speakers
+        // with the same diarizer index don't collide when looking up db_id and source.
         let sortedSpeakerKeys = speakerMappings.keys.sorted()
         if !sortedSpeakerKeys.isEmpty {
             yaml += "\nspeakers:"
@@ -131,9 +133,11 @@ extension TranscriptSaver {
                 guard let mapping = speakerMappings[key] else { continue }
                 let name = mapping.displayName
                 let confidence = mapping.confidence?.rawValue ?? "unknown"
-                let source = speakerSources[mapping.speakerId] ?? "unknown"
+                let source = speakerSources[key] ?? speakerSources[mapping.speakerId] ?? "unknown"
+                let channel = key.hasPrefix("mic_") ? "mic" : "system"
                 yaml += "\n  - id: \"\(Self.escapeYAML(mapping.speakerId))\""
-                if let dbId = speakerDbIds[mapping.speakerId] {
+                yaml += "\n    channel: \(channel)"
+                if let dbId = speakerDbIds[key] ?? speakerDbIds[mapping.speakerId] {
                     yaml += "\n    db_id: \"\(dbId.uuidString)\""
                 }
                 yaml += "\n    name: \"\(Self.escapeYAML(name))\""
@@ -182,14 +186,34 @@ extension TranscriptSaver {
         // Mic channel stats
         let micTimeSeconds = result.micUtterances.reduce(0.0) { $0 + ($1.end - $1.start) }
         let micTimeStr = DateFormattingHelper.formatDuration(micTimeSeconds)
-        doc += "### Microphone (You)\n"
+        let micHasMultipleSpeakers = result.micSpeakerCount > 1
+        let micSectionTitle = micHasMultipleSpeakers ? "Microphone (People in the Room)" : "Microphone (You)"
+        doc += "### \(micSectionTitle)\n"
         doc += "- **Utterances:** \(result.micUtteranceCount)\n"
         doc += "- **Words:** ~\(result.micWordCount)\n"
         doc += "- **Speaking Time:** \(micTimeStr)\n"
-        if result.micSpeakerCount > 1 {
+        if micHasMultipleSpeakers {
             doc += "- **Speakers Detected:** \(result.micSpeakerCount)\n"
         }
         doc += "\n"
+
+        // Local speaker breakdown (only when mic diarization found multiple speakers)
+        if micHasMultipleSpeakers {
+            doc += "#### Local Speaker Breakdown\n\n"
+            let micSpeakerGroups = Dictionary(grouping: result.micUtterances, by: { $0.speakerId })
+            for speaker in micSpeakerGroups.keys.sorted() {
+                let utterances = micSpeakerGroups[speaker] ?? []
+                let wordCount = utterances.reduce(0) { $0 + $1.transcript.split(separator: " ").count }
+                let speakingTime = utterances.reduce(0.0) { $0 + ($1.end - $1.start) }
+                let speakingTimeStr = DateFormattingHelper.formatDuration(speakingTime)
+
+                let speakerKey = "mic_\(speaker)"
+                let speakerName = speakerMappings[speakerKey]?.displayName ?? "Speaker \(speaker)"
+
+                doc += "- **\(speakerName):** \(utterances.count) utterances, ~\(wordCount) words, \(speakingTimeStr)\n"
+            }
+            doc += "\n"
+        }
 
         // System channel stats with speaker breakdown
         let sysTimeSeconds = result.systemUtterances.reduce(0.0) { $0 + ($1.end - $1.start) }
