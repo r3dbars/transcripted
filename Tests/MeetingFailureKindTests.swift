@@ -25,6 +25,14 @@ func testMeetingFailureKind() {
         assertEqual(kind, .saveFailed, "save failures should keep their own analytics bucket")
     }
 
+    runSuite("MeetingFailureKind classifies pipeline-busy errors") {
+        let kind = MeetingFailureKind.classify(
+            message: "Transcription already in progress"
+        )
+
+        assertEqual(kind, .pipelineBusy, "pipeline-busy rejections from TranscriptionTaskManager should not fall to unexpected_error")
+    }
+
     runSuite("MeetingFailureKind falls back to an explicit unexpected bucket") {
         let kind = MeetingFailureKind.classify(
             message: "Something odd happened while processing the meeting"
