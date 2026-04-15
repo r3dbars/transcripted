@@ -24,6 +24,11 @@ struct AccessibilityBridge {
         var roleRef: AnyObject?
         AXUIElementCopyAttributeValue(axElement, kAXRoleAttribute as CFString, &roleRef)
         let role = roleRef as? String ?? ""
+
+        // Never expose secure text fields (password, PIN, biometric auth). The
+        // broader "contains Text" match below would otherwise accept AXSecureTextField.
+        if role == "AXSecureTextField" { return nil }
+
         let textRoles = ["AXTextArea", "AXTextField", "AXWebArea", "AXTextView", "AXComboBox"]
         guard textRoles.contains(role) || role.contains("Text") else { return nil }
 
