@@ -61,16 +61,50 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         }
     }
 
-    var onboardingActionTitle: String {
+    var actionButtonTitle: String {
         switch self {
         case .microphone:
-            return "Allow microphone"
+            return Self.microphoneActionTitle(for: AVCaptureDevice.authorizationStatus(for: .audio))
         case .accessibility:
-            return "Allow accessibility"
+            return Self.accessibilityActionTitle(isTrusted: AXIsProcessTrusted())
         case .systemAudioRecording:
-            return "Allow system audio recording"
+            return Self.systemAudioRecordingActionTitle(isGranted: TranscriptedPermissionAccess.systemAudioRecordingGranted())
         case .calendar:
-            return "Enable meeting prompts"
+            return Self.calendarActionTitle(for: EKEventStore.authorizationStatus(for: .event))
+        }
+    }
+
+    static func microphoneActionTitle(for status: AVAuthorizationStatus) -> String {
+        switch status {
+        case .notDetermined:
+            return "Allow microphone"
+        case .denied, .restricted:
+            return "Open Microphone Settings"
+        case .authorized:
+            return "Review"
+        @unknown default:
+            return "Open Microphone Settings"
+        }
+    }
+
+    static func accessibilityActionTitle(isTrusted: Bool) -> String {
+        isTrusted ? "Review" : "Open Accessibility Settings"
+    }
+
+    static func systemAudioRecordingActionTitle(isGranted: Bool) -> String {
+        isGranted ? "Review" : "Open Audio Recording Settings"
+    }
+
+    static func calendarActionTitle(for status: EKAuthorizationStatus) -> String {
+        switch status {
+        case .fullAccess, .authorized:
+            return "Review"
+        case .notDetermined:
+            return "Allow Calendar Access"
+        case .writeOnly, .denied, .restricted:
+            return "Open Calendar Settings"
+        @unknown default:
+            return "Open Calendar Settings"
         }
     }
 }

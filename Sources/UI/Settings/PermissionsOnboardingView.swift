@@ -499,7 +499,7 @@ private struct PermissionSetupCard: View {
             }
 
             if !granted {
-                Button(kind.onboardingActionTitle, action: action)
+                Button(kind.actionButtonTitle, action: action)
                     .buttonStyle(.borderedProminent)
             }
         }
