@@ -99,7 +99,10 @@ final class MenuBarSettingsView: NSView {
         // incidental PII. Scrub through the analytics sanitizer before embedding
         // them in a public GitHub issue URL.
         let rawLogLines = appState?.logger.entries.suffix(80).joined(separator: "\n") ?? "No in-app logs attached."
-        let logLines = AnalyticsPayloadSanitizer.sanitizeText(rawLogLines)
+        // `redact` scrubs secrets/paths/URLs without the analytics length cap —
+        // `sanitizeText` would truncate the 80-line blob to 80 chars, hiding
+        // the body of the feedback report.
+        let logLines = AnalyticsPayloadSanitizer.redact(rawLogLines)
         let title = "Transcripted Feedback"
         let body = """
         What happened:

@@ -51,6 +51,21 @@ enum AnalyticsPayloadSanitizer {
     }
 
     static func sanitizeText(_ text: String) -> String {
+        let redacted = redact(text)
+        guard !redacted.isEmpty else { return "" }
+
+        if redacted.count > maxValueLength {
+            return String(redacted.prefix(maxValueLength)) + "..."
+        }
+
+        return redacted
+    }
+
+    /// Apply regex-based redaction without the analytics length cap.
+    /// Use this for feedback / diagnostic contexts where multi-line log
+    /// blobs must be scrubbed but not truncated. `sanitizeText` calls
+    /// this and then applies the `maxValueLength` cap.
+    static func redact(_ text: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
 
@@ -71,10 +86,6 @@ enum AnalyticsPayloadSanitizer {
         result = secretAssignmentRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1=[redacted-secret]")
         range = NSRange(result.startIndex..., in: result)
         result = emailRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-email]")
-
-        if result.count > maxValueLength {
-            return String(result.prefix(maxValueLength)) + "..."
-        }
 
         return result
     }
