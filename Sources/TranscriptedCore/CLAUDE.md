@@ -4,9 +4,9 @@
 
 `Sources/TranscriptedCore/` is the reusable meeting transcription library embedded in this repo. It is consumed by the app through `Sources/Meeting/`, and it can also be tested as a standalone Swift package through the root `Package.swift`.
 
-## Subsystems (55 Swift files)
+## Subsystems (57 Swift files)
 
-- `Audio/` (11 files) — mic + system audio capture, device recovery, resampling, level metering, process tap, buffer writing, and merge helpers
+- `Audio/` (13 files) — mic + system audio capture, device recovery, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, and merge helpers
 - `Logging/` (2 files) — shared app logger and JSONL file logger
 - `Models/` (4 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, and transcript metadata builders
 - `Pipeline/` (4 files) — transcription orchestration, pipeline runner, and task queue
@@ -26,6 +26,12 @@
 - `TranscriptNotifier` — optional callback channel for transcript-saved / failure notifications
 
 These seams exist specifically so the app can embed the library without adopting the old standalone Transcripted app assumptions.
+
+## Audio backend notes
+
+- `Audio` can switch between the legacy CoreAudio path and the newer ScreenCaptureKit system-audio path through `SystemAudioCaptureEngine`.
+- `SCKAudioCapture` is the macOS 26+ backend for audio-only ScreenCaptureKit capture, which keeps system-audio recording on the lighter permission tier and avoids full screen-pixel capture.
+- Hosts embedding `TranscriptedCore` should keep app-specific permission UX outside this directory, but they should understand that system-audio capture backend behavior now depends on OS availability.
 
 ## Threading model
 
