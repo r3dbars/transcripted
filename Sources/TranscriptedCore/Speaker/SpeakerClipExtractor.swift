@@ -1,5 +1,5 @@
 // SpeakerClipExtractor.swift
-// Extracts short audio clips per speaker from the system WAV file.
+// Extracts short audio clips per speaker from a source WAV file (mic or system).
 // Used by the post-meeting naming flow so users can hear each speaker's voice.
 
 import Foundation
@@ -9,7 +9,8 @@ import AVFoundation
 struct ClipResult {
     let clipURL: URL              // temporary WAV file
     let persistentSpeakerId: UUID // from SpeakerDatabase
-    let sortformerSpeakerId: String // "0", "1" for transcript matching
+    let diarizerSpeakerId: String // "0", "1" for transcript matching
+    let channel: UtteranceChannel // which audio source this clip came from
     let sampleText: String        // representative transcript quote
     let matchSimilarity: Double?  // cosine similarity from DB match
     let currentName: String?      // display name if known
@@ -19,24 +20,26 @@ struct ClipResult {
 @available(macOS 14.0, *)
 public enum SpeakerClipExtractor {
 
-    /// Extract a 5-8 second audio clip per speaker from the system audio WAV.
+    /// Extract a 5-8 second audio clip per speaker from a source WAV file.
     ///
     /// For each speaker, picks the longest single utterance (capped at 8s).
     /// If the longest utterance is under 3s, concatenates short utterances up to 8s.
     /// Uses frame-level seeking to avoid loading the entire file into memory.
     ///
     /// - Parameters:
-    ///   - systemAudioURL: Path to the system audio WAV file (48kHz native)
-    ///   - utterances: System audio utterances from transcription result
+    ///   - sourceAudioURL: Path to the source WAV file (mic or system audio)
+    ///   - utterances: Utterances from this channel
+    ///   - channel: Which channel these utterances came from
     ///   - speakerDB: Speaker database for looking up profiles
     /// - Returns: Array of ClipResults, one per speaker that needs naming/confirmation
     static func extractClips(
-        systemAudioURL: URL,
+        sourceAudioURL: URL,
         utterances: [TranscriptionUtterance],
+        channel: UtteranceChannel,
         speakerDB: any SpeakerStore
     ) throws -> [ClipResult] {
 
-        let audioFile = try AVAudioFile(forReading: systemAudioURL)
+        let audioFile = try AVAudioFile(forReading: sourceAudioURL)
         let format = audioFile.processingFormat
         let sampleRate = format.sampleRate
 
@@ -54,7 +57,7 @@ public enum SpeakerClipExtractor {
             guard let firstWithId = speakerUtterances.first(where: { $0.persistentSpeakerId != nil }),
                   let persistentId = firstWithId.persistentSpeakerId else {
                 // Speaker has no persistent ID — skip (shouldn't happen but be safe)
-                AppLogger.pipeline.warning("Speaker has no persistent ID, skipping clip extraction", ["speakerId": "\(speakerId)"])
+                AppLogger.pipeline.warning("Speaker has no persistent ID, skipping clip extraction", ["speakerId": "\(speakerId)", "channel": channel.rawValue])
                 continue
             }
 
@@ -70,7 +73,8 @@ public enum SpeakerClipExtractor {
                 from: audioFile,
                 segments: clipSegments,
                 sampleRate: sampleRate,
-                speakerId: speakerId
+                speakerId: speakerId,
+                channel: channel
             )
 
             // Pick a representative text sample (longest utterance text)
@@ -81,7 +85,8 @@ public enum SpeakerClipExtractor {
             results.append(ClipResult(
                 clipURL: clipURL,
                 persistentSpeakerId: persistentId,
-                sortformerSpeakerId: String(speakerId),
+                diarizerSpeakerId: String(speakerId),
+                channel: channel,
                 sampleText: sampleText,
                 matchSimilarity: similarity,
                 currentName: profile?.displayName,
@@ -89,7 +94,7 @@ public enum SpeakerClipExtractor {
             ))
         }
 
-        AppLogger.pipeline.info("Extracted speaker clips", ["count": "\(results.count)"])
+        AppLogger.pipeline.info("Extracted speaker clips", ["count": "\(results.count)", "channel": channel.rawValue])
         return results
     }
 
@@ -199,11 +204,12 @@ public enum SpeakerClipExtractor {
         from audioFile: AVAudioFile,
         segments: [TranscriptionUtterance],
         sampleRate: Double,
-        speakerId: Int
+        speakerId: Int,
+        channel: UtteranceChannel
     ) throws -> URL {
 
         let tempDir = NSTemporaryDirectory()
-        let clipFilename = "speaker_\(speakerId)_\(UUID().uuidString.prefix(8)).wav"
+        let clipFilename = "speaker_\(channel.rawValue)_\(speakerId)_\(UUID().uuidString.prefix(8)).wav"
         let clipURL = URL(fileURLWithPath: tempDir).appendingPathComponent(clipFilename)
 
         // Output format: mono 48kHz (native quality for playback)

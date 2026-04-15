@@ -21,7 +21,7 @@ extension TranscriptionTaskManager {
         clips: [SpeakerNamingEntry]
     ) {
         let speakerDB = transcription.speakerDB
-        let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map { ($0.sortformerSpeakerId, $0) })
+        let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map { ($0.diarizerSpeakerId, $0) })
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let resolvedUpdates = Self.applyNamingUpdates(
@@ -105,7 +105,7 @@ extension TranscriptionTaskManager {
         resolvedUpdates.reserveCapacity(updates.count)
 
         for update in updates {
-            let entry = clipsBySpeakerId[update.sortformerSpeakerId]
+            let entry = clipsBySpeakerId[update.diarizerSpeakerId]
             guard let resolvedPersistentSpeakerId = resolvePersistentSpeakerId(
                 for: update,
                 entry: entry,
@@ -123,7 +123,7 @@ extension TranscriptionTaskManager {
 
             resolvedUpdates.append(SpeakerNameUpdate(
                 persistentSpeakerId: update.persistentSpeakerId,
-                sortformerSpeakerId: update.sortformerSpeakerId,
+                diarizerSpeakerId: update.diarizerSpeakerId,
                 newName: update.newName,
                 previousName: update.previousName,
                 action: update.action,
@@ -212,6 +212,13 @@ extension TranscriptionTaskManager {
                 "name": update.newName
             ])
             return nil
+
+        case .collapsedToMe:
+            // The user clicked "Keep as You" for this mic speaker. Wiring lands in the
+            // follow-up PR that enables mic diarization end-to-end; for now, skip silently
+            // so the DB isn't mutated and the transcript rewrite path doesn't see this
+            // update. Default (off) behavior never produces this action.
+            return update.persistentSpeakerId
         }
     }
 

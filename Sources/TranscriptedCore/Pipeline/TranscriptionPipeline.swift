@@ -309,7 +309,7 @@ extension Transcription {
                 ])
             }
 
-            var systemSpeakerContexts: [String: SystemSpeakerContext] = [:]
+            var systemSpeakerContexts: [String: ChannelSpeakerContext] = [:]
             let effectiveSpeakerIds = Set(
                 speakerSegments.map { speakerIdRemap[$0.speakerId] ?? $0.speakerId }
             )
@@ -333,7 +333,7 @@ extension Transcription {
                         existingProfiles.first(where: { $0.id == match.persistentId })
                     }
 
-                systemSpeakerContexts[String(effectiveSpeakerId)] = SystemSpeakerContext(
+                systemSpeakerContexts[String(effectiveSpeakerId)] = ChannelSpeakerContext(
                     persistentSpeakerId: persistentId,
                     sessionEmbedding: sessionEmbedding,
                     matchedProfileSnapshot: matchedProfileSnapshot,
