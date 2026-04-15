@@ -119,6 +119,7 @@ APP_SOURCES=(
     "Sources/Support/TranscriptedConstants.swift"
     "Sources/Speech/ParakeetModelInitDiagnostics.swift"
     "Sources/Speech/ParakeetPrewarmPolicy.swift"
+    "Sources/Speech/ParakeetRecoveryState.swift"
     "Sources/Speech/ParakeetShortAudioGate.swift"
     "Sources/Speech/RecordedAudioTimeline.swift"
     "Sources/Meeting/MeetingRecordingStartGate.swift"

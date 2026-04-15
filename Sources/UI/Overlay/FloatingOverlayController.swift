@@ -11,7 +11,7 @@ class FloatingOverlayController {
         let title: String
         let detail: String
         let progress: Double
-        let status: String
+        let status: String?
 
         static let initial = LoadingPresentation(
             title: "Loading dictation",
