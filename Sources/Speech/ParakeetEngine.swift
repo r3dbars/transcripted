@@ -242,7 +242,21 @@ class ParakeetEngine: ObservableObject {
                 models = try await AsrModels.load(from: bundlePath, version: .v3)
                 loadSourceName = loadSource.rawValue
             } else {
-                // Fallback: download from HuggingFace (~600MB on first run)
+                // Fallback: download from HuggingFace (~600MB on first run).
+                //
+                // SECURITY: AsrModels.download() pulls model artifacts from HuggingFace
+                // through FluidAudio. Transcripted does not currently re-verify the
+                // downloaded artifacts against pinned SHA-256 digests. Trust here rests
+                // on the system TLS chain plus HuggingFace's CDN integrity. A targeted
+                // TLS interception or CDN compromise could swap the model files, with
+                // a worst-case impact of bad transcriptions or — much less likely —
+                // exploitation of a Core ML deserialization bug.
+                //
+                // To close this gap we'd ship a static `[filename: sha256]` table for
+                // each supported Parakeet variant and verify it after download, before
+                // calling AsrModels.load(...). The hashes need to be computed from a
+                // trusted release of the model bundle; without that source of truth a
+                // verification stub would be worse than no check at all.
                 failureStage = .downloadModels
                 loadSource = .download
                 print("🌐 PARAKEET | models not bundled, downloading (~600MB)...")

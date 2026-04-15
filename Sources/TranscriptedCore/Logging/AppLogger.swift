@@ -44,7 +44,10 @@ public final class AppLogger: @unchecked Sendable {
         case "error": .fault
         default: .info
         }
-        os_log("%{public}@", log: osLog, type: logType, "[\(subsystem)] \(message)\(metadataString(metadata))")
+        // Default to %{private}@ so caller-supplied metadata (paths, titles, errors)
+        // is redacted in production system logs. Console.app on a development device
+        // can still surface this with `sudo log config --mode "private_data:on"`.
+        os_log("%{private}@", log: osLog, type: logType, "[\(subsystem)] \(message)\(metadataString(metadata))")
     }
 
     /// Synchronous flush — call from applicationWillTerminate
