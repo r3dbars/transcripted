@@ -573,10 +573,12 @@ class ParakeetEngine: ObservableObject {
         // Immediately tear down anything that's running — the system has
         // already stopped the engine internally before posting this notification,
         // so the tap and prewarm state are stale.
-        audioWatchdogTask?.cancel()
-        audioWatchdogTask = nil
+        cancelAudioWatchdog()
 
         if isRecording {
+            pendingSamplesLock.withLock {
+                pendingSamples.removeAll(keepingCapacity: true)
+            }
             streamingSamplesLock.withLock { streamingSampleBuffer.removeAll(keepingCapacity: true) }
             Task { await eouManager?.reset() }
             audioEngine.inputNode.removeTap(onBus: 0)
@@ -713,7 +715,11 @@ class ParakeetEngine: ObservableObject {
             context: ["was_recording": "\(isRecording)", "was_prewarmed": "\(isEnginePrewarmed)"])
 
         let wasRecording = isRecording
+        cancelAudioWatchdog()
         if isRecording {
+            pendingSamplesLock.withLock {
+                pendingSamples.removeAll(keepingCapacity: true)
+            }
             streamingSamplesLock.lock()
             streamingSampleBuffer.removeAll(keepingCapacity: true)
             streamingSamplesLock.unlock()
@@ -762,6 +768,10 @@ class ParakeetEngine: ObservableObject {
         installAudioObserversIfNeeded()
         recordingInterrupted = false
         didReceiveAudioSamples = false
+        cancelAudioWatchdog()
+        pendingSamplesLock.withLock {
+            pendingSamples.removeAll(keepingCapacity: true)
+        }
         sampleBuffer.removeAll(keepingCapacity: true)
         sampleBuffer.reserveCapacity(Int(nativeSampleRate * Double(TranscriptedConstants.audioBufferCapacitySeconds)))
 
@@ -957,7 +967,7 @@ class ParakeetEngine: ObservableObject {
     /// After sleep/wake, CoreAudio may report the engine as running but the hardware graph
     /// is disconnected. If no samples arrive within 2 seconds, tear down and retry once.
     private func startAudioWatchdog() {
-        audioWatchdogTask?.cancel()
+        cancelAudioWatchdog()
         audioWatchdogTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioWatchdogTimeout)
             guard let self = self, self.isRecording, !Task.isCancelled else { return }
@@ -977,6 +987,9 @@ class ParakeetEngine: ObservableObject {
             // Full teardown
             self.streamingSamplesLock.withLock {
                 self.streamingSampleBuffer.removeAll(keepingCapacity: true)
+            }
+            self.pendingSamplesLock.withLock {
+                self.pendingSamples.removeAll(keepingCapacity: true)
             }
             await self.eouManager?.reset()
             self.audioEngine.inputNode.removeTap(onBus: 0)
@@ -1006,8 +1019,7 @@ class ParakeetEngine: ObservableObject {
 
     func stopRecording() {
         guard isRecording else { return }
-        audioWatchdogTask?.cancel()
-        audioWatchdogTask = nil
+        cancelAudioWatchdog()
         if liveDisplayEnabled {
             streamingSamplesLock.lock()
             let remainingEou: [Float] = streamingSampleBuffer
@@ -1252,8 +1264,10 @@ class ParakeetEngine: ObservableObject {
     // MARK: - Cleanup
 
     func cancel() {
-        audioWatchdogTask?.cancel()
-        audioWatchdogTask = nil
+        cancelAudioWatchdog()
+        pendingSamplesLock.withLock {
+            pendingSamples.removeAll(keepingCapacity: true)
+        }
         if isRecording {
             if liveDisplayEnabled {
                 streamingSamplesLock.lock()
@@ -1269,6 +1283,11 @@ class ParakeetEngine: ObservableObject {
         isTranscribing = false
         liveTranscript = ""
         committedStreamText = ""
+    }
+
+    private func cancelAudioWatchdog() {
+        audioWatchdogTask?.cancel()
+        audioWatchdogTask = nil
     }
 
     func cleanup() {

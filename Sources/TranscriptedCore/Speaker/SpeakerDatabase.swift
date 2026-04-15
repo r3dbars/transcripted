@@ -280,7 +280,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
             )
         } else {
             // New speaker
-            let newId = UUID()
+            let newId = existingId ?? UUID()
             let normalized = l2Normalize(embedding)
             let embeddingData = normalized.withUnsafeBufferPointer { Data(buffer: $0) }
 

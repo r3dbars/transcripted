@@ -4,6 +4,20 @@ import Foundation
 
 extension TranscriptionTaskManager {
 
+    private struct PlannedNamingChanges {
+        let resolvedUpdates: [SpeakerNameUpdate]
+        let mutations: [PlannedSpeakerMutation]
+    }
+
+    private enum PlannedSpeakerMutation {
+        case merge(sourceId: UUID, into: UUID)
+        case setDisplayName(id: UUID, name: String)
+        case restoreProfile(SpeakerProfile)
+        case addOrUpdateEmbedding(embedding: [Float], existingId: UUID?)
+        case incrementDisputeCount(UUID)
+        case resetDisputeCount(UUID)
+    }
+
     /// Handle completion of the speaker naming flow.
     /// Applies names to the database, updates the transcript, and cleans up.
     ///
@@ -24,26 +38,6 @@ extension TranscriptionTaskManager {
         let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map { ($0.diarizerSpeakerId, $0) })
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let resolvedUpdates = Self.applyNamingUpdates(
-                updates,
-                clipsBySpeakerId: clipsBySpeakerId,
-                speakerDB: speakerDB
-            ) else {
-                SpeakerClipExtractor.cleanupClips(clips)
-                try? FileManager.default.removeItem(at: micURL)
-                try? FileManager.default.removeItem(at: systemURL)
-
-                Task { @MainActor in
-                    self?.finishNamingFlow(
-                        didFinalizeTranscript: false,
-                        updatesCount: updates.count,
-                        transcriptId: transcriptId,
-                        resolvedURL: transcriptURL
-                    )
-                }
-                return
-            }
-
             guard let resolvedURL = TranscriptSaver.resolveTranscriptURL(
                 transcriptURL,
                 transcriptId: transcriptId
@@ -62,12 +56,37 @@ extension TranscriptionTaskManager {
                 }
                 return
             }
+
+            guard let plannedChanges = Self.planNamingUpdates(
+                updates,
+                clipsBySpeakerId: clipsBySpeakerId,
+                speakerDB: speakerDB
+            ) else {
+                SpeakerClipExtractor.cleanupClips(clips)
+                try? FileManager.default.removeItem(at: micURL)
+                try? FileManager.default.removeItem(at: systemURL)
+
+                Task { @MainActor in
+                    self?.finishNamingFlow(
+                        didFinalizeTranscript: false,
+                        updatesCount: updates.count,
+                        transcriptId: transcriptId,
+                        resolvedURL: resolvedURL
+                    )
+                }
+                return
+            }
+
             let didFinalizeTranscript = updates.isEmpty || TranscriptSaver.updateSpeakerNames(
                 transcriptURL: resolvedURL,
-                updates: resolvedUpdates,
+                updates: plannedChanges.resolvedUpdates,
                 transcriptionResult: transcriptionResult,
                 speakerStore: speakerDB
             )
+
+            if didFinalizeTranscript {
+                Self.applyPlannedNamingMutations(plannedChanges.mutations, speakerDB: speakerDB)
+            }
 
             SpeakerClipExtractor.cleanupClips(clips)
             try? FileManager.default.removeItem(at: micURL)
@@ -96,17 +115,18 @@ extension TranscriptionTaskManager {
         }
     }
 
-    nonisolated private static func applyNamingUpdates(
+    nonisolated private static func planNamingUpdates(
         _ updates: [SpeakerNameUpdate],
         clipsBySpeakerId: [String: SpeakerNamingEntry],
         speakerDB: any SpeakerStore
-    ) -> [SpeakerNameUpdate]? {
+    ) -> PlannedNamingChanges? {
         var resolvedUpdates: [SpeakerNameUpdate] = []
         resolvedUpdates.reserveCapacity(updates.count)
+        var mutations: [PlannedSpeakerMutation] = []
 
         for update in updates {
             let entry = clipsBySpeakerId[update.diarizerSpeakerId]
-            guard let resolvedPersistentSpeakerId = resolvePersistentSpeakerId(
+            guard let plan = planPersistentSpeakerResolution(
                 for: update,
                 entry: entry,
                 speakerDB: speakerDB
@@ -116,7 +136,7 @@ extension TranscriptionTaskManager {
 
             AppLogger.speakers.info("Speaker named", [
                 "originalId": update.persistentSpeakerId.uuidString,
-                "resolvedId": resolvedPersistentSpeakerId.uuidString,
+                "resolvedId": plan.resolvedPersistentSpeakerId.uuidString,
                 "name": update.newName,
                 "action": "\(update.action)"
             ])
@@ -127,32 +147,40 @@ extension TranscriptionTaskManager {
                 newName: update.newName,
                 previousName: update.previousName,
                 action: update.action,
-                resolvedPersistentSpeakerId: resolvedPersistentSpeakerId
+                resolvedPersistentSpeakerId: plan.resolvedPersistentSpeakerId
             ))
+            mutations.append(contentsOf: plan.mutations)
         }
 
-        return resolvedUpdates
+        return PlannedNamingChanges(
+            resolvedUpdates: resolvedUpdates,
+            mutations: mutations
+        )
     }
 
-    nonisolated private static func resolvePersistentSpeakerId(
+    nonisolated private static func planPersistentSpeakerResolution(
         for update: SpeakerNameUpdate,
         entry: SpeakerNamingEntry?,
         speakerDB: any SpeakerStore
-    ) -> UUID? {
+    ) -> (resolvedPersistentSpeakerId: UUID, mutations: [PlannedSpeakerMutation])? {
         switch update.action {
         case .merged(let targetProfileId):
-            speakerDB.mergeProfiles(sourceId: update.persistentSpeakerId, into: targetProfileId)
-            speakerDB.resetDisputeCount(id: targetProfileId)
-            return targetProfileId
+            return (
+                targetProfileId,
+                [
+                    .merge(sourceId: update.persistentSpeakerId, into: targetProfileId),
+                    .resetDisputeCount(targetProfileId),
+                ]
+            )
 
         case .confirmed:
-            speakerDB.setDisplayName(
-                id: update.persistentSpeakerId,
-                name: update.newName,
-                source: NameSource.userManual
+            return (
+                update.persistentSpeakerId,
+                [
+                    .setDisplayName(id: update.persistentSpeakerId, name: update.newName),
+                    .resetDisputeCount(update.persistentSpeakerId),
+                ]
             )
-            speakerDB.resetDisputeCount(id: update.persistentSpeakerId)
-            return update.persistentSpeakerId
 
         case .named:
             if let targetProfile = exactNamedTarget(
@@ -160,23 +188,28 @@ extension TranscriptionTaskManager {
                 excluding: update.persistentSpeakerId,
                 speakerDB: speakerDB
             ) {
-                speakerDB.mergeProfiles(sourceId: update.persistentSpeakerId, into: targetProfile.id)
-                speakerDB.resetDisputeCount(id: targetProfile.id)
-                return targetProfile.id
+                return (
+                    targetProfile.id,
+                    [
+                        .merge(sourceId: update.persistentSpeakerId, into: targetProfile.id),
+                        .resetDisputeCount(targetProfile.id),
+                    ]
+                )
             }
 
-            speakerDB.setDisplayName(
-                id: update.persistentSpeakerId,
-                name: update.newName,
-                source: NameSource.userManual
+            return (
+                update.persistentSpeakerId,
+                [
+                    .setDisplayName(id: update.persistentSpeakerId, name: update.newName),
+                    .resetDisputeCount(update.persistentSpeakerId),
+                ]
             )
-            speakerDB.resetDisputeCount(id: update.persistentSpeakerId)
-            return update.persistentSpeakerId
 
         case .corrected:
+            var mutations: [PlannedSpeakerMutation] = []
             if let matchedProfile = entry?.matchedProfileSnapshot {
-                speakerDB.restoreProfile(matchedProfile)
-                speakerDB.incrementDisputeCount(id: matchedProfile.id)
+                mutations.append(.restoreProfile(matchedProfile))
+                mutations.append(.incrementDisputeCount(matchedProfile.id))
             }
 
             if let targetProfile = exactNamedTarget(
@@ -185,26 +218,19 @@ extension TranscriptionTaskManager {
                 speakerDB: speakerDB
             ) {
                 if let embedding = entry?.sessionEmbedding {
-                    _ = speakerDB.addOrUpdateSpeaker(embedding: embedding, existingId: targetProfile.id)
+                    mutations.append(.addOrUpdateEmbedding(embedding: embedding, existingId: targetProfile.id))
                 }
-                speakerDB.setDisplayName(
-                    id: targetProfile.id,
-                    name: update.newName,
-                    source: NameSource.userManual
-                )
-                speakerDB.resetDisputeCount(id: targetProfile.id)
-                return targetProfile.id
+                mutations.append(.setDisplayName(id: targetProfile.id, name: update.newName))
+                mutations.append(.resetDisputeCount(targetProfile.id))
+                return (targetProfile.id, mutations)
             }
 
             if let embedding = entry?.sessionEmbedding {
-                let newProfile = speakerDB.addOrUpdateSpeaker(embedding: embedding, existingId: nil)
-                speakerDB.setDisplayName(
-                    id: newProfile.id,
-                    name: update.newName,
-                    source: NameSource.userManual
-                )
-                speakerDB.resetDisputeCount(id: newProfile.id)
-                return newProfile.id
+                let newProfileId = UUID()
+                mutations.append(.addOrUpdateEmbedding(embedding: embedding, existingId: newProfileId))
+                mutations.append(.setDisplayName(id: newProfileId, name: update.newName))
+                mutations.append(.resetDisputeCount(newProfileId))
+                return (newProfileId, mutations)
             }
 
             AppLogger.speakers.error("Correction missing session embedding; refusing unsafe profile rewrite", [
@@ -218,7 +244,29 @@ extension TranscriptionTaskManager {
             // follow-up PR that enables mic diarization end-to-end; for now, skip silently
             // so the DB isn't mutated and the transcript rewrite path doesn't see this
             // update. Default (off) behavior never produces this action.
-            return update.persistentSpeakerId
+            return (update.persistentSpeakerId, [])
+        }
+    }
+
+    nonisolated private static func applyPlannedNamingMutations(
+        _ mutations: [PlannedSpeakerMutation],
+        speakerDB: any SpeakerStore
+    ) {
+        for mutation in mutations {
+            switch mutation {
+            case .merge(let sourceId, let targetId):
+                speakerDB.mergeProfiles(sourceId: sourceId, into: targetId)
+            case .setDisplayName(let id, let name):
+                speakerDB.setDisplayName(id: id, name: name, source: NameSource.userManual)
+            case .restoreProfile(let profile):
+                speakerDB.restoreProfile(profile)
+            case .addOrUpdateEmbedding(let embedding, let existingId):
+                _ = speakerDB.addOrUpdateSpeaker(embedding: embedding, existingId: existingId)
+            case .incrementDisputeCount(let id):
+                speakerDB.incrementDisputeCount(id: id)
+            case .resetDisputeCount(let id):
+                speakerDB.resetDisputeCount(id: id)
+            }
         }
     }
 

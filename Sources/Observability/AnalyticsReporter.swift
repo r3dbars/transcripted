@@ -158,7 +158,10 @@ final class AnalyticsReporter {
         eventProperties["distinct_id"] = distinctID
         eventProperties["app_version"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
         eventProperties["os_major"] = "\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion)"
-        eventProperties["session_id"] = sessionID
+        let sanitizedSessionID = AnalyticsPayloadSanitizer.sanitizeText(sessionID)
+        if !sanitizedSessionID.isEmpty {
+            eventProperties["session_id"] = sanitizedSessionID
+        }
 
         let payload: [String: Any] = [
             "api_key": apiKey,

@@ -427,7 +427,7 @@ class DictationSessionController: ObservableObject {
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
             let pasteOutcome = self.pasteWithClipboardRestore(text)
-            self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
+            let saveFailureMessage = self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
             let wordCount = text.split(whereSeparator: \.isWhitespace).count
             let deliveryLevel: EventLevel = pasteOutcome.delivery == .pasted ? .info : .warning
             DiagnosticsTrail.record(
@@ -448,10 +448,21 @@ class DictationSessionController: ObservableObject {
             )
             switch pasteOutcome {
             case .pasted:
-                AppSoundPlayer.shared.play(.dictationDelivered)
-                overlayController.showSuccessAndDismiss()
+                if let saveFailureMessage {
+                    AppSoundPlayer.shared.play(.dictationDelivered)
+                    overlayController.showError(saveFailureMessage)
+                } else {
+                    AppSoundPlayer.shared.play(.dictationDelivered)
+                    overlayController.showSuccessAndDismiss()
+                }
             case .copied(let message), .failed(let message):
-                overlayController.showError(message)
+                let combinedMessage: String
+                if let saveFailureMessage {
+                    combinedMessage = "\(message) \(saveFailureMessage)"
+                } else {
+                    combinedMessage = message
+                }
+                overlayController.showError(combinedMessage)
             }
             isDictating = false
             appState.logger.log("DICTATION | completed with outcome \(pasteOutcome)")
@@ -837,7 +848,8 @@ class DictationSessionController: ObservableObject {
         pasteboard.setString(text, forType: .string)
     }
 
-    private func persistDictationTranscript(text: String, delivery: DictationDelivery) {
+    @discardableResult
+    private func persistDictationTranscript(text: String, delivery: DictationDelivery) -> String? {
         do {
             let saved = try DictationTranscriptWriter.save(
                 text: text,
@@ -856,6 +868,7 @@ class DictationSessionController: ObservableObject {
                     ]
                 )
             )
+            return nil
         } catch {
             appState?.logger.log("DICTATION | failed to save markdown export: \(error.localizedDescription)")
             DiagnosticsTrail.record(
@@ -866,6 +879,7 @@ class DictationSessionController: ObservableObject {
                 message: "Failed to save dictation markdown export",
                 context: dictationContext(extra: ["error": error.localizedDescription])
             )
+            return "Transcripted couldn't save a local copy of this dictation. Check your save location and available disk space."
         }
     }
 

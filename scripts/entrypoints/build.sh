@@ -77,6 +77,27 @@ verify_signature() {
     codesign -dvvv --entitlements - "$APP_BUNDLE"
 }
 
+verify_launch_smoke() {
+    local smoke_log="$BUILD_DIR/launch-smoke.log"
+    rm -f "$smoke_log"
+
+    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$APP_BINARY" >"$smoke_log" 2>&1 &
+    local app_pid=$!
+
+    sleep 5
+
+    if ! kill -0 "$app_pid" 2>/dev/null; then
+        wait "$app_pid" || true
+        echo "Transcripted exited during launch smoke."
+        echo "Smoke log:"
+        cat "$smoke_log"
+        exit 1
+    fi
+
+    kill "$app_pid" 2>/dev/null || true
+    wait "$app_pid" 2>/dev/null || true
+}
+
 sign_embedded_code() {
     local sign_hash="$1"
     local framework_path
@@ -243,6 +264,9 @@ if [ -n "$SIGN_HASH" ] && codesign -dv "$APP_BUNDLE" 2>&1 | grep -q "Signature=a
     exit 1
 fi
 
+echo "Running launch smoke check..."
+verify_launch_smoke
+
 echo "Build complete!"
-echo "Launching Transcripted..."
+echo "Opening Transcripted..."
 open "$APP_BUNDLE"

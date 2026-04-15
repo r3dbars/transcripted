@@ -239,6 +239,10 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             return false
         }
 
+        XCTAssertNil(
+            harness.speakerDB.getSpeaker(id: persistentSpeakerId)?.displayName,
+            "speaker DB should stay untouched when transcript rewrite fails"
+        )
         XCTAssertFalse(FileManager.default.fileExists(atPath: clipURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))
@@ -662,7 +666,11 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
 
         let rejectedProfile = harness.speakerDB.getSpeaker(id: matchedProfile.id)
         XCTAssertEqual(rejectedProfile?.displayName, "Matt Vlasach")
-        XCTAssertEqual(rejectedProfile?.disputeCount, matchedSnapshot.disputeCount + 1)
+        XCTAssertEqual(
+            rejectedProfile?.disputeCount,
+            matchedSnapshot.disputeCount,
+            "failed transcript rewrites should not partially commit dispute-count changes"
+        )
     }
 
     @MainActor
