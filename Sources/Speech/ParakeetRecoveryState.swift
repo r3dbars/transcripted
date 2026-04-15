@@ -16,6 +16,14 @@ struct ParakeetRecoveryState: Equatable {
         inputFormatReady = false
     }
 
+    /// Marks the engine as ready without generation gating. Use only from non-Task
+    /// contexts where no stale-generation race is possible (e.g. after a successful
+    /// synchronous prewarm or after recording starts on the current generation).
+    mutating func markFormatReady() {
+        isRecovering = false
+        inputFormatReady = true
+    }
+
     mutating func finishRecovery(success: Bool, generation: UInt64) -> Bool {
         guard generation == self.generation else { return false }
         isRecovering = false

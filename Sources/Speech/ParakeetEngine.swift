@@ -470,9 +470,11 @@ class ParakeetEngine: ObservableObject {
             return
         }
         prewarmRetryCount += 1
+        let capturedGeneration = recoveryState.generation
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-            self?.prewarm()
+            guard let self, !self.recoveryState.isStale(generation: capturedGeneration) else { return }
+            self.prewarm()
         }
     }
 
@@ -642,7 +644,7 @@ class ParakeetEngine: ObservableObject {
                 // samples. The watchdog gets one retry before giving up.
                 if shouldRestartRecording {
                     var restarted = false
-                    for attempt in 1...4 {
+                    for attempt in 1...TranscriptedConstants.recordingRestartAttempts {
                         guard !Task.isCancelled else { return }
                         guard !self.recoveryState.isStale(generation: myGeneration) else { return }
                         if self.startRecording() {
@@ -659,7 +661,7 @@ class ParakeetEngine: ObservableObject {
                             break
                         }
                         // BT format negotiation can take ~1-2s; wait between attempts.
-                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        try? await Task.sleep(nanoseconds: TranscriptedConstants.recordingRestartRetryDelay)
                     }
                     if !restarted {
                         self.recordingInterrupted = true
@@ -688,12 +690,8 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func publishRecoveryState() {
-        if isRecovering != recoveryState.isRecovering {
-            isRecovering = recoveryState.isRecovering
-        }
-        if inputFormatReady != recoveryState.inputFormatReady {
-            inputFormatReady = recoveryState.inputFormatReady
-        }
+        isRecovering = recoveryState.isRecovering
+        inputFormatReady = recoveryState.inputFormatReady
     }
 
     private func markFormatUnreadyAndPublish() {
@@ -703,7 +701,7 @@ class ParakeetEngine: ObservableObject {
 
     private func markFormatReadyAndPublish() {
         if !recoveryState.inputFormatReady {
-            _ = recoveryState.finishRecovery(success: true, generation: recoveryState.generation)
+            recoveryState.markFormatReady()
             publishRecoveryState()
         }
     }

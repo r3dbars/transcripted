@@ -62,6 +62,16 @@ func testParakeetRecoveryState() {
         assertTrue(state.isStale(generation: g1), "earlier generation is stale once superseded")
     }
 
+    runSuite("ParakeetRecoveryState.markFormatReady — clears recovery and marks format ready without bumping generation") {
+        var state = ParakeetRecoveryState()
+        let g = state.beginConfigChange()
+        state.markFormatReady()
+
+        assertFalse(state.isRecovering, "markFormatReady should clear recovery flag")
+        assertTrue(state.inputFormatReady, "markFormatReady should mark format ready")
+        assertEqual(state.generation, g, "markFormatReady should not bump generation")
+    }
+
     runSuite("ParakeetRecoveryState.markFormatUnready — flips format flag without bumping generation") {
         var state = ParakeetRecoveryState()
         let before = state.generation
