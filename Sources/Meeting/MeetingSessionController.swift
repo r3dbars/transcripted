@@ -941,22 +941,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func analyticsFailureKind(from message: String) -> String {
-        let normalized = message.lowercased()
-
-        if normalized.contains("system audio") || normalized.contains("screen recording") {
-            return "system_audio"
-        }
-        if normalized.contains("recording too short") {
-            return "recording_too_short"
-        }
-        if normalized.contains("save") {
-            return "save_failed"
-        }
-        if normalized.contains("model") || normalized.contains("load") {
-            return "model_load"
-        }
-
-        return "other"
+        MeetingFailureKind.classify(message: message).rawValue
     }
 
     private func baseDiagnosticsContext(extra: [String: String] = [:]) -> [String: String] {

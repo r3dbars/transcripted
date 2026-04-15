@@ -327,10 +327,10 @@ public class Audio: ObservableObject {
     }
 
     private func setup() {
-        engine = AVAudioEngine()
-        inputNode = engine?.inputNode
-
-        AppLogger.audioMic.info("Using system default microphone")
+        // Delay AVAudioEngine/input-node access until monitoring or recording
+        // actually begins. Launch-time meeting wiring constructs Audio as part
+        // of app startup, and touching the input node here has shown up in
+        // Sentry app-hang traces inside CoreAudio.
 
         // Do not prompt for microphone access during object construction.
         // MeetingSessionController creates Audio during background warmup, and
@@ -394,6 +394,28 @@ public class Audio: ObservableObject {
                 }
             }
         }
+    }
+
+    @discardableResult
+    func ensureEngineInitialized() throws -> (AVAudioEngine, AVAudioInputNode) {
+        if engine == nil {
+            engine = AVAudioEngine()
+        }
+
+        if inputNode == nil, let engine {
+            inputNode = engine.inputNode
+            AppLogger.audioMic.info("Using system default microphone")
+        }
+
+        guard let engine, let inputNode else {
+            throw NSError(
+                domain: "Audio",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Engine not initialized"]
+            )
+        }
+
+        return (engine, inputNode)
     }
 
     // MARK: - Start Recording
@@ -615,7 +637,15 @@ public class Audio: ObservableObject {
     /// Automatically stops when `start()` is called for full recording.
     public func startMonitoring() {
         guard !isMonitoring, !isRecording, !isStarting else { return }
-        guard let engine = engine, let inputNode = inputNode else { return }
+
+        let engine: AVAudioEngine
+        let inputNode: AVAudioInputNode
+        do {
+            (engine, inputNode) = try ensureEngineInitialized()
+        } catch {
+            AppLogger.audio.warning("Failed to initialize monitoring engine", ["error": error.localizedDescription])
+            return
+        }
 
         AppLogger.audio.info("Starting audio level monitoring")
 
