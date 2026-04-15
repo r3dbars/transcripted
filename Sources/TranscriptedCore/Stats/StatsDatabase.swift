@@ -93,7 +93,6 @@ public final class StatsDatabase {
     /// Apply permissions and WAL pragmas to an already-opened database handle.
     /// Called on both initial open and corruption-recovery re-open.
     private func configureOpenDatabase() {
-        isDatabaseOpen = true
         FileManager.default.restrictSQLiteArtifactsToOwnerOnly(atPath: dbPath.path)
         // Security: check each PRAGMA return value so a silent failure (e.g. WAL mode refused
         // because another process holds the db) is logged rather than silently misconfiguring
@@ -111,6 +110,9 @@ public final class StatsDatabase {
                 sqlite3_free(errorMessage)
             }
         }
+        // Security: mark the database open only after all pragmas are applied so any concurrent
+        // reader that observes isDatabaseOpen=true is guaranteed to see a fully-configured handle.
+        isDatabaseOpen = true
     }
 
     /// Verify database integrity using PRAGMA quick_check.

@@ -169,7 +169,8 @@ final class AnalyticsReporter {
         ]
 
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let url = URL(string: normalizedCaptureURL(from: captureHost)) else {
+              let urlString = normalizedCaptureURL(from: captureHost),
+              let url = URL(string: urlString) else {
             return
         }
 
@@ -181,9 +182,16 @@ final class AnalyticsReporter {
         session.dataTask(with: request).resume()
     }
 
-    private func normalizedCaptureURL(from host: String) -> String {
+    private func normalizedCaptureURL(from host: String) -> String? {
         let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        // Security: reject non-HTTPS hosts so analytics payloads (including the api_key and
+        // distinct_id) cannot be sent over plaintext HTTP or to an arbitrary URI scheme.
+        // A tampered Info.plist or a malicious observability-overrides.plist could otherwise
+        // redirect analytics to an attacker-controlled endpoint over plain HTTP.
+        guard trimmedHost.lowercased().hasPrefix("https://") else {
+            return nil
+        }
         return "\(trimmedHost)/capture/"
     }
 }

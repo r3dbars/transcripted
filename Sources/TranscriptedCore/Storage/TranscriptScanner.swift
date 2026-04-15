@@ -157,7 +157,10 @@ public enum TranscriptScanner {
                         actionItemsCount = Int(value) ?? 0
 
                     case "capture_id", "transcript_id":
-                        captureID = value
+                        // Security: cap length to prevent unbounded strings from an adversarially
+                        // crafted transcript file from being stored in the stats database.
+                        // A legitimate UUID is 36 chars; 256 gives generous slack for any future formats.
+                        captureID = String(value.prefix(256))
 
                     default:
                         break
@@ -182,7 +185,8 @@ public enum TranscriptScanner {
         }
 
         // Extract title from filename or content
-        title = extractTitle(from: fileURL, content: content)
+        // Security: cap at 1024 chars to bound what reaches the stats database from on-disk files.
+        title = extractTitle(from: fileURL, content: content).map { String($0.prefix(1024)) }
 
         let metadata = RecordingMetadata(
             id: captureID ?? UUID().uuidString,

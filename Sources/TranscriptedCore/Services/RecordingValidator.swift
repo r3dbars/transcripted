@@ -111,8 +111,17 @@ public enum RecordingValidator {
     private static func resolvedSaveDirectory(paths: CoreStoragePaths) -> URL {
         if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
            !customPath.isEmpty {
-            return URL(fileURLWithPath: customPath, isDirectory: true)
+            let candidate = URL(fileURLWithPath: customPath, isDirectory: true)
                 .appendingPathComponent("meetings", isDirectory: true)
+            // Security: validate the path even in internal callers (checkDiskSpace,
+            // checkFilePermissions) that bypass the UI-level validation in
+            // validateRecordingConditions. Without this guard a UserDefaults value
+            // containing ".." traversal components could cause the permission-test file
+            // (.murmur_permission_test) to be written outside the intended directory.
+            if case .failure = validateSavePath(candidate) {
+                return paths.transcripts
+            }
+            return candidate
         }
 
         return paths.transcripts

@@ -82,7 +82,6 @@ public final class SpeakerDatabase: @unchecked Sendable {
     /// Apply permissions and WAL pragmas to an already-opened database handle.
     /// Called on both initial open and corruption-recovery re-open.
     private func configureOpenDatabase() {
-        isDatabaseOpen = true
         FileManager.default.restrictSQLiteArtifactsToOwnerOnly(atPath: dbPath.path)
         // WAL mode for crash safety, busy timeout to avoid SQLITE_BUSY, NORMAL sync for performance
         let pragmas = [
@@ -98,6 +97,9 @@ public final class SpeakerDatabase: @unchecked Sendable {
                 sqlite3_free(errorMessage)
             }
         }
+        // Security: mark the database open only after all pragmas are applied so any concurrent
+        // reader that observes isDatabaseOpen=true is guaranteed to see a fully-configured handle.
+        isDatabaseOpen = true
     }
 
     /// Verify database integrity using PRAGMA quick_check.
