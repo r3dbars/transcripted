@@ -12,6 +12,8 @@ extension Audio {
     // MARK: - Audio Capture Setup
 
     func startAudioCapture() async throws {
+        ensureCaptureInfrastructureConfigured()
+        ensureInputEngineInitialized()
         guard let engine = engine, let inputNode = inputNode else {
             throw NSError(domain: "Audio", code: 1, userInfo: [NSLocalizedDescriptionKey: "Engine not initialized"])
         }
