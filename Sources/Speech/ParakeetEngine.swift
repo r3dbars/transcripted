@@ -295,7 +295,8 @@ class ParakeetEngine: ObservableObject {
             }
 
         } catch {
-            modelDownloadState = .failed(error.localizedDescription)
+            let friendlyMessage = ModelDownloadService.classifyError(error).detail
+            modelDownloadState = .failed(friendlyMessage)
             print("❌ PARAKEET | model initialization failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "model_init_failed",
                 message: error.localizedDescription,
