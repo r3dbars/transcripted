@@ -71,10 +71,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     "meeting_prompt_record_selected",
                     properties: self.analyticsProperties(for: candidate)
                 )
-                self.meetingPromptDetector.markAccepted(candidate: candidate)
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    await self.appState.meetingSession.startRecording(trigger: .detectedPrompt)
+                    let started = await self.appState.meetingSession.startRecording(trigger: .detectedPrompt)
+                    if started {
+                        self.meetingPromptDetector.markAccepted(candidate: candidate)
+                    }
                 }
             }
             meetingOverlayController.onPromptDismiss = { [weak self] candidate in
@@ -107,7 +109,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         // Set up menubar status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "mic.and.signal.meter", accessibilityDescription: "Transcripted")
+            let image = NSImage(systemSymbolName: "mic.and.signal.meter", accessibilityDescription: "Transcripted")
+            image?.isTemplate = true
+            button.image = image
             button.toolTip = "Transcripted"
             button.action = #selector(togglePopover)
             button.target = self

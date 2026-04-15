@@ -98,4 +98,69 @@ func testTranscriptedPermissionAccess() async {
         assertTrue(granted, "known granted permission should stay ready")
         assertEqual(requestBox.callCount, 0, "known granted permission should not trigger another request")
     }
+
+    runSuite("TranscriptedPermissionKind action titles — name the real recovery path for blocked permissions") {
+        assertEqual(
+            TranscriptedPermissionKind.microphoneActionTitle(for: .notDetermined),
+            "Allow microphone",
+            "microphone action should stay prompt-like before the first decision"
+        )
+        assertEqual(
+            TranscriptedPermissionKind.microphoneActionTitle(for: .denied),
+            "Open Microphone Settings",
+            "microphone action should point to System Settings after denial"
+        )
+        assertEqual(
+            TranscriptedPermissionKind.accessibilityActionTitle(isTrusted: false),
+            "Open Accessibility Settings",
+            "accessibility action should name the settings destination instead of a vague fix label"
+        )
+        assertEqual(
+            TranscriptedPermissionKind.systemAudioRecordingActionTitle(for: .unknown),
+            "Check System Audio Recording",
+            "unknown system audio state should ask the app to verify access instead of treating it as a denial"
+        )
+        assertEqual(
+            TranscriptedPermissionKind.systemAudioRecordingActionTitle(for: .denied),
+            "Open Audio Recording Settings",
+            "system audio action should explain the destination when the permission is still missing"
+        )
+        assertEqual(
+            TranscriptedPermissionKind.calendarActionTitle(for: .notDetermined),
+            "Allow Calendar Access",
+            "calendar action should stay prompt-like before the first decision"
+        )
+    }
+
+    runSuite("TranscriptedPermissionAccess.systemAudioRecordingStatus — separates unknown from denied state") {
+        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
+        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
+        defer {
+            restore(originalKnown, forKey: knownKey)
+            restore(originalGranted, forKey: grantedKey)
+        }
+
+        UserDefaults.standard.removeObject(forKey: knownKey)
+        UserDefaults.standard.removeObject(forKey: grantedKey)
+        assertEqual(
+            TranscriptedPermissionAccess.systemAudioRecordingStatus(),
+            .unknown,
+            "missing local cache should stay unknown so upgraded installs are not treated like explicit denials"
+        )
+
+        UserDefaults.standard.set(true, forKey: knownKey)
+        UserDefaults.standard.set(false, forKey: grantedKey)
+        assertEqual(
+            TranscriptedPermissionAccess.systemAudioRecordingStatus(),
+            .denied,
+            "known negative result should stay denied"
+        )
+
+        UserDefaults.standard.set(true, forKey: grantedKey)
+        assertEqual(
+            TranscriptedPermissionAccess.systemAudioRecordingStatus(),
+            .granted,
+            "cached positive result should stay granted"
+        )
+    }
 }

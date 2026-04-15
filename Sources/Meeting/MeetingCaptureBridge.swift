@@ -30,6 +30,7 @@ final class MeetingCaptureBridge: ObservableObject {
     @Published private(set) var systemLevel: Float = 0         // system audio level (latest frame from Core's rolling history)
     @Published private(set) var recordingDuration: TimeInterval = 0
     @Published private(set) var systemAudioStatus: SystemAudioStatus = .unknown
+    @Published private(set) var errorMessage: String?
 
     // MARK: - Underlying capture
 
@@ -42,6 +43,7 @@ final class MeetingCaptureBridge: ObservableObject {
     /// Fulfilled when Core's Audio reports recording completed. Cleared each
     /// time `startRecording` runs so back-to-back sessions do not leak state.
     private var completionContinuation: CheckedContinuation<(micURL: URL?, systemURL: URL?), Never>?
+    private var startContinuation: CheckedContinuation<Bool, Never>?
 
     init(audio: Audio = Audio()) {
         self.audio = audio
@@ -57,13 +59,28 @@ final class MeetingCaptureBridge: ObservableObject {
 
     /// Start a new recording session. Returns immediately; the session remains
     /// active until `stopAndAwaitFiles()` is called.
-    func startRecording() {
+    func startRecording() async -> Bool {
         if let continuation = completionContinuation {
             completionContinuation = nil
             continuation.resume(returning: (audio.micAudioFileURL, audio.systemAudioFileURL))
         }
-        guard !audio.isRecording else { return }
-        audio.start()
+        if audio.isRecording { return true }
+
+        errorMessage = nil
+
+        return await withCheckedContinuation { continuation in
+            startContinuation?.resume(returning: false)
+            startContinuation = continuation
+
+            audio.start()
+
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: TranscriptedConstants.meetingStartTimeout)
+                guard let self, let continuation = self.startContinuation else { return }
+                self.startContinuation = nil
+                continuation.resume(returning: self.audio.isRecording)
+            }
+        }
     }
 
     /// Stop the current recording and wait for Core's Audio to finish writing
@@ -148,5 +165,29 @@ final class MeetingCaptureBridge: ObservableObject {
         audio.$systemAudioStatus
             .receive(on: RunLoop.main)
             .assign(to: &$systemAudioStatus)
+
+        audio.$error
+            .receive(on: RunLoop.main)
+            .sink { [weak self] errorMessage in
+                guard let self else { return }
+                self.errorMessage = errorMessage
+
+                guard errorMessage != nil,
+                      !self.audio.isRecording,
+                      let continuation = self.startContinuation else { return }
+                self.startContinuation = nil
+                continuation.resume(returning: false)
+            }
+            .store(in: &cancellables)
+
+        audio.$isRecording
+            .receive(on: RunLoop.main)
+            .sink { [weak self] isRecording in
+                guard let self else { return }
+                guard isRecording, let continuation = self.startContinuation else { return }
+                self.startContinuation = nil
+                continuation.resume(returning: true)
+            }
+            .store(in: &cancellables)
     }
 }

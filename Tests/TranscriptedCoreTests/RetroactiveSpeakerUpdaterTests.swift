@@ -83,7 +83,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             updates: [
                 SpeakerNameUpdate(
                     persistentSpeakerId: speakerId,
-                    sortformerSpeakerId: "0",
+                    diarizerSpeakerId: "0",
                     newName: "Alex",
                     action: .named
                 )
@@ -112,7 +112,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let source: String
         let label: String
         let text: String
-        let sortformerSpeakerId: Int?
+        let diarizerSpeakerId: Int?
         let speakingSeconds: Double
 
         init(
@@ -120,14 +120,14 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             source: String,
             label: String,
             text: String,
-            sortformerSpeakerId: Int? = nil,
+            diarizerSpeakerId: Int? = nil,
             speakingSeconds: Double = 3.0
         ) {
             self.timestamp = timestamp
             self.source = source
             self.label = label
             self.text = text
-            self.sortformerSpeakerId = sortformerSpeakerId
+            self.diarizerSpeakerId = diarizerSpeakerId
             self.speakingSeconds = speakingSeconds
         }
     }
@@ -361,7 +361,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             updates: [
                 SpeakerNameUpdate(
                     persistentSpeakerId: originalPersistentId,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     newName: "Sarah Graham",
                     previousName: "Matt Vlasach",
                     action: .corrected,
@@ -419,7 +419,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             updates: [
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     newName: "Sarah Graham",
                     previousName: "Speaker 1",
                     action: .named
@@ -473,7 +473,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             updates: [
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     newName: "Sarah Graham",
                     previousName: "Speaker 1",
                     action: .named
@@ -529,7 +529,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             updates: [
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     newName: "Sarah Graham",
                     previousName: "Speaker 1",
                     action: .named
@@ -585,7 +585,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             updates: [
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     newName: "Sarah Graham",
                     previousName: "Speaker 1",
                     action: .named
@@ -629,7 +629,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
                 source: "System",
                 label: "Matt Vlasach",
                 text: "Sarah is actually joining today.",
-                sortformerSpeakerId: 1,
+                diarizerSpeakerId: 1,
                 speakingSeconds: 3.0
             ),
             MarkdownUtterance(
@@ -637,7 +637,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
                 source: "System",
                 label: "Matt Vlasach",
                 text: "Matt Vlasach is still the label on this other speaker.",
-                sortformerSpeakerId: 2,
+                diarizerSpeakerId: 2,
                 speakingSeconds: 4.0
             )
         ]
@@ -658,7 +658,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             updates: [
                 SpeakerNameUpdate(
                     persistentSpeakerId: firstPersistentId,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     newName: "Sarah Graham",
                     previousName: "Matt Vlasach",
                     action: .corrected,
@@ -699,7 +699,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
                 source: "System",
                 label: "[[Matt Vlasach]]",
                 text: #"Literal tokens: [[Matt Vlasach]] [System/Matt Vlasach] **Matt Vlasach:** name: "Matt Vlasach""#,
-                sortformerSpeakerId: 1,
+                diarizerSpeakerId: 1,
                 speakingSeconds: 3.0
             )
         ]
@@ -719,7 +719,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             updates: [
                 SpeakerNameUpdate(
                     persistentSpeakerId: originalPersistentId,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     newName: "Sarah Graham",
                     previousName: "Matt Vlasach",
                     action: .corrected,
@@ -834,7 +834,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
 
         let mappedUtterances = utterances.map { utterance -> TranscriptionUtterance in
             let channel = utterance.source.caseInsensitiveCompare("Mic") == .orderedSame ? 0 : 1
-            let speakerId = utterance.sortformerSpeakerId
+            let speakerId = utterance.diarizerSpeakerId
                 ?? resolvedSpeakerId(
                     for: utterance,
                     channel: channel,

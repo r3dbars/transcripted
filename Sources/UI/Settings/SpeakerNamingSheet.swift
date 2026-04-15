@@ -60,6 +60,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
     private let request: SpeakerNamingRequest
     private let onClose: () -> Void
     private let contentView: SpeakerNamingContentView
+    private var didComplete = false
 
     init(request: SpeakerNamingRequest, onClose: @escaping () -> Void) {
         self.request = request
@@ -83,14 +84,10 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
 
         contentView.onSave = { [weak self] updates in
-            guard let self else { return }
-            self.request.onComplete(updates)
-            self.close()
+            self?.finish(with: updates)
         }
         contentView.onCancel = { [weak self] in
-            guard let self else { return }
-            self.request.onComplete([])
-            self.close()
+            self?.finish(with: [])
         }
     }
 
@@ -98,8 +95,19 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     func windowWillClose(_ notification: Notification) {
+        if !didComplete {
+            request.onComplete([])
+            didComplete = true
+        }
         SpeakerClipPlayback.stop()
         onClose()
+    }
+
+    private func finish(with updates: [SpeakerNameUpdate]) {
+        guard !didComplete else { return }
+        didComplete = true
+        request.onComplete(updates)
+        close()
     }
 }
 
@@ -305,7 +313,7 @@ final class SpeakerRowView: NSView {
         if let current = entry.currentName, !current.isEmpty {
             labelField.stringValue = "Suggested match: \(current)"
         } else {
-            labelField.stringValue = "Speaker \(entry.sortformerSpeakerId)"
+            labelField.stringValue = "Speaker \(entry.diarizerSpeakerId)"
         }
         labelField.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         labelField.textColor = NSColor.labelColor
@@ -419,14 +427,14 @@ final class SpeakerRowView: NSView {
             if let suggestedProfileId = entry.suggestedProfileId {
                 return SpeakerNameUpdate(
                     persistentSpeakerId: entry.id,
-                    sortformerSpeakerId: entry.sortformerSpeakerId,
+                    diarizerSpeakerId: entry.diarizerSpeakerId,
                     newName: current,
                     action: .merged(targetProfileId: suggestedProfileId)
                 )
             }
             return SpeakerNameUpdate(
                 persistentSpeakerId: entry.id,
-                sortformerSpeakerId: entry.sortformerSpeakerId,
+                diarizerSpeakerId: entry.diarizerSpeakerId,
                 newName: current,
                 previousName: current,
                 action: .confirmed
@@ -438,7 +446,7 @@ final class SpeakerRowView: NSView {
         if let option = knownPeopleByLabel[typed] {
             return SpeakerNameUpdate(
                 persistentSpeakerId: entry.id,
-                sortformerSpeakerId: entry.sortformerSpeakerId,
+                diarizerSpeakerId: entry.diarizerSpeakerId,
                 newName: option.displayName,
                 action: .merged(targetProfileId: option.id)
             )
@@ -457,7 +465,7 @@ final class SpeakerRowView: NSView {
 
         return SpeakerNameUpdate(
             persistentSpeakerId: entry.id,
-            sortformerSpeakerId: entry.sortformerSpeakerId,
+            diarizerSpeakerId: entry.diarizerSpeakerId,
             newName: typed,
             previousName: entry.currentName,
             action: action

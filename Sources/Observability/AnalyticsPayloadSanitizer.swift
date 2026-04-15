@@ -35,9 +35,11 @@ enum AnalyticsPayloadSanitizer {
     private static let userPathRegex = makeRegex(#"/Users/[^/\s]+/"#)
     private static let absolutePathRegex = makeRegex(#"(?<!https:)(?<!http:)/(?:Users|private|var|tmp|Volumes|Applications)[^\s"]*"#)
     private static let rawURLRegex = makeRegex(#"https?://[^\s"]+"#, options: [.caseInsensitive])
+    private static let apiKeyRegex = makeRegex(#"sk-[A-Za-z0-9_-]+"#)
     private static let commonSecretRegex = makeRegex(
         #"\b(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|phc_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|xoxx-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}\.[A-Za-z0-9._-]{10,})\b"#
     )
+    private static let bearerRegex = makeRegex(#"Bearer\s+[A-Za-z0-9._-]+"#, options: [.caseInsensitive])
     private static let secretAssignmentRegex = makeRegex(
         #"(?i)\b((?:access_)?token|refresh_token|api[_-]?key|x-api-key|signature|x-amz-signature)\s*[:=]\s*([^\s,;]+)"#
     )
@@ -62,6 +64,21 @@ enum AnalyticsPayloadSanitizer {
     }
 
     static func sanitizeText(_ text: String) -> String {
+        let redacted = redact(text)
+        guard !redacted.isEmpty else { return "" }
+
+        if redacted.count > maxValueLength {
+            return String(redacted.prefix(maxValueLength)) + "..."
+        }
+
+        return redacted
+    }
+
+    /// Apply regex-based redaction without the analytics length cap.
+    /// Use this for feedback / diagnostic contexts where multi-line log
+    /// blobs must be scrubbed but not truncated. `sanitizeText` calls
+    /// this and then applies the `maxValueLength` cap.
+    static func redact(_ text: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
 
@@ -73,15 +90,15 @@ enum AnalyticsPayloadSanitizer {
         range = NSRange(result.startIndex..., in: result)
         result = rawURLRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-url]")
         range = NSRange(result.startIndex..., in: result)
+        result = apiKeyRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "sk-****")
+        range = NSRange(result.startIndex..., in: result)
         result = commonSecretRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-secret]")
+        range = NSRange(result.startIndex..., in: result)
+        result = bearerRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "Bearer ****")
         range = NSRange(result.startIndex..., in: result)
         result = secretAssignmentRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1=[redacted-secret]")
         range = NSRange(result.startIndex..., in: result)
         result = emailRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-email]")
-
-        if result.count > maxValueLength {
-            return String(result.prefix(maxValueLength)) + "..."
-        }
 
         return result
     }

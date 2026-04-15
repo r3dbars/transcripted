@@ -37,7 +37,9 @@ public struct TranscriptionUtterance: Sendable {
 public struct TranscriptionResult: Sendable {
     public let micUtterances: [TranscriptionUtterance]
     public let systemUtterances: [TranscriptionUtterance]
-    public let systemSpeakerContexts: [String: SystemSpeakerContext]
+    public let systemSpeakerContexts: [String: ChannelSpeakerContext]
+    public let micSpeakerContexts: [String: ChannelSpeakerContext]
+    public let newlyCreatedMicProfileIds: Set<UUID>
     public let duration: TimeInterval
     public let processingTime: TimeInterval
     public let droppedSegments: Int
@@ -45,7 +47,9 @@ public struct TranscriptionResult: Sendable {
     public init(
         micUtterances: [TranscriptionUtterance],
         systemUtterances: [TranscriptionUtterance],
-        systemSpeakerContexts: [String: SystemSpeakerContext] = [:],
+        systemSpeakerContexts: [String: ChannelSpeakerContext] = [:],
+        micSpeakerContexts: [String: ChannelSpeakerContext] = [:],
+        newlyCreatedMicProfileIds: Set<UUID> = [],
         duration: TimeInterval,
         processingTime: TimeInterval,
         droppedSegments: Int = 0
@@ -53,6 +57,8 @@ public struct TranscriptionResult: Sendable {
         self.micUtterances = micUtterances
         self.systemUtterances = systemUtterances
         self.systemSpeakerContexts = systemSpeakerContexts
+        self.micSpeakerContexts = micSpeakerContexts
+        self.newlyCreatedMicProfileIds = newlyCreatedMicProfileIds
         self.duration = duration
         self.processingTime = processingTime
         self.droppedSegments = droppedSegments
@@ -80,6 +86,11 @@ public struct TranscriptionResult: Sendable {
         Set(systemUtterances.map { String($0.speakerId) })
     }
 
+    /// Unique speaker IDs in mic audio (only meaningful when mic diarization ran)
+    public var micSpeakerIds: Set<String> {
+        Set(micUtterances.map { String($0.speakerId) })
+    }
+
     /// Speaker count per channel
     public var micSpeakerCount: Int {
         Set(micUtterances.map { $0.speakerId }).count
@@ -89,10 +100,15 @@ public struct TranscriptionResult: Sendable {
         Set(systemUtterances.map { $0.speakerId }).count
     }
 
-    /// Persistent speaker IDs that appeared in system audio utterances.
+    /// Persistent speaker IDs that appeared in utterances, across both channels.
     /// Profiles are looked up separately via SpeakerDatabase.
     public var persistentSpeakerIds: Set<UUID> {
-        Set(systemUtterances.compactMap { $0.persistentSpeakerId })
+        Set((systemUtterances + micUtterances).compactMap { $0.persistentSpeakerId })
+    }
+
+    /// Persistent speaker IDs seen only on the mic channel this run.
+    public var micPersistentSpeakerIds: Set<UUID> {
+        Set(micUtterances.compactMap { $0.persistentSpeakerId })
     }
 }
 
@@ -204,6 +220,14 @@ public struct TranscriptionMetadata {
 
 // MARK: - Speaker Naming Flow Types
 
+/// Which audio channel a diarized speaker came from.
+/// Remote participants come in on `.system` (Zoom/Teams/etc. output captured via process tap).
+/// People physically in the room come in on `.mic` when local diarization is enabled.
+public enum UtteranceChannel: String, Sendable, Hashable {
+    case mic
+    case system
+}
+
 /// A named person the user can link a detected speaker to.
 public struct SpeakerIdentityOption: Identifiable, Hashable {
     public let id: UUID
@@ -251,7 +275,8 @@ public struct SpeakerNamingRequest {
 public struct SpeakerNamingEntry: Identifiable, Sendable {
     public let id: UUID                     // persistent speaker ID from SpeakerDatabase
     public let suggestedProfileId: UUID?    // existing person this row suggests, if any
-    public let sortformerSpeakerId: String  // "0", "1" — for transcript string matching
+    public let diarizerSpeakerId: String    // "0", "1" — from PyAnnote/Sortformer, for transcript string matching
+    public let channel: UtteranceChannel    // .mic (local) vs .system (remote)
     public let clipURL: URL                 // temporary WAV clip for playback
     public let sampleText: String           // representative quote from transcript
     public let currentName: String?         // nil if unknown speaker
@@ -265,7 +290,8 @@ public struct SpeakerNamingEntry: Identifiable, Sendable {
     public init(
         id: UUID,
         suggestedProfileId: UUID? = nil,
-        sortformerSpeakerId: String,
+        diarizerSpeakerId: String,
+        channel: UtteranceChannel = .system,
         clipURL: URL,
         sampleText: String,
         currentName: String?,
@@ -278,7 +304,8 @@ public struct SpeakerNamingEntry: Identifiable, Sendable {
     ) {
         self.id = id
         self.suggestedProfileId = suggestedProfileId
-        self.sortformerSpeakerId = sortformerSpeakerId
+        self.diarizerSpeakerId = diarizerSpeakerId
+        self.channel = channel
         self.clipURL = clipURL
         self.sampleText = sampleText
         self.currentName = currentName
@@ -291,9 +318,9 @@ public struct SpeakerNamingEntry: Identifiable, Sendable {
     }
 }
 
-/// Per-speaker context captured during one transcription run.
+/// Per-speaker context captured during one transcription run for one channel.
 /// Keeps enough information around to safely recover from a false-positive match.
-public struct SystemSpeakerContext: Sendable {
+public struct ChannelSpeakerContext: Sendable {
     public let persistentSpeakerId: UUID
     public let sessionEmbedding: [Float]?
     public let matchedProfileSnapshot: SpeakerProfile?
@@ -315,7 +342,8 @@ public struct SystemSpeakerContext: Sendable {
 /// Result of user naming/confirming a speaker
 public struct SpeakerNameUpdate: Sendable {
     public let persistentSpeakerId: UUID
-    public let sortformerSpeakerId: String
+    public let diarizerSpeakerId: String
+    public let channel: UtteranceChannel
     public let newName: String
     public let previousName: String?
     public let action: NamingAction
@@ -323,14 +351,16 @@ public struct SpeakerNameUpdate: Sendable {
 
     public init(
         persistentSpeakerId: UUID,
-        sortformerSpeakerId: String,
+        diarizerSpeakerId: String,
+        channel: UtteranceChannel = .system,
         newName: String,
         previousName: String? = nil,
         action: NamingAction,
         resolvedPersistentSpeakerId: UUID? = nil
     ) {
         self.persistentSpeakerId = persistentSpeakerId
-        self.sortformerSpeakerId = sortformerSpeakerId
+        self.diarizerSpeakerId = diarizerSpeakerId
+        self.channel = channel
         self.newName = newName
         self.previousName = previousName
         self.action = action
@@ -342,5 +372,6 @@ public struct SpeakerNameUpdate: Sendable {
         case confirmed  // user confirmed suggested name
         case corrected  // user rejected suggestion and typed correct name
         case merged(targetProfileId: UUID)  // user linked this speaker to an existing profile
+        case collapsedToMe  // user clicked "Keep as You" — collapse this mic speaker into the single owner
     }
 }

@@ -29,7 +29,7 @@ final class FileLogger: @unchecked Sendable {
     init(paths: CoreStoragePaths = .default, isDisabledOverride: Bool? = nil) {
         // Disable file logging during test runs to avoid polluting production logs.
         let env = ProcessInfo.processInfo.environment
-        let isTestRun = env["XCTestConfigurationFilePath"] != nil
+        let isTestRun = Self.isRunningUnderTests(environment: env)
             || Self.isEnabledFlag(env["TRANSCRIPTED_DISABLE_FILE_LOGGER"])
         self.isDisabled = isDisabledOverride ?? isTestRun
 
@@ -50,6 +50,9 @@ final class FileLogger: @unchecked Sendable {
         // Open file handle for appending
         fileHandle = try? FileHandle(forWritingTo: logFileURL)
         fileHandle?.seekToEndOfFile()
+
+        // Heal oversized inherited logs on startup even if this process never reaches 100 writes.
+        trimIfNeeded()
     }
 
     /// Write a log entry asynchronously (non-blocking)
@@ -159,5 +162,17 @@ final class FileLogger: @unchecked Sendable {
         default:
             return false
         }
+    }
+
+    private static func isRunningUnderTests(environment: [String: String]) -> Bool {
+        if environment["XCTestConfigurationFilePath"] != nil || environment["XCTestBundlePath"] != nil {
+            return true
+        }
+
+        if CommandLine.arguments.first?.contains(".xctest") == true {
+            return true
+        }
+
+        return NSClassFromString("XCTestCase") != nil
     }
 }

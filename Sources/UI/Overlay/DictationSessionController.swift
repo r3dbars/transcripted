@@ -124,18 +124,8 @@ class DictationSessionController: ObservableObject {
 
     // MARK: - Removed Draft Mode
 
-    func startSession(imageData: Data?, sourceApp: NSRunningApplication?) {
-        let _ = imageData
-        let _ = sourceApp
-        guard let (_, overlayController) = readyState() else { return }
-        overlayController.showError(Self.removedDraftModeMessage)
-    }
-
-    func stopSessionAndDraft() {
-        guard let (_, overlayController) = readyState() else { return }
-        overlayController.showError(Self.removedDraftModeMessage)
-    }
-
+    // `cancelSession()` is still invoked by ContextCaptureEngine on interrupt paths.
+    // The `startSession` / `stopSessionAndDraft` stubs were removed — they had no callers.
     func cancelSession() {
         cancelSession(message: Self.removedDraftModeMessage)
     }
@@ -427,7 +417,7 @@ class DictationSessionController: ObservableObject {
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
             let pasteOutcome = self.pasteWithClipboardRestore(text)
-            self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
+            let saveFailureMessage = self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
             let wordCount = text.split(whereSeparator: \.isWhitespace).count
             let deliveryLevel: EventLevel = pasteOutcome.delivery == .pasted ? .info : .warning
             DiagnosticsTrail.record(
@@ -449,9 +439,19 @@ class DictationSessionController: ObservableObject {
             switch pasteOutcome {
             case .pasted:
                 AppSoundPlayer.shared.play(.dictationDelivered)
-                overlayController.showSuccessAndDismiss()
+                if let saveFailureMessage {
+                    overlayController.showError(saveFailureMessage)
+                } else {
+                    overlayController.showSuccessAndDismiss()
+                }
             case .copied(let message), .failed(let message):
-                overlayController.showError(message)
+                let combinedMessage: String
+                if let saveFailureMessage {
+                    combinedMessage = "\(message) \(saveFailureMessage)"
+                } else {
+                    combinedMessage = message
+                }
+                overlayController.showError(combinedMessage)
             }
             isDictating = false
             appState.logger.log("DICTATION | completed with outcome \(pasteOutcome)")
@@ -461,7 +461,7 @@ class DictationSessionController: ObservableObject {
                     "delivery": pasteOutcome.delivery.rawValue,
                     "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
                     "trigger": currentDictationTrigger.rawValue,
-                    "word_count_bucket": AnalyticsReporter.wordCountBucket(text.split(whereSeparator: \.isWhitespace).count),
+                    "word_count_bucket": AnalyticsReporter.wordCountBucket(wordCount),
                 ]
             )
         }
@@ -726,8 +726,37 @@ class DictationSessionController: ObservableObject {
         }
     }
 
+    /// Bundle identifiers of dedicated terminal emulators. Auto-paste is refused into
+    /// these targets because dictated text containing a trailing newline (or any
+    /// shell metacharacter) would be interpreted as a command and executed. The user
+    /// can still press Cmd+V manually if they really meant to paste into a shell.
+    private static let terminalBundleIDs: Set<String> = [
+        "com.apple.Terminal",
+        "com.googlecode.iterm2",
+        "dev.warp.Warp-Stable",
+        "co.zeit.hyper",
+        "net.kovidgoyal.kitty",
+        "io.alacritty",
+        "com.mitchellh.ghostty",
+    ]
+
+    private func isFrontmostAppATerminal() -> Bool {
+        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
+            return false
+        }
+        return Self.terminalBundleIDs.contains(bundleID)
+    }
+
     private func pasteWithClipboardRestore(_ text: String) -> DictationPasteOutcome {
         guard let appState = appState else { return .failed("Couldn't paste dictation") }
+
+        // Refuse to auto-paste into a terminal: a trailing newline or shell
+        // metacharacter in the dictated text would execute as a command.
+        if isFrontmostAppATerminal() {
+            appState.logger.log("DICTATION | terminal frontmost, copying instead of auto-paste")
+            copyTextToClipboard(text)
+            return .copied("Dictation won't auto-paste into a terminal for safety. Press Cmd+V to paste.")
+        }
 
         // Check Accessibility permission BEFORE modifying clipboard
         guard AXIsProcessTrusted() else {
@@ -777,21 +806,26 @@ class DictationSessionController: ObservableObject {
         let changeCountAfterSet = pasteboard.changeCount
         clipboardRestoreTask?.cancel()
         clipboardRestoreTask = Task { @MainActor in
+            // Defer guarantees the dictated text is wiped from the global pasteboard
+            // even if this task is cancelled or the actor is torn down mid-loop —
+            // otherwise a clipboard manager could scrape it indefinitely.
+            defer {
+                pasteboard.clearContents()
+                let items = savedItems.map { typeData -> NSPasteboardItem in
+                    let item = NSPasteboardItem()
+                    for (type, data) in typeData {
+                        item.setData(data, forType: type)
+                    }
+                    return item
+                }
+                if !items.isEmpty {
+                    pasteboard.writeObjects(items)
+                }
+            }
             let startTime = CFAbsoluteTimeGetCurrent()
             while CFAbsoluteTimeGetCurrent() - startTime < TranscriptedConstants.clipboardRestoreTimeout {
                 try? await Task.sleep(nanoseconds: TranscriptedConstants.clipboardPollInterval)
                 if pasteboard.changeCount != changeCountAfterSet { break }
-            }
-            pasteboard.clearContents()
-            let items = savedItems.map { typeData -> NSPasteboardItem in
-                let item = NSPasteboardItem()
-                for (type, data) in typeData {
-                    item.setData(data, forType: type)
-                }
-                return item
-            }
-            if !items.isEmpty {
-                pasteboard.writeObjects(items)
             }
         }
         return .pasted
@@ -803,7 +837,8 @@ class DictationSessionController: ObservableObject {
         pasteboard.setString(text, forType: .string)
     }
 
-    private func persistDictationTranscript(text: String, delivery: DictationDelivery) {
+    @discardableResult
+    private func persistDictationTranscript(text: String, delivery: DictationDelivery) -> String? {
         do {
             let saved = try DictationTranscriptWriter.save(
                 text: text,
@@ -822,6 +857,7 @@ class DictationSessionController: ObservableObject {
                     ]
                 )
             )
+            return nil
         } catch {
             appState?.logger.log("DICTATION | failed to save markdown export: \(error.localizedDescription)")
             DiagnosticsTrail.record(
@@ -832,6 +868,7 @@ class DictationSessionController: ObservableObject {
                 message: "Failed to save dictation markdown export",
                 context: dictationContext(extra: ["error": error.localizedDescription])
             )
+            return "Transcripted couldn't save a local copy of this dictation. Check your save location and available disk space."
         }
     }
 

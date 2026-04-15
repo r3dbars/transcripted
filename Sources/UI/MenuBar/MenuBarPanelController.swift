@@ -38,6 +38,7 @@ final class MenuBarPanelController: NSViewController {
         content.settingsView.appState = appState
         content.shortcutsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
         content.shortcutsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
+        content.modelStatusView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu() }
         content.settingsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu() }
         content.settingsView.onCheckForUpdates = { [weak self] in self?.checkForUpdatesFromMenu() }
         content.settingsView.onOpenAgentConnect = { [weak self] in self?.openAgentConnectFromMenu() }
@@ -52,9 +53,9 @@ final class MenuBarPanelController: NSViewController {
     func refresh() {
         guard let content = contentView else { return }
         let warmupStatus = appState.meetingSession.warmupStatus
-        let dictationState = FirstRunExperience.dictationAction(
-            for: FirstRunLocalModelState(appState.sttRouter.parakeetEngine.modelDownloadState)
-        )
+        let modelState = FirstRunLocalModelState(appState.sttRouter.parakeetEngine.modelDownloadState)
+        let dictationState = FirstRunExperience.dictationAction(for: modelState)
+        content.modelStatusView.update(state: modelState)
         let meetingState = FirstRunExperience.meetingAction(
             dictationReady: appState.sttRouter.isModelLoaded,
             meetingsStatus: warmupStatus.meetingsStatus
@@ -101,6 +102,13 @@ final class MenuBarPanelController: NSViewController {
 
     private func setupSubscriptions() {
         appState.meetingSession.$warmupStatus
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.refresh()
+            }
+            .store(in: &subscriptions)
+
+        appState.sttRouter.parakeetEngine.$modelDownloadState
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.refresh()

@@ -252,7 +252,21 @@ class ParakeetEngine: ObservableObject {
                 models = try await AsrModels.load(from: bundlePath, version: .v3)
                 loadSourceName = loadSource.rawValue
             } else {
-                // Fallback: download from HuggingFace (~600MB on first run)
+                // Fallback: download from HuggingFace (~600MB on first run).
+                //
+                // SECURITY: AsrModels.download() pulls model artifacts from HuggingFace
+                // through FluidAudio. Transcripted does not currently re-verify the
+                // downloaded artifacts against pinned SHA-256 digests. Trust here rests
+                // on the system TLS chain plus HuggingFace's CDN integrity. A targeted
+                // TLS interception or CDN compromise could swap the model files, with
+                // a worst-case impact of bad transcriptions or — much less likely —
+                // exploitation of a Core ML deserialization bug.
+                //
+                // To close this gap we'd ship a static `[filename: sha256]` table for
+                // each supported Parakeet variant and verify it after download, before
+                // calling AsrModels.load(...). The hashes need to be computed from a
+                // trusted release of the model bundle; without that source of truth a
+                // verification stub would be worse than no check at all.
                 failureStage = .downloadModels
                 loadSource = .download
                 print("🌐 PARAKEET | models not bundled, downloading (~600MB)...")
@@ -281,7 +295,8 @@ class ParakeetEngine: ObservableObject {
             }
 
         } catch {
-            modelDownloadState = .failed(error.localizedDescription)
+            let friendlyMessage = ModelDownloadService.classifyError(error).detail
+            modelDownloadState = .failed(friendlyMessage)
             print("❌ PARAKEET | model initialization failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "model_init_failed",
                 message: error.localizedDescription,
@@ -455,9 +470,11 @@ class ParakeetEngine: ObservableObject {
             return
         }
         prewarmRetryCount += 1
+        let capturedGeneration = recoveryState.generation
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-            self?.prewarm()
+            guard let self, !self.recoveryState.isStale(generation: capturedGeneration) else { return }
+            self.prewarm()
         }
     }
 
@@ -556,10 +573,12 @@ class ParakeetEngine: ObservableObject {
         // Immediately tear down anything that's running — the system has
         // already stopped the engine internally before posting this notification,
         // so the tap and prewarm state are stale.
-        audioWatchdogTask?.cancel()
-        audioWatchdogTask = nil
+        cancelAudioWatchdog()
 
         if isRecording {
+            pendingSamplesLock.withLock {
+                pendingSamples.removeAll(keepingCapacity: true)
+            }
             streamingSamplesLock.withLock { streamingSampleBuffer.removeAll(keepingCapacity: true) }
             Task { await eouManager?.reset() }
             audioEngine.inputNode.removeTap(onBus: 0)
@@ -627,7 +646,7 @@ class ParakeetEngine: ObservableObject {
                 // samples. The watchdog gets one retry before giving up.
                 if shouldRestartRecording {
                     var restarted = false
-                    for attempt in 1...4 {
+                    for attempt in 1...TranscriptedConstants.recordingRestartAttempts {
                         guard !Task.isCancelled else { return }
                         guard !self.recoveryState.isStale(generation: myGeneration) else { return }
                         if self.startRecording() {
@@ -644,7 +663,7 @@ class ParakeetEngine: ObservableObject {
                             break
                         }
                         // BT format negotiation can take ~1-2s; wait between attempts.
-                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        try? await Task.sleep(nanoseconds: TranscriptedConstants.recordingRestartRetryDelay)
                     }
                     if !restarted {
                         self.recordingInterrupted = true
@@ -673,12 +692,8 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func publishRecoveryState() {
-        if isRecovering != recoveryState.isRecovering {
-            isRecovering = recoveryState.isRecovering
-        }
-        if inputFormatReady != recoveryState.inputFormatReady {
-            inputFormatReady = recoveryState.inputFormatReady
-        }
+        isRecovering = recoveryState.isRecovering
+        inputFormatReady = recoveryState.inputFormatReady
     }
 
     private func markFormatUnreadyAndPublish() {
@@ -688,7 +703,7 @@ class ParakeetEngine: ObservableObject {
 
     private func markFormatReadyAndPublish() {
         if !recoveryState.inputFormatReady {
-            _ = recoveryState.finishRecovery(success: true, generation: recoveryState.generation)
+            recoveryState.markFormatReady()
             publishRecoveryState()
         }
     }
@@ -700,7 +715,11 @@ class ParakeetEngine: ObservableObject {
             context: ["was_recording": "\(isRecording)", "was_prewarmed": "\(isEnginePrewarmed)"])
 
         let wasRecording = isRecording
+        cancelAudioWatchdog()
         if isRecording {
+            pendingSamplesLock.withLock {
+                pendingSamples.removeAll(keepingCapacity: true)
+            }
             streamingSamplesLock.lock()
             streamingSampleBuffer.removeAll(keepingCapacity: true)
             streamingSamplesLock.unlock()
@@ -749,6 +768,10 @@ class ParakeetEngine: ObservableObject {
         installAudioObserversIfNeeded()
         recordingInterrupted = false
         didReceiveAudioSamples = false
+        cancelAudioWatchdog()
+        pendingSamplesLock.withLock {
+            pendingSamples.removeAll(keepingCapacity: true)
+        }
         sampleBuffer.removeAll(keepingCapacity: true)
         sampleBuffer.reserveCapacity(Int(nativeSampleRate * Double(TranscriptedConstants.audioBufferCapacitySeconds)))
 
@@ -944,7 +967,7 @@ class ParakeetEngine: ObservableObject {
     /// After sleep/wake, CoreAudio may report the engine as running but the hardware graph
     /// is disconnected. If no samples arrive within 2 seconds, tear down and retry once.
     private func startAudioWatchdog() {
-        audioWatchdogTask?.cancel()
+        cancelAudioWatchdog()
         audioWatchdogTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioWatchdogTimeout)
             guard let self = self, self.isRecording, !Task.isCancelled else { return }
@@ -964,6 +987,9 @@ class ParakeetEngine: ObservableObject {
             // Full teardown
             self.streamingSamplesLock.withLock {
                 self.streamingSampleBuffer.removeAll(keepingCapacity: true)
+            }
+            self.pendingSamplesLock.withLock {
+                self.pendingSamples.removeAll(keepingCapacity: true)
             }
             await self.eouManager?.reset()
             self.audioEngine.inputNode.removeTap(onBus: 0)
@@ -993,8 +1019,7 @@ class ParakeetEngine: ObservableObject {
 
     func stopRecording() {
         guard isRecording else { return }
-        audioWatchdogTask?.cancel()
-        audioWatchdogTask = nil
+        cancelAudioWatchdog()
         if liveDisplayEnabled {
             streamingSamplesLock.lock()
             let remainingEou: [Float] = streamingSampleBuffer
@@ -1239,8 +1264,10 @@ class ParakeetEngine: ObservableObject {
     // MARK: - Cleanup
 
     func cancel() {
-        audioWatchdogTask?.cancel()
-        audioWatchdogTask = nil
+        cancelAudioWatchdog()
+        pendingSamplesLock.withLock {
+            pendingSamples.removeAll(keepingCapacity: true)
+        }
         if isRecording {
             if liveDisplayEnabled {
                 streamingSamplesLock.lock()
@@ -1256,6 +1283,11 @@ class ParakeetEngine: ObservableObject {
         isTranscribing = false
         liveTranscript = ""
         committedStreamText = ""
+    }
+
+    private func cancelAudioWatchdog() {
+        audioWatchdogTask?.cancel()
+        audioWatchdogTask = nil
     }
 
     func cleanup() {

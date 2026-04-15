@@ -19,7 +19,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         let source: String
         let label: String
         let text: String
-        let sortformerSpeakerId: Int?
+        let diarizerSpeakerId: Int?
         let speakingSeconds: Double
 
         init(
@@ -27,14 +27,14 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             source: String,
             label: String,
             text: String,
-            sortformerSpeakerId: Int? = nil,
+            diarizerSpeakerId: Int? = nil,
             speakingSeconds: Double = 3.0
         ) {
             self.timestamp = timestamp
             self.source = source
             self.label = label
             self.text = text
-            self.sortformerSpeakerId = sortformerSpeakerId
+            self.diarizerSpeakerId = diarizerSpeakerId
             self.speakingSeconds = speakingSeconds
         }
     }
@@ -117,7 +117,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             updates: [
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     newName: "Sarah Graham",
                     previousName: nil,
                     action: .named
@@ -131,7 +131,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             clips: [
                 SpeakerNamingEntry(
                     id: persistentSpeakerId,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     clipURL: clipURL,
                     sampleText: "Thanks for joining.",
                     currentName: nil,
@@ -205,7 +205,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             updates: [
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     newName: "Sarah Graham",
                     previousName: nil,
                     action: .named
@@ -219,7 +219,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             clips: [
                 SpeakerNamingEntry(
                     id: persistentSpeakerId,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     clipURL: clipURL,
                     sampleText: "Thanks for joining.",
                     currentName: nil,
@@ -239,6 +239,10 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             return false
         }
 
+        XCTAssertNil(
+            harness.speakerDB.getSpeaker(id: persistentSpeakerId)?.displayName,
+            "speaker DB should stay untouched when transcript rewrite fails"
+        )
         XCTAssertFalse(FileManager.default.fileExists(atPath: clipURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))
@@ -301,7 +305,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             updates: [
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     newName: "Sarah Graham",
                     previousName: nil,
                     action: .named
@@ -315,7 +319,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             clips: [
                 SpeakerNamingEntry(
                     id: persistentSpeakerId,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     clipURL: clipURL,
                     sampleText: "Thanks for joining.",
                     currentName: nil,
@@ -415,7 +419,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             updates: [
                 SpeakerNameUpdate(
                     persistentSpeakerId: matchedProfile.id,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     newName: "Sarah Graham",
                     previousName: "Matt Vlasach",
                     action: .corrected
@@ -429,7 +433,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             clips: [
                 SpeakerNamingEntry(
                     id: matchedProfile.id,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     clipURL: clipURL,
                     sampleText: "Thanks for joining.",
                     currentName: "Matt Vlasach",
@@ -519,7 +523,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             updates: [
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     newName: "Sarah Graham",
                     previousName: "Speaker 1",
                     action: .named
@@ -533,7 +537,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             clips: [
                 SpeakerNamingEntry(
                     id: persistentSpeakerId,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     clipURL: clipURL,
                     sampleText: "Thanks for joining.",
                     currentName: nil,
@@ -621,7 +625,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             updates: [
                 SpeakerNameUpdate(
                     persistentSpeakerId: matchedProfile.id,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     newName: "Sarah Graham",
                     previousName: "Matt Vlasach",
                     action: .corrected
@@ -635,7 +639,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             clips: [
                 SpeakerNamingEntry(
                     id: matchedProfile.id,
-                    sortformerSpeakerId: "1",
+                    diarizerSpeakerId: "1",
                     clipURL: clipURL,
                     sampleText: "Thanks for joining.",
                     currentName: "Matt Vlasach",
@@ -662,7 +666,11 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
 
         let rejectedProfile = harness.speakerDB.getSpeaker(id: matchedProfile.id)
         XCTAssertEqual(rejectedProfile?.displayName, "Matt Vlasach")
-        XCTAssertEqual(rejectedProfile?.disputeCount, matchedSnapshot.disputeCount + 1)
+        XCTAssertEqual(
+            rejectedProfile?.disputeCount,
+            matchedSnapshot.disputeCount,
+            "failed transcript rewrites should not partially commit dispute-count changes"
+        )
     }
 
     @MainActor
@@ -790,7 +798,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
 
         let mappedUtterances = utterances.map { utterance -> TranscriptionUtterance in
             let channel = utterance.source.caseInsensitiveCompare("Mic") == .orderedSame ? 0 : 1
-            let speakerId = utterance.sortformerSpeakerId
+            let speakerId = utterance.diarizerSpeakerId
                 ?? resolvedSpeakerId(
                     for: utterance,
                     channel: channel,
