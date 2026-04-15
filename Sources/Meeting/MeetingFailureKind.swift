@@ -63,7 +63,7 @@ enum MeetingFailureKind: String {
             return .saveFailed
         }
 
-        if normalized.contains("another pipeline is already active") {
+        if normalized.contains("transcription already in progress") {
             return .pipelineBusy
         }
 
