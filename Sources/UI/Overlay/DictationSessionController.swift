@@ -124,18 +124,8 @@ class DictationSessionController: ObservableObject {
 
     // MARK: - Removed Draft Mode
 
-    func startSession(imageData: Data?, sourceApp: NSRunningApplication?) {
-        let _ = imageData
-        let _ = sourceApp
-        guard let (_, overlayController) = readyState() else { return }
-        overlayController.showError(Self.removedDraftModeMessage)
-    }
-
-    func stopSessionAndDraft() {
-        guard let (_, overlayController) = readyState() else { return }
-        overlayController.showError(Self.removedDraftModeMessage)
-    }
-
+    // `cancelSession()` is still invoked by ContextCaptureEngine on interrupt paths.
+    // The `startSession` / `stopSessionAndDraft` stubs were removed — they had no callers.
     func cancelSession() {
         cancelSession(message: Self.removedDraftModeMessage)
     }

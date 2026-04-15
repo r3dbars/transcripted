@@ -63,4 +63,42 @@ func testAnalyticsPayloadSanitizer() {
         assertTrue(value.contains("Bearer ****"), "bearer marker should remain")
         assertTrue(value.contains("sk-****"), "sk-style marker should remain")
     }
+
+    runSuite("AnalyticsPayloadSanitizer redacts case-insensitive bearer variants with tabs and multi-space") {
+        for raw in ["bearer\ttokenabc", "BEARER   abc.def_ghi", "Bearer\t token-123", "beArEr  mixed_case_token"] {
+            let sanitized = AnalyticsPayloadSanitizer.sanitizeText(raw)
+            assertFalse(sanitized.lowercased().contains("tokenabc"), "case-insensitive bearer should still redact token part in '\(raw)'")
+            assertFalse(sanitized.contains("abc.def_ghi"), "bearer with whitespace variants should redact token in '\(raw)'")
+            assertFalse(sanitized.contains("mixed_case_token"), "mixed-case bearer should redact in '\(raw)'")
+        }
+    }
+
+    runSuite("AnalyticsPayloadSanitizer.redact scrubs without the analytics length cap") {
+        // Build a multi-line log blob longer than maxValueLength (80 chars) so
+        // the feedback path can verify redaction happens but length is preserved.
+        let rawLines = [
+            "2026-04-15 User signed in from /Users/redbars/Documents/session.log",
+            "Request used Bearer abc123.def456_ghi to contact https://api.example.com/v1/resource",
+            "Error reported to person@example.com — see api_key=supersecret for correlation",
+            "Final handoff: github_pat_abcdefghijklmnopqrstuvwxyz_1234567890 recorded",
+        ]
+        let raw = rawLines.joined(separator: "\n")
+        let redacted = AnalyticsPayloadSanitizer.redact(raw)
+
+        assertTrue(redacted.count > 80, "redact must not truncate; expected output longer than analytics cap, got \(redacted.count) chars")
+        assertTrue(redacted.contains("\n"), "redact must preserve newlines so multi-line log blobs stay readable")
+        assertFalse(redacted.contains("/Users/redbars/"), "redact must scrub user paths in multi-line input")
+        assertFalse(redacted.contains("person@example.com"), "redact must scrub emails")
+        assertFalse(redacted.contains("Bearer abc123.def456_ghi"), "redact must scrub bearer headers")
+        assertFalse(redacted.contains("api_key=supersecret"), "redact must scrub inline secret assignments")
+        assertFalse(redacted.contains("github_pat_abcdefghijklmnopqrstuvwxyz_1234567890"), "redact must scrub GitHub PAT")
+        assertFalse(redacted.contains("https://api.example.com/v1/resource"), "redact must scrub URLs")
+    }
+
+    runSuite("AnalyticsPayloadSanitizer.sanitizeText still truncates single-value input") {
+        let long = String(repeating: "a", count: 200)
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeText(long)
+        assertTrue(sanitized.count <= 83, "sanitizeText should still enforce the 80-char cap + \"...\" marker; got \(sanitized.count)")
+        assertTrue(sanitized.hasSuffix("..."), "sanitizeText should append the truncation marker")
+    }
 }
