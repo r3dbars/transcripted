@@ -51,6 +51,11 @@ enum TranscriptedConstants {
     /// recording, the engine is likely a zombie (running but disconnected from hardware)
     static let audioWatchdogTimeout: UInt64 = 2_000_000_000  // 2 seconds
 
+    /// Timeout for MeetingCaptureBridge.startRecording — resolves the start
+    /// continuation with the current `isRecording` state after this window if
+    /// neither the success nor error publisher has fired.
+    static let meetingStartTimeout: UInt64 = 5_000_000_000  // 5 seconds
+
     /// Debounce window for coalescing rapid audio config change notifications (e.g. BT reconnect bursts)
     static let audioConfigChangeDebounceDelay: UInt64 = 250_000_000  // 250ms
 

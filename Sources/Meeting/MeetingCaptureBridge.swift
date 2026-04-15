@@ -75,7 +75,7 @@ final class MeetingCaptureBridge: ObservableObject {
             audio.start()
 
             Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                try? await Task.sleep(nanoseconds: TranscriptedConstants.meetingStartTimeout)
                 guard let self, let continuation = self.startContinuation else { return }
                 self.startContinuation = nil
                 continuation.resume(returning: self.audio.isRecording)

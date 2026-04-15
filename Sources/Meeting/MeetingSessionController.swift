@@ -279,12 +279,12 @@ final class MeetingSessionController: ObservableObject {
 
         switch state {
         case .recording:
-                DiagnosticsTrail.record(
-                    engine: "meeting",
-                    event: "meeting_start_ignored",
-                    message: "Meeting start ignored because another meeting flow is active",
-                    context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
-                )
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "meeting_start_ignored",
+                message: "Meeting start ignored because another meeting flow is active",
+                context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+            )
             return true
         case .idle, .loadingModels, .ready, .transcribing, .error:
             break

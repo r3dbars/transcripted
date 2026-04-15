@@ -448,11 +448,10 @@ class DictationSessionController: ObservableObject {
             )
             switch pasteOutcome {
             case .pasted:
+                AppSoundPlayer.shared.play(.dictationDelivered)
                 if let saveFailureMessage {
-                    AppSoundPlayer.shared.play(.dictationDelivered)
                     overlayController.showError(saveFailureMessage)
                 } else {
-                    AppSoundPlayer.shared.play(.dictationDelivered)
                     overlayController.showSuccessAndDismiss()
                 }
             case .copied(let message), .failed(let message):
