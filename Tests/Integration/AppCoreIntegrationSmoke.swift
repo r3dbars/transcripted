@@ -12,6 +12,10 @@
 import Foundation
 import TranscriptedCore
 
+private enum SmokeLifetime {
+    static var audio: Audio?
+}
+
 @MainActor
 func runSmoke() async -> Int32 {
     print("[smoke] CoreStoragePaths default…")
@@ -38,12 +42,14 @@ func runSmoke() async -> Int32 {
         return 1
     }
 
-    // NOTE: Audio(paths:) and DiarizationService() are intentionally skipped.
-    // Audio.setup() opens AVAudioEngine and blocks waiting for mic permissions
-    // the smoke binary has no entitlements for; DiarizationService touches
-    // CoreML bundles we cannot download from a standalone tool. Their
-    // construction is exercised implicitly by the app build path
-    // (bash build.sh), which this script runs alongside.
+    print("[smoke] Audio(paths:) lightweight init…")
+    SmokeLifetime.audio = Audio(paths: paths)
+
+    // NOTE: Live Audio start()/monitoring and DiarizationService() are still
+    // intentionally skipped. Starting capture touches OS-managed devices and
+    // permissions the smoke binary does not own, while DiarizationService
+    // still reaches for CoreML bundles we cannot download from a standalone
+    // tool.
 
     print("[smoke] DiarizationService type reachable…")
     let _: DiarizationService.Type = DiarizationService.self

@@ -12,6 +12,8 @@ extension Audio {
     // MARK: - Audio Capture Setup
 
     func startAudioCapture() async throws {
+        ensureCaptureInfrastructureConfigured()
+
         let (engine, inputNode) = try ensureEngineInitialized()
 
         // Use system default microphone (whatever macOS has configured)

@@ -323,19 +323,10 @@ public class Audio: ObservableObject {
 
     public init(paths: CoreStoragePaths = .default) {
         self.paths = paths
-        setup()
     }
 
-    private func setup() {
-        // Delay AVAudioEngine/input-node access until monitoring or recording
-        // actually begins. Launch-time meeting wiring constructs Audio as part
-        // of app startup, and touching the input node here has shown up in
-        // Sentry app-hang traces inside CoreAudio.
-
-        // Do not prompt for microphone access during object construction.
-        // MeetingSessionController creates Audio during background warmup, and
-        // prompting here makes permission dialogs appear before the user has
-        // explicitly asked to record a meeting.
+    func ensureCaptureInfrastructureConfigured() {
+        guard systemAudioCapture == nil else { return }
 
         // Initialize system audio capture using the macOS 26+ audio-only
         // ScreenCaptureKit path. This keeps meeting audio on the narrower
@@ -398,6 +389,9 @@ public class Audio: ObservableObject {
 
     @discardableResult
     func ensureEngineInitialized() throws -> (AVAudioEngine, AVAudioInputNode) {
+        // Delay AVAudioEngine/input-node access until monitoring or recording
+        // actually begins. Launch-time warmup can construct Audio long before
+        // the user has explicitly asked to record anything.
         if engine == nil {
             engine = AVAudioEngine()
         }
@@ -569,8 +563,6 @@ public class Audio: ObservableObject {
                 inputNode.removeTap(onBus: 0)
                 engine.stop()
             }
-        } else {
-            AppLogger.audio.warning("Stopping audio capture without an active engine")
         }
 
         // Stop system audio capture
@@ -637,6 +629,7 @@ public class Audio: ObservableObject {
     /// Automatically stops when `start()` is called for full recording.
     public func startMonitoring() {
         guard !isMonitoring, !isRecording, !isStarting else { return }
+        ensureCaptureInfrastructureConfigured()
 
         let engine: AVAudioEngine
         let inputNode: AVAudioInputNode
@@ -721,7 +714,15 @@ public class Audio: ObservableObject {
         if let observer = wakeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
-        stop()
+        timer?.invalidate()
+        watchdogTimer?.invalidate()
+        systemAudioCancellable?.cancel()
+        systemAudioCapture?.stopSync()
+
+        if let engine, let inputNode, engine.isRunning {
+            inputNode.removeTap(onBus: 0)
+            engine.stop()
+        }
     }
 }
 
