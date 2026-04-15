@@ -268,7 +268,8 @@ final class MeetingSessionController: ObservableObject {
     /// Begin a new meeting recording. Safe to call from UI buttons. If a prior
     /// meeting is still transcribing, the new capture starts immediately and
     /// the older transcript continues in the background.
-    func startRecording(trigger: StartTrigger = .unknown) async {
+    @discardableResult
+    func startRecording(trigger: StartTrigger = .unknown) async -> Bool {
         DiagnosticsTrail.record(
             engine: "meeting",
             event: "meeting_start_requested",
@@ -284,7 +285,7 @@ final class MeetingSessionController: ObservableObject {
                 message: "Meeting start ignored because another meeting flow is active",
                 context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
             )
-            return
+            return true
         case .idle, .loadingModels, .ready, .transcribing, .error:
             break
         }
@@ -344,7 +345,7 @@ final class MeetingSessionController: ObservableObject {
                 startDecision.errorMessage
                     ?? "Turn on the required permissions in System Settings before recording a meeting."
             )
-            return
+            return false
         }
 
         switch state {
@@ -358,15 +359,28 @@ final class MeetingSessionController: ObservableObject {
                     message: "Meeting could not start because models were not ready",
                     context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
                 )
-                return
+                return false
             }
         case .ready, .transcribing:
             break
         case .recording:
-            return
+            return true
         }
 
-        capture.startRecording()
+        let started = await capture.startRecording()
+        guard started else {
+            let failureMessage = capture.errorMessage ?? "Meeting recording couldn't start. Check Transcripted's permissions and audio setup, then try again."
+            DiagnosticsTrail.record(
+                level: .error,
+                engine: "meeting",
+                event: "meeting_start_failed",
+                message: failureMessage,
+                context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+            )
+            state = .error(failureMessage)
+            return false
+        }
+
         activeRecordingTrigger = trigger
         state = .recording
         DiagnosticsTrail.record(
@@ -381,6 +395,7 @@ final class MeetingSessionController: ObservableObject {
                 "trigger": trigger.rawValue,
             ]
         )
+        return true
     }
 
     /// Stop capture and queue the finished meeting for background transcription.

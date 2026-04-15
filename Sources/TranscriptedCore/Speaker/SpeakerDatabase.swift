@@ -217,6 +217,11 @@ public final class SpeakerDatabase: @unchecked Sendable {
 
     /// Add a new speaker or update an existing one's embedding.
     /// When updating, uses exponential moving average to refine the voice fingerprint.
+    ///
+    /// When `existingId` is non-nil and the DB has no matching row, the caller's
+    /// UUID is used for the newly-inserted row instead of minting a fresh one.
+    /// Callers that pre-generate IDs (e.g. naming coordinator) rely on this;
+    /// callers that pass `nil` always get a fresh UUID.
     public func addOrUpdateSpeaker(embedding: [Float], existingId: UUID? = nil) -> SpeakerProfile {
         return queue.sync {
             addOrUpdateSpeakerImpl(embedding: embedding, existingId: existingId)
@@ -280,7 +285,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
             )
         } else {
             // New speaker
-            let newId = UUID()
+            let newId = existingId ?? UUID()
             let normalized = l2Normalize(embedding)
             let embeddingData = normalized.withUnsafeBufferPointer { Data(buffer: $0) }
 

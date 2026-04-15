@@ -40,10 +40,6 @@ extension Audio {
             let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_system.wav")
             AppLogger.audioSystem.info("System audio file URL", ["file": fileURL.lastPathComponent])
 
-            DispatchQueue.main.async {
-                self.systemAudioFileURL = fileURL
-            }
-
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let strongSelf = self else {
                     AppLogger.audioSystem.error("System audio setup: self is nil")
@@ -133,12 +129,20 @@ extension Audio {
                             }
                         }
                     }
+                    DispatchQueue.main.async {
+                        strongSelf.systemAudioFileURL = fileURL
+                    }
                     AppLogger.audioSystem.info("System audio capture started")
 
                 } catch {
                     AppLogger.audioSystem.warning("System audio failed", ["error": error.localizedDescription])
+                    strongSelf.systemAudioFileQueue.sync {
+                        strongSelf.systemAudioFile = nil
+                    }
+                    try? FileManager.default.removeItem(at: fileURL)
                     DispatchQueue.main.async {
                         strongSelf.error = "System audio unavailable \u{2014} can only record your microphone. To capture Zoom/Teams audio, go to System Settings \u{2192} Privacy & Security \u{2192} System Audio Recording and enable Transcripted."
+                        strongSelf.systemAudioFileURL = nil
                         strongSelf.systemAudioFailed = true
                     }
                 }
