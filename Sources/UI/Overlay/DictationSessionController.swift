@@ -726,8 +726,37 @@ class DictationSessionController: ObservableObject {
         }
     }
 
+    /// Bundle identifiers of dedicated terminal emulators. Auto-paste is refused into
+    /// these targets because dictated text containing a trailing newline (or any
+    /// shell metacharacter) would be interpreted as a command and executed. The user
+    /// can still press Cmd+V manually if they really meant to paste into a shell.
+    private static let terminalBundleIDs: Set<String> = [
+        "com.apple.Terminal",
+        "com.googlecode.iterm2",
+        "dev.warp.Warp-Stable",
+        "co.zeit.hyper",
+        "net.kovidgoyal.kitty",
+        "io.alacritty",
+        "com.mitchellh.ghostty",
+    ]
+
+    private func isFrontmostAppATerminal() -> Bool {
+        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
+            return false
+        }
+        return Self.terminalBundleIDs.contains(bundleID)
+    }
+
     private func pasteWithClipboardRestore(_ text: String) -> DictationPasteOutcome {
         guard let appState = appState else { return .failed("Couldn't paste dictation") }
+
+        // Refuse to auto-paste into a terminal: a trailing newline or shell
+        // metacharacter in the dictated text would execute as a command.
+        if isFrontmostAppATerminal() {
+            appState.logger.log("DICTATION | terminal frontmost, copying instead of auto-paste")
+            copyTextToClipboard(text)
+            return .copied("Dictation won't auto-paste into a terminal for safety. Press Cmd+V to paste.")
+        }
 
         // Check Accessibility permission BEFORE modifying clipboard
         guard AXIsProcessTrusted() else {
@@ -777,21 +806,26 @@ class DictationSessionController: ObservableObject {
         let changeCountAfterSet = pasteboard.changeCount
         clipboardRestoreTask?.cancel()
         clipboardRestoreTask = Task { @MainActor in
+            // Defer guarantees the dictated text is wiped from the global pasteboard
+            // even if this task is cancelled or the actor is torn down mid-loop —
+            // otherwise a clipboard manager could scrape it indefinitely.
+            defer {
+                pasteboard.clearContents()
+                let items = savedItems.map { typeData -> NSPasteboardItem in
+                    let item = NSPasteboardItem()
+                    for (type, data) in typeData {
+                        item.setData(data, forType: type)
+                    }
+                    return item
+                }
+                if !items.isEmpty {
+                    pasteboard.writeObjects(items)
+                }
+            }
             let startTime = CFAbsoluteTimeGetCurrent()
             while CFAbsoluteTimeGetCurrent() - startTime < TranscriptedConstants.clipboardRestoreTimeout {
                 try? await Task.sleep(nanoseconds: TranscriptedConstants.clipboardPollInterval)
                 if pasteboard.changeCount != changeCountAfterSet { break }
-            }
-            pasteboard.clearContents()
-            let items = savedItems.map { typeData -> NSPasteboardItem in
-                let item = NSPasteboardItem()
-                for (type, data) in typeData {
-                    item.setData(data, forType: type)
-                }
-                return item
-            }
-            if !items.isEmpty {
-                pasteboard.writeObjects(items)
             }
         }
         return .pasted
