@@ -107,7 +107,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         // Set up menubar status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "mic.and.signal.meter", accessibilityDescription: "Transcripted")
+            let image = NSImage(systemSymbolName: "mic.and.signal.meter", accessibilityDescription: "Transcripted")
+            image?.isTemplate = true
+            button.image = image
             button.toolTip = "Transcripted"
             button.action = #selector(togglePopover)
             button.target = self
