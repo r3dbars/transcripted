@@ -212,7 +212,7 @@ extension TranscriptSaver {
 
             // Replace generic labels (e.g. "Speaker 0") throughout the body.
             for update in updates {
-                let genericLabel = "Speaker \(update.sortformerSpeakerId)"
+                let genericLabel = "Speaker \(update.diarizerSpeakerId)"
                 applyNameReplacement(in: &content, oldName: genericLabel, newName: update.newName, updateSpeakerTag: false)
             }
 
@@ -258,10 +258,10 @@ extension TranscriptSaver {
             let obsidianEnabled = isObsidianFormatted(content)
             let updatesBySystemKey = Dictionary(uniqueKeysWithValues: updates.map {
                 (
-                    "system_\($0.sortformerSpeakerId)",
+                    "system_\($0.diarizerSpeakerId)",
                     (
-                        oldName: currentSpeakerName(in: content, sortformerSpeakerId: $0.sortformerSpeakerId)
-                            ?? "Speaker \($0.sortformerSpeakerId)",
+                        oldName: currentSpeakerName(in: content, diarizerSpeakerId: $0.diarizerSpeakerId)
+                            ?? "Speaker \($0.diarizerSpeakerId)",
                         newName: $0.newName
                     )
                 )
@@ -429,7 +429,7 @@ extension TranscriptSaver {
         var lines = String(content[frontmatterRange])
             .components(separatedBy: "\n")
 
-        let targetIdLine = #"id: "\#(update.sortformerSpeakerId)""#
+        let targetIdLine = #"id: "\#(update.diarizerSpeakerId)""#
         let resolvedPersistentId = (update.resolvedPersistentSpeakerId ?? update.persistentSpeakerId).uuidString
         var lineIndex = 0
 
@@ -520,11 +520,11 @@ extension TranscriptSaver {
         return content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound
     }
 
-    private static func currentSpeakerName(in content: String, sortformerSpeakerId: String) -> String? {
+    private static func currentSpeakerName(in content: String, diarizerSpeakerId: String) -> String? {
         guard let frontmatterRange = frontmatterContentRange(in: content) else { return nil }
 
         let lines = String(content[frontmatterRange]).components(separatedBy: "\n")
-        let targetIdLine = #"id: "\#(sortformerSpeakerId)""#
+        let targetIdLine = #"id: "\#(diarizerSpeakerId)""#
         var lineIndex = 0
 
         while lineIndex < lines.count {
@@ -618,7 +618,7 @@ extension TranscriptSaver {
             let speakerKey = "system_\(speakerId)"
             let speakerName = updatesBySystemKey[speakerKey]?.newName
                 ?? updatesBySystemKey[speakerKey]?.oldName
-                ?? currentSpeakerName(in: content, sortformerSpeakerId: String(speakerId))
+                ?? currentSpeakerName(in: content, diarizerSpeakerId: String(speakerId))
                 ?? "Speaker \(speakerId)"
             let speakingTime = utterances.reduce(0.0) { $0 + ($1.end - $1.start) }
             let wordCount = utterances.reduce(0) { $0 + $1.transcript.split(separator: " ").count }

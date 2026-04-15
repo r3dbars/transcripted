@@ -191,8 +191,9 @@ extension TranscriptionTaskManager {
                     needsActionIds.contains(String($0.speakerId))
                 }
                 let clips = try SpeakerClipExtractor.extractClips(
-                    systemAudioURL: systemURL,
+                    sourceAudioURL: systemURL,
                     utterances: actionUtterances,
+                    channel: .system,
                     speakerDB: speakerDB
                 )
 
@@ -200,15 +201,15 @@ extension TranscriptionTaskManager {
                     let entries = clips.map { clip in
                         return SpeakerNamingEntry(
                             id: clip.persistentSpeakerId,
-                            sortformerSpeakerId: clip.sortformerSpeakerId,
+                            diarizerSpeakerId: clip.diarizerSpeakerId,
                             clipURL: clip.clipURL,
                             sampleText: clip.sampleText,
                             currentName: clip.currentName,
                             matchSimilarity: clip.matchSimilarity,
                             needsNaming: clip.currentName == nil,
                             needsConfirmation: clip.currentName != nil,
-                            sessionEmbedding: result.systemSpeakerContexts[clip.sortformerSpeakerId]?.sessionEmbedding,
-                            matchedProfileSnapshot: result.systemSpeakerContexts[clip.sortformerSpeakerId]?.matchedProfileSnapshot
+                            sessionEmbedding: result.systemSpeakerContexts[clip.diarizerSpeakerId]?.sessionEmbedding,
+                            matchedProfileSnapshot: result.systemSpeakerContexts[clip.diarizerSpeakerId]?.matchedProfileSnapshot
                         )
                     }
 

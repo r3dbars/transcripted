@@ -305,7 +305,7 @@ final class SpeakerRowView: NSView {
         if let current = entry.currentName, !current.isEmpty {
             labelField.stringValue = "Suggested match: \(current)"
         } else {
-            labelField.stringValue = "Speaker \(entry.sortformerSpeakerId)"
+            labelField.stringValue = "Speaker \(entry.diarizerSpeakerId)"
         }
         labelField.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         labelField.textColor = NSColor.labelColor
@@ -419,14 +419,14 @@ final class SpeakerRowView: NSView {
             if let suggestedProfileId = entry.suggestedProfileId {
                 return SpeakerNameUpdate(
                     persistentSpeakerId: entry.id,
-                    sortformerSpeakerId: entry.sortformerSpeakerId,
+                    diarizerSpeakerId: entry.diarizerSpeakerId,
                     newName: current,
                     action: .merged(targetProfileId: suggestedProfileId)
                 )
             }
             return SpeakerNameUpdate(
                 persistentSpeakerId: entry.id,
-                sortformerSpeakerId: entry.sortformerSpeakerId,
+                diarizerSpeakerId: entry.diarizerSpeakerId,
                 newName: current,
                 previousName: current,
                 action: .confirmed
@@ -438,7 +438,7 @@ final class SpeakerRowView: NSView {
         if let option = knownPeopleByLabel[typed] {
             return SpeakerNameUpdate(
                 persistentSpeakerId: entry.id,
-                sortformerSpeakerId: entry.sortformerSpeakerId,
+                diarizerSpeakerId: entry.diarizerSpeakerId,
                 newName: option.displayName,
                 action: .merged(targetProfileId: option.id)
             )
@@ -457,7 +457,7 @@ final class SpeakerRowView: NSView {
 
         return SpeakerNameUpdate(
             persistentSpeakerId: entry.id,
-            sortformerSpeakerId: entry.sortformerSpeakerId,
+            diarizerSpeakerId: entry.diarizerSpeakerId,
             newName: typed,
             previousName: entry.currentName,
             action: action
