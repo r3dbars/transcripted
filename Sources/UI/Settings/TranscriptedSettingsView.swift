@@ -312,7 +312,7 @@ private struct PermissionStatusRow: View {
 
             Spacer()
 
-            Button(granted ? "Review" : "Fix") {
+            Button(granted ? "Review" : kind.actionButtonTitle) {
                 action()
             }
         }

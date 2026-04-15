@@ -98,4 +98,32 @@ func testTranscriptedPermissionAccess() async {
         assertTrue(granted, "known granted permission should stay ready")
         assertEqual(requestBox.callCount, 0, "known granted permission should not trigger another request")
     }
+
+    runSuite("TranscriptedPermissionKind action titles — name the real recovery path for blocked permissions") {
+        assertEqual(
+            TranscriptedPermissionKind.microphoneActionTitle(for: .notDetermined),
+            "Allow microphone",
+            "microphone action should stay prompt-like before the first decision"
+        )
+        assertEqual(
+            TranscriptedPermissionKind.microphoneActionTitle(for: .denied),
+            "Open Microphone Settings",
+            "microphone action should point to System Settings after denial"
+        )
+        assertEqual(
+            TranscriptedPermissionKind.accessibilityActionTitle(isTrusted: false),
+            "Open Accessibility Settings",
+            "accessibility action should name the settings destination instead of a vague fix label"
+        )
+        assertEqual(
+            TranscriptedPermissionKind.systemAudioRecordingActionTitle(isGranted: false),
+            "Open Audio Recording Settings",
+            "system audio action should explain the destination when the permission is still missing"
+        )
+        assertEqual(
+            TranscriptedPermissionKind.calendarActionTitle(for: .notDetermined),
+            "Allow Calendar Access",
+            "calendar action should stay prompt-like before the first decision"
+        )
+    }
 }
