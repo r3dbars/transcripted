@@ -98,8 +98,6 @@ class DictationSessionController: ObservableObject {
     /// Max duration for a listening session before auto-cancel (5 minutes).
     /// Prevents stuck sessions when the user walks away from the computer.
     private static let sessionTimeoutNanos: UInt64 = 5 * 60 * 1_000_000_000
-    private static let recordingStartRetryAttempts = 4
-    private static let recordingStartRetryDelay: UInt64 = 350_000_000
 
     deinit {
         startupTask?.cancel()
@@ -195,17 +193,14 @@ class DictationSessionController: ObservableObject {
         guard isDictating else { return }
 
         overlayController.state = .listening
-        attemptBeginDictationRecording(sourceApp: sourceApp, attempt: 1)
-    }
 
-    private func attemptBeginDictationRecording(sourceApp: NSRunningApplication?, attempt: Int) {
-        guard let appState = appState, let overlayController = overlayController else { return }
-        guard isDictating else { return }
-
-        if appState.sttRouter.startRecording() {
+        // Fast path — engine is ready right now.
+        if let appState = appState,
+           !appState.sttRouter.isRecovering,
+           appState.sttRouter.inputFormatReady,
+           appState.sttRouter.startRecording() {
             recordingStartRetryTask?.cancel()
             recordingStartRetryTask = nil
-            overlayController.state = .listening
             resizePanelToCompact()
             appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
             AppSoundPlayer.shared.play(.dictationStart)
@@ -213,67 +208,93 @@ class DictationSessionController: ObservableObject {
             return
         }
 
-        appState.logger.log("DICTATION | recording start attempt \(attempt) failed")
+        // Slow path — engine is settling after a device change. Wait for it.
+        recordingStartRetryTask?.cancel()
+        recordingStartRetryTask = Task { @MainActor [weak self] in
+            await self?.waitForEngineAndStart(sourceApp: sourceApp)
+        }
+    }
 
+    private func waitForEngineAndStart(sourceApp: NSRunningApplication?) async {
+        guard let appState = appState, let overlayController = overlayController else { return }
+        guard isDictating else { return }
+
+        // Permission check up front — no point waiting if the user denied mic access.
         let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         guard microphoneStatus == .authorized else {
-            let shouldOfferSettingsAction = shouldOfferMicrophoneSettingsAction(for: microphoneStatus)
-            DiagnosticsTrail.record(
-                logger: appState.logger,
-                level: .error,
-                engine: "dictation",
-                event: "dictation_recording_failed",
-                message: "Dictation recording failed to start",
-                context: dictationContext(
-                    extra: [
-                        "attempt": "\(attempt)",
-                        "audio_device": appState.sttRouter.inputDeviceName,
-                        "mic_status": microphoneStatus.diagnosticName
-                    ]
-                )
-            )
-            overlayController.showError(
-                microphoneUnavailableMessage(
-                    for: microphoneStatus,
-                    openedSettings: false
-                ),
-                actionTitle: shouldOfferSettingsAction ? "Open Microphone Settings" : nil,
-                action: shouldOfferSettingsAction ? {
-                    TranscriptedPermissionAccess.openSettings(for: .microphone)
-                } : nil
-            )
-            isDictating = false
+            presentMicrophonePermissionError(microphoneStatus)
             return
         }
 
-        if attempt < Self.recordingStartRetryAttempts {
-            let nextAttempt = attempt + 1
-            DiagnosticsTrail.record(
-                logger: appState.logger,
-                level: .warning,
-                engine: "dictation",
-                event: "dictation_recording_retry",
-                message: "Retrying dictation recording while audio hardware settles",
-                context: dictationContext(
-                    extra: [
-                        "attempt": "\(nextAttempt)",
-                        "audio_device": appState.sttRouter.inputDeviceName
-                    ]
-                )
-            )
+        let startedAt = CFAbsoluteTimeGetCurrent()
+        let deadline = startedAt + TranscriptedConstants.dictationRecoveryBudget
+
+        while CFAbsoluteTimeGetCurrent() < deadline {
+            guard isDictating, !Task.isCancelled else { return }
+
+            let elapsed = CFAbsoluteTimeGetCurrent() - startedAt
             overlayController.showLoadingState(
                 near: sourceApp,
-                presentation: microphoneRecoveryPresentation(for: nextAttempt)
+                presentation: microphoneRecoveryPresentation(
+                    elapsed: elapsed,
+                    deviceName: appState.sttRouter.inputDeviceName
+                )
             )
-            recordingStartRetryTask?.cancel()
-            recordingStartRetryTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: Self.recordingStartRetryDelay)
-                guard let self = self else { return }
-                self.attemptBeginDictationRecording(sourceApp: sourceApp, attempt: nextAttempt)
+
+            if !appState.sttRouter.isRecovering, appState.sttRouter.inputFormatReady {
+                if appState.sttRouter.startRecording() {
+                    overlayController.state = .listening
+                    resizePanelToCompact()
+                    let waited = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
+                    appState.logger.log("DICTATION | started after \(waited)ms wait (parakeet, \(appState.sttRouter.inputDeviceName))")
+                    DiagnosticsTrail.record(
+                        logger: appState.logger,
+                        engine: "dictation",
+                        event: "dictation_started_after_wait",
+                        message: "Dictation started after waiting for engine readiness",
+                        context: dictationContext(
+                            extra: [
+                                "wait_ms": "\(waited)",
+                                "audio_device": appState.sttRouter.inputDeviceName
+                            ]
+                        )
+                    )
+                    AppSoundPlayer.shared.play(.dictationStart)
+                    installSessionTimeout()
+                    return
+                }
             }
-            return
+
+            try? await Task.sleep(nanoseconds: TranscriptedConstants.dictationReadinessPollInterval)
         }
 
+        guard isDictating, !Task.isCancelled else { return }
+
+        let waited = Int(TranscriptedConstants.dictationRecoveryBudget * 1000)
+        DiagnosticsTrail.record(
+            logger: appState.logger,
+            level: .error,
+            engine: "dictation",
+            event: "dictation_recording_failed",
+            message: "Dictation recording failed to start within recovery budget",
+            context: dictationContext(
+                extra: [
+                    "wait_ms": "\(waited)",
+                    "audio_device": appState.sttRouter.inputDeviceName,
+                    "is_recovering": "\(appState.sttRouter.isRecovering)",
+                    "format_ready": "\(appState.sttRouter.inputFormatReady)"
+                ]
+            )
+        )
+        overlayController.showError(
+            microphoneTimeoutMessage(deviceName: appState.sttRouter.inputDeviceName)
+        )
+        isDictating = false
+    }
+
+    private func presentMicrophonePermissionError(_ status: AVAuthorizationStatus) {
+        guard let appState = appState, let overlayController = overlayController else { return }
+        let shouldOfferSettingsAction = shouldOfferMicrophoneSettingsAction(for: status)
         DiagnosticsTrail.record(
             logger: appState.logger,
             level: .error,
@@ -282,12 +303,18 @@ class DictationSessionController: ObservableObject {
             message: "Dictation recording failed to start",
             context: dictationContext(
                 extra: [
-                    "attempt": "\(attempt)",
-                    "audio_device": appState.sttRouter.inputDeviceName
+                    "audio_device": appState.sttRouter.inputDeviceName,
+                    "mic_status": status.diagnosticName
                 ]
             )
         )
-        overlayController.showError(microphoneUnavailableMessage(for: .authorized))
+        overlayController.showError(
+            microphoneUnavailableMessage(for: status, openedSettings: false),
+            actionTitle: shouldOfferSettingsAction ? "Open Microphone Settings" : nil,
+            action: shouldOfferSettingsAction ? {
+                TranscriptedPermissionAccess.openSettings(for: .microphone)
+            } : nil
+        )
         isDictating = false
     }
 
@@ -577,15 +604,20 @@ class DictationSessionController: ObservableObject {
         }
     }
 
-    private func microphoneRecoveryPresentation(for attempt: Int) -> FloatingOverlayController.LoadingPresentation {
-        let clampedAttempt = max(1, min(attempt, Self.recordingStartRetryAttempts))
-        let progress = min(0.9, 0.18 + (Double(clampedAttempt - 1) * 0.18))
+    private func microphoneRecoveryPresentation(elapsed: TimeInterval, deviceName: String) -> FloatingOverlayController.LoadingPresentation {
+        let budget = TranscriptedConstants.dictationRecoveryBudget
+        let progress = min(0.85, 0.1 + (elapsed / budget) * 0.75)
+        let status: String? = elapsed > 1.5 ? "Still connecting to \(deviceName)…" : nil
         return .init(
             title: "Switching microphone",
-            detail: "Transcripted is reconnecting to the current microphone after the audio device changed. Recording starts automatically when the new route is ready.",
+            detail: "Connecting to the new audio device.",
             progress: progress,
-            status: "Retry \(clampedAttempt) of \(Self.recordingStartRetryAttempts)"
+            status: status
         )
+    }
+
+    private func microphoneTimeoutMessage(deviceName: String) -> String {
+        "Couldn't reach \(deviceName). Try selecting a different input in System Settings."
     }
 
     /// Shrink the panel to compact (header-only) height without animation.
