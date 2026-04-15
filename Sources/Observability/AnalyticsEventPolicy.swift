@@ -84,12 +84,14 @@ struct AnalyticsEventPolicy: Equatable {
                 "duration_bucket",
                 "reason",
                 "system_stream_present",
+                "trigger",
             ]
         ),
         "meeting_transcript_saved": .init(
             name: "meeting_transcript_saved",
             allowedProperties: [
                 "queue_depth_bucket",
+                "trigger",
             ]
         ),
         "meeting_transcript_failed": .init(
@@ -97,6 +99,7 @@ struct AnalyticsEventPolicy: Equatable {
             allowedProperties: [
                 "failure_kind",
                 "queue_depth_bucket",
+                "trigger",
             ]
         ),
     ]

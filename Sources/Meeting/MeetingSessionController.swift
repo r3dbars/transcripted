@@ -77,6 +77,7 @@ final class MeetingSessionController: ObservableObject {
         let micURL: URL
         let systemURL: URL?
         let healthInfo: RecordingHealthInfo
+        let startTrigger: StartTrigger
     }
 
     private enum TerminalTranscriptionOutcome: Equatable {
@@ -149,6 +150,8 @@ final class MeetingSessionController: ObservableObject {
     private var retryingFailedMeetingIDs: Set<UUID> = []
     private var queuedTranscriptionJobs: [QueuedTranscriptionJob] = []
     private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
+    private var activeRecordingTrigger: StartTrigger = .unknown
+    private var activeTranscriptionTrigger: StartTrigger = .unknown
 
     // MARK: - Init
 
@@ -364,6 +367,7 @@ final class MeetingSessionController: ObservableObject {
         }
 
         capture.startRecording()
+        activeRecordingTrigger = trigger
         state = .recording
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -385,12 +389,15 @@ final class MeetingSessionController: ObservableObject {
     func stopRecording(reason: StopReason = .unknown) async {
         guard case .recording = state else { return }
 
+        let recordingTrigger = activeRecordingTrigger
+
         DiagnosticsTrail.record(
             engine: "meeting",
             event: "meeting_stop_requested",
             message: "Meeting stop requested",
             context: baseDiagnosticsContext(
                 extra: [
+                    "trigger": recordingTrigger.rawValue,
                     "reason": reason.rawValue,
                     "duration_ms": "\(Int(recordingDuration * 1000))"
                 ]
@@ -400,6 +407,7 @@ final class MeetingSessionController: ObservableObject {
         let files = await capture.stopAndAwaitFiles()
         let healthInfo = capture.healthInfo()
         let durationMs = Int(recordingDuration * 1000)
+        activeRecordingTrigger = .unknown
         state = .transcribing
 
         DiagnosticsTrail.record(
@@ -409,6 +417,7 @@ final class MeetingSessionController: ObservableObject {
             message: "Meeting recording stopped",
             context: baseDiagnosticsContext(
                 extra: [
+                    "trigger": recordingTrigger.rawValue,
                     "reason": reason.rawValue,
                     "duration_ms": "\(durationMs)",
                     "mic_file_present": boolString(files.micURL != nil),
@@ -435,7 +444,8 @@ final class MeetingSessionController: ObservableObject {
         let outcome = enqueueTranscriptionJob(
             micURL: micURL,
             systemURL: files.systemURL,
-            healthInfo: healthInfo
+            healthInfo: healthInfo,
+            startTrigger: recordingTrigger
         )
 
         let queueDepth = queuedTranscriptionJobs.count
@@ -447,6 +457,7 @@ final class MeetingSessionController: ObservableObject {
                 : "Meeting queued behind an earlier transcription",
             context: baseDiagnosticsContext(
                 extra: [
+                    "trigger": recordingTrigger.rawValue,
                     "reason": reason.rawValue,
                     "duration_ms": "\(durationMs)",
                     "queue_depth": "\(queueDepth)"
@@ -460,6 +471,7 @@ final class MeetingSessionController: ObservableObject {
                 "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
                 "reason": reason.rawValue,
                 "system_stream_present": boolString(files.systemURL != nil),
+                "trigger": recordingTrigger.rawValue,
             ]
         )
     }
@@ -470,6 +482,7 @@ final class MeetingSessionController: ObservableObject {
         let queuedJobs = queuedTranscriptionJobs
         queuedTranscriptionJobs.removeAll()
         lastTerminalTranscriptionOutcome = nil
+        activeTranscriptionTrigger = .unknown
 
         for job in queuedJobs {
             failedManager.addFailedTranscription(
@@ -495,6 +508,7 @@ final class MeetingSessionController: ObservableObject {
         guard !retryingFailedMeetingIDs.contains(id) else { return }
 
         retryingFailedMeetingIDs.insert(id)
+        activeTranscriptionTrigger = .unknown
         refreshFailedMeetings()
 
         Task { [weak self] in
@@ -757,12 +771,14 @@ final class MeetingSessionController: ObservableObject {
     private func enqueueTranscriptionJob(
         micURL: URL,
         systemURL: URL?,
-        healthInfo: RecordingHealthInfo
+        healthInfo: RecordingHealthInfo,
+        startTrigger: StartTrigger
     ) -> QueueInsertionOutcome {
         let job = QueuedTranscriptionJob(
             micURL: micURL,
             systemURL: systemURL,
-            healthInfo: healthInfo
+            healthInfo: healthInfo,
+            startTrigger: startTrigger
         )
 
         if canStartQueuedTranscriptionImmediately {
@@ -776,6 +792,7 @@ final class MeetingSessionController: ObservableObject {
 
     private func startQueuedTranscription(_ job: QueuedTranscriptionJob) {
         lastTerminalTranscriptionOutcome = nil
+        activeTranscriptionTrigger = job.startTrigger
 
         if !isCaptureSessionActive {
             state = .transcribing
@@ -818,6 +835,7 @@ final class MeetingSessionController: ObservableObject {
     private func finalizeBackgroundTranscriptionStateIfNeeded() {
         guard !hasVisibleBackgroundTranscriptionWork else { return }
         guard !isCaptureSessionActive else { return }
+        activeTranscriptionTrigger = .unknown
 
         switch lastTerminalTranscriptionOutcome {
         case .failed(let message):
@@ -835,13 +853,15 @@ final class MeetingSessionController: ObservableObject {
         switch status {
         case .transcriptSaved:
             lastTerminalTranscriptionOutcome = .transcriptSaved
+            let transcriptionTrigger = activeTranscriptionTrigger
             DiagnosticsTrail.record(
                 engine: "meeting",
                 event: "meeting_transcript_saved",
                 message: "Meeting transcript saved",
                 context: baseDiagnosticsContext(
                     extra: [
-                        "queue_depth": "\(queuedTranscriptionJobs.count)"
+                        "queue_depth": "\(queuedTranscriptionJobs.count)",
+                        "trigger": transcriptionTrigger.rawValue
                     ]
                 )
             )
@@ -849,11 +869,13 @@ final class MeetingSessionController: ObservableObject {
                 "meeting_transcript_saved",
                 properties: [
                     "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
+                    "trigger": transcriptionTrigger.rawValue,
                 ]
             )
             AppSoundPlayer.shared.play(.meetingTranscriptComplete)
         case .failed(let message):
             lastTerminalTranscriptionOutcome = .failed(message)
+            let transcriptionTrigger = activeTranscriptionTrigger
             DiagnosticsTrail.record(
                 level: .error,
                 engine: "meeting",
@@ -862,7 +884,8 @@ final class MeetingSessionController: ObservableObject {
                 context: baseDiagnosticsContext(
                     extra: [
                         "error": message,
-                        "queue_depth": "\(queuedTranscriptionJobs.count)"
+                        "queue_depth": "\(queuedTranscriptionJobs.count)",
+                        "trigger": transcriptionTrigger.rawValue
                     ]
                 )
             )
@@ -871,6 +894,7 @@ final class MeetingSessionController: ObservableObject {
                 properties: [
                     "failure_kind": analyticsFailureKind(from: message),
                     "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
+                    "trigger": transcriptionTrigger.rawValue,
                 ]
             )
         case .gettingReady:
