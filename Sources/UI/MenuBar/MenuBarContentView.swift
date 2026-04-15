@@ -16,10 +16,12 @@ final class MenuBarContentView: NSView {
     let headerView = MenuBarHeaderView(frame: .zero)
     let shortcutsView = MenuBarShortcutsView(frame: .zero)
     let recentMeetingsView = MenuBarRecentMeetingsView(frame: .zero)
+    let modelStatusView = MenuBarModelStatusView(frame: .zero)
     let settingsView = MenuBarSettingsView(frame: .zero)
     let agentConnectView = MenuAgentConnectPageView(frame: .zero)
 
     private let recentsDivider = NSView()
+    private let modelStatusDivider = NSView()
     private let footerDivider = NSView()
     private var currentPage: Page = .main
 
@@ -50,7 +52,7 @@ final class MenuBarContentView: NSView {
         scrollView.documentView = documentView
         addSubview(scrollView)
 
-        [recentsDivider, footerDivider].forEach {
+        [recentsDivider, modelStatusDivider, footerDivider].forEach {
             $0.wantsLayer = true
             $0.layer?.backgroundColor = MenuTokens.sectionDividerNS.cgColor
             documentView.addSubview($0)
@@ -59,6 +61,7 @@ final class MenuBarContentView: NSView {
         documentView.addSubview(headerView)
         documentView.addSubview(shortcutsView)
         documentView.addSubview(recentMeetingsView)
+        documentView.addSubview(modelStatusView)
         documentView.addSubview(settingsView)
         documentView.addSubview(agentConnectView)
         updatePageVisibility()
@@ -101,6 +104,12 @@ final class MenuBarContentView: NSView {
             recentMeetingsView.isHidden = true
         }
 
+        modelStatusDivider.frame = NSRect(x: pad, y: y - (MenuTokens.sectionSpacing / 2), width: width, height: dividerHeight)
+
+        let modelStatusHeight = modelStatusView.intrinsicHeight
+        modelStatusView.frame = NSRect(x: pad, y: y, width: width, height: modelStatusHeight)
+        y += modelStatusHeight + MenuTokens.sectionSpacing
+
         footerDivider.frame = NSRect(x: pad, y: y - (MenuTokens.sectionSpacing / 2), width: width, height: dividerHeight)
 
         let footerHeight = settingsView.intrinsicHeight
@@ -126,7 +135,7 @@ final class MenuBarContentView: NSView {
 
     private func updatePageVisibility() {
         let isMain = currentPage == .main
-        [headerView, shortcutsView, recentMeetingsView, settingsView, recentsDivider, footerDivider].forEach {
+        [headerView, shortcutsView, recentMeetingsView, modelStatusView, settingsView, recentsDivider, modelStatusDivider, footerDivider].forEach {
             $0.isHidden = !isMain
         }
         agentConnectView.isHidden = isMain
