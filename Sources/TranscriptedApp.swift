@@ -71,10 +71,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     "meeting_prompt_record_selected",
                     properties: self.analyticsProperties(for: candidate)
                 )
-                self.meetingPromptDetector.markAccepted(candidate: candidate)
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    await self.appState.meetingSession.startRecording(trigger: .detectedPrompt)
+                    let started = await self.appState.meetingSession.startRecording(trigger: .detectedPrompt)
+                    if started {
+                        self.meetingPromptDetector.markAccepted(candidate: candidate)
+                    }
                 }
             }
             meetingOverlayController.onPromptDismiss = { [weak self] candidate in

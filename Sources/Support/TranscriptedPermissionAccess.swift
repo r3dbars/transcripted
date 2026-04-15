@@ -68,7 +68,7 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         case .accessibility:
             return Self.accessibilityActionTitle(isTrusted: AXIsProcessTrusted())
         case .systemAudioRecording:
-            return Self.systemAudioRecordingActionTitle(isGranted: TranscriptedPermissionAccess.systemAudioRecordingGranted())
+            return Self.systemAudioRecordingActionTitle(for: TranscriptedPermissionAccess.systemAudioRecordingStatus())
         case .calendar:
             return Self.calendarActionTitle(for: EKEventStore.authorizationStatus(for: .event))
         }
@@ -91,8 +91,15 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         isTrusted ? "Review" : "Open Accessibility Settings"
     }
 
-    static func systemAudioRecordingActionTitle(isGranted: Bool) -> String {
-        isGranted ? "Review" : "Open Audio Recording Settings"
+    static func systemAudioRecordingActionTitle(for status: TranscriptedPermissionAccess.SystemAudioPermissionState) -> String {
+        switch status {
+        case .granted:
+            return "Review"
+        case .unknown:
+            return "Check System Audio Recording"
+        case .denied:
+            return "Open Audio Recording Settings"
+        }
     }
 
     static func calendarActionTitle(for status: EKAuthorizationStatus) -> String {
@@ -110,6 +117,16 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
 }
 
 enum TranscriptedPermissionAccess {
+    enum SystemAudioPermissionState {
+        case granted
+        case denied
+        case unknown
+
+        var isGranted: Bool {
+            self == .granted
+        }
+    }
+
     private static let systemAudioRecordingGrantedKey = "systemAudioRecordingPermissionGranted"
     private static let systemAudioRecordingKnownKey = "systemAudioRecordingPermissionKnown"
     @MainActor private static var activeSystemAudioRequester: SystemAudioPermissionRequester?
@@ -154,7 +171,7 @@ enum TranscriptedPermissionAccess {
             }
             openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
         case .systemAudioRecording:
-            if systemAudioRecordingGranted() {
+            if systemAudioRecordingStatus() == .granted {
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
                 return
             }
@@ -207,10 +224,19 @@ enum TranscriptedPermissionAccess {
         }
     }
 
+    static func systemAudioRecordingStatus() -> SystemAudioPermissionState {
+        let defaults = UserDefaults.standard
+        let known = defaults.bool(forKey: systemAudioRecordingKnownKey)
+
+        if defaults.object(forKey: systemAudioRecordingGrantedKey) as? Bool == true {
+            return .granted
+        }
+
+        return known ? .denied : .unknown
+    }
+
     static func systemAudioRecordingGranted() -> Bool {
-        let known = UserDefaults.standard.bool(forKey: systemAudioRecordingKnownKey)
-        let granted = UserDefaults.standard.bool(forKey: systemAudioRecordingGrantedKey)
-        return known && granted
+        systemAudioRecordingStatus().isGranted
     }
 
     private static func setSystemAudioRecordingGranted(_ granted: Bool) {
@@ -220,7 +246,7 @@ enum TranscriptedPermissionAccess {
 
     @MainActor
     static func requestSystemAudioRecordingAccessIfNeeded() async -> Bool {
-        if systemAudioRecordingGranted() {
+        if systemAudioRecordingStatus() == .granted {
             return true
         }
 
@@ -234,7 +260,7 @@ enum TranscriptedPermissionAccess {
     static func requestSystemAudioRecordingAccessIfNeeded(
         requester: @escaping @MainActor () async -> Bool
     ) async -> Bool {
-        if systemAudioRecordingGranted() {
+        if systemAudioRecordingStatus() == .granted {
             return true
         }
 
