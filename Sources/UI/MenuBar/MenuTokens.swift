@@ -62,15 +62,15 @@ enum MenuTokens {
     static let savedBorder = Color(MenuTokens.savedBorderNS)
 
     // Layout
-    static let panelWidth: CGFloat = 360
-    static let panelHeight: CGFloat = 408
+    static let panelWidth: CGFloat = 348
+    static let panelHeight: CGFloat = 246
     static let onboardingWindowWidth: CGFloat = 620
     static let onboardingWindowHeight: CGFloat = 760
     static let innerPadding: CGFloat = 14
     static let sectionSpacing: CGFloat = 8
     static let surfaceCornerRadius: CGFloat = 16
     static let cardCornerRadius: CGFloat = 12
-    static let actionRowHeight: CGFloat = 46
+    static let actionRowHeight: CGFloat = 52
     static let recentRowHeight: CGFloat = 40
     static let savedRowHeight: CGFloat = 54
     static let failedRowHeight: CGFloat = 62

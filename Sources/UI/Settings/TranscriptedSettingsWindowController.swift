@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 import TranscriptedCore
 
 @MainActor
@@ -16,11 +16,19 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         )
         self.speakerPeopleModel = speakerPeopleModel
         self.hostingController = NSHostingController(
-            rootView: TranscriptedSettingsView(speakerPeopleModel: speakerPeopleModel)
+            rootView: TranscriptedSettingsView(
+                speakerPeopleModel: speakerPeopleModel,
+                parakeetEngine: appState.sttRouter.parakeetEngine,
+                meetingSession: appState.meetingSession,
+                sparkleUpdater: appState.sparkleUpdater,
+                onCheckForUpdates: { appState.sparkleUpdater.checkForUpdates() },
+                onOpenAgentConnect: { AgentConnectionWindowCoordinator.shared.show() },
+                onSendFeedback: { TranscriptedAppActions.sendFeedback(logEntries: appState.logger.entries) }
+            )
         )
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 780, height: 760),
+            contentRect: NSRect(x: 0, y: 0, width: 980, height: 720),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -28,6 +36,9 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         window.title = "Transcripted Settings"
         window.contentViewController = hostingController
         window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = MenuTokens.surfaceBackgroundNS
+        window.minSize = NSSize(width: 860, height: 640)
         window.center()
 
         super.init(window: window)

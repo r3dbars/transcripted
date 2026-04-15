@@ -1,42 +1,28 @@
-// MenuBarSettingsView.swift
-// Compact utility footer for the menubar popover.
-
 import AppKit
 
 @MainActor
 final class MenuBarSettingsView: NSView {
-    private let connectAgentButton = MenuOutlineButton(
-        title: "Connect your agent",
-        symbolName: "sparkles",
-        accessibilityLabel: "Connect your agent",
-        toolTip: "Connect your agent",
-        style: .accent
-    )
-    private let settingsButton = MenuIconButton(
+    private let settingsButton = MenuOutlineButton(
+        title: "Settings",
         symbolName: "gearshape",
         accessibilityLabel: "Open settings",
         toolTip: "Open settings"
     )
-    private let updatesButton = MenuIconButton(
+    private let updatesButton = MenuOutlineButton(
+        title: "Check updates",
         symbolName: "arrow.triangle.2.circlepath.circle",
         accessibilityLabel: "Check for updates",
         toolTip: "Check for updates"
     )
-    private let feedbackButton = MenuIconButton(
-        symbolName: "bubble.left",
-        accessibilityLabel: "Send feedback",
-        toolTip: "Send feedback"
-    )
-    private let quitButton = MenuIconButton(
+    private let quitButton = MenuOutlineButton(
+        title: "Quit",
         symbolName: "power",
         accessibilityLabel: "Quit Transcripted",
         toolTip: "Quit Transcripted"
     )
 
-    weak var appState: TranscriptedAppState?
     var onOpenSettings: (() -> Void)?
     var onCheckForUpdates: (() -> Void)?
-    var onOpenAgentConnect: (() -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -49,18 +35,12 @@ final class MenuBarSettingsView: NSView {
     override var isFlipped: Bool { true }
 
     private func setupViews() {
-        connectAgentButton.target = self
-        connectAgentButton.action = #selector(openAgentConnect)
-        addSubview(connectAgentButton)
-
-        [settingsButton, updatesButton, feedbackButton, quitButton].forEach { addSubview($0) }
+        [settingsButton, updatesButton, quitButton].forEach { addSubview($0) }
 
         settingsButton.target = self
         settingsButton.action = #selector(openSettings)
         updatesButton.target = self
         updatesButton.action = #selector(checkForUpdates)
-        feedbackButton.target = self
-        feedbackButton.action = #selector(sendFeedback)
         quitButton.target = self
         quitButton.action = #selector(quitApp)
     }
@@ -68,42 +48,25 @@ final class MenuBarSettingsView: NSView {
     override func layout() {
         super.layout()
 
-        let buttonSize = MenuTokens.secondaryButtonSize
-        let buttonY: CGFloat = 7
-        quitButton.frame = NSRect(x: bounds.width - buttonSize, y: buttonY, width: buttonSize, height: buttonSize)
-        feedbackButton.frame = NSRect(
-            x: quitButton.frame.minX - 8 - buttonSize,
-            y: buttonY,
-            width: buttonSize,
-            height: buttonSize
-        )
+        let buttonHeight = MenuTokens.secondaryButtonSize
+        let spacing: CGFloat = 8
+        let quitWidth = quitButton.fittingSize.width
+        let updatesWidth = min(max(112, updatesButton.fittingSize.width), max(112, bounds.width * 0.38))
+        let settingsWidth = bounds.width - quitWidth - updatesWidth - spacing * 2
+
+        settingsButton.frame = NSRect(x: 0, y: 0, width: max(96, settingsWidth), height: buttonHeight)
         updatesButton.frame = NSRect(
-            x: feedbackButton.frame.minX - 8 - buttonSize,
-            y: buttonY,
-            width: buttonSize,
-            height: buttonSize
+            x: settingsButton.frame.maxX + spacing,
+            y: 0,
+            width: updatesWidth,
+            height: buttonHeight
         )
-        settingsButton.frame = NSRect(
-            x: updatesButton.frame.minX - 8 - buttonSize,
-            y: buttonY,
-            width: buttonSize,
-            height: buttonSize
+        quitButton.frame = NSRect(
+            x: updatesButton.frame.maxX + spacing,
+            y: 0,
+            width: quitWidth,
+            height: buttonHeight
         )
-
-        let connectWidth = min(max(150, connectAgentButton.fittingSize.width), max(0, settingsButton.frame.minX - 12))
-        connectAgentButton.frame = NSRect(x: 0, y: buttonY, width: connectWidth, height: buttonSize)
-    }
-
-    @objc private func sendFeedback() {
-        guard let appState else { return }
-        let logLines = appState.logger.entries.suffix(80).joined(separator: "\n")
-        let subject = "Transcripted Feedback"
-        let body = "What happened:\n[describe the issue here]\n\n---\nLogs:\n\(logLines)"
-        let encodedSubject = subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? subject
-        let encodedBody = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        if let url = URL(string: "mailto:hi@transcripted.app?subject=\(encodedSubject)&body=\(encodedBody)") {
-            NSWorkspace.shared.open(url)
-        }
     }
 
     @objc private func quitApp() {
@@ -118,11 +81,24 @@ final class MenuBarSettingsView: NSView {
         onCheckForUpdates?()
     }
 
-    @objc private func openAgentConnect() {
-        onOpenAgentConnect?()
+    func update(updateState: SparkleUpdaterController.UpdateState) {
+        updatesButton.title = updateState.buttonTitle
+        if case .available = updateState {
+            updatesButton.setSymbol(
+                "arrow.down.circle.fill",
+                accessibilityLabel: "Install available update"
+            )
+        } else {
+            updatesButton.setSymbol(
+                "arrow.triangle.2.circlepath.circle",
+                accessibilityLabel: "Check for updates"
+            )
+        }
+        updatesButton.isEnabled = updateState != .checking
+        needsLayout = true
     }
 
     func dismissTransientUI() {}
 
-    var intrinsicHeight: CGFloat { MenuTokens.secondaryButtonSize + 8 }
+    var intrinsicHeight: CGFloat { MenuTokens.secondaryButtonSize }
 }

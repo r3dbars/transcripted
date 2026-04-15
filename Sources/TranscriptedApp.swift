@@ -31,7 +31,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         appState: appState,
         preferredSourceAppProvider: { [weak self] in self?.lastExternalApplication },
         openSettingsWindow: { [weak self] in self?.showSettingsWindow() },
-        openAgentConnectWindow: { [weak self] in self?.showAgentConnectWindow() },
         dismissPopover: { [weak self] in self?.closePopover() }
     )
 
@@ -184,10 +183,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     private func showSettingsWindow() {
         settingsWindowController.present()
-    }
-
-    private func showAgentConnectWindow() {
-        AgentConnectionWindowCoordinator.shared.show()
     }
 
     private func makeOnboardingView() -> PermissionsOnboardingView {

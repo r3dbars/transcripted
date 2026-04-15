@@ -1,6 +1,3 @@
-// MenuBarPanelController.swift
-// NSViewController that hosts the menubar popover and wires actions/subscriptions.
-
 import AppKit
 import Combine
 
@@ -9,7 +6,6 @@ final class MenuBarPanelController: NSViewController {
     private let appState: TranscriptedAppState
     private let dismissPopover: () -> Void
     private let openSettingsWindow: () -> Void
-    private let openAgentConnectWindow: () -> Void
     private let preferredSourceAppProvider: () -> NSRunningApplication?
     private var contentView: MenuBarContentView?
     private var subscriptions = Set<AnyCancellable>()
@@ -18,13 +14,11 @@ final class MenuBarPanelController: NSViewController {
         appState: TranscriptedAppState,
         preferredSourceAppProvider: @escaping () -> NSRunningApplication?,
         openSettingsWindow: @escaping () -> Void,
-        openAgentConnectWindow: @escaping () -> Void,
         dismissPopover: @escaping () -> Void
     ) {
         self.appState = appState
         self.preferredSourceAppProvider = preferredSourceAppProvider
         self.openSettingsWindow = openSettingsWindow
-        self.openAgentConnectWindow = openAgentConnectWindow
         self.dismissPopover = dismissPopover
         super.init(nibName: nil, bundle: nil)
     }
@@ -33,14 +27,14 @@ final class MenuBarPanelController: NSViewController {
     required init?(coder: NSCoder) { fatalError() }
 
     override func loadView() {
-        let content = MenuBarContentView(frame: NSRect(x: 0, y: 0, width: MenuTokens.panelWidth, height: MenuTokens.panelHeight))
+        let content = MenuBarContentView(
+            frame: NSRect(x: 0, y: 0, width: MenuTokens.panelWidth, height: MenuTokens.panelHeight)
+        )
         content.appState = appState
-        content.settingsView.appState = appState
         content.shortcutsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
         content.shortcutsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
         content.settingsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu() }
         content.settingsView.onCheckForUpdates = { [weak self] in self?.checkForUpdatesFromMenu() }
-        content.settingsView.onOpenAgentConnect = { [weak self] in self?.openAgentConnectFromMenu() }
         view = content
         contentView = content
         view.appearance = NSAppearance(named: .darkAqua)
@@ -64,38 +58,13 @@ final class MenuBarPanelController: NSViewController {
             warmupStatus: warmupStatus,
             hotkeyError: appState.contextCapture.hotkeyError
         )
-
         content.shortcutsView.update(
             dictationKey: appState.contextCapture.dictationShortcutDisplay,
             meetingKey: appState.contextCapture.meetingShortcutDisplay,
             dictationState: dictationState,
             meetingState: meetingState
         )
-
-        if #available(macOS 14.0, *) {
-            content.recentMeetingsView.update(
-                meetings: RecentMeetingsScanner.loadRecent(),
-                failedMeetings: appState.meetingSession.failedMeetings,
-                onRetryFailedMeeting: { [weak self] id in
-                    self?.appState.meetingSession.retryFailedMeeting(id: id)
-                },
-                onDeleteFailedMeeting: { [weak self] id in
-                    self?.appState.meetingSession.deleteFailedMeeting(id: id)
-                },
-                onDismissFailedMeeting: { [weak self] id in
-                    self?.appState.meetingSession.dismissFailedMeeting(id: id)
-                }
-            )
-        } else {
-            content.recentMeetingsView.update(
-                meetings: RecentMeetingsScanner.loadRecent(),
-                failedMeetings: [],
-                onRetryFailedMeeting: { _ in },
-                onDeleteFailedMeeting: { _ in },
-                onDismissFailedMeeting: { _ in }
-            )
-        }
-
+        content.settingsView.update(updateState: appState.sparkleUpdater.updateState)
         content.needsLayout = true
     }
 
@@ -122,26 +91,16 @@ final class MenuBarPanelController: NSViewController {
             }
             .store(in: &subscriptions)
 
-        if #available(macOS 14.0, *) {
-            appState.meetingSession.$lastSavedTranscriptURL
-                .receive(on: RunLoop.main)
-                .sink { [weak self] _ in
-                    self?.refresh()
-                }
-                .store(in: &subscriptions)
-
-            appState.meetingSession.$failedMeetings
-                .receive(on: RunLoop.main)
-                .sink { [weak self] _ in
-                    self?.refresh()
-                }
-                .store(in: &subscriptions)
-        }
+        appState.sparkleUpdater.$updateState
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.refresh()
+            }
+            .store(in: &subscriptions)
     }
 
     func prepareForClose() {
         contentView?.shortcutsView.cancelEditing()
-        contentView?.showMainPage()
         contentView?.settingsView.dismissTransientUI()
     }
 
@@ -172,11 +131,6 @@ final class MenuBarPanelController: NSViewController {
     private func checkForUpdatesFromMenu() {
         dismissPopover()
         appState.sparkleUpdater.checkForUpdates()
-    }
-
-    private func openAgentConnectFromMenu() {
-        dismissPopover()
-        openAgentConnectWindow()
     }
 
     private func resolvedSourceApp() -> NSRunningApplication? {
