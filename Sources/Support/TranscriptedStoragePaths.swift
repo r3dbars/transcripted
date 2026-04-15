@@ -39,8 +39,8 @@ extension FileManager {
         let url = userApplicationSupportDir.appendingPathComponent("Transcripted", isDirectory: true)
         try? createPrivateDirectory(at: url)
         try? createPrivateDirectory(at: url.appendingPathComponent("captures", isDirectory: true))
-        try? createDirectory(at: url.appendingPathComponent("captures/meetings", isDirectory: true), withIntermediateDirectories: true)
-        try? createDirectory(at: url.appendingPathComponent("captures/dictations", isDirectory: true), withIntermediateDirectories: true)
+        try? createPrivateDirectory(at: url.appendingPathComponent("captures/meetings", isDirectory: true))
+        try? createPrivateDirectory(at: url.appendingPathComponent("captures/dictations", isDirectory: true))
         try? createPrivateDirectory(at: url.appendingPathComponent("state", isDirectory: true))
         try? createPrivateDirectory(at: url.appendingPathComponent("cache", isDirectory: true))
         try? createPrivateDirectory(at: url.appendingPathComponent("logs", isDirectory: true))
@@ -60,7 +60,7 @@ extension FileManager {
 
     var transcriptedCaptureLibraryDir: URL {
         let url = TranscriptedStoragePreferences.captureLibraryURL(fileManager: self)
-        try? createDirectory(at: url, withIntermediateDirectories: true)
+        try? createPrivateDirectory(at: url)
         return url
     }
 
@@ -87,14 +87,14 @@ extension FileManager {
     /// <capture-library>/meetings/
     var meetingSupportDir: URL {
         let url = transcriptedCaptureLibraryDir.appendingPathComponent("meetings", isDirectory: true)
-        try? createDirectory(at: url, withIntermediateDirectories: true)
+        try? createPrivateDirectory(at: url)
         return url
     }
 
     /// <capture-library>/dictations/
     var dictationSupportDir: URL {
         let url = transcriptedCaptureLibraryDir.appendingPathComponent("dictations", isDirectory: true)
-        try? createDirectory(at: url, withIntermediateDirectories: true)
+        try? createPrivateDirectory(at: url)
         return url
     }
 

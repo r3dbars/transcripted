@@ -151,6 +151,8 @@ class ParakeetEngine: ObservableObject {
     @Published var liveTranscript: String = ""
     @Published var modelDownloadState: ParakeetModelState = .notLoaded
     @Published var recordingInterrupted = false
+    @Published var isRecovering = false
+    @Published var inputFormatReady = true
 
     private let audioEngine = AVAudioEngine()
     private var sampleBuffer: [Float] = []
@@ -183,6 +185,14 @@ class ParakeetEngine: ObservableObject {
     /// burst arrived. Subsequent changes during recovery inherit this flag so
     /// the final recovery attempt knows to restart recording.
     private var configChangeWasRecording = false
+    /// Pure-logic state machine for device-change recovery. Owns the generation
+    /// counter and the readiness flags. Mirrored into @Published so the UI can
+    /// observe via Combine.
+    private var recoveryState = ParakeetRecoveryState()
+    /// Counts consecutive failed prewarm attempts. Reset on successful prewarm or
+    /// on a fresh config-change burst. Bounded by `prewarmRetryBudget` to prevent
+    /// infinite Task chains when the mic is permanently unavailable.
+    private var prewarmRetryCount: Int = 0
 
     // FluidAudio ASR
     private var asrManager: AsrManager?
@@ -242,7 +252,21 @@ class ParakeetEngine: ObservableObject {
                 models = try await AsrModels.load(from: bundlePath, version: .v3)
                 loadSourceName = loadSource.rawValue
             } else {
-                // Fallback: download from HuggingFace (~600MB on first run)
+                // Fallback: download from HuggingFace (~600MB on first run).
+                //
+                // SECURITY: AsrModels.download() pulls model artifacts from HuggingFace
+                // through FluidAudio. Transcripted does not currently re-verify the
+                // downloaded artifacts against pinned SHA-256 digests. Trust here rests
+                // on the system TLS chain plus HuggingFace's CDN integrity. A targeted
+                // TLS interception or CDN compromise could swap the model files, with
+                // a worst-case impact of bad transcriptions or — much less likely —
+                // exploitation of a Core ML deserialization bug.
+                //
+                // To close this gap we'd ship a static `[filename: sha256]` table for
+                // each supported Parakeet variant and verify it after download, before
+                // calling AsrModels.load(...). The hashes need to be computed from a
+                // trusted release of the model bundle; without that source of truth a
+                // verification stub would be worse than no check at all.
                 failureStage = .downloadModels
                 loadSource = .download
                 print("🌐 PARAKEET | models not bundled, downloading (~600MB)...")
@@ -271,7 +295,8 @@ class ParakeetEngine: ObservableObject {
             }
 
         } catch {
-            modelDownloadState = .failed(error.localizedDescription)
+            let friendlyMessage = ModelDownloadService.classifyError(error).detail
+            modelDownloadState = .failed(friendlyMessage)
             print("❌ PARAKEET | model initialization failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "model_init_failed",
                 message: error.localizedDescription,
@@ -395,26 +420,61 @@ class ParakeetEngine: ObservableObject {
 
         do {
             let inputNode = audioEngine.inputNode
-            let nativeFormat = inputNode.outputFormat(forBus: 0)
+            let outputFormat = inputNode.outputFormat(forBus: 0)
+            let hwFormat = inputNode.inputFormat(forBus: 0)
 
-            // Validate audio format — after sleep, the input node may return a zero-rate
-            // format if CoreAudio hardware hasn't fully reinitialized.
-            guard nativeFormat.sampleRate > 0, nativeFormat.channelCount > 0 else {
+            // Validate both formats. AirPods on macOS run input in Hands-Free Profile
+            // (24kHz hw / 48kHz output bus); CoreAudio's internal converter handles
+            // the upsample and the tap delivers at the output bus rate. Both must be
+            // valid before declaring the engine ready — input alone or output alone
+            // can transiently report zero during device transitions.
+            guard outputFormat.sampleRate > 0, outputFormat.channelCount > 0,
+                  hwFormat.sampleRate > 0, hwFormat.channelCount > 0 else {
                 EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "prewarm_invalid_format",
                     message: "Audio format invalid during prewarm",
-                    context: ["sample_rate": "\(nativeFormat.sampleRate)", "channels": "\(nativeFormat.channelCount)"])
+                    context: [
+                        "output_rate": "\(outputFormat.sampleRate)",
+                        "output_channels": "\(outputFormat.channelCount)",
+                        "hw_rate": "\(hwFormat.sampleRate)",
+                        "hw_channels": "\(hwFormat.channelCount)"
+                    ])
+                schedulePrewarmRetry()
                 return
             }
 
-            nativeSampleRate = nativeFormat.sampleRate
+            nativeSampleRate = outputFormat.sampleRate
 
             audioEngine.prepare()
             try audioEngine.start()
             isEnginePrewarmed = true
+            prewarmRetryCount = 0
+            markFormatReadyAndPublish()
             print("🔥 PARAKEET | engine pre-warmed (\(inputDeviceName), \(nativeSampleRate)Hz)")
         } catch {
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "prewarm_failed",
                 message: error.localizedDescription, context: ["audio_device": inputDeviceName])
+            schedulePrewarmRetry()
+        }
+    }
+
+    private func schedulePrewarmRetry() {
+        // Bounded retry — give CoreAudio time to settle, but don't loop forever.
+        // Each call counts toward the budget; budget resets on a successful prewarm
+        // or on an explicit device change (which restarts the cycle anyway).
+        guard prewarmRetryCount < TranscriptedConstants.prewarmRetryBudget else {
+            EventReporter.shared.capture(level: .warning, engine: "parakeet",
+                event: "prewarm_retry_budget_exhausted",
+                message: "Prewarm retry budget exhausted — engine will retry on next device change or user action",
+                context: ["audio_device": inputDeviceName])
+            prewarmRetryCount = 0
+            return
+        }
+        prewarmRetryCount += 1
+        let capturedGeneration = recoveryState.generation
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
+            guard let self, !self.recoveryState.isStale(generation: capturedGeneration) else { return }
+            self.prewarm()
         }
     }
 
@@ -503,6 +563,13 @@ class ParakeetEngine: ObservableObject {
             configChangeWasRecording = true
         }
 
+        // Bump the generation counter and signal UI that engine is recovering.
+        // DictationSessionController waits on these flags instead of racing.
+        _ = recoveryState.beginConfigChange()
+        publishRecoveryState()
+        // Fresh device state warrants a fresh retry budget for prewarm.
+        prewarmRetryCount = 0
+
         // Immediately tear down anything that's running — the system has
         // already stopped the engine internally before posting this notification,
         // so the tap and prewarm state are stale.
@@ -539,13 +606,23 @@ class ParakeetEngine: ObservableObject {
     private func attemptDeviceRecovery() {
         let shouldRestartRecording = configChangeWasRecording
         configChangeWasRecording = false
+        let myGeneration = recoveryState.generation
 
         configRecoveryTask = Task { @MainActor [weak self] in
             // Wait for CoreAudio to finish settling the new device graph.
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
             guard !Task.isCancelled, let self = self else { return }
+            guard !self.recoveryState.isStale(generation: myGeneration) else { return }
             do {
-                let newFormat = self.audioEngine.inputNode.outputFormat(forBus: 0)
+                // Two-step format validation. CoreAudio sometimes reports zero
+                // sample rate on first read after device change, even past the
+                // initial settle delay. One extra wait + re-read is enough.
+                var newFormat = self.audioEngine.inputNode.outputFormat(forBus: 0)
+                if newFormat.sampleRate == 0 || newFormat.channelCount == 0 {
+                    try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
+                    guard !self.recoveryState.isStale(generation: myGeneration) else { return }
+                    newFormat = self.audioEngine.inputNode.outputFormat(forBus: 0)
+                }
                 guard newFormat.sampleRate > 0, newFormat.channelCount > 0 else {
                     throw NSError(domain: "ParakeetEngine", code: -1,
                         userInfo: [NSLocalizedDescriptionKey: "Invalid audio format after device change (\(newFormat.sampleRate)Hz, \(newFormat.channelCount)ch)"])
@@ -558,27 +635,46 @@ class ParakeetEngine: ObservableObject {
                 print("🔥 PARAKEET | engine re-warmed after device change")
 
                 guard !Task.isCancelled else { return }
+                guard self.recoveryState.finishRecovery(success: true, generation: myGeneration) else { return }
+                self.publishRecoveryState()
 
                 // If we were recording, try to restart on the new device.
                 // The watchdog (via isRecoveryAttempt=false) catches silent
                 // failures where the device looks functional but produces no
                 // samples. The watchdog gets one retry before giving up.
                 if shouldRestartRecording {
-                    if self.startRecording() {
-                        print("✅ PARAKEET | recording recovered on new device (\(self.inputDeviceName))")
-                        EventReporter.shared.capture(level: .info, engine: "parakeet",
-                            event: "recording_recovered_device_change",
-                            message: "Recording recovered after device change",
-                            context: ["audio_device": self.inputDeviceName, "sample_rate": "\(self.nativeSampleRate)"])
-                    } else {
+                    var restarted = false
+                    for attempt in 1...TranscriptedConstants.recordingRestartAttempts {
+                        guard !Task.isCancelled else { return }
+                        guard !self.recoveryState.isStale(generation: myGeneration) else { return }
+                        if self.startRecording() {
+                            restarted = true
+                            print("✅ PARAKEET | recording recovered on new device (\(self.inputDeviceName)) after \(attempt) attempt(s)")
+                            EventReporter.shared.capture(level: .info, engine: "parakeet",
+                                event: "recording_recovered_device_change",
+                                message: "Recording recovered after device change",
+                                context: [
+                                    "audio_device": self.inputDeviceName,
+                                    "sample_rate": "\(self.nativeSampleRate)",
+                                    "attempts": "\(attempt)"
+                                ])
+                            break
+                        }
+                        // BT format negotiation can take ~1-2s; wait between attempts.
+                        try? await Task.sleep(nanoseconds: TranscriptedConstants.recordingRestartRetryDelay)
+                    }
+                    if !restarted {
                         self.recordingInterrupted = true
                         EventReporter.shared.capture(level: .warning, engine: "parakeet",
                             event: "recording_interrupted",
-                            message: "Recording could not restart after device change",
+                            message: "Recording could not restart after device change within retry budget",
                             context: ["audio_device": self.inputDeviceName])
                     }
                 }
             } catch {
+                if self.recoveryState.finishRecovery(success: false, generation: myGeneration) {
+                    self.publishRecoveryState()
+                }
                 if shouldRestartRecording {
                     self.recordingInterrupted = true
                     EventReporter.shared.capture(level: .warning, engine: "parakeet",
@@ -590,6 +686,23 @@ class ParakeetEngine: ObservableObject {
                     event: "device_change_rewarm_failed",
                     message: error.localizedDescription, context: ["audio_device": self.inputDeviceName])
             }
+        }
+    }
+
+    private func publishRecoveryState() {
+        isRecovering = recoveryState.isRecovering
+        inputFormatReady = recoveryState.inputFormatReady
+    }
+
+    private func markFormatUnreadyAndPublish() {
+        recoveryState.markFormatUnready()
+        publishRecoveryState()
+    }
+
+    private func markFormatReadyAndPublish() {
+        if !recoveryState.inputFormatReady {
+            recoveryState.markFormatReady()
+            publishRecoveryState()
         }
     }
 
@@ -653,19 +766,17 @@ class ParakeetEngine: ObservableObject {
         sampleBuffer.reserveCapacity(Int(nativeSampleRate * Double(TranscriptedConstants.audioBufferCapacitySeconds)))
 
         let inputNode = audioEngine.inputNode
-        let nativeFormat = inputNode.outputFormat(forBus: 0)
-        nativeSampleRate = nativeFormat.sampleRate
-
-        // After sleep/wake, the output format and hardware input format can
-        // desync — outputFormat reports one rate while the hardware runs at
-        // another. installTap asserts they match. Detect and fix by
-        // restarting the engine so CoreAudio rebuilds the graph.
+        // The tap is installed with format: nil, which means buffers arrive at the
+        // node's OUTPUT bus format. On AirPods HFP the hw input is 24kHz but the
+        // node's output bus is 48kHz (CoreAudio's internal converter handles the
+        // upsample). The downstream resampler must use the rate the buffer
+        // actually arrives at — i.e. outputFormat — not the hw rate. Validate
+        // both so we don't proceed when the device graph is still settling.
+        let outputFormat = inputNode.outputFormat(forBus: 0)
         let hwFormat = inputNode.inputFormat(forBus: 0)
-        guard nativeFormat.sampleRate > 0,
-              nativeFormat.channelCount > 0,
-              hwFormat.sampleRate > 0,
-              hwFormat.channelCount > 0 else {
-            print("⚠️ PARAKEET | input format unavailable: output=\(nativeFormat.sampleRate)Hz/\(nativeFormat.channelCount)ch hw=\(hwFormat.sampleRate)Hz/\(hwFormat.channelCount)ch")
+        guard outputFormat.sampleRate > 0, outputFormat.channelCount > 0,
+              hwFormat.sampleRate > 0, hwFormat.channelCount > 0 else {
+            print("⚠️ PARAKEET | input format unavailable: output=\(outputFormat.sampleRate)Hz/\(outputFormat.channelCount)ch hw=\(hwFormat.sampleRate)Hz/\(hwFormat.channelCount)ch")
             EventReporter.shared.capture(
                 level: .warning,
                 engine: "parakeet",
@@ -673,86 +784,25 @@ class ParakeetEngine: ObservableObject {
                 message: "Audio hardware format not ready while starting dictation",
                 context: [
                     "audio_device": inputDeviceName,
-                    "output_rate": "\(nativeFormat.sampleRate)",
-                    "output_channels": "\(nativeFormat.channelCount)",
+                    "output_rate": "\(outputFormat.sampleRate)",
+                    "output_channels": "\(outputFormat.channelCount)",
                     "hw_rate": "\(hwFormat.sampleRate)",
                     "hw_channels": "\(hwFormat.channelCount)",
                 ]
             )
             audioEngine.stop()
             isEnginePrewarmed = false
+            markFormatUnreadyAndPublish()
             Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
                 self?.prewarm()
             }
             return false
         }
-        if nativeFormat.sampleRate != hwFormat.sampleRate && hwFormat.sampleRate > 0 {
-            print("⚠️ PARAKEET | format mismatch: output=\(nativeFormat.sampleRate)Hz hw=\(hwFormat.sampleRate)Hz — resyncing engine")
-            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "format_mismatch_resync",
-                message: "Output/hardware sample rate mismatch after wake",
-                context: ["output_rate": "\(nativeFormat.sampleRate)", "hw_rate": "\(hwFormat.sampleRate)"])
-            audioEngine.stop()
-            isEnginePrewarmed = false
-            audioEngine.prepare()
-            do {
-                try audioEngine.start()
-                isEnginePrewarmed = true
-            } catch {
-                EventReporter.shared.capture(level: .error, engine: "parakeet", event: "resync_engine_failed",
-                    message: error.localizedDescription)
-                return false
-            }
-            // Re-read both formats after engine restart and refuse to install a
-            // tap until CoreAudio reports a stable, matching hardware graph.
-            let refreshedOutputFormat = inputNode.outputFormat(forBus: 0)
-            let refreshedHardwareFormat = inputNode.inputFormat(forBus: 0)
-            nativeSampleRate = refreshedOutputFormat.sampleRate
 
-            guard refreshedOutputFormat.sampleRate > 0, refreshedHardwareFormat.sampleRate > 0 else {
-                EventReporter.shared.capture(level: .warning, engine: "parakeet",
-                    event: "format_mismatch_retry_needed",
-                    message: "Audio hardware still settling after device change",
-                    context: [
-                        "output_rate": "\(refreshedOutputFormat.sampleRate)",
-                        "hw_rate": "\(refreshedHardwareFormat.sampleRate)"
-                    ])
-                audioEngine.stop()
-                isEnginePrewarmed = false
-                Task { @MainActor [weak self] in
-                    try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-                    self?.prewarm()
-                }
-                return false
-            }
+        nativeSampleRate = outputFormat.sampleRate
 
-            guard refreshedOutputFormat.sampleRate == refreshedHardwareFormat.sampleRate else {
-                print("⚠️ PARAKEET | format mismatch persisted after resync: output=\(refreshedOutputFormat.sampleRate)Hz hw=\(refreshedHardwareFormat.sampleRate)Hz")
-                EventReporter.shared.capture(level: .warning, engine: "parakeet",
-                    event: "format_mismatch_retry_needed",
-                    message: "Audio format mismatch persisted after engine resync",
-                    context: [
-                        "output_rate": "\(refreshedOutputFormat.sampleRate)",
-                        "hw_rate": "\(refreshedHardwareFormat.sampleRate)"
-                    ])
-                audioEngine.stop()
-                isEnginePrewarmed = false
-                Task { @MainActor [weak self] in
-                    try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-                    self?.prewarm()
-                }
-                return false
-            }
-        }
-
-        guard nativeSampleRate > 0 else {
-            print("❌ PARAKEET | sample rate is 0 — audio hardware not ready")
-            EventReporter.shared.capture(level: .error, engine: "parakeet", event: "zero_sample_rate",
-                message: "Sample rate is 0, audio hardware not initialized")
-            return false
-        }
-
-        inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nativeFormat) { [weak self] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nil) { [weak self] buffer, _ in
             guard let self = self,
                   let monoSamples = self.extractMonoSamples(from: buffer) else { return }
             let frameLength = monoSamples.count
@@ -846,6 +896,7 @@ class ParakeetEngine: ObservableObject {
         }
 
         isRecording = true
+        markFormatReadyAndPublish()
         liveTranscript = ""
         committedStreamText = ""
         if liveDisplayEnabled {

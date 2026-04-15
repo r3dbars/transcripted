@@ -1,0 +1,43 @@
+import Foundation
+
+func testMeetingFailureKind() {
+    runSuite("MeetingFailureKind classifies recording-too-short errors") {
+        let kind = MeetingFailureKind.classify(
+            message: "Invalid audio data provided. Must be at least 1 second of 16kHz audio."
+        )
+
+        assertEqual(kind, .recordingTooShort, "short captures should stay out of the generic bucket")
+    }
+
+    runSuite("MeetingFailureKind classifies diarization failures") {
+        let kind = MeetingFailureKind.classify(
+            message: "PyAnnote inference failed: model weights missing"
+        )
+
+        assertEqual(kind, .diarizationFailed, "diarization-specific failures should be preserved for analytics")
+    }
+
+    runSuite("MeetingFailureKind classifies save failures") {
+        let kind = MeetingFailureKind.classify(
+            message: "Failed to save transcript: Could not write transcript to meetings"
+        )
+
+        assertEqual(kind, .saveFailed, "save failures should keep their own analytics bucket")
+    }
+
+    runSuite("MeetingFailureKind classifies pipeline-busy errors") {
+        let kind = MeetingFailureKind.classify(
+            message: "Transcription already in progress"
+        )
+
+        assertEqual(kind, .pipelineBusy, "pipeline-busy rejections from TranscriptionTaskManager should not fall to unexpected_error")
+    }
+
+    runSuite("MeetingFailureKind falls back to an explicit unexpected bucket") {
+        let kind = MeetingFailureKind.classify(
+            message: "Something odd happened while processing the meeting"
+        )
+
+        assertEqual(kind, .unexpectedError, "unknown failures should avoid the vague 'other' label")
+    }
+}

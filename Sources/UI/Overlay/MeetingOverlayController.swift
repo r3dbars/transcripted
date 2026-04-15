@@ -223,18 +223,21 @@ final class MeetingOverlayRootView: NSView {
         )
 
         let titleX = statusDot.frame.maxX + 8
-        let titleSize = titleLabel.fittingSize
-        titleLabel.frame = NSRect(
-            x: titleX,
-            y: headerMidY - titleSize.height / 2,
-            width: min(titleSize.width, 150),
-            height: titleSize.height
-        )
+        var nextX = titleX
+        if !titleLabel.isHidden {
+            let titleSize = titleLabel.fittingSize
+            titleLabel.frame = NSRect(
+                x: titleX,
+                y: headerMidY - titleSize.height / 2,
+                width: min(titleSize.width, 150),
+                height: titleSize.height
+            )
+            nextX = titleLabel.frame.maxX + 8
+        }
 
         let timerSize = timerLabel.fittingSize
-        let timerX = titleLabel.frame.maxX + 8
         timerLabel.frame = NSRect(
-            x: timerX,
+            x: nextX,
             y: headerMidY - timerSize.height / 2,
             width: timerSize.width,
             height: timerSize.height
@@ -411,7 +414,7 @@ final class MeetingOverlayRootView: NSView {
             isErrorState = false
         }
         statusDot.isHidden = isPreparing
-        titleLabel.isHidden = isPreparing
+        titleLabel.isHidden = isPreparing || state == .recording
         timerLabel.isHidden = isPreparing || (state != .recording && !isPrompting)
         detailLabel.isHidden = !(isPrompting || isErrorState)
         micLabel.isHidden = isPreparing || isPrompting
@@ -538,6 +541,7 @@ enum MeetingOverlayTokens {
     static let dotError      = NSColor.systemRed
 
     static let panelWidth: CGFloat  = 360
+    static let recordingPanelWidth: CGFloat = 260
     static let panelHeight: CGFloat = 48
     static let promptHeight: CGFloat = 88
     static let warmupHeight: CGFloat = 96
@@ -792,6 +796,7 @@ final class MeetingOverlayController {
         if panel.isVisible { return }
 
         let desiredHeight = currentPanelHeight()
+        let desiredWidth = currentPanelWidth()
 
         // Position at top-center of the screen containing the mouse.
         let mousePos = NSEvent.mouseLocation
@@ -799,13 +804,13 @@ final class MeetingOverlayController {
             ?? NSScreen.main
         if let visibleFrame = screen?.visibleFrame {
             let origin = NSPoint(
-                x: visibleFrame.midX - MeetingOverlayTokens.panelWidth / 2,
+                x: visibleFrame.midX - desiredWidth / 2,
                 y: visibleFrame.maxY - desiredHeight - 12
             )
             panel.setFrameOrigin(origin)
         }
         panel.setContentSize(NSSize(
-            width: MeetingOverlayTokens.panelWidth,
+            width: desiredWidth,
             height: desiredHeight
         ))
         panel.alphaValue = 0
@@ -829,6 +834,15 @@ final class MeetingOverlayController {
             return MeetingOverlayTokens.errorHeight
         default:
             return MeetingOverlayTokens.panelHeight
+        }
+    }
+
+    private func currentPanelWidth() -> CGFloat {
+        switch state {
+        case .recording:
+            return MeetingOverlayTokens.recordingPanelWidth
+        default:
+            return MeetingOverlayTokens.panelWidth
         }
     }
 
@@ -932,11 +946,16 @@ final class MeetingOverlayController {
     private func resizePanelIfNeeded() {
         guard let panel, panel.isVisible else { return }
         let desiredHeight = currentPanelHeight()
-        guard abs(panel.frame.height - desiredHeight) > 0.5 else { return }
+        let desiredWidth = currentPanelWidth()
+        let heightChanged = abs(panel.frame.height - desiredHeight) > 0.5
+        let widthChanged = abs(panel.frame.width - desiredWidth) > 0.5
+        guard heightChanged || widthChanged else { return }
 
         var frame = panel.frame
         frame.origin.y += frame.height - desiredHeight
+        frame.origin.x += (frame.width - desiredWidth) / 2
         frame.size.height = desiredHeight
+        frame.size.width = desiredWidth
         panel.setFrame(frame, display: true, animate: true)
     }
 }

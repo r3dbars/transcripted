@@ -81,5 +81,9 @@ PostHog controls described below.
 - stable trigger enums like `hotkey`, `menu`, `detected_prompt`
 - normalized failure kinds like `system_audio`, `recording_too_short`, `other`
 
+Meeting workflow analytics should keep that same stable `trigger` enum on later
+stop/save/fail events so product and reliability reviews can attribute outcomes
+without joining against any sensitive context.
+
 Anything richer than that should stay local unless there is a new explicit
 privacy review and a matching allowlist change.

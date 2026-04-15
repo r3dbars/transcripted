@@ -95,15 +95,25 @@ final class MenuBarSettingsView: NSView {
     }
 
     @objc private func sendFeedback() {
-        guard let appState else { return }
-        let logLines = appState.logger.entries.suffix(80).joined(separator: "\n")
-        let subject = "Transcripted Feedback"
-        let body = "What happened:\n[describe the issue here]\n\n---\nLogs:\n\(logLines)"
-        let encodedSubject = subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? subject
-        let encodedBody = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        if let url = URL(string: "mailto:hi@transcripted.app?subject=\(encodedSubject)&body=\(encodedBody)") {
-            NSWorkspace.shared.open(url)
-        }
+        let logLines = appState?.logger.entries.suffix(80).joined(separator: "\n") ?? "No in-app logs attached."
+        let title = "Transcripted Feedback"
+        let body = """
+        What happened:
+        [describe the issue here]
+
+        ---
+        Logs:
+        \(logLines)
+        """
+
+        var components = URLComponents(string: "https://github.com/r3dbars/transcripted/issues/new")
+        components?.queryItems = [
+            URLQueryItem(name: "title", value: title),
+            URLQueryItem(name: "body", value: body)
+        ]
+
+        guard let url = components?.url else { return }
+        NSWorkspace.shared.open(url)
     }
 
     @objc private func quitApp() {

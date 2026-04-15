@@ -17,13 +17,26 @@ func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy meeting_recording_stopped system_stream_present key is not silently filtered") {
         let policy = AnalyticsEventPolicy.policy(forEvent: "meeting_recording_stopped")
         assertEqual(policy?.allowedProperties.contains("system_stream_present"), true, "system_stream_present should be in the allowlist")
+        assertEqual(policy?.allowedProperties.contains("trigger"), true, "meeting stop events should preserve start trigger attribution")
 
         // Verify the key passes sanitization — it must not contain a sensitive fragment
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
-            ["system_stream_present": "true"],
-            allowedKeys: ["system_stream_present"]
+            [
+                "system_stream_present": "true",
+                "trigger": "detected_prompt",
+            ],
+            allowedKeys: ["system_stream_present", "trigger"]
         )
         assertEqual(sanitized["system_stream_present"], "true", "system_stream_present must survive sanitization — if empty the metric is always missing")
+        assertEqual(sanitized["trigger"], "detected_prompt", "meeting trigger attribution must survive sanitization")
+    }
+
+    runSuite("AnalyticsEventPolicy allows meeting outcome trigger attribution") {
+        let saved = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_saved")
+        let failed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
+
+        assertEqual(saved?.allowedProperties.contains("trigger"), true, "meeting saves should preserve trigger attribution")
+        assertEqual(failed?.allowedProperties.contains("trigger"), true, "meeting failures should preserve trigger attribution")
     }
 
     runSuite("AnalyticsEventPolicy allows coarse meeting prompt telemetry") {

@@ -124,15 +124,25 @@ func testFirstRunExperience() {
         )
     }
 
-    runSuite("FirstRunExperience.modelCard — explains the one-time local download") {
+    runSuite("FirstRunExperience.modelCard — names the model and download source during first-run") {
         let card = FirstRunExperience.modelCard(for: .downloading(progress: 0.5))
 
-        assertEqual(card.title, "Downloading local dictation", "model card should name the active first-run step")
+        assertEqual(card.title, "Downloading Parakeet TDT V3", "model card should name the active first-run step and the model")
         assertTrue(
-            card.detail.contains("one-time download"),
-            "model card should explain why the download is happening"
+            card.detail.contains("huggingface.co"),
+            "model card should tell the user where the model is being downloaded from"
+        )
+        assertTrue(
+            card.detail.contains("on this Mac") || card.detail.contains("locally"),
+            "model card should reassure the user the model stays local"
         )
         assertEqual(card.status, "50% complete", "model card should surface live progress")
         assertNotNil(card.progress, "model card should show a progress bar during downloads")
+    }
+
+    runSuite("FirstRunExperience.modelCard — names Parakeet TDT V3 in ready state") {
+        let card = FirstRunExperience.modelCard(for: .ready)
+
+        assertTrue(card.title.contains("Parakeet TDT V3"), "ready card should tell the user which model is running")
     }
 }
