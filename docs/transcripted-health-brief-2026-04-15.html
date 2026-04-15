@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transcripted Health Brief · April 15, 2026</title>
+  <style>
+    :root {
+      --bg: #f4ecdf;
+      --bg-deep: #e8dcc6;
+      --paper: rgba(255, 250, 242, 0.88);
+      --paper-strong: rgba(255, 252, 247, 0.96);
+      --ink: #1e2933;
+      --muted: #596670;
+      --line: rgba(65, 54, 42, 0.12);
+      --teal: #0f766e;
+      --teal-soft: rgba(15, 118, 110, 0.12);
+      --amber: #b45309;
+      --amber-soft: rgba(180, 83, 9, 0.12);
+      --red: #b91c1c;
+      --red-soft: rgba(185, 28, 28, 0.12);
+      --slate: #334155;
+      --slate-soft: rgba(51, 65, 85, 0.1);
+      --green: #166534;
+      --green-soft: rgba(22, 101, 52, 0.12);
+      --shadow: 0 24px 60px rgba(86, 63, 30, 0.14);
+      --radius-xl: 28px;
+      --radius-lg: 22px;
+      --radius-md: 16px;
+      --radius-sm: 999px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.13), transparent 28%),
+        radial-gradient(circle at top right, rgba(180, 83, 9, 0.14), transparent 34%),
+        linear-gradient(180deg, #fbf5ea 0%, var(--bg) 42%, var(--bg-deep) 100%);
+      line-height: 1.5;
+    }
+
+    .page {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 32px auto 64px;
+    }
+
+    .hero,
+    .section {
+      border: 1px solid rgba(79, 63, 41, 0.1);
+      border-radius: var(--radius-lg);
+      background: var(--paper);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .hero {
+      padding: 34px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      top: -30px;
+      right: -30px;
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(185, 28, 28, 0.16), rgba(185, 28, 28, 0));
+      pointer-events: none;
+    }
+
+    .section {
+      margin-top: 22px;
+      padding: 26px;
+    }
+
+    .eyebrow,
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow {
+      color: var(--teal);
+      font-size: 0.82rem;
+    }
+
+    .kicker {
+      font-size: 0.76rem;
+      padding: 6px 10px;
+      border-radius: var(--radius-sm);
+      margin-bottom: 12px;
+    }
+
+    .critical { background: var(--red-soft); color: var(--red); }
+    .watch { background: var(--amber-soft); color: var(--amber); }
+    .stable { background: var(--teal-soft); color: var(--teal); }
+    .noise { background: var(--slate-soft); color: var(--slate); }
+    .good { background: var(--green-soft); color: var(--green); }
+
+    h1, h2, h3 { margin: 0; line-height: 1.06; }
+
+    h1, h2 {
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+    }
+
+    h1 {
+      font-size: clamp(2.5rem, 5vw, 4.3rem);
+      letter-spacing: -0.045em;
+      margin: 14px 0;
+      max-width: 11ch;
+    }
+
+    h2 {
+      font-size: clamp(1.55rem, 2.5vw, 2.15rem);
+      letter-spacing: -0.035em;
+    }
+
+    h3 {
+      font-size: 1.05rem;
+      letter-spacing: -0.02em;
+    }
+
+    p { margin: 0; color: var(--muted); }
+
+    .hero-chips,
+    .stat-grid,
+    .issue-grid,
+    .two-up,
+    .signal-grid,
+    .footer-links {
+      display: grid;
+      gap: 16px;
+    }
+
+    .hero-chips,
+    .stat-grid,
+    .issue-grid,
+    .signal-grid,
+    .footer-links {
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .two-up {
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+      align-items: start;
+    }
+
+    .chip,
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: var(--paper-strong);
+      padding: 18px;
+    }
+
+    .chip-label {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.74rem;
+      font-weight: 700;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .big-number {
+      font-size: clamp(2rem, 4vw, 3rem);
+      letter-spacing: -0.06em;
+      font-weight: 800;
+      margin: 6px 0 4px;
+    }
+
+    .mini-note {
+      margin-top: 10px;
+      font-size: 0.92rem;
+    }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.55);
+    }
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 14px;
+      border-bottom: 1px solid rgba(79, 63, 41, 0.1);
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 800;
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    a {
+      color: inherit;
+      text-decoration-color: rgba(15, 118, 110, 0.45);
+      text-underline-offset: 0.16em;
+    }
+
+    code {
+      font-family: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+      font-size: 0.93em;
+      background: rgba(30, 41, 51, 0.05);
+      border: 1px solid rgba(30, 41, 51, 0.08);
+      border-radius: 0.45rem;
+      padding: 0.1rem 0.38rem;
+      white-space: nowrap;
+    }
+
+    .source-note {
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+      font-size: 0.92rem;
+      color: var(--muted);
+    }
+
+    @media (max-width: 900px) {
+      .two-up {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div class="eyebrow">Transcripted Health Brief · April 15, 2026</div>
+      <h1>Used, growing, and still tripping on launch.</h1>
+      <p>
+        In the last 7 days through April 15, 2026, Transcripted showed real usage and
+        rising public interest, but the shipped build <code>1.0.7</code> is still taking
+        a real startup/audio hang. The repo is already at <code>1.0.8</code>, so the
+        biggest gap right now is not insight. It is getting the fixes into users’ hands.
+      </p>
+
+      <div class="hero-chips" style="margin-top: 24px;">
+        <div class="chip">
+          <span class="chip-label">Release</span>
+          <strong>Public: 1.0.7 · Repo: 1.0.8</strong>
+        </div>
+        <div class="chip">
+          <span class="chip-label">Most Real Signal</span>
+          <strong>Launch-time audio hang on shipped builds</strong>
+        </div>
+        <div class="chip">
+          <span class="chip-label">Repo Mode</span>
+          <strong>Reliability hardening with diarization groundwork</strong>
+        </div>
+        <div class="chip">
+          <span class="chip-label">Overall Call</span>
+          <strong>Healthy usage, blocked by one ugly shipped bug</strong>
+        </div>
+      </div>
+    </header>
+
+    <section class="section">
+      <h2>At A Glance</h2>
+      <div class="stat-grid" style="margin-top: 18px;">
+        <article class="card">
+          <div class="kicker critical">Main issue</div>
+          <h3>Production launch hangs</h3>
+          <div class="big-number">14</div>
+          <p>
+            <code>APPLE-MACOS-5</code> is the real problem. It is happening in
+            <code>production</code>, on real devices, and most often on
+            <code>transcripted@1.0.7</code>.
+          </p>
+        </article>
+        <article class="card">
+          <div class="kicker stable">Usage</div>
+          <h3>Active devices</h3>
+          <div class="big-number">26</div>
+          <p>
+            PostHog is brand new, but it already shows 192 launches in the last 7 days.
+            This is early signal, not fake signal.
+          </p>
+        </article>
+        <article class="card">
+          <div class="kicker good">Sticky workflow</div>
+          <h3>Dictations completed</h3>
+          <div class="big-number">407</div>
+          <p>
+            Dictation is the clear winner so far. Meetings are real too, but smaller:
+            68 starts, 53 saved transcripts, 9 failures.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Product, GitHub, Websites</h2>
+      <div class="issue-grid" style="margin-top: 18px;">
+        <article class="card">
+          <div class="kicker stable">Product usage</div>
+          <h3>Dictation is carrying the product right now</h3>
+          <ul>
+            <li>Dictation: 527 starts, 407 completes, 34 <code>no_speech</code>, 15 cancels.</li>
+            <li>Almost all dictation starts come from <code>right_option_tap</code> (502). That path is the muscle.</li>
+            <li>Meetings: 68 starts split across <code>menu</code> (32), <code>hotkey</code> (30), and <code>detected_prompt</code> (6).</li>
+            <li>Meeting prompt funnel is weak: 21 shown, 17 dismissed, 4 record selections.</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <div class="kicker good">GitHub</div>
+          <h3>Interest is climbing faster than downloads</h3>
+          <ul>
+            <li>107 unique repo viewers in 14 days, 12 new stars, 15 stars total.</li>
+            <li>Latest public release <code>v1.0.7</code> has 18 downloads so far.</li>
+            <li>Clone counts are huge, but likely inflated by automation and should not be treated as adoption.</li>
+            <li>Recent merged work is mostly reliability, telemetry, privacy, and release plumbing.</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <div class="kicker watch">Websites</div>
+          <h3>Both sites are up, but the measurement layer is thin</h3>
+          <ul>
+            <li><code>transcripted.app</code> is live. Latest production Pages deploy I found was April 12, 2026.</li>
+            <li><code>r3d.br</code> does not appear to be the configured domain. The live domain is <code>r3d.bar</code>.</li>
+            <li>Cloudflare zone analytics were blocked by token scope, and Pages web analytics are not configured on either site.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Sentry: Real Vs Noise</h2>
+      <div class="issue-grid" style="margin-top: 18px;">
+        <article class="card">
+          <div class="kicker critical">Real bug</div>
+          <h3><code>APPLE-MACOS-5</code> · launch/audio hang</h3>
+          <p>
+            This is the one to care about first. It looks like launch-time audio
+            initialization is still touching the wrong path too early on the public build.
+          </p>
+          <ul>
+            <li>14 production app hangs in the last 7 days, with the latest seen on April 15, 2026.</li>
+            <li>The stack lands in <code>AVAudioEngine.inputNode</code> during launch.</li>
+            <li>PR <code>#318</code> matches this path almost perfectly, but users are still mostly on <code>1.0.7</code>.</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <div class="kicker watch">Watch</div>
+          <h3><code>APPLE-MACOS-H</code> · backend/download turbulence</h3>
+          <p>
+            This looks real, but not like the core blocker. It is a short burst of
+            infrastructure pain, not the main recurring product failure.
+          </p>
+          <ul>
+            <li>8 production HTTP 503/504 events on April 14, 2026, all on <code>1.0.7</code>.</li>
+            <li>The frames are system-only network/download paths, not the same shape as the launch hang.</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <div class="kicker noise">Noise</div>
+          <h3>Do not let these steal attention</h3>
+          <p>
+            Sentry has a little honest noise in it right now, and it is worth ignoring on purpose.
+          </p>
+          <ul>
+            <li><code>APPLE-MACOS-2</code> is the intentional <code>sentry_test_event</code> from Settings.</li>
+            <li><code>APPLE-MACOS-1</code> is a Sentry dashboard/sample JavaScript issue, not a Transcripted Mac app failure.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>What To Test</h2>
+      <div class="two-up" style="margin-top: 18px;">
+        <div>
+          <table>
+            <thead>
+              <tr>
+                <th>Scenario</th>
+                <th>Why</th>
+                <th>Pass condition</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Cold launch on the build after <code>#318</code></td>
+                <td>The top Sentry issue is a launch-time audio hang.</td>
+                <td>App opens cleanly and does not touch launch-time audio capture until recording actually starts.</td>
+              </tr>
+              <tr>
+                <td>Deny microphone, then recover through Settings</td>
+                <td><code>mic_not_authorized</code> showed up on <code>1.0.6</code> and the UX copy was just tightened.</td>
+                <td>The UI sends people to the right macOS pane and recovery feels obvious, not cryptic.</td>
+              </tr>
+              <tr>
+                <td>Short meeting and model-download failure handling</td>
+                <td>Meeting failures include <code>recording_too_short</code>, and there was a smaller burst of 503/504 download pain.</td>
+                <td>The app fails gracefully with a clear reason and a clean next step, not a generic dead end.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="kicker stable">Code paths to watch</div>
+          <h3>Startup, capture, and attribution boundaries</h3>
+          <p>
+            If the next release moves the Sentry picture, these are the seams most likely to explain it.
+          </p>
+          <ul>
+            <li><code>AppDelegate.applicationDidFinishLaunching</code> and early meeting setup.</li>
+            <li><code>Audio</code>, <code>AVAudioEngine.inputNode</code>, and system-audio device listener paths.</li>
+            <li><code>MeetingFailureKind</code> plus trigger propagation into save/fail analytics after <code>#323</code>.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>What To Fix</h2>
+      <div class="signal-grid" style="margin-top: 18px;">
+        <article class="card">
+          <div class="kicker critical">1. Ship</div>
+          <h3>Get users off 1.0.7 fast</h3>
+          <p>
+            The repo already has fresh reliability work merged on April 15, 2026.
+            The biggest win is to publish that work so the shipped build is not still the one generating the hang.
+          </p>
+        </article>
+        <article class="card">
+          <div class="kicker watch">2. Cover</div>
+          <h3>Treat short and failed captures like product states</h3>
+          <p>
+            <code>recording_too_short</code>, permission misses, and transient download failures should feel handled,
+            explained, and recoverable instead of looking like mysterious product breakage.
+          </p>
+        </article>
+        <article class="card">
+          <div class="kicker stable">3. Triage</div>
+          <h3>Clean the signal before the next review</h3>
+          <p>
+            Deduplicate the stale nightly automation issues, keep test events out of the way,
+            and let the new meeting trigger attribution build a cleaner next read.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Bottom Line</h2>
+      <div class="signal-grid" style="margin-top: 18px;">
+        <article class="card">
+          <div class="kicker critical">Fix now</div>
+          <h3>Ship past the hang</h3>
+          <p>
+            Transcripted has enough real usage now that the launch/audio hang is holding back a product people are actually trying to use.
+          </p>
+        </article>
+        <article class="card">
+          <div class="kicker watch">Fix next</div>
+          <h3>Reduce first-minute friction</h3>
+          <p>
+            The next biggest drag is setup and failure handling: permissions, short captures, and backend turbulence need cleaner recovery.
+          </p>
+        </article>
+        <article class="card">
+          <div class="kicker stable">Set up next</div>
+          <h3>Measure the site and the meeting funnel</h3>
+          <p>
+            GitHub interest is rising faster than downloads, and website analytics are still missing, so the growth story is still blurrier than it needs to be.
+          </p>
+        </article>
+      </div>
+
+      <div class="footer-links" style="margin-top: 18px;">
+        <a class="card" href="https://r3dbars.sentry.io/issues/?project=apple-macos&amp;query=is%3Aunresolved+lastSeen%3A-7d">Open Sentry issue search</a>
+        <a class="card" href="https://github.com/r3dbars/transcripted/releases/latest">Open latest public release</a>
+        <a class="card" href="https://transcripted.app">Open transcripted.app</a>
+      </div>
+
+      <p class="source-note">
+        Sources used in this brief: local repo state on April 15, 2026; Sentry unresolved issues from the last 7 days;
+        PostHog product events from the last 7 days; GitHub traffic, stars, releases, PRs, and issues over the last 14 days;
+        Cloudflare Pages and zone status checked on April 15, 2026.
+      </p>
+    </section>
+  </main>
+</body>
+</html>
