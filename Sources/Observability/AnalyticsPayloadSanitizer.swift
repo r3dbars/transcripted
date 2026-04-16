@@ -19,18 +19,31 @@ enum AnalyticsPayloadSanitizer {
         "url",
     ]
 
-    private static let userPathRegex = try! NSRegularExpression(pattern: #"/Users/[^/\s]+/"#)
-    private static let absolutePathRegex = try! NSRegularExpression(pattern: #"(?<!https:)(?<!http:)/(?:Users|private|var|tmp|Volumes|Applications)[^\s"]*"#)
-    private static let rawURLRegex = try! NSRegularExpression(pattern: #"https?://[^\s"]+"#, options: [.caseInsensitive])
-    private static let apiKeyRegex = try! NSRegularExpression(pattern: #"sk-[A-Za-z0-9_-]+"#)
-    private static let commonSecretRegex = try! NSRegularExpression(
-        pattern: #"\b(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|phc_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|xoxx-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}\.[A-Za-z0-9._-]{10,})\b"#
+    // Security: compile-time regex patterns are built via this helper instead of try! so that a
+    // future malformed pattern triggers an assertionFailure in debug builds and falls back to a
+    // no-op regex in release builds — keeping the crash-scrubbing path alive rather than crashing it.
+    private static func makeRegex(_ pattern: String, options: NSRegularExpression.Options = []) -> NSRegularExpression {
+        if let regex = try? NSRegularExpression(pattern: pattern, options: options) {
+            return regex
+        }
+        assertionFailure("Sanitizer regex failed to compile — pattern will be skipped: \(pattern)")
+        // "(?!)" is a negative lookahead that never matches, so substitution is a no-op.
+        // swiftlint:disable:next force_try
+        return try! NSRegularExpression(pattern: "(?!)")
+    }
+
+    private static let userPathRegex = makeRegex(#"/Users/[^/\s]+/"#)
+    private static let absolutePathRegex = makeRegex(#"(?<!https:)(?<!http:)/(?:Users|private|var|tmp|Volumes|Applications)[^\s"]*"#)
+    private static let rawURLRegex = makeRegex(#"https?://[^\s"]+"#, options: [.caseInsensitive])
+    private static let apiKeyRegex = makeRegex(#"sk-[A-Za-z0-9_-]+"#)
+    private static let commonSecretRegex = makeRegex(
+        #"\b(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|phc_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|xoxx-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}\.[A-Za-z0-9._-]{10,})\b"#
     )
-    private static let bearerRegex = try! NSRegularExpression(pattern: #"Bearer\s+[A-Za-z0-9._-]+"#, options: [.caseInsensitive])
-    private static let secretAssignmentRegex = try! NSRegularExpression(
-        pattern: #"(?i)\b((?:access_)?token|refresh_token|api[_-]?key|x-api-key|signature|x-amz-signature)\s*[:=]\s*([^\s,;]+)"#
+    private static let bearerRegex = makeRegex(#"Bearer\s+[A-Za-z0-9._-]+"#, options: [.caseInsensitive])
+    private static let secretAssignmentRegex = makeRegex(
+        #"(?i)\b((?:access_)?token|refresh_token|api[_-]?key|x-api-key|signature|x-amz-signature)\s*[:=]\s*([^\s,;]+)"#
     )
-    private static let emailRegex = try! NSRegularExpression(pattern: #"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}"#, options: [.caseInsensitive])
+    private static let emailRegex = makeRegex(#"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}"#, options: [.caseInsensitive])
 
     static func sanitizeProperties(
         _ properties: [String: String],
