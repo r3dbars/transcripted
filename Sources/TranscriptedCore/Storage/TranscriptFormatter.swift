@@ -16,11 +16,6 @@ extension TranscriptSaver {
          .replacingOccurrences(of: "\t", with: "\\t")
     }
 
-    static func formatSourceLabel(_ source: String) -> String {
-        // Map "System Audio" to shorter "SysAudio"
-        return source == "System Audio" ? "SysAudio" : source
-    }
-
     /// Format transcript as markdown with metadata header
     static func formatMarkdown(text: String, duration: TimeInterval, date: Date) -> String {
         let dateFormatter = DateFormatter()
