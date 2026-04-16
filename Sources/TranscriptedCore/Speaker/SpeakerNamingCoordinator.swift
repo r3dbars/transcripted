@@ -35,7 +35,22 @@ extension TranscriptionTaskManager {
         clips: [SpeakerNamingEntry]
     ) {
         let speakerDB = transcription.speakerDB
-        let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map { ($0.diarizerSpeakerId, $0) })
+        let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map {
+            (Self.speakerClipLookupKey(channel: $0.channel, diarizerSpeakerId: $0.diarizerSpeakerId), $0)
+        })
+
+        // Partition updates: "Keep as You" collapsedToMe updates follow a different
+        // path (delete newly-created profiles, rewrite mic labels to "You") than
+        // regular name/merge/confirm updates. We process both during naming completion.
+        let collapsedUpdates = updates.filter {
+            if case .collapsedToMe = $0.action { return true }
+            return false
+        }
+        let regularUpdates = updates.filter {
+            if case .collapsedToMe = $0.action { return false }
+            return true
+        }
+        let newlyCreatedMicProfileIds = transcriptionResult.newlyCreatedMicProfileIds
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let resolvedURL = TranscriptSaver.resolveTranscriptURL(
@@ -58,7 +73,7 @@ extension TranscriptionTaskManager {
             }
 
             guard let plannedChanges = Self.planNamingUpdates(
-                updates,
+                regularUpdates,
                 clipsBySpeakerId: clipsBySpeakerId,
                 speakerDB: speakerDB
             ) else {
@@ -77,15 +92,30 @@ extension TranscriptionTaskManager {
                 return
             }
 
-            let didFinalizeTranscript = updates.isEmpty || TranscriptSaver.updateSpeakerNames(
+            var didFinalizeTranscript = regularUpdates.isEmpty || TranscriptSaver.updateSpeakerNames(
                 transcriptURL: resolvedURL,
                 updates: plannedChanges.resolvedUpdates,
                 transcriptionResult: transcriptionResult,
                 speakerStore: speakerDB
             )
 
+            if didFinalizeTranscript && !collapsedUpdates.isEmpty {
+                didFinalizeTranscript = TranscriptSaver.collapseMicSpeakersToYou(
+                    transcriptURL: resolvedURL,
+                    collapsedUpdates: collapsedUpdates
+                )
+            }
+
             if didFinalizeTranscript {
                 Self.applyPlannedNamingMutations(plannedChanges.mutations, speakerDB: speakerDB)
+                for update in collapsedUpdates where newlyCreatedMicProfileIds.contains(update.persistentSpeakerId) {
+                    speakerDB.deleteSpeaker(id: update.persistentSpeakerId)
+                    SpeakerClipExtractor.deletePersistedClip(for: update.persistentSpeakerId)
+                    AppLogger.speakers.info("Collapsed mic speaker — deleted newly-created profile", [
+                        "profileId": update.persistentSpeakerId.uuidString,
+                        "diarizerSpeakerId": update.diarizerSpeakerId
+                    ])
+                }
             }
 
             SpeakerClipExtractor.cleanupClips(clips)
@@ -125,7 +155,7 @@ extension TranscriptionTaskManager {
         var mutations: [PlannedSpeakerMutation] = []
 
         for update in updates {
-            let entry = clipsBySpeakerId[update.diarizerSpeakerId]
+            let entry = clipsBySpeakerId[speakerClipLookupKey(channel: update.channel, diarizerSpeakerId: update.diarizerSpeakerId)]
             guard let plan = planPersistentSpeakerResolution(
                 for: update,
                 entry: entry,
@@ -144,6 +174,7 @@ extension TranscriptionTaskManager {
             resolvedUpdates.append(SpeakerNameUpdate(
                 persistentSpeakerId: update.persistentSpeakerId,
                 diarizerSpeakerId: update.diarizerSpeakerId,
+                channel: update.channel,
                 newName: update.newName,
                 previousName: update.previousName,
                 action: update.action,
@@ -240,10 +271,8 @@ extension TranscriptionTaskManager {
             return nil
 
         case .collapsedToMe:
-            // The user clicked "Keep as You" for this mic speaker. Wiring lands in the
-            // follow-up PR that enables mic diarization end-to-end; for now, skip silently
-            // so the DB isn't mutated and the transcript rewrite path doesn't see this
-            // update. Default (off) behavior never produces this action.
+            // Collapsed updates are handled upstream in handleNamingComplete because they
+            // rewrite transcript text and delete only newly-created mic profiles.
             return (update.persistentSpeakerId, [])
         }
     }
@@ -290,6 +319,13 @@ extension TranscriptionTaskManager {
         (name ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+    }
+
+    nonisolated private static func speakerClipLookupKey(
+        channel: UtteranceChannel,
+        diarizerSpeakerId: String
+    ) -> String {
+        "\(channel.rawValue)_\(diarizerSpeakerId)"
     }
 
     @MainActor private func finishNamingFlow(

@@ -51,8 +51,17 @@ public class TranscriptionTaskManager: ObservableObject {
 
     // MARK: - Task Lifecycle
 
-    /// Start a new transcription task in the background
-    public func startTranscription(micURL: URL, systemURL: URL?, outputFolder: URL, healthInfo: RecordingHealthInfo? = nil) {
+    /// Start a new transcription task in the background.
+    /// When `splitLocalSpeakers` is true, the mic channel goes through PyAnnote diarization
+    /// so multiple in-room speakers can be named individually (GitHub #312). Default false
+    /// preserves the single-"You" behavior.
+    public func startTranscription(
+        micURL: URL,
+        systemURL: URL?,
+        outputFolder: URL,
+        healthInfo: RecordingHealthInfo? = nil,
+        splitLocalSpeakers: Bool = false
+    ) {
 
         // Guard: reject concurrent pipelines to prevent model contention
         if !activeTasks.isEmpty {
@@ -81,13 +90,23 @@ public class TranscriptionTaskManager: ObservableObject {
             return
         }
 
-        let task = TranscriptionTask(micURL: micURL, systemURL: systemURL, outputFolder: outputFolder, healthInfo: healthInfo)
+        let task = TranscriptionTask(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: outputFolder,
+            healthInfo: healthInfo,
+            splitLocalSpeakers: splitLocalSpeakers
+        )
 
         activeCount += 1
         backgroundTaskCount += 1
         displayStatus = .gettingReady
 
-        AppLogger.pipeline.info("Starting transcription task", ["taskId": "\(task.id)", "activeCount": "\(activeCount)"])
+        AppLogger.pipeline.info("Starting transcription task", [
+            "taskId": "\(task.id)",
+            "activeCount": "\(activeCount)",
+            "splitLocalSpeakers": "\(splitLocalSpeakers)"
+        ])
 
         let asyncTask = Task {
             do {
@@ -100,7 +119,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     systemURL: systemURL,
                     outputFolder: outputFolder,
                     taskId: task.id,
-                    healthInfo: task.healthInfo
+                    healthInfo: task.healthInfo,
+                    splitLocalSpeakers: task.splitLocalSpeakers
                 )
 
                 await MainActor.run {
@@ -177,12 +197,16 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         do {
+            // Retries don't carry the original task's splitLocalSpeakers flag — retries are
+            // rare and the feature default is off, so we use the default. If users retry
+            // after enabling local split, they can restart the meeting capture instead.
             let transcriptURL = try await transcribeWithSpeakerIdentification(
                 micURL: failed.micAudioURL,
                 systemURL: failed.systemAudioURL,
                 outputFolder: outputFolder,
                 taskId: failedId,
-                healthInfo: nil
+                healthInfo: nil,
+                splitLocalSpeakers: false
             )
 
             AppLogger.pipeline.info("Retry successful", ["file": transcriptURL.lastPathComponent])
