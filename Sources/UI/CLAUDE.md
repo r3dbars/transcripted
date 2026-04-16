@@ -13,7 +13,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (33 Swift files)
+## Files (34 Swift files)
 
 ### Overlay/
 
@@ -36,6 +36,7 @@ dictation overlay and the meeting prompt / recording overlay.
 - `MenuBar/MenuAgentConnectPageView.swift` — agent connection page in the menubar popover
 - `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover
 - `MenuBar/MenuBarHeaderView.swift` — popover header with app name and status
+- `MenuBar/MenuBarModelStatusView.swift` — persistent local-model status badge with download progress, error state, and settings shortcut
 - `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar
 - `MenuBar/MenuBarRecentMeetingsView.swift` — recent meetings list in the popover
 - `MenuBar/MenuBarSettingsView.swift` — settings actions in the popover footer

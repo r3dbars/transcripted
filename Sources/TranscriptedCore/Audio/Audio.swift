@@ -447,11 +447,9 @@ public class Audio: ObservableObject {
                         // Permission granted, proceed with start
                         self.startAudioCaptureAsync()
                     } else {
-                        // Permission denied
-                        DispatchQueue.main.async {
-                            self.error = "Microphone permission required. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted, then try again."
-                            self.isStarting = false
-                        }
+                        // Permission denied — already on main via the outer dispatch
+                        self.error = "Microphone permission required. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted, then try again."
+                        self.isStarting = false
                     }
                 }
             }
