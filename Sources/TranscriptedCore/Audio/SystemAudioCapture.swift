@@ -212,6 +212,7 @@ class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine {
         } catch {
             let errMsg = "Failed to start system audio capture: \(error.localizedDescription)"
             AppLogger.audioSystem.error("Start failed", ["error": errMsg])
+            cleanup()
             errorMessage = errMsg
             throw error
         }
@@ -222,7 +223,11 @@ class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine {
     /// If a new session starts before the delay fires (e.g. monitoring -> recording),
     /// the generation counter will cause the stale cleanup to be skipped.
     func stop() {
-        guard isCapturing else { return }
+        guard isCapturing || isPrepared else { return }
+        guard isCapturing else {
+            cleanup()
+            return
+        }
 
         // Update UI immediately - don't block the main thread
         DispatchQueue.main.async { [weak self] in
@@ -260,7 +265,11 @@ class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine {
     /// (e.g. monitoring -> recording transition) to avoid the race where
     /// delayed cleanup destroys the newly created tap.
     func stopSync() {
-        guard isCapturing else { return }
+        guard isCapturing || isPrepared else { return }
+        guard isCapturing else {
+            cleanup()
+            return
+        }
 
         DispatchQueue.main.async { [weak self] in
             self?.isCapturing = false
