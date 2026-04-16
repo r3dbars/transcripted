@@ -21,7 +21,9 @@ extension TranscriptionTaskManager {
         clips: [SpeakerNamingEntry]
     ) {
         let speakerDB = transcription.speakerDB
-        let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map { ($0.diarizerSpeakerId, $0) })
+        let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map {
+            (Self.speakerClipLookupKey(channel: $0.channel, diarizerSpeakerId: $0.diarizerSpeakerId), $0)
+        })
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let resolvedUpdates = Self.applyNamingUpdates(
@@ -105,7 +107,7 @@ extension TranscriptionTaskManager {
         resolvedUpdates.reserveCapacity(updates.count)
 
         for update in updates {
-            let entry = clipsBySpeakerId[update.diarizerSpeakerId]
+            let entry = clipsBySpeakerId[speakerClipLookupKey(channel: update.channel, diarizerSpeakerId: update.diarizerSpeakerId)]
             guard let resolvedPersistentSpeakerId = resolvePersistentSpeakerId(
                 for: update,
                 entry: entry,
@@ -124,6 +126,7 @@ extension TranscriptionTaskManager {
             resolvedUpdates.append(SpeakerNameUpdate(
                 persistentSpeakerId: update.persistentSpeakerId,
                 diarizerSpeakerId: update.diarizerSpeakerId,
+                channel: update.channel,
                 newName: update.newName,
                 previousName: update.previousName,
                 action: update.action,
@@ -242,6 +245,13 @@ extension TranscriptionTaskManager {
         (name ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+    }
+
+    nonisolated private static func speakerClipLookupKey(
+        channel: UtteranceChannel,
+        diarizerSpeakerId: String
+    ) -> String {
+        "\(channel.rawValue)_\(diarizerSpeakerId)"
     }
 
     @MainActor private func finishNamingFlow(
