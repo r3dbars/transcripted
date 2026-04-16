@@ -43,7 +43,16 @@ public enum SystemAudioStatus: Equatable {
 public class Audio: ObservableObject {
     @Published public var isRecording: Bool = false
     @Published public private(set) var isMonitoring: Bool = false  // Lightweight level metering without file recording
-    private var isStarting: Bool = false  // Prevents double-start during async setup
+    // Security: isStarting is read and written from both the main thread and
+    // background queues (e.g. the AVCaptureDevice permission callback). Protect it
+    // with a lock to prevent a narrow race where two concurrent start() calls both
+    // pass the guard and set up two recording sessions.
+    private var _isStarting: Bool = false
+    private let isStartingLock = NSLock()
+    private var isStarting: Bool {
+        get { isStartingLock.lock(); defer { isStartingLock.unlock() }; return _isStarting }
+        set { isStartingLock.lock(); defer { isStartingLock.unlock() }; _isStarting = newValue }
+    }
     @Published public var audioLevel: Float = 0.0
     @Published public var recordingDuration: TimeInterval = 0.0
     @Published public var audioLevelHistory: [Float] = Array(repeating: 0.0, count: 15)

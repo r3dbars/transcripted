@@ -222,6 +222,30 @@ public enum ModelDownloadService {
         return true
     }
 
+    /// Validate a HuggingFace model ID before interpolating it into download URLs.
+    /// Security: modelId is string-interpolated directly into HTTPS URLs. An attacker-controlled
+    /// or misconfigured value containing path traversal sequences (e.g. "../../foo") or
+    /// URL-breaking characters could cause the request to hit an unexpected endpoint.
+    /// Allowlist: "namespace/model-name" — alphanumerics, hyphens, underscores, dots, and
+    /// exactly one optional slash separating namespace from model name.
+    static func isSafeModelId(_ modelId: String) -> Bool {
+        guard !modelId.isEmpty, modelId.count <= 200 else { return false }
+        // Must not contain ".." traversal components
+        let components = modelId.components(separatedBy: "/")
+        guard !components.contains(".."), !components.contains(".") else { return false }
+        // At most two path components (namespace/model) — extra slashes are suspicious
+        guard components.count <= 2 else { return false }
+        // Each component must be non-empty and consist only of safe characters
+        let safeChars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
+        for component in components {
+            guard !component.isEmpty,
+                  component.unicodeScalars.allSatisfy({ safeChars.contains($0) }) else {
+                return false
+            }
+        }
+        return true
+    }
+
 
     // MARK: - HuggingFace Model Download Infrastructure
 
@@ -238,6 +262,15 @@ public enum ModelDownloadService {
 
     /// Fetch the list of files in a HuggingFace model repository
     static func fetchModelFileList(modelId: String) async throws -> [HFModelFile] {
+        // Security: validate modelId against an allowlist before interpolating into URLs.
+        // An untrusted or misconfigured modelId containing ".." or extra slashes could cause
+        // the request to hit an unintended endpoint on the mirror server.
+        guard isSafeModelId(modelId) else {
+            throw ModelDownloadError(
+                kind: .unknown("Invalid model ID '\(modelId)' — must match namespace/model-name format"),
+                underlyingError: nil
+            )
+        }
         // Try each mirror for the API call
         for mirror in mirrors {
             // Security: use safe URL construction — force-unwrap would crash if modelId or mirror
@@ -310,6 +343,15 @@ public enum ModelDownloadService {
         destination: URL,
         expectedSHA256: String? = nil
     ) async throws {
+        // Security: validate modelId against an allowlist before interpolating into URLs.
+        // Mirrors this check in fetchModelFileList — defense-in-depth for callers that
+        // invoke downloadFileWithMirrorFallback directly.
+        guard isSafeModelId(modelId) else {
+            throw ModelDownloadError(
+                kind: .unknown("Invalid model ID '\(modelId)' — must match namespace/model-name format"),
+                underlyingError: nil
+            )
+        }
         for mirror in mirrors {
             // Security: use safe URL construction — force-unwrap would crash if filename contained
             // URL-unsafe characters (e.g., spaces) not caught by isSafeModelFilename. Skip

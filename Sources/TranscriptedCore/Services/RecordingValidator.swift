@@ -121,7 +121,15 @@ public enum RecordingValidator {
     // MARK: - Save Path Validation
 
     /// System directories that must never be used as a transcript save location.
-    private static let forbiddenPrefixes = ["/System", "/Library", "/usr", "/bin", "/sbin", "/private"]
+    /// Security: ~/Library is included because a tampered UserDefaults value could otherwise
+    /// direct transcript writes into ~/Library/Preferences or ~/Library/Keychains, potentially
+    /// corrupting preference plists or creating confusing files in sensitive locations.
+    private static let forbiddenPrefixes: [String] = {
+        var prefixes = ["/System", "/Library", "/usr", "/bin", "/sbin", "/private"]
+        // Append the user-home Library path at runtime so it resolves correctly for all users.
+        prefixes.append(NSHomeDirectory() + "/Library")
+        return prefixes
+    }()
 
     /// Validates a custom save path is safe to use.
     /// Resolves symlinks and rejects paths containing `..` traversals or targeting system directories.

@@ -25,8 +25,14 @@ public final class SpeakerDatabase: @unchecked Sendable {
             withIntermediateDirectories: true
         )
         dbPath = paths.speakerDB
-        openDatabase()
-        createTables()
+        // Security: run database setup on the serial queue so that isDatabaseOpen is set
+        // within the same queue context that all public methods use. This establishes a
+        // memory barrier preventing public methods from observing a stale isDatabaseOpen=false
+        // if init and a concurrent public-method call race on the same instance.
+        queue.sync {
+            openDatabase()
+            createTables()
+        }
     }
 
     /// Public initializer that accepts a custom SQLite path.
@@ -38,8 +44,11 @@ public final class SpeakerDatabase: @unchecked Sendable {
             at: dbPath.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        openDatabase()
-        createTables()
+        // Security: same queue.sync pattern as private init() — see comment there.
+        queue.sync {
+            openDatabase()
+            createTables()
+        }
     }
 
     deinit {
