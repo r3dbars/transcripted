@@ -7,6 +7,9 @@ import ApplicationServices
 @MainActor
 struct AccessibilityBridge {
 
+    private static let secureTextFieldRole = "AXSecureTextField"
+    private static let textRoles: Set<String> = ["AXTextArea", "AXTextField", "AXWebArea", "AXTextView", "AXComboBox"]
+
     /// Return the focused text element in the given app, or nil if not a text field.
     static func focusedTextElement(for app: NSRunningApplication) -> AXUIElement? {
         guard AXIsProcessTrusted() else { return nil }
@@ -20,7 +23,6 @@ struct AccessibilityBridge {
 
         let axElement = focusedElement as! AXUIElement
 
-        // Check if it's a text-related element
         var roleRef: AnyObject?
         AXUIElementCopyAttributeValue(axElement, kAXRoleAttribute as CFString, &roleRef)
         let role = roleRef as? String ?? ""
@@ -28,13 +30,14 @@ struct AccessibilityBridge {
         // Never expose secure text fields (password, PIN, biometric auth). Some
         // AppKit hosts surface secure fields as AXTextField with subrole
         // AXSecureTextField, so we check both the role and the subrole.
-        if role == "AXSecureTextField" { return nil }
+        if role == secureTextFieldRole { return nil }
+        guard textRoles.contains(role) || role.contains("Text") else { return nil }
+
+        // Subrole IPC only runs for elements that passed the text-role check above,
+        // avoiding a cross-process call for buttons, sliders, and other non-text elements.
         var subroleRef: AnyObject?
         AXUIElementCopyAttributeValue(axElement, kAXSubroleAttribute as CFString, &subroleRef)
-        if let subrole = subroleRef as? String, subrole == "AXSecureTextField" { return nil }
-
-        let textRoles = ["AXTextArea", "AXTextField", "AXWebArea", "AXTextView", "AXComboBox"]
-        guard textRoles.contains(role) || role.contains("Text") else { return nil }
+        if let subrole = subroleRef as? String, subrole == secureTextFieldRole { return nil }
 
         return axElement
     }
