@@ -76,6 +76,12 @@ bash build-deps.sh --force
 NOTARY_PROFILE=<profile-name> bash build-beta.sh <beta-token> <user-name>
 ```
 
+Before you publish a user-facing release note, sanity-check the release state:
+
+- compare `Info.plist` `CFBundleShortVersionString` against the latest GitHub release tag
+- review the merged PRs since that latest published release so the note reflects shipped changes, not just local branch state
+- if `docs/appcast.xml` still points at the older release, say plainly that existing installs will not discover the new build in-app yet
+
 If you expect existing installs of Transcripted to discover the new version
 inside the app, do not stop after the DMG is built. You must also complete the
 Sparkle steps in `docs/sparkle-updates.md`.

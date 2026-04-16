@@ -24,6 +24,15 @@ struct AccessibilityBridge {
         var roleRef: AnyObject?
         AXUIElementCopyAttributeValue(axElement, kAXRoleAttribute as CFString, &roleRef)
         let role = roleRef as? String ?? ""
+
+        // Never expose secure text fields (password, PIN, biometric auth). Some
+        // AppKit hosts surface secure fields as AXTextField with subrole
+        // AXSecureTextField, so we check both the role and the subrole.
+        if role == "AXSecureTextField" { return nil }
+        var subroleRef: AnyObject?
+        AXUIElementCopyAttributeValue(axElement, kAXSubroleAttribute as CFString, &subroleRef)
+        if let subrole = subroleRef as? String, subrole == "AXSecureTextField" { return nil }
+
         let textRoles = ["AXTextArea", "AXTextField", "AXWebArea", "AXTextView", "AXComboBox"]
         guard textRoles.contains(role) || role.contains("Text") else { return nil }
 

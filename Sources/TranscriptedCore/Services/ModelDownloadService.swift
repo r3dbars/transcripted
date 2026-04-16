@@ -331,8 +331,16 @@ public enum ModelDownloadService {
                     }
 
                     // Security: verify SHA-256 digest of downloaded file when the API manifest
-                    // provided one. Rejects files where the digest does not match — a compromised
-                    // mirror cannot substitute malicious model weights without detection.
+                    // provided one. LFS-tracked files (model weights) always have a digest.
+                    // Non-LFS files (config JSON, tokenizer, etc.) do not provide a digest in the
+                    // HuggingFace manifest — log a warning so these unverified downloads are
+                    // visible in audit trails and can be investigated if a mirror is compromised.
+                    if expectedSHA256 == nil {
+                        AppLogger.services.warning("Downloading file without SHA-256 integrity check — non-LFS file has no digest in HuggingFace manifest", [
+                            "file": filename,
+                            "mirror": mirror
+                        ])
+                    }
                     if let expected = expectedSHA256 {
                         let computed = try sha256Hex(of: tempURL)
                         guard computed.lowercased() == expected.lowercased() else {

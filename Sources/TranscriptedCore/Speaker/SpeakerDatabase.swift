@@ -12,6 +12,14 @@ public final class SpeakerDatabase: @unchecked Sendable {
     public static let shared = SpeakerDatabase()
 
     var db: OpaquePointer?
+    // Thread-safety invariant:
+    // - Writes happen only during `init` (single-threaded construction) inside
+    //   `openDatabase`/`configureOpenDatabase`.
+    // - Reads happen only inside `queue.sync { ... }` via the `*Impl` helpers
+    //   below. This serializes reader visibility through the queue's memory
+    //   barrier, which is why the class can safely be `@unchecked Sendable`
+    //   even though this field is a plain `var Bool`.
+    // If a new caller reads this outside the queue, add a queue.sync hop.
     var isDatabaseOpen = false
     let dbPath: URL
     let queue = DispatchQueue(label: "com.transcripted.speakerdb", qos: .utility)
@@ -82,7 +90,6 @@ public final class SpeakerDatabase: @unchecked Sendable {
     /// Apply permissions and WAL pragmas to an already-opened database handle.
     /// Called on both initial open and corruption-recovery re-open.
     private func configureOpenDatabase() {
-        isDatabaseOpen = true
         FileManager.default.restrictSQLiteArtifactsToOwnerOnly(atPath: dbPath.path)
         // WAL mode for crash safety, busy timeout to avoid SQLITE_BUSY, NORMAL sync for performance
         let pragmas = [
@@ -98,6 +105,9 @@ public final class SpeakerDatabase: @unchecked Sendable {
                 sqlite3_free(errorMessage)
             }
         }
+        // Security: mark the database open only after all pragmas are applied so any concurrent
+        // reader that observes isDatabaseOpen=true is guaranteed to see a fully-configured handle.
+        isDatabaseOpen = true
     }
 
     /// Verify database integrity using PRAGMA quick_check.
@@ -217,6 +227,11 @@ public final class SpeakerDatabase: @unchecked Sendable {
 
     /// Add a new speaker or update an existing one's embedding.
     /// When updating, uses exponential moving average to refine the voice fingerprint.
+    ///
+    /// When `existingId` is non-nil and the DB has no matching row, the caller's
+    /// UUID is used for the newly-inserted row instead of minting a fresh one.
+    /// Callers that pre-generate IDs (e.g. naming coordinator) rely on this;
+    /// callers that pass `nil` always get a fresh UUID.
     public func addOrUpdateSpeaker(embedding: [Float], existingId: UUID? = nil) -> SpeakerProfile {
         return queue.sync {
             addOrUpdateSpeakerImpl(embedding: embedding, existingId: existingId)
@@ -280,7 +295,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
             )
         } else {
             // New speaker
-            let newId = UUID()
+            let newId = existingId ?? UUID()
             let normalized = l2Normalize(embedding)
             let embeddingData = normalized.withUnsafeBufferPointer { Data(buffer: $0) }
 

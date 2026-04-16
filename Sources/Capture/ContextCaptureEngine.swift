@@ -348,6 +348,9 @@ class ContextCaptureEngine: ObservableObject {
             &hotkeyRef
         )
         if dictationStatus != noErr {
+            // Carbon leaves the ref undefined on failure — nil it so unregister
+            // doesn't later call UnregisterEventHotKey on a bogus pointer.
+            hotkeyRef = nil
             errors.append("Dictation shortcut")
             EventReporter.shared.capture(level: .error, engine: "capture", event: "hotkey_register_failed",
                 message: "Dictation hotkey registration failed", context: ["os_status": "\(dictationStatus)"])
@@ -364,6 +367,7 @@ class ContextCaptureEngine: ObservableObject {
             &meetingHotkeyRef
         )
         if meetingStatus != noErr {
+            meetingHotkeyRef = nil
             errors.append("Meeting shortcut")
             EventReporter.shared.capture(level: .error, engine: "capture", event: "hotkey_register_failed",
                 message: "Meeting hotkey registration failed", context: ["os_status": "\(meetingStatus)"])

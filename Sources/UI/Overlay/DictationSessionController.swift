@@ -124,18 +124,8 @@ class DictationSessionController: ObservableObject {
 
     // MARK: - Removed Draft Mode
 
-    func startSession(imageData: Data?, sourceApp: NSRunningApplication?) {
-        let _ = imageData
-        let _ = sourceApp
-        guard let (_, overlayController) = readyState() else { return }
-        overlayController.showError(Self.removedDraftModeMessage)
-    }
-
-    func stopSessionAndDraft() {
-        guard let (_, overlayController) = readyState() else { return }
-        overlayController.showError(Self.removedDraftModeMessage)
-    }
-
+    // `cancelSession()` is still invoked by ContextCaptureEngine on interrupt paths.
+    // The `startSession` / `stopSessionAndDraft` stubs were removed — they had no callers.
     func cancelSession() {
         cancelSession(message: Self.removedDraftModeMessage)
     }
@@ -427,7 +417,7 @@ class DictationSessionController: ObservableObject {
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
             let pasteOutcome = self.pasteWithClipboardRestore(text)
-            self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
+            let saveFailureMessage = self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
             let wordCount = text.split(whereSeparator: \.isWhitespace).count
             let deliveryLevel: EventLevel = pasteOutcome.delivery == .pasted ? .info : .warning
             DiagnosticsTrail.record(
@@ -449,9 +439,19 @@ class DictationSessionController: ObservableObject {
             switch pasteOutcome {
             case .pasted:
                 AppSoundPlayer.shared.play(.dictationDelivered)
-                overlayController.showSuccessAndDismiss()
+                if let saveFailureMessage {
+                    overlayController.showError(saveFailureMessage)
+                } else {
+                    overlayController.showSuccessAndDismiss()
+                }
             case .copied(let message), .failed(let message):
-                overlayController.showError(message)
+                let combinedMessage: String
+                if let saveFailureMessage {
+                    combinedMessage = "\(message) \(saveFailureMessage)"
+                } else {
+                    combinedMessage = message
+                }
+                overlayController.showError(combinedMessage)
             }
             isDictating = false
             appState.logger.log("DICTATION | completed with outcome \(pasteOutcome)")
@@ -837,7 +837,8 @@ class DictationSessionController: ObservableObject {
         pasteboard.setString(text, forType: .string)
     }
 
-    private func persistDictationTranscript(text: String, delivery: DictationDelivery) {
+    @discardableResult
+    private func persistDictationTranscript(text: String, delivery: DictationDelivery) -> String? {
         do {
             let saved = try DictationTranscriptWriter.save(
                 text: text,
@@ -856,6 +857,7 @@ class DictationSessionController: ObservableObject {
                     ]
                 )
             )
+            return nil
         } catch {
             appState?.logger.log("DICTATION | failed to save markdown export: \(error.localizedDescription)")
             DiagnosticsTrail.record(
@@ -866,6 +868,7 @@ class DictationSessionController: ObservableObject {
                 message: "Failed to save dictation markdown export",
                 context: dictationContext(extra: ["error": error.localizedDescription])
             )
+            return "Transcripted couldn't save a local copy of this dictation. Check your save location and available disk space."
         }
     }
 

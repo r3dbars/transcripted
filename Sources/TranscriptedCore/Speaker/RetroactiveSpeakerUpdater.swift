@@ -256,11 +256,15 @@ extension TranscriptSaver {
             }
 
             let obsidianEnabled = isObsidianFormatted(content)
-            let updatesBySystemKey = Dictionary(uniqueKeysWithValues: updates.map {
+            let updatesByChannelKey = Dictionary(uniqueKeysWithValues: updates.map {
                 (
-                    "system_\($0.diarizerSpeakerId)",
+                    speakerUpdateKey(channel: $0.channel, diarizerSpeakerId: $0.diarizerSpeakerId),
                     (
-                        oldName: currentSpeakerName(in: content, diarizerSpeakerId: $0.diarizerSpeakerId)
+                        oldName: currentSpeakerName(
+                            in: content,
+                            diarizerSpeakerId: $0.diarizerSpeakerId,
+                            channel: $0.channel
+                        )
                             ?? "Speaker \($0.diarizerSpeakerId)",
                         newName: $0.newName
                     )
@@ -274,7 +278,7 @@ extension TranscriptSaver {
             guard rewriteFullTranscriptSection(
                 in: &content,
                 result: transcriptionResult,
-                updatesBySystemKey: updatesBySystemKey,
+                updatesByChannelKey: updatesByChannelKey,
                 obsidianEnabled: obsidianEnabled
             ) else {
                 AppLogger.pipeline.error("Failed to rewrite transcript body for speaker updates", [
@@ -286,9 +290,20 @@ extension TranscriptSaver {
             guard rewriteRemoteSpeakerBreakdown(
                 in: &content,
                 result: transcriptionResult,
-                updatesBySystemKey: updatesBySystemKey
+                updatesByChannelKey: updatesByChannelKey
             ) else {
                 AppLogger.pipeline.error("Failed to rewrite speaker breakdown for speaker updates", [
+                    "path": transcriptURL.lastPathComponent
+                ])
+                return false
+            }
+
+            guard rewriteLocalSpeakerBreakdownIfPresent(
+                in: &content,
+                result: transcriptionResult,
+                updatesByChannelKey: updatesByChannelKey
+            ) else {
+                AppLogger.pipeline.error("Failed to rewrite local speaker breakdown for speaker updates", [
                     "path": transcriptURL.lastPathComponent
                 ])
                 return false
@@ -387,7 +402,6 @@ extension TranscriptSaver {
             do {
                 let pattern = #"\n- \*\*Speakers Detected:\*\* \d+\n"#
                 if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
-                    let range = NSRange(content.startIndex..., in: content)
                     // Only replace the FIRST match (the mic block's one — remote block
                     // is always written so removing both would break the remote stats).
                     // We find the mic block anchor and scope to that.
@@ -609,6 +623,12 @@ extension TranscriptSaver {
                 }
             }
 
+            let block = lines[lineIndex..<nextEntryIndex]
+            guard speakerBlockMatchesChannel(block, channel: update.channel) else {
+                lineIndex = nextEntryIndex
+                continue
+            }
+
             let dbIdLine = #"    db_id: "\#(resolvedPersistentId)""#
             let nameLine = #"    name: "\#(escapeYAML(update.newName))""#
             let sourceLine = "    source: \(NameSource.userManual)"
@@ -662,7 +682,11 @@ extension TranscriptSaver {
         return content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound
     }
 
-    private static func currentSpeakerName(in content: String, diarizerSpeakerId: String) -> String? {
+    private static func currentSpeakerName(
+        in content: String,
+        diarizerSpeakerId: String,
+        channel: UtteranceChannel
+    ) -> String? {
         guard let frontmatterRange = frontmatterContentRange(in: content) else { return nil }
 
         let lines = String(content[frontmatterRange]).components(separatedBy: "\n")
@@ -680,6 +704,12 @@ extension TranscriptSaver {
                 $0.trimmingCharacters(in: .whitespaces).hasPrefix("- ")
             }) ?? lines.count
 
+            let block = lines[lineIndex..<nextEntryIndex]
+            guard speakerBlockMatchesChannel(block, channel: channel) else {
+                lineIndex = nextEntryIndex
+                continue
+            }
+
             for index in (lineIndex + 1)..<nextEntryIndex {
                 let candidate = lines[index].trimmingCharacters(in: .whitespaces)
                 guard candidate.hasPrefix("name:") else { continue }
@@ -695,10 +725,29 @@ extension TranscriptSaver {
         return nil
     }
 
+    private static func speakerBlockMatchesChannel(
+        _ block: ArraySlice<String>,
+        channel: UtteranceChannel
+    ) -> Bool {
+        let expectedLine = "channel: \(channel.rawValue)"
+        let normalizedBlock = block.map { $0.trimmingCharacters(in: .whitespaces) }
+        if normalizedBlock.contains(expectedLine) {
+            return true
+        }
+
+        // Older transcripts predate explicit channel metadata. Treat a missing channel
+        // line as the legacy system-audio case so historical rename flows still work.
+        if channel == .system {
+            return !normalizedBlock.contains(where: { $0.hasPrefix("channel:") })
+        }
+
+        return false
+    }
+
     private static func rewriteFullTranscriptSection(
         in content: inout String,
         result: TranscriptionResult,
-        updatesBySystemKey: [String: (oldName: String, newName: String)],
+        updatesByChannelKey: [String: (oldName: String, newName: String)],
         obsidianEnabled: Bool
     ) -> Bool {
         if let range = fullTranscriptContentRange(in: content) {
@@ -706,7 +755,7 @@ extension TranscriptSaver {
                 in: &content,
                 range: range,
                 result: result,
-                updatesBySystemKey: updatesBySystemKey,
+                updatesByChannelKey: updatesByChannelKey,
                 obsidianEnabled: obsidianEnabled
             )
         }
@@ -716,7 +765,7 @@ extension TranscriptSaver {
                 in: &content,
                 range: range,
                 result: result,
-                updatesBySystemKey: updatesBySystemKey,
+                updatesByChannelKey: updatesByChannelKey,
                 obsidianEnabled: obsidianEnabled
             )
         }
@@ -726,7 +775,7 @@ extension TranscriptSaver {
                 in: &content,
                 range: range,
                 result: result,
-                updatesBySystemKey: updatesBySystemKey,
+                updatesByChannelKey: updatesByChannelKey,
                 obsidianEnabled: obsidianEnabled
             )
         }
@@ -737,15 +786,48 @@ extension TranscriptSaver {
     private static func rewriteRemoteSpeakerBreakdown(
         in content: inout String,
         result: TranscriptionResult,
-        updatesBySystemKey: [String: (oldName: String, newName: String)]
+        updatesByChannelKey: [String: (oldName: String, newName: String)]
     ) -> Bool {
-        guard let headerRange = content.range(of: "#### Remote Speaker Breakdown\n\n") else {
+        rewriteSpeakerBreakdown(
+            in: &content,
+            header: "#### Remote Speaker Breakdown\n\n",
+            utterances: result.systemUtterances,
+            channel: .system,
+            updatesByChannelKey: updatesByChannelKey
+        )
+    }
+
+    private static func rewriteLocalSpeakerBreakdownIfPresent(
+        in content: inout String,
+        result: TranscriptionResult,
+        updatesByChannelKey: [String: (oldName: String, newName: String)]
+    ) -> Bool {
+        guard content.contains("#### Local Speaker Breakdown\n\n") else { return true }
+
+        return rewriteSpeakerBreakdown(
+            in: &content,
+            header: "#### Local Speaker Breakdown\n\n",
+            utterances: result.micUtterances,
+            channel: .mic,
+            updatesByChannelKey: updatesByChannelKey
+        )
+    }
+
+    private static func rewriteSpeakerBreakdown(
+        in content: inout String,
+        header: String,
+        utterances: [TranscriptionUtterance],
+        channel: UtteranceChannel,
+        updatesByChannelKey: [String: (oldName: String, newName: String)]
+    ) -> Bool {
+        guard let headerRange = content.range(of: header) else {
             return false
         }
 
         let footerCandidates = [
-            "\n\n---\n\n## Full Transcript",
-            "\n\n## Transcript",
+            "\n\n#### ",
+            "\n\n### ",
+            "\n\n## ",
             "\n\n---\n\n",
         ]
         guard let footerRange = footerCandidates.compactMap({
@@ -754,13 +836,13 @@ extension TranscriptSaver {
             return false
         }
 
-        let speakerGroups = Dictionary(grouping: result.systemUtterances, by: { $0.speakerId })
+        let speakerGroups = Dictionary(grouping: utterances, by: { $0.speakerId })
         let lines = speakerGroups.keys.sorted().map { speakerId in
             let utterances = speakerGroups[speakerId] ?? []
-            let speakerKey = "system_\(speakerId)"
-            let speakerName = updatesBySystemKey[speakerKey]?.newName
-                ?? updatesBySystemKey[speakerKey]?.oldName
-                ?? currentSpeakerName(in: content, diarizerSpeakerId: String(speakerId))
+            let speakerKey = speakerUpdateKey(channel: channel, diarizerSpeakerId: String(speakerId))
+            let speakerName = updatesByChannelKey[speakerKey]?.newName
+                ?? updatesByChannelKey[speakerKey]?.oldName
+                ?? currentSpeakerName(in: content, diarizerSpeakerId: String(speakerId), channel: channel)
                 ?? "Speaker \(speakerId)"
             let speakingTime = utterances.reduce(0.0) { $0 + ($1.end - $1.start) }
             let wordCount = utterances.reduce(0) { $0 + $1.transcript.split(separator: " ").count }
@@ -812,7 +894,7 @@ extension TranscriptSaver {
         in content: inout String,
         range: Range<String.Index>,
         result: TranscriptionResult,
-        updatesBySystemKey: [String: (oldName: String, newName: String)],
+        updatesByChannelKey: [String: (oldName: String, newName: String)],
         obsidianEnabled: Bool
     ) -> Bool {
         let lines = String(content[range]).components(separatedBy: "\n")
@@ -833,8 +915,11 @@ extension TranscriptSaver {
                 return false
             }
 
-            let speakerKey = "\(utterance.channel == 0 ? "mic" : "system")_\(utterance.speakerId)"
-            guard let update = updatesBySystemKey[speakerKey] else { continue }
+            let speakerKey = speakerUpdateKey(
+                channel: utterance.channel == 0 ? .mic : .system,
+                diarizerSpeakerId: String(utterance.speakerId)
+            )
+            guard let update = updatesByChannelKey[speakerKey] else { continue }
 
             let label = transcriptLabel(
                 for: update.newName,
@@ -853,7 +938,7 @@ extension TranscriptSaver {
         in content: inout String,
         range: Range<String.Index>,
         result: TranscriptionResult,
-        updatesBySystemKey: [String: (oldName: String, newName: String)],
+        updatesByChannelKey: [String: (oldName: String, newName: String)],
         obsidianEnabled: Bool
     ) -> Bool {
         let chunks = String(content[range])
@@ -878,8 +963,11 @@ extension TranscriptSaver {
                 return false
             }
 
-            let speakerKey = "\(utterance.channel == 0 ? "mic" : "system")_\(utterance.speakerId)"
-            if let update = updatesBySystemKey[speakerKey] {
+            let speakerKey = speakerUpdateKey(
+                channel: utterance.channel == 0 ? .mic : .system,
+                diarizerSpeakerId: String(utterance.speakerId)
+            )
+            if let update = updatesByChannelKey[speakerKey] {
                 let label = transcriptLabel(
                     for: update.newName,
                     currentLabel: components.label,
@@ -895,6 +983,13 @@ extension TranscriptSaver {
 
         content.replaceSubrange(range, with: rewrittenChunks.joined(separator: "\n\n"))
         return true
+    }
+
+    private static func speakerUpdateKey(
+        channel: UtteranceChannel,
+        diarizerSpeakerId: String
+    ) -> String {
+        "\(channel.rawValue)_\(diarizerSpeakerId)"
     }
 
     private static func parseTranscriptLine(_ line: String) -> (timestamp: String, source: String, label: String, text: String)? {
