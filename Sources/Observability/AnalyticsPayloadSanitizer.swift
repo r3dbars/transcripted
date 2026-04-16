@@ -51,7 +51,7 @@ enum AnalyticsPayloadSanitizer {
     ) -> [String: String] {
         var sanitized: [String: String] = [:]
 
-        for (key, value) in properties.sorted(by: { $0.key < $1.key }) {
+        for (key, value) in properties {
             guard allowedKeys.contains(key) else { continue }
             guard !shouldDrop(key: key) else { continue }
 

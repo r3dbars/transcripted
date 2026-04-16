@@ -40,7 +40,7 @@ enum SentryPayloadSanitizer {
     private static let commonSecretRegex = makeRegex(
         #"\b(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|phc_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|xoxx-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}\.[A-Za-z0-9._-]{10,})\b"#
     )
-    private static let bearerRegex = makeRegex(#"Bearer [A-Za-z0-9._-]+"#)
+    private static let bearerRegex = makeRegex(#"Bearer\s+[A-Za-z0-9._-]+"#, options: [.caseInsensitive])
     private static let secretAssignmentRegex = makeRegex(
         #"(?i)\b((?:access_)?token|refresh_token|api[_-]?key|x-api-key|signature|x-amz-signature)\s*[:=]\s*([^\s,;]+)"#
     )
@@ -50,7 +50,7 @@ enum SentryPayloadSanitizer {
     static func sanitizeTags(_ tags: [String: String]) -> [String: String] {
         var sanitized: [String: String] = [:]
 
-        for (key, value) in tags.sorted(by: { $0.key < $1.key }) {
+        for (key, value) in tags {
             guard !shouldDrop(key: key) else { continue }
             let cleaned = sanitizeText(value)
             guard !cleaned.isEmpty else { continue }
@@ -63,7 +63,7 @@ enum SentryPayloadSanitizer {
     static func sanitizeContext(_ context: [String: String]) -> [String: String] {
         var sanitized: [String: String] = [:]
 
-        for (key, value) in context.sorted(by: { $0.key < $1.key }) {
+        for (key, value) in context {
             guard !shouldDrop(key: key) else { continue }
             let cleaned = sanitizeText(value)
             guard !cleaned.isEmpty else { continue }
@@ -76,7 +76,7 @@ enum SentryPayloadSanitizer {
     static func sanitizeAnyDictionary(_ dictionary: [String: Any]) -> [String: Any] {
         var sanitized: [String: Any] = [:]
 
-        for (key, value) in dictionary.sorted(by: { $0.key < $1.key }) {
+        for (key, value) in dictionary {
             guard !shouldDrop(key: key) else { continue }
             guard let cleaned = sanitizeAnyValue(value) else { continue }
             sanitized[key] = cleaned
@@ -88,7 +88,7 @@ enum SentryPayloadSanitizer {
     static func sanitizeEventContexts(_ contexts: [String: [String: Any]]) -> [String: [String: Any]] {
         var sanitized: [String: [String: Any]] = [:]
 
-        for (key, value) in contexts.sorted(by: { $0.key < $1.key }) {
+        for (key, value) in contexts {
             guard !shouldDrop(key: key) else { continue }
             let cleaned = sanitizeAnyDictionary(value)
             guard !cleaned.isEmpty else { continue }
