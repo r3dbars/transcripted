@@ -9,7 +9,7 @@ struct IndexValidator {
         let target = "transcripted.json"
 
         guard FileManager.default.fileExists(atPath: indexPath.path) else {
-            return [.warn("index/file-exists", target: target, detail: "transcripted.json not found")]
+            return [.pass("index/legacy-index-optional", target: target)]
         }
 
         guard let data = try? Data(contentsOf: indexPath),

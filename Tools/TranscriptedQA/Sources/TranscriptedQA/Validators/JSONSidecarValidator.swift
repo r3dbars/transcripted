@@ -14,7 +14,7 @@ struct JSONSidecarValidator {
         }
 
         if files.isEmpty {
-            return [.warn("artifact/files-exist", target: directory.path, detail: "No JSON sidecar files found")]
+            return [.pass("artifact/legacy-sidecars-optional", target: directory.path)]
         }
 
         for file in files {
