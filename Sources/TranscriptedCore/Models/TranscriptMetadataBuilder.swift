@@ -34,9 +34,32 @@ public struct RecordingHealthInfo {
 
     /// Create health info from Audio instance.
     public static func from(audio: Audio, systemCapture: (any SystemAudioCaptureEngine)?) -> RecordingHealthInfo {
-        let successRate = systemCapture?.bufferSuccessRate ?? 1.0
+        let successRate: Double = {
+            if audio.systemAudioFailed || audio.systemAudioStatus == .failed {
+                return 0.0
+            }
+            return systemCapture?.bufferSuccessRate ?? 1.0
+        }()
+
+        let baseQuality = CaptureQuality.from(successRate: successRate)
+        let adjustedQuality: CaptureQuality
+        if audio.deviceSwitchCount >= 3 {
+            adjustedQuality = .degraded
+        } else if audio.deviceSwitchCount >= 1 || !audio.recordingGaps.isEmpty {
+            switch baseQuality {
+            case .excellent:
+                adjustedQuality = .good
+            case .good:
+                adjustedQuality = .fair
+            case .fair, .degraded:
+                adjustedQuality = baseQuality
+            }
+        } else {
+            adjustedQuality = baseQuality
+        }
+
         return RecordingHealthInfo(
-            captureQuality: CaptureQuality.from(successRate: successRate),
+            captureQuality: adjustedQuality,
             audioGaps: audio.recordingGaps.count,
             deviceSwitches: audio.deviceSwitchCount,
             gapDescriptions: audio.recordingGaps.map { $0.description }

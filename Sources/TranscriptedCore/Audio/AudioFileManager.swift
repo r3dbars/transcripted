@@ -38,6 +38,7 @@ extension Audio {
             try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
             let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
             let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_system.wav")
+            let sessionGeneration = recordingSessionGeneration
             AppLogger.audioSystem.info("System audio file URL", ["file": fileURL.lastPathComponent])
 
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -46,12 +47,34 @@ extension Audio {
                     return
                 }
 
+                func cleanupAbandonedSetup() {
+                    strongSelf.systemAudioFileQueue.sync {
+                        strongSelf.systemAudioFile = nil
+                    }
+                    capture.stopSync()
+                    try? FileManager.default.removeItem(at: fileURL)
+                }
+
+                func sessionIsCurrent() -> Bool {
+                    sessionGeneration == strongSelf.recordingSessionGeneration
+                }
+
                 AppLogger.audioSystem.info("Starting system audio capture on background thread")
 
                 do {
+                    guard sessionIsCurrent() else {
+                        cleanupAbandonedSetup()
+                        return
+                    }
+
                     // Step 1: Prepare the tap (creates aggregate device, gets format)
                     // This does NOT start the I/O proc yet
                     try capture.prepare()
+
+                    guard sessionIsCurrent() else {
+                        cleanupAbandonedSetup()
+                        return
+                    }
 
                     // Step 2: Get the format from the tap (now corrected to match device nominal rate)
                     guard let tapFormat = capture.audioFormat else {
@@ -81,10 +104,16 @@ extension Audio {
                     strongSelf.systemAudioFileQueue.sync { strongSelf.systemAudioFile = file }
                     AppLogger.audioSystem.info("System audio file created before I/O proc", ["sampleRate": "\(Int(sampleRate))", "channels": "\(tapFormat.channelCount)"])
 
+                    guard sessionIsCurrent() else {
+                        cleanupAbandonedSetup()
+                        return
+                    }
+
                     // Step 4: Now start the I/O proc with a lightweight callback
                     // The file already exists, so callback only needs to copy+write
                     try capture.start { [weak self] systemBuffer in
                         guard let self = self else { return }
+                        guard sessionGeneration == self.recordingSessionGeneration else { return }
 
                         self.systemBufferCount += 1
                         let currentBufferCount = self.systemBufferCount
@@ -129,12 +158,23 @@ extension Audio {
                             }
                         }
                     }
+
+                    guard sessionIsCurrent() else {
+                        cleanupAbandonedSetup()
+                        return
+                    }
+
                     DispatchQueue.main.async {
+                        guard sessionGeneration == strongSelf.recordingSessionGeneration else { return }
                         strongSelf.systemAudioFileURL = fileURL
                     }
                     AppLogger.audioSystem.info("System audio capture started")
 
                 } catch {
+                    guard sessionIsCurrent() else {
+                        cleanupAbandonedSetup()
+                        return
+                    }
                     AppLogger.audioSystem.warning("System audio failed", ["error": error.localizedDescription])
                     strongSelf.systemAudioFileQueue.sync {
                         strongSelf.systemAudioFile = nil

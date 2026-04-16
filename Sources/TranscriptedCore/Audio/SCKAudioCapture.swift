@@ -110,6 +110,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine {
         }
 
         self.bufferCallback = bufferCallback
+        errorMessage = nil
 
         // Output handler converts CMSampleBuffer → AVAudioPCMBuffer
         let output = SCKAudioStreamOutput { [weak self] buffer in
@@ -123,31 +124,40 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine {
         self.streamOutput = output
 
         let queue = DispatchQueue(label: "SCKAudioCapture.output", qos: .userInitiated)
-        try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: queue)
+        do {
+            try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: queue)
 
-        // Start capture — synchronous wait since we're on a background thread.
-        let semaphore = DispatchSemaphore(value: 0)
-        var startError: Error?
-        stream.startCapture { error in
-            startError = error
-            semaphore.signal()
-        }
-        semaphore.wait()
+            // Start capture — synchronous wait since we're on a background thread.
+            let semaphore = DispatchSemaphore(value: 0)
+            var startError: Error?
+            stream.startCapture { error in
+                startError = error
+                semaphore.signal()
+            }
+            semaphore.wait()
 
-        if let error = startError {
+            if let error = startError {
+                throw error
+            }
+
+            _isCapturing = true
+            AppLogger.audioSystem.info("SCKAudioCapture: now capturing system audio")
+        } catch {
             AppLogger.audioSystem.error("SCKAudioCapture: start failed", ["error": error.localizedDescription])
+            cleanup()
             DispatchQueue.main.async { self.errorMessage = error.localizedDescription }
             throw error
         }
-
-        _isCapturing = true
-        AppLogger.audioSystem.info("SCKAudioCapture: now capturing system audio")
     }
 
     func stop() {
-        guard _isCapturing, let stream = stream else { return }
-        _isCapturing = false
+        guard let stream = stream else { return }
+        guard _isCapturing else {
+            cleanup()
+            return
+        }
 
+        _isCapturing = false
         stream.stopCapture { [weak self] error in
             if let error = error {
                 AppLogger.audioSystem.warning("SCKAudioCapture: stop error", ["error": error.localizedDescription])
@@ -157,9 +167,13 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine {
     }
 
     func stopSync() {
-        guard _isCapturing, let stream = stream else { return }
-        _isCapturing = false
+        guard let stream = stream else { return }
+        guard _isCapturing else {
+            cleanup()
+            return
+        }
 
+        _isCapturing = false
         let semaphore = DispatchSemaphore(value: 0)
         stream.stopCapture { _ in
             semaphore.signal()
@@ -171,10 +185,12 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine {
     private func cleanup() {
         AppLogger.audioSystem.info("SCKAudioCapture: cleanup")
         logStats()
+        _isCapturing = false
         stream = nil
         streamOutput = nil
         bufferCallback = nil
         _audioFormat = nil
+        resetStats()
     }
 
     private func logStats() {
@@ -186,6 +202,13 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine {
             "total": "\(total)",
             "withData": "\(withData)"
         ])
+    }
+
+    private func resetStats() {
+        statsLock.lock()
+        _totalBuffers = 0
+        _buffersWithData = 0
+        statsLock.unlock()
     }
 }
 
