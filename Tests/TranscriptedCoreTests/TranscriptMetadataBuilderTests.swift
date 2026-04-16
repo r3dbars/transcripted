@@ -2,7 +2,7 @@ import XCTest
 @testable import TranscriptedCore
 
 @available(macOS 14.0, *)
-final class TranscriptMetadataBuilderTests: XCTestCase {
+final class RecordingHealthInfoTests: XCTestCase {
     private var tempRoot: URL!
 
     override func setUp() {

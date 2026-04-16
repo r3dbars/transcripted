@@ -49,7 +49,6 @@ They also honor:
 | `DiarizeCommand.swift` | Single-file diarization command |
 | `BatchCommand.swift` | Directory diarization command |
 | `ConfigLoader.swift` | JSON-to-`OfflineDiarizerConfig` loader |
-| `DiarizerConfigCompatibility.swift` | Compatibility shim for speaker-bound tuning while newer FluidAudio APIs are in flux |
 | `RTTMWriter.swift` | RTTM output formatter |
 
 ## Build And Run
@@ -74,5 +73,4 @@ instruction to run `bash build-deps.sh` from the repo root before rebuilding.
 - the diarization commands depend on repo-level artifacts, so run `bash build-deps.sh` first when those are missing
 - retrieval-only commands should still build and run even when the diarization bundle is absent
 - the default context resolver prefers Transcripted capture folders, then falls back to Draft-era exports, then `~/Documents/Transcripted/`
-- `DiarizerConfigCompatibility.swift` currently keeps old bounded-speaker call sites compiling; it does not reintroduce upstream behavior by itself
 - changes here should be verified independently from the app build

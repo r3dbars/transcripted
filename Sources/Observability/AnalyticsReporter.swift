@@ -1,5 +1,21 @@
 import Foundation
 
+private struct AnalyticsCaptureRequest: Encodable {
+    let apiKey: String
+    let event: String
+    let distinctID: String
+    let timestamp: String
+    let properties: [String: String]
+
+    enum CodingKeys: String, CodingKey {
+        case apiKey = "api_key"
+        case event
+        case distinctID = "distinct_id"
+        case timestamp
+        case properties
+    }
+}
+
 enum AnalyticsRuntimeConfiguration {
     static let apiKeyInfoKey = "TranscriptedPostHogAPIKey"
     static let hostInfoKey = "TranscriptedPostHogHost"
@@ -27,10 +43,12 @@ enum AnalyticsRuntimeConfiguration {
 
     static func localOverrideValue(forKey key: String, appSupportDirectory: URL) -> String? {
         for url in localOverridesSearchURLs(appSupportDirectory: appSupportDirectory) {
-            guard let overrides = NSDictionary(contentsOf: url) as? [String: Any] else {
+            guard let data = try? Data(contentsOf: url),
+                  let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+                  let overrides = plist as? [String: String] else {
                 continue
             }
-            if let value = firstNonEmpty(overrides[key] as? String) {
+            if let value = firstNonEmpty(overrides[key]) {
                 return value
             }
         }
@@ -154,7 +172,7 @@ final class AnalyticsReporter {
             allowedKeys: policy.allowedProperties
         )
 
-        var eventProperties: [String: Any] = sanitizedProperties
+        var eventProperties: [String: String] = sanitizedProperties
         eventProperties["distinct_id"] = distinctID
         eventProperties["app_version"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
         eventProperties["os_major"] = "\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion)"
@@ -163,15 +181,15 @@ final class AnalyticsReporter {
             eventProperties["session_id"] = sanitizedSessionID
         }
 
-        let payload: [String: Any] = [
-            "api_key": apiKey,
-            "event": policy.name,
-            "distinct_id": distinctID,
-            "timestamp": Self.isoDateFormatter.string(from: Date()),
-            "properties": eventProperties,
-        ]
+        let payload = AnalyticsCaptureRequest(
+            apiKey: apiKey,
+            event: policy.name,
+            distinctID: distinctID,
+            timestamp: Self.isoDateFormatter.string(from: Date()),
+            properties: eventProperties
+        )
 
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+        guard let data = try? JSONEncoder().encode(payload),
               let urlString = normalizedCaptureURL(from: captureHost),
               let url = URL(string: urlString) else {
             return

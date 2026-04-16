@@ -37,11 +37,25 @@ enum MeetingTranscriptStyler {
     }
 
     private static func styledTranscript(at url: URL, persistChanges: Bool) -> StyledMeetingTranscript {
-        guard let raw = try? String(contentsOf: url, encoding: .utf8),
-              let document = parseDocument(raw, fallbackURL: url) else {
+        let raw: String
+        do {
+            raw = try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            logFailure(
+                event: "meeting_transcript_read_failed",
+                message: "Failed to read meeting transcript",
+                context: [
+                    "file": url.lastPathComponent,
+                    "error": error.localizedDescription
+                ]
+            )
+            return StyledMeetingTranscript(url: url, title: fallbackTitle(for: url))
+        }
+
+        guard let document = parseDocument(raw, fallbackURL: url) else {
             return StyledMeetingTranscript(
                 url: url,
-                title: url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " ")
+                title: fallbackTitle(for: url)
             )
         }
 
@@ -56,14 +70,38 @@ enum MeetingTranscriptStyler {
         let finalURL = renameTranscriptArtifactsIfNeeded(at: url, title: title)
 
         if updated != raw {
-            try? updated.write(to: finalURL, atomically: true, encoding: .utf8)
+            do {
+                try updated.write(to: finalURL, atomically: true, encoding: .utf8)
+            } catch {
+                logFailure(
+                    event: "meeting_transcript_write_failed",
+                    message: "Failed to write styled meeting transcript",
+                    context: [
+                        "file": finalURL.lastPathComponent,
+                        "error": error.localizedDescription
+                    ]
+                )
+            }
         }
 
         return StyledMeetingTranscript(url: finalURL, title: title)
     }
 
     static func transcriptBody(at url: URL) -> String? {
-        guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let raw: String
+        do {
+            raw = try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            logFailure(
+                event: "meeting_transcript_body_read_failed",
+                message: "Failed to read meeting transcript body",
+                context: [
+                    "file": url.lastPathComponent,
+                    "error": error.localizedDescription
+                ]
+            )
+            return nil
+        }
         return stripFrontmatter(from: raw)?.trimmingCharacters(in: .whitespacesAndNewlines)
             ?? raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -305,8 +343,29 @@ enum MeetingTranscriptStyler {
             try fm.moveItem(at: url, to: targetURL)
             return targetURL
         } catch {
+            logFailure(
+                event: "meeting_transcript_rename_failed",
+                message: "Failed to rename styled transcript",
+                context: [
+                    "from": url.lastPathComponent,
+                    "to": targetURL.lastPathComponent,
+                    "error": error.localizedDescription
+                ]
+            )
             return url
         }
+    }
+
+    private static func fallbackTitle(for url: URL) -> String {
+        url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " ")
+    }
+
+    private static func logFailure(event: String, message: String, context: [String: String]) {
+        let contextString = context
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: " ")
+        fputs("⚠️ MEETING | \(event) | \(message) | \(contextString)\n", stderr)
     }
 
     private static func sanitizedFileStem(for title: String, fallback: String) -> String {

@@ -1,10 +1,10 @@
 #!/bin/bash
-# Build Draft's native speech + meeting dependencies as a unified static library.
+# Build Transcripted's native speech + meeting dependencies as a unified static library.
 # Resolves shared dependencies (Hub, Tokenizers, Jinja, Crypto, etc.) once
 # to prevent duplicate symbol conflicts.
 #
 # Run once — artifacts go into deps-libs/ and deps-modules/
-# Pattern follows the older FluidAudio-only helper now parked under scripts/legacy/: expensive build runs once, build.sh reuses cached artifacts
+# Pattern follows the cache-first build workflow: expensive build runs once, build.sh reuses cached artifacts
 
 set -e
 

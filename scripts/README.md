@@ -29,13 +29,6 @@ not have to carry the full operational logic:
 - `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast from an updates folder and copy it into `docs/appcast.xml`
 - `scripts/dev/onboarding.sh` — inspect, reset, or force the first-run onboarding state while iterating on copy and layout
 
-## Legacy scripts
-
-These are kept for historical or one-off reference, not as the primary workflow:
-
-- `scripts/legacy/build-fluidaudio.sh` — older FluidAudio-only dependency build path, superseded by `build-deps.sh`
-- `scripts/legacy/package-dmg.sh` — simple unsigned DMG packager, superseded by `build-beta.sh` for real distribution
-
 ## Rule of thumb
 
 If a command is not listed above, do not assume it is part of the current app build or release contract.

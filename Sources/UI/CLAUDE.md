@@ -17,7 +17,7 @@ Draft-mode UI is not an active product path in this worktree.
 
 ### Overlay/
 
-- `Overlay/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
+- `Overlay/DictationSessionController.swift` — dictation session orchestration
 - `Overlay/FloatingOverlayController.swift` — owns the dictation overlay panel lifecycle and Combine subscriptions
 - `Overlay/FloatingOverlayPanel.swift` — non-activating NSPanel for the dictation overlay
 - `Overlay/OverlayDraftingView.swift` — drafting/processing state view

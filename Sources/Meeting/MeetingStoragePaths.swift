@@ -7,9 +7,7 @@ enum MeetingStoragePaths {
 
     /// Root: <capture-library>/meetings/
     static var root: URL {
-        let url = FileManager.default.meetingSupportDir
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
+        FileManager.default.meetingSupportDir
     }
 
     /// Meeting captures live directly in the meetings folder.
@@ -45,7 +43,7 @@ enum MeetingStoragePaths {
     /// long-term state even if the naming flow uses them briefly.
     static var speakerClipsFolder: URL {
         let url = recordingsScratch.appendingPathComponent("speaker_clips", isDirectory: true)
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        FileManager.default.ensurePrivateDirectory(at: url, context: "meeting speaker clips")
         return url
     }
 

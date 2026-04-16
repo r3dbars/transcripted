@@ -26,15 +26,11 @@ enum AgentConnectionGuide {
     }
 
     static var meetingsFolder: URL {
-        let url = MeetingStoragePaths.transcriptsFolder
-        LegacyAgentFolderCleanup.removeLegacyHelperFiles(from: url)
-        return url
+        MeetingStoragePaths.transcriptsFolder
     }
 
     static var dictationsFolder: URL {
-        let url = DictationStoragePaths.transcriptsFolder
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
+        DictationStoragePaths.transcriptsFolder
     }
 
     static let benefitHighlights = [

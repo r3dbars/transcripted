@@ -73,8 +73,10 @@ public class TranscriptionTaskManager: ObservableObject {
         if let micDuration = audioDuration(url: micURL), micDuration < minDuration {
             AppLogger.pipeline.info("Recording too short, skipping transcription", ["duration": String(format: "%.1fs", micDuration)])
 
-            try? FileManager.default.removeItem(at: micURL)
-            if let systemURL { try? FileManager.default.removeItem(at: systemURL) }
+            removeRecordingFile(micURL, label: "short mic recording")
+            if let systemURL {
+                removeRecordingFile(systemURL, label: "short system recording")
+            }
 
             self.displayStatus = .failed(message: "Recording too short")
             self.scheduleStatusReset(delay: 3)
@@ -311,5 +313,17 @@ public class TranscriptionTaskManager: ObservableObject {
             return
         }
         notifier.notifyTranscriptionFailed(errorMessage: errorMessage)
+    }
+
+    private func removeRecordingFile(_ url: URL, label: String) {
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            AppLogger.pipeline.warning("Failed to remove recording file", [
+                "label": label,
+                "file": url.lastPathComponent,
+                "error": error.localizedDescription
+            ])
+        }
     }
 }

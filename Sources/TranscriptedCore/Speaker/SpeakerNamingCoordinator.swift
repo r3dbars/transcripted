@@ -43,8 +43,8 @@ extension TranscriptionTaskManager {
                 transcriptId: transcriptId
             ) else {
                 SpeakerClipExtractor.cleanupClips(clips)
-                try? FileManager.default.removeItem(at: micURL)
-                try? FileManager.default.removeItem(at: systemURL)
+                Self.removeTemporaryAudioFile(micURL, label: "mic audio")
+                Self.removeTemporaryAudioFile(systemURL, label: "system audio")
 
                 Task { @MainActor in
                     self?.finishNamingFlow(
@@ -63,8 +63,8 @@ extension TranscriptionTaskManager {
                 speakerDB: speakerDB
             ) else {
                 SpeakerClipExtractor.cleanupClips(clips)
-                try? FileManager.default.removeItem(at: micURL)
-                try? FileManager.default.removeItem(at: systemURL)
+                Self.removeTemporaryAudioFile(micURL, label: "mic audio")
+                Self.removeTemporaryAudioFile(systemURL, label: "system audio")
 
                 Task { @MainActor in
                     self?.finishNamingFlow(
@@ -89,8 +89,8 @@ extension TranscriptionTaskManager {
             }
 
             SpeakerClipExtractor.cleanupClips(clips)
-            try? FileManager.default.removeItem(at: micURL)
-            try? FileManager.default.removeItem(at: systemURL)
+            Self.removeTemporaryAudioFile(micURL, label: "mic audio")
+            Self.removeTemporaryAudioFile(systemURL, label: "system audio")
 
             Task { @MainActor in
                 self?.finishNamingFlow(
@@ -107,8 +107,8 @@ extension TranscriptionTaskManager {
     /// Called from applicationWillTerminate to prevent orphaned audio files.
     public func cleanupPendingNaming() {
         if let request = speakerNamingRequest {
-            try? FileManager.default.removeItem(at: request.micAudioURL)
-            try? FileManager.default.removeItem(at: request.systemAudioURL)
+            Self.removeTemporaryAudioFile(request.micAudioURL, label: "pending mic audio")
+            Self.removeTemporaryAudioFile(request.systemAudioURL, label: "pending system audio")
             SpeakerClipExtractor.cleanupClips(request.speakers)
             speakerNamingRequest = nil
             AppLogger.pipeline.info("Cleaned up pending naming on shutdown")
@@ -284,6 +284,19 @@ extension TranscriptionTaskManager {
             }
             .sorted { $0.callCount > $1.callCount }
             .first
+    }
+
+    nonisolated private static func removeTemporaryAudioFile(_ url: URL?, label: String) {
+        guard let url else { return }
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            AppLogger.pipeline.warning("Failed to remove temporary audio file", [
+                "label": label,
+                "file": url.lastPathComponent,
+                "error": error.localizedDescription
+            ])
+        }
     }
 
     nonisolated private static func normalizeSpeakerName(_ name: String?) -> String {
