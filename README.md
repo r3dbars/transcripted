@@ -25,6 +25,19 @@ your agent at the folder later.
 2. Record a meeting or capture a dictation on your Mac.
 3. Open the saved Markdown files yourself, or point your agent at the folder.
 
+### Install With Homebrew
+
+If you prefer Homebrew, you can install and update Transcripted from the
+terminal:
+
+```bash
+brew tap r3dbars/transcripted https://github.com/r3dbars/transcripted
+brew install --cask transcripted
+```
+
+`brew upgrade --cask transcripted` picks up new releases. Transcripted also
+self-updates through Sparkle, so you can install either way.
+
 ## Just Markdown. Not A Black Box.
 
 Transcripted starts with readable Markdown. You do not need to learn a
