@@ -5,11 +5,18 @@ struct CLIContextDirectories {
     let meetingsDir: URL
     let dictationsDir: URL
 
-    static func resolve(dataDir: String?, meetingsDir: String?, dictationsDir: String?) -> CLIContextDirectories {
+    static func resolve(
+        dataDir: String?,
+        meetingsDir: String?,
+        dictationsDir: String?,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default,
+        homeDirectory: URL? = nil
+    ) -> CLIContextDirectories {
         if let dataDir, !dataDir.isEmpty {
             let shared = URL(fileURLWithPath: dataDir)
-            if FileManager.default.fileExists(atPath: shared.appendingPathComponent("meetings", isDirectory: true).path)
-                || FileManager.default.fileExists(atPath: shared.appendingPathComponent("dictations", isDirectory: true).path) {
+            if fileManager.fileExists(atPath: shared.appendingPathComponent("meetings", isDirectory: true).path)
+                || fileManager.fileExists(atPath: shared.appendingPathComponent("dictations", isDirectory: true).path) {
                 return CLIContextDirectories(
                     meetingsDir: shared.appendingPathComponent("meetings", isDirectory: true),
                     dictationsDir: shared.appendingPathComponent("dictations", isDirectory: true)
@@ -18,11 +25,10 @@ struct CLIContextDirectories {
             return CLIContextDirectories(meetingsDir: shared, dictationsDir: shared)
         }
 
-        let env = ProcessInfo.processInfo.environment
-        if let shared = env["TRANSCRIPTED_DATA_DIR"], !shared.isEmpty {
+        if let shared = environment["TRANSCRIPTED_DATA_DIR"], !shared.isEmpty {
             let sharedURL = URL(fileURLWithPath: shared)
-            if FileManager.default.fileExists(atPath: sharedURL.appendingPathComponent("meetings", isDirectory: true).path)
-                || FileManager.default.fileExists(atPath: sharedURL.appendingPathComponent("dictations", isDirectory: true).path) {
+            if fileManager.fileExists(atPath: sharedURL.appendingPathComponent("meetings", isDirectory: true).path)
+                || fileManager.fileExists(atPath: sharedURL.appendingPathComponent("dictations", isDirectory: true).path) {
                 return CLIContextDirectories(
                     meetingsDir: sharedURL.appendingPathComponent("meetings", isDirectory: true),
                     dictationsDir: sharedURL.appendingPathComponent("dictations", isDirectory: true)
@@ -31,7 +37,7 @@ struct CLIContextDirectories {
             return CLIContextDirectories(meetingsDir: sharedURL, dictationsDir: sharedURL)
         }
 
-        let home = FileManager.default.homeDirectoryForCurrentUser
+        let home = homeDirectory ?? fileManager.homeDirectoryForCurrentUser
         let transcriptedRoot = home
             .appendingPathComponent("Library", isDirectory: true)
             .appendingPathComponent("Application Support", isDirectory: true)
@@ -55,21 +61,24 @@ struct CLIContextDirectories {
             .appendingPathComponent("Transcripted", isDirectory: true)
 
         let meetingsURL = meetingsDir.map(URL.init(fileURLWithPath:))
-            ?? env["TRANSCRIPTED_MEETINGS_DIR"].map(URL.init(fileURLWithPath:))
+            ?? environment["TRANSCRIPTED_MEETINGS_DIR"].map(URL.init(fileURLWithPath:))
         let dictationsURL = dictationsDir.map(URL.init(fileURLWithPath:))
-            ?? env["TRANSCRIPTED_DICTATIONS_DIR"].map(URL.init(fileURLWithPath:))
-        let currentTranscriptedCapturesExist = FileManager.default.fileExists(atPath: defaultMeetings.path)
-            || FileManager.default.fileExists(atPath: defaultDictations.path)
+            ?? environment["TRANSCRIPTED_DICTATIONS_DIR"].map(URL.init(fileURLWithPath:))
+        let currentTranscriptedCapturesExist = fileManager.fileExists(atPath: defaultMeetings.path)
+            || fileManager.fileExists(atPath: defaultDictations.path)
+
+        let legacyDraftCapturesExist = fileManager.fileExists(atPath: legacyDraftMeetings.path)
+            || fileManager.fileExists(atPath: legacyDraftDictations.path)
 
         let useLegacyDraft = meetingsURL == nil
             && dictationsURL == nil
             && !currentTranscriptedCapturesExist
-            && FileManager.default.fileExists(atPath: legacyDraftMeetings.path)
+            && legacyDraftCapturesExist
         let useLegacyShared = meetingsURL == nil
             && dictationsURL == nil
             && !currentTranscriptedCapturesExist
-            && !FileManager.default.fileExists(atPath: legacyDraftMeetings.path)
-            && FileManager.default.fileExists(atPath: legacyShared.path)
+            && !legacyDraftCapturesExist
+            && fileManager.fileExists(atPath: legacyShared.path)
 
         return CLIContextDirectories(
             meetingsDir: meetingsURL ?? (useLegacyDraft ? legacyDraftMeetings : (useLegacyShared ? legacyShared : defaultMeetings)),

@@ -47,4 +47,32 @@ final class DataDirectoriesTests: XCTestCase {
         )
         XCTAssertEqual(directories.dictationsDir.path, dictationsDir.path)
     }
+
+    func testResolveFallsBackToLegacyDraftWhenOnlyLegacyDictationsExist() throws {
+        let legacyDraftDictations = tempHome
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("Draft", isDirectory: true)
+            .appendingPathComponent("dictations", isDirectory: true)
+            .appendingPathComponent("transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacyDraftDictations, withIntermediateDirectories: true)
+
+        let directories = TranscriptedDataDirectories.resolve(
+            environment: [:],
+            fileManager: .default,
+            homeDirectory: tempHome
+        )
+
+        XCTAssertEqual(
+            directories.meetingsDir.path,
+            tempHome
+                .appendingPathComponent("Library", isDirectory: true)
+                .appendingPathComponent("Application Support", isDirectory: true)
+                .appendingPathComponent("Draft", isDirectory: true)
+                .appendingPathComponent("meetings", isDirectory: true)
+                .appendingPathComponent("transcripts", isDirectory: true)
+                .path
+        )
+        XCTAssertEqual(directories.dictationsDir.path, legacyDraftDictations.path)
+    }
 }

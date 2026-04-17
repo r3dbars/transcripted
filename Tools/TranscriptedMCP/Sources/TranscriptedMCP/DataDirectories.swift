@@ -76,14 +76,17 @@ struct TranscriptedDataDirectories {
         let currentTranscriptedCapturesExist = fileManager.fileExists(atPath: defaultMeetings.path)
             || fileManager.fileExists(atPath: defaultDictations.path)
 
+        let legacyDraftCapturesExist = fileManager.fileExists(atPath: legacyDraftMeetings.path)
+            || fileManager.fileExists(atPath: legacyDraftDictations.path)
+
         let useLegacyDraft = meetingsOverride == nil
             && dictationsOverride == nil
             && !currentTranscriptedCapturesExist
-            && fileManager.fileExists(atPath: legacyDraftMeetings.path)
+            && legacyDraftCapturesExist
         let useLegacyShared = meetingsOverride == nil
             && dictationsOverride == nil
             && !currentTranscriptedCapturesExist
-            && !fileManager.fileExists(atPath: legacyDraftMeetings.path)
+            && !legacyDraftCapturesExist
             && fileManager.fileExists(atPath: legacyShared.path)
 
         return TranscriptedDataDirectories(
