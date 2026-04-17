@@ -11,6 +11,37 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         XCTAssertNil(Transcription.embeddingWeight(forMicFraction: 0.85))
     }
 
+    func testAudioCaptureStartStateWaitsForFreshSystemAudioFile() {
+        let readyURL = URL(fileURLWithPath: "/tmp/system.wav")
+
+        XCTAssertEqual(
+            AudioCaptureStartState.meetingCaptureOutcome(
+                isRecording: true,
+                systemAudioFileURL: nil,
+                errorMessage: nil
+            ),
+            .waiting
+        )
+
+        XCTAssertEqual(
+            AudioCaptureStartState.meetingCaptureOutcome(
+                isRecording: true,
+                systemAudioFileURL: readyURL,
+                errorMessage: nil
+            ),
+            .ready
+        )
+
+        XCTAssertEqual(
+            AudioCaptureStartState.meetingCaptureOutcome(
+                isRecording: true,
+                systemAudioFileURL: readyURL,
+                errorMessage: "System audio unavailable"
+            ),
+            .failed("System audio unavailable")
+        )
+    }
+
     func testMergeConsecutiveUtterancesMergesSameSpeakerAndPropagatesSpeakerMetadata() {
         let secondSpeakerId = UUID()
         let merged = Transcription.mergeConsecutiveUtterances(

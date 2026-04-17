@@ -77,8 +77,14 @@ final class MeetingCaptureBridge: ObservableObject {
             Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: TranscriptedConstants.meetingStartTimeout)
                 guard let self, let continuation = self.startContinuation else { return }
+                self.errorMessage = AudioCaptureStartState.timeoutFailureMessage(
+                    existingErrorMessage: self.errorMessage
+                )
                 self.startContinuation = nil
-                continuation.resume(returning: self.audio.isRecording)
+                if self.audio.isRecording {
+                    self.audio.stop()
+                }
+                continuation.resume(returning: false)
             }
         }
     }
@@ -127,6 +133,29 @@ final class MeetingCaptureBridge: ObservableObject {
 
     // MARK: - Private
 
+    private func finishPendingStartAttemptIfPossible() {
+        guard let continuation = startContinuation else { return }
+
+        switch AudioCaptureStartState.meetingCaptureOutcome(
+            isRecording: audio.isRecording,
+            systemAudioFileURL: audio.systemAudioFileURL,
+            errorMessage: errorMessage
+        ) {
+        case .waiting:
+            return
+        case .ready:
+            startContinuation = nil
+            continuation.resume(returning: true)
+        case .failed(let message):
+            startContinuation = nil
+            errorMessage = message
+            if audio.isRecording {
+                audio.stop()
+            }
+            continuation.resume(returning: false)
+        }
+    }
+
     private func wireCallbacks() {
         audio.onRecordingComplete = { [weak self] micURL, systemURL in
             // This closure fires on whichever queue Core's Audio dispatches from.
@@ -171,22 +200,23 @@ final class MeetingCaptureBridge: ObservableObject {
             .sink { [weak self] errorMessage in
                 guard let self else { return }
                 self.errorMessage = errorMessage
-
-                guard errorMessage != nil,
-                      !self.audio.isRecording,
-                      let continuation = self.startContinuation else { return }
-                self.startContinuation = nil
-                continuation.resume(returning: false)
+                self.finishPendingStartAttemptIfPossible()
             }
             .store(in: &cancellables)
 
         audio.$isRecording
             .receive(on: RunLoop.main)
-            .sink { [weak self] isRecording in
+            .sink { [weak self] _ in
                 guard let self else { return }
-                guard isRecording, let continuation = self.startContinuation else { return }
-                self.startContinuation = nil
-                continuation.resume(returning: true)
+                self.finishPendingStartAttemptIfPossible()
+            }
+            .store(in: &cancellables)
+
+        audio.$systemAudioFileURL
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.finishPendingStartAttemptIfPossible()
             }
             .store(in: &cancellables)
     }

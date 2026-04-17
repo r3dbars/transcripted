@@ -412,6 +412,33 @@ public class Audio: ObservableObject {
         return (engine, inputNode)
     }
 
+    func prepareForNewRecordingStart() {
+        error = nil
+        isMicRecovering = false
+        systemBufferCount = 0  // Reset debug counter (lock-protected)
+        resetSilenceTracking()  // Start fresh silence tracking
+        systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
+        systemAudioSilenceStart = nil  // Reset system audio silence tracking
+        recordingSessionGeneration &+= 1
+
+        // Reset capture artifacts so a previous session cannot make a new start
+        // look ready before the fresh mic/system files exist.
+        originalMicAudioFileURL = nil
+        micAudioFileURL = nil
+        systemAudioFileURL = nil
+
+        // Reset health tracking for new recording session
+        recordingGaps = []
+        deviceSwitchCount = 0
+        recoveryAttemptCount = 0
+        sleepTimestamp = nil
+        lastRecoveryTime = nil
+        consecutiveMicWriteErrors = 0
+        consecutiveSystemWriteErrors = 0
+        systemAudioFailed = false
+        micSegments = []
+    }
+
     // MARK: - Start Recording
 
     public func start() {
@@ -462,24 +489,7 @@ public class Audio: ObservableObject {
             }
             return
         }
-        error = nil
-        isMicRecovering = false
-        systemBufferCount = 0  // Reset debug counter (lock-protected)
-        resetSilenceTracking()  // Start fresh silence tracking
-        systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
-        systemAudioSilenceStart = nil  // Reset system audio silence tracking
-        recordingSessionGeneration &+= 1
-
-        // Reset health tracking for new recording session
-        recordingGaps = []
-        deviceSwitchCount = 0
-        recoveryAttemptCount = 0
-        sleepTimestamp = nil
-        lastRecoveryTime = nil
-        consecutiveMicWriteErrors = 0
-        consecutiveSystemWriteErrors = 0
-        systemAudioFailed = false
-        micSegments = []
+        prepareForNewRecordingStart()
 
         AppLogger.audio.info("Starting audio capture")
 
@@ -508,24 +518,7 @@ public class Audio: ObservableObject {
     private func startAudioCaptureAsync() {
         // Set isStarting to prevent double-start during async setup
         isStarting = true
-        error = nil
-        isMicRecovering = false
-        systemBufferCount = 0  // Reset debug counter (lock-protected)
-        resetSilenceTracking()  // Start fresh silence tracking
-        systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
-        systemAudioSilenceStart = nil  // Reset system audio silence tracking
-        recordingSessionGeneration &+= 1
-
-        // Reset health tracking for new recording session
-        recordingGaps = []
-        deviceSwitchCount = 0
-        recoveryAttemptCount = 0
-        sleepTimestamp = nil
-        lastRecoveryTime = nil
-        consecutiveMicWriteErrors = 0
-        consecutiveSystemWriteErrors = 0
-        systemAudioFailed = false
-        micSegments = []
+        prepareForNewRecordingStart()
 
         AppLogger.audio.info("Starting audio capture")
 
