@@ -61,5 +61,10 @@ let package = Package(
                 .linkedFramework("Network"),
             ] : []
         ),
+        .testTarget(
+            name: "TranscriptedCLITests",
+            dependencies: ["transcripted-cli"],
+            path: "Tests/TranscriptedCLITests"
+        ),
     ]
 )
