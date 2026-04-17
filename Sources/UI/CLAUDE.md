@@ -17,7 +17,7 @@ Draft-mode UI is not an active product path in this worktree.
 
 ### Overlay/
 
-- `Overlay/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
+- `Overlay/DictationSessionController.swift` — dictation session orchestration
 - `Overlay/FloatingOverlayController.swift` — owns the dictation overlay panel lifecycle and Combine subscriptions
 - `Overlay/FloatingOverlayPanel.swift` — non-activating NSPanel for the dictation overlay
 - `Overlay/OverlayDraftingView.swift` — drafting/processing state view
@@ -62,7 +62,7 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
 - `Settings/TranscriptedOnboardingWindowController.swift` — dedicated first-launch window that hosts onboarding before users drop into the menubar flow
 - `Settings/SpeakerNamingSheet.swift` — sheet for renaming speakers in a completed meeting
-- `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, naming, merging, previewing, and deleting saved speaker profiles
+- `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, toggling multiple local-speaker identification, naming, merging, previewing, and deleting saved speaker profiles
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 

@@ -12,10 +12,17 @@ public class FailedTranscriptionManager: ObservableObject {
 
     public init(paths: CoreStoragePaths = .default) {
         // Ensure the parent folder exists before first save; the load pass tolerates a missing file.
-        try? FileManager.default.createDirectory(
-            at: paths.failedQueue.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
+        do {
+            try FileManager.default.createDirectory(
+                at: paths.failedQueue.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+        } catch {
+            AppLogger.pipeline.error("Failed to create failed transcription directory", [
+                "path": paths.failedQueue.deletingLastPathComponent().path,
+                "error": error.localizedDescription
+            ])
+        }
         self.storageURL = paths.failedQueue
 
         // Configure date encoding/decoding
@@ -68,7 +75,15 @@ public class FailedTranscriptionManager: ObservableObject {
         } catch {
             // Backup corrupt file before it gets overwritten on next save
             let backupURL = storageURL.deletingLastPathComponent().appendingPathComponent("failed_transcriptions_backup.json")
-            try? FileManager.default.copyItem(at: storageURL, to: backupURL)
+            do {
+                try FileManager.default.copyItem(at: storageURL, to: backupURL)
+            } catch {
+                AppLogger.pipeline.error("Failed to back up corrupt failed transcriptions file", [
+                    "source": storageURL.path,
+                    "backup": backupURL.path,
+                    "error": error.localizedDescription
+                ])
+            }
             AppLogger.pipeline.error("Corrupt failed transcriptions file, backed up", ["error": "\(error)"])
         }
     }
@@ -121,17 +136,11 @@ public class FailedTranscriptionManager: ObservableObject {
             return
         }
 
-        // Delete audio files
-        do {
-            try FileManager.default.removeItem(at: failed.micAudioURL)
-            AppLogger.pipeline.info("Deleted mic audio", ["file": failed.micAudioURL.lastPathComponent])
+        // Delete audio files independently so one failure does not hide the other.
+        removeAudioFile(failed.micAudioURL, label: "mic audio")
 
-            if let systemURL = failed.systemAudioURL {
-                try? FileManager.default.removeItem(at: systemURL)
-                AppLogger.pipeline.info("Deleted system audio", ["file": systemURL.lastPathComponent])
-            }
-        } catch {
-            AppLogger.pipeline.error("Error deleting audio files", ["error": "\(error)"])
+        if let systemURL = failed.systemAudioURL {
+            removeAudioFile(systemURL, label: "system audio")
         }
 
         // Remove from queue
@@ -170,9 +179,9 @@ public class FailedTranscriptionManager: ObservableObject {
 
         for failure in toRemove {
             // Delete audio files to reclaim disk space
-            try? FileManager.default.removeItem(at: failure.micAudioURL)
+            removeAudioFile(failure.micAudioURL, label: "cleanup mic audio")
             if let systemURL = failure.systemAudioURL {
-                try? FileManager.default.removeItem(at: systemURL)
+                removeAudioFile(systemURL, label: "cleanup system audio")
             }
         }
 
@@ -195,5 +204,21 @@ public class FailedTranscriptionManager: ObservableObject {
         }
 
         AppLogger.pipeline.info("Cleaned up old failed transcriptions", ["count": "\(oldFailures.count)", "olderThanDays": "\(days)"])
+    }
+
+    private func removeAudioFile(_ url: URL, label: String) {
+        do {
+            try FileManager.default.removeItem(at: url)
+            AppLogger.pipeline.info("Deleted audio file", [
+                "label": label,
+                "file": url.lastPathComponent
+            ])
+        } catch {
+            AppLogger.pipeline.warning("Failed to delete audio file", [
+                "label": label,
+                "file": url.lastPathComponent,
+                "error": error.localizedDescription
+            ])
+        }
     }
 }

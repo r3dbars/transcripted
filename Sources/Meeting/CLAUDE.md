@@ -15,7 +15,7 @@
 - `MeetingPromptHeuristics.swift` — shared scoring and snooze rules for calendar- and runtime-based prompt candidates
 - `MeetingRecordingStartGate.swift` — permission preflight for meeting recording, including missing-permission reasons and user-facing error messages
 - `MeetingSTTAdapter.swift` — adapts the app's shared `ParakeetEngine` to `TranscriptedCore.SpeechToTextEngine`
-- `MeetingSessionController.swift` — top-level meeting state machine, permission gating, model warmup, capture start/stop, queued transcription handoff, failed-meeting actions, and transcript restyling
+- `MeetingSessionController.swift` — top-level meeting state machine, permission gating, model warmup, capture start/stop, local-speaker diarization toggle handoff, queued transcription handoff, failed-meeting actions, and transcript restyling
 - `MeetingSessionUIPolicy.swift` — centralizes when queued or active transcription work should keep the meeting overlay in its transcribing/saving state
 - `MeetingStoragePaths.swift` — current split meeting storage layout across the capture library, app state, logs, and temp folders
 - `MeetingTranscriptStyler.swift` — restyles saved transcripts and renames files after save
@@ -27,7 +27,7 @@
 3. `Sources/TranscriptedAppState.swift` starts background model warmup through `meetingSession.prepareModels(showLoadingUI: false)`.
 4. `MeetingSessionController.startRecording(...)` first runs `MeetingRecordingStartGate` so missing microphone or System Audio Recording permission failures are blocked before capture starts, then uses `MeetingCaptureBridge` to start core audio capture into app-owned scratch paths.
 5. `MeetingSessionController.stopRecording(...)` awaits mic/system audio files from the bridge, then either starts transcription immediately or queues it behind the active job.
-6. `TranscriptionTaskManager` runs one diarize → transcribe → save pipeline at a time.
+6. `TranscriptionTaskManager` runs one diarize → transcribe → save pipeline at a time, honoring the persisted `LocalSpeakerPreferences.isEnabled` flag via the `splitLocalSpeakers` task option.
 7. A subscription on `taskManager.$lastSavedTranscriptURL` calls `MeetingTranscriptStyler.restyleTranscript(...)` and updates the recent-meetings UI state.
 8. Failed meetings can be retried, deleted, or dismissed from the menubar recent-meetings section, with `MeetingFailureKind` providing stable failure categories and `MeetingFailureCopy` keeping error copy consistent across retryable and non-retryable states.
 
@@ -41,6 +41,7 @@
 - `MeetingFailureKind` is the canonical place for stable failed-meeting categories used by presentation and metadata. Keep new classification rules centralized there.
 - `MeetingFailureCopy` is the canonical place for human-facing failed-meeting titles and details. Keep retry messaging centralized there.
 - `MeetingSessionUIPolicy` is the canonical place for deciding whether background meeting work should still surface as an active transcribing/saving state. Speaker review alone should not keep that state visible.
+- The local-speaker split toggle is app-owned state. Keep the preference in `Sources/Support/LocalSpeakerPreferences.swift` and only pass the resolved boolean into core work.
 - `TranscriptionTaskManager` stays single-flight. App-level queueing belongs in `MeetingSessionController`, not in ad hoc background tasks.
 - Live PCM handlers installed through `MeetingCaptureBridge` run on capture threads. Keep them real-time safe.
 

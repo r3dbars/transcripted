@@ -137,6 +137,7 @@ APP_SOURCES=(
     "Sources/Observability/SentryPayloadSanitizer.swift"
     "Sources/Reliability/WakeRecoveryCoordinator.swift"
     "Sources/TranscriptedCore/Audio/MicRecordingSegment.swift"
+    "Sources/TranscriptedCore/Models/SpeakerMapping.swift"
     "Sources/TranscriptedCore/Models/TranscriptionTypes.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerProfile.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift"

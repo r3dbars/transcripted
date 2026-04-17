@@ -1,10 +1,10 @@
 import Foundation
 
-/// Recording health information for transcript metadata (Phase 3)
-/// Captures quality metrics to be embedded in transcript YAML frontmatter
-public struct RecordingHealthInfo {
-    /// Capture quality rating based on buffer success rate
-    public enum CaptureQuality: String {
+/// Recording health information for transcript metadata.
+/// Captures quality metrics that get embedded in transcript YAML frontmatter.
+public struct RecordingHealthInfo: Sendable {
+    /// Capture quality rating based on buffer success rate.
+    public enum CaptureQuality: String, Sendable {
         case excellent = "excellent"  // >= 98%
         case good = "good"            // 90-97%
         case fair = "fair"            // 80-89%
@@ -66,7 +66,7 @@ public struct RecordingHealthInfo {
         )
     }
 
-    /// Default "no issues" health info
+    /// Default "no issues" health info.
     public static var perfect: RecordingHealthInfo {
         RecordingHealthInfo(
             captureQuality: .excellent,
