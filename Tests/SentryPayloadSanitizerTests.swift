@@ -54,6 +54,16 @@ func testSentryPayloadSanitizer() {
         assertTrue(sanitized.contains("[redacted-secret]"), "redacted secret marker should remain")
     }
 
+    runSuite("SentryPayloadSanitizer redacts case-insensitive bearer variants with tabs and multi-space") {
+        for raw in ["bearer\ttokenabc", "BEARER   abc.def_ghi", "Bearer\t token-123", "beArEr  mixed_case_token"] {
+            let sanitized = SentryPayloadSanitizer.sanitizeText(raw)
+            assertFalse(sanitized.lowercased().contains("tokenabc"), "case-insensitive bearer should still redact token part in '\(raw)'")
+            assertFalse(sanitized.contains("abc.def_ghi"), "bearer with whitespace variants should redact token in '\(raw)'")
+            assertFalse(sanitized.contains("mixed_case_token"), "mixed-case bearer should redact in '\(raw)'")
+            assertTrue(sanitized.contains("Bearer ****"), "sanitized bearer marker should remain in '\(raw)'")
+        }
+    }
+
     runSuite("SentryPayloadSanitizer.sanitizeAnyDictionary redacts nested free-form values") {
         let sanitized = SentryPayloadSanitizer.sanitizeAnyDictionary([
             "safe_count": 3,
