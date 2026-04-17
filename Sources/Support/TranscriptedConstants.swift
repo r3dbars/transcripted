@@ -12,8 +12,9 @@ enum TranscriptedConstants {
 
     // MARK: - Audio & Speech
 
-    /// Audio buffer pre-allocation capacity in seconds
-    static let audioBufferCapacitySeconds = 120
+    /// Audio buffer capacity in seconds — sized well above the session timeout
+    /// so batch dictation never silently drops older audio.
+    static let audioBufferCapacitySeconds = 1800
 
     /// Audio tap buffer size (AVAudioEngine installTap)
     static let audioTapBufferSize: UInt32 = 1024

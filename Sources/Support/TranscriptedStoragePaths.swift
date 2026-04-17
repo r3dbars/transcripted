@@ -34,18 +34,45 @@ extension FileManager {
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
     }
 
+    private func logDirectoryCreationFailure(context: String, url: URL, error: Error) {
+        fputs("⚠️ STORAGE | failed to create \(context) at \(url.path): \(error.localizedDescription)\n", stderr)
+    }
+
+    func ensurePrivateDirectory(at url: URL, context: String) {
+        do {
+            try createPrivateDirectory(at: url)
+        } catch {
+            logDirectoryCreationFailure(context: context, url: url, error: error)
+        }
+    }
+
     /// App-owned Transcripted root.
     var transcriptedAppSupportDir: URL {
         let url = userApplicationSupportDir.appendingPathComponent("Transcripted", isDirectory: true)
-        try? createPrivateDirectory(at: url)
-        try? createPrivateDirectory(at: url.appendingPathComponent("captures", isDirectory: true))
-        try? createPrivateDirectory(at: url.appendingPathComponent("captures/meetings", isDirectory: true))
-        try? createPrivateDirectory(at: url.appendingPathComponent("captures/dictations", isDirectory: true))
-        try? createPrivateDirectory(at: url.appendingPathComponent("state", isDirectory: true))
-        try? createPrivateDirectory(at: url.appendingPathComponent("cache", isDirectory: true))
-        try? createPrivateDirectory(at: url.appendingPathComponent("logs", isDirectory: true))
-        try? createPrivateDirectory(at: url.appendingPathComponent("tmp", isDirectory: true))
-        try? createPrivateDirectory(at: url.appendingPathComponent("tmp/recordings", isDirectory: true))
+        let captures = url.appendingPathComponent("captures", isDirectory: true)
+        let meetings = captures.appendingPathComponent("meetings", isDirectory: true)
+        let dictations = captures.appendingPathComponent("dictations", isDirectory: true)
+        let state = url.appendingPathComponent("state", isDirectory: true)
+        let cache = url.appendingPathComponent("cache", isDirectory: true)
+        let logs = url.appendingPathComponent("logs", isDirectory: true)
+        let tmp = url.appendingPathComponent("tmp", isDirectory: true)
+        let recordings = tmp.appendingPathComponent("recordings", isDirectory: true)
+
+        let directories: [(URL, String)] = [
+            (url, "Transcripted app support root"),
+            (captures, "Transcripted capture library parent"),
+            (meetings, "Transcripted meeting captures"),
+            (dictations, "Transcripted dictation captures"),
+            (state, "Transcripted state"),
+            (cache, "Transcripted cache"),
+            (logs, "Transcripted logs"),
+            (tmp, "Transcripted tmp"),
+            (recordings, "Transcripted temporary recordings"),
+        ]
+
+        for (directory, context) in directories {
+            ensurePrivateDirectory(at: directory, context: context)
+        }
         return url
     }
 
@@ -60,7 +87,7 @@ extension FileManager {
 
     var transcriptedCaptureLibraryDir: URL {
         let url = TranscriptedStoragePreferences.captureLibraryURL(fileManager: self)
-        try? createPrivateDirectory(at: url)
+        ensurePrivateDirectory(at: url, context: "Transcripted capture library")
         return url
     }
 
@@ -86,15 +113,17 @@ extension FileManager {
 
     /// <capture-library>/meetings/
     var meetingSupportDir: URL {
-        let url = transcriptedCaptureLibraryDir.appendingPathComponent("meetings", isDirectory: true)
-        try? createPrivateDirectory(at: url)
-        return url
+        transcriptedCaptureLibrarySubdirectory("meetings")
     }
 
     /// <capture-library>/dictations/
     var dictationSupportDir: URL {
-        let url = transcriptedCaptureLibraryDir.appendingPathComponent("dictations", isDirectory: true)
-        try? createPrivateDirectory(at: url)
+        transcriptedCaptureLibrarySubdirectory("dictations")
+    }
+
+    private func transcriptedCaptureLibrarySubdirectory(_ name: String) -> URL {
+        let url = transcriptedCaptureLibraryDir.appendingPathComponent(name, isDirectory: true)
+        ensurePrivateDirectory(at: url, context: "Transcripted \(name) folder")
         return url
     }
 

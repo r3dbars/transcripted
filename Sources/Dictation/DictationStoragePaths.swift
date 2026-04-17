@@ -6,9 +6,7 @@ import Foundation
 enum DictationStoragePaths {
     /// Root: <capture-library>/dictations/
     static var root: URL {
-        let url = FileManager.default.dictationSupportDir
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
+        FileManager.default.dictationSupportDir
     }
 
     /// Dictation captures live directly in the dictations folder.

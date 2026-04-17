@@ -122,7 +122,7 @@ public enum SpeakerClipExtractor {
             return
         }
         let dest = dir.appendingPathComponent("\(speakerId.uuidString).wav")
-        try? FileManager.default.removeItem(at: dest) // OK if doesn't exist
+        removeClipFile(dest, label: "existing persisted clip")
         do {
             try FileManager.default.copyItem(at: tempClipURL, to: dest)
             FileManager.default.restrictToOwnerOnly(atPath: dest.path)
@@ -146,7 +146,7 @@ public enum SpeakerClipExtractor {
         clipsDirectory: URL = defaultClipsDirectory
     ) {
         let url = clipsDirectory.appendingPathComponent("\(speakerId.uuidString).wav")
-        try? FileManager.default.removeItem(at: url)
+        removeClipFile(url, label: "persisted clip")
     }
 
     // MARK: - Temporary Clip Cleanup
@@ -154,13 +154,13 @@ public enum SpeakerClipExtractor {
     /// Clean up temporary clip files
     static func cleanupClips(_ clips: [ClipResult]) {
         for clip in clips {
-            try? FileManager.default.removeItem(at: clip.clipURL)
+            removeClipFile(clip.clipURL, label: "temporary clip")
         }
     }
 
     static func cleanupClips(_ entries: [SpeakerNamingEntry]) {
         for entry in entries {
-            try? FileManager.default.removeItem(at: entry.clipURL)
+            removeClipFile(entry.clipURL, label: "speaker naming clip")
         }
     }
 
@@ -308,6 +308,18 @@ public enum SpeakerClipExtractor {
             case .invalidAudioFormat: return "Invalid audio file format"
             case .bufferCreationFailed: return "Failed to create audio buffer"
             }
+        }
+    }
+
+    private static func removeClipFile(_ url: URL, label: String) {
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            AppLogger.pipeline.warning("Failed to remove clip file", [
+                "label": label,
+                "file": url.lastPathComponent,
+                "error": error.localizedDescription
+            ])
         }
     }
 }

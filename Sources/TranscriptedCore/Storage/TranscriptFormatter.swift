@@ -4,7 +4,6 @@ import Foundation
 
 extension TranscriptSaver {
 
-    /// Format source label for timeline display
     /// Escape special characters for safe YAML string interpolation.
     /// Security: YAML double-quoted scalars prohibit raw newlines/tabs — an unescaped \n
     /// ends the scalar value, letting subsequent text be parsed as additional YAML keys.
@@ -14,11 +13,6 @@ extension TranscriptSaver {
          .replacingOccurrences(of: "\n", with: "\\n")
          .replacingOccurrences(of: "\r", with: "\\r")
          .replacingOccurrences(of: "\t", with: "\\t")
-    }
-
-    static func formatSourceLabel(_ source: String) -> String {
-        // Map "System Audio" to shorter "SysAudio"
-        return source == "System Audio" ? "SysAudio" : source
     }
 
     /// Format transcript as markdown with metadata header
@@ -175,11 +169,7 @@ extension TranscriptSaver {
         doc += "**Duration:** \(durationString) | **Words:** \(totalWordCount) | **Utterances:** \(totalUtterances)\n\n"
         doc += "---\n\n"
 
-        // SECTION 1: Summary placeholder
-        doc += "## Summary\n\n"
-        doc += "*Paste into your favorite AI tool for summary generation*\n\n"
-
-        // SECTION 2: Channel & Speaker Analytics
+        // SECTION 1: Channel & Speaker Analytics
         doc += "---\n\n"
         doc += "## Channel & Speaker Analytics\n\n"
 
@@ -242,7 +232,7 @@ extension TranscriptSaver {
             doc += "\n"
         }
 
-        // SECTION 3: Full Transcript
+        // SECTION 2: Full Transcript
         doc += "---\n\n"
         doc += "## Full Transcript\n\n"
 

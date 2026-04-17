@@ -8,8 +8,6 @@
 - meeting start/stop
 - optional right-Option tap dictation
 
-It no longer owns a live screenshot-driven draft mode.
-
 ## Key Files
 
 - `ContextCaptureEngine.swift` — Carbon hotkey registration, hotkey debounce,

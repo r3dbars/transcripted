@@ -30,22 +30,6 @@ public enum DateFormattingHelper {
         return formatter
     }()
 
-    /// Time only: "14:30:45"
-    private static let timeOnlyFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "HH:mm:ss"
-        return formatter
-    }()
-
-    /// ISO date only: "2024-01-15"
-    private static let isoDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
     // MARK: - Public API
 
     /// Format for audio filenames with millisecond precision
@@ -66,31 +50,11 @@ public enum DateFormattingHelper {
         displayFormatter.string(from: date)
     }
 
-    /// Format time only
-    /// Example: "14:30:45"
-    public static func formatTimeOnly(_ date: Date) -> String {
-        timeOnlyFormatter.string(from: date)
-    }
-
-    /// Format ISO date only
-    /// Example: "2024-01-15"
-    public static func formatISODate(_ date: Date) -> String {
-        isoDateFormatter.string(from: date)
-    }
-
     /// Format a TimeInterval as MM:SS
     /// Example: 125.0 -> "02:05"
     public static func formatDuration(_ interval: TimeInterval) -> String {
         let minutes = Int(interval) / 60
         let seconds = Int(interval) % 60
         return String(format: "%02d:%02d", minutes, seconds)
-    }
-
-    /// Format a TimeInterval as M:SS (no leading zero on minutes)
-    /// Example: 125.0 -> "2:05"
-    public static func formatDurationCompact(_ interval: TimeInterval) -> String {
-        let minutes = Int(interval) / 60
-        let seconds = Int(interval) % 60
-        return String(format: "%d:%02d", minutes, seconds)
     }
 }

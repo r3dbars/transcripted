@@ -11,11 +11,7 @@ enum BetaConfig {
     /// build-beta.sh replaces BETA_TOKEN_PLACEHOLDER with the actual token.
     static let userToken: String = {
         let token = "BETA_TOKEN_PLACEHOLDER"
-        // Security: assert the placeholder was substituted before the binary shipped.
-        // A beta build produced without running build-beta.sh would carry the literal
-        // placeholder, which leaks the substitution mechanism and may succeed against a
-        // lenient backend check. assertionFailure fires in debug/test builds only; production
-        // callers should gate on this value before making authenticated requests.
+        // Crash early in debug/test if build-beta.sh did not substitute the token.
         assert(token != "BETA_TOKEN_PLACEHOLDER",
                "BetaConfig.userToken was not substituted — run build-beta.sh before use")
         return token

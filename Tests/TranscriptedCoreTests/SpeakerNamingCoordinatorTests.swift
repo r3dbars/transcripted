@@ -1060,12 +1060,6 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
 
         ---
 
-        ## Summary
-
-        *Paste into your favorite AI tool for summary generation*
-
-        ---
-
         ## Channel & Speaker Analytics
 
         ### Microphone (You)

@@ -4,18 +4,21 @@
 
 `Sources/TranscriptedCore/` is the reusable meeting transcription library embedded in this repo. It is consumed by the app through `Sources/Meeting/`, and it can also be tested as a standalone Swift package through the root `Package.swift`.
 
-## Subsystems (57 Swift files)
+## Subsystems (56 Swift files)
 
 - `Audio/` (13 files) — mic + system audio capture, device recovery, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, and merge helpers
 - `Logging/` (2 files) — shared app logger and JSONL file logger
-- `Models/` (4 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, and transcript metadata builders
+- `Models/` (5 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, `RecordingHealthInfo`, and shared speaker-mapping / transcript metadata models
 - `Pipeline/` (4 files) — transcription orchestration, pipeline runner, and task queue
 - `Protocols/` (7 files) — host-injected seams: `SpeechToTextEngine`, `DiarizationEngine`, `SpeakerStore`, `TranscriptNotifier`, `AudioCaptureEngine`, `StatsStore`, `TranscriptStorage`
 - `Services/` (7 files) — DI container (`AppServices`), model bundle / download management, path indirection, recording validation, diarization, and failed-transcription persistence
 - `Speaker/` (10 files) — speaker DB, embedding matching / clustering, clip extraction, naming policy / coordinator, profile merging, retroactive transcript updates, and local-speaker splitting helpers
 - `Stats/` (4 files) — recording stats database, models, queries, and service
+<<<<<<< HEAD
+- `Storage/` (3 files) — transcript save, scanner, formatter
+- `Utilities/` (2 files) — date formatting and file permission helpers
 - `Storage/` (3 files) — transcript save, local-speaker breakdown formatting, scanner, formatter
-- `Utilities/` (3 files) — date formatting, legacy folder cleanup, and file permission helpers
+- `Utilities/` (2 files) — date formatting and file permission helpers
 
 ## The seams embedders should know
 

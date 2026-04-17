@@ -225,14 +225,28 @@ public enum ModelDownloadService {
 
     // MARK: - HuggingFace Model Download Infrastructure
 
-    /// Represents a file in a HuggingFace model repository
-    struct HFModelFile {
+    /// Represents a file in a Hugging Face model repository.
+    struct HFModelFile: Sendable {
         let name: String
         let size: Int?
         /// SHA-256 hex digest for LFS-tracked files (e.g. model weights).
         /// Populated from the HuggingFace API response when available.
         /// Security: used to verify file integrity after download from mirrors,
         /// so a compromised third-party mirror cannot silently serve malicious weights.
+        let sha256: String?
+    }
+
+    private struct HuggingFaceModelManifest: Decodable {
+        let siblings: [HuggingFaceModelManifestSibling]
+    }
+
+    private struct HuggingFaceModelManifestSibling: Decodable {
+        let rfilename: String
+        let size: Int?
+        let lfs: HuggingFaceModelManifestLFS?
+    }
+
+    private struct HuggingFaceModelManifestLFS: Decodable {
         let sha256: String?
     }
 
@@ -254,23 +268,21 @@ public enum ModelDownloadService {
                     continue
                 }
 
-                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let siblings = json["siblings"] as? [[String: Any]] else {
+                guard let manifest = try? JSONDecoder().decode(HuggingFaceModelManifest.self, from: data) else {
                     continue
                 }
 
-                let files = siblings.compactMap { sibling -> HFModelFile? in
-                    guard let name = sibling["rfilename"] as? String else { return nil }
+                let files = manifest.siblings.compactMap { sibling -> HFModelFile? in
+                    let name = sibling.rfilename
                     // Security: filter out any filenames that would escape the cache directory.
                     // Malicious or compromised API responses could include path traversal sequences.
                     guard isSafeModelFilename(name) else {
                         AppLogger.services.warning("Skipping unsafe filename in model manifest", ["filename": name])
                         return nil
                     }
-                    let size = sibling["size"] as? Int
                     // Security: extract SHA-256 from LFS metadata if present.
-                    let sha256 = (sibling["lfs"] as? [String: Any])?["sha256"] as? String
-                    return HFModelFile(name: name, size: size, sha256: sha256)
+                    let sha256 = sibling.lfs?.sha256
+                    return HFModelFile(name: name, size: sibling.size, sha256: sha256)
                 }
 
                 if !files.isEmpty {
