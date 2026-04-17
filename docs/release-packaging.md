@@ -86,6 +86,17 @@ If you expect existing installs of Transcripted to discover the new version
 inside the app, do not stop after the DMG is built. You must also complete the
 Sparkle steps in `docs/sparkle-updates.md`.
 
+After the release is published on GitHub, refresh the Homebrew cask so `brew
+upgrade` picks the new DMG up:
+
+```bash
+bash scripts/release/update-cask.sh <version>
+```
+
+The script downloads the published `Transcripted-<version>.dmg`, computes its
+sha256, and rewrites `Casks/transcripted.rb` in place. Commit that change with
+the rest of the release bookkeeping.
+
 Even after a DMG is properly signed, notarized, and stapled, users should still
 expect the normal macOS first-open confirmation for an app downloaded from the
 Internet. The healthy path is the standard one-click confirmation dialog, not a
