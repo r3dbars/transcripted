@@ -726,37 +726,8 @@ class DictationSessionController: ObservableObject {
         }
     }
 
-    /// Bundle identifiers of dedicated terminal emulators. Auto-paste is refused into
-    /// these targets because dictated text containing a trailing newline (or any
-    /// shell metacharacter) would be interpreted as a command and executed. The user
-    /// can still press Cmd+V manually if they really meant to paste into a shell.
-    private static let terminalBundleIDs: Set<String> = [
-        "com.apple.Terminal",
-        "com.googlecode.iterm2",
-        "dev.warp.Warp-Stable",
-        "co.zeit.hyper",
-        "net.kovidgoyal.kitty",
-        "io.alacritty",
-        "com.mitchellh.ghostty",
-    ]
-
-    private func isFrontmostAppATerminal() -> Bool {
-        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
-            return false
-        }
-        return Self.terminalBundleIDs.contains(bundleID)
-    }
-
     private func pasteWithClipboardRestore(_ text: String) -> DictationPasteOutcome {
         guard let appState = appState else { return .failed("Couldn't paste dictation") }
-
-        // Refuse to auto-paste into a terminal: a trailing newline or shell
-        // metacharacter in the dictated text would execute as a command.
-        if isFrontmostAppATerminal() {
-            appState.logger.log("DICTATION | terminal frontmost, copying instead of auto-paste")
-            copyTextToClipboard(text)
-            return .copied("Dictation won't auto-paste into a terminal for safety. Press Cmd+V to paste.")
-        }
 
         // Check Accessibility permission BEFORE modifying clipboard
         guard AXIsProcessTrusted() else {
