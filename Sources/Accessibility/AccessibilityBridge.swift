@@ -21,6 +21,7 @@ struct AccessibilityBridge {
         let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedRef)
         guard result == .success, let focusedElement = focusedRef else { return nil }
 
+        guard CFGetTypeID(focusedElement) == AXUIElementGetTypeID() else { return nil }
         let axElement = focusedElement as! AXUIElement
 
         var roleRef: AnyObject?
@@ -59,7 +60,9 @@ struct AccessibilityBridge {
         AXUIElementCopyAttributeValue(axElement, kAXPositionAttribute as CFString, &posRef)
         AXUIElementCopyAttributeValue(axElement, kAXSizeAttribute as CFString, &sizeRef)
 
-        guard let posValue = posRef, let sizeValue = sizeRef else { return nil }
+        guard let posValue = posRef, let sizeValue = sizeRef,
+              CFGetTypeID(posValue) == AXValueGetTypeID(),
+              CFGetTypeID(sizeValue) == AXValueGetTypeID() else { return nil }
 
         var point = CGPoint.zero
         var size = CGSize.zero
