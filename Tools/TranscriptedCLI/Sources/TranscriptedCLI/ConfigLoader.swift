@@ -3,8 +3,8 @@ import Foundation
 #if TRANSCRIPTEDCLI_WITH_DIARIZATION
 import FluidAudio
 
-/// JSON-decodable config that maps 1:1 to OfflineDiarizerConfig's flat init.
-/// All fields optional — missing fields use FluidAudio defaults.
+/// JSON-decodable config for the supported OfflineDiarizerConfig parameters.
+/// Missing fields use FluidAudio defaults.
 struct DiarizeConfig: Codable {
     var clusteringThreshold: Double?
     var Fa: Double?
@@ -22,16 +22,9 @@ struct DiarizeConfig: Codable {
     var segmentationMinDurationOff: Double?
     var maxVBxIterations: Int?
     var convergenceTolerance: Double?
-    var minSpeakers: Int?
-    var maxSpeakers: Int?
 
     func toOfflineDiarizerConfig() -> OfflineDiarizerConfig {
-        // FluidAudio's public OfflineDiarizerConfig surface has drifted from the
-        // older flat initializer this CLI used to mirror. Keep config-file
-        // loading buildable by falling back to the library defaults for now,
-        // while still threading through the legacy speaker-bound compatibility
-        // shim above.
-        OfflineDiarizerConfig.default.applyingSpeakerBounds(min: minSpeakers, max: maxSpeakers)
+        OfflineDiarizerConfig.default
     }
 }
 

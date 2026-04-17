@@ -31,13 +31,6 @@ enum DictationTranscriptWriter {
         return formatter
     }()
 
-    private static let frontmatterDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
     private static let entryIdFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -60,6 +53,13 @@ enum DictationTranscriptWriter {
         return formatter
     }()
 
+    private static let fallbackTitleFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.dateFormat = "MMM d 'at' h:mm a"
+        return formatter
+    }()
+
     private static let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -77,7 +77,9 @@ enum DictationTranscriptWriter {
         let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = buildTitle(from: normalizedText, createdAt: createdAt)
         let folder = directory ?? DictationStoragePaths.transcriptsFolder
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        if directory != nil {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
         let url = dailyFileURL(for: createdAt, in: folder)
 
         let sourceAppName = sourceApp?.localizedName ?? "Unknown"
@@ -126,7 +128,7 @@ enum DictationTranscriptWriter {
         return """
         ---
         title: "\(escapedTitle)"
-        date: \(frontmatterDateFormatter.string(from: date))
+        date: \(dayFilenameFormatter.string(from: date))
         capture_type: dictation_day
         ---
 
@@ -174,9 +176,6 @@ enum DictationTranscriptWriter {
             return candidate
         }
 
-        let fallbackFormatter = DateFormatter()
-        fallbackFormatter.locale = Locale.current
-        fallbackFormatter.dateFormat = "MMM d 'at' h:mm a"
-        return "Dictation \(fallbackFormatter.string(from: createdAt))"
+        return "Dictation \(fallbackTitleFormatter.string(from: createdAt))"
     }
 }

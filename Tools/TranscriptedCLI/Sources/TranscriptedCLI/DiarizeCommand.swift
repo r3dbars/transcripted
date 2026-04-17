@@ -35,7 +35,7 @@ struct Diarize: AsyncParsableCommand {
         if let configPath = config {
             diarizerConfig = try ConfigLoader.load(from: configPath)
         } else {
-            diarizerConfig = OfflineDiarizerConfig.default.applyingSpeakerBounds(min: 2, max: 8)
+            diarizerConfig = OfflineDiarizerConfig.default
         }
 
         // Initialize diarizer

@@ -16,7 +16,7 @@ struct MeetingRecordingStartDecision: Equatable {
 
 enum MeetingRecordingStartGate {
     static var systemAudioRecordingSummary: String {
-        "Needed so Transcripted can capture the other side of calls, videos, and other meeting audio."
+        TranscriptedPermissionKind.systemAudioRecordingSummary
     }
 
     static var systemAudioRecordingQuickStart: String {

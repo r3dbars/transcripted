@@ -16,7 +16,7 @@ Important entry points:
 - `Support/HotkeyPreferences.swift` — persisted hotkey settings used by capture routing
 - `Support/TranscriptedConstants.swift` — shared timing and behavior constants used across the app target
 - `Capture/ContextCaptureEngine.swift` — right-option dictation handling, keyboard hotkeys, meeting hotkey routing
-- `UI/Overlay/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
+- `UI/Overlay/DictationSessionController.swift` — dictation session orchestration
 - `Meeting/MeetingPromptDetector.swift` — Calendar and runtime-app meeting detection used to offer one-tap meeting capture prompts
 - `Meeting/MeetingSessionController.swift` — app-side bridge into `TranscriptedCore`, including queued meeting transcription handoff
 - `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter
