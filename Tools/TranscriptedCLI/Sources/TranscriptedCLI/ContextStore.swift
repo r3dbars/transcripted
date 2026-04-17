@@ -127,7 +127,7 @@ enum CLIContextStore {
                     entryId: nil,
                     date: meeting.date,
                     datetime: meeting.datetime,
-                    preview: meeting.speakers.joined(separator: ", "),
+                    preview: recentMeetingPreview(for: meeting),
                     wordCount: meeting.wordCount,
                     speakers: meeting.speakers,
                     sourceAppName: nil,
@@ -341,6 +341,15 @@ enum CLIContextStore {
             return filename
         }
         return extractTitle(from: content) ?? filename
+    }
+
+    private static func recentMeetingPreview(for meeting: MeetingRecord) -> String {
+        if let firstUtterance = meeting.utterances.first(where: {
+            !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }) {
+            return String(firstUtterance.text.prefix(220))
+        }
+        return meeting.speakers.joined(separator: ", ")
     }
 
     private static func extractTitle(from content: String) -> String? {
