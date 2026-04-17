@@ -52,11 +52,18 @@ They also honor:
 | `DiarizerConfigCompatibility.swift` | Compatibility shim for speaker-bound tuning while newer FluidAudio APIs are in flux |
 | `RTTMWriter.swift` | RTTM output formatter |
 
+## Test Files
+
+| File | Purpose |
+|------|---------|
+| `Tests/TranscriptedCLITests/ContextDirectoriesTests.swift` | Coverage for current Transcripted captures vs legacy Draft fallback path resolution |
+
 ## Build And Run
 
 ```bash
 cd Tools/TranscriptedCLI
 swift build
+swift test
 swift run transcripted-cli context-recent
 swift run transcripted-cli context-search "roadmap"
 swift run transcripted-cli list-dictations --count 5
@@ -73,6 +80,7 @@ instruction to run `bash build-deps.sh` from the repo root before rebuilding.
 - the context commands and the diarization commands serve different users, do not describe the whole package as diarization-only
 - the diarization commands depend on repo-level artifacts, so run `bash build-deps.sh` first when those are missing
 - retrieval-only commands should still build and run even when the diarization bundle is absent
+- `swift test` currently covers the agent-facing context path resolver only
 - the default context resolver prefers Transcripted capture folders, then falls back to Draft-era exports, then `~/Documents/Transcripted/`
 - `DiarizerConfigCompatibility.swift` currently keeps old bounded-speaker call sites compiling; it does not reintroduce upstream behavior by itself
 - changes here should be verified independently from the app build
