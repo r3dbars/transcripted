@@ -5,7 +5,7 @@ cask "transcripted" do
   url "https://github.com/r3dbars/transcripted/releases/download/v#{version}/Transcripted-#{version}.dmg",
       verified: "github.com/r3dbars/transcripted/"
   name "Transcripted"
-  desc "Local macOS menubar app for dictation and meeting transcription"
+  desc "Menubar app for dictation and meeting transcription"
   homepage "https://transcripted.app/"
 
   livecheck do
@@ -14,13 +14,14 @@ cask "transcripted" do
   end
 
   auto_updates true
-  depends_on macos: ">= :sequoia"
+  depends_on arch: :arm64
+  depends_on macos: ">= :tahoe"
 
   app "Transcripted.app"
 
   zap trash: [
     "~/Library/Application Support/Transcripted",
-    "~/Library/Caches/com.transcripted.Transcripted",
-    "~/Library/Preferences/com.transcripted.Transcripted.plist",
+    "~/Library/Caches/com.justinbetker.draft",
+    "~/Library/Preferences/com.justinbetker.draft.plist",
   ]
 end
