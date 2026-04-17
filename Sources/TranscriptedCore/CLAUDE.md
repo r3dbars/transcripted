@@ -12,9 +12,9 @@
 - `Pipeline/` (4 files) — transcription orchestration, pipeline runner, and task queue
 - `Protocols/` (7 files) — host-injected seams: `SpeechToTextEngine`, `DiarizationEngine`, `SpeakerStore`, `TranscriptNotifier`, `AudioCaptureEngine`, `StatsStore`, `TranscriptStorage`
 - `Services/` (7 files) — DI container (`AppServices`), model bundle / download management, path indirection, recording validation, diarization, and failed-transcription persistence
-- `Speaker/` (10 files) — speaker DB, embedding matching / clustering, clip extraction, naming policy / coordinator, profile merging, retroactive transcript updates
+- `Speaker/` (10 files) — speaker DB, embedding matching / clustering, clip extraction, naming policy / coordinator, profile merging, retroactive transcript updates, and local-speaker splitting helpers
 - `Stats/` (4 files) — recording stats database, models, queries, and service
-- `Storage/` (3 files) — transcript save, scanner, formatter
+- `Storage/` (3 files) — transcript save, local-speaker breakdown formatting, scanner, formatter
 - `Utilities/` (3 files) — date formatting, legacy folder cleanup, and file permission helpers
 
 ## The seams embedders should know
@@ -22,7 +22,7 @@
 - `CoreStoragePaths` — redirects all persisted output away from the standalone defaults
 - `ModelBundleProvider` — lets hosts override where offline model bundles are resolved
 - `AppServices` — DI container over protocol-typed STT / diarization / speaker-store dependencies
-- `TranscriptionTaskManager` — host-facing queue and orchestration surface
+- `TranscriptionTaskManager` — host-facing queue and orchestration surface, including the `splitLocalSpeakers` task option
 - `TranscriptNotifier` — optional callback channel for transcript-saved / failure notifications
 
 These seams exist specifically so the app can embed the library without adopting the old standalone Transcripted app assumptions.

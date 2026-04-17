@@ -62,7 +62,7 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
 - `Settings/TranscriptedOnboardingWindowController.swift` — dedicated first-launch window that hosts onboarding before users drop into the menubar flow
 - `Settings/SpeakerNamingSheet.swift` — sheet for renaming speakers in a completed meeting
-- `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, naming, merging, previewing, and deleting saved speaker profiles
+- `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, toggling multiple local-speaker identification, naming, merging, previewing, and deleting saved speaker profiles
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 
