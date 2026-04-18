@@ -40,6 +40,32 @@ func testTranscriptedStoragePaths() {
         )
     }
 
+    runSuite("FileManager.restrictFileToOwnerOnly — tightens existing files to owner-only") {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedStoragePathsTests-file-\(UUID().uuidString).txt", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        FileManager.default.createFile(
+            atPath: file.path,
+            contents: Data("hello".utf8),
+            attributes: [.posixPermissions: 0o644]
+        )
+
+        assertEqual(
+            permissions(of: file),
+            NSNumber(value: 0o644),
+            "test setup should start from a broader file permission"
+        )
+
+        FileManager.default.restrictFileToOwnerOnly(at: file)
+
+        assertEqual(
+            permissions(of: file),
+            NSNumber(value: 0o600),
+            "owner-only file helper should tighten permissions to 0600"
+        )
+    }
+
     runSuite("Transcripted capture library helpers — custom capture folders stay owner-only") {
         let original = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         defer {

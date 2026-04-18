@@ -37,18 +37,19 @@ private actor EventFileWriter {
     }()
 
     init() {
-        let storageDir = FileManager.default.transcriptedLogsDir
+        let storageDir = FileManager.default.transcriptedLogsDirURL
         fileURL = storageDir.appendingPathComponent("events.jsonl")
+    }
 
-        // Ensure directory exists
+    func append(_ event: ObservabilityEvent) {
+        let storageDir = fileURL.deletingLastPathComponent()
         do {
             try FileManager.default.createPrivateDirectory(at: storageDir)
         } catch {
             fputs("⚠️ EVENT | failed to create directory \(storageDir.path): \(error.localizedDescription)\n", stderr)
+            return
         }
-    }
 
-    func append(_ event: ObservabilityEvent) {
         let data: Data
         do {
             data = try encoder.encode(event)
