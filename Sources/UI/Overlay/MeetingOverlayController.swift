@@ -614,8 +614,8 @@ enum MeetingOverlayTokens {
     static let panelStroke   = NSColor.white.withAlphaComponent(0.08)
     static let textPrimary   = NSColor(calibratedWhite: 0.98, alpha: 1.0)
     static let textSecondary = NSColor.white.withAlphaComponent(0.55)
-    static let waveformMicTint = NSColor(calibratedRed: 0.20, green: 0.90, blue: 0.63, alpha: 1.0)
-    static let waveformSystemTint = NSColor(calibratedRed: 0.72, green: 0.76, blue: 0.82, alpha: 0.95)
+    static let waveformMicTint = NSColor(calibratedRed: 0.72, green: 0.82, blue: 0.79, alpha: 1.0)
+    static let waveformSystemTint = NSColor(calibratedRed: 0.74, green: 0.78, blue: 0.85, alpha: 1.0)
     static let dotIdle       = OverlayTokens.textMuted
     static let dotPrep       = OverlayTokens.textSecondary
     static let dotPrompt     = OverlayTokens.accentGreen

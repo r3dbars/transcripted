@@ -378,12 +378,15 @@ final class DualWaveformDrawingLayer: CALayer {
 
             let primarySample = sampleForDisplay(from: primaryBuffer, stepIndex: i)
             let secondarySample = sampleForDisplay(from: secondaryBuffer, stepIndex: i)
+            let secondaryHeight = barHeight(for: secondarySample, maxHeight: effectiveHalfBarHeight)
 
+            // Core Animation draws this layer in a bottom-left coordinate space,
+            // so the top stream needs to start at the center line and grow upward.
             drawBar(
                 in: ctx,
                 sampleValue: primarySample,
                 x: x,
-                y: centerY - barHeight(for: primarySample, maxHeight: effectiveHalfBarHeight),
+                y: centerY,
                 maxHeight: effectiveHalfBarHeight,
                 tintColor: primaryTintColor
             )
@@ -391,7 +394,7 @@ final class DualWaveformDrawingLayer: CALayer {
                 in: ctx,
                 sampleValue: secondarySample,
                 x: x,
-                y: centerY,
+                y: centerY - secondaryHeight,
                 maxHeight: effectiveHalfBarHeight,
                 tintColor: secondaryTintColor
             )
