@@ -2,42 +2,6 @@ import AppKit
 import EventKit
 import Foundation
 
-enum MeetingPromptProvider: String, CaseIterable, Hashable {
-    case zoom
-    case googleMeet
-    case teams
-    case webex
-    case facetime
-
-    var browserHosted: Bool {
-        switch self {
-        case .googleMeet, .teams, .webex:
-            return true
-        case .zoom, .facetime:
-            return false
-        }
-    }
-
-    var activeBundleIdentifiers: Set<String> {
-        switch self {
-        case .zoom:
-            return ["us.zoom.xos"]
-        case .googleMeet:
-            return []
-        case .teams:
-            return ["com.microsoft.teams", "com.microsoft.teams2"]
-        case .webex:
-            return ["com.cisco.webexmeetingsapp", "com.webex.meetingmanager"]
-        case .facetime:
-            return ["com.apple.FaceTime"]
-        }
-    }
-
-    var supportsNativeRuntimePrompt: Bool {
-        !activeBundleIdentifiers.isEmpty
-    }
-}
-
 @available(macOS 14.0, *)
 @MainActor
 final class MeetingPromptDetector {
@@ -46,6 +10,7 @@ final class MeetingPromptDetector {
         let title: String
         let detail: String
         let provider: MeetingPromptProvider
+        let reason: MeetingPromptReason
         let source: MeetingPromptSource
         let startDate: Date
         let endDate: Date
@@ -107,28 +72,48 @@ final class MeetingPromptDetector {
         workspaceObservers.removeAll()
     }
 
-    func snooze(candidate: Candidate, interval: TimeInterval? = nil) {
+    @discardableResult
+    func snooze(candidate: Candidate, interval: TimeInterval? = nil) -> MeetingPromptBackoffDecision {
         let now = Date()
         let baseInterval = MeetingPromptHeuristics.snoozeInterval(
             for: candidate.source,
             explicit: interval,
             defaultInterval: defaultSnoozeInterval
         )
+        let decision: MeetingPromptBackoffDecision
         let until: Date
         switch candidate.source {
         case .calendarEvent:
+            let minimumInterval = MeetingPromptHeuristics.calendarDismissMinimumInterval(
+                for: candidate.provider,
+                defaultInterval: baseInterval
+            )
             until = max(
-                now.addingTimeInterval(baseInterval),
+                now.addingTimeInterval(minimumInterval),
                 candidate.endDate.addingTimeInterval(MeetingPromptHeuristics.calendarReminderPostStartGrace)
+            )
+            decision = MeetingPromptBackoffDecision(
+                kind: candidate.provider == .teams ? .calendarTeamsExtended : .calendarDefault,
+                until: until
             )
             suppressRuntimePrompts(for: candidate.provider, until: until)
         case .runtimeApp:
-            until = nextRuntimePromptResumeDate(for: candidate.provider, now: now)
-                ?? now.addingTimeInterval(MeetingPromptHeuristics.runtimeDismissFallbackInterval)
+            if let resumeDate = nextRuntimePromptResumeDate(for: candidate.provider, now: now) {
+                until = resumeDate
+                decision = MeetingPromptBackoffDecision(kind: .runtimeUntilNextCalendar, until: until)
+            } else {
+                let fallbackInterval = MeetingPromptHeuristics.runtimeDismissFallbackInterval(for: candidate.provider)
+                until = now.addingTimeInterval(fallbackInterval)
+                decision = MeetingPromptBackoffDecision(
+                    kind: candidate.provider == .teams ? .runtimeTeamsExtended : .runtimeDefaultFallback,
+                    until: until
+                )
+            }
             suppressRuntimePrompts(for: candidate.provider, until: until)
         }
         snoozedUntil[candidate.id] = until
         pendingUntil[candidate.id] = until
+        return decision
     }
 
     func markAccepted(candidate: Candidate) {
@@ -231,6 +216,7 @@ final class MeetingPromptDetector {
     ) -> [ScoredCandidate] {
         MeetingPromptProvider.allCases.compactMap { provider in
             guard provider.supportsNativeRuntimePrompt else { return nil }
+            guard MeetingPromptHeuristics.allowsRuntimeOnlyPrompt(for: provider) else { return nil }
             guard provider.activeBundleIdentifiers.contains(where: runningBundleIDs.contains) else { return nil }
             if let suppressedUntil = runtimeSuppressedUntil[provider], suppressedUntil > now {
                 return nil
@@ -250,6 +236,7 @@ final class MeetingPromptDetector {
                     title: presentation.title,
                     detail: presentation.detail,
                     provider: provider,
+                    reason: MeetingPromptHeuristics.reason(for: .runtimeApp, hasRuntimeContext: false),
                     source: .runtimeApp,
                     startDate: now,
                     endDate: now.addingTimeInterval(MeetingPromptHeuristics.runtimeReminderSnoozeInterval),
@@ -316,6 +303,10 @@ final class MeetingPromptDetector {
                 title: "Meeting detected",
                 detail: detail,
                 provider: provider,
+                reason: MeetingPromptHeuristics.reason(
+                    for: .calendarEvent,
+                    hasRuntimeContext: runtimeReason != nil
+                ),
                 source: .calendarEvent,
                 startDate: event.startDate,
                 endDate: event.endDate,

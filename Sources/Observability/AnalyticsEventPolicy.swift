@@ -59,6 +59,7 @@ struct AnalyticsEventPolicy: Equatable {
         "meeting_prompt_shown": .init(
             name: "meeting_prompt_shown",
             allowedProperties: [
+                "prompt_reason",
                 "provider",
                 "source",
             ]
@@ -66,6 +67,8 @@ struct AnalyticsEventPolicy: Equatable {
         "meeting_prompt_dismissed": .init(
             name: "meeting_prompt_dismissed",
             allowedProperties: [
+                "backoff_kind",
+                "prompt_reason",
                 "provider",
                 "source",
             ]
@@ -73,6 +76,7 @@ struct AnalyticsEventPolicy: Equatable {
         "meeting_prompt_record_selected": .init(
             name: "meeting_prompt_record_selected",
             allowedProperties: [
+                "prompt_reason",
                 "provider",
                 "source",
             ]
