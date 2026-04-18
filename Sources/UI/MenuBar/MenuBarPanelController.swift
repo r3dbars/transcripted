@@ -3,29 +3,27 @@
 
 import AppKit
 import Combine
-import UniformTypeIdentifiers
 
 @MainActor
 final class MenuBarPanelController: NSViewController {
     private let appState: TranscriptedAppState
     private let dismissPopover: () -> Void
-    private let openSettingsWindow: () -> Void
-    private let openAgentConnectWindow: () -> Void
+    private let openSettingsWindow: (TranscriptedSettingsPage) -> Void
     private let preferredSourceAppProvider: () -> NSRunningApplication?
+    private let textPaster = ClipboardRestoringTextPaster()
+
     private var contentView: MenuBarContentView?
     private var subscriptions = Set<AnyCancellable>()
 
     init(
         appState: TranscriptedAppState,
         preferredSourceAppProvider: @escaping () -> NSRunningApplication?,
-        openSettingsWindow: @escaping () -> Void,
-        openAgentConnectWindow: @escaping () -> Void,
+        openSettingsWindow: @escaping (TranscriptedSettingsPage) -> Void,
         dismissPopover: @escaping () -> Void
     ) {
         self.appState = appState
         self.preferredSourceAppProvider = preferredSourceAppProvider
         self.openSettingsWindow = openSettingsWindow
-        self.openAgentConnectWindow = openAgentConnectWindow
         self.dismissPopover = dismissPopover
         super.init(nibName: nil, bundle: nil)
     }
@@ -36,14 +34,13 @@ final class MenuBarPanelController: NSViewController {
     override func loadView() {
         let content = MenuBarContentView(frame: NSRect(x: 0, y: 0, width: MenuTokens.panelWidth, height: MenuTokens.panelHeight))
         content.appState = appState
-        content.settingsView.appState = appState
-        content.shortcutsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
-        content.shortcutsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
-        content.shortcutsView.onImportAudioFile = { [weak self] in self?.importAudioFileFromMenu() }
-        content.modelStatusView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu() }
-        content.settingsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu() }
-        content.settingsView.onCheckForUpdates = { [weak self] in self?.checkForUpdatesFromMenu() }
-        content.settingsView.onOpenAgentConnect = { [weak self] in self?.openAgentConnectFromMenu() }
+        content.primaryActionsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
+        content.primaryActionsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
+        content.primaryActionsView.onPasteLastDictation = { [weak self] in self?.pasteLastDictationFromMenu() }
+        content.primaryActionsView.onOpenRecentMeetings = { [weak self] in self?.openSettingsFromMenu(.meetings) }
+        content.utilityActionsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu(.home) }
+        content.utilityActionsView.onCheckForUpdates = { [weak self] in self?.checkForUpdatesFromMenu() }
+        content.utilityActionsView.onOpenConnectAgent = { [weak self] in self?.openSettingsFromMenu(.connectAgent) }
         view = content
         contentView = content
         view.appearance = NSAppearance(named: .darkAqua)
@@ -54,53 +51,45 @@ final class MenuBarPanelController: NSViewController {
 
     func refresh() {
         guard let content = contentView else { return }
+
         let warmupStatus = appState.meetingSession.warmupStatus
         let modelState = FirstRunLocalModelState(appState.sttRouter.parakeetEngine.modelDownloadState)
         let dictationState = FirstRunExperience.dictationAction(for: modelState)
-        content.modelStatusView.update(state: modelState)
         let meetingState = FirstRunExperience.meetingAction(
             dictationReady: appState.sttRouter.isModelLoaded,
             meetingsStatus: warmupStatus.meetingsStatus
         )
+        let latestDictation = DictationTranscriptStore.latestSavedDictation()
+        let updatePresentation = menuUpdatePresentation(for: appState.sparkleUpdater.updateStatus)
 
         content.headerView.update(
             warmupStatus: warmupStatus,
             hotkeyError: appState.contextCapture.hotkeyError
         )
 
-        content.shortcutsView.update(
+        content.primaryActionsView.update(
             dictationKey: appState.contextCapture.dictationShortcutDisplay,
             meetingKey: appState.contextCapture.meetingShortcutDisplay,
             dictationState: dictationState,
             meetingState: meetingState,
-            canImportAudioFiles: !appState.meetingSession.isRecording
+            pasteDetail: pasteDetail(for: latestDictation),
+            pasteEnabled: latestDictation != nil
         )
 
-        if #available(macOS 14.0, *) {
-            content.recentMeetingsView.update(
-                meetings: RecentMeetingsScanner.loadRecent(),
-                failedMeetings: appState.meetingSession.failedMeetings,
-                onRetryFailedMeeting: { [weak self] id in
-                    self?.appState.meetingSession.retryFailedMeeting(id: id)
-                },
-                onDeleteFailedMeeting: { [weak self] id in
-                    self?.appState.meetingSession.deleteFailedMeeting(id: id)
-                },
-                onDismissFailedMeeting: { [weak self] id in
-                    self?.appState.meetingSession.dismissFailedMeeting(id: id)
-                }
-            )
-        } else {
-            content.recentMeetingsView.update(
-                meetings: RecentMeetingsScanner.loadRecent(),
-                failedMeetings: [],
-                onRetryFailedMeeting: { _ in },
-                onDeleteFailedMeeting: { _ in },
-                onDismissFailedMeeting: { _ in }
-            )
+        content.utilityActionsView.update(
+            updateTitle: updatePresentation.title,
+            updateVersion: updatePresentation.version,
+            updateTone: updatePresentation.tone,
+            updateEnabled: appState.sparkleUpdater.updateStatus.canCheckForUpdates
+        )
+
+        if case .unknown = appState.sparkleUpdater.updateStatus.state {
+            appState.sparkleUpdater.refreshUpdateStatus()
         }
 
         content.needsLayout = true
+        content.layoutSubtreeIfNeeded()
+        preferredContentSize = content.preferredPanelSize
     }
 
     private func setupSubscriptions() {
@@ -133,34 +122,18 @@ final class MenuBarPanelController: NSViewController {
             }
             .store(in: &subscriptions)
 
-        if #available(macOS 14.0, *) {
-            appState.meetingSession.$lastSavedTranscriptURL
-                .receive(on: RunLoop.main)
-                .sink { [weak self] _ in
-                    self?.refresh()
-                }
-                .store(in: &subscriptions)
-
-            appState.meetingSession.$isRecording
-                .receive(on: RunLoop.main)
-                .sink { [weak self] _ in
-                    self?.refresh()
-                }
-                .store(in: &subscriptions)
-
-            appState.meetingSession.$failedMeetings
-                .receive(on: RunLoop.main)
-                .sink { [weak self] _ in
-                    self?.refresh()
-                }
-                .store(in: &subscriptions)
-        }
+        appState.sparkleUpdater.$updateStatus
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.refresh()
+            }
+            .store(in: &subscriptions)
     }
 
     func prepareForClose() {
-        contentView?.shortcutsView.cancelEditing()
-        contentView?.showMainPage()
-        contentView?.settingsView.dismissTransientUI()
+        textPaster.cancelPendingClipboardRestore()
+        contentView?.utilityActionsView.dismissTransientUI()
+        contentView?.scrollToTop()
     }
 
     private func startDictationFromMenu() {
@@ -172,19 +145,29 @@ final class MenuBarPanelController: NSViewController {
     }
 
     private func startMeetingFromMenu() {
-        if #available(macOS 14.0, *) {
-            let sourceApp = resolvedSourceApp()
-            dismissPopover()
-            sourceApp?.activate(options: [])
-            Task {
-                await appState.meetingSession.startRecording(trigger: .menu)
-            }
+        let sourceApp = resolvedSourceApp()
+        dismissPopover()
+        sourceApp?.activate(options: [])
+        Task {
+            await appState.meetingSession.startRecording(trigger: .menu)
         }
     }
 
-    private func openSettingsFromMenu() {
+    private func pasteLastDictationFromMenu() {
+        guard let latestText = DictationTranscriptStore.latestSavedText() else {
+            NSSound.beep()
+            return
+        }
+
+        let sourceApp = resolvedSourceApp()
         dismissPopover()
-        openSettingsWindow()
+        sourceApp?.activate(options: [])
+        _ = textPaster.paste(latestText)
+    }
+
+    private func openSettingsFromMenu(_ page: TranscriptedSettingsPage) {
+        dismissPopover()
+        openSettingsWindow(page)
     }
 
     private func checkForUpdatesFromMenu() {
@@ -192,32 +175,70 @@ final class MenuBarPanelController: NSViewController {
         appState.sparkleUpdater.checkForUpdates()
     }
 
-    private func openAgentConnectFromMenu() {
-        dismissPopover()
-        openAgentConnectWindow()
-    }
-
-    private func importAudioFileFromMenu() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.audio]
-        panel.prompt = "Transcribe"
-        panel.message = "Choose an audio file Transcripted should transcribe."
-
-        dismissPopover()
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        Task {
-            _ = await appState.meetingSession.importAudioFile(from: url)
-        }
-    }
-
     private func resolvedSourceApp() -> NSRunningApplication? {
         let app = preferredSourceAppProvider()
         guard app?.bundleIdentifier != Bundle.main.bundleIdentifier else { return nil }
         return app
+    }
+
+    private func menuUpdatePresentation(
+        for status: SparkleUpdaterController.UpdateStatus
+    ) -> (title: String, version: String?, tone: MenuBarActionRowView.Tone) {
+        switch status.state {
+        case .unknown, .readyToCheck:
+            return (
+                "Check for Updates",
+                nil,
+                .standard
+            )
+        case .checking:
+            return (
+                "Checking…",
+                nil,
+                .standard
+            )
+        case .noUpdateAvailable:
+            return (
+                "Check for Updates",
+                nil,
+                .standard
+            )
+        case .updateAvailable(let version):
+            return (
+                "Update Available",
+                version,
+                .accent
+            )
+        }
+    }
+
+    private func pasteDetail(for entry: SavedDictationEntry?) -> String {
+        guard let entry else {
+            return "No saved dictation yet."
+        }
+
+        let collapsed = entry.text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? ""
+
+        guard !collapsed.isEmpty else {
+            return "Paste the newest saved dictation."
+        }
+
+        return shortenedPreview(for: collapsed, limit: 40)
+    }
+
+    private func shortenedPreview(for text: String, limit: Int) -> String {
+        let normalized = text.replacingOccurrences(
+            of: "\\s+",
+            with: " ",
+            options: .regularExpression
+        )
+        guard normalized.count > limit else {
+            return normalized
+        }
+        let truncated = normalized.prefix(max(0, limit - 1)).trimmingCharacters(in: .whitespaces)
+        return "\(truncated)…"
     }
 }

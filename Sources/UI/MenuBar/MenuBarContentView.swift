@@ -1,31 +1,25 @@
 // MenuBarContentView.swift
-// Root NSView for the menubar popover — one unified surface with four zones.
+// Root NSView for the menubar popover.
 
 import AppKit
 
 @MainActor
 final class MenuBarContentView: NSView {
-    enum Page {
-        case main
-        case agentConnect
-    }
-
     private let scrollView = NSScrollView()
     private let documentView = FlippedMenuDocumentView()
+    private let headerDivider = NSView()
+    private let sectionDivider = NSView()
+    private var documentHeight: CGFloat = MenuTokens.panelHeight
 
     let headerView = MenuBarHeaderView(frame: .zero)
-    let shortcutsView = MenuBarShortcutsView(frame: .zero)
-    let recentMeetingsView = MenuBarRecentMeetingsView(frame: .zero)
-    let modelStatusView = MenuBarModelStatusView(frame: .zero)
-    let settingsView = MenuBarSettingsView(frame: .zero)
-    let agentConnectView = MenuAgentConnectPageView(frame: .zero)
+    let primaryActionsView = MenuBarPrimaryActionsView(frame: .zero)
+    let utilityActionsView = MenuBarUtilityActionsView(frame: .zero)
 
-    private let recentsDivider = NSView()
-    private let modelStatusDivider = NSView()
-    private let footerDivider = NSView()
-    private var currentPage: Page = .main
-
-    weak var appState: TranscriptedAppState?
+    weak var appState: TranscriptedAppState? {
+        didSet {
+            utilityActionsView.appState = appState
+        }
+    }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -52,19 +46,13 @@ final class MenuBarContentView: NSView {
         scrollView.documentView = documentView
         addSubview(scrollView)
 
-        [recentsDivider, modelStatusDivider, footerDivider].forEach {
+        [headerDivider, sectionDivider].forEach {
             $0.wantsLayer = true
             $0.layer?.backgroundColor = MenuTokens.sectionDividerNS.cgColor
             documentView.addSubview($0)
         }
 
-        documentView.addSubview(headerView)
-        documentView.addSubview(shortcutsView)
-        documentView.addSubview(recentMeetingsView)
-        documentView.addSubview(modelStatusView)
-        documentView.addSubview(settingsView)
-        documentView.addSubview(agentConnectView)
-        updatePageVisibility()
+        [headerView, primaryActionsView, utilityActionsView].forEach(documentView.addSubview(_:))
     }
 
     override func layout() {
@@ -74,76 +62,37 @@ final class MenuBarContentView: NSView {
 
         let pad = MenuTokens.innerPadding
         let width = bounds.width - pad * 2
-        if currentPage == .agentConnect {
-            let contentHeight = agentConnectView.intrinsicHeight
-            agentConnectView.frame = NSRect(x: pad, y: pad, width: width, height: contentHeight)
-            documentView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(contentHeight + pad * 2, bounds.height))
-            return
-        }
-
-        let dividerHeight: CGFloat = 1
         var y = pad
+
         let headerHeight = headerView.intrinsicHeight
         headerView.frame = NSRect(x: pad, y: y, width: width, height: headerHeight)
-        y += headerHeight + MenuTokens.sectionSpacing
+        y += headerHeight + 10
 
-        let shortcutsHeight = shortcutsView.intrinsicHeight
-        shortcutsView.frame = NSRect(x: pad, y: y, width: width, height: shortcutsHeight)
-        y += shortcutsHeight + MenuTokens.sectionSpacing
+        headerDivider.frame = NSRect(x: pad, y: y, width: width, height: 1)
+        y += 9
 
-        if recentMeetingsView.hasContent {
-            recentsDivider.isHidden = false
-            recentsDivider.frame = NSRect(x: pad, y: y - (MenuTokens.sectionSpacing / 2), width: width, height: dividerHeight)
+        let primaryHeight = primaryActionsView.intrinsicHeight
+        primaryActionsView.frame = NSRect(x: pad, y: y, width: width, height: primaryHeight)
+        y += primaryHeight + MenuTokens.sectionSpacing
 
-            let recentsHeight = recentMeetingsView.intrinsicHeight
-            recentMeetingsView.isHidden = false
-            recentMeetingsView.frame = NSRect(x: pad, y: y, width: width, height: recentsHeight)
-            y += recentsHeight + MenuTokens.sectionSpacing
-        } else {
-            recentsDivider.isHidden = true
-            recentMeetingsView.isHidden = true
-        }
+        sectionDivider.frame = NSRect(x: pad, y: y, width: width, height: 1)
+        y += 9
 
-        modelStatusDivider.frame = NSRect(x: pad, y: y - (MenuTokens.sectionSpacing / 2), width: width, height: dividerHeight)
+        let utilityHeight = utilityActionsView.intrinsicHeight
+        utilityActionsView.frame = NSRect(x: pad, y: y, width: width, height: utilityHeight)
+        y += utilityHeight + pad
 
-        let modelStatusHeight = modelStatusView.intrinsicHeight
-        modelStatusView.frame = NSRect(x: pad, y: y, width: width, height: modelStatusHeight)
-        y += modelStatusHeight + MenuTokens.sectionSpacing
-
-        footerDivider.frame = NSRect(x: pad, y: y - (MenuTokens.sectionSpacing / 2), width: width, height: dividerHeight)
-
-        let footerHeight = settingsView.intrinsicHeight
-        settingsView.frame = NSRect(x: pad, y: y, width: width, height: footerHeight)
-        y += footerHeight + pad
-
-        documentView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(y, bounds.height))
+        documentHeight = y
+        documentView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: y)
     }
 
-    func showMainPage() {
-        currentPage = .main
-        updatePageVisibility()
-        scrollToTop()
-        needsLayout = true
-    }
-
-    func showAgentConnectPage() {
-        currentPage = .agentConnect
-        updatePageVisibility()
-        scrollToTop()
-        needsLayout = true
-    }
-
-    private func updatePageVisibility() {
-        let isMain = currentPage == .main
-        [headerView, shortcutsView, recentMeetingsView, modelStatusView, settingsView, recentsDivider, modelStatusDivider, footerDivider].forEach {
-            $0.isHidden = !isMain
-        }
-        agentConnectView.isHidden = isMain
-    }
-
-    private func scrollToTop() {
+    func scrollToTop() {
         scrollView.contentView.scroll(to: .zero)
         scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    var preferredPanelSize: NSSize {
+        NSSize(width: MenuTokens.panelWidth, height: min(documentHeight, MenuTokens.panelHeight))
     }
 }
 
