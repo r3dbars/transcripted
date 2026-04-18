@@ -6,6 +6,7 @@
 
 - dictation
 - meeting capture and local transcription
+- optional local-speaker review for people sharing the room mic during meetings
 
 The old standalone Transcripted app is preserved on:
 
