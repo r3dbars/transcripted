@@ -5,6 +5,16 @@
 import AppKit
 import QuartzCore
 
+enum WaveformMirroredAnchor {
+    case fromBottom
+    case fromTop
+}
+
+enum WaveformVisualizationStyle {
+    case scrolling
+    case mirrored(anchor: WaveformMirroredAnchor, phaseOffset: CGFloat)
+}
+
 // MARK: - Ring Buffer (extracted from ScrollingWaveformView, unchanged)
 
 /// Fixed-capacity circular buffer of audio level samples.
@@ -49,6 +59,10 @@ final class WaveformDrawingLayer: CALayer {
     var lastSampleTime: CFAbsoluteTime = 0
     var currentLevel: Float = 0
     var tintColor: NSColor = .white
+    var visualizationStyle: WaveformVisualizationStyle = .scrolling
+    var mirroredBarCount: Int = 26
+    var mirroredBarWidth: CGFloat = 2
+    var mirroredBarSpacing: CGFloat = 1.5
 
     // Bar geometry — matches original SwiftUI waveform
     let barWidth: CGFloat = 2
@@ -62,6 +76,15 @@ final class WaveformDrawingLayer: CALayer {
     override func draw(in ctx: CGContext) {
         let now = CFAbsoluteTimeGetCurrent()
 
+        switch visualizationStyle {
+        case .scrolling:
+            drawScrolling(in: ctx, now: now)
+        case .mirrored(let anchor, let phaseOffset):
+            drawMirrored(in: ctx, now: now, anchor: anchor, phaseOffset: phaseOffset)
+        }
+    }
+
+    private func drawScrolling(in ctx: CGContext, now: CFAbsoluteTime) {
         // 1. Sample audio level into ring buffer at 20Hz
         let elapsed = now - lastSampleTime
         if elapsed >= sampleInterval {
@@ -114,6 +137,73 @@ final class WaveformDrawingLayer: CALayer {
             ctx.fillPath()
         }
     }
+
+    private func drawMirrored(
+        in ctx: CGContext,
+        now: CFAbsoluteTime,
+        anchor: WaveformMirroredAnchor,
+        phaseOffset: CGFloat
+    ) {
+        let size = bounds.size
+        guard size.width > 0, size.height > 0 else { return }
+
+        let count = max(1, mirroredBarCount)
+        let stride = mirroredBarWidth + mirroredBarSpacing
+        let totalWidth = CGFloat(count) * mirroredBarWidth + CGFloat(max(0, count - 1)) * mirroredBarSpacing
+        let startX = max(0, (size.width - totalWidth) / 2)
+        let maxHeight = max(1, size.height - 1)
+        let level = max(0, min(1, CGFloat(currentLevel)))
+        let boostedLevel = max(0.08, sqrt(level))
+        let baseAlpha = tintColor.usingColorSpace(.deviceRGB)?.alphaComponent ?? 1
+        let time = CGFloat(now)
+
+        for index in 0..<count {
+            let env = envelopeMultiplier(for: index, of: count)
+            let phase = phaseOffset + CGFloat(index) * 0.48
+            let motionA = normalizedSine(time * 4.8 + phase)
+            let motionB = normalizedSine(time * 7.1 + phase * 1.7 + 0.9)
+            let motion = max(0.12, motionA * 0.7 + motionB * 0.3)
+            let rawLevel = min(1, boostedLevel * (0.45 + motion * 0.9))
+            let barHeight = max(minBarHeight, rawLevel * maxHeight * env)
+            let x = startX + CGFloat(index) * stride
+            let y: CGFloat = switch anchor {
+            case .fromBottom:
+                0
+            case .fromTop:
+                size.height - barHeight
+            }
+
+            let rect = CGRect(
+                x: x,
+                y: y,
+                width: mirroredBarWidth,
+                height: barHeight
+            )
+
+            let opacity = baseAlpha * (0.5 + rawLevel * 0.5)
+            ctx.setFillColor(tintColor.withAlphaComponent(opacity).cgColor)
+
+            let path = CGPath(
+                roundedRect: rect,
+                cornerWidth: mirroredBarWidth / 2,
+                cornerHeight: mirroredBarWidth / 2,
+                transform: nil
+            )
+            ctx.addPath(path)
+            ctx.fillPath()
+        }
+    }
+
+    private func envelopeMultiplier(for index: Int, of total: Int) -> CGFloat {
+        guard total > 1 else { return 1 }
+        let norm = (CGFloat(index) - CGFloat(total - 1) / 2) / (CGFloat(total - 1) / 2)
+        let envelope = pow(cos(norm * .pi / 2), 1.2) * 0.85 + 0.15
+        return max(0.15, envelope)
+    }
+
+    private func normalizedSine(_ value: CGFloat) -> CGFloat {
+        (sin(value) + 1) / 2
+    }
 }
 
 // MARK: - Host View
@@ -133,6 +223,36 @@ final class WaveformHostView: NSView {
 
     var tintColor: NSColor = .white {
         didSet { drawingLayer.tintColor = tintColor }
+    }
+
+    var visualizationStyle: WaveformVisualizationStyle = .scrolling {
+        didSet {
+            drawingLayer.visualizationStyle = visualizationStyle
+            drawingLayer.buffer.clear()
+            drawingLayer.lastSampleTime = 0
+            drawingLayer.setNeedsDisplay()
+        }
+    }
+
+    var mirroredBarCount: Int = 26 {
+        didSet {
+            drawingLayer.mirroredBarCount = mirroredBarCount
+            drawingLayer.setNeedsDisplay()
+        }
+    }
+
+    var mirroredBarWidth: CGFloat = 2 {
+        didSet {
+            drawingLayer.mirroredBarWidth = mirroredBarWidth
+            drawingLayer.setNeedsDisplay()
+        }
+    }
+
+    var mirroredBarSpacing: CGFloat = 1.5 {
+        didSet {
+            drawingLayer.mirroredBarSpacing = mirroredBarSpacing
+            drawingLayer.setNeedsDisplay()
+        }
     }
 
     /// Start/stop the render timer. Stop when not recording to avoid unnecessary GPU work.
@@ -155,6 +275,10 @@ final class WaveformHostView: NSView {
         wantsLayer = true
         drawingLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2.0
         drawingLayer.tintColor = tintColor
+        drawingLayer.visualizationStyle = visualizationStyle
+        drawingLayer.mirroredBarCount = mirroredBarCount
+        drawingLayer.mirroredBarWidth = mirroredBarWidth
+        drawingLayer.mirroredBarSpacing = mirroredBarSpacing
         drawingLayer.frame = bounds
         layer?.addSublayer(drawingLayer)
     }
