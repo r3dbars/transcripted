@@ -14,6 +14,7 @@ private actor AppLogFileWriter {
         closeHandle()
 
         let fm = FileManager.default
+        try? fm.createPrivateDirectory(at: URL(fileURLWithPath: path).deletingLastPathComponent())
         if fm.fileExists(atPath: path) {
             do {
                 let attrs = try fm.attributesOfItem(atPath: path)
@@ -69,7 +70,7 @@ private actor AppLogFileWriter {
 class AppLogger: ObservableObject {
     @Published var entries: [String] = []
 
-    private let logFilePath = FileManager.default.transcriptedLogsDir
+    private let logFilePath = FileManager.default.transcriptedLogsDirURL
         .appendingPathComponent("debug.log", isDirectory: false)
         .path
     private let fileWriter = AppLogFileWriter()

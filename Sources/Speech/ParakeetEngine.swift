@@ -199,10 +199,16 @@ class ParakeetEngine: ObservableObject {
     private var audioWatchdogTask: Task<Void, Never>?
     private var asrManagerReady = false
     private nonisolated(unsafe) var didReceiveAudioSamples = false
+    private var cachedInputDeviceName = "Unknown"
 
     var isModelLoaded: Bool { asrManagerReady }
+    var inputDeviceName: String { cachedInputDeviceName }
 
-    var inputDeviceName: String {
+    init() {
+        scheduleInputDeviceNameRefresh()
+    }
+
+    nonisolated private static func loadInputDeviceName() -> String {
         do {
             return try CoreAudioInputDeviceLookup.defaultInputDeviceName()
         } catch {
@@ -210,11 +216,37 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
+    private func scheduleInputDeviceNameRefresh() {
+        Task.detached(priority: .utility) { [weak self] in
+            let deviceName = Self.loadInputDeviceName()
+            await self?.updateCachedInputDeviceName(deviceName)
+        }
+    }
+
+    private func updateCachedInputDeviceName(_ deviceName: String) {
+        cachedInputDeviceName = deviceName
+    }
+
+    private func handleDefaultInputDeviceChange(deviceName: String) {
+        cachedInputDeviceName = deviceName
+        print("🎤 PARAKEET | default input changed → \(deviceName)")
+        EventReporter.shared.capture(
+            level: .info,
+            engine: "parakeet",
+            event: "default_input_device_changed",
+            message: "Default input device changed",
+            context: ["audio_device": deviceName]
+        )
+        handleAudioConfigChange()
+    }
+
     // MARK: - Model Initialization
 
     /// Load Parakeet models from the app bundle (preferred) or download from HuggingFace (fallback).
     /// Bundle path: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/
     func initialize() async {
+        scheduleInputDeviceNameRefresh()
+
         guard asrManager == nil else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "already_initialized",
                 message: "initialize() called but ASR manager already exists — ignoring")
@@ -395,6 +427,7 @@ class ParakeetEngine: ObservableObject {
     func prewarm() {
         guard !isEnginePrewarmed, !isRecording else { return }
         installAudioObserversIfNeeded()
+        scheduleInputDeviceNameRefresh()
 
         let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         switch ParakeetPrewarmPolicy.decision(for: microphoneStatus) {
@@ -516,17 +549,9 @@ class ParakeetEngine: ObservableObject {
         )
 
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            Task { @MainActor [weak self] in
-                guard let self = self else { return }
-                print("🎤 PARAKEET | default input changed → \(self.inputDeviceName)")
-                EventReporter.shared.capture(
-                    level: .info,
-                    engine: "parakeet",
-                    event: "default_input_device_changed",
-                    message: "Default input device changed",
-                    context: ["audio_device": self.inputDeviceName]
-                )
-                self.handleAudioConfigChange()
+            Task.detached(priority: .utility) { [weak self] in
+                let deviceName = Self.loadInputDeviceName()
+                await self?.handleDefaultInputDeviceChange(deviceName: deviceName)
             }
         }
 
@@ -758,6 +783,7 @@ class ParakeetEngine: ObservableObject {
 
     func startRecording(isRecoveryAttempt: Bool = false) -> Bool {
         guard !isRecording else { return true }
+        scheduleInputDeviceNameRefresh()
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         guard micStatus == .authorized else {
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "mic_not_authorized",

@@ -34,8 +34,33 @@ extension FileManager {
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
     }
 
+    var transcriptedAppSupportRootURL: URL {
+        userApplicationSupportDir.appendingPathComponent("Transcripted", isDirectory: true)
+    }
+
+    var transcriptedLogsDirURL: URL {
+        transcriptedAppSupportRootURL.appendingPathComponent("logs", isDirectory: true)
+    }
+
     private func logDirectoryCreationFailure(context: String, url: URL, error: Error) {
         fputs("⚠️ STORAGE | failed to create \(context) at \(url.path): \(error.localizedDescription)\n", stderr)
+    }
+
+    private func ensuredPrivateDirectory(at url: URL, context: String) -> URL {
+        ensurePrivateDirectory(at: url, context: context)
+        return url
+    }
+
+    private func setPOSIXPermissionsIfNeeded(_ permissions: NSNumber, ofItemAtPath path: String) {
+        guard fileExists(atPath: path) else { return }
+
+        if let attributes = try? attributesOfItem(atPath: path),
+           let currentPermissions = attributes[.posixPermissions] as? NSNumber,
+           currentPermissions == permissions {
+            return
+        }
+
+        try? setAttributes([.posixPermissions: permissions], ofItemAtPath: path)
     }
 
     func ensurePrivateDirectory(at url: URL, context: String) {
@@ -48,32 +73,7 @@ extension FileManager {
 
     /// App-owned Transcripted root.
     var transcriptedAppSupportDir: URL {
-        let url = userApplicationSupportDir.appendingPathComponent("Transcripted", isDirectory: true)
-        let captures = url.appendingPathComponent("captures", isDirectory: true)
-        let meetings = captures.appendingPathComponent("meetings", isDirectory: true)
-        let dictations = captures.appendingPathComponent("dictations", isDirectory: true)
-        let state = url.appendingPathComponent("state", isDirectory: true)
-        let cache = url.appendingPathComponent("cache", isDirectory: true)
-        let logs = url.appendingPathComponent("logs", isDirectory: true)
-        let tmp = url.appendingPathComponent("tmp", isDirectory: true)
-        let recordings = tmp.appendingPathComponent("recordings", isDirectory: true)
-
-        let directories: [(URL, String)] = [
-            (url, "Transcripted app support root"),
-            (captures, "Transcripted capture library parent"),
-            (meetings, "Transcripted meeting captures"),
-            (dictations, "Transcripted dictation captures"),
-            (state, "Transcripted state"),
-            (cache, "Transcripted cache"),
-            (logs, "Transcripted logs"),
-            (tmp, "Transcripted tmp"),
-            (recordings, "Transcripted temporary recordings"),
-        ]
-
-        for (directory, context) in directories {
-            ensurePrivateDirectory(at: directory, context: context)
-        }
-        return url
+        ensuredPrivateDirectory(at: transcriptedAppSupportRootURL, context: "Transcripted app support root")
     }
 
     /// Historic Draft compatibility root, retained only for migration / cleanup flows.
@@ -82,33 +82,37 @@ extension FileManager {
     }
 
     var transcriptedDefaultCaptureLibraryDir: URL {
-        transcriptedAppSupportDir.appendingPathComponent("captures", isDirectory: true)
+        let url = transcriptedAppSupportDir.appendingPathComponent("captures", isDirectory: true)
+        return ensuredPrivateDirectory(at: url, context: "Transcripted capture library parent")
     }
 
     var transcriptedCaptureLibraryDir: URL {
         let url = TranscriptedStoragePreferences.captureLibraryURL(fileManager: self)
-        ensurePrivateDirectory(at: url, context: "Transcripted capture library")
-        return url
+        return ensuredPrivateDirectory(at: url, context: "Transcripted capture library")
     }
 
     var transcriptedStateDir: URL {
-        transcriptedAppSupportDir.appendingPathComponent("state", isDirectory: true)
+        let url = transcriptedAppSupportDir.appendingPathComponent("state", isDirectory: true)
+        return ensuredPrivateDirectory(at: url, context: "Transcripted state")
     }
 
     var transcriptedCacheDir: URL {
-        transcriptedAppSupportDir.appendingPathComponent("cache", isDirectory: true)
+        let url = transcriptedAppSupportDir.appendingPathComponent("cache", isDirectory: true)
+        return ensuredPrivateDirectory(at: url, context: "Transcripted cache")
     }
 
     var transcriptedLogsDir: URL {
-        transcriptedAppSupportDir.appendingPathComponent("logs", isDirectory: true)
+        ensuredPrivateDirectory(at: transcriptedLogsDirURL, context: "Transcripted logs")
     }
 
     var transcriptedTemporaryDir: URL {
-        transcriptedAppSupportDir.appendingPathComponent("tmp", isDirectory: true)
+        let url = transcriptedAppSupportDir.appendingPathComponent("tmp", isDirectory: true)
+        return ensuredPrivateDirectory(at: url, context: "Transcripted tmp")
     }
 
     var transcriptedRecordingsDir: URL {
-        transcriptedTemporaryDir.appendingPathComponent("recordings", isDirectory: true)
+        let url = transcriptedTemporaryDir.appendingPathComponent("recordings", isDirectory: true)
+        return ensuredPrivateDirectory(at: url, context: "Transcripted temporary recordings")
     }
 
     /// <capture-library>/meetings/
@@ -123,18 +127,17 @@ extension FileManager {
 
     private func transcriptedCaptureLibrarySubdirectory(_ name: String) -> URL {
         let url = transcriptedCaptureLibraryDir.appendingPathComponent(name, isDirectory: true)
-        ensurePrivateDirectory(at: url, context: "Transcripted \(name) folder")
-        return url
+        return ensuredPrivateDirectory(at: url, context: "Transcripted \(name) folder")
     }
 
     /// Create a directory and tighten it to owner-only access (0700).
     func createPrivateDirectory(at url: URL) throws {
         try createDirectory(at: url, withIntermediateDirectories: true)
-        try? setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+        setPOSIXPermissionsIfNeeded(NSNumber(value: 0o700), ofItemAtPath: url.path)
     }
 
     /// Tighten a file to owner-only access (0600).
     func restrictFileToOwnerOnly(at url: URL) {
-        try? setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        setPOSIXPermissionsIfNeeded(NSNumber(value: 0o600), ofItemAtPath: url.path)
     }
 }
