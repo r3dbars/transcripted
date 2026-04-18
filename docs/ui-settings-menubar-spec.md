@@ -123,6 +123,10 @@ Contents:
   - local model readiness
   - permissions health
   - capture library location
+- app-wide transcription model controls for:
+  - choosing the local speech model used by both dictation and meetings
+  - showing whether that model is bundled, already cached, or needs a one-time download
+  - saying which host Transcripted will contact when the selected model is missing
 - quick links into the most important pages
 
 ### Shortcuts

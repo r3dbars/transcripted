@@ -533,32 +533,34 @@ class DictationSessionController: ObservableObject {
     }
 
     private func loadingPresentation(for modelState: ParakeetModelState) -> FloatingOverlayController.LoadingPresentation {
+        let modelName = appState?.sttRouter.parakeetEngine.selectedModel.displayName ?? "the selected local voice model"
+
         switch modelState {
         case .notLoaded:
             return .init(
                 title: "Starting dictation",
-                detail: "Transcripted is waking up the local voice model before it starts listening.",
+                detail: "Transcripted is waking up \(modelName) before it starts listening.",
                 progress: 0.08,
                 status: "Preparing local model"
             )
         case .downloading(let progress):
             return .init(
                 title: "Downloading dictation model",
-                detail: "Transcripted is downloading the on-device voice model needed for local dictation.",
+                detail: "Transcripted is downloading \(modelName), the on-device voice model needed for local dictation.",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 status: "\(Int(progress * 100))% complete"
             )
         case .loading:
             return .init(
                 title: "Loading dictation",
-                detail: "Transcripted has the model files and is loading them into memory. Recording starts automatically when it finishes.",
+                detail: "Transcripted has the \(modelName) files and is loading them into memory. Recording starts automatically when it finishes.",
                 progress: 0.92,
                 status: "Almost ready"
             )
         case .ready:
             return .init(
                 title: "Starting dictation",
-                detail: "The local voice model is ready. Opening the microphone now.",
+                detail: "\(modelName) is ready. Opening the microphone now.",
                 progress: 1.0,
                 status: "Starting microphone"
             )

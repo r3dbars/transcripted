@@ -153,6 +153,7 @@ class ParakeetEngine: ObservableObject {
     @Published var recordingInterrupted = false
     @Published var isRecovering = false
     @Published var inputFormatReady = true
+    @Published private(set) var selectedModel = LocalTranscriptionModelPreferences.selectedModel()
 
     private let audioEngine = AVAudioEngine()
     private var sampleBuffer: [Float] = []
@@ -203,8 +204,12 @@ class ParakeetEngine: ObservableObject {
 
     var isModelLoaded: Bool { asrManagerReady }
     var inputDeviceName: String { cachedInputDeviceName }
+    var selectedModelAvailability: LocalTranscriptionModelAvailability {
+        LocalTranscriptionModelResolver.availability(for: selectedModel)
+    }
 
     init() {
+        selectedModel = LocalTranscriptionModelPreferences.selectedModel()
         scheduleInputDeviceNameRefresh()
     }
 
@@ -242,10 +247,11 @@ class ParakeetEngine: ObservableObject {
 
     // MARK: - Model Initialization
 
-    /// Load Parakeet models from the app bundle (preferred) or download from HuggingFace (fallback).
-    /// Bundle path: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/
+    /// Load the selected Parakeet model from the app bundle (preferred), local cache,
+    /// or HuggingFace mirror fallback when it is not already on this Mac.
     func initialize() async {
         scheduleInputDeviceNameRefresh()
+        selectedModel = LocalTranscriptionModelPreferences.selectedModel()
 
         guard asrManager == nil else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "already_initialized",
@@ -265,23 +271,31 @@ class ParakeetEngine: ObservableObject {
         // not surprise users with a hidden or out-of-context prompt.
 
         modelDownloadState = .loading
-        print("🔄 PARAKEET | initializing models...")
+        print("🔄 PARAKEET | initializing \(selectedModel.displayName)...")
 
         var failureStage: ParakeetModelInitStage = .authorizationRequest
         var loadSource: ParakeetModelLoadSource = .unresolved
-        let bundledModelPath = bundledModelPath(subdirectory: "parakeet-tdt-0.6b-v3-coreml", checkFile: "Encoder.mlmodelc")
-        let bundledModelPresent = bundledModelPath != nil
+        let availability = selectedModelAvailability
+        let localModelPath = availability.directoryURL
+        let bundledModelPresent = availability.source == .bundled
 
         do {
             let models: AsrModels
             let loadSourceName: String
 
-            // Try loading from app bundle first (bundled by build.sh)
-            if let bundlePath = bundledModelPath {
+            if let localModelPath {
                 failureStage = .bundleLoad
-                loadSource = .bundle
-                print("📦 PARAKEET | loading from bundle: \(bundlePath.path)")
-                models = try await AsrModels.load(from: bundlePath, version: .v3)
+                switch availability.source {
+                case .bundled:
+                    loadSource = .bundle
+                    print("📦 PARAKEET | loading \(selectedModel.displayName) from bundle: \(localModelPath.path)")
+                case .cached:
+                    loadSource = .cache
+                    print("💾 PARAKEET | loading \(selectedModel.displayName) from cache: \(localModelPath.path)")
+                case .downloadRequired:
+                    loadSource = .unresolved
+                }
+                models = try await loadModels(for: selectedModel, from: localModelPath)
                 loadSourceName = loadSource.rawValue
             } else {
                 // Fallback: download from HuggingFace (~600MB on first run).
@@ -301,12 +315,12 @@ class ParakeetEngine: ObservableObject {
                 // verification stub would be worse than no check at all.
                 failureStage = .downloadModels
                 loadSource = .download
-                print("🌐 PARAKEET | models not bundled, downloading (~600MB)...")
+                print("🌐 PARAKEET | \(selectedModel.displayName) not bundled or cached, downloading...")
                 modelDownloadState = .downloading(progress: 0.0)
-                let downloadedPath = try await AsrModels.download(version: .v3)
+                let downloadedPath = try await downloadModels(for: selectedModel)
                 modelDownloadState = .loading
-                print("🌐 PARAKEET | loading downloaded models from: \(downloadedPath.path)")
-                models = try await AsrModels.load(from: downloadedPath, version: .v3)
+                print("🌐 PARAKEET | loading downloaded \(selectedModel.displayName) models from: \(downloadedPath.path)")
+                models = try await loadModels(for: selectedModel, from: downloadedPath)
                 loadSourceName = loadSource.rawValue
             }
 
@@ -317,10 +331,13 @@ class ParakeetEngine: ObservableObject {
             asrManager = manager
             asrManagerReady = true
             modelDownloadState = .ready
-            print("✅ PARAKEET | TDT V3 models loaded (source: \(loadSourceName))")
+            print("✅ PARAKEET | \(selectedModel.displayName) loaded (source: \(loadSourceName))")
             EventReporter.shared.capture(level: .info, engine: "parakeet", event: "models_loaded",
-                message: "Parakeet ASR models initialized successfully",
-                context: ["load_source": loadSourceName])
+                message: "\(selectedModel.displayName) initialized successfully",
+                context: [
+                    "load_source": loadSourceName,
+                    "model_id": selectedModel.rawValue
+                ])
 
             if liveDisplayEnabled {
                 await initializeEouModel()
@@ -336,9 +353,29 @@ class ParakeetEngine: ObservableObject {
                     stage: failureStage,
                     loadSource: loadSource,
                     bundledModelPresent: bundledModelPresent,
-                    microphoneStatus: AVCaptureDevice.authorizationStatus(for: .audio)
+                    microphoneStatus: AVCaptureDevice.authorizationStatus(for: .audio),
+                    selectedModel: selectedModel
                 ))
         }
+    }
+
+    func switchToModel(_ model: LocalTranscriptionModel) async {
+        guard !isRecording, !isTranscribing else { return }
+
+        LocalTranscriptionModelPreferences.setSelectedModel(model)
+        selectedModel = model
+        cancel()
+        cleanup()
+        await initialize()
+    }
+
+    func reloadSelectedModel() async {
+        guard !isRecording, !isTranscribing else { return }
+
+        selectedModel = LocalTranscriptionModelPreferences.selectedModel()
+        cancel()
+        cleanup()
+        await initialize()
     }
 
     /// Load Parakeet EOU 120M for streaming live display.
@@ -420,6 +457,24 @@ class ParakeetEngine: ObservableObject {
             .appendingPathComponent(subdirectory)
         guard FileManager.default.fileExists(atPath: path.appendingPathComponent(checkFile).path) else { return nil }
         return path
+    }
+
+    private func loadModels(for model: LocalTranscriptionModel, from directory: URL) async throws -> AsrModels {
+        switch model {
+        case .parakeetTdtV3:
+            return try await AsrModels.load(from: directory, version: .v3)
+        case .parakeetTdtV2:
+            return try await AsrModels.load(from: directory, version: .v2)
+        }
+    }
+
+    private func downloadModels(for model: LocalTranscriptionModel) async throws -> URL {
+        switch model {
+        case .parakeetTdtV3:
+            return try await AsrModels.download(version: .v3)
+        case .parakeetTdtV2:
+            return try await AsrModels.download(version: .v2)
+        }
     }
 
     // MARK: - Pre-warm

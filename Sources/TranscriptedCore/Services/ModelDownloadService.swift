@@ -33,7 +33,7 @@ public enum DownloadErrorKind: Equatable {
         case .networkOffline:
             return "Connect to the internet and try again."
         case .tlsFailure:
-            return "Could not establish a secure connection to the download server. Check your network or try a VPN."
+            return "Could not establish a secure connection to huggingface.co or the fallback mirror hf-mirror.com. Check your network or try a VPN."
         case .timeout:
             return "The download took too long. Try again or check your connection speed."
         case .diskSpace:
@@ -70,6 +70,13 @@ public enum ModelDownloadService {
         "https://huggingface.co",
         "https://hf-mirror.com"
     ]
+
+    public static var downloadHostDisplayList: String {
+        let hosts = mirrors.compactMap { URL(string: $0)?.host ?? $0 }
+        guard let first = hosts.first else { return "the configured model host" }
+        guard hosts.count > 1 else { return first }
+        return "\(first) with \(hosts[1]) as a fallback"
+    }
 
     /// Default retry configuration
     public static let maxRetries = 3

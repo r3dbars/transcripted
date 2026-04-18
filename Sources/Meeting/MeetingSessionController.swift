@@ -757,6 +757,7 @@ final class MeetingSessionController: ObservableObject {
     private func refreshWarmupStatus() {
         let dictationState = parakeetEngine.modelDownloadState
         let meetingState = diarization.modelState
+        let modelName = parakeetEngine.selectedModel.displayName
         let isMeetingWarmupInFlight = modelPreparationTask != nil || state == .loadingModels
         let hasMeetingWarmupFailure: Bool
         if case .failed = meetingState {
@@ -776,7 +777,7 @@ final class MeetingSessionController: ObservableObject {
             warmupStatus = ModelWarmupStatus(
                 title: "Getting Transcripted ready",
                 subtitle: "Downloading local dictation model",
-                detail: "Transcripted is downloading the on-device voice model used for dictation. This can take a minute or two on first launch.",
+                detail: "Transcripted is downloading \(modelName), the on-device voice model shared by dictation and meetings. This can take a minute or two the first time.",
                 progress: max(0.08, min(0.62, 0.08 + progress * 0.54)),
                 dictationStatus: "Downloading \(Int(progress * 100))%",
                 meetingsStatus: "Waiting"
@@ -785,7 +786,7 @@ final class MeetingSessionController: ObservableObject {
             warmupStatus = ModelWarmupStatus(
                 title: "Getting Transcripted ready",
                 subtitle: "Loading local dictation model",
-                detail: "Transcripted has the model files and is loading dictation into memory.",
+                detail: "Transcripted has the \(modelName) files and is loading dictation into memory.",
                 progress: 0.68,
                 dictationStatus: "Loading",
                 meetingsStatus: "Waiting"
@@ -793,7 +794,7 @@ final class MeetingSessionController: ObservableObject {
         case .failed(let message):
             warmupStatus = ModelWarmupStatus(
                 title: "Couldn’t start dictation",
-                subtitle: "The local dictation model failed to load",
+                subtitle: "\(modelName) failed to load",
                 detail: message,
                 progress: 0,
                 dictationStatus: "Failed",

@@ -22,6 +22,8 @@ struct TranscriptedSettingsView: View {
     @State private var recentMeetings = RecentMeetingsScanner.loadRecent(limit: 5)
     @State private var recentDictations = DictationTranscriptStore.recentSavedDictations(limit: 5)
     @State private var showSupportFolders = false
+    @State private var selectedTranscriptionModel = LocalTranscriptionModelPreferences.selectedModel()
+    @State private var isApplyingTranscriptionModel = false
 
     init(
         appState: TranscriptedAppState,
@@ -89,6 +91,9 @@ struct TranscriptedSettingsView: View {
         }
         .onChange(of: navigation.selectedPage) { _, _ in
             refreshRecentCaptures()
+        }
+        .onReceive(parakeetEngine.$selectedModel) { model in
+            selectedTranscriptionModel = model
         }
     }
 
@@ -164,7 +169,11 @@ struct TranscriptedSettingsView: View {
                 title: "Setup Status",
                 detail: "These cards show whether Transcripted is ready for dictation, meetings, and local storage."
             ) {
-                let modelCard = FirstRunExperience.modelCard(for: FirstRunLocalModelState(parakeetEngine.modelDownloadState))
+                let modelCard = FirstRunExperience.modelCard(
+                    for: FirstRunLocalModelState(parakeetEngine.modelDownloadState),
+                    selectedModel: selectedTranscriptionModel,
+                    availability: selectedModelAvailability
+                )
 
                 SettingsStatusCard(
                     title: "Local voice model",
@@ -195,6 +204,67 @@ struct TranscriptedSettingsView: View {
                     detail: (captureLibraryURL.path as NSString).abbreviatingWithTildeInPath,
                     tone: .ready
                 )
+            }
+
+            SettingsSection(
+                title: "Transcription Model",
+                detail: "Dictation and meetings share the same on-device speech model. Change it here when you want a different language or accuracy tradeoff."
+            ) {
+                Picker("Selected model", selection: Binding(
+                    get: { selectedTranscriptionModel },
+                    set: { newValue in
+                        chooseTranscriptionModel(newValue)
+                    }
+                )) {
+                    ForEach(LocalTranscriptionModel.allCases, id: \.self) { model in
+                        Text(model.pickerLabel)
+                            .tag(model)
+                    }
+                }
+                .disabled(modelSelectionControlsDisabled)
+
+                Text(selectedTranscriptionModel.selectionSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Current source")
+                        .font(.subheadline.weight(.semibold))
+
+                    Spacer()
+
+                    Text(selectedModelAvailability.source.statusTitle)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(selectedModelAvailability.statusDetail(for: selectedTranscriptionModel))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(selectedModelAvailability.networkDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    Button("Reload Selected Model") {
+                        reloadSelectedTranscriptionModel()
+                    }
+                    .disabled(modelSelectionControlsDisabled)
+
+                    Button(selectedModelRevealButtonTitle) {
+                        revealSelectedModelFiles()
+                    }
+                }
+
+                if modelSelectionControlsDisabled {
+                    Text("Change the model when Transcripted is idle and not already loading speech models.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             SettingsSection(
@@ -585,6 +655,34 @@ struct TranscriptedSettingsView: View {
         captureLibraryURL.standardizedFileURL == FileManager.default.transcriptedDefaultCaptureLibraryDir.standardizedFileURL
     }
 
+    private var selectedModelAvailability: LocalTranscriptionModelAvailability {
+        LocalTranscriptionModelResolver.availability(for: selectedTranscriptionModel)
+    }
+
+    private var selectedModelRevealButtonTitle: String {
+        selectedModelAvailability.directoryURL == nil ? "Show Model Cache" : "Show Model Folder"
+    }
+
+    private var modelSelectionControlsDisabled: Bool {
+        if isApplyingTranscriptionModel || parakeetEngine.isRecording || parakeetEngine.isTranscribing {
+            return true
+        }
+
+        switch parakeetEngine.modelDownloadState {
+        case .downloading, .loading:
+            return true
+        case .notLoaded, .ready, .failed:
+            break
+        }
+
+        switch meetingSession.state {
+        case .loadingModels, .recording, .transcribing:
+            return true
+        case .idle, .ready, .error:
+            return false
+        }
+    }
+
     private var crashReportingFootnote: String {
         if CrashReporter.isAvailable {
             return crashReportingEnabled
@@ -622,6 +720,7 @@ struct TranscriptedSettingsView: View {
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
         anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
+        selectedTranscriptionModel = parakeetEngine.selectedModel
         if case .unknown = sparkleUpdater.updateStatus.state {
             sparkleUpdater.refreshUpdateStatus()
         }
@@ -672,6 +771,38 @@ struct TranscriptedSettingsView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         TranscriptedStoragePreferences.setCaptureLibraryURL(url)
         refreshStoragePaths()
+    }
+
+    private func chooseTranscriptionModel(_ model: LocalTranscriptionModel) {
+        guard model != selectedTranscriptionModel else { return }
+
+        selectedTranscriptionModel = model
+        isApplyingTranscriptionModel = true
+        Task { @MainActor in
+            defer { isApplyingTranscriptionModel = false }
+            await parakeetEngine.switchToModel(model)
+            await meetingSession.prepareModels(showLoadingUI: false)
+        }
+    }
+
+    private func reloadSelectedTranscriptionModel() {
+        isApplyingTranscriptionModel = true
+        Task { @MainActor in
+            defer { isApplyingTranscriptionModel = false }
+            await parakeetEngine.reloadSelectedModel()
+            await meetingSession.prepareModels(showLoadingUI: false)
+        }
+    }
+
+    private func revealSelectedModelFiles() {
+        guard let fallbackURL = LocalTranscriptionModelResolver.cacheRootURL() else { return }
+        let url = selectedModelAvailability.directoryURL ?? fallbackURL
+
+        if selectedModelAvailability.directoryURL == nil && !FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     private var aboutUpdateStatusTitle: String {

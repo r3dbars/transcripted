@@ -125,12 +125,20 @@ func testFirstRunExperience() {
     }
 
     runSuite("FirstRunExperience.modelCard — names the model and download source during first-run") {
-        let card = FirstRunExperience.modelCard(for: .downloading(progress: 0.5))
+        let card = FirstRunExperience.modelCard(
+            for: .downloading(progress: 0.5),
+            selectedModel: .parakeetTdtV3,
+            availability: .init(source: .downloadRequired, directoryURL: nil)
+        )
 
         assertEqual(card.title, "Downloading Parakeet TDT V3", "model card should name the active first-run step and the model")
         assertTrue(
             card.detail.contains("huggingface.co"),
             "model card should tell the user where the model is being downloaded from"
+        )
+        assertTrue(
+            card.detail.contains("hf-mirror.com"),
+            "model card should surface the fallback model host during setup"
         )
         assertTrue(
             card.detail.contains("on this Mac") || card.detail.contains("locally"),
@@ -141,8 +149,26 @@ func testFirstRunExperience() {
     }
 
     runSuite("FirstRunExperience.modelCard — names Parakeet TDT V3 in ready state") {
-        let card = FirstRunExperience.modelCard(for: .ready)
+        let card = FirstRunExperience.modelCard(
+            for: .ready,
+            selectedModel: .parakeetTdtV3,
+            availability: .init(source: .bundled, directoryURL: URL(fileURLWithPath: "/tmp/model", isDirectory: true))
+        )
 
         assertTrue(card.title.contains("Parakeet TDT V3"), "ready card should tell the user which model is running")
+    }
+
+    runSuite("FirstRunExperience.modelCard — reflects the selected alternative local model") {
+        let card = FirstRunExperience.modelCard(
+            for: .notLoaded,
+            selectedModel: .parakeetTdtV2,
+            availability: .init(source: .cached, directoryURL: URL(fileURLWithPath: "/tmp/v2", isDirectory: true))
+        )
+
+        assertTrue(card.title.contains("Parakeet TDT V2"), "first-run copy should track the selected model instead of assuming v3")
+        assertTrue(
+            card.detail.contains("already stored on this Mac"),
+            "first-run copy should explain when the selected model is already available locally"
+        )
     }
 }

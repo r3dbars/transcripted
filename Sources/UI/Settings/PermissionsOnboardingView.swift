@@ -185,7 +185,11 @@ struct PermissionsOnboardingView: View {
     }
 
     private var modelStatus: FirstRunModelCardState {
-        FirstRunExperience.modelCard(for: FirstRunLocalModelState(parakeetEngine.modelDownloadState))
+        FirstRunExperience.modelCard(
+            for: FirstRunLocalModelState(parakeetEngine.modelDownloadState),
+            selectedModel: parakeetEngine.selectedModel,
+            availability: parakeetEngine.selectedModelAvailability
+        )
     }
 
     private var primaryAction: FirstRunPrimaryActionState {
