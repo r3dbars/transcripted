@@ -5,7 +5,7 @@ import AVFoundation
 
 extension TranscriptionTaskManager {
 
-    /// Transcribe with multichannel mode (requires both mic and system audio)
+    /// Transcribe a captured meeting using system audio plus optional mic audio.
     /// - Returns: URL of saved transcript with speaker attribution
     /// Note: nonisolated to keep heavy async work off the main thread
     nonisolated func transcribeWithSpeakerIdentification(
@@ -14,7 +14,8 @@ extension TranscriptionTaskManager {
         outputFolder: URL,
         taskId: UUID,
         healthInfo: RecordingHealthInfo?,
-        splitLocalSpeakers: Bool = false
+        splitLocalSpeakers: Bool = false,
+        meetingTitle: String? = nil
     ) async throws -> URL {
 
         // Require system audio for multichannel transcription
@@ -28,7 +29,26 @@ extension TranscriptionTaskManager {
             outputFolder: outputFolder,
             taskId: taskId,
             healthInfo: healthInfo,
-            splitLocalSpeakers: splitLocalSpeakers
+            splitLocalSpeakers: splitLocalSpeakers,
+            meetingTitle: meetingTitle
+        )
+    }
+
+    /// Transcribe an imported audio file through the system-audio speaker path.
+    nonisolated func transcribeImportedAudio(
+        audioURL: URL,
+        outputFolder: URL,
+        taskId: UUID,
+        meetingTitle: String? = nil
+    ) async throws -> URL {
+        try await transcribeMultichannelPipeline(
+            micURL: nil,
+            systemURL: audioURL,
+            outputFolder: outputFolder,
+            taskId: taskId,
+            healthInfo: nil,
+            splitLocalSpeakers: false,
+            meetingTitle: meetingTitle
         )
     }
 
@@ -37,12 +57,13 @@ extension TranscriptionTaskManager {
     /// speakers thread through the same classification + naming flow as remote speakers.
     /// Note: nonisolated to keep heavy async work off the main thread
     nonisolated func transcribeMultichannelPipeline(
-        micURL: URL,
+        micURL: URL?,
         systemURL: URL,
         outputFolder: URL,
         taskId: UUID,
         healthInfo: RecordingHealthInfo?,
-        splitLocalSpeakers: Bool = false
+        splitLocalSpeakers: Bool = false,
+        meetingTitle: String? = nil
     ) async throws -> URL {
 
         let transcription = await MainActor.run { self.transcription }
@@ -245,6 +266,7 @@ extension TranscriptionTaskManager {
             speakerSources: speakerSources,
             speakerDbIds: speakerDbIds,
             directory: outputFolder,
+            meetingTitle: meetingTitle,
             healthInfo: healthInfo,
             notifier: notifier,
             speakerStore: speakerDB,
@@ -295,7 +317,7 @@ extension TranscriptionTaskManager {
         // user can name them or collapse the group via "Keep as You". We intentionally
         // don't filter to "needs action" on the mic side: if local split ran and produced
         // multiple speakers, the user should always see the section so they can decide.
-        if splitLocalSpeakers && !result.micPersistentSpeakerIds.isEmpty {
+        if splitLocalSpeakers && !result.micPersistentSpeakerIds.isEmpty, let micURL {
             do {
                 let micUtterancesWithProfiles = result.micUtterances.filter {
                     $0.persistentSpeakerId != nil
@@ -371,7 +393,9 @@ extension TranscriptionTaskManager {
         }
 
         // No naming needed — clean up audio files
-        try? FileManager.default.removeItem(at: micURL)
+        if let micURL {
+            try? FileManager.default.removeItem(at: micURL)
+        }
         try? FileManager.default.removeItem(at: systemURL)
 
         return savedURL

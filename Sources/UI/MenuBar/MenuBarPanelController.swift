@@ -3,6 +3,7 @@
 
 import AppKit
 import Combine
+import UniformTypeIdentifiers
 
 @MainActor
 final class MenuBarPanelController: NSViewController {
@@ -38,6 +39,7 @@ final class MenuBarPanelController: NSViewController {
         content.settingsView.appState = appState
         content.shortcutsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
         content.shortcutsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
+        content.shortcutsView.onImportAudioFile = { [weak self] in self?.importAudioFileFromMenu() }
         content.modelStatusView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu() }
         content.settingsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu() }
         content.settingsView.onCheckForUpdates = { [weak self] in self?.checkForUpdatesFromMenu() }
@@ -70,7 +72,8 @@ final class MenuBarPanelController: NSViewController {
             dictationKey: appState.contextCapture.dictationShortcutDisplay,
             meetingKey: appState.contextCapture.meetingShortcutDisplay,
             dictationState: dictationState,
-            meetingState: meetingState
+            meetingState: meetingState,
+            canImportAudioFiles: !appState.meetingSession.isRecording
         )
 
         if #available(macOS 14.0, *) {
@@ -138,6 +141,13 @@ final class MenuBarPanelController: NSViewController {
                 }
                 .store(in: &subscriptions)
 
+            appState.meetingSession.$isRecording
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in
+                    self?.refresh()
+                }
+                .store(in: &subscriptions)
+
             appState.meetingSession.$failedMeetings
                 .receive(on: RunLoop.main)
                 .sink { [weak self] _ in
@@ -185,6 +195,24 @@ final class MenuBarPanelController: NSViewController {
     private func openAgentConnectFromMenu() {
         dismissPopover()
         openAgentConnectWindow()
+    }
+
+    private func importAudioFileFromMenu() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.audio]
+        panel.prompt = "Transcribe"
+        panel.message = "Choose an audio file Transcripted should transcribe."
+
+        dismissPopover()
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        Task {
+            _ = await appState.meetingSession.importAudioFile(from: url)
+        }
     }
 
     private func resolvedSourceApp() -> NSRunningApplication? {

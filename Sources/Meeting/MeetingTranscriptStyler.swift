@@ -137,6 +137,7 @@ enum MeetingTranscriptStyler {
 
         return ParsedDocument(
             frontmatterLines: frontmatterLines,
+            explicitTitle: values["title"]?.trimmingCharacters(in: .whitespacesAndNewlines),
             recordedAt: recordedAt,
             duration: duration,
             durationSeconds: parseDurationSeconds(duration),
@@ -229,6 +230,11 @@ enum MeetingTranscriptStyler {
     }
 
     private static func buildTitle(for document: ParsedDocument) -> String {
+        if let explicitTitle = document.explicitTitle,
+           !explicitTitle.isEmpty {
+            return explicitTitle
+        }
+
         let namedRemoteParticipants = Array(
             LinkedSet(document.transcriptEntries.compactMap { entry -> String? in
                 guard entry.label.hasPrefix("System/") else { return nil }
@@ -403,6 +409,7 @@ enum MeetingTranscriptStyler {
 
 private struct ParsedDocument {
     let frontmatterLines: [String]
+    let explicitTitle: String?
     let recordedAt: Date
     let duration: String
     let durationSeconds: Int
