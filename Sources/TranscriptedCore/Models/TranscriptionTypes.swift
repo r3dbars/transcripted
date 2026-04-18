@@ -247,7 +247,7 @@ public struct SpeakerNamingRequest {
     public let knownPeople: [SpeakerIdentityOption]
     public let transcriptURL: URL
     public let systemAudioURL: URL
-    public let micAudioURL: URL
+    public let micAudioURL: URL?
     public let onComplete: ([SpeakerNameUpdate]) -> Void
 
     public init(
@@ -256,7 +256,7 @@ public struct SpeakerNamingRequest {
         transcriptURL: URL,
         transcriptId: UUID,
         systemAudioURL: URL,
-        micAudioURL: URL,
+        micAudioURL: URL?,
         onComplete: @escaping ([SpeakerNameUpdate]) -> Void
     ) {
         self.speakers = speakers

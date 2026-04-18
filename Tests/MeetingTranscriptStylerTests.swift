@@ -5,6 +5,7 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerRenamesArtifacts()
         testMeetingTranscriptStylerDoesNotCreateSiblingArtifacts()
         testMeetingTranscriptStylerIsIdempotent()
+        testMeetingTranscriptStylerPreservesExplicitTitle()
     }
 }
 
@@ -57,6 +58,21 @@ private func testMeetingTranscriptStylerIsIdempotent() {
     assertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("Meeting with Alex 2.md").path), "Styler should not append duplicate suffixes on repeated passes")
 }
 
+private func testMeetingTranscriptStylerPreservesExplicitTitle() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Call_2026-04-07_09-14-00.md")
+    try? sampleImportedTranscript().write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+    let updatedMarkdown = try? String(contentsOf: styled.url, encoding: .utf8)
+
+    assertEqual(styled.title, "Customer Interview April", "Styler should respect an explicit imported transcript title")
+    assertEqual(styled.url.lastPathComponent, "Customer Interview April.md", "Explicit titles should drive the final transcript filename")
+    assertTrue(updatedMarkdown?.contains("# Customer Interview April") == true, "Explicit titles should be written back into the rendered markdown")
+}
+
 private func sampleMeetingTranscript() -> String {
     """
     ---
@@ -75,6 +91,28 @@ private func sampleMeetingTranscript() -> String {
 
     **[00:04] [System/Alex]**
     Happy to help. Let's get started.
+    """
+}
+
+private func sampleImportedTranscript() -> String {
+    """
+    ---
+    title: "Customer Interview April"
+    date: "2026-04-07"
+    time: "09:14:00"
+    duration: "12:30"
+    total_word_count: "42"
+    mic_utterances: "0"
+    system_utterances: "2"
+    ---
+
+    ## Full Transcript
+
+    **[00:00] [System/Speaker 0]**
+    Thanks for sitting down with us today.
+
+    **[00:04] [System/Speaker 1]**
+    Happy to help.
     """
 }
 

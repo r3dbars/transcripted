@@ -10,6 +10,7 @@
 - `MeetingCaptureBridge.swift` — `@MainActor` wrapper around core `Audio`, converts callback-based stop into `async`
 - `MeetingFailureCopy.swift` — normalizes `MeetingFailureKind` values into user-facing titles and recovery copy
 - `MeetingFailureKind.swift` — canonical failure taxonomy that classifies raw meeting errors into stable machine-readable kinds
+- `MeetingImportedAudioPreparer.swift` — copies user-selected audio files into app-owned scratch space before import transcription
 - `MeetingModelDownloader.swift` — loads Parakeet and diarization models together
 - `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, and asks the overlay to offer one-tap recording prompts
 - `MeetingPromptHeuristics.swift` — shared scoring and snooze rules for calendar- and runtime-based prompt candidates
@@ -27,9 +28,10 @@
 3. `Sources/TranscriptedAppState.swift` starts background model warmup through `meetingSession.prepareModels(showLoadingUI: false)`.
 4. `MeetingSessionController.startRecording(...)` first runs `MeetingRecordingStartGate` so missing microphone or System Audio Recording permission failures are blocked before capture starts, then uses `MeetingCaptureBridge` to start core audio capture into app-owned scratch paths.
 5. `MeetingSessionController.stopRecording(...)` awaits mic/system audio files from the bridge, then either starts transcription immediately or queues it behind the active job.
-6. `TranscriptionTaskManager` runs one diarize → transcribe → save pipeline at a time, honoring the persisted `LocalSpeakerPreferences.isEnabled` flag via the `splitLocalSpeakers` task option.
-7. A subscription on `taskManager.$lastSavedTranscriptURL` calls `MeetingTranscriptStyler.restyleTranscript(...)` and updates the recent-meetings UI state.
-8. Failed meetings can be retried, deleted, or dismissed from the menubar recent-meetings section, with `MeetingFailureKind` providing stable failure categories and `MeetingFailureCopy` keeping error copy consistent across retryable and non-retryable states.
+6. `MeetingSessionController.importAudioFile(...)` copies a user-selected audio file into app-owned scratch space, then queues a system-audio-only transcription pass through the same task manager.
+7. `TranscriptionTaskManager` runs one diarize → transcribe → save pipeline at a time, honoring the persisted `LocalSpeakerPreferences.isEnabled` flag via the `splitLocalSpeakers` task option.
+8. A subscription on `taskManager.$lastSavedTranscriptURL` calls `MeetingTranscriptStyler.restyleTranscript(...)` and updates the recent-meetings UI state.
+9. Failed meetings can be retried, deleted, or dismissed from the menubar recent-meetings section, with `MeetingFailureKind` providing stable failure categories and `MeetingFailureCopy` keeping error copy consistent across retryable and non-retryable states.
 
 ## Key invariants
 

@@ -30,7 +30,7 @@ extension TranscriptionTaskManager {
         transcriptURL: URL,
         transcriptId: UUID,
         transcriptionResult: TranscriptionResult,
-        micURL: URL,
+        micURL: URL?,
         systemURL: URL,
         clips: [SpeakerNamingEntry]
     ) {
