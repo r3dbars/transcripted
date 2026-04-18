@@ -44,9 +44,15 @@ APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 STAGED_APP_BINARY="$BUILD_DIR/$APP_NAME-beta-bin"
 DMG_NAME="Transcripted-${APP_VERSION}.dmg"
-DMG_VOLUME_NAME="Install Transcripted"
-DMG_WINDOW_WIDTH=720
-DMG_WINDOW_HEIGHT=460
+DMG_VOLUME_NAME="Transcripted"
+DMG_WINDOW_WIDTH=960
+DMG_WINDOW_HEIGHT=640
+DMG_ICON_SIZE=144
+DMG_TEXT_SIZE=16
+DMG_APP_ICON_X=220
+DMG_APP_ICON_Y=340
+DMG_APPLICATIONS_ICON_X=740
+DMG_APPLICATIONS_ICON_Y=340
 DMG_BACKGROUND_PATH="scripts/release/assets/dmg-background.png"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-${SIGN_IDENTITY:-}}"
 SIGNING_DISPLAY_NAME=""
@@ -157,6 +163,7 @@ create_finder_layout_dmg() {
     local attach_output
     local device
     local mount_dir
+    local background_alias_line=""
 
     echo "ℹ️  create-dmg not found — using built-in Finder layout fallback"
 
@@ -197,6 +204,10 @@ create_finder_layout_dmg() {
     device="$(printf '%s\n' "$attach_output" | awk '/Apple_HFS/ {print $1; exit}')"
     mount_dir="$(printf '%s\n' "$attach_output" | awk '/Apple_HFS/ {$1=""; $2=""; sub(/^  +/, ""); print; exit}')"
 
+    if [ -f "$mount_dir/.background/dmg-background.png" ]; then
+        background_alias_line="set background picture of viewOptions to (POSIX file \"$mount_dir/.background/dmg-background.png\" as alias)"
+    fi
+
     bless --folder "$mount_dir" --openfolder "$mount_dir" >/dev/null 2>&1 || true
 
     if ! osascript <<EOF >/dev/null
@@ -210,13 +221,11 @@ tell application "Finder"
         set the bounds of container window to {200, 120, $((200 + DMG_WINDOW_WIDTH)), $((120 + DMG_WINDOW_HEIGHT))}
         set viewOptions to the icon view options of container window
         set arrangement of viewOptions to not arranged
-        set icon size of viewOptions to 116
-        set text size of viewOptions to 16
-        if exists file ".background:dmg-background.png" of disk "$DMG_VOLUME_NAME" then
-            set background picture of viewOptions to file ".background:dmg-background.png"
-        end if
-        set position of item "$APP_NAME.app" of container window to {190, 245}
-        set position of item "Applications" of container window to {530, 245}
+        set icon size of viewOptions to $DMG_ICON_SIZE
+        set text size of viewOptions to $DMG_TEXT_SIZE
+        $background_alias_line
+        set position of item "$APP_NAME.app" of container window to {$DMG_APP_ICON_X, $DMG_APP_ICON_Y}
+        set position of item "Applications" of container window to {$DMG_APPLICATIONS_ICON_X, $DMG_APPLICATIONS_ICON_Y}
         update without registering applications
         delay 1
         close
@@ -483,10 +492,10 @@ if command -v create-dmg >/dev/null 2>&1; then
         --volname "$DMG_VOLUME_NAME" \
         --window-pos 200 120 \
         --window-size "$DMG_WINDOW_WIDTH" "$DMG_WINDOW_HEIGHT" \
-        --icon-size 116 \
-        --icon "$APP_NAME.app" 190 245 \
+        --icon-size "$DMG_ICON_SIZE" \
+        --icon "$APP_NAME.app" "$DMG_APP_ICON_X" "$DMG_APP_ICON_Y" \
         --hide-extension "$APP_NAME.app" \
-        --app-drop-link 530 245 \
+        --app-drop-link "$DMG_APPLICATIONS_ICON_X" "$DMG_APPLICATIONS_ICON_Y" \
         --no-internet-enable \
         "${DMG_BG_FLAGS[@]}" \
         "$BUILD_DIR/$DMG_NAME" \
