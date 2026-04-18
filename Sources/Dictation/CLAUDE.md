@@ -9,13 +9,14 @@
 - `DictationSessionTimeout.swift` — uptime-based timeout helper so sleep does not consume a session's remaining record window
 - `DictationStoragePaths.swift` — capture-library-backed storage root for dictation artifacts
 - `DictationTranscriptWriter.swift` — groups completed dictations into one markdown file per day
+- `DictationTranscriptStore.swift` — shared seam for saving dictation markdown and reading the newest saved dictation back out
 
 ## Flow
 
 1. `Sources/UI/Overlay/DictationSessionController.swift` transcribes audio with `STTRouter`.
 2. The session tries to paste the text back into the target app.
 3. The session records whether delivery was `pasted`, `copied`, or `failed`.
-4. `DictationTranscriptWriter.save(...)` appends a new section to that day's markdown file.
+4. `DictationTranscriptStore.save(...)` appends a new section to that day's markdown file.
 
 ## Storage
 
@@ -42,4 +43,4 @@ Each section captures:
 
 - If you change the markdown layout, update the tests.
 - Dictation artifacts are append-only by day; do not assume one file per session.
-- This directory is about persistence and timing helpers only. Recording lifecycle changes belong in `Sources/UI/Overlay/DictationSessionController.swift` and `Sources/Speech/`.
+- This directory owns dictation persistence plus the newest-saved-dictation lookup seam. Recording lifecycle changes still belong in `Sources/UI/Overlay/DictationSessionController.swift` and `Sources/Speech/`.

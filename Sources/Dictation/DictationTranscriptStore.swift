@@ -1,0 +1,208 @@
+// DictationTranscriptStore.swift
+// Shared save/read seam for saved dictation markdown artifacts.
+
+import AppKit
+import Foundation
+
+struct SavedDictationEntry {
+    let url: URL
+    let title: String
+    let text: String
+    let createdAt: Date
+    let delivery: DictationDelivery
+    let sourceAppName: String
+    let sourceAppBundleID: String?
+}
+
+enum DictationTranscriptStore {
+    private static let dictationDayPrefix = "Dictations_"
+
+    private static let iso8601Formatters: [ISO8601DateFormatter] = {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        let standard = ISO8601DateFormatter()
+        standard.formatOptions = [.withInternetDateTime]
+
+        return [fractional, standard]
+    }()
+
+    @discardableResult
+    static func save(
+        text: String,
+        sourceApp: NSRunningApplication?,
+        delivery: DictationDelivery,
+        createdAt: Date = Date(),
+        directory: URL? = nil
+    ) throws -> SavedDictationTranscript {
+        try DictationTranscriptWriter.save(
+            text: text,
+            sourceApp: sourceApp,
+            delivery: delivery,
+            createdAt: createdAt,
+            directory: directory
+        )
+    }
+
+    static func latestSavedText(directory: URL? = nil) -> String? {
+        latestSavedDictation(directory: directory)?.text
+    }
+
+    static func latestSavedDictation(directory: URL? = nil) -> SavedDictationEntry? {
+        let folder = directory ?? DictationStoragePaths.transcriptsFolder
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory),
+              isDirectory.boolValue,
+              let files = try? FileManager.default.contentsOfDirectory(
+                at: folder,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return nil
+        }
+
+        return files
+            .filter { isDictationDayFile($0) }
+            .compactMap(latestEntry(in:))
+            .max { $0.createdAt < $1.createdAt }
+    }
+
+    private static func isDictationDayFile(_ url: URL) -> Bool {
+        url.pathExtension == "md" && url.lastPathComponent.hasPrefix(dictationDayPrefix)
+    }
+
+    private static func latestEntry(in url: URL) -> SavedDictationEntry? {
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            return nil
+        }
+
+        return splitSections(in: content)
+            .compactMap { parseEntry(from: $0, in: url) }
+            .max { $0.createdAt < $1.createdAt }
+    }
+
+    private static func splitSections(in content: String) -> [String] {
+        let lines = content.components(separatedBy: "\n")
+        var sections: [String] = []
+        var currentSection: [String] = []
+
+        for line in lines {
+            if line.hasPrefix("## ") {
+                if !currentSection.isEmpty {
+                    sections.append(currentSection.joined(separator: "\n"))
+                }
+                currentSection = [line]
+            } else if !currentSection.isEmpty {
+                currentSection.append(line)
+            }
+        }
+
+        if !currentSection.isEmpty {
+            sections.append(currentSection.joined(separator: "\n"))
+        }
+
+        return sections
+    }
+
+    private static func parseEntry(from rawSection: String, in url: URL) -> SavedDictationEntry? {
+        let lines = rawSection.components(separatedBy: "\n")
+        guard let heading = lines.first, heading.hasPrefix("## ") else {
+            return nil
+        }
+
+        let title = parseTitle(from: heading)
+        var createdAtText = ""
+        var sourceAppName = "Unknown"
+        var sourceAppBundleID: String?
+        var delivery = DictationDelivery.failed
+        var bodyLines: [String] = []
+        var inBody = false
+        var sawMetadata = false
+
+        for line in lines.dropFirst() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty {
+                if !inBody, sawMetadata {
+                    inBody = true
+                } else if inBody {
+                    bodyLines.append("")
+                }
+                continue
+            }
+
+            if inBody {
+                bodyLines.append(line)
+                continue
+            }
+
+            if trimmed.hasPrefix("Captured:") {
+                sawMetadata = true
+                createdAtText = metadataValue(from: trimmed, prefix: "Captured:")
+            } else if trimmed.hasPrefix("Timestamp:") {
+                sawMetadata = true
+                createdAtText = metadataValue(from: trimmed, prefix: "Timestamp:")
+            } else if trimmed.hasPrefix("Source app:") {
+                sawMetadata = true
+                sourceAppName = metadataValue(from: trimmed, prefix: "Source app:")
+            } else if trimmed.hasPrefix("Bundle ID:") {
+                sawMetadata = true
+                sourceAppBundleID = metadataValue(from: trimmed, prefix: "Bundle ID:")
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
+            } else if trimmed.hasPrefix("Delivery:") {
+                sawMetadata = true
+                let rawDelivery = metadataValue(from: trimmed, prefix: "Delivery:")
+                delivery = DictationDelivery(rawValue: rawDelivery) ?? .failed
+            } else if trimmed.hasPrefix("Entry ID:") || trimmed.hasPrefix("Words:") || trimmed.hasPrefix("Characters:") {
+                sawMetadata = true
+            } else if !sawMetadata {
+                inBody = true
+                bodyLines.append(line)
+            }
+        }
+
+        let text = bodyLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackCreatedAt = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        let createdAt = parseCreatedAt(createdAtText)
+            ?? fallbackCreatedAt
+            ?? Date(timeIntervalSince1970: 0)
+
+        return SavedDictationEntry(
+            url: url,
+            title: title,
+            text: text,
+            createdAt: createdAt,
+            delivery: delivery,
+            sourceAppName: sourceAppName,
+            sourceAppBundleID: sourceAppBundleID
+        )
+    }
+
+    private static func parseTitle(from heading: String) -> String {
+        let rawHeading = heading.replacingOccurrences(of: "## ", with: "")
+        let parts = rawHeading.components(separatedBy: " - ")
+        if parts.count > 1 {
+            return parts.dropFirst().joined(separator: " - ")
+        }
+        return rawHeading
+    }
+
+    private static func metadataValue(from line: String, prefix: String) -> String {
+        line
+            .replacingOccurrences(of: prefix, with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func parseCreatedAt(_ value: String) -> Date? {
+        guard !value.isEmpty else {
+            return nil
+        }
+
+        for formatter in iso8601Formatters {
+            if let parsed = formatter.date(from: value) {
+                return parsed
+            }
+        }
+
+        return nil
+    }
+}
