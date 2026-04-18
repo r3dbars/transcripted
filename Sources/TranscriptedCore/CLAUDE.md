@@ -4,20 +4,17 @@
 
 `Sources/TranscriptedCore/` is the reusable meeting transcription library embedded in this repo. It is consumed by the app through `Sources/Meeting/`, and it can also be tested as a standalone Swift package through the root `Package.swift`.
 
-## Subsystems (56 Swift files)
+## Subsystems (58 Swift files)
 
-- `Audio/` (13 files) — mic + system audio capture, device recovery, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, and merge helpers
+- `Audio/` (14 files) — mic + system audio capture, imported-audio prep helpers, device recovery, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, and merge helpers
 - `Logging/` (2 files) — shared app logger and JSONL file logger
-- `Models/` (5 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, `RecordingHealthInfo`, and shared speaker-mapping / transcript metadata models
+- `Models/` (5 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, `SpeakerMapping`, and recording-health metadata builders
 - `Pipeline/` (4 files) — transcription orchestration, pipeline runner, and task queue
 - `Protocols/` (7 files) — host-injected seams: `SpeechToTextEngine`, `DiarizationEngine`, `SpeakerStore`, `TranscriptNotifier`, `AudioCaptureEngine`, `StatsStore`, `TranscriptStorage`
 - `Services/` (7 files) — DI container (`AppServices`), model bundle / download management, path indirection, recording validation, diarization, and failed-transcription persistence
-- `Speaker/` (10 files) — speaker DB, embedding matching / clustering, clip extraction, naming policy / coordinator, profile merging, retroactive transcript updates, and local-speaker splitting helpers
+- `Speaker/` (10 files) — speaker DB, embedding matching / clustering, clip extraction, naming policy / coordinator, profile merging, retroactive transcript updates
 - `Stats/` (4 files) — recording stats database, models, queries, and service
-<<<<<<< HEAD
 - `Storage/` (3 files) — transcript save, scanner, formatter
-- `Utilities/` (2 files) — date formatting and file permission helpers
-- `Storage/` (3 files) — transcript save, local-speaker breakdown formatting, scanner, formatter
 - `Utilities/` (2 files) — date formatting and file permission helpers
 
 ## The seams embedders should know
@@ -25,7 +22,7 @@
 - `CoreStoragePaths` — redirects all persisted output away from the standalone defaults
 - `ModelBundleProvider` — lets hosts override where offline model bundles are resolved
 - `AppServices` — DI container over protocol-typed STT / diarization / speaker-store dependencies
-- `TranscriptionTaskManager` — host-facing queue and orchestration surface, including the `splitLocalSpeakers` task option
+- `TranscriptionTaskManager` — host-facing queue and orchestration surface, including imported-audio jobs and optional local-speaker mic diarization when the app asks for it
 - `TranscriptNotifier` — optional callback channel for transcript-saved / failure notifications
 
 These seams exist specifically so the app can embed the library without adopting the old standalone Transcripted app assumptions.
@@ -35,6 +32,7 @@ These seams exist specifically so the app can embed the library without adopting
 - `Audio` can switch between the legacy CoreAudio path and the newer ScreenCaptureKit system-audio path through `SystemAudioCaptureEngine`.
 - `SCKAudioCapture` is the macOS 26+ backend for audio-only ScreenCaptureKit capture, which keeps system-audio recording on the lighter permission tier and avoids full screen-pixel capture.
 - Hosts embedding `TranscriptedCore` should keep app-specific permission UX outside this directory, but they should understand that system-audio capture backend behavior now depends on OS availability.
+- Imported meeting audio is funneled through the same pipeline primitives as live captures so transcript formatting, stats, speaker naming, and retry behavior stay aligned.
 
 ## Threading model
 
@@ -56,7 +54,7 @@ The app still injects app-specific `CoreStoragePaths` for meetings so the
 capture folder follows the selected capture library rather than a hard-coded
 default path.
 
-`TranscriptSaver.saveTranscript(...)` writes a markdown transcript.
+`TranscriptSaver.saveTranscript(...)` writes a markdown transcript, including YAML speaker metadata and recording-health fields like `capture_quality`, `audio_gaps`, and `device_switches` when the host provides them.
 
 ## Editing rules
 
@@ -80,8 +78,10 @@ Also run when the package seam changes:
 Current direct core coverage includes:
 
 - `Tests/TranscriptedCoreTests/CoreStoragePathsTests.swift`
+- `Tests/TranscriptedCoreTests/DatabaseFilePermissionsTests.swift`
 - `Tests/TranscriptedCoreTests/EmbeddingClustererTests.swift`
 - `Tests/TranscriptedCoreTests/MicRecordingFileMergerTests.swift`
+- `Tests/TranscriptedCoreTests/TranscriptMetadataBuilderTests.swift`
 - `Tests/TranscriptedCoreTests/RetroactiveSpeakerUpdaterTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerMatchingServiceTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerNamingCoordinatorTests.swift`
@@ -90,4 +90,4 @@ Current direct core coverage includes:
 - `Tests/TranscriptedCoreTests/TranscriptionPipelineHelpersTests.swift`
 - `Tests/Integration/AppCoreIntegrationSmoke.swift`
 
-Core coverage is still selective, but it is no longer limited just to the package seam. Speaker reconciliation, file merging, stats, and storage-path behavior now have direct tests.
+Core coverage is still selective, but it is no longer limited just to the package seam. Speaker reconciliation, transcript metadata, stats, storage-path behavior, and file-permission enforcement all have direct tests.
