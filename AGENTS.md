@@ -44,7 +44,7 @@ Rules:
 3. If you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam, also run `swift test`.
 4. `build.sh` must not compile `Sources/TranscriptedCore/` directly into the app target.
 
-## Releases and Sparkle
+## Releases, Sparkle, and Homebrew
 
 When the task is a user-facing release, package handoff, or update-path change,
 agents must treat Sparkle as part of the release contract, not as optional
@@ -58,13 +58,18 @@ Rules:
    - publish the signed archive where users can fetch it
    - update `docs/appcast.xml`
    - push the updated appcast to the branch that backs the live feed
-4. If Sparkle metadata was not updated, say explicitly that existing installs will not discover the new release in-app yet.
-5. If the release artifact URL, appcast URL, public key, or Sparkle tooling changes, update the docs in the same change.
-6. Keep `Info.plist` Sparkle settings aligned with the actual release feed:
+4. If the release should also be installable or upgradeable through Homebrew, the release flow must also:
+   - run `bash scripts/release/update-cask.sh <version>` after the GitHub release is published
+   - commit the updated `Casks/transcripted.rb`
+   - push that cask update so `brew install` and `brew upgrade` see the new version
+5. If Sparkle metadata was not updated, say explicitly that existing installs will not discover the new release in-app yet.
+6. If the Homebrew cask was not updated, say explicitly that `brew install` / `brew upgrade` will still point at the older release.
+7. If the release artifact URL, appcast URL, public key, Sparkle tooling, or Homebrew install path changes, update the docs in the same change.
+8. Keep `Info.plist` Sparkle settings aligned with the actual release feed:
    - `SUFeedURL`
    - `SUPublicEDKey`
    - any automatic-check / automatic-download flags
-7. Preferred release verification for Sparkle-related changes:
+9. Preferred release verification for release-path changes:
    - `bash build-deps.sh --force` when dependency tooling changes
    - `bash build.sh`
    - `bash run-tests.sh`
