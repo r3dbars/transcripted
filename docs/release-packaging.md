@@ -22,6 +22,9 @@ depend on `create-dmg` being present just to avoid a blank DMG.
 `build-beta.sh` also treats the per-user beta token as sensitive build input:
 it escapes the token before injecting it into `Sources/Beta/BetaConfig.swift`
 and only prints a masked preview in build logs.
+The packaged release archive is still versioned from `Info.plist`, so published
+artifacts keep the stable `Transcripted-<version>.dmg` name expected by Sparkle
+and Homebrew even when the embedded beta token is per-user.
 
 Transcripted's Sparkle update plumbing is documented in `docs/sparkle-updates.md`.
 `build-deps.sh` now downloads the pinned Sparkle framework and release tools,
@@ -33,9 +36,10 @@ The two build flows intentionally use separate committed entitlement files:
 - `config/entitlements/local.plist`
 - `config/entitlements/beta.plist`
 
-`build.sh` now fails before it touches signing when the unified dependency
-artifacts are missing or stale, and it also requires the app binary to exist
-before signature validation runs.
+`build.sh` and `build-beta.sh` now fail before they touch signing when the
+unified dependency artifacts are missing or older than the current
+`Sources/TranscriptedCore/`, `Package.swift`, or `build-deps.sh` inputs. They
+also require the app binary to exist before signature validation runs.
 
 ## Prerequisites
 

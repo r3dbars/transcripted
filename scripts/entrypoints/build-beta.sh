@@ -11,6 +11,12 @@
 
 set -euo pipefail
 
+plist_value() {
+    local plist_path="$1"
+    local key="$2"
+    /usr/libexec/PlistBuddy -c "Print :$key" "$plist_path" 2>/dev/null || true
+}
+
 ENTRYPOINT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$ENTRYPOINT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
@@ -19,10 +25,16 @@ BETA_TOKEN="${1:-}"
 USER_NAME="${2:-beta}"
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 REQUIRE_BUNDLED_PARAKEET_MODELS="${REQUIRE_BUNDLED_PARAKEET_MODELS:-1}"
+APP_VERSION="$(plist_value Info.plist CFBundleShortVersionString)"
 
 if [ -z "$BETA_TOKEN" ]; then
     echo "Usage: ./build-beta.sh <beta-token> <user-name>"
     echo "Example: ./build-beta.sh transcripted-beta-nate Nate"
+    exit 1
+fi
+
+if [ -z "$APP_VERSION" ]; then
+    echo "❌ Could not read CFBundleShortVersionString from Info.plist"
     exit 1
 fi
 
@@ -31,7 +43,7 @@ BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 STAGED_APP_BINARY="$BUILD_DIR/$APP_NAME-beta-bin"
-DMG_NAME="Transcripted-${USER_NAME}.dmg"
+DMG_NAME="Transcripted-${APP_VERSION}.dmg"
 DMG_VOLUME_NAME="Install Transcripted"
 DMG_WINDOW_WIDTH=720
 DMG_WINDOW_HEIGHT=460
@@ -42,11 +54,33 @@ NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 BETA_CONFIG_PATH="Sources/Beta/BetaConfig.swift"
 BETA_CONFIG_BACKUP="$(mktemp -t transcripted-beta-config)"
 BETA_ENTITLEMENTS="config/entitlements/beta.plist"
+DEPS_BUILD_STAMP="deps-libs/.build-deps-stamp"
 DEPS_FRAMEWORK_ROOT="deps-frameworks"
 ESPEAK_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/ESpeakNG.framework"
 SENTRY_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sentry.framework"
 SPARKLE_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sparkle.framework"
 TRANSCRIPTED_CORE_MODULE="deps-modules/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
+
+dependency_input_listing() {
+    {
+        printf '%s\n' "Package.swift"
+        printf '%s\n' "scripts/entrypoints/build-deps.sh"
+        find "Sources/TranscriptedCore" -type f ! -name "CLAUDE.md"
+    } | while IFS= read -r path; do
+        [ -e "$path" ] || continue
+        printf '%s\t%s\n' "$(stat -f '%m' "$path")" "$path"
+    done
+}
+
+newest_dependency_input() {
+    dependency_input_listing | sort -nr | head -1
+}
+
+deps_build_stamp_info() {
+    if [ -f "$DEPS_BUILD_STAMP" ]; then
+        printf '%s\t%s\n' "$(stat -f '%m' "$DEPS_BUILD_STAMP")" "$DEPS_BUILD_STAMP"
+    fi
+}
 
 mask_secret() {
     local value="$1"
@@ -278,12 +312,26 @@ if [ ! -f "$BETA_ENTITLEMENTS" ]; then
     exit 1
 fi
 
-if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -d "$ESPEAK_FRAMEWORK" ] || [ ! -d "$SENTRY_FRAMEWORK" ] || [ ! -d "$SPARKLE_FRAMEWORK" ]; then
+if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -d "$ESPEAK_FRAMEWORK" ] || [ ! -d "$SENTRY_FRAMEWORK" ] || [ ! -d "$SPARKLE_FRAMEWORK" ]; then
     echo "❌ Dependencies missing or stale — required for beta builds"
+    echo "   Missing stamp: $DEPS_BUILD_STAMP"
     echo "   Missing module: $TRANSCRIPTED_CORE_MODULE"
     echo "   Missing framework: $ESPEAK_FRAMEWORK"
     echo "   Missing framework: $SENTRY_FRAMEWORK"
     echo "   Missing framework: $SPARKLE_FRAMEWORK"
+    echo "   Run build-deps.sh --force first to rebuild dependencies."
+    exit 1
+fi
+
+newest_input="$(newest_dependency_input)"
+build_stamp="$(deps_build_stamp_info)"
+IFS=$'\t' read -r newest_input_mtime newest_input_path <<< "$newest_input"
+IFS=$'\t' read -r build_stamp_mtime build_stamp_path <<< "$build_stamp"
+
+if [ -n "${newest_input_mtime:-}" ] && [ -n "${build_stamp_mtime:-}" ] && [ "$newest_input_mtime" -gt "$build_stamp_mtime" ]; then
+    echo "❌ Dependencies are stale for TranscriptedCore."
+    echo "   Newest input: $newest_input_path"
+    echo "   Built deps stamp: $build_stamp_path"
     echo "   Run build-deps.sh --force first to rebuild dependencies."
     exit 1
 fi

@@ -15,12 +15,34 @@ STAGED_APP_BINARY="$BUILD_DIR/$APP_NAME-bin"
 LOCAL_ENTITLEMENTS="config/entitlements/local.plist"
 SIGN_IDENTITY="${SIGN_IDENTITY:-${SIGNING_IDENTITY:-}}"
 DEPS_ARCHIVE="deps-libs/libDraftDeps.a"
+DEPS_BUILD_STAMP="deps-libs/.build-deps-stamp"
 DEPS_MODULE_ROOT="deps-modules"
 DEPS_FRAMEWORK_ROOT="deps-frameworks"
 ESPEAK_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/ESpeakNG.framework"
 SENTRY_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sentry.framework"
 SPARKLE_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sparkle.framework"
 TRANSCRIPTED_CORE_MODULE="$DEPS_MODULE_ROOT/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
+
+dependency_input_listing() {
+    {
+        printf '%s\n' "Package.swift"
+        printf '%s\n' "scripts/entrypoints/build-deps.sh"
+        find "Sources/TranscriptedCore" -type f ! -name "CLAUDE.md"
+    } | while IFS= read -r path; do
+        [ -e "$path" ] || continue
+        printf '%s\t%s\n' "$(stat -f '%m' "$path")" "$path"
+    done
+}
+
+newest_dependency_input() {
+    dependency_input_listing | sort -nr | head -1
+}
+
+deps_build_stamp_info() {
+    if [ -f "$DEPS_BUILD_STAMP" ]; then
+        printf '%s\t%s\n' "$(stat -f '%m' "$DEPS_BUILD_STAMP")" "$DEPS_BUILD_STAMP"
+    fi
+}
 
 ensure_build_prerequisites() {
     if [ ! -f "$LOCAL_ENTITLEMENTS" ]; then
@@ -30,13 +52,38 @@ ensure_build_prerequisites() {
 }
 
 ensure_deps_ready() {
-    if [ -f "$DEPS_ARCHIVE" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -d "$ESPEAK_FRAMEWORK" ] && [ -d "$SENTRY_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
+    local newest_input
+    local build_stamp
+    local newest_input_mtime
+    local newest_input_path
+    local build_stamp_mtime
+    local build_stamp_path
+
+    if [ -f "$DEPS_ARCHIVE" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -d "$ESPEAK_FRAMEWORK" ] && [ -d "$SENTRY_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
+        newest_input="$(newest_dependency_input)"
+        build_stamp="$(deps_build_stamp_info)"
+
+        IFS=$'\t' read -r newest_input_mtime newest_input_path <<< "$newest_input"
+        IFS=$'\t' read -r build_stamp_mtime build_stamp_path <<< "$build_stamp"
+
+        if [ -n "$newest_input_mtime" ] && [ -n "$build_stamp_mtime" ] && [ "$newest_input_mtime" -gt "$build_stamp_mtime" ]; then
+            echo "Dependencies are stale for TranscriptedCore."
+            echo "Newest input:"
+            echo "  $newest_input_path"
+            echo "Built deps stamp:"
+            echo "  $build_stamp_path"
+            echo ""
+            echo "Run: bash build-deps.sh --force"
+            exit 1
+        fi
+
         return 0
     fi
 
     echo "Dependencies missing or stale for TranscriptedCore."
     echo "Expected:"
     echo "  $DEPS_ARCHIVE"
+    echo "  $DEPS_BUILD_STAMP"
     echo "  $DEPS_MODULE_ROOT/"
     echo "  $TRANSCRIPTED_CORE_MODULE"
     echo "  $ESPEAK_FRAMEWORK"

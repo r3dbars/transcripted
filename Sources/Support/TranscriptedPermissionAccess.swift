@@ -249,8 +249,8 @@ enum TranscriptedPermissionAccess {
     }
 
     @MainActor
-    static func requestSystemAudioRecordingAccessIfNeeded() async -> Bool {
-        if systemAudioRecordingStatus() == .granted {
+    static func requestSystemAudioRecordingAccessIfNeeded(forceRefresh: Bool = false) async -> Bool {
+        if !forceRefresh, systemAudioRecordingStatus() == .granted {
             return true
         }
 
@@ -262,9 +262,10 @@ enum TranscriptedPermissionAccess {
 
     @MainActor
     static func requestSystemAudioRecordingAccessIfNeeded(
+        forceRefresh: Bool = false,
         requester: @escaping @MainActor () async -> Bool
     ) async -> Bool {
-        if systemAudioRecordingStatus() == .granted {
+        if !forceRefresh, systemAudioRecordingStatus() == .granted {
             return true
         }
 

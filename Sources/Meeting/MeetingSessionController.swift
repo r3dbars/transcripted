@@ -296,19 +296,33 @@ final class MeetingSessionController: ObservableObject {
             microphoneGranted: microphoneGranted,
             systemAudioRecordingGranted: systemAudioRecordingGranted
         )
+        let shouldRevalidateCachedSystemAudioPermission = microphoneGranted && systemAudioRecordingGranted
+        let shouldRequestMissingSystemAudioPermission =
+            microphoneGranted &&
+            !startDecision.canStart &&
+            startDecision.failureReason == "system_audio_recording"
 
-        if !startDecision.canStart,
-           startDecision.failureReason == "system_audio_recording",
-           microphoneGranted
-        {
+        if shouldRevalidateCachedSystemAudioPermission || shouldRequestMissingSystemAudioPermission {
+            let permissionCheckMode = shouldRevalidateCachedSystemAudioPermission ? "revalidation" : "request"
             DiagnosticsTrail.record(
                 engine: "meeting",
-                event: "meeting_start_requesting_system_audio_permission",
-                message: "Meeting start is requesting system audio permission",
-                context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+                event: shouldRevalidateCachedSystemAudioPermission
+                    ? "meeting_start_revalidating_system_audio_permission"
+                    : "meeting_start_requesting_system_audio_permission",
+                message: shouldRevalidateCachedSystemAudioPermission
+                    ? "Meeting start is revalidating cached system audio permission"
+                    : "Meeting start is requesting system audio permission",
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "trigger": trigger.rawValue,
+                        "permission_check": permissionCheckMode
+                    ]
+                )
             )
 
-            systemAudioRecordingGranted = await TranscriptedPermissionAccess.requestSystemAudioRecordingAccessIfNeeded()
+            systemAudioRecordingGranted = await TranscriptedPermissionAccess.requestSystemAudioRecordingAccessIfNeeded(
+                forceRefresh: shouldRevalidateCachedSystemAudioPermission
+            )
             startDecision = MeetingRecordingStartGate.evaluate(
                 microphoneGranted: microphoneGranted,
                 systemAudioRecordingGranted: systemAudioRecordingGranted
@@ -323,7 +337,12 @@ final class MeetingSessionController: ObservableObject {
                 message: systemAudioRecordingGranted
                     ? "System audio permission is ready for meeting capture"
                     : "System audio permission is still missing for meeting capture",
-                context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "trigger": trigger.rawValue,
+                        "permission_check": permissionCheckMode
+                    ]
+                )
             )
         }
 
