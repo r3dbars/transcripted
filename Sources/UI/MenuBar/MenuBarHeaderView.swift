@@ -27,7 +27,7 @@ final class MenuBarHeaderView: NSView {
     override var isFlipped: Bool { true }
 
     private func setupViews() {
-        titleLabel.font = NSFont.systemFont(ofSize: 17, weight: .semibold)
+        titleLabel.font = NSFont.systemFont(ofSize: 15.5, weight: .semibold)
         titleLabel.textColor = MenuTokens.textPrimaryNS
         addSubview(titleLabel)
 
@@ -35,7 +35,7 @@ final class MenuBarHeaderView: NSView {
         statusDot.layer?.cornerRadius = MenuTokens.statusDotSize / 2
         addSubview(statusDot)
 
-        statusLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        statusLabel.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
         statusLabel.textColor = MenuTokens.textSecondaryNS
         addSubview(statusLabel)
 
@@ -67,26 +67,34 @@ final class MenuBarHeaderView: NSView {
 
         let isReady = currentWarmupStatus == .ready
         let hasWarning = currentHotkeyError?.isEmpty == false
-        let padTop: CGFloat = 0
 
-        titleLabel.frame = NSRect(x: 0, y: padTop, width: bounds.width, height: 22)
-
-        let statusY: CGFloat = 28
-        let dotSize = MenuTokens.statusDotSize
-        statusDot.frame = NSRect(x: 0, y: statusY + 3, width: dotSize, height: dotSize)
-        statusLabel.frame = NSRect(x: dotSize + 8, y: statusY, width: bounds.width - dotSize - 8, height: 14)
+        if isReady && !hasWarning {
+            let dotSize = MenuTokens.statusDotSize
+            let labelWidth = statusLabel.intrinsicContentSize.width
+            let statusWidth = dotSize + 6 + labelWidth
+            let statusX = bounds.width - statusWidth
+            titleLabel.frame = NSRect(x: 0, y: 0, width: max(120, statusX - 8), height: 20)
+            statusDot.frame = NSRect(x: statusX, y: 7, width: dotSize, height: dotSize)
+            statusLabel.frame = NSRect(x: statusDot.frame.maxX + 6, y: 3, width: labelWidth, height: 16)
+        } else {
+            titleLabel.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 20)
+            let statusY: CGFloat = 22
+            let dotSize = MenuTokens.statusDotSize
+            statusDot.frame = NSRect(x: 0, y: statusY + 3, width: dotSize, height: dotSize)
+            statusLabel.frame = NSRect(x: dotSize + 8, y: statusY, width: bounds.width - dotSize - 8, height: 14)
+        }
 
         progressBar.isHidden = isReady
         detailLabel.isHidden = isReady
         if !isReady {
-            progressBar.frame = NSRect(x: 0, y: 50, width: bounds.width, height: 8)
-            detailLabel.frame = NSRect(x: 0, y: 62, width: bounds.width, height: 26)
+            progressBar.frame = NSRect(x: 0, y: 42, width: bounds.width, height: 8)
+            detailLabel.frame = NSRect(x: 0, y: 54, width: bounds.width, height: 24)
         }
 
         warningIconView.isHidden = !hasWarning
         warningLabel.isHidden = !hasWarning
         if hasWarning {
-            let warningY: CGFloat = isReady ? 50 : 94
+            let warningY: CGFloat = isReady ? 28 : 82
             warningIconView.frame = NSRect(x: 0, y: warningY + 1, width: 12, height: 12)
             warningLabel.frame = NSRect(x: 18, y: warningY - 1, width: bounds.width - 18, height: 26)
         }
@@ -110,9 +118,9 @@ final class MenuBarHeaderView: NSView {
     var intrinsicHeight: CGFloat {
         let isReady = currentWarmupStatus == .ready
         let hasWarning = currentHotkeyError?.isEmpty == false
-        if hasWarning {
-            return isReady ? 78 : 122
+        if isReady {
+            return hasWarning ? 56 : 20
         }
-        return isReady ? 46 : 90
+        return hasWarning ? 110 : 78
     }
 }

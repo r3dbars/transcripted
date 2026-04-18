@@ -17,7 +17,7 @@ Draft-mode UI is not an active product path in this worktree.
 
 ### Overlay/
 
-- `Overlay/DictationSessionController.swift` — dictation session orchestration
+- `Overlay/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
 - `Overlay/FloatingOverlayController.swift` — owns the dictation overlay panel lifecycle and Combine subscriptions
 - `Overlay/FloatingOverlayPanel.swift` — non-activating NSPanel for the dictation overlay
 - `Overlay/OverlayDraftingView.swift` — drafting/processing state view
@@ -39,7 +39,7 @@ dictation overlay and the meeting prompt / recording overlay.
 - `MenuBar/MenuBarModelStatusView.swift` — persistent local-model status badge with download progress, error state, and settings shortcut
 - `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar
 - `MenuBar/MenuBarRecentMeetingsView.swift` — recent meetings list in the popover
-- `MenuBar/MenuBarSettingsView.swift` — settings actions in the popover footer
+- `MenuBar/MenuBarSettingsView.swift` — settings actions in the popover footer, including imported-audio transcription entry points
 - `MenuBar/MenuBarShortcutsView.swift` — keyboard shortcut hints in the popover
 - `MenuBar/MenuIconButton.swift` — icon-only button style for menubar items
 - `MenuBar/MenuOutlineButton.swift` — outlined button style for menubar actions
@@ -61,8 +61,8 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
 - `Settings/TranscriptedOnboardingWindowController.swift` — dedicated first-launch window that hosts onboarding before users drop into the menubar flow
-- `Settings/SpeakerNamingSheet.swift` — sheet for renaming speakers in a completed meeting
-- `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, toggling multiple local-speaker identification, naming, merging, previewing, and deleting saved speaker profiles
+- `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits
+- `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, naming, merging, previewing, and deleting saved speaker profiles, plus the toggle for identifying multiple local speakers on the mic track
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 
@@ -76,6 +76,11 @@ The current agent-connect surfaces should keep one simple mental model:
 Cross-cutting permission checks now live in `Sources/Support/TranscriptedPermissionAccess.swift`
 so the meeting prompt detector and the settings/onboarding flows share the same
 app-level permission logic outside the UI tree.
+
+Cross-cutting local-speaker behavior is split between settings and review UI:
+`SpeakerPeopleSettingsSection` owns the persisted toggle for local mic diarization,
+while `SpeakerNamingSheet` is where users confirm local-vs-remote speakers or
+collapse the local side back into a single "You" track.
 
 Keep user-visible TCC prompts user-initiated. Background warmup paths should
 not request microphone, system-audio-recording, or calendar access on their own;
@@ -100,8 +105,10 @@ Manual checks:
 - dictation overlay starts, stops, and auto-pastes cleanly
 - detected-meeting prompts appear only when appropriate and can start or snooze a meeting cleanly
 - meeting overlay warms up and records cleanly
+- imported-audio transcription can be started from the menubar and lands in the normal recent-meetings flow
 - menubar popover renders shortcuts, recents, settings actions, and the agent-connect page cleanly
-- speaker settings can preview clips and rename / merge people cleanly
+- speaker settings can preview clips, toggle local-speaker splitting, and rename / merge people cleanly
+- completed meeting review cleanly separates "People in the room" from remote participants, and "Keep as You" restores the single-speaker local path when needed
 - permissions onboarding and first-run onboarding window still open correctly
 - first-run CTA copy updates correctly as permissions and local-model state change
 - settings window still opens correctly

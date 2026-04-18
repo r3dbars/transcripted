@@ -19,42 +19,12 @@ class DictationSessionController: ObservableObject {
         case unknown = "unknown"
     }
 
-    private enum DictationPasteOutcome {
-        case pasted
-        case copied(String)
-        case failed(String)
-
-        var delivery: DictationDelivery {
-            switch self {
-            case .pasted: return .pasted
-            case .copied: return .copied
-            case .failed: return .failed
-            }
-        }
-
-        var diagnosticName: String {
-            switch self {
-            case .pasted: return "pasted"
-            case .copied: return "copied"
-            case .failed: return "failed"
-            }
-        }
-
-        var diagnosticMessage: String {
-            switch self {
-            case .pasted:
-                return "Dictation pasted successfully"
-            case .copied(let message), .failed(let message):
-                return message
-            }
-        }
-    }
-
     @Published var isInSession = false
     @Published var isDictating = false
     @Published var lastCompletedText: String?
 
     private var interruptionSubscription: AnyCancellable?
+    private let textPaster = ClipboardRestoringTextPaster()
 
     var appState: TranscriptedAppState? {
         didSet { setupInterruptionObserver() }
@@ -89,7 +59,6 @@ class DictationSessionController: ObservableObject {
     private var sessionSourceApp: NSRunningApplication?
     private var startupTask: Task<Void, Never>?
     private var streamingTask: Task<Void, Never>?
-    private var clipboardRestoreTask: Task<Void, Never>?
     private var recordingStartRetryTask: Task<Void, Never>?
     private var sessionTimeoutTask: Task<Void, Never>?
     private var sessionStartTime: CFAbsoluteTime = 0
@@ -102,7 +71,6 @@ class DictationSessionController: ObservableObject {
     deinit {
         startupTask?.cancel()
         streamingTask?.cancel()
-        clipboardRestoreTask?.cancel()
         recordingStartRetryTask?.cancel()
         sessionTimeoutTask?.cancel()
     }
@@ -444,7 +412,7 @@ class DictationSessionController: ObservableObject {
                 } else {
                     overlayController.showSuccessAndDismiss()
                 }
-            case .copied(let message), .failed(let message):
+            case .copied(let message, reason: _), .failed(let message):
                 let combinedMessage: String
                 if let saveFailureMessage {
                     combinedMessage = "\(message) \(saveFailureMessage)"
@@ -665,8 +633,7 @@ class DictationSessionController: ObservableObject {
         startupTask = nil
         streamingTask?.cancel()
         streamingTask = nil
-        clipboardRestoreTask?.cancel()
-        clipboardRestoreTask = nil
+        textPaster.cancelPendingClipboardRestore()
         recordingStartRetryTask?.cancel()
         recordingStartRetryTask = nil
         sessionTimeoutTask?.cancel()
@@ -727,91 +694,26 @@ class DictationSessionController: ObservableObject {
     }
 
     private func pasteWithClipboardRestore(_ text: String) -> DictationPasteOutcome {
-        guard let appState = appState else { return .failed("Couldn't paste dictation") }
+        let outcome = textPaster.paste(text)
 
-        // Check Accessibility permission BEFORE modifying clipboard
-        guard AXIsProcessTrusted() else {
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
-            appState.logger.log("DICTATION | Accessibility missing, copying text instead")
-            copyTextToClipboard(text)
-            return .copied("Couldn't paste automatically. Accessibility is off, so the text was copied.")
-        }
-
-        let pasteboard = NSPasteboard.general
-
-        // Save current clipboard contents
-        let savedItems: [[NSPasteboard.PasteboardType: Data]] = pasteboard.pasteboardItems?.map { item in
-            var typeData: [NSPasteboard.PasteboardType: Data] = [:]
-            for type in item.types {
-                if let data = item.data(forType: type) {
-                    typeData[type] = data
-                }
-            }
-            return typeData
-        } ?? []
-
-        // Set our drafted text
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-
-        // Simulate Cmd+V — target app is already frontmost (overlay is non-activating)
-        guard let vDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true),
-              let vUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false) else {
+        switch outcome.copyReason {
+        case .accessibilityMissing:
+            appState?.logger.log("DICTATION | Accessibility missing, copying text instead")
+        case .pasteEventCreationFailed:
             EventReporter.shared.capture(level: .error, engine: "overlay", event: "cgevent_create_failed",
                 message: "CGEvent creation returned nil — paste will not work")
-            appState.logger.log("DICTATION | CGEvent paste failed, keeping text on clipboard")
-            return .copied("Couldn't paste automatically. The text was copied instead.")
+            appState?.logger.log("DICTATION | CGEvent paste failed, keeping text on clipboard")
+        case nil:
+            break
         }
-        vDown.flags = .maskCommand
-        vDown.post(tap: .cghidEventTap)
 
-        vUp.flags = .maskCommand
-        vUp.post(tap: .cghidEventTap)
-
-        // Restore clipboard after paste completes.
-        // Poll changeCount every 50ms — some apps (rich text editors) write back to the
-        // clipboard on paste, which increments changeCount. If no change detected, fall
-        // back to a 2-second timeout (more conservative than the old 500ms for slow
-        // Electron apps like Slack/Teams).
-        let changeCountAfterSet = pasteboard.changeCount
-        clipboardRestoreTask?.cancel()
-        clipboardRestoreTask = Task { @MainActor in
-            // Defer guarantees the dictated text is wiped from the global pasteboard
-            // even if this task is cancelled or the actor is torn down mid-loop —
-            // otherwise a clipboard manager could scrape it indefinitely.
-            defer {
-                pasteboard.clearContents()
-                let items = savedItems.map { typeData -> NSPasteboardItem in
-                    let item = NSPasteboardItem()
-                    for (type, data) in typeData {
-                        item.setData(data, forType: type)
-                    }
-                    return item
-                }
-                if !items.isEmpty {
-                    pasteboard.writeObjects(items)
-                }
-            }
-            let startTime = CFAbsoluteTimeGetCurrent()
-            while CFAbsoluteTimeGetCurrent() - startTime < TranscriptedConstants.clipboardRestoreTimeout {
-                try? await Task.sleep(nanoseconds: TranscriptedConstants.clipboardPollInterval)
-                if pasteboard.changeCount != changeCountAfterSet { break }
-            }
-        }
-        return .pasted
-    }
-
-    private func copyTextToClipboard(_ text: String) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        return outcome
     }
 
     @discardableResult
     private func persistDictationTranscript(text: String, delivery: DictationDelivery) -> String? {
         do {
-            let saved = try DictationTranscriptWriter.save(
+            let saved = try DictationTranscriptStore.save(
                 text: text,
                 sourceApp: sessionSourceApp,
                 delivery: delivery
@@ -853,6 +755,21 @@ class DictationSessionController: ObservableObject {
         }
 
         return context
+    }
+}
+
+private typealias DictationPasteOutcome = TextPasteOutcome
+
+private extension TextPasteOutcome {
+    var delivery: DictationDelivery {
+        switch self {
+        case .pasted:
+            return .pasted
+        case .copied:
+            return .copied
+        case .failed:
+            return .failed
+        }
     }
 }
 
