@@ -36,14 +36,14 @@ final class MenuBarUtilityActionsView: NSView {
 
     func update(
         updateTitle: String,
-        updateDetail: String,
+        updateVersion: String?,
         updateTone: MenuBarActionRowView.Tone,
         updateEnabled: Bool
     ) {
         connectAgentRow.update(
             symbolName: "sparkles",
             title: "Connect Agent",
-            detail: "Copy the prompt or MCP setup in Settings.",
+            detail: "",
             tone: .standard,
             size: .utility
         )
@@ -51,7 +51,7 @@ final class MenuBarUtilityActionsView: NSView {
         feedbackRow.update(
             symbolName: "bubble.left",
             title: "Submit Feedback",
-            detail: "Open a GitHub feedback form with scrubbed app logs.",
+            detail: "",
             tone: .standard,
             size: .utility
         )
@@ -59,7 +59,8 @@ final class MenuBarUtilityActionsView: NSView {
         updatesRow.update(
             symbolName: "arrow.triangle.2.circlepath.circle",
             title: updateTitle,
-            detail: updateDetail,
+            detail: "",
+            trailingText: updateVersion,
             tone: updateTone,
             size: .utility,
             isEnabled: updateEnabled
@@ -68,7 +69,7 @@ final class MenuBarUtilityActionsView: NSView {
         settingsRow.update(
             symbolName: "gearshape",
             title: "Open Settings",
-            detail: "Shortcuts, meetings, dictations, storage, privacy, and more.",
+            detail: "",
             tone: .standard,
             size: .utility
         )
@@ -76,7 +77,7 @@ final class MenuBarUtilityActionsView: NSView {
         quitRow.update(
             symbolName: "power",
             title: "Quit",
-            detail: "Close Transcripted completely.",
+            detail: "",
             tone: .warning,
             size: .utility
         )
@@ -92,7 +93,7 @@ final class MenuBarUtilityActionsView: NSView {
         var y: CGFloat = 0
         for row in [connectAgentRow, feedbackRow, updatesRow, settingsRow, quitRow] {
             row.frame = NSRect(x: 0, y: y, width: bounds.width, height: rowHeight)
-            y += rowHeight + 6
+            y += rowHeight + 4
         }
     }
 
@@ -103,6 +104,6 @@ final class MenuBarUtilityActionsView: NSView {
     func dismissTransientUI() {}
 
     var intrinsicHeight: CGFloat {
-        (MenuBarActionRowView.Size.utility.height * 5) + 24
+        (MenuBarActionRowView.Size.utility.height * 5) + 16
     }
 }

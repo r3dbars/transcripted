@@ -15,9 +15,9 @@ final class MenuBarActionRowView: NSControl {
         var height: CGFloat {
             switch self {
             case .primary:
-                return 52
+                return 44
             case .utility:
-                return 46
+                return 36
             }
         }
     }
@@ -100,12 +100,12 @@ final class MenuBarActionRowView: NSControl {
         titleLabel.textColor = MenuTokens.textPrimaryNS
         addSubview(titleLabel)
 
-        detailLabel.font = NSFont.systemFont(ofSize: 10.5)
+        detailLabel.font = NSFont.systemFont(ofSize: 10)
         detailLabel.textColor = MenuTokens.textSecondaryNS
         detailLabel.lineBreakMode = .byTruncatingTail
         addSubview(detailLabel)
 
-        trailingLabel.font = NSFont.systemFont(ofSize: 10.5, weight: .medium)
+        trailingLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
         trailingLabel.textColor = MenuTokens.textMutedNS
         trailingLabel.alignment = .right
         addSubview(trailingLabel)
@@ -165,10 +165,10 @@ final class MenuBarActionRowView: NSControl {
     override func layout() {
         super.layout()
 
-        let padX: CGFloat = 14
-        let wellSize: CGFloat = rowSize == .primary ? 34 : 30
-        let symbolSize: CGFloat = rowSize == .primary ? 18 : 16
-        let trailingWidth: CGFloat = trailingLabel.isHidden ? 0 : 112
+        let padX: CGFloat = rowSize == .primary ? 12 : 10
+        let wellSize: CGFloat = rowSize == .primary ? 30 : 24
+        let symbolSize: CGFloat = rowSize == .primary ? 16 : 13
+        let trailingWidth: CGFloat = trailingLabel.isHidden ? 0 : (rowSize == .primary ? 104 : 88)
         let trailingSpacing: CGFloat = trailingWidth > 0 ? 10 : 0
         let contentWidth = bounds.width - (padX * 2) - wellSize - 12 - trailingWidth - trailingSpacing
         let textWidth = max(CGFloat(0), contentWidth)
@@ -182,9 +182,15 @@ final class MenuBarActionRowView: NSControl {
         )
 
         let textX = symbolWellView.frame.maxX + 12
-        let titleY: CGFloat = rowSize == .primary ? 9 : 7
-        titleLabel.frame = NSRect(x: textX, y: titleY, width: textWidth, height: 16)
-        detailLabel.frame = NSRect(x: textX, y: titleLabel.frame.maxY + 2, width: textWidth, height: 14)
+        if detailLabel.isHidden {
+            let centeredY = (bounds.height - 16) / 2
+            titleLabel.frame = NSRect(x: textX, y: centeredY, width: textWidth, height: 16)
+            detailLabel.frame = .zero
+        } else {
+            let titleY: CGFloat = rowSize == .primary ? 6 : 4
+            titleLabel.frame = NSRect(x: textX, y: titleY, width: textWidth, height: 16)
+            detailLabel.frame = NSRect(x: textX, y: titleLabel.frame.maxY + 1, width: textWidth, height: 13)
+        }
 
         if trailingWidth > 0 {
             let trailingX = bounds.width - padX - trailingWidth

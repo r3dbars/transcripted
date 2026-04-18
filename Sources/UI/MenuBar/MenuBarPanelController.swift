@@ -71,15 +71,15 @@ final class MenuBarPanelController: NSViewController {
             meetingKey: appState.contextCapture.meetingShortcutDisplay,
             dictationState: dictationState,
             meetingState: meetingState,
-            pasteDetail: latestDictation.map {
-                "Paste “\($0.title)” into the app you were just using."
-            } ?? "No saved dictation yet.",
+            pasteDetail: latestDictation != nil
+                ? "Paste the newest saved dictation."
+                : "No saved dictation yet.",
             pasteEnabled: latestDictation != nil
         )
 
         content.utilityActionsView.update(
             updateTitle: updatePresentation.title,
-            updateDetail: updatePresentation.detail,
+            updateVersion: updatePresentation.version,
             updateTone: updatePresentation.tone,
             updateEnabled: appState.sparkleUpdater.updateStatus.canCheckForUpdates
         )
@@ -182,30 +182,30 @@ final class MenuBarPanelController: NSViewController {
 
     private func menuUpdatePresentation(
         for status: SparkleUpdaterController.UpdateStatus
-    ) -> (title: String, detail: String, tone: MenuBarActionRowView.Tone) {
+    ) -> (title: String, version: String?, tone: MenuBarActionRowView.Tone) {
         switch status.state {
         case .unknown, .readyToCheck:
             return (
                 "Check for Updates",
-                "See whether a newer Transcripted release is ready.",
+                nil,
                 .standard
             )
         case .checking:
             return (
-                "Checking for Updates…",
-                "Looking for the latest Transcripted release.",
+                "Checking…",
+                nil,
                 .accent
             )
         case .noUpdateAvailable:
             return (
-                "Check for Updates",
-                "You are already on the latest available version.",
+                "Up to Date",
+                nil,
                 .standard
             )
         case .updateAvailable(let version):
             return (
                 "Update Available",
-                "Version \(version) is ready.",
+                version,
                 .accent
             )
         }

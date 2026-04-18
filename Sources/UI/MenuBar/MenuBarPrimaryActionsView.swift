@@ -74,11 +74,11 @@ final class MenuBarPrimaryActionsView: NSView {
 
         let rowHeight = MenuBarActionRowView.Size.primary.height
         dictationRow.frame = NSRect(x: 0, y: 0, width: bounds.width, height: rowHeight)
-        meetingRow.frame = NSRect(x: 0, y: dictationRow.frame.maxY + 8, width: bounds.width, height: rowHeight)
-        pasteRow.frame = NSRect(x: 0, y: meetingRow.frame.maxY + 8, width: bounds.width, height: rowHeight)
+        meetingRow.frame = NSRect(x: 0, y: dictationRow.frame.maxY + 6, width: bounds.width, height: rowHeight)
+        pasteRow.frame = NSRect(x: 0, y: meetingRow.frame.maxY + 6, width: bounds.width, height: rowHeight)
     }
 
     var intrinsicHeight: CGFloat {
-        (MenuBarActionRowView.Size.primary.height * 3) + 16
+        (MenuBarActionRowView.Size.primary.height * 3) + 12
     }
 }
