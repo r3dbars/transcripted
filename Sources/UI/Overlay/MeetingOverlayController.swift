@@ -330,15 +330,14 @@ final class MeetingOverlayRootView: NSView {
             height: tokens.stopHeight
         )
 
-        let barsLeft = timerLabel.frame.maxX + tokens.headerGap + 10
+        let barsLeft = timerLabel.frame.maxX + tokens.headerGap
         let barsRight = closeButton.frame.minX - tokens.headerGap
         let availableBarsWidth = max(0, barsRight - barsLeft)
         let barsWidth = min(tokens.recordingWaveformWidth, availableBarsWidth)
-        let barsX = barsLeft + max(0, (availableBarsWidth - barsWidth) / 2)
         let barsHeight: CGFloat = 22
         let barsY = midY - barsHeight / 2
         audioWaveform.frame = NSRect(
-            x: barsX,
+            x: barsLeft,
             y: barsY,
             width: barsWidth,
             height: barsHeight
@@ -626,16 +625,16 @@ enum MeetingOverlayTokens {
     static let dotError      = NSColor.systemRed
 
     static let panelWidth: CGFloat  = 360
-    static let recordingPanelWidth: CGFloat = 300
+    static let recordingPanelWidth: CGFloat = 256
     static let panelHeight: CGFloat = 44
     static let promptHeight: CGFloat = 88
     static let warmupHeight: CGFloat = 96
     static let errorHeight: CGFloat = 72
     static let cornerRadius: CGFloat = 22
     static let dotSize: CGFloat     = 8
-    static let padLeft: CGFloat     = 14
-    static let padRight: CGFloat    = 5
-    static let headerGap: CGFloat   = 10
+    static let padLeft: CGFloat     = 12
+    static let padRight: CGFloat    = 8
+    static let headerGap: CGFloat   = 8
     static let timerFontSize: CGFloat = 13
     static let stopHeight: CGFloat  = 28
     static let recordingWaveformWidth: CGFloat = 124
