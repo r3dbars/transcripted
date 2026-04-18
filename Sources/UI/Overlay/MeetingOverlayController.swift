@@ -65,8 +65,7 @@ final class MeetingOverlayRootView: NSView {
     private let detailLabel = NSTextField(labelWithString: "")
     private let micLabel = NSTextField(labelWithString: "Mic")
     private let systemLabel = NSTextField(labelWithString: "System audio")
-    private let micWaveform = WaveformHostView(frame: .zero)
-    private let systemWaveform = WaveformHostView(frame: .zero)
+    private let audioWaveform = DualWaveformHostView(frame: .zero)
     private let recordButton = NSButton()
     private let closeButton = NSButton()
     private let chevronButton = NSButton()
@@ -125,13 +124,9 @@ final class MeetingOverlayRootView: NSView {
         systemLabel.textColor = MeetingOverlayTokens.textSecondary
         addSubview(systemLabel)
 
-        micWaveform.visualizationStyle = .scrolling
-        micWaveform.tintColor = MeetingOverlayTokens.waveformTint
-        addSubview(micWaveform)
-
-        systemWaveform.visualizationStyle = .scrolling
-        systemWaveform.tintColor = MeetingOverlayTokens.waveformTint.withAlphaComponent(MeetingOverlayTokens.waveformSystemAlpha)
-        addSubview(systemWaveform)
+        audioWaveform.primaryTintColor = MeetingOverlayTokens.waveformTint
+        audioWaveform.secondaryTintColor = MeetingOverlayTokens.waveformTint.withAlphaComponent(MeetingOverlayTokens.waveformSystemAlpha)
+        addSubview(audioWaveform)
 
         warmupTitleLabel.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
         warmupTitleLabel.textColor = MeetingOverlayTokens.textPrimary
@@ -301,17 +296,11 @@ final class MeetingOverlayRootView: NSView {
             height: systemLabel.fittingSize.height
         )
 
-        micWaveform.frame = NSRect(
-            x: levelBarX,
-            y: micY,
-            width: levelBarWidth,
-            height: levelBarHeight
-        )
-        systemWaveform.frame = NSRect(
+        audioWaveform.frame = NSRect(
             x: levelBarX,
             y: systemY,
             width: levelBarWidth,
-            height: levelBarHeight
+            height: levelBarHeight * 2 + levelBarGap
         )
     }
 
@@ -362,19 +351,11 @@ final class MeetingOverlayRootView: NSView {
         let barsWidth = max(0, barsRight - barsLeft)
         let barsHeight: CGFloat = 22
         let barsY = midY - barsHeight / 2
-        let halfHeight = barsHeight / 2
-
-        micWaveform.frame = NSRect(
-            x: barsLeft,
-            y: midY,
-            width: barsWidth,
-            height: halfHeight
-        )
-        systemWaveform.frame = NSRect(
+        audioWaveform.frame = NSRect(
             x: barsLeft,
             y: barsY,
             width: barsWidth,
-            height: halfHeight
+            height: barsHeight
         )
 
         titleLabel.frame = .zero
@@ -499,13 +480,11 @@ final class MeetingOverlayRootView: NSView {
         detailLabel.isHidden = !(isPrompting || isErrorState)
         micLabel.isHidden = isPreparing || isPrompting
         systemLabel.isHidden = isPreparing || isPrompting
-        micWaveform.isHidden = isPreparing || isPrompting
-        systemWaveform.isHidden = isPreparing || isPrompting
+        audioWaveform.isHidden = isPreparing || isPrompting
         let showLevels = state == .recording
         micLabel.isHidden = !showLevels
         systemLabel.isHidden = !showLevels
-        micWaveform.isHidden = !showLevels
-        systemWaveform.isHidden = !showLevels
+        audioWaveform.isHidden = !showLevels
         recordButton.isHidden = !isPrompting
         closeButton.isHidden = isPreparing || (state != .recording && !isPrompting)
         chevronButton.isHidden = true
@@ -581,11 +560,10 @@ final class MeetingOverlayRootView: NSView {
         }
         currentMicLevel = max(0, min(1, micLevel))
         currentSystemLevel = max(0, min(1, systemLevel))
-        micWaveform.level = currentMicLevel
-        systemWaveform.level = currentSystemLevel
+        audioWaveform.primaryLevel = currentMicLevel
+        audioWaveform.secondaryLevel = currentSystemLevel
         let shouldAnimate = state == .recording
-        micWaveform.isActive = shouldAnimate
-        systemWaveform.isActive = shouldAnimate
+        audioWaveform.isActive = shouldAnimate
 
         needsLayout = true
     }
