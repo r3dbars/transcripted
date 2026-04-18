@@ -15,9 +15,9 @@ final class MenuBarActionRowView: NSControl {
         var height: CGFloat {
             switch self {
             case .primary:
-                return 44
+                return 42
             case .utility:
-                return 36
+                return 32
             }
         }
     }
@@ -86,26 +86,21 @@ final class MenuBarActionRowView: NSControl {
 
     private func setupViews() {
         wantsLayer = true
-        layer?.cornerRadius = 14
-        layer?.borderWidth = 1
+        layer?.cornerRadius = 10
 
         symbolWellView.wantsLayer = true
-        symbolWellView.layer?.cornerRadius = 10
         addSubview(symbolWellView)
 
         symbolView.imageScaling = .scaleProportionallyDown
         symbolWellView.addSubview(symbolView)
 
-        titleLabel.font = NSFont.systemFont(ofSize: 12.5, weight: .semibold)
         titleLabel.textColor = MenuTokens.textPrimaryNS
         addSubview(titleLabel)
 
-        detailLabel.font = NSFont.systemFont(ofSize: 10)
         detailLabel.textColor = MenuTokens.textSecondaryNS
         detailLabel.lineBreakMode = .byTruncatingTail
         addSubview(detailLabel)
 
-        trailingLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
         trailingLabel.textColor = MenuTokens.textMutedNS
         trailingLabel.alignment = .right
         addSubview(trailingLabel)
@@ -115,73 +110,63 @@ final class MenuBarActionRowView: NSControl {
 
     private func updateAppearance() {
         let backgroundColor: NSColor
-        let borderColor: NSColor
         let iconTint: NSColor
-        let iconBackground: NSColor
+        let iconBackground: NSColor = .clear
 
         if !isEnabled {
-            backgroundColor = MenuTokens.actionDisabledNS
-            borderColor = MenuTokens.sectionDividerNS
+            backgroundColor = MenuTokens.flatRowDisabledNS
             iconTint = MenuTokens.textMutedNS
-            iconBackground = MenuTokens.symbolBackgroundNS
         } else if isPressing {
-            backgroundColor = MenuTokens.actionPressedNS
-            borderColor = MenuTokens.actionBorderNS
-            (iconTint, iconBackground) = toneColors(pressed: true)
+            backgroundColor = MenuTokens.flatRowPressedNS
+            iconTint = toneColors().pressed
         } else if isHovering {
-            backgroundColor = MenuTokens.recentHoverNS
-            borderColor = MenuTokens.actionBorderNS
-            (iconTint, iconBackground) = toneColors(pressed: false)
+            backgroundColor = MenuTokens.flatRowHoverNS
+            iconTint = toneColors().normal
         } else {
-            backgroundColor = MenuTokens.actionBackgroundNS
-            borderColor = MenuTokens.actionBorderNS
-            (iconTint, iconBackground) = toneColors(pressed: false)
+            backgroundColor = .clear
+            iconTint = toneColors().normal
         }
 
         layer?.backgroundColor = backgroundColor.cgColor
-        layer?.borderColor = borderColor.cgColor
+        layer?.borderWidth = 0
         symbolWellView.layer?.backgroundColor = iconBackground.cgColor
         symbolView.contentTintColor = iconTint
         alphaValue = isEnabled ? 1.0 : 0.55
     }
 
-    private func toneColors(pressed: Bool) -> (NSColor, NSColor) {
+    private func toneColors() -> (normal: NSColor, pressed: NSColor) {
         switch rowTone {
         case .accent:
-            return (
-                NSColor.systemBlue,
-                pressed ? MenuTokens.accentButtonPressedNS : MenuTokens.accentButtonBackgroundNS
-            )
+            return (NSColor.systemBlue, NSColor.systemBlue)
         case .standard:
-            return (MenuTokens.textPrimaryNS, MenuTokens.symbolBackgroundNS)
+            return (MenuTokens.textSecondaryNS, MenuTokens.textPrimaryNS)
         case .warning:
-            return (
-                MenuTokens.statusOrangeNS,
-                pressed ? MenuTokens.failedBorderNS : MenuTokens.failedBackgroundNS
-            )
+            return (MenuTokens.statusOrangeNS, MenuTokens.statusOrangeNS)
         }
     }
 
     override func layout() {
         super.layout()
 
-        let padX: CGFloat = rowSize == .primary ? 12 : 10
-        let wellSize: CGFloat = rowSize == .primary ? 30 : 24
+        let padX: CGFloat = rowSize == .primary ? 8 : 6
+        let wellWidth: CGFloat = rowSize == .primary ? 18 : 16
         let symbolSize: CGFloat = rowSize == .primary ? 16 : 13
-        let trailingWidth: CGFloat = trailingLabel.isHidden ? 0 : (rowSize == .primary ? 104 : 88)
-        let trailingSpacing: CGFloat = trailingWidth > 0 ? 10 : 0
-        let contentWidth = bounds.width - (padX * 2) - wellSize - 12 - trailingWidth - trailingSpacing
+        let trailingWidth: CGFloat = trailingLabel.isHidden ? 0 : (rowSize == .primary ? 96 : 76)
+        let trailingSpacing: CGFloat = trailingWidth > 0 ? 8 : 0
+        let contentWidth = bounds.width - (padX * 2) - wellWidth - 10 - trailingWidth - trailingSpacing
         let textWidth = max(CGFloat(0), contentWidth)
 
-        symbolWellView.frame = NSRect(x: padX, y: (bounds.height - wellSize) / 2, width: wellSize, height: wellSize)
+        updateTypography()
+
+        symbolWellView.frame = NSRect(x: padX, y: (bounds.height - symbolSize) / 2, width: wellWidth, height: symbolSize)
         symbolView.frame = NSRect(
-            x: (wellSize - symbolSize) / 2,
-            y: (wellSize - symbolSize) / 2,
+            x: max(0, (wellWidth - symbolSize) / 2),
+            y: 0,
             width: symbolSize,
             height: symbolSize
         )
 
-        let textX = symbolWellView.frame.maxX + 12
+        let textX = symbolWellView.frame.maxX + 10
         if detailLabel.isHidden {
             let centeredY = (bounds.height - 16) / 2
             titleLabel.frame = NSRect(x: textX, y: centeredY, width: textWidth, height: 16)
@@ -196,6 +181,19 @@ final class MenuBarActionRowView: NSControl {
             let trailingX = bounds.width - padX - trailingWidth
             let trailingY = (bounds.height - 14) / 2
             trailingLabel.frame = NSRect(x: trailingX, y: trailingY, width: trailingWidth, height: 14)
+        }
+    }
+
+    private func updateTypography() {
+        switch rowSize {
+        case .primary:
+            titleLabel.font = NSFont.systemFont(ofSize: 13.5, weight: .semibold)
+            detailLabel.font = NSFont.systemFont(ofSize: 11)
+            trailingLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        case .utility:
+            titleLabel.font = NSFont.systemFont(ofSize: 12.5, weight: .semibold)
+            detailLabel.font = NSFont.systemFont(ofSize: 10.5)
+            trailingLabel.font = NSFont.systemFont(ofSize: 10.5, weight: .medium)
         }
     }
 

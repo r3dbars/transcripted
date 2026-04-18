@@ -22,6 +22,9 @@ enum MenuTokens {
     static let actionPressedNS = NSColor.white.withAlphaComponent(0.10)
     static let actionDisabledNS = NSColor.white.withAlphaComponent(0.03)
     static let actionBorderNS = NSColor.white.withAlphaComponent(0.08)
+    static let flatRowHoverNS = NSColor.white.withAlphaComponent(0.055)
+    static let flatRowPressedNS = NSColor.white.withAlphaComponent(0.10)
+    static let flatRowDisabledNS = NSColor.white.withAlphaComponent(0.02)
     static let badgeBackgroundNS = NSColor.white.withAlphaComponent(0.08)
     static let badgeBorderNS = NSColor.white.withAlphaComponent(0.12)
     static let symbolBackgroundNS = NSColor.white.withAlphaComponent(0.05)
@@ -63,11 +66,11 @@ enum MenuTokens {
 
     // Layout
     static let panelWidth: CGFloat = 392
-    static let panelHeight: CGFloat = 448
+    static let panelHeight: CGFloat = 400
     static let onboardingWindowWidth: CGFloat = 620
     static let onboardingWindowHeight: CGFloat = 760
-    static let innerPadding: CGFloat = 14
-    static let sectionSpacing: CGFloat = 8
+    static let innerPadding: CGFloat = 16
+    static let sectionSpacing: CGFloat = 10
     static let surfaceCornerRadius: CGFloat = 16
     static let cardCornerRadius: CGFloat = 12
     static let actionRowHeight: CGFloat = 46

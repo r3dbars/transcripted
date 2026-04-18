@@ -12,9 +12,6 @@ final class MenuBarContentView: NSView {
     let primaryActionsView = MenuBarPrimaryActionsView(frame: .zero)
     let utilityActionsView = MenuBarUtilityActionsView(frame: .zero)
 
-    private let primaryDivider = NSView()
-    private let utilityDivider = NSView()
-
     weak var appState: TranscriptedAppState? {
         didSet {
             utilityActionsView.appState = appState
@@ -46,12 +43,6 @@ final class MenuBarContentView: NSView {
         scrollView.documentView = documentView
         addSubview(scrollView)
 
-        [primaryDivider, utilityDivider].forEach {
-            $0.wantsLayer = true
-            $0.layer?.backgroundColor = MenuTokens.sectionDividerNS.cgColor
-            documentView.addSubview($0)
-        }
-
         [headerView, primaryActionsView, utilityActionsView].forEach(documentView.addSubview(_:))
     }
 
@@ -62,22 +53,15 @@ final class MenuBarContentView: NSView {
 
         let pad = MenuTokens.innerPadding
         let width = bounds.width - pad * 2
-        let dividerHeight: CGFloat = 1
         var y = pad
 
         let headerHeight = headerView.intrinsicHeight
         headerView.frame = NSRect(x: pad, y: y, width: width, height: headerHeight)
-        y += headerHeight + MenuTokens.sectionSpacing
-
-        primaryDivider.frame = NSRect(x: pad, y: y, width: width, height: dividerHeight)
-        y += dividerHeight + MenuTokens.sectionSpacing
+        y += headerHeight + 12
 
         let primaryHeight = primaryActionsView.intrinsicHeight
         primaryActionsView.frame = NSRect(x: pad, y: y, width: width, height: primaryHeight)
         y += primaryHeight + MenuTokens.sectionSpacing
-
-        utilityDivider.frame = NSRect(x: pad, y: y, width: width, height: dividerHeight)
-        y += dividerHeight + MenuTokens.sectionSpacing
 
         let utilityHeight = utilityActionsView.intrinsicHeight
         utilityActionsView.frame = NSRect(x: pad, y: y, width: width, height: utilityHeight)

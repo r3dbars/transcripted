@@ -198,7 +198,7 @@ final class MenuBarPanelController: NSViewController {
             )
         case .noUpdateAvailable:
             return (
-                "Up to Date",
+                "Check for Updates",
                 nil,
                 .standard
             )

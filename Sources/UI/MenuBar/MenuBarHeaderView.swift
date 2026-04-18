@@ -71,7 +71,7 @@ final class MenuBarHeaderView: NSView {
 
         titleLabel.frame = NSRect(x: 0, y: padTop, width: bounds.width, height: 22)
 
-        let statusY: CGFloat = 28
+        let statusY: CGFloat = 26
         let dotSize = MenuTokens.statusDotSize
         statusDot.frame = NSRect(x: 0, y: statusY + 3, width: dotSize, height: dotSize)
         statusLabel.frame = NSRect(x: dotSize + 8, y: statusY, width: bounds.width - dotSize - 8, height: 14)
@@ -79,14 +79,14 @@ final class MenuBarHeaderView: NSView {
         progressBar.isHidden = isReady
         detailLabel.isHidden = isReady
         if !isReady {
-            progressBar.frame = NSRect(x: 0, y: 50, width: bounds.width, height: 8)
-            detailLabel.frame = NSRect(x: 0, y: 62, width: bounds.width, height: 26)
+            progressBar.frame = NSRect(x: 0, y: 46, width: bounds.width, height: 8)
+            detailLabel.frame = NSRect(x: 0, y: 58, width: bounds.width, height: 26)
         }
 
         warningIconView.isHidden = !hasWarning
         warningLabel.isHidden = !hasWarning
         if hasWarning {
-            let warningY: CGFloat = isReady ? 50 : 94
+            let warningY: CGFloat = isReady ? 46 : 90
             warningIconView.frame = NSRect(x: 0, y: warningY + 1, width: 12, height: 12)
             warningLabel.frame = NSRect(x: 18, y: warningY - 1, width: bounds.width - 18, height: 26)
         }
@@ -111,8 +111,8 @@ final class MenuBarHeaderView: NSView {
         let isReady = currentWarmupStatus == .ready
         let hasWarning = currentHotkeyError?.isEmpty == false
         if hasWarning {
-            return isReady ? 78 : 122
+            return isReady ? 74 : 118
         }
-        return isReady ? 46 : 90
+        return isReady ? 42 : 86
     }
 }
