@@ -3,7 +3,15 @@ import Foundation
 
 @MainActor
 enum TranscriptedSupportActions {
+    private static let feedbackIssueURLString = "https://github.com/r3dbars/transcripted/issues/new"
+
     static func sendFeedback(logger: AppLogger?) {
+        guard let url = feedbackIssueURL(logger: logger) else { return }
+        AppSoundPlayer.shared.play(.feedbackSubmitted, respectingPreferences: false)
+        NSWorkspace.shared.open(url)
+    }
+
+    static func feedbackIssueURL(logger: AppLogger?) -> URL? {
         let rawLogLines = logger?.entries.suffix(80).joined(separator: "\n") ?? "No in-app logs attached."
         let logLines = AnalyticsPayloadSanitizer.redact(rawLogLines)
         let title = "Transcripted Feedback"
@@ -16,14 +24,13 @@ enum TranscriptedSupportActions {
         \(logLines)
         """
 
-        var components = URLComponents(string: "https://github.com/r3dbars/transcripted/issues/new")
+        var components = URLComponents(string: feedbackIssueURLString)
         components?.queryItems = [
             URLQueryItem(name: "title", value: title),
             URLQueryItem(name: "body", value: body)
         ]
 
-        guard let url = components?.url else { return }
-        NSWorkspace.shared.open(url)
+        return components?.url
     }
 
     static var appVersionDescription: String {
