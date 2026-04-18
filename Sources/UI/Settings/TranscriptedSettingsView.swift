@@ -90,6 +90,9 @@ struct TranscriptedSettingsView: View {
         .onChange(of: navigation.selectedPage) { _, _ in
             refreshRecentCaptures()
         }
+        .onChange(of: meetingSession.lastSavedTranscriptURL) { _, _ in
+            refreshRecentCaptures()
+        }
     }
 
     @ViewBuilder
@@ -160,6 +163,24 @@ struct TranscriptedSettingsView: View {
                 )
             }
 
+            if let activity = homeTranscriptionActivity {
+                SettingsActivityCard(
+                    symbolName: activity.symbolName,
+                    title: activity.title,
+                    status: activity.status,
+                    detail: activity.detail,
+                    tone: activity.tone,
+                    progress: activity.progress,
+                    actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript",
+                    action: activity.transcriptURL.map { transcriptURL in
+                        {
+                            NSWorkspace.shared.open(transcriptURL)
+                        }
+                    }
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             SettingsSection(
                 title: "Setup Status",
                 detail: "These cards show whether Transcripted is ready for dictation, meetings, and local storage."
@@ -226,6 +247,7 @@ struct TranscriptedSettingsView: View {
                 }
             }
         }
+        .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
     }
 
     private var shortcutsPage: some View {
@@ -612,6 +634,16 @@ struct TranscriptedSettingsView: View {
         case .failed:
             return .caution
         }
+    }
+
+    private var homeTranscriptionActivity: HomeTranscriptionActivityPresentation? {
+        HomeTranscriptionActivityPresentation.make(
+            sessionState: meetingSession.state,
+            displayStatus: meetingSession.displayStatus,
+            warmupStatus: meetingSession.warmupStatus,
+            lastSavedTitle: meetingSession.lastSavedTitle,
+            lastSavedTranscriptURL: meetingSession.lastSavedTranscriptURL
+        )
     }
 
     private func refreshState() {
