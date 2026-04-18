@@ -78,6 +78,7 @@ final class MenuBarUtilityActionsView: NSView {
             symbolName: "power",
             title: "Quit",
             detail: "",
+            trailingText: "⌘Q",
             tone: .warning,
             size: .utility
         )
@@ -89,11 +90,11 @@ final class MenuBarUtilityActionsView: NSView {
     override func layout() {
         super.layout()
 
-        let rowHeight = MenuBarActionRowView.Size.utility.height
         var y: CGFloat = 0
         for row in [connectAgentRow, feedbackRow, updatesRow, settingsRow, quitRow] {
+            let rowHeight = row.intrinsicContentSize.height
             row.frame = NSRect(x: 0, y: y, width: bounds.width, height: rowHeight)
-            y += rowHeight + 2
+            y += rowHeight + 1
         }
     }
 
@@ -104,6 +105,8 @@ final class MenuBarUtilityActionsView: NSView {
     func dismissTransientUI() {}
 
     var intrinsicHeight: CGFloat {
-        (MenuBarActionRowView.Size.utility.height * 5) + 8
+        [connectAgentRow, feedbackRow, updatesRow, settingsRow, quitRow]
+            .map { $0.intrinsicContentSize.height }
+            .reduce(0, +) + 4
     }
 }

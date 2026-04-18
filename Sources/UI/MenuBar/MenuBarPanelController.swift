@@ -71,9 +71,7 @@ final class MenuBarPanelController: NSViewController {
             meetingKey: appState.contextCapture.meetingShortcutDisplay,
             dictationState: dictationState,
             meetingState: meetingState,
-            pasteDetail: latestDictation != nil
-                ? "Paste the newest saved dictation."
-                : "No saved dictation yet.",
+            pasteDetail: pasteDetail(for: latestDictation),
             pasteEnabled: latestDictation != nil
         )
 
@@ -89,6 +87,8 @@ final class MenuBarPanelController: NSViewController {
         }
 
         content.needsLayout = true
+        content.layoutSubtreeIfNeeded()
+        preferredContentSize = content.preferredPanelSize
     }
 
     private func setupSubscriptions() {
@@ -194,7 +194,7 @@ final class MenuBarPanelController: NSViewController {
             return (
                 "Checking…",
                 nil,
-                .accent
+                .standard
             )
         case .noUpdateAvailable:
             return (
@@ -209,5 +209,35 @@ final class MenuBarPanelController: NSViewController {
                 .accent
             )
         }
+    }
+
+    private func pasteDetail(for entry: SavedDictationEntry?) -> String {
+        guard let entry else {
+            return "No saved dictation yet."
+        }
+
+        let collapsed = entry.text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? ""
+
+        guard !collapsed.isEmpty else {
+            return "Paste the newest saved dictation."
+        }
+
+        return shortenedPreview(for: collapsed, limit: 40)
+    }
+
+    private func shortenedPreview(for text: String, limit: Int) -> String {
+        let normalized = text.replacingOccurrences(
+            of: "\\s+",
+            with: " ",
+            options: .regularExpression
+        )
+        guard normalized.count > limit else {
+            return normalized
+        }
+        let truncated = normalized.prefix(max(0, limit - 1)).trimmingCharacters(in: .whitespaces)
+        return "\(truncated)…"
     }
 }

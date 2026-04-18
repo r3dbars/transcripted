@@ -72,13 +72,19 @@ final class MenuBarPrimaryActionsView: NSView {
     override func layout() {
         super.layout()
 
-        let rowHeight = MenuBarActionRowView.Size.primary.height
-        dictationRow.frame = NSRect(x: 0, y: 0, width: bounds.width, height: rowHeight)
-        meetingRow.frame = NSRect(x: 0, y: dictationRow.frame.maxY + 4, width: bounds.width, height: rowHeight)
-        pasteRow.frame = NSRect(x: 0, y: meetingRow.frame.maxY + 4, width: bounds.width, height: rowHeight)
+        let firstHeight = dictationRow.intrinsicContentSize.height
+        let secondHeight = meetingRow.intrinsicContentSize.height
+        let thirdHeight = pasteRow.intrinsicContentSize.height
+
+        dictationRow.frame = NSRect(x: 0, y: 0, width: bounds.width, height: firstHeight)
+        meetingRow.frame = NSRect(x: 0, y: dictationRow.frame.maxY + 2, width: bounds.width, height: secondHeight)
+        pasteRow.frame = NSRect(x: 0, y: meetingRow.frame.maxY + 2, width: bounds.width, height: thirdHeight)
     }
 
     var intrinsicHeight: CGFloat {
-        (MenuBarActionRowView.Size.primary.height * 3) + 8
+        dictationRow.intrinsicContentSize.height
+            + meetingRow.intrinsicContentSize.height
+            + pasteRow.intrinsicContentSize.height
+            + 4
     }
 }

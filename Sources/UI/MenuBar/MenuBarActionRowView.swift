@@ -11,15 +11,6 @@ final class MenuBarActionRowView: NSControl {
     enum Size {
         case primary
         case utility
-
-        var height: CGFloat {
-            switch self {
-            case .primary:
-                return 42
-            case .utility:
-                return 32
-            }
-        }
     }
 
     var onPress: (() -> Void)?
@@ -35,6 +26,7 @@ final class MenuBarActionRowView: NSControl {
     private var trackingAreaRef: NSTrackingArea?
     private var rowTone: Tone = .standard
     private var rowSize: Size = .utility
+    private var currentHeight: CGFloat = 26
 
     override var isEnabled: Bool {
         didSet { updateAppearance() }
@@ -51,7 +43,7 @@ final class MenuBarActionRowView: NSControl {
     override var isFlipped: Bool { true }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: rowSize.height)
+        NSSize(width: NSView.noIntrinsicMetric, height: currentHeight)
     }
 
     func update(
@@ -72,10 +64,11 @@ final class MenuBarActionRowView: NSControl {
         detailLabel.isHidden = detail.isEmpty
         trailingLabel.stringValue = trailingText ?? ""
         trailingLabel.isHidden = trailingText?.isEmpty ?? true
+        currentHeight = resolvedHeight()
 
         if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title) {
             symbolView.image = image.withSymbolConfiguration(
-                NSImage.SymbolConfiguration(pointSize: size == .primary ? 14 : 13, weight: .semibold)
+                NSImage.SymbolConfiguration(pointSize: size == .primary ? 15 : 13, weight: .semibold)
             )
         }
 
@@ -86,9 +79,8 @@ final class MenuBarActionRowView: NSControl {
 
     private func setupViews() {
         wantsLayer = true
-        layer?.cornerRadius = 10
+        layer?.cornerRadius = 6
 
-        symbolWellView.wantsLayer = true
         addSubview(symbolWellView)
 
         symbolView.imageScaling = .scaleProportionallyDown
@@ -111,7 +103,6 @@ final class MenuBarActionRowView: NSControl {
     private func updateAppearance() {
         let backgroundColor: NSColor
         let iconTint: NSColor
-        let iconBackground: NSColor = .clear
 
         if !isEnabled {
             backgroundColor = MenuTokens.flatRowDisabledNS
@@ -129,8 +120,10 @@ final class MenuBarActionRowView: NSControl {
 
         layer?.backgroundColor = backgroundColor.cgColor
         layer?.borderWidth = 0
-        symbolWellView.layer?.backgroundColor = iconBackground.cgColor
         symbolView.contentTintColor = iconTint
+        titleLabel.textColor = MenuTokens.textPrimaryNS
+        detailLabel.textColor = MenuTokens.textSecondaryNS
+        trailingLabel.textColor = MenuTokens.textMutedNS
         alphaValue = isEnabled ? 1.0 : 0.55
     }
 
@@ -148,38 +141,39 @@ final class MenuBarActionRowView: NSControl {
     override func layout() {
         super.layout()
 
-        let padX: CGFloat = rowSize == .primary ? 8 : 6
-        let wellWidth: CGFloat = rowSize == .primary ? 18 : 16
-        let symbolSize: CGFloat = rowSize == .primary ? 16 : 13
-        let trailingWidth: CGFloat = trailingLabel.isHidden ? 0 : (rowSize == .primary ? 96 : 76)
+        let hasDetail = !detailLabel.isHidden
+        let padX: CGFloat = 2
+        let iconWidth: CGFloat = rowSize == .primary ? 18 : 16
+        let symbolSize: CGFloat = rowSize == .primary ? 15 : 13
+        let trailingWidth: CGFloat = trailingLabel.isHidden ? 0 : (rowSize == .primary ? 92 : 70)
         let trailingSpacing: CGFloat = trailingWidth > 0 ? 8 : 0
-        let contentWidth = bounds.width - (padX * 2) - wellWidth - 10 - trailingWidth - trailingSpacing
+        let contentWidth = bounds.width - (padX * 2) - iconWidth - 8 - trailingWidth - trailingSpacing
         let textWidth = max(CGFloat(0), contentWidth)
 
         updateTypography()
 
-        symbolWellView.frame = NSRect(x: padX, y: (bounds.height - symbolSize) / 2, width: wellWidth, height: symbolSize)
+        symbolWellView.frame = NSRect(x: padX, y: floor((bounds.height - symbolSize) / 2), width: iconWidth, height: symbolSize)
         symbolView.frame = NSRect(
-            x: max(0, (wellWidth - symbolSize) / 2),
+            x: max(0, floor((iconWidth - symbolSize) / 2)),
             y: 0,
             width: symbolSize,
             height: symbolSize
         )
 
-        let textX = symbolWellView.frame.maxX + 10
-        if detailLabel.isHidden {
+        let textX = symbolWellView.frame.maxX + 8
+        if !hasDetail {
             let centeredY = (bounds.height - 16) / 2
             titleLabel.frame = NSRect(x: textX, y: centeredY, width: textWidth, height: 16)
             detailLabel.frame = .zero
         } else {
-            let titleY: CGFloat = rowSize == .primary ? 6 : 4
+            let titleY: CGFloat = rowSize == .primary ? 2 : 1
             titleLabel.frame = NSRect(x: textX, y: titleY, width: textWidth, height: 16)
             detailLabel.frame = NSRect(x: textX, y: titleLabel.frame.maxY + 1, width: textWidth, height: 13)
         }
 
         if trailingWidth > 0 {
             let trailingX = bounds.width - padX - trailingWidth
-            let trailingY = (bounds.height - 14) / 2
+            let trailingY = hasDetail ? 2 : (bounds.height - 14) / 2
             trailingLabel.frame = NSRect(x: trailingX, y: trailingY, width: trailingWidth, height: 14)
         }
     }
@@ -187,13 +181,23 @@ final class MenuBarActionRowView: NSControl {
     private func updateTypography() {
         switch rowSize {
         case .primary:
-            titleLabel.font = NSFont.systemFont(ofSize: 13.5, weight: .semibold)
-            detailLabel.font = NSFont.systemFont(ofSize: 11)
-            trailingLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        case .utility:
             titleLabel.font = NSFont.systemFont(ofSize: 12.5, weight: .semibold)
             detailLabel.font = NSFont.systemFont(ofSize: 10.5)
+            trailingLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        case .utility:
+            titleLabel.font = NSFont.systemFont(ofSize: 12.5, weight: .medium)
+            detailLabel.font = NSFont.systemFont(ofSize: 10.5)
             trailingLabel.font = NSFont.systemFont(ofSize: 10.5, weight: .medium)
+        }
+    }
+
+    private func resolvedHeight() -> CGFloat {
+        let hasDetail = !detailLabel.stringValue.isEmpty
+        switch rowSize {
+        case .primary:
+            return hasDetail ? 32 : 24
+        case .utility:
+            return hasDetail ? 28 : 24
         }
     }
 

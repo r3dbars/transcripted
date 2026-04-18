@@ -258,6 +258,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         _ = resolvedSourceApp()
         menuPanelController.refresh()
         popover.contentViewController = menuPanelController
+        popover.contentSize = menuPanelController.preferredContentSize
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         NSApp.activate(ignoringOtherApps: true)
     }

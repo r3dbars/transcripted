@@ -7,6 +7,9 @@ import AppKit
 final class MenuBarContentView: NSView {
     private let scrollView = NSScrollView()
     private let documentView = FlippedMenuDocumentView()
+    private let headerDivider = NSView()
+    private let sectionDivider = NSView()
+    private var documentHeight: CGFloat = MenuTokens.panelHeight
 
     let headerView = MenuBarHeaderView(frame: .zero)
     let primaryActionsView = MenuBarPrimaryActionsView(frame: .zero)
@@ -43,6 +46,12 @@ final class MenuBarContentView: NSView {
         scrollView.documentView = documentView
         addSubview(scrollView)
 
+        [headerDivider, sectionDivider].forEach {
+            $0.wantsLayer = true
+            $0.layer?.backgroundColor = MenuTokens.sectionDividerNS.cgColor
+            documentView.addSubview($0)
+        }
+
         [headerView, primaryActionsView, utilityActionsView].forEach(documentView.addSubview(_:))
     }
 
@@ -57,22 +66,33 @@ final class MenuBarContentView: NSView {
 
         let headerHeight = headerView.intrinsicHeight
         headerView.frame = NSRect(x: pad, y: y, width: width, height: headerHeight)
-        y += headerHeight + 12
+        y += headerHeight + 10
+
+        headerDivider.frame = NSRect(x: pad, y: y, width: width, height: 1)
+        y += 9
 
         let primaryHeight = primaryActionsView.intrinsicHeight
         primaryActionsView.frame = NSRect(x: pad, y: y, width: width, height: primaryHeight)
         y += primaryHeight + MenuTokens.sectionSpacing
 
+        sectionDivider.frame = NSRect(x: pad, y: y, width: width, height: 1)
+        y += 9
+
         let utilityHeight = utilityActionsView.intrinsicHeight
         utilityActionsView.frame = NSRect(x: pad, y: y, width: width, height: utilityHeight)
         y += utilityHeight + pad
 
-        documentView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(y, bounds.height))
+        documentHeight = y
+        documentView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: y)
     }
 
     func scrollToTop() {
         scrollView.contentView.scroll(to: .zero)
         scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    var preferredPanelSize: NSSize {
+        NSSize(width: MenuTokens.panelWidth, height: min(documentHeight, MenuTokens.panelHeight))
     }
 }
 
