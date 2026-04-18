@@ -65,7 +65,38 @@ func drawRoundedPanel(rect: NSRect) {
     path.stroke()
 }
 
+func drawArrowHead(tip: NSPoint, tail: NSPoint) {
+    let deltaX = tip.x - tail.x
+    let deltaY = tip.y - tail.y
+    let length = hypot(deltaX, deltaY)
+
+    guard length > 0 else { return }
+
+    let unitX = deltaX / length
+    let unitY = deltaY / length
+    let backX = tip.x - (unitX * 74)
+    let backY = tip.y - (unitY * 74)
+    let perpX = -unitY
+    let perpY = unitX
+
+    let leftWing = NSPoint(x: backX + (perpX * 30), y: backY + (perpY * 30))
+    let rightWing = NSPoint(x: backX - (perpX * 30), y: backY - (perpY * 30))
+
+    let arrowHead = NSBezierPath()
+    arrowHead.move(to: tip)
+    arrowHead.line(to: leftWing)
+    arrowHead.move(to: tip)
+    arrowHead.line(to: rightWing)
+    arrowHead.lineWidth = 14
+    arrowHead.lineCapStyle = .round
+    arrowHead.lineJoinStyle = .round
+    arrowColor.setStroke()
+    arrowHead.stroke()
+}
+
 func drawArrow() {
+    let tip = NSPoint(x: 1445, y: 830)
+    let approach = NSPoint(x: 1280, y: 900)
     let path = NSBezierPath()
     path.move(to: NSPoint(x: 760, y: 560))
     path.curve(
@@ -79,9 +110,9 @@ func drawArrow() {
         controlPoint2: NSPoint(x: 900, y: 900)
     )
     path.curve(
-        to: NSPoint(x: 1330, y: 980),
-        controlPoint1: NSPoint(x: 1030, y: 1040),
-        controlPoint2: NSPoint(x: 1200, y: 1040)
+        to: tip,
+        controlPoint1: NSPoint(x: 1060, y: 1080),
+        controlPoint2: approach
     )
 
     path.lineWidth = 14
@@ -90,18 +121,7 @@ func drawArrow() {
     path.setLineDash([18, 24], count: 2, phase: 0)
     arrowColor.setStroke()
     path.stroke()
-
-    let tip = NSPoint(x: 1330, y: 980)
-    let arrowHead = NSBezierPath()
-    arrowHead.move(to: tip)
-    arrowHead.line(to: NSPoint(x: 1270, y: 948))
-    arrowHead.move(to: tip)
-    arrowHead.line(to: NSPoint(x: 1292, y: 916))
-    arrowHead.lineWidth = 14
-    arrowHead.lineCapStyle = .round
-    arrowHead.lineJoinStyle = .round
-    arrowColor.setStroke()
-    arrowHead.stroke()
+    drawArrowHead(tip: tip, tail: approach)
 }
 
 let image = NSImage(size: canvasSize)
