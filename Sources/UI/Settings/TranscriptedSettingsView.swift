@@ -1,9 +1,17 @@
-import SwiftUI
 import AppKit
+import Observation
+import SwiftUI
 import TranscriptedCore
 
 struct TranscriptedSettingsView: View {
+    @Bindable var navigation: TranscriptedSettingsNavigationModel
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
+    @ObservedObject private var parakeetEngine: ParakeetEngine
+    @ObservedObject private var meetingSession: MeetingSessionController
+    @ObservedObject private var sparkleUpdater: SparkleUpdaterController
+
+    private let actions: TranscriptedSettingsActions
+
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
@@ -11,160 +19,479 @@ struct TranscriptedSettingsView: View {
     @State private var sentryTestStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
+    @State private var showSupportFolders = false
 
-    init(speakerPeopleModel: SpeakerPeopleSettingsViewModel) {
+    init(
+        appState: TranscriptedAppState,
+        navigation: TranscriptedSettingsNavigationModel,
+        speakerPeopleModel: SpeakerPeopleSettingsViewModel,
+        actions: TranscriptedSettingsActions
+    ) {
+        self.navigation = navigation
         self.speakerPeopleModel = speakerPeopleModel
+        self.actions = actions
+        _parakeetEngine = ObservedObject(wrappedValue: appState.sttRouter.parakeetEngine)
+        _meetingSession = ObservedObject(wrappedValue: appState.meetingSession)
+        _sparkleUpdater = ObservedObject(wrappedValue: appState.sparkleUpdater)
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Transcripted Settings")
-                        .font(.title2.weight(.semibold))
-
-                    Text("Transcripted is a local-first voice utility for dictation and meeting capture. These controls help you manage shortcuts, permissions, and where to find your data.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-
-                SettingsSection(title: "Shortcuts", detail: "Choose the keyboard shortcuts Transcripted listens for anywhere on your Mac.") {
-                    HotkeyRecorderContainer()
-                        .frame(height: 76)
-
-                    Toggle("Tap the right Option key to start dictation", isOn: Binding(
-                        get: { rightOptionEnabled },
-                        set: { newValue in
-                            rightOptionEnabled = newValue
-                            HotkeyPreferences.setRightOptionDictation(enabled: newValue)
-                        }
-                    ))
-
-                    Text(rightOptionEnabled
-                        ? "A quick tap of the right Option key will also start dictation."
-                        : "Dictation will only use the configured keyboard shortcut."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-
-                SettingsSection(title: "Feedback", detail: "Use subtle macOS system sounds to confirm dictation state changes.") {
-                    Toggle("Play dictation feedback sounds", isOn: Binding(
-                        get: { uiSoundsEnabled },
-                        set: { newValue in
-                            uiSoundsEnabled = newValue
-                            UISoundPreferences.setEnabled(newValue)
-                        }
-                    ))
-
-                    Text(uiSoundsEnabled
-                        ? "Transcripted will play quiet cues when dictation starts, stops, completes, or ends with no speech."
-                        : "Dictation sounds are off."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-
-                SettingsSection(title: "Diagnostics", detail: "Both controls are optional. Crash reports and anonymous usage statistics stay separate, scoped, and scrubbed before anything leaves this Mac.") {
-                    Toggle("Send crash and error reports", isOn: Binding(
-                        get: { crashReportingEnabled },
-                        set: { newValue in
-                            crashReportingEnabled = newValue
-                            CrashReportingPreferences.setEnabled(newValue)
-                            sentryTestStatus = nil
-                        }
-                    ))
-                    .disabled(!CrashReporter.isAvailable)
-
-                    Toggle("Send anonymous usage statistics", isOn: Binding(
-                        get: { anonymousAnalyticsEnabled },
-                        set: { newValue in
-                            anonymousAnalyticsEnabled = newValue
-                            AnalyticsPreferences.setEnabled(newValue)
-                        }
-                    ))
-                    .disabled(!AnalyticsReporter.isAvailable)
-
+        NavigationSplitView {
+            List(TranscriptedSettingsPage.allCases, selection: $navigation.selectedPage) { page in
+                Label(page.title, systemImage: page.systemImage)
+                    .tag(page)
+            }
+            .navigationSplitViewColumnWidth(min: 200, ideal: 220)
+            .listStyle(.sidebar)
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 0) {
+                    Divider()
                     HStack {
-                        Button("Send Test Sentry Event") {
-                            sendTestSentryEvent()
-                        }
-                        .disabled(!CrashReporter.isAvailable || !crashReportingEnabled)
-
-                        if let sentryTestStatus {
-                            Text(sentryTestStatus)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Text("Transcripted never sends transcript text, audio, meeting titles, speaker names, source app names, emails, file paths, or raw URLs through either path.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Text(crashReportingFootnote)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Text(analyticsFootnote)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                SettingsSection(title: "Permissions", detail: "Transcripted only asks for permissions that support local capture, paste-back, and optional meeting prompts.") {
-                    ForEach(TranscriptedPermissionKind.allCases) { kind in
-                        PermissionStatusRow(kind: kind, granted: permissionStates[kind] ?? false) {
-                            TranscriptedPermissionAccess.openSettings(for: kind)
-                            refreshPermissions()
-                        }
-                    }
-
-                    HStack {
+                        Text(TranscriptedSupportActions.appVersionDescription)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         Spacer()
-                        Button("Refresh Status") {
-                            refreshPermissions()
-                        }
                     }
-                }
-
-                SpeakerPeopleSettingsSection(model: speakerPeopleModel)
-
-                SettingsSection(title: "Storage", detail: "Captures can live anywhere you want, while app state stays separated under Application Support.") {
-                    StorageRow(title: "Capture library", url: captureLibraryURL)
-                    StorageRow(title: "Meeting captures", url: MeetingStoragePaths.transcriptsFolder)
-                    StorageRow(title: "Dictation captures", url: DictationStoragePaths.transcriptsFolder)
-                    StorageRow(title: "App state", url: appStateFolder)
-                    StorageRow(title: "App cache", url: cacheFolder)
-                    StorageRow(title: "App logs", url: logsFolder)
-                    StorageRow(title: "Temporary recordings", url: recordingsFolder)
-
-                    HStack {
-                        Button("Choose Capture Library") {
-                            chooseCaptureLibrary()
-                        }
-
-                        Button("Reset to Default") {
-                            TranscriptedStoragePreferences.setCaptureLibraryURL(nil)
-                            refreshStoragePaths()
-                        }
-                    }
-
-                    Text("Choose a folder like an Obsidian vault if you want agents to read the raw Markdown captures directly. Transcripted will keep its databases, cache, logs, and tmp files under Application Support.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.thinMaterial)
                 }
             }
-            .padding(24)
+        } detail: {
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(nsColor: .windowBackgroundColor),
+                        Color(nsColor: .controlBackgroundColor).opacity(0.4)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 28) {
+                        pageBody
+                    }
+                    .padding(28)
+                    .frame(maxWidth: 860, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
         }
-        .frame(minWidth: 680, minHeight: 580)
+        .frame(minWidth: 880, minHeight: 640)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear {
-            refreshPermissions()
-            refreshStoragePaths()
-            rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
-            uiSoundsEnabled = UISoundPreferences.isEnabled()
-            crashReportingEnabled = CrashReportingPreferences.isEnabled()
-            anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
+        .onAppear(perform: refreshState)
+    }
+
+    @ViewBuilder
+    private var pageBody: some View {
+        switch navigation.selectedPage {
+        case .home:
+            homePage
+        case .shortcuts:
+            shortcutsPage
+        case .meetings:
+            meetingsPage
+        case .dictations:
+            dictationsPage
+        case .storage:
+            storagePage
+        case .connectAgent:
+            connectAgentPage
+        case .privacy:
+            privacyPage
+        case .about:
+            aboutPage
+        }
+    }
+
+    private var homePage: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "Home",
+                summary: "Start recording quickly, import audio files, and see what still needs setup."
+            )
+
+            let columns = [
+                GridItem(.flexible(minimum: 220), spacing: 14),
+                GridItem(.flexible(minimum: 220), spacing: 14)
+            ]
+
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+                SettingsActionTile(
+                    symbolName: "mic.fill",
+                    title: "Start Dictation",
+                    detail: "Turn speech into text in the app you were just using.",
+                    tone: .accent,
+                    action: actions.startDictation
+                )
+
+                SettingsActionTile(
+                    symbolName: "record.circle.fill",
+                    title: "Start Meeting",
+                    detail: "Capture your mic and meeting audio together.",
+                    tone: .accent,
+                    action: actions.startMeeting
+                )
+
+                SettingsActionTile(
+                    symbolName: "waveform",
+                    title: "Transcribe Audio File",
+                    detail: "Import an existing recording and run it through the meeting pipeline.",
+                    action: actions.importAudioFile
+                )
+
+                SettingsActionTile(
+                    symbolName: "sparkles",
+                    title: "Connect Your Agent",
+                    detail: "Copy the main prompt or set up MCP when you want a deeper connection.",
+                    action: {
+                        navigation.selectedPage = .connectAgent
+                    }
+                )
+            }
+
+            SettingsSection(
+                title: "Setup Status",
+                detail: "These cards show whether Transcripted is ready for dictation, meetings, and local storage."
+            ) {
+                let modelCard = FirstRunExperience.modelCard(for: FirstRunLocalModelState(parakeetEngine.modelDownloadState))
+
+                SettingsStatusCard(
+                    title: "Local voice model",
+                    status: modelCard.status,
+                    detail: modelCard.detail,
+                    tone: tone(for: modelCard.tone)
+                )
+
+                SettingsStatusCard(
+                    title: "Meeting tools",
+                    status: meetingSession.warmupStatus.subtitle,
+                    detail: meetingSession.warmupStatus.detail.isEmpty
+                        ? "Meeting capture and imported audio transcription share the same local setup."
+                        : meetingSession.warmupStatus.detail,
+                    tone: meetingSession.warmupStatus == .ready ? .ready : .working
+                )
+
+                SettingsStatusCard(
+                    title: "Permissions",
+                    status: permissionsStatusLine,
+                    detail: permissionsDetailLine,
+                    tone: missingRequiredPermissions.isEmpty ? .ready : .caution
+                )
+
+                SettingsStatusCard(
+                    title: "Capture library",
+                    status: isUsingDefaultCaptureLibrary ? "Default location" : "Custom location",
+                    detail: (captureLibraryURL.path as NSString).abbreviatingWithTildeInPath,
+                    tone: .ready
+                )
+            }
+
+            SettingsSection(
+                title: "What To Adjust Next",
+                detail: "These are the pages most people look at after the first successful recording."
+            ) {
+                SettingsQuickLinkRow(
+                    symbolName: "keyboard",
+                    title: "Shortcuts",
+                    detail: "Change the global keys Transcripted listens for."
+                ) {
+                    navigation.selectedPage = .shortcuts
+                }
+
+                SettingsQuickLinkRow(
+                    symbolName: "person.2.wave.2.fill",
+                    title: "Meetings",
+                    detail: "Import audio files and tune speaker matching."
+                ) {
+                    navigation.selectedPage = .meetings
+                }
+
+                SettingsQuickLinkRow(
+                    symbolName: "lock.shield.fill",
+                    title: "Privacy",
+                    detail: "Review permissions, crash reporting, and anonymous analytics."
+                ) {
+                    navigation.selectedPage = .privacy
+                }
+            }
+        }
+    }
+
+    private var shortcutsPage: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "Shortcuts",
+                summary: "Choose the keyboard triggers Transcripted listens for anywhere on your Mac."
+            )
+
+            SettingsSection(
+                title: "Keyboard Shortcuts",
+                detail: "Set one shortcut for dictation and one for meetings. Transcripted applies them immediately."
+            ) {
+                HotkeyRecorderContainer()
+                    .frame(height: 76)
+
+                Toggle("Tap the right Option key to start dictation", isOn: Binding(
+                    get: { rightOptionEnabled },
+                    set: { newValue in
+                        rightOptionEnabled = newValue
+                        HotkeyPreferences.setRightOptionDictation(enabled: newValue)
+                    }
+                ))
+
+                Text(rightOptionEnabled
+                    ? "A quick tap of the right Option key will also start dictation."
+                    : "Dictation will only use the configured keyboard shortcut."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var meetingsPage: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "Meetings",
+                summary: "Control how Transcripted records meetings, imports audio files, and keeps speaker matching tidy."
+            )
+
+            SettingsSection(
+                title: "Meeting Actions",
+                detail: "Meetings can start live from your Mac or from an audio file you already recorded."
+            ) {
+                SettingsQuickLinkRow(
+                    symbolName: "record.circle.fill",
+                    title: "Start Meeting",
+                    detail: "Begin capturing your microphone and system audio together."
+                ) {
+                    actions.startMeeting()
+                }
+
+                SettingsQuickLinkRow(
+                    symbolName: "waveform",
+                    title: "Transcribe Audio File",
+                    detail: "Import a saved audio file and run it through the meeting transcription pipeline."
+                ) {
+                    actions.importAudioFile()
+                }
+
+                Text("If a meeting action is blocked, check Privacy for microphone or system audio permissions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            SpeakerPeopleSettingsSection(model: speakerPeopleModel)
+        }
+    }
+
+    private var dictationsPage: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "Dictations",
+                summary: "Control what happens after dictation finishes, including sound cues and pasting the latest saved dictation."
+            )
+
+            SettingsSection(
+                title: "Dictation Actions",
+                detail: "Use the latest saved dictation again without starting a new recording."
+            ) {
+                SettingsQuickLinkRow(
+                    symbolName: "arrow.turn.down.right",
+                    title: "Paste Last Dictation",
+                    detail: "Paste the newest saved dictation into the app you were just using."
+                ) {
+                    actions.pasteLastDictation()
+                }
+
+                Text("Transcripted uses Accessibility to paste automatically. If that is unavailable, it falls back to copying the text.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            SettingsSection(
+                title: "Feedback Sounds",
+                detail: "Use quiet system sounds to confirm what happened after dictation starts or finishes."
+            ) {
+                Toggle("Play dictation feedback sounds", isOn: Binding(
+                    get: { uiSoundsEnabled },
+                    set: { newValue in
+                        uiSoundsEnabled = newValue
+                        UISoundPreferences.setEnabled(newValue)
+                    }
+                ))
+
+                Text(uiSoundsEnabled
+                    ? "Transcripted will play subtle sounds when dictation starts, stops, completes, or ends with no speech."
+                    : "Dictation sounds are off."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var storagePage: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "Storage",
+                summary: "Choose where captures live while keeping app-owned state, logs, and temporary files separate."
+            )
+
+            SettingsSection(
+                title: "Capture Library",
+                detail: "This is the main folder for the markdown files you may want to open yourself or hand to an agent later."
+            ) {
+                StorageRow(title: "Capture library", url: captureLibraryURL)
+                StorageRow(title: "Meeting captures", url: MeetingStoragePaths.transcriptsFolder)
+                StorageRow(title: "Dictation captures", url: DictationStoragePaths.transcriptsFolder)
+
+                HStack {
+                    Button("Choose Capture Library") {
+                        chooseCaptureLibrary()
+                    }
+
+                    Button("Reset to Default") {
+                        TranscriptedStoragePreferences.setCaptureLibraryURL(nil)
+                        refreshStoragePaths()
+                    }
+                }
+
+                Text("Choose a folder like an Obsidian vault if you want agents to read the raw Markdown captures directly.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            SettingsSection(
+                title: "Support Folders",
+                detail: "These folders are usually only useful when troubleshooting, inspecting logs, or cleaning up storage."
+            ) {
+                DisclosureGroup("Show support folders", isExpanded: $showSupportFolders) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        StorageRow(title: "App state", url: appStateFolder)
+                        StorageRow(title: "App cache", url: cacheFolder)
+                        StorageRow(title: "App logs", url: logsFolder)
+                        StorageRow(title: "Temporary recordings", url: recordingsFolder)
+                    }
+                    .padding(.top, 12)
+                }
+            }
+        }
+    }
+
+    private var connectAgentPage: some View {
+        AgentConnectionSettingsPage()
+    }
+
+    private var privacyPage: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "Privacy",
+                summary: "Review the permissions Transcripted needs and choose whether optional reporting leaves this Mac."
+            )
+
+            SettingsSection(
+                title: "Permissions",
+                detail: "Transcripted only asks for permissions that help with local capture, paste-back, and optional meeting prompts."
+            ) {
+                ForEach(TranscriptedPermissionKind.allCases) { kind in
+                    PermissionStatusRow(kind: kind, granted: permissionStates[kind] ?? false) {
+                        TranscriptedPermissionAccess.openSettings(for: kind)
+                        refreshPermissions()
+                    }
+                }
+            }
+
+            SettingsSection(
+                title: "Optional Reporting",
+                detail: "Crash reports and anonymous usage statistics stay separate, scoped, and scrubbed before anything leaves this Mac."
+            ) {
+                Toggle("Send crash and error reports", isOn: Binding(
+                    get: { crashReportingEnabled },
+                    set: { newValue in
+                        crashReportingEnabled = newValue
+                        CrashReportingPreferences.setEnabled(newValue)
+                        sentryTestStatus = nil
+                    }
+                ))
+                .disabled(!CrashReporter.isAvailable)
+
+                Toggle("Send anonymous usage statistics", isOn: Binding(
+                    get: { anonymousAnalyticsEnabled },
+                    set: { newValue in
+                        anonymousAnalyticsEnabled = newValue
+                        AnalyticsPreferences.setEnabled(newValue)
+                    }
+                ))
+                .disabled(!AnalyticsReporter.isAvailable)
+
+                HStack {
+                    Button("Send Test Sentry Event") {
+                        sendTestSentryEvent()
+                    }
+                    .disabled(!CrashReporter.isAvailable || !crashReportingEnabled)
+
+                    if let sentryTestStatus {
+                        Text(sentryTestStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Text("Transcripted never sends transcript text, audio, meeting titles, speaker names, source app names, emails, file paths, or raw URLs through either path.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(crashReportingFootnote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(analyticsFootnote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var aboutPage: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "About",
+                summary: "Transcripted is a local-first Mac app for dictation, meetings, and clean Markdown exports."
+            )
+
+            SettingsSection(
+                title: "Version",
+                detail: "Build info and update controls live here."
+            ) {
+                SettingsStatusCard(
+                    title: "Transcripted",
+                    status: TranscriptedSupportActions.appVersionDescription,
+                    detail: "Updates are delivered through Sparkle when the appcast is current and automatic checks are enabled.",
+                    tone: .ready
+                )
+
+                SettingsStatusCard(
+                    title: "Updates",
+                    status: aboutUpdateStatusTitle,
+                    detail: aboutUpdateStatusDetail,
+                    tone: aboutUpdateStatusTone
+                )
+
+                HStack {
+                    Button(aboutUpdateButtonTitle) {
+                        actions.checkForUpdates()
+                    }
+                    .disabled(!sparkleUpdater.updateStatus.canCheckForUpdates)
+
+                    Button("Submit Feedback") {
+                        actions.sendFeedback()
+                    }
+                }
+            }
         }
     }
 
@@ -184,10 +511,34 @@ struct TranscriptedSettingsView: View {
         FileManager.default.transcriptedRecordingsDir
     }
 
+    private var missingRequiredPermissions: [TranscriptedPermissionKind] {
+        TranscriptedPermissionKind.allCases.filter { kind in
+            kind.isRequiredOnFirstLaunch && !(permissionStates[kind] ?? false)
+        }
+    }
+
+    private var permissionsStatusLine: String {
+        if missingRequiredPermissions.isEmpty {
+            return "Ready"
+        }
+        return "\(missingRequiredPermissions.count) required item\(missingRequiredPermissions.count == 1 ? "" : "s") missing"
+    }
+
+    private var permissionsDetailLine: String {
+        if missingRequiredPermissions.isEmpty {
+            return "Microphone and Accessibility are on. Optional meeting permissions can be adjusted any time."
+        }
+        return "Turn on \(missingRequiredPermissions.map(\.title).joined(separator: " and ")) so Transcripted can record and paste back reliably."
+    }
+
+    private var isUsingDefaultCaptureLibrary: Bool {
+        captureLibraryURL.standardizedFileURL == FileManager.default.transcriptedDefaultCaptureLibraryDir.standardizedFileURL
+    }
+
     private var crashReportingFootnote: String {
         if CrashReporter.isAvailable {
             return crashReportingEnabled
-                ? "Enabled. Transcripted will send scrubbed crash and error data to Sentry so reliability issues are easier to diagnose. Use the test button to verify your dashboard wiring."
+                ? "Enabled. Transcripted will send scrubbed crash and error data to Sentry so reliability issues are easier to diagnose."
                 : "Off. Transcripted will keep crash and error details on this Mac only."
         }
         return "This build does not have a Sentry DSN configured yet, so crash and error reporting stay local."
@@ -196,10 +547,41 @@ struct TranscriptedSettingsView: View {
     private var analyticsFootnote: String {
         if AnalyticsReporter.isAvailable {
             return anonymousAnalyticsEnabled
-                ? "Enabled by default. Transcripted will send only allowlisted anonymous product events such as launches, dictation completions, and meeting workflow milestones using coarse buckets instead of raw content. You can turn this off at any time."
+                ? "Enabled. Transcripted sends only allowlisted anonymous product events such as launches, dictation completions, and meeting workflow milestones."
                 : "Off. Transcripted will not send anonymous usage statistics unless you turn this back on."
         }
         return "This build does not have a PostHog project key configured yet, so anonymous usage statistics stay disabled."
+    }
+
+    private func tone(for tone: FirstRunModelCardState.Tone) -> SettingsStatusCard.Tone {
+        switch tone {
+        case .ready:
+            return .ready
+        case .working:
+            return .working
+        case .failed:
+            return .caution
+        }
+    }
+
+    private func refreshState() {
+        refreshPermissions()
+        refreshStoragePaths()
+        rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
+        uiSoundsEnabled = UISoundPreferences.isEnabled()
+        crashReportingEnabled = CrashReportingPreferences.isEnabled()
+        anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
+        if case .unknown = sparkleUpdater.updateStatus.state {
+            sparkleUpdater.refreshUpdateStatus()
+        }
+    }
+
+    private func refreshPermissions() {
+        permissionStates = PermissionSnapshot.current()
+    }
+
+    private func refreshStoragePaths() {
+        captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
     }
 
     private func sendTestSentryEvent() {
@@ -221,14 +603,6 @@ struct TranscriptedSettingsView: View {
         sentryTestStatus = "Queued test event \(eventID.prefix(8)). Check Sentry in a few seconds."
     }
 
-    private func refreshPermissions() {
-        permissionStates = PermissionSnapshot.current()
-    }
-
-    private func refreshStoragePaths() {
-        captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
-    }
-
     private func chooseCaptureLibrary() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -243,115 +617,173 @@ struct TranscriptedSettingsView: View {
         TranscriptedStoragePreferences.setCaptureLibraryURL(url)
         refreshStoragePaths()
     }
-}
 
-private struct PermissionSnapshot {
-    private(set) var values: [TranscriptedPermissionKind: Bool]
-
-    subscript(kind: TranscriptedPermissionKind) -> Bool? {
-        values[kind]
+    private var aboutUpdateStatusTitle: String {
+        switch sparkleUpdater.updateStatus.state {
+        case .unknown, .readyToCheck:
+            return "Ready to check"
+        case .checking:
+            return "Checking for updates"
+        case .noUpdateAvailable:
+            return "Up to date"
+        case .updateAvailable(let version):
+            return "Update available (\(version))"
+        }
     }
 
-    static func current() -> PermissionSnapshot {
-        PermissionSnapshot(values: Dictionary(uniqueKeysWithValues: TranscriptedPermissionKind.allCases.map {
-            ($0, TranscriptedPermissionAccess.isGranted($0))
-        }))
+    private var aboutUpdateStatusDetail: String {
+        switch sparkleUpdater.updateStatus.state {
+        case .unknown, .readyToCheck:
+            return "Ask Sparkle to check whether a newer Transcripted release is ready."
+        case .checking:
+            return "Transcripted is probing for the latest available version now."
+        case .noUpdateAvailable:
+            return "This Mac is already on the newest version Sparkle can see right now."
+        case .updateAvailable(let version):
+            return "Version \(version) is ready. Use the button below to open the standard Sparkle update flow."
+        }
     }
-}
 
-struct SettingsSection<Content: View>: View {
-    let title: String
-    let detail: String
-    @ViewBuilder var content: Content
+    private var aboutUpdateStatusTone: SettingsStatusCard.Tone {
+        switch sparkleUpdater.updateStatus.state {
+        case .unknown, .readyToCheck:
+            return .working
+        case .checking:
+            return .working
+        case .noUpdateAvailable:
+            return .ready
+        case .updateAvailable:
+            return .caution
+        }
+    }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 12) {
-                content
-            }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
-            )
+    private var aboutUpdateButtonTitle: String {
+        switch sparkleUpdater.updateStatus.state {
+        case .updateAvailable:
+            return "Update Available"
+        case .checking:
+            return "Checking for Updates…"
+        case .unknown, .readyToCheck, .noUpdateAvailable:
+            return "Check for Updates"
         }
     }
 }
 
-private struct PermissionStatusRow: View {
-    let kind: TranscriptedPermissionKind
-    let granted: Bool
+private struct AgentConnectionSettingsPage: View {
+    @StateObject private var viewModel = AgentConnectionViewModel(
+        context: AgentConnectionContext(meetingTitle: nil, meetingDate: nil, transcriptURL: nil)
+    )
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "Connect Your Agent",
+                summary: "Copy one smart prompt first, then use MCP or raw folders only if you need the more manual setup."
+            )
+
+            SettingsSection(
+                title: "Main Path",
+                detail: "Most people only need the main prompt. It tells the agent to prefer MCP when available and fall back to folders when not."
+            ) {
+                ForEach(Array(AgentConnectionGuide.benefitHighlights.enumerated()), id: \.offset) { index, highlight in
+                    SettingsQuickLinkRow(
+                        symbolName: index == 0 ? "sparkles" : "checkmark.circle.fill",
+                        title: highlight,
+                        detail: "Works from the same local Transcripted data already saved on this Mac."
+                    ) {}
+                    .disabled(true)
+                }
+
+                HStack {
+                    Button("Copy Agent Prompt") {
+                        viewModel.copyStarterPrompt()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+
+            SettingsSection(
+                title: "Optional MCP Setup",
+                detail: "Only use this if your agent supports MCP and you want the direct read-only tool connection."
+            ) {
+                Text(viewModel.context.mcpSetupText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button("Copy MCP Setup") {
+                    viewModel.copyMCPSetup()
+                }
+                .buttonStyle(.bordered)
+            }
+
+            SettingsSection(
+                title: "Manual Folders",
+                detail: "These are fallback paths for manual setup or quick inspection."
+            ) {
+                AgentFolderRow(
+                    name: "Meetings",
+                    detail: "Saved meeting markdown files live here.",
+                    path: viewModel.context.meetingsFolderURL.path,
+                    isAvailable: viewModel.fileExists(viewModel.context.meetingsFolderURL)
+                ) {
+                    viewModel.reveal(viewModel.context.meetingsFolderURL)
+                }
+
+                AgentFolderRow(
+                    name: "Dictations",
+                    detail: "Saved dictation days and entries live here.",
+                    path: viewModel.context.dictationsFolderURL.path,
+                    isAvailable: viewModel.fileExists(viewModel.context.dictationsFolderURL)
+                ) {
+                    viewModel.reveal(viewModel.context.dictationsFolderURL)
+                }
+
+                Button("Copy Folder Paths") {
+                    viewModel.copyFolderPaths()
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+}
+
+private struct AgentFolderRow: View {
+    let name: String
+    let detail: String
+    let path: String
+    let isAvailable: Bool
     let action: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                .foregroundStyle(granted ? Color.green : Color.orange)
-                .font(.system(size: 16, weight: .semibold))
-                .padding(.top, 2)
-
             VStack(alignment: .leading, spacing: 4) {
-                Text(kind.title)
-                    .font(.subheadline.weight(.semibold))
-                Text(kind.summary)
+                HStack(spacing: 8) {
+                    Text(name)
+                        .font(.subheadline.weight(.semibold))
+
+                    if !isAvailable {
+                        Text("Not written yet")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.orange)
+                    }
+                }
+
+                Text(detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
 
-            Spacer()
-
-            Button(granted ? "Review" : kind.actionButtonTitle) {
-                action()
-            }
-        }
-    }
-}
-
-private struct StorageRow: View {
-    let title: String
-    let url: URL
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                Text((url.path as NSString).abbreviatingWithTildeInPath)
-                    .font(.system(.caption, design: .monospaced))
+                Text(path)
+                    .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
 
-            Spacer()
+            Spacer(minLength: 12)
 
-            Button("Show in Finder") {
-                if !FileManager.default.fileExists(atPath: url.path) {
-                    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-                }
-                NSWorkspace.shared.activateFileViewerSelecting([url])
-            }
+            Button("Reveal", action: action)
+                .buttonStyle(.bordered)
+                .disabled(!isAvailable)
         }
-    }
-}
-
-private struct HotkeyRecorderContainer: NSViewRepresentable {
-    func makeNSView(context: Context) -> HotkeyRecorderAppKitView {
-        HotkeyRecorderAppKitView(frame: .zero)
-    }
-
-    func updateNSView(_ nsView: HotkeyRecorderAppKitView, context: Context) {
-        nsView.refreshDisplay()
     }
 }

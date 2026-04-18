@@ -5,9 +5,10 @@ import TranscriptedCore
 @MainActor
 final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDelegate {
     private let speakerPeopleModel: SpeakerPeopleSettingsViewModel
+    private let navigationModel: TranscriptedSettingsNavigationModel
     private let hostingController: NSHostingController<TranscriptedSettingsView>
 
-    init(appState: TranscriptedAppState) {
+    init(appState: TranscriptedAppState, actions: TranscriptedSettingsActions) {
         let speakerDatabase = (appState.meetingSession.services.speakerStore as? SpeakerDatabase)
             ?? SpeakerDatabase(path: MeetingStoragePaths.speakersDatabase.path)
         let speakerPeopleModel = SpeakerPeopleSettingsViewModel(
@@ -15,12 +16,18 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
             preferredClipsDirectory: MeetingStoragePaths.speakerClipsFolder
         )
         self.speakerPeopleModel = speakerPeopleModel
+        self.navigationModel = TranscriptedSettingsNavigationModel()
         self.hostingController = NSHostingController(
-            rootView: TranscriptedSettingsView(speakerPeopleModel: speakerPeopleModel)
+            rootView: TranscriptedSettingsView(
+                appState: appState,
+                navigation: navigationModel,
+                speakerPeopleModel: speakerPeopleModel,
+                actions: actions
+            )
         )
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 780, height: 760),
+            contentRect: NSRect(x: 0, y: 0, width: 980, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -37,9 +44,10 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func present() {
+    func present(page: TranscriptedSettingsPage = .home) {
         guard let window else { return }
         speakerPeopleModel.refresh()
+        navigationModel.selectedPage = page
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

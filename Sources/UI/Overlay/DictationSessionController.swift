@@ -71,7 +71,6 @@ class DictationSessionController: ObservableObject {
     deinit {
         startupTask?.cancel()
         streamingTask?.cancel()
-        textPaster.cancelPendingClipboardRestore()
         recordingStartRetryTask?.cancel()
         sessionTimeoutTask?.cancel()
     }
@@ -413,7 +412,7 @@ class DictationSessionController: ObservableObject {
                 } else {
                     overlayController.showSuccessAndDismiss()
                 }
-            case .copied(let message), .failed(let message):
+            case .copied(let message, reason: _), .failed(let message):
                 let combinedMessage: String
                 if let saveFailureMessage {
                     combinedMessage = "\(message) \(saveFailureMessage)"
