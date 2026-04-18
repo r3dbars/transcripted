@@ -1,8 +1,63 @@
 import Foundation
 
+enum MeetingPromptProvider: String, CaseIterable, Hashable {
+    case zoom
+    case googleMeet
+    case teams
+    case webex
+    case facetime
+
+    var browserHosted: Bool {
+        switch self {
+        case .googleMeet, .teams, .webex:
+            return true
+        case .zoom, .facetime:
+            return false
+        }
+    }
+
+    var activeBundleIdentifiers: Set<String> {
+        switch self {
+        case .zoom:
+            return ["us.zoom.xos"]
+        case .googleMeet:
+            return []
+        case .teams:
+            return ["com.microsoft.teams", "com.microsoft.teams2"]
+        case .webex:
+            return ["com.cisco.webexmeetingsapp", "com.webex.meetingmanager"]
+        case .facetime:
+            return ["com.apple.FaceTime"]
+        }
+    }
+
+    var supportsNativeRuntimePrompt: Bool {
+        !activeBundleIdentifiers.isEmpty
+    }
+}
+
 enum MeetingPromptSource: Equatable {
     case calendarEvent
     case runtimeApp
+}
+
+enum MeetingPromptReason: String, Equatable {
+    case calendarNearby = "calendar_nearby"
+    case calendarPlusRuntimeMatch = "calendar_plus_runtime_match"
+    case runtimeOnly = "runtime_only"
+}
+
+enum MeetingPromptBackoffKind: String, Equatable {
+    case calendarDefault = "calendar_default"
+    case calendarTeamsExtended = "calendar_teams_extended"
+    case runtimeUntilNextCalendar = "runtime_until_next_calendar"
+    case runtimeDefaultFallback = "runtime_default_fallback"
+    case runtimeTeamsExtended = "runtime_teams_extended"
+}
+
+struct MeetingPromptBackoffDecision: Equatable {
+    let kind: MeetingPromptBackoffKind
+    let until: Date
 }
 
 enum MeetingPromptWindowPolicy {
@@ -20,10 +75,15 @@ struct RuntimeMeetingPromptPresentation: Equatable {
 
 enum MeetingPromptHeuristics {
     static let runtimeReminderSnoozeInterval: TimeInterval = 2 * 60
-    static let runtimeDismissFallbackInterval: TimeInterval = 30 * 60
+    static let defaultRuntimeDismissFallbackInterval: TimeInterval = 30 * 60
+    static let teamsDismissMinimumInterval: TimeInterval = 2 * 60 * 60
     static let runtimeActivityFreshness: TimeInterval = 5 * 60
     static let calendarReminderLeadTime: TimeInterval = 60
     static let calendarReminderPostStartGrace: TimeInterval = 5 * 60
+
+    static func allowsRuntimeOnlyPrompt(for provider: MeetingPromptProvider) -> Bool {
+        provider != .teams
+    }
 
     static func snoozeInterval(
         for source: MeetingPromptSource,
@@ -39,6 +99,35 @@ enum MeetingPromptHeuristics {
             return defaultInterval
         case .runtimeApp:
             return runtimeReminderSnoozeInterval
+        }
+    }
+
+    static func calendarDismissMinimumInterval(
+        for provider: MeetingPromptProvider,
+        defaultInterval: TimeInterval
+    ) -> TimeInterval {
+        if provider == .teams {
+            return max(defaultInterval, teamsDismissMinimumInterval)
+        }
+        return defaultInterval
+    }
+
+    static func runtimeDismissFallbackInterval(for provider: MeetingPromptProvider) -> TimeInterval {
+        if provider == .teams {
+            return teamsDismissMinimumInterval
+        }
+        return defaultRuntimeDismissFallbackInterval
+    }
+
+    static func reason(
+        for source: MeetingPromptSource,
+        hasRuntimeContext: Bool
+    ) -> MeetingPromptReason {
+        switch source {
+        case .calendarEvent:
+            return hasRuntimeContext ? .calendarPlusRuntimeMatch : .calendarNearby
+        case .runtimeApp:
+            return .runtimeOnly
         }
     }
 

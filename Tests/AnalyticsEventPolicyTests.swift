@@ -45,7 +45,19 @@ func testAnalyticsEventPolicy() {
         let recorded = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_record_selected")
 
         assertEqual(shown?.allowedProperties.contains("provider"), true, "prompt shown should allow provider attribution")
+        assertEqual(shown?.allowedProperties.contains("prompt_reason"), true, "prompt shown should preserve why it appeared")
         assertEqual(dismissed?.allowedProperties.contains("source"), true, "prompt dismiss should allow source attribution")
+        assertEqual(dismissed?.allowedProperties.contains("backoff_kind"), true, "prompt dismiss should preserve which backoff rule fired")
         assertEqual(recorded?.allowedProperties.contains("provider"), true, "prompt accept should allow provider attribution")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "prompt_reason": "calendar_plus_runtime_match",
+                "backoff_kind": "calendar_teams_extended",
+            ],
+            allowedKeys: ["prompt_reason", "backoff_kind"]
+        )
+        assertEqual(sanitized["prompt_reason"], "calendar_plus_runtime_match", "prompt reason should survive sanitization")
+        assertEqual(sanitized["backoff_kind"], "calendar_teams_extended", "dismiss backoff kind should survive sanitization")
     }
 }
