@@ -99,6 +99,38 @@ func testTranscriptedPermissionAccess() async {
         assertEqual(requestBox.callCount, 0, "known granted permission should not trigger another request")
     }
 
+    await runSuite("TranscriptedPermissionAccess.requestSystemAudioRecordingAccessIfNeeded(forceRefresh:) — rechecks cached grants before meeting start") {
+        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
+        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
+        let originalOnboarding = UserDefaults.standard.object(forKey: onboardingKey)
+        defer {
+            restore(originalKnown, forKey: knownKey)
+            restore(originalGranted, forKey: grantedKey)
+            restore(originalOnboarding, forKey: onboardingKey)
+        }
+
+        UserDefaults.standard.set(true, forKey: knownKey)
+        UserDefaults.standard.set(true, forKey: grantedKey)
+        UserDefaults.standard.set(true, forKey: onboardingKey)
+
+        let requestBox = PermissionRequestBox()
+        let granted = await TranscriptedPermissionAccess.requestSystemAudioRecordingAccessIfNeeded(forceRefresh: true) {
+            requestBox.callCount += 1
+            return false
+        }
+
+        assertFalse(granted, "a forced recheck should surface revoked system audio permission")
+        assertEqual(requestBox.callCount, 1, "meeting start should bypass the cached grant and perform a real recheck")
+        assertTrue(
+            UserDefaults.standard.bool(forKey: knownKey),
+            "forced rechecks should keep the permission state marked as known"
+        )
+        assertFalse(
+            UserDefaults.standard.bool(forKey: grantedKey),
+            "a failed forced recheck should clear the cached granted state"
+        )
+    }
+
     runSuite("TranscriptedPermissionKind action titles — name the real recovery path for blocked permissions") {
         assertEqual(
             TranscriptedPermissionKind.microphoneActionTitle(for: .notDetermined),
