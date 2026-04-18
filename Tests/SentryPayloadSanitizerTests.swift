@@ -44,12 +44,14 @@ func testSentryPayloadSanitizer() {
     }
 
     runSuite("SentryPayloadSanitizer.sanitizeText redacts raw URLs and common token formats") {
-        let input = "Download failed at https://example.com/private?token=abc123 with ghp_123456789012345678901234567890123456 and phc_abcdefghijklmnopqrstuvwxyz123456"
+        let input = "Download failed at https://example.com/private?token=abc123 with ghp_123456789012345678901234567890123456 phc_abcdefghijklmnopqrstuvwxyz123456 AKIAIOSFODNN7EXAMPLE AIzaSyA-BCDEFGHIJKLMNOPQRSTUVWXYZ123456"
         let sanitized = SentryPayloadSanitizer.sanitizeText(input)
 
         assertFalse(sanitized.contains("https://example.com/private?token=abc123"), "raw URLs should be redacted")
         assertFalse(sanitized.contains("ghp_123456789012345678901234567890123456"), "GitHub tokens should be redacted")
         assertFalse(sanitized.contains("phc_abcdefghijklmnopqrstuvwxyz123456"), "PostHog keys should be redacted")
+        assertFalse(sanitized.contains("AKIAIOSFODNN7EXAMPLE"), "AWS access key IDs should be redacted")
+        assertFalse(sanitized.contains("AIzaSyA-BCDEFGHIJKLMNOPQRSTUVWXYZ123456"), "Google API keys should be redacted")
         assertTrue(sanitized.contains("[redacted-url]"), "redacted URL marker should remain")
         assertTrue(sanitized.contains("[redacted-secret]"), "redacted secret marker should remain")
     }
