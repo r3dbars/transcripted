@@ -5,10 +5,12 @@ final class MenuBarPrimaryActionsView: NSView {
     var onStartDictation: (() -> Void)?
     var onStartMeeting: (() -> Void)?
     var onPasteLastDictation: (() -> Void)?
+    var onOpenRecentMeetings: (() -> Void)?
 
     private let dictationRow = MenuBarActionRowView()
     private let meetingRow = MenuBarActionRowView()
     private let pasteRow = MenuBarActionRowView()
+    private let recentMeetingsRow = MenuBarActionRowView()
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -24,8 +26,9 @@ final class MenuBarPrimaryActionsView: NSView {
         dictationRow.onPress = { [weak self] in self?.onStartDictation?() }
         meetingRow.onPress = { [weak self] in self?.onStartMeeting?() }
         pasteRow.onPress = { [weak self] in self?.onPasteLastDictation?() }
+        recentMeetingsRow.onPress = { [weak self] in self?.onOpenRecentMeetings?() }
 
-        [dictationRow, meetingRow, pasteRow].forEach(addSubview(_:))
+        [dictationRow, meetingRow, pasteRow, recentMeetingsRow].forEach(addSubview(_:))
     }
 
     func update(
@@ -65,6 +68,14 @@ final class MenuBarPrimaryActionsView: NSView {
             isEnabled: pasteEnabled
         )
 
+        recentMeetingsRow.update(
+            symbolName: "clock.arrow.circlepath",
+            title: "Recent Meetings",
+            detail: "",
+            tone: .standard,
+            size: .utility
+        )
+
         needsLayout = true
         invalidateIntrinsicContentSize()
     }
@@ -75,16 +86,19 @@ final class MenuBarPrimaryActionsView: NSView {
         let firstHeight = dictationRow.intrinsicContentSize.height
         let secondHeight = meetingRow.intrinsicContentSize.height
         let thirdHeight = pasteRow.intrinsicContentSize.height
+        let fourthHeight = recentMeetingsRow.intrinsicContentSize.height
 
         dictationRow.frame = NSRect(x: 0, y: 0, width: bounds.width, height: firstHeight)
         meetingRow.frame = NSRect(x: 0, y: dictationRow.frame.maxY + 2, width: bounds.width, height: secondHeight)
         pasteRow.frame = NSRect(x: 0, y: meetingRow.frame.maxY + 2, width: bounds.width, height: thirdHeight)
+        recentMeetingsRow.frame = NSRect(x: 0, y: pasteRow.frame.maxY + 2, width: bounds.width, height: fourthHeight)
     }
 
     var intrinsicHeight: CGFloat {
         dictationRow.intrinsicContentSize.height
             + meetingRow.intrinsicContentSize.height
             + pasteRow.intrinsicContentSize.height
-            + 4
+            + recentMeetingsRow.intrinsicContentSize.height
+            + 6
     }
 }

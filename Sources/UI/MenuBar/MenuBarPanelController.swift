@@ -37,6 +37,7 @@ final class MenuBarPanelController: NSViewController {
         content.primaryActionsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
         content.primaryActionsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
         content.primaryActionsView.onPasteLastDictation = { [weak self] in self?.pasteLastDictationFromMenu() }
+        content.primaryActionsView.onOpenRecentMeetings = { [weak self] in self?.openSettingsFromMenu(.meetings) }
         content.utilityActionsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu(.home) }
         content.utilityActionsView.onCheckForUpdates = { [weak self] in self?.checkForUpdatesFromMenu() }
         content.utilityActionsView.onOpenConnectAgent = { [weak self] in self?.openSettingsFromMenu(.connectAgent) }

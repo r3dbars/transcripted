@@ -66,6 +66,51 @@ func testDictationTranscriptStore() {
 
         assertEqual(DictationTranscriptStore.latestSavedText(directory: outputDir), "legacy text", "legacy dictation text")
     }
+
+    runSuite("DictationTranscriptStore.recentSavedDictations — returns the newest entries across day files and same-day sections") {
+        let fm = FileManager.default
+        let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationStoreTests-\(UUID().uuidString)", isDirectory: true)
+        let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
+        try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        _ = try? DictationTranscriptStore.save(
+            text: "older notes entry",
+            sourceApp: nil,
+            delivery: .copied,
+            createdAt: isoDate("2026-04-06T09:00:00-0500"),
+            directory: outputDir
+        )
+        _ = try? DictationTranscriptStore.save(
+            text: "same day first entry",
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: isoDate("2026-04-08T08:30:00-0500"),
+            directory: outputDir
+        )
+        _ = try? DictationTranscriptStore.save(
+            text: "same day newest entry",
+            sourceApp: nil,
+            delivery: .failed,
+            createdAt: isoDate("2026-04-08T09:15:00-0500"),
+            directory: outputDir
+        )
+        _ = try? DictationTranscriptStore.save(
+            text: "latest day entry",
+            sourceApp: nil,
+            delivery: .copied,
+            createdAt: isoDate("2026-04-09T07:45:00-0500"),
+            directory: outputDir
+        )
+
+        let recent = DictationTranscriptStore.recentSavedDictations(limit: 3, directory: outputDir)
+
+        assertEqual(recent.count, 3, "recent dictation count")
+        assertEqual(recent[0].text, "latest day entry", "first recent dictation")
+        assertEqual(recent[1].text, "same day newest entry", "second recent dictation")
+        assertEqual(recent[2].text, "same day first entry", "third recent dictation")
+        assertEqual(recent[1].url.lastPathComponent, "Dictations_2026-04-08.md", "same-day dictations reuse the day file")
+    }
 }
 
 private func isoDate(_ string: String) -> Date {

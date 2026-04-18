@@ -4,7 +4,7 @@
 import AppKit
 import Foundation
 
-struct SavedDictationEntry {
+struct SavedDictationEntry: Identifiable {
     let url: URL
     let title: String
     let text: String
@@ -12,6 +12,10 @@ struct SavedDictationEntry {
     let delivery: DictationDelivery
     let sourceAppName: String
     let sourceAppBundleID: String?
+
+    var id: String {
+        "\(url.path)#\(createdAt.timeIntervalSince1970)#\(title)"
+    }
 }
 
 enum DictationTranscriptStore {
@@ -49,6 +53,12 @@ enum DictationTranscriptStore {
     }
 
     static func latestSavedDictation(directory: URL? = nil) -> SavedDictationEntry? {
+        recentSavedDictations(limit: 1, directory: directory).first
+    }
+
+    static func recentSavedDictations(limit: Int = 5, directory: URL? = nil) -> [SavedDictationEntry] {
+        guard limit > 0 else { return [] }
+
         let folder = directory ?? DictationStoragePaths.transcriptsFolder
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory),
@@ -58,27 +68,29 @@ enum DictationTranscriptStore {
                 includingPropertiesForKeys: [.contentModificationDateKey],
                 options: [.skipsHiddenFiles]
               ) else {
-            return nil
+            return []
         }
 
-        return files
+        return Array(
+            files
             .filter { isDictationDayFile($0) }
-            .compactMap(latestEntry(in:))
-            .max { $0.createdAt < $1.createdAt }
+            .flatMap { entries(in: $0) }
+            .sorted { $0.createdAt > $1.createdAt }
+            .prefix(limit)
+        )
     }
 
     private static func isDictationDayFile(_ url: URL) -> Bool {
         url.pathExtension == "md" && url.lastPathComponent.hasPrefix(dictationDayPrefix)
     }
 
-    private static func latestEntry(in url: URL) -> SavedDictationEntry? {
+    private static func entries(in url: URL) -> [SavedDictationEntry] {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else {
-            return nil
+            return []
         }
 
         return splitSections(in: content)
             .compactMap { parseEntry(from: $0, in: url) }
-            .max { $0.createdAt < $1.createdAt }
     }
 
     private static func splitSections(in content: String) -> [String] {

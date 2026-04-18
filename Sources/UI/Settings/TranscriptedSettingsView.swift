@@ -19,6 +19,8 @@ struct TranscriptedSettingsView: View {
     @State private var sentryTestStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
+    @State private var recentMeetings = RecentMeetingsScanner.loadRecent(limit: 5)
+    @State private var recentDictations = DictationTranscriptStore.recentSavedDictations(limit: 5)
     @State private var showSupportFolders = false
 
     init(
@@ -82,6 +84,12 @@ struct TranscriptedSettingsView: View {
         .frame(minWidth: 880, minHeight: 640)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear(perform: refreshState)
+        .task(id: navigation.presentationID) {
+            refreshState()
+        }
+        .onChange(of: navigation.selectedPage) { _, _ in
+            refreshRecentCaptures()
+        }
     }
 
     @ViewBuilder
@@ -284,6 +292,27 @@ struct TranscriptedSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            SettingsSection(
+                title: "Recent Meetings",
+                detail: "Open one of the last five saved meeting transcripts without digging through folders."
+            ) {
+                if recentMeetings.isEmpty {
+                    Text("No meeting transcripts saved yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(recentMeetings) { item in
+                        SettingsQuickLinkRow(
+                            symbolName: "doc.text",
+                            title: item.title,
+                            detail: formattedRecentDate(item.date)
+                        ) {
+                            NSWorkspace.shared.open(item.transcriptURL)
+                        }
+                    }
+                }
+            }
+
             SpeakerPeopleSettingsSection(model: speakerPeopleModel)
         }
     }
@@ -310,6 +339,27 @@ struct TranscriptedSettingsView: View {
                 Text("Transcripted uses Accessibility to paste automatically. If that is unavailable, it falls back to copying the text.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            SettingsSection(
+                title: "Recent Dictations",
+                detail: "These are the newest saved dictations from the last few days. Opening one jumps to the markdown file for that day."
+            ) {
+                if recentDictations.isEmpty {
+                    Text("No dictations saved yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(recentDictations) { item in
+                        SettingsQuickLinkRow(
+                            symbolName: "text.bubble",
+                            title: item.title,
+                            detail: "\(formattedRecentDate(item.createdAt)) • \(item.sourceAppName)"
+                        ) {
+                            NSWorkspace.shared.open(item.url)
+                        }
+                    }
+                }
             }
 
             SettingsSection(
@@ -567,6 +617,7 @@ struct TranscriptedSettingsView: View {
     private func refreshState() {
         refreshPermissions()
         refreshStoragePaths()
+        refreshRecentCaptures()
         rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
@@ -582,6 +633,11 @@ struct TranscriptedSettingsView: View {
 
     private func refreshStoragePaths() {
         captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
+    }
+
+    private func refreshRecentCaptures() {
+        recentMeetings = RecentMeetingsScanner.loadRecent(limit: 5)
+        recentDictations = DictationTranscriptStore.recentSavedDictations(limit: 5)
     }
 
     private func sendTestSentryEvent() {
@@ -667,6 +723,19 @@ struct TranscriptedSettingsView: View {
             return "Check for Updates"
         }
     }
+
+    private func formattedRecentDate(_ date: Date) -> String {
+        Self.recentCaptureDateFormatter.string(from: date)
+    }
+
+    private static let recentCaptureDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.doesRelativeDateFormatting = true
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
 }
 
 private struct AgentConnectionSettingsPage: View {

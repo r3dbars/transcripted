@@ -48,6 +48,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         guard let window else { return }
         speakerPeopleModel.refresh()
         navigationModel.selectedPage = page
+        navigationModel.presentationID = UUID()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
