@@ -273,21 +273,7 @@ class ContextCaptureEngine: ObservableObject {
         // Register meeting hotkey from saved preferences (or defaults)
         registerHotkeysFromPreferences()
 
-        // Install right Option tap detector for dictation toggle
-        rightOptionDetector.maxTapDurationProvider = { [weak self] in
-            self?.sessionController?.isDictating == true ? 1.0 : 0.35
-        }
-        rightOptionDetector.onInteraction = { [weak self] event, context in
-            self?.recordRightOptionInteraction(event: event, context: context)
-        }
-        if HotkeyPreferences.rightOptionDictationEnabled() {
-            rightOptionDetector.onTap = { [weak self] in
-                Task { @MainActor [weak self] in
-                    self?.handleRightOptionTap()
-                }
-            }
-            rightOptionDetector.install()
-        }
+        configureRightOptionDetector()
 
         // Listen for preference changes (from HotkeyRecorderView)
         hotkeyChangeObserver = NotificationCenter.default.addObserver(
@@ -316,20 +302,27 @@ class ContextCaptureEngine: ObservableObject {
 
         // Re-evaluate right Option tap detector
         rightOptionDetector.remove()
+        configureRightOptionDetector()
+    }
+
+    private func configureRightOptionDetector() {
         rightOptionDetector.maxTapDurationProvider = { [weak self] in
             self?.sessionController?.isDictating == true ? 1.0 : 0.35
         }
         rightOptionDetector.onInteraction = { [weak self] event, context in
             self?.recordRightOptionInteraction(event: event, context: context)
         }
-        if HotkeyPreferences.rightOptionDictationEnabled() {
-            rightOptionDetector.onTap = { [weak self] in
-                Task { @MainActor [weak self] in
-                    self?.handleRightOptionTap()
-                }
-            }
-            rightOptionDetector.install()
+        guard HotkeyPreferences.rightOptionDictationEnabled() else {
+            rightOptionDetector.onTap = nil
+            return
         }
+
+        rightOptionDetector.onTap = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.handleRightOptionTap()
+            }
+        }
+        rightOptionDetector.install()
     }
 
     private func registerHotkeysFromPreferences() {
