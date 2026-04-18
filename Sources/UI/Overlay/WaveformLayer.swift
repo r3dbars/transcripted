@@ -93,6 +93,7 @@ final class WaveformDrawingLayer: CALayer {
 
         let size = bounds.size
         let centerY = size.height / 2.0
+        let effectiveMaxBarHeight = max(minBarHeight, min(maxBarHeight, max(1, size.height - 1)))
 
         // 3. Draw bars right-to-left (newest at right edge)
         let maxVisibleBars = Int(ceil((size.width + barStride) / barStride)) + 1
@@ -108,7 +109,7 @@ final class WaveformDrawingLayer: CALayer {
 
             // Height: sqrt curve boosts low/mid levels
             let boosted = CGFloat(sqrt(sampleValue))
-            let barHeight = max(minBarHeight, boosted * maxBarHeight)
+            let barHeight = max(minBarHeight, boosted * effectiveMaxBarHeight)
 
             let rect = CGRect(
                 x: x,

@@ -125,17 +125,11 @@ final class MeetingOverlayRootView: NSView {
         systemLabel.textColor = MeetingOverlayTokens.textSecondary
         addSubview(systemLabel)
 
-        micWaveform.visualizationStyle = .mirrored(anchor: .fromBottom, phaseOffset: 0)
-        micWaveform.mirroredBarCount = MeetingOverlayTokens.barCount
-        micWaveform.mirroredBarWidth = MeetingOverlayTokens.barWidth
-        micWaveform.mirroredBarSpacing = MeetingOverlayTokens.barGap
+        micWaveform.visualizationStyle = .scrolling
         micWaveform.tintColor = MeetingOverlayTokens.waveformTint
         addSubview(micWaveform)
 
-        systemWaveform.visualizationStyle = .mirrored(anchor: .fromTop, phaseOffset: 1.8)
-        systemWaveform.mirroredBarCount = MeetingOverlayTokens.barCount
-        systemWaveform.mirroredBarWidth = MeetingOverlayTokens.barWidth
-        systemWaveform.mirroredBarSpacing = MeetingOverlayTokens.barGap
+        systemWaveform.visualizationStyle = .scrolling
         systemWaveform.tintColor = MeetingOverlayTokens.waveformTint.withAlphaComponent(MeetingOverlayTokens.waveformSystemAlpha)
         addSubview(systemWaveform)
 
@@ -688,9 +682,6 @@ enum MeetingOverlayTokens {
     static let timerFontSize: CGFloat = 13
     static let labelFontSize: CGFloat = 11
     static let stopHeight: CGFloat  = 28
-    static let barCount: Int        = 26
-    static let barWidth: CGFloat    = 2
-    static let barGap: CGFloat      = 1.5
 }
 
 // MARK: - Controller
