@@ -81,11 +81,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
             meetingOverlayController.onPromptDismiss = { [weak self] candidate in
                 guard let self else { return }
+                let backoffDecision = self.meetingPromptDetector.snooze(candidate: candidate)
                 AnalyticsReporter.track(
                     "meeting_prompt_dismissed",
-                    properties: self.analyticsProperties(for: candidate)
+                    properties: self.analyticsProperties(
+                        for: candidate,
+                        backoffKind: backoffDecision.kind
+                    )
                 )
-                self.meetingPromptDetector.snooze(candidate: candidate)
             }
             meetingPromptDetector.onPromptRequest = { [weak self] candidate in
                 guard PermissionsOnboardingView.hasCompleted else { return false }
@@ -263,11 +266,19 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     @available(macOS 14.0, *)
-    private func analyticsProperties(for candidate: MeetingPromptDetector.Candidate) -> [String: String] {
-        [
+    private func analyticsProperties(
+        for candidate: MeetingPromptDetector.Candidate,
+        backoffKind: MeetingPromptBackoffKind? = nil
+    ) -> [String: String] {
+        var properties = [
+            "prompt_reason": candidate.reason.rawValue,
             "provider": candidate.provider.rawValue,
             "source": candidate.source.analyticsValue,
         ]
+        if let backoffKind {
+            properties["backoff_kind"] = backoffKind.rawValue
+        }
+        return properties
     }
 
     // MARK: - NSPopoverDelegate

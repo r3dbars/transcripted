@@ -17,6 +17,7 @@ if [ -z "$TMP_ROOT" ]; then
 fi
 DEPS_BUILD="$(mktemp -d "$TMP_ROOT/transcripted-deps-build.XXXXXX")"
 DEPS_LIBS="$DRAFT_DIR/deps-libs"
+DEPS_BUILD_STAMP="$DEPS_LIBS/.build-deps-stamp"
 DEPS_MODULES="$DRAFT_DIR/deps-modules"
 DEPS_FRAMEWORKS="$DRAFT_DIR/deps-frameworks"
 DEPS_TOOLS="$DRAFT_DIR/deps-tools"
@@ -25,6 +26,23 @@ MLX_SWIFT_LM_REVISION="${MLX_SWIFT_LM_REVISION:-25b00d4}"
 SWIFT_TRANSFORMERS_VERSION="${SWIFT_TRANSFORMERS_VERSION:-1.2.1}"
 SPARKLE_VERSION="${SPARKLE_VERSION:-2.9.1}"
 SENTRY_COCOA_VERSION="${SENTRY_COCOA_VERSION:-9.10.0}"
+SPARKLE_SHA256="${SPARKLE_SHA256:-9fec2b888e6e2940b1bfbd5d3d010b9f67076b52170923549095cbb74132403b}"
+SENTRY_COCOA_SHA256="${SENTRY_COCOA_SHA256:-1dd70512f3b5af6c74f1b8f11279531900173fb638d7d541320a7cbc00ed06bc}"
+
+verify_download_sha256() {
+    local downloaded_file="$1"
+    local expected_sha256="$2"
+    local label="$3"
+    local actual_sha256
+
+    actual_sha256="$(shasum -a 256 "$downloaded_file" | awk '{print $1}')"
+    if [ "$actual_sha256" != "$expected_sha256" ]; then
+        echo "[build-deps] ERROR: SHA-256 mismatch for $label"
+        echo "[build-deps]   expected: $expected_sha256"
+        echo "[build-deps]   actual:   $actual_sha256"
+        exit 1
+    fi
+}
 
 download_sparkle_distribution() {
     local sparkle_root="$DEPS_BUILD/sparkle"
@@ -36,6 +54,7 @@ download_sparkle_distribution() {
     echo "Downloading Sparkle $SPARKLE_VERSION..."
     mkdir -p "$sparkle_root"
     curl --fail --location --silent --show-error "$sparkle_url" -o "$sparkle_zip"
+    verify_download_sha256 "$sparkle_zip" "$SPARKLE_SHA256" "Sparkle $SPARKLE_VERSION"
     unzip -q "$sparkle_zip" -d "$unpacked_root"
 
     if [ ! -d "$framework_src" ]; then
@@ -66,6 +85,7 @@ download_sentry_distribution() {
     echo "Downloading Sentry Cocoa $SENTRY_COCOA_VERSION..."
     mkdir -p "$sentry_root"
     curl --fail --location --silent --show-error "$sentry_url" -o "$sentry_zip"
+    verify_download_sha256 "$sentry_zip" "$SENTRY_COCOA_SHA256" "Sentry Cocoa $SENTRY_COCOA_VERSION"
     unzip -q "$sentry_zip" -d "$unpacked_root"
 
     if [ ! -d "$framework_src" ]; then
@@ -193,10 +213,11 @@ echo "[build-deps] Using TranscriptedCore from: $TRANSCRIPTED_ROOT"
 # Skip if already built (use --force to rebuild).
 # libExternalDeps.a was added later for SPM-based `swift test`, so require it too;
 # otherwise legacy worktrees would keep skipping while missing the archive.
-if [ -f "$DEPS_LIBS/libDraftDeps.a" ] && [ -f "$DEPS_LIBS/libExternalDeps.a" ] && [ -d "$DEPS_MODULES" ] && [ -d "$DEPS_FRAMEWORKS/ESpeakNG.framework" ] && [ -d "$DEPS_FRAMEWORKS/Sentry.framework" ] && [ -d "$DEPS_FRAMEWORKS/Sparkle.framework" ] && [ -x "$DEPS_TOOLS/sparkle/bin/generate_appcast" ] && [ "${1:-}" != "--force" ]; then
+if [ -f "$DEPS_LIBS/libDraftDeps.a" ] && [ -f "$DEPS_LIBS/libExternalDeps.a" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULES" ] && [ -d "$DEPS_FRAMEWORKS/ESpeakNG.framework" ] && [ -d "$DEPS_FRAMEWORKS/Sentry.framework" ] && [ -d "$DEPS_FRAMEWORKS/Sparkle.framework" ] && [ -x "$DEPS_TOOLS/sparkle/bin/generate_appcast" ] && [ "${1:-}" != "--force" ]; then
     echo "Dependencies already built. Use --force to rebuild."
     echo "  libs:    $DEPS_LIBS/libDraftDeps.a"
     echo "           $DEPS_LIBS/libExternalDeps.a"
+    echo "  stamp:   $DEPS_BUILD_STAMP"
     echo "  modules: $DEPS_MODULES/"
     echo "  frameworks: $DEPS_FRAMEWORKS/ESpeakNG.framework"
     echo "              $DEPS_FRAMEWORKS/Sentry.framework"
@@ -452,6 +473,8 @@ if [ -n "$CMLX_SRC" ]; then
 else
     echo "  WARNING: Cmlx source not found — cannot compile Metal shaders"
 fi
+
+touch "$DEPS_BUILD_STAMP"
 
 echo ""
 echo "=== Results ==="

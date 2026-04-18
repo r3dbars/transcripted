@@ -8,10 +8,17 @@ import Carbon
 final class MenuBarShortcutsView: NSView {
     var onStartDictation: (() -> Void)?
     var onStartMeeting: (() -> Void)?
+    var onImportAudioFile: (() -> Void)?
 
     private let dictationRow = PrimaryActionRowView()
     private let meetingRow = PrimaryActionRowView()
-    private let resetHintLabel = NSTextField(labelWithString: "Click a shortcut badge to edit")
+    private let importButton = MenuOutlineButton(
+        title: "Transcribe file",
+        symbolName: "waveform",
+        accessibilityLabel: "Transcribe file",
+        toolTip: "Choose an audio file to transcribe"
+    )
+    private let resetHintLabel = NSTextField(labelWithString: "Edit shortcuts or import audio")
     private let resetButton = MenuIconButton(
         symbolName: "arrow.counterclockwise",
         accessibilityLabel: "Reset shortcuts",
@@ -21,6 +28,7 @@ final class MenuBarShortcutsView: NSView {
     private var recordingTarget: RecordingTarget?
     private var currentDictationState = MenuBarPrimaryActionState(isEnabled: true, subtitle: "Paste spoken text anywhere")
     private var currentMeetingState = MenuBarPrimaryActionState(isEnabled: true, subtitle: "Capture mic and system audio")
+    private var canImportAudioFiles = true
 
     private enum RecordingTarget {
         case dictation
@@ -69,6 +77,10 @@ final class MenuBarShortcutsView: NSView {
         resetHintLabel.textColor = MenuTokens.textMutedNS
         addSubview(resetHintLabel)
 
+        importButton.target = self
+        importButton.action = #selector(importAudioFile)
+        addSubview(importButton)
+
         resetButton.target = self
         resetButton.action = #selector(resetShortcuts)
         addSubview(resetButton)
@@ -87,8 +99,16 @@ final class MenuBarShortcutsView: NSView {
             height: MenuTokens.actionRowHeight
         )
 
+        let importY = meetingRow.frame.maxY + 8
+        importButton.frame = NSRect(
+            x: 0,
+            y: importY,
+            width: bounds.width,
+            height: MenuTokens.secondaryButtonSize
+        )
+
         let buttonSize = MenuTokens.secondaryButtonSize
-        let footerY = meetingRow.frame.maxY + 6
+        let footerY = importButton.frame.maxY + 8
         resetButton.frame = NSRect(x: bounds.width - buttonSize, y: footerY, width: buttonSize, height: buttonSize)
         resetHintLabel.frame = NSRect(
             x: 0,
@@ -102,13 +122,16 @@ final class MenuBarShortcutsView: NSView {
         dictationKey: String,
         meetingKey: String,
         dictationState: MenuBarPrimaryActionState,
-        meetingState: MenuBarPrimaryActionState
+        meetingState: MenuBarPrimaryActionState,
+        canImportAudioFiles: Bool
     ) {
         currentDictationState = dictationState
         currentMeetingState = meetingState
+        self.canImportAudioFiles = canImportAudioFiles
+        importButton.isEnabled = canImportAudioFiles && recordingTarget == nil
         resetButton.isEnabled = recordingTarget == nil
         resetHintLabel.alphaValue = 1.0
-        resetHintLabel.stringValue = "Click a shortcut badge to edit"
+        resetHintLabel.stringValue = "Edit shortcuts or import audio"
 
         dictationRow.update(
             symbolName: "mic.fill",
@@ -185,17 +208,23 @@ final class MenuBarShortcutsView: NSView {
             dictationKey: HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding()),
             meetingKey: HotkeyPreferences.displayString(for: HotkeyPreferences.meetingBinding()),
             dictationState: currentDictationState,
-            meetingState: currentMeetingState
+            meetingState: currentMeetingState,
+            canImportAudioFiles: canImportAudioFiles
         )
     }
 
     var intrinsicHeight: CGFloat {
-        MenuTokens.actionRowHeight * 2 + MenuTokens.secondaryButtonSize + 12
+        MenuTokens.actionRowHeight * 2 + MenuTokens.secondaryButtonSize * 2 + 20
     }
 
     @objc private func resetShortcuts() {
         HotkeyPreferences.resetToDefaults()
         refreshFromPreferences()
+    }
+
+    @objc private func importAudioFile() {
+        guard importButton.isEnabled, recordingTarget == nil else { return }
+        onImportAudioFile?()
     }
 }
 

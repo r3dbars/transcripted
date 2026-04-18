@@ -155,6 +155,82 @@ public class TranscriptionTaskManager: ObservableObject {
         activeTasks[task.id] = asyncTask
     }
 
+    /// Start a new transcription task for an imported audio file.
+    /// Imported files reuse the system-audio speaker path and are not added to the
+    /// failed-transcription queue because the user can simply re-import the source file.
+    public func startImportedTranscription(
+        audioURL: URL,
+        outputFolder: URL,
+        meetingTitle: String? = nil
+    ) {
+        if !activeTasks.isEmpty {
+            AppLogger.pipeline.warning("Rejecting imported transcription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
+            displayStatus = .failed(message: "Transcription already in progress")
+            scheduleStatusReset(delay: 4)
+            return
+        }
+
+        let minDuration: TimeInterval = 2.0
+        if let audioDuration = audioDuration(url: audioURL), audioDuration < minDuration {
+            AppLogger.pipeline.info("Imported recording too short, skipping transcription", ["duration": String(format: "%.1fs", audioDuration)])
+            removeRecordingFile(audioURL, label: "short imported recording")
+            displayStatus = .failed(message: "Recording too short")
+            scheduleStatusReset(delay: 3)
+            return
+        }
+
+        let taskId = UUID()
+        activeCount += 1
+        backgroundTaskCount += 1
+        displayStatus = .gettingReady
+
+        AppLogger.pipeline.info("Starting imported transcription task", [
+            "taskId": taskId.uuidString,
+            "activeCount": "\(activeCount)"
+        ])
+
+        let asyncTask = Task {
+            do {
+                await MainActor.run {
+                    self.displayStatus = .transcribing(progress: 0.0)
+                }
+
+                let transcriptURL = try await self.transcribeImportedAudio(
+                    audioURL: audioURL,
+                    outputFolder: outputFolder,
+                    taskId: taskId,
+                    meetingTitle: meetingTitle
+                )
+
+                await MainActor.run {
+                    if self.speakerNamingRequest == nil {
+                        self.populateSavedMetadata(from: transcriptURL)
+                        self.displayStatus = .transcriptSaved
+                        self.scheduleStatusReset(delay: 4)
+                    } else {
+                        self.displayStatus = .finishing
+                    }
+                    self.handleTaskCompletion(taskId: taskId)
+                }
+            } catch {
+                AppLogger.pipeline.error("Imported transcription task failed", [
+                    "taskId": taskId.uuidString,
+                    "error": error.localizedDescription
+                ])
+
+                await MainActor.run {
+                    self.removeRecordingFile(audioURL, label: "failed imported recording")
+                    self.displayStatus = .failed(message: "Transcription failed")
+                    self.sendFailureNotification(errorMessage: error.localizedDescription)
+                    self.handleTaskCompletion(taskId: taskId)
+                    self.scheduleStatusReset(delay: 4)
+                }
+            }
+        }
+
+        activeTasks[taskId] = asyncTask
+    }
+
     /// Retry a failed transcription by its ID
     public func retryFailedTranscription(failedId: UUID, outputFolder: URL) async -> Bool {
         // Guard: reject if a pipeline is already active — same constraint as startTranscription.

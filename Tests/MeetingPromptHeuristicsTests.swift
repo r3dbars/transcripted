@@ -42,6 +42,17 @@ func testMeetingPromptHeuristics() {
         assertNil(prompt, "stale app activity should not keep prompting forever")
     }
 
+    runSuite("MeetingPromptHeuristics.allowsRuntimeOnlyPrompt — Teams must rely on stronger evidence") {
+        assertFalse(
+            MeetingPromptHeuristics.allowsRuntimeOnlyPrompt(for: .teams),
+            "Teams should not prompt just because the app is open"
+        )
+        assertTrue(
+            MeetingPromptHeuristics.allowsRuntimeOnlyPrompt(for: .zoom),
+            "Zoom should keep the existing runtime-only prompt path"
+        )
+    }
+
     runSuite("MeetingPromptHeuristics.snoozeInterval — runtime reminders use a short follow-up interval") {
         let interval = MeetingPromptHeuristics.snoozeInterval(
             for: .runtimeApp,
@@ -64,6 +75,55 @@ func testMeetingPromptHeuristics() {
         )
 
         assertEqual(interval, 30 * 60, "calendar prompts should preserve the longer snooze")
+    }
+
+    runSuite("MeetingPromptHeuristics.calendarDismissMinimumInterval — Teams get a stickier dismissal") {
+        let zoomInterval = MeetingPromptHeuristics.calendarDismissMinimumInterval(
+            for: .zoom,
+            defaultInterval: 30 * 60
+        )
+        let teamsInterval = MeetingPromptHeuristics.calendarDismissMinimumInterval(
+            for: .teams,
+            defaultInterval: 30 * 60
+        )
+
+        assertEqual(zoomInterval, 30 * 60, "Zoom should keep the default calendar dismissal interval")
+        assertEqual(
+            teamsInterval,
+            MeetingPromptHeuristics.teamsDismissMinimumInterval,
+            "Teams should stay quiet longer after a dismissal"
+        )
+    }
+
+    runSuite("MeetingPromptHeuristics.runtimeDismissFallbackInterval — Teams get the longer fallback backoff") {
+        assertEqual(
+            MeetingPromptHeuristics.runtimeDismissFallbackInterval(for: .zoom),
+            MeetingPromptHeuristics.defaultRuntimeDismissFallbackInterval,
+            "Zoom should keep the standard runtime fallback"
+        )
+        assertEqual(
+            MeetingPromptHeuristics.runtimeDismissFallbackInterval(for: .teams),
+            MeetingPromptHeuristics.teamsDismissMinimumInterval,
+            "Teams should fall back to the longer dismissal interval"
+        )
+    }
+
+    runSuite("MeetingPromptHeuristics.reason — calendar prompts distinguish runtime-backed prompts") {
+        assertEqual(
+            MeetingPromptHeuristics.reason(for: .calendarEvent, hasRuntimeContext: false),
+            .calendarNearby,
+            "calendar-only prompts should record the nearby-calendar reason"
+        )
+        assertEqual(
+            MeetingPromptHeuristics.reason(for: .calendarEvent, hasRuntimeContext: true),
+            .calendarPlusRuntimeMatch,
+            "calendar prompts with app evidence should record the combined reason"
+        )
+        assertEqual(
+            MeetingPromptHeuristics.reason(for: .runtimeApp, hasRuntimeContext: false),
+            .runtimeOnly,
+            "runtime prompts should keep the runtime-only reason"
+        )
     }
 
     runSuite("MeetingPromptWindowPolicy.shouldOfferCalendarPrompt — only prompts in the one-minute lead window") {

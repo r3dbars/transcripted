@@ -15,6 +15,7 @@ your agent at the folder later.
 
 - Clean meeting notes with speaker names
 - Dictation notes for your follow-up thoughts
+- Import audio files you already have on your Mac
 - Plain Markdown files on disk
 - Files you can hand to your agent later
 - Local-first storage you can inspect yourself
@@ -22,7 +23,7 @@ your agent at the folder later.
 ## How To Get Started
 
 1. Download Transcripted from the latest GitHub release.
-2. Record a meeting or capture a dictation on your Mac.
+2. Record a meeting, capture a dictation, or import an audio file you already have.
 3. Open the saved Markdown files yourself, or point your agent at the folder.
 
 ### Install With Homebrew

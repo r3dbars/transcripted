@@ -7,24 +7,25 @@ import FluidAudio
 
 extension Transcription {
 
-    /// Transcribe mic + system audio using local Parakeet STT + offline diarization.
+    /// Transcribe system audio using local Parakeet STT + offline diarization,
+    /// with optional mic audio for mixed live meeting captures.
     ///
     /// Pipeline:
-    /// 1. Load & resample both audio files to 16kHz mono
+    /// 1. Load & resample the captured audio files to 16kHz mono
     /// 2. Run PyAnnote offline diarization on system audio -> speaker segments with embeddings
     /// 3. Transcribe each system-audio speaker segment with Parakeet
-    /// 4. Transcribe mic audio with Parakeet.
+    /// 4. When present, transcribe mic audio with Parakeet.
     ///    - If `splitLocalSpeakers` is false (default), splits by silence and tags
     ///      every utterance as the single "You" speaker.
     ///    - If true, runs PyAnnote diarization on the mic channel too and threads
     ///      per-speaker embeddings through the same classification/matching path
     ///      used for system audio. Surfaces multiple local speakers in the naming sheet.
-    /// 5. Match speaker embeddings against persistent SpeakerDatabase (both channels)
-    /// 6. Merge mic + system utterances chronologically
+    /// 5. Match speaker embeddings against persistent SpeakerDatabase
+    /// 6. Merge available utterances chronologically
     ///
     /// Note: nonisolated to keep heavy compute off the main thread
     nonisolated func transcribeMultichannel(
-        micURL: URL,
+        micURL: URL?,
         systemURL: URL,
         splitLocalSpeakers: Bool = false,
         onProgress: ((Double) -> Void)? = nil
@@ -43,9 +44,9 @@ extension Transcription {
         let processingStartTime = Date()
 
         do {
-            // Get recording duration from original mic file
-            let micFile = try AVAudioFile(forReading: micURL)
-            let duration = Double(micFile.length) / micFile.processingFormat.sampleRate
+            let durationFileURL = micURL ?? systemURL
+            let durationFile = try AVAudioFile(forReading: durationFileURL)
+            let duration = Double(durationFile.length) / durationFile.processingFormat.sampleRate
 
             onProgress?(0.0)
 
@@ -60,14 +61,23 @@ extension Transcription {
             // Load sequentially to avoid both resampling buffers in memory simultaneously.
             // async let forces concurrent resampling (~460MB peak for long recordings);
             // sequential means only one resampling buffer exists at a time.
-            let systemSamples = try await AudioResampler.loadAndResample(url: systemURL, targetRate: 16000)
-            let micSamples = try await AudioResampler.loadAndResample(url: micURL, targetRate: 16000)
+            let systemSamples = try AudioResampler.loadAndResample(url: systemURL, targetRate: 16000)
+            let micSamples: [Float]
+            if let micURL {
+                micSamples = try AudioResampler.loadAndResample(url: micURL, targetRate: 16000)
+            } else {
+                micSamples = []
+            }
 
             let resampleTime = CFAbsoluteTimeGetCurrent() - resampleStart
             AppLogger.transcription.info("Resampling completed in \(String(format: "%.2f", resampleTime))s")
 
             AppLogger.transcription.debug("System: \(systemSamples.count) samples (\(String(format: "%.1f", Double(systemSamples.count) / 16000))s)")
-            AppLogger.transcription.debug("Mic: \(micSamples.count) samples (\(String(format: "%.1f", Double(micSamples.count) / 16000))s)")
+            if let _ = micURL {
+                AppLogger.transcription.debug("Mic: \(micSamples.count) samples (\(String(format: "%.1f", Double(micSamples.count) / 16000))s)")
+            } else {
+                AppLogger.transcription.debug("Mic: skipped for system-audio-only transcription")
+            }
 
             // Validate system audio has meaningful content (at least 1 second at 16kHz).
             // Without this, a failed system audio capture produces an empty transcript.
@@ -398,75 +408,79 @@ extension Transcription {
 
             AppLogger.transcription.info("System audio transcribed", ["utterances": "\(systemUtterances.count)", "speakers": "\(Set(systemUtterances.map { $0.speakerId }).count)"])
 
-            // Step 4: Transcribe mic audio.
-            // Two modes:
-            //   A) splitLocalSpeakers == false (default): silence-split, tag as single "You"
-            //   B) splitLocalSpeakers == true: diarize mic, run same classification path
-            //      used for system audio, emit per-speaker utterances
-            await MainActor.run {
-                self.processingStatus = "Transcribing mic audio..."
-            }
-
             var micUtterances: [TranscriptionUtterance] = []
             var micSpeakerContexts: [String: ChannelSpeakerContext] = [:]
             var newlyCreatedMicProfileIds: Set<UUID> = []
 
-            if splitLocalSpeakers {
-                // B) Mic diarization path
-                let micResult = try await Self.processMicChannelWithDiarization(
-                    samples: micSamples,
-                    diarization: diarization,
-                    parakeet: parakeet,
-                    speakerDB: speakerDB,
-                    existingProfiles: existingProfiles,
-                    droppedSegments: &droppedSegments,
-                    onProgress: onProgress
-                )
-                micUtterances = micResult.utterances
-                micSpeakerContexts = micResult.speakerContexts
-                newlyCreatedMicProfileIds = micResult.newlyCreatedProfileIds
-                AppLogger.transcription.info("Mic audio diarized + transcribed", [
-                    "utterances": "\(micUtterances.count)",
-                    "speakers": "\(Set(micUtterances.map { $0.speakerId }).count)",
-                    "newProfiles": "\(newlyCreatedMicProfileIds.count)"
-                ])
-            } else {
-                // A) Default: silence-split, single speaker
-                let micSegments = Self.detectSpeechSegments(samples: micSamples, sampleRate: 16000)
-                AppLogger.transcription.info("Mic audio segmented by silence", ["segments": "\(micSegments.count)"])
-
-                for (index, segment) in micSegments.enumerated() {
-                    try Task.checkCancellation()
-
-                    let segmentSamples = AudioResampler.extractSlice(
-                        from: micSamples,
-                        sampleRate: 16000,
-                        startTime: segment.start,
-                        endTime: segment.end
-                    )
-
-                    // Skip segments shorter than 1s — Parakeet requires at least 16,000 samples
-                    guard segmentSamples.count >= 16000 else { droppedSegments += 1; continue }
-
-                    let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .microphone)
-                    guard !text.isEmpty else { continue }
-
-                    micUtterances.append(TranscriptionUtterance(
-                        start: segment.start,
-                        end: segment.end,
-                        channel: 0,
-                        speakerId: 0,
-                        persistentSpeakerId: nil,
-                        matchSimilarity: nil,
-                        transcript: text
-                    ))
-
-                    // Update progress (65% to 90% during mic transcription)
-                    let micProgress = 0.65 + (Double(index + 1) / Double(max(1, micSegments.count))) * 0.25
-                    onProgress?(micProgress)
+            if micURL != nil {
+                // Step 4: Transcribe mic audio.
+                // Two modes:
+                //   A) splitLocalSpeakers == false (default): silence-split, tag as single "You"
+                //   B) splitLocalSpeakers == true: diarize mic, run same classification path
+                //      used for system audio, emit per-speaker utterances
+                await MainActor.run {
+                    self.processingStatus = "Transcribing mic audio..."
                 }
 
-                AppLogger.transcription.info("Mic audio transcribed", ["utterances": "\(micUtterances.count)"])
+                if splitLocalSpeakers {
+                    // B) Mic diarization path
+                    let micResult = try await Self.processMicChannelWithDiarization(
+                        samples: micSamples,
+                        diarization: diarization,
+                        parakeet: parakeet,
+                        speakerDB: speakerDB,
+                        existingProfiles: existingProfiles,
+                        droppedSegments: &droppedSegments,
+                        onProgress: onProgress
+                    )
+                    micUtterances = micResult.utterances
+                    micSpeakerContexts = micResult.speakerContexts
+                    newlyCreatedMicProfileIds = micResult.newlyCreatedProfileIds
+                    AppLogger.transcription.info("Mic audio diarized + transcribed", [
+                        "utterances": "\(micUtterances.count)",
+                        "speakers": "\(Set(micUtterances.map { $0.speakerId }).count)",
+                        "newProfiles": "\(newlyCreatedMicProfileIds.count)"
+                    ])
+                } else {
+                    // A) Default: silence-split, single speaker
+                    let micSegments = Self.detectSpeechSegments(samples: micSamples, sampleRate: 16000)
+                    AppLogger.transcription.info("Mic audio segmented by silence", ["segments": "\(micSegments.count)"])
+
+                    for (index, segment) in micSegments.enumerated() {
+                        try Task.checkCancellation()
+
+                        let segmentSamples = AudioResampler.extractSlice(
+                            from: micSamples,
+                            sampleRate: 16000,
+                            startTime: segment.start,
+                            endTime: segment.end
+                        )
+
+                        // Skip segments shorter than 1s — Parakeet requires at least 16,000 samples
+                        guard segmentSamples.count >= 16000 else { droppedSegments += 1; continue }
+
+                        let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .microphone)
+                        guard !text.isEmpty else { continue }
+
+                        micUtterances.append(TranscriptionUtterance(
+                            start: segment.start,
+                            end: segment.end,
+                            channel: 0,
+                            speakerId: 0,
+                            persistentSpeakerId: nil,
+                            matchSimilarity: nil,
+                            transcript: text
+                        ))
+
+                        // Update progress (65% to 90% during mic transcription)
+                        let micProgress = 0.65 + (Double(index + 1) / Double(max(1, micSegments.count))) * 0.25
+                        onProgress?(micProgress)
+                    }
+
+                    AppLogger.transcription.info("Mic audio transcribed", ["utterances": "\(micUtterances.count)"])
+                }
+            } else {
+                AppLogger.transcription.info("Mic audio skipped", ["reason": "system_audio_only"])
             }
 
             onProgress?(0.95)

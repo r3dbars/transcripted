@@ -31,6 +31,7 @@ final class MeetingSessionController: ObservableObject {
         case hotkey = "hotkey"
         case menu = "menu"
         case detectedPrompt = "detected_prompt"
+        case fileImport = "file_import"
         case unknown = "unknown"
     }
 
@@ -74,9 +75,19 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private struct QueuedTranscriptionJob {
-        let micURL: URL
-        let systemURL: URL?
-        let healthInfo: RecordingHealthInfo
+        enum Kind {
+            case recorded(
+                micURL: URL,
+                systemURL: URL?,
+                healthInfo: RecordingHealthInfo
+            )
+            case imported(
+                audioURL: URL,
+                suggestedTitle: String
+            )
+        }
+
+        let kind: Kind
         let startTrigger: StartTrigger
     }
 
@@ -296,19 +307,33 @@ final class MeetingSessionController: ObservableObject {
             microphoneGranted: microphoneGranted,
             systemAudioRecordingGranted: systemAudioRecordingGranted
         )
+        let shouldRevalidateCachedSystemAudioPermission = microphoneGranted && systemAudioRecordingGranted
+        let shouldRequestMissingSystemAudioPermission =
+            microphoneGranted &&
+            !startDecision.canStart &&
+            startDecision.failureReason == "system_audio_recording"
 
-        if !startDecision.canStart,
-           startDecision.failureReason == "system_audio_recording",
-           microphoneGranted
-        {
+        if shouldRevalidateCachedSystemAudioPermission || shouldRequestMissingSystemAudioPermission {
+            let permissionCheckMode = shouldRevalidateCachedSystemAudioPermission ? "revalidation" : "request"
             DiagnosticsTrail.record(
                 engine: "meeting",
-                event: "meeting_start_requesting_system_audio_permission",
-                message: "Meeting start is requesting system audio permission",
-                context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+                event: shouldRevalidateCachedSystemAudioPermission
+                    ? "meeting_start_revalidating_system_audio_permission"
+                    : "meeting_start_requesting_system_audio_permission",
+                message: shouldRevalidateCachedSystemAudioPermission
+                    ? "Meeting start is revalidating cached system audio permission"
+                    : "Meeting start is requesting system audio permission",
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "trigger": trigger.rawValue,
+                        "permission_check": permissionCheckMode
+                    ]
+                )
             )
 
-            systemAudioRecordingGranted = await TranscriptedPermissionAccess.requestSystemAudioRecordingAccessIfNeeded()
+            systemAudioRecordingGranted = await TranscriptedPermissionAccess.requestSystemAudioRecordingAccessIfNeeded(
+                forceRefresh: shouldRevalidateCachedSystemAudioPermission
+            )
             startDecision = MeetingRecordingStartGate.evaluate(
                 microphoneGranted: microphoneGranted,
                 systemAudioRecordingGranted: systemAudioRecordingGranted
@@ -323,7 +348,12 @@ final class MeetingSessionController: ObservableObject {
                 message: systemAudioRecordingGranted
                     ? "System audio permission is ready for meeting capture"
                     : "System audio permission is still missing for meeting capture",
-                context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "trigger": trigger.rawValue,
+                        "permission_check": permissionCheckMode
+                    ]
+                )
             )
         }
 
@@ -491,6 +521,81 @@ final class MeetingSessionController: ObservableObject {
         )
     }
 
+    @discardableResult
+    func importAudioFile(from sourceURL: URL) async -> Bool {
+        guard !isCaptureSessionActive else {
+            state = .error("Stop the current meeting before importing an audio file.")
+            return false
+        }
+
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_file_import_requested",
+            message: "Imported meeting transcription requested",
+            context: baseDiagnosticsContext(extra: ["trigger": StartTrigger.fileImport.rawValue])
+        )
+
+        if case .idle = state {
+            await prepareModels()
+        } else if case .loadingModels = state {
+            await prepareModels()
+        } else if case .error = state {
+            await prepareModels()
+        }
+
+        switch state {
+        case .ready, .transcribing:
+            break
+        default:
+            return false
+        }
+
+        let preparedAudio: PreparedImportedMeetingAudio
+        do {
+            preparedAudio = try MeetingImportedAudioPreparer.prepareImportedAudio(from: sourceURL)
+        } catch {
+            DiagnosticsTrail.record(
+                level: .error,
+                engine: "meeting",
+                event: "meeting_file_import_failed",
+                message: "Imported meeting audio could not be prepared",
+                context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
+            )
+            state = .error(error.localizedDescription)
+            return false
+        }
+
+        let outcome = enqueueImportedAudioJob(
+            audioURL: preparedAudio.copiedAudioURL,
+            suggestedTitle: preparedAudio.suggestedTitle,
+            startTrigger: .fileImport
+        )
+
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: outcome == .startedImmediately
+                ? "meeting_file_import_started"
+                : "meeting_file_import_queued",
+            message: outcome == .startedImmediately
+                ? "Imported meeting transcription started"
+                : "Imported meeting transcription queued",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "file": preparedAudio.copiedAudioURL.lastPathComponent,
+                    "queue_depth": "\(queuedTranscriptionJobs.count)",
+                    "title": preparedAudio.suggestedTitle
+                ]
+            )
+        )
+        AnalyticsReporter.track(
+            "meeting_file_imported",
+            properties: [
+                "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
+            ]
+        )
+        return true
+    }
+
     /// Cancel any in-progress pipeline. Does not cancel an active recording —
     /// use stopRecording() for that.
     func cancelActiveTranscription(reason: TranscriptionCancelReason = .unknown) {
@@ -500,11 +605,16 @@ final class MeetingSessionController: ObservableObject {
         activeTranscriptionTrigger = .unknown
 
         for job in queuedJobs {
-            failedManager.addFailedTranscription(
-                micAudioURL: job.micURL,
-                systemAudioURL: job.systemURL,
-                errorMessage: "Transcription cancelled"
-            )
+            switch job.kind {
+            case .recorded(let micURL, let systemURL, _):
+                failedManager.addFailedTranscription(
+                    micAudioURL: micURL,
+                    systemAudioURL: systemURL,
+                    errorMessage: "Transcription cancelled"
+                )
+            case .imported(let audioURL, _):
+                try? FileManager.default.removeItem(at: audioURL)
+            }
         }
 
         taskManager.cancelAll()
@@ -790,12 +900,34 @@ final class MeetingSessionController: ObservableObject {
         startTrigger: StartTrigger
     ) -> QueueInsertionOutcome {
         let job = QueuedTranscriptionJob(
-            micURL: micURL,
-            systemURL: systemURL,
-            healthInfo: healthInfo,
+            kind: .recorded(
+                micURL: micURL,
+                systemURL: systemURL,
+                healthInfo: healthInfo
+            ),
             startTrigger: startTrigger
         )
 
+        return enqueue(job)
+    }
+
+    private func enqueueImportedAudioJob(
+        audioURL: URL,
+        suggestedTitle: String,
+        startTrigger: StartTrigger
+    ) -> QueueInsertionOutcome {
+        let job = QueuedTranscriptionJob(
+            kind: .imported(
+                audioURL: audioURL,
+                suggestedTitle: suggestedTitle
+            ),
+            startTrigger: startTrigger
+        )
+
+        return enqueue(job)
+    }
+
+    private func enqueue(_ job: QueuedTranscriptionJob) -> QueueInsertionOutcome {
         if canStartQueuedTranscriptionImmediately {
             startQueuedTranscription(job)
             return .startedImmediately
@@ -813,13 +945,22 @@ final class MeetingSessionController: ObservableObject {
             state = .transcribing
         }
 
-        taskManager.startTranscription(
-            micURL: job.micURL,
-            systemURL: job.systemURL,
-            outputFolder: storagePaths.transcripts,
-            healthInfo: job.healthInfo,
-            splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
-        )
+        switch job.kind {
+        case .recorded(let micURL, let systemURL, let healthInfo):
+            taskManager.startTranscription(
+                micURL: micURL,
+                systemURL: systemURL,
+                outputFolder: storagePaths.transcripts,
+                healthInfo: healthInfo,
+                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
+            )
+        case .imported(let audioURL, let suggestedTitle):
+            taskManager.startImportedTranscription(
+                audioURL: audioURL,
+                outputFolder: storagePaths.transcripts,
+                meetingTitle: suggestedTitle
+            )
+        }
     }
 
     private func handleBackgroundTranscriptionWorkChanged() {
