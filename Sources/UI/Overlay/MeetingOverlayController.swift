@@ -332,11 +332,13 @@ final class MeetingOverlayRootView: NSView {
 
         let barsLeft = timerLabel.frame.maxX + tokens.headerGap + 10
         let barsRight = closeButton.frame.minX - tokens.headerGap
-        let barsWidth = max(0, barsRight - barsLeft)
+        let availableBarsWidth = max(0, barsRight - barsLeft)
+        let barsWidth = min(tokens.recordingWaveformWidth, availableBarsWidth)
+        let barsX = barsLeft + max(0, (availableBarsWidth - barsWidth) / 2)
         let barsHeight: CGFloat = 22
         let barsY = midY - barsHeight / 2
         audioWaveform.frame = NSRect(
-            x: barsLeft,
+            x: barsX,
             y: barsY,
             width: barsWidth,
             height: barsHeight
@@ -614,8 +616,8 @@ enum MeetingOverlayTokens {
     static let panelStroke   = NSColor.white.withAlphaComponent(0.08)
     static let textPrimary   = NSColor(calibratedWhite: 0.98, alpha: 1.0)
     static let textSecondary = NSColor.white.withAlphaComponent(0.55)
-    static let waveformMicTint = NSColor(calibratedRed: 0.72, green: 0.82, blue: 0.79, alpha: 1.0)
-    static let waveformSystemTint = NSColor(calibratedRed: 0.74, green: 0.78, blue: 0.85, alpha: 1.0)
+    static let waveformMicTint = NSColor(calibratedRed: 0.84, green: 0.69, blue: 0.48, alpha: 1.0)
+    static let waveformSystemTint = NSColor(calibratedRed: 0.57, green: 0.66, blue: 0.85, alpha: 1.0)
     static let dotIdle       = OverlayTokens.textMuted
     static let dotPrep       = OverlayTokens.textSecondary
     static let dotPrompt     = OverlayTokens.accentGreen
@@ -636,6 +638,7 @@ enum MeetingOverlayTokens {
     static let headerGap: CGFloat   = 10
     static let timerFontSize: CGFloat = 13
     static let stopHeight: CGFloat  = 28
+    static let recordingWaveformWidth: CGFloat = 124
 }
 
 // MARK: - Controller
