@@ -15,6 +15,12 @@ The distribution DMG now uses committed release art:
 - app icon: `Resources/Transcripted.icns`
 - DMG install background: `scripts/release/assets/dmg-background.png`
 
+If you refresh the install-window art, regenerate the committed PNG with:
+
+```bash
+swift scripts/release/generate-dmg-background.swift
+```
+
 `build-beta.sh` uses that art for the preferred `create-dmg` path and also for
 the built-in Finder-layout fallback, so polished install windows no longer
 depend on `create-dmg` being present just to avoid a blank DMG.
