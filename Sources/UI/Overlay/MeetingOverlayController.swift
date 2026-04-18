@@ -185,6 +185,7 @@ final class MeetingOverlayRootView: NSView {
         closeButton.layer?.cornerRadius = 8
         closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
         closeButton.layer?.borderWidth = 0
+        closeButton.imageScaling = .scaleProportionallyDown
         closeButton.target = self
         closeButton.action = #selector(handleSecondaryAction)
         closeButton.isHidden = true
@@ -355,11 +356,10 @@ final class MeetingOverlayRootView: NSView {
             height: lineHeight
         )
 
-        let closeWidth = max(52, closeButton.fittingSize.width + tokens.stopHPadding * 2)
         closeButton.frame = NSRect(
-            x: bounds.width - tokens.padRight - closeWidth,
+            x: bounds.width - tokens.padRight - tokens.stopHeight,
             y: midY - tokens.stopHeight / 2,
-            width: closeWidth,
+            width: tokens.stopHeight,
             height: tokens.stopHeight
         )
 
@@ -554,7 +554,11 @@ final class MeetingOverlayRootView: NSView {
             micLabel.textColor = MeetingOverlayTokens.textSecondary
             systemLabel.font = .systemFont(ofSize: MeetingOverlayTokens.labelFontSize, weight: .regular)
             systemLabel.textColor = MeetingOverlayTokens.textSecondary
-            closeButton.attributedTitle = buttonTitle("Stop", size: 12, weight: .semibold)
+            closeButton.attributedTitle = buttonTitle("", size: 12, weight: .semibold)
+            closeButton.image = stopButtonImage()
+            closeButton.imagePosition = .imageOnly
+            closeButton.contentTintColor = MeetingOverlayTokens.textPrimary
+            closeButton.toolTip = "Stop recording"
             closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
             closeButton.layer?.cornerRadius = MeetingOverlayTokens.stopHeight / 2
             closeButton.layer?.borderWidth = 0.5
@@ -604,6 +608,10 @@ final class MeetingOverlayRootView: NSView {
         systemLabel.font = .systemFont(ofSize: 8, weight: .medium)
         systemLabel.textColor = MeetingOverlayTokens.textSecondary
         closeButton.attributedTitle = buttonTitle("Stop", size: 11, weight: .semibold)
+        closeButton.image = nil
+        closeButton.imagePosition = .noImage
+        closeButton.contentTintColor = MeetingOverlayTokens.textPrimary
+        closeButton.toolTip = nil
         closeButton.layer?.cornerRadius = 8
         closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
         closeButton.layer?.borderWidth = 0
@@ -625,6 +633,12 @@ final class MeetingOverlayRootView: NSView {
         statusDot.layer?.shadowColor = color.cgColor
         statusDot.layer?.shadowOpacity = haloOpacity
         statusDot.layer?.shadowRadius = haloRadius
+    }
+
+    private func stopButtonImage() -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
+        return NSImage(systemSymbolName: "stop.fill", accessibilityDescription: "Stop recording")?
+            .withSymbolConfiguration(config)
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
@@ -674,7 +688,6 @@ enum MeetingOverlayTokens {
     static let timerFontSize: CGFloat = 13
     static let labelFontSize: CGFloat = 11
     static let stopHeight: CGFloat  = 28
-    static let stopHPadding: CGFloat = 14
     static let barCount: Int        = 26
     static let barWidth: CGFloat    = 2
     static let barGap: CGFloat      = 1.5

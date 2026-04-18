@@ -75,6 +75,7 @@ final class WaveformDrawingLayer: CALayer {
 
     override func draw(in ctx: CGContext) {
         let now = CFAbsoluteTimeGetCurrent()
+        recordSamplesIfNeeded(now: now)
 
         switch visualizationStyle {
         case .scrolling:
@@ -85,22 +86,10 @@ final class WaveformDrawingLayer: CALayer {
     }
 
     private func drawScrolling(in ctx: CGContext, now: CFAbsoluteTime) {
-        // 1. Sample audio level into ring buffer at 20Hz
-        let elapsed = now - lastSampleTime
-        if elapsed >= sampleInterval {
-            let sampleCount = min(Int(elapsed / sampleInterval), 3)
-            for _ in 0..<sampleCount {
-                buffer.append(currentLevel)
-            }
-            lastSampleTime = now
-        }
-
         guard buffer.currentCount > 0 else { return }
 
         // 2. Smooth fractional scroll offset for sub-pixel motion
-        let currentElapsed = now - lastSampleTime
-        let fractionalProgress = min(currentElapsed / sampleInterval, 1.0)
-        let smoothOffset = CGFloat(fractionalProgress) * barStride
+        let smoothOffset = scrollingOffset(now: now, stride: barStride)
 
         let size = bounds.size
         let centerY = size.height / 2.0
@@ -146,26 +135,26 @@ final class WaveformDrawingLayer: CALayer {
     ) {
         let size = bounds.size
         guard size.width > 0, size.height > 0 else { return }
+        guard buffer.currentCount > 0 else { return }
 
-        let count = max(1, mirroredBarCount)
+        let _ = phaseOffset
         let stride = mirroredBarWidth + mirroredBarSpacing
-        let totalWidth = CGFloat(count) * mirroredBarWidth + CGFloat(max(0, count - 1)) * mirroredBarSpacing
-        let startX = max(0, (size.width - totalWidth) / 2)
+        let maxVisibleBars = min(max(1, mirroredBarCount), Int(ceil((size.width + stride) / stride)) + 1)
+        let barsToDraw = min(maxVisibleBars, buffer.currentCount)
+        let smoothOffset = scrollingOffset(now: now, stride: stride)
         let maxHeight = max(1, size.height - 1)
-        let level = max(0, min(1, CGFloat(currentLevel)))
-        let boostedLevel = max(0.08, sqrt(level))
         let baseAlpha = tintColor.usingColorSpace(.deviceRGB)?.alphaComponent ?? 1
-        let time = CGFloat(now)
 
-        for index in 0..<count {
-            let env = envelopeMultiplier(for: index, of: count)
-            let phase = phaseOffset + CGFloat(index) * 0.48
-            let motionA = normalizedSine(time * 4.8 + phase)
-            let motionB = normalizedSine(time * 7.1 + phase * 1.7 + 0.9)
-            let motion = max(0.12, motionA * 0.7 + motionB * 0.3)
-            let rawLevel = min(1, boostedLevel * (0.45 + motion * 0.9))
-            let barHeight = max(minBarHeight, rawLevel * maxHeight * env)
-            let x = startX + CGFloat(index) * stride
+        for i in 0..<barsToDraw {
+            let barIndex = buffer.currentCount - 1 - i
+            let sampleValue = smoothedSample(at: barIndex)
+            let boosted = CGFloat(sqrt(sampleValue))
+            let visualIndex = barsToDraw - 1 - i
+            let env = envelopeMultiplier(for: visualIndex, of: barsToDraw)
+            let barHeight = max(minBarHeight, boosted * maxHeight * env)
+            let x = size.width - CGFloat(i + 1) * stride - smoothOffset + mirroredBarSpacing
+            guard x + mirroredBarWidth > 0 else { break }
+            guard x < size.width else { continue }
             let y: CGFloat = switch anchor {
             case .fromBottom:
                 0
@@ -180,7 +169,7 @@ final class WaveformDrawingLayer: CALayer {
                 height: barHeight
             )
 
-            let opacity = baseAlpha * (0.5 + rawLevel * 0.5)
+            let opacity = baseAlpha * (0.42 + CGFloat(sampleValue) * 0.48)
             ctx.setFillColor(tintColor.withAlphaComponent(opacity).cgColor)
 
             let path = CGPath(
@@ -194,6 +183,30 @@ final class WaveformDrawingLayer: CALayer {
         }
     }
 
+    private func recordSamplesIfNeeded(now: CFAbsoluteTime) {
+        let elapsed = now - lastSampleTime
+        if elapsed >= sampleInterval {
+            let sampleCount = min(Int(elapsed / sampleInterval), 3)
+            for _ in 0..<sampleCount {
+                buffer.append(currentLevel)
+            }
+            lastSampleTime = now
+        }
+    }
+
+    private func scrollingOffset(now: CFAbsoluteTime, stride: CGFloat) -> CGFloat {
+        let currentElapsed = now - lastSampleTime
+        let fractionalProgress = min(currentElapsed / sampleInterval, 1.0)
+        return CGFloat(fractionalProgress) * stride
+    }
+
+    private func smoothedSample(at index: Int) -> Float {
+        let current = buffer.sample(at: index)
+        let previous = buffer.sample(at: max(0, index - 1))
+        let next = buffer.sample(at: min(buffer.currentCount - 1, index + 1))
+        return min(1, max(0, current * 0.6 + previous * 0.2 + next * 0.2))
+    }
+
     private func envelopeMultiplier(for index: Int, of total: Int) -> CGFloat {
         guard total > 1 else { return 1 }
         let norm = (CGFloat(index) - CGFloat(total - 1) / 2) / (CGFloat(total - 1) / 2)
@@ -201,9 +214,6 @@ final class WaveformDrawingLayer: CALayer {
         return max(0.15, envelope)
     }
 
-    private func normalizedSine(_ value: CGFloat) -> CGFloat {
-        (sin(value) + 1) / 2
-    }
 }
 
 // MARK: - Host View
