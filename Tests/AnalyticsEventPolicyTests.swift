@@ -31,6 +31,15 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["trigger"], "detected_prompt", "meeting trigger attribution must survive sanitization")
     }
 
+    runSuite("AnalyticsEventPolicy meeting_recording_cancelled stays coarse and allowlisted") {
+        let policy = AnalyticsEventPolicy.policy(forEvent: "meeting_recording_cancelled")
+
+        assertEqual(policy?.allowedProperties.contains("duration_bucket"), true, "meeting cancellation should only keep bucketed duration")
+        assertEqual(policy?.allowedProperties.contains("reason"), true, "meeting cancellation should preserve coarse reason")
+        assertEqual(policy?.allowedProperties.contains("system_stream_present"), true, "meeting cancellation should preserve system stream presence")
+        assertEqual(policy?.allowedProperties.contains("trigger"), true, "meeting cancellation should preserve trigger attribution")
+    }
+
     runSuite("AnalyticsEventPolicy allows meeting outcome trigger attribution") {
         let saved = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_saved")
         let failed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")

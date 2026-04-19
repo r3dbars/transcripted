@@ -10,6 +10,7 @@
 
 import AppKit
 import Combine
+import Carbon
 import TranscriptedCore
 
 // MARK: - Panel
@@ -687,6 +688,20 @@ final class MeetingOverlayController {
     private var rootView: MeetingOverlayRootView?
     private var subscriptions: Set<AnyCancellable> = []
     private var autoHideTask: Task<Void, Never>?
+    private var globalEscapeMonitor: Any?
+    private var localEscapeMonitor: Any?
+    private var isShowingCancelConfirmation = false
+
+    deinit {
+        if let monitor = globalEscapeMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        if let monitor = localEscapeMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        autoHideTask?.cancel()
+        promptCountdownTask?.cancel()
+    }
 
     // MARK: - Dependencies
 
@@ -905,6 +920,7 @@ final class MeetingOverlayController {
         ))
         panel.alphaValue = 0
         panel.orderFrontRegardless()
+        installEscapeMonitors()
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.18
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -944,7 +960,83 @@ final class MeetingOverlayController {
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak panel] in
             panel?.orderOut(nil)
+            Task { @MainActor [weak self] in
+                self?.removeEscapeMonitors()
+            }
         })
+    }
+
+    private func installEscapeMonitors() {
+        guard globalEscapeMonitor == nil, localEscapeMonitor == nil else { return }
+
+        globalEscapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == UInt16(kVK_Escape) else { return }
+            Task { @MainActor [weak self] in
+                self?.handleEscapeKey()
+            }
+        }
+
+        localEscapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == UInt16(kVK_Escape) else { return event }
+            Task { @MainActor [weak self] in
+                self?.handleEscapeKey()
+            }
+            return nil
+        }
+    }
+
+    private func removeEscapeMonitors() {
+        if let monitor = globalEscapeMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalEscapeMonitor = nil
+        }
+        if let monitor = localEscapeMonitor {
+            NSEvent.removeMonitor(monitor)
+            localEscapeMonitor = nil
+        }
+    }
+
+    private func handleEscapeKey() {
+        switch state {
+        case .prompt:
+            dismissPrompt(notifyDetector: true)
+        case .recording:
+            showCancelRecordingConfirmation()
+        default:
+            break
+        }
+    }
+
+    private func showCancelRecordingConfirmation() {
+        guard !isShowingCancelConfirmation else { return }
+        guard let session = meetingSession else { return }
+        guard case .recording = session.state else { return }
+
+        isShowingCancelConfirmation = true
+        removeEscapeMonitors()
+        defer {
+            isShowingCancelConfirmation = false
+            if panel?.isVisible == true {
+                installEscapeMonitors()
+            }
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Discard this meeting recording?"
+        alert.informativeText = "This will stop the meeting recording and delete the captured audio. No transcript will be saved."
+        alert.addButton(withTitle: "Keep Recording")
+        alert.addButton(withTitle: "Discard Recording")
+        alert.buttons.last?.hasDestructiveAction = true
+
+        let response = alert.runModal()
+        guard response == .alertSecondButtonReturn else { return }
+
+        Task { [weak session] in
+            await session?.cancelRecording(reason: .escapeConfirmation)
+        }
     }
 
     private func scheduleAutoHide(after seconds: Double) {
