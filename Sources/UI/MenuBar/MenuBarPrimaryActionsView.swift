@@ -2,11 +2,14 @@ import AppKit
 
 @MainActor
 final class MenuBarPrimaryActionsView: NSView {
+    var onOpenHome: (() -> Void)?
     var onStartDictation: (() -> Void)?
     var onStartMeeting: (() -> Void)?
     var onPasteLastDictation: (() -> Void)?
     var onOpenRecentMeetings: (() -> Void)?
 
+    private let homeRow = MenuBarActionRowView()
+    private let homeDivider = NSView()
     private let dictationRow = MenuBarActionRowView()
     private let meetingRow = MenuBarActionRowView()
     private let pasteRow = MenuBarActionRowView()
@@ -23,12 +26,16 @@ final class MenuBarPrimaryActionsView: NSView {
     override var isFlipped: Bool { true }
 
     private func setupViews() {
+        homeRow.onPress = { [weak self] in self?.onOpenHome?() }
         dictationRow.onPress = { [weak self] in self?.onStartDictation?() }
         meetingRow.onPress = { [weak self] in self?.onStartMeeting?() }
         pasteRow.onPress = { [weak self] in self?.onPasteLastDictation?() }
         recentMeetingsRow.onPress = { [weak self] in self?.onOpenRecentMeetings?() }
 
-        [dictationRow, meetingRow, pasteRow, recentMeetingsRow].forEach(addSubview(_:))
+        homeDivider.wantsLayer = true
+        homeDivider.layer?.backgroundColor = MenuTokens.sectionDividerNS.cgColor
+
+        [homeRow, homeDivider, dictationRow, meetingRow, pasteRow, recentMeetingsRow].forEach(addSubview(_:))
     }
 
     func update(
@@ -39,6 +46,14 @@ final class MenuBarPrimaryActionsView: NSView {
         pasteDetail: String,
         pasteEnabled: Bool
     ) {
+        homeRow.update(
+            symbolName: "house.fill",
+            title: "Home",
+            detail: "",
+            tone: .standard,
+            size: .utility
+        )
+
         dictationRow.update(
             symbolName: "mic.fill",
             title: "Start Dictation",
@@ -88,14 +103,24 @@ final class MenuBarPrimaryActionsView: NSView {
         let thirdHeight = pasteRow.intrinsicContentSize.height
         let fourthHeight = recentMeetingsRow.intrinsicContentSize.height
 
-        dictationRow.frame = NSRect(x: 0, y: 0, width: bounds.width, height: firstHeight)
+        var y: CGFloat = 0
+        let homeHeight = homeRow.intrinsicContentSize.height
+        homeRow.frame = NSRect(x: 0, y: y, width: bounds.width, height: homeHeight)
+        y += homeHeight + 6
+
+        homeDivider.frame = NSRect(x: 0, y: y, width: bounds.width, height: 1)
+        y += 7
+
+        dictationRow.frame = NSRect(x: 0, y: y, width: bounds.width, height: firstHeight)
         meetingRow.frame = NSRect(x: 0, y: dictationRow.frame.maxY + 2, width: bounds.width, height: secondHeight)
         pasteRow.frame = NSRect(x: 0, y: meetingRow.frame.maxY + 2, width: bounds.width, height: thirdHeight)
         recentMeetingsRow.frame = NSRect(x: 0, y: pasteRow.frame.maxY + 2, width: bounds.width, height: fourthHeight)
     }
 
     var intrinsicHeight: CGFloat {
-        dictationRow.intrinsicContentSize.height
+        homeRow.intrinsicContentSize.height
+            + 14
+            + dictationRow.intrinsicContentSize.height
             + meetingRow.intrinsicContentSize.height
             + pasteRow.intrinsicContentSize.height
             + recentMeetingsRow.intrinsicContentSize.height

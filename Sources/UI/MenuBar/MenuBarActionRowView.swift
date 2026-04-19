@@ -68,7 +68,7 @@ final class MenuBarActionRowView: NSControl {
 
         if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title) {
             symbolView.image = image.withSymbolConfiguration(
-                NSImage.SymbolConfiguration(pointSize: size == .primary ? 15 : 13, weight: .semibold)
+                NSImage.SymbolConfiguration(pointSize: size == .primary ? 14 : 12, weight: .semibold)
             )
         }
 
@@ -79,7 +79,7 @@ final class MenuBarActionRowView: NSControl {
 
     private func setupViews() {
         wantsLayer = true
-        layer?.cornerRadius = 6
+        layer?.cornerRadius = MenuTokens.cardCornerRadius
 
         addSubview(symbolWellView)
 
@@ -103,27 +103,42 @@ final class MenuBarActionRowView: NSControl {
     private func updateAppearance() {
         let backgroundColor: NSColor
         let iconTint: NSColor
+        let titleColor: NSColor
+        let detailColor: NSColor
+        let trailingColor: NSColor
 
         if !isEnabled {
             backgroundColor = MenuTokens.flatRowDisabledNS
             iconTint = MenuTokens.textMutedNS
+            titleColor = MenuTokens.textMutedNS
+            detailColor = MenuTokens.textMutedNS
+            trailingColor = MenuTokens.textMutedNS
         } else if isPressing {
             backgroundColor = MenuTokens.flatRowPressedNS
-            iconTint = toneColors().pressed
+            iconTint = .white
+            titleColor = .white
+            detailColor = NSColor.white.withAlphaComponent(0.78)
+            trailingColor = NSColor.white.withAlphaComponent(0.82)
         } else if isHovering {
             backgroundColor = MenuTokens.flatRowHoverNS
-            iconTint = toneColors().normal
+            iconTint = .white
+            titleColor = .white
+            detailColor = NSColor.white.withAlphaComponent(0.78)
+            trailingColor = NSColor.white.withAlphaComponent(0.82)
         } else {
             backgroundColor = .clear
             iconTint = toneColors().normal
+            titleColor = MenuTokens.textPrimaryNS
+            detailColor = MenuTokens.textSecondaryNS
+            trailingColor = MenuTokens.textMutedNS
         }
 
         layer?.backgroundColor = backgroundColor.cgColor
         layer?.borderWidth = 0
         symbolView.contentTintColor = iconTint
-        titleLabel.textColor = MenuTokens.textPrimaryNS
-        detailLabel.textColor = MenuTokens.textSecondaryNS
-        trailingLabel.textColor = MenuTokens.textMutedNS
+        titleLabel.textColor = titleColor
+        detailLabel.textColor = detailColor
+        trailingLabel.textColor = trailingColor
         alphaValue = isEnabled ? 1.0 : 0.55
     }
 
@@ -142,10 +157,10 @@ final class MenuBarActionRowView: NSControl {
         super.layout()
 
         let hasDetail = !detailLabel.isHidden
-        let padX: CGFloat = 2
-        let iconWidth: CGFloat = rowSize == .primary ? 18 : 16
-        let symbolSize: CGFloat = rowSize == .primary ? 15 : 13
-        let trailingWidth: CGFloat = trailingLabel.isHidden ? 0 : (rowSize == .primary ? 92 : 70)
+        let padX: CGFloat = 6
+        let iconWidth: CGFloat = rowSize == .primary ? 17 : 16
+        let symbolSize: CGFloat = rowSize == .primary ? 14 : 12
+        let trailingWidth: CGFloat = trailingLabel.isHidden ? 0 : (rowSize == .primary ? 76 : 64)
         let trailingSpacing: CGFloat = trailingWidth > 0 ? 8 : 0
         let contentWidth = bounds.width - (padX * 2) - iconWidth - 8 - trailingWidth - trailingSpacing
         let textWidth = max(CGFloat(0), contentWidth)
@@ -166,7 +181,7 @@ final class MenuBarActionRowView: NSControl {
             titleLabel.frame = NSRect(x: textX, y: centeredY, width: textWidth, height: 16)
             detailLabel.frame = .zero
         } else {
-            let titleY: CGFloat = rowSize == .primary ? 2 : 1
+            let titleY: CGFloat = rowSize == .primary ? 1 : 1
             titleLabel.frame = NSRect(x: textX, y: titleY, width: textWidth, height: 16)
             detailLabel.frame = NSRect(x: textX, y: titleLabel.frame.maxY + 1, width: textWidth, height: 13)
         }
@@ -181,13 +196,13 @@ final class MenuBarActionRowView: NSControl {
     private func updateTypography() {
         switch rowSize {
         case .primary:
-            titleLabel.font = NSFont.systemFont(ofSize: 12.5, weight: .semibold)
-            detailLabel.font = NSFont.systemFont(ofSize: 10.5)
-            trailingLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        case .utility:
             titleLabel.font = NSFont.systemFont(ofSize: 12.5, weight: .medium)
-            detailLabel.font = NSFont.systemFont(ofSize: 10.5)
+            detailLabel.font = NSFont.systemFont(ofSize: 10)
             trailingLabel.font = NSFont.systemFont(ofSize: 10.5, weight: .medium)
+        case .utility:
+            titleLabel.font = NSFont.systemFont(ofSize: 12.5, weight: .regular)
+            detailLabel.font = NSFont.systemFont(ofSize: 10)
+            trailingLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
         }
     }
 
@@ -195,7 +210,7 @@ final class MenuBarActionRowView: NSControl {
         let hasDetail = !detailLabel.stringValue.isEmpty
         switch rowSize {
         case .primary:
-            return hasDetail ? 32 : 24
+            return hasDetail ? MenuTokens.compactActionRowHeight : 24
         case .utility:
             return hasDetail ? 28 : 24
         }

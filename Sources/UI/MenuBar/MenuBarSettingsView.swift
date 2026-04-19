@@ -14,8 +14,8 @@ final class MenuBarSettingsView: NSView {
     )
     private let settingsButton = MenuIconButton(
         symbolName: "gearshape",
-        accessibilityLabel: "Open settings",
-        toolTip: "Open settings"
+        accessibilityLabel: "Settings",
+        toolTip: "Settings"
     )
     private let updatesButton = MenuIconButton(
         symbolName: "arrow.triangle.2.circlepath.circle",

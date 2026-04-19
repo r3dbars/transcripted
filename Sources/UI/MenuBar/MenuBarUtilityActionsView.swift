@@ -68,7 +68,7 @@ final class MenuBarUtilityActionsView: NSView {
 
         settingsRow.update(
             symbolName: "gearshape",
-            title: "Open Settings",
+            title: "Settings",
             detail: "",
             tone: .standard,
             size: .utility
