@@ -12,6 +12,7 @@
 - `MeetingFailureKind.swift` — canonical failure taxonomy that classifies raw meeting errors into stable machine-readable kinds
 - `MeetingImportedAudioPreparer.swift` — copies imported recordings into app-managed scratch paths, derives titles, and prepares single-file meeting transcription jobs
 - `MeetingModelDownloader.swift` — loads Parakeet and diarization models together
+- `MeetingWarmupStatusPolicy.swift` — centralizes the title/detail copy and visibility rules for quiet vs user-visible meeting model warmup states
 - `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, and asks the overlay to offer one-tap recording prompts
 - `MeetingPromptHeuristics.swift` — shared scoring and snooze rules for calendar- and runtime-based prompt candidates
 - `MeetingRecordingCleanup.swift` — removes scratch audio when a live meeting recording is explicitly discarded instead of saved
@@ -86,6 +87,7 @@ Relevant direct coverage:
 - `Tests/MeetingFailureKindTests.swift`
 - `Tests/MeetingPromptHeuristicsTests.swift`
 - `Tests/MeetingRecordingStartGateTests.swift`
+- `Tests/MeetingWarmupStatusPolicyTests.swift`
 - `Tests/MeetingSessionUIPolicyTests.swift`
 - `Tests/MeetingTranscriptStylerTests.swift`
 - `Tests/SpeakerNamingPolicyTests.swift`
