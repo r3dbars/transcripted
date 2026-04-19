@@ -779,12 +779,12 @@ private struct AgentConnectionSettingsPage: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Connect Your Agent",
-                summary: "Copy one smart prompt with the Summarize and Search Memory starter skills."
+                summary: "Copy one smart prompt with the Summarize and Search Memory starter skills. The agent picks the best route automatically."
             )
 
             SettingsSection(
                 title: "Main Path",
-                detail: "Most people only need the main prompt. It tells the agent to prefer MCP when available, fall back to folders when not, and use the two starter skills."
+                detail: "Most people only need the main prompt. Local agents read Transcripted directly; remote chats get one clear next step if they cannot reach this Mac."
             ) {
                 ForEach(Array(AgentConnectionGuide.starterSkills.enumerated()), id: \.offset) { _, skill in
                     SettingsQuickLinkRow(

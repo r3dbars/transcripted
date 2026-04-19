@@ -15,7 +15,7 @@ final class MenuAgentConnectPageView: NSView {
     )
     private let titleLabel = NSTextField(labelWithString: "Connect your agent")
     private let subtitleLabel = NSTextField(wrappingLabelWithString:
-        "Copy one prompt, paste it into your agent, and let Transcripted use MCP when available or folders when not."
+        "Copy once, paste anywhere, and let your agent pick the best available Transcripted connection."
     )
     private let starterPromptLabel = NSTextField(labelWithString: "Starter skills")
     private let benefitOneRow = AgentConnectInfoRowView(

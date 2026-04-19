@@ -29,8 +29,12 @@ func testAgentConnectionGuide() {
         assertTrue(prompt.contains("Summarize v0.1.0"), "prompt should include Summarize version")
         assertTrue(prompt.contains("Search Memory v0.1.0"), "prompt should include Search Memory version")
         assertTrue(
-            prompt.contains("Agent environment guidance:"),
+            prompt.contains("Automatic environment routing:"),
             "prompt should include environment-specific routing guidance"
+        )
+        assertTrue(
+            prompt.contains("Do not ask me to choose a connection mode."),
+            "prompt should keep routing decisions away from the user"
         )
         assertTrue(
             prompt.contains("Local agents running on this Mac, such as Codex, Claude Code in the terminal"),
@@ -57,8 +61,8 @@ func testAgentConnectionGuide() {
             "prompt should make SKILL.md files canonical for matching tasks"
         )
         assertTrue(
-            prompt.contains("Briefly tell me which environment, connection mode, and skill versions are active."),
-            "prompt should report active environment, connection, and skill versions"
+            prompt.contains("Briefly tell me the chosen route and active skill versions. Do not make me choose."),
+            "prompt should report the chosen route without making the user choose"
         )
         assertTrue(
             prompt.contains("continue with folder fallback for the current session when folders are readable"),

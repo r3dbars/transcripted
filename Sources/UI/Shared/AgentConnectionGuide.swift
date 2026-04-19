@@ -101,16 +101,21 @@ enum AgentConnectionGuide {
 
         Your job is to connect to my Transcripted data using the best available method, then help me search and summarize my meetings and dictations.
 
-        Connection priority:
+        Connection behavior:
+        - Do not ask me to choose a connection mode.
+        - Silently pick the best available route, then continue.
+        - Only stop when you cannot read any Transcripted data. If that happens, give me one smallest next step.
+
+        Automatic route priority:
         1. If Transcripted MCP tools are already available in this environment, use them first.
         2. If Transcripted MCP tools are not available, but this environment can build or configure a local MCP server, try to set up Transcripted MCP using the information below.
         3. If MCP cannot be used here, fall back to direct file access using the local folders below.
         4. If neither MCP nor folder access is possible, stop and tell me exactly what is missing, what you tried, and the smallest next step I need to take.
 
-        Agent environment guidance:
+        Automatic environment routing:
         - Local agents running on this Mac, such as Codex, Claude Code in the terminal, Claude Code in an app, OpenCode, or OpenClaw, can usually read the local folders and bundled skill files. Use MCP when configured; otherwise use folder fallback.
         - Desktop clients with local stdio MCP support, such as Claude Desktop, can use Transcripted MCP after the MCP config is added and the client is restarted.
-        - Remote or web chats, such as Claude chat in a browser, mobile chat, or any sandbox that cannot read `/Users/...` paths, cannot use local folders, local skill files, or local stdio MCP. Ask me to upload or paste captures, or use a remote MCP connector if one exists.
+        - Remote or web chats, such as Claude chat in a browser, mobile chat, or any sandbox that cannot read `/Users/...` paths, cannot use local folders, local skill files, or local stdio MCP. Do not ask me to choose a mode. Say that this chat cannot reach my Mac directly, then ask me for the single smallest useful action: upload or paste captures, switch to a local agent, or use a remote connector if one is available.
         - Cowork or shared-agent environments may be local or remote. First determine whether the execution environment can read local Mac paths, then follow the matching rule above.
 
         \(mcpPromptBlock)
@@ -148,10 +153,10 @@ enum AgentConnectionGuide {
         - If MCP setup requires restarting the agent, say so, then continue with folder fallback for the current session when folders are readable.
 
         First step:
-        1. Determine which environment type you are in: local Mac agent, desktop MCP client, remote/web chat, or unknown cowork/shared context.
-        2. Determine which connection mode is available: MCP, MCP setup, folders, uploaded/pasted files, or unavailable.
+        1. Silently determine which environment type you are in: local Mac agent, desktop MCP client, remote/web chat, or unknown cowork/shared context.
+        2. Silently determine which connection mode is available: MCP, MCP setup, folders, uploaded/pasted files, or unavailable.
         3. Confirm whether the bundled SKILL.md files are readable.
-        4. Briefly tell me which environment, connection mode, and skill versions are active.
+        4. Briefly tell me the chosen route and active skill versions. Do not make me choose.
         5. Then continue with my task.
         """
 
