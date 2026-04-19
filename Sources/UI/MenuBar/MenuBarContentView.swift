@@ -65,18 +65,25 @@ final class MenuBarContentView: NSView {
         var y = pad
 
         let headerHeight = headerView.intrinsicHeight
-        headerView.frame = NSRect(x: pad, y: y, width: width, height: headerHeight)
-        y += headerHeight + 10
+        headerView.isHidden = headerHeight <= 0
+        headerDivider.isHidden = headerHeight <= 0
+        if headerHeight > 0 {
+            headerView.frame = NSRect(x: pad, y: y, width: width, height: headerHeight)
+            y += headerHeight + 8
 
-        headerDivider.frame = NSRect(x: pad, y: y, width: width, height: 1)
-        y += 9
+            headerDivider.frame = NSRect(x: pad, y: y, width: width, height: 1)
+            y += 7
+        } else {
+            headerView.frame = .zero
+            headerDivider.frame = .zero
+        }
 
         let primaryHeight = primaryActionsView.intrinsicHeight
         primaryActionsView.frame = NSRect(x: pad, y: y, width: width, height: primaryHeight)
         y += primaryHeight + MenuTokens.sectionSpacing
 
         sectionDivider.frame = NSRect(x: pad, y: y, width: width, height: 1)
-        y += 9
+        y += 7
 
         let utilityHeight = utilityActionsView.intrinsicHeight
         utilityActionsView.frame = NSRect(x: pad, y: y, width: width, height: utilityHeight)
