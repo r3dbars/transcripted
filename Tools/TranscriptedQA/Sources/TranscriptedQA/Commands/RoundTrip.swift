@@ -65,13 +65,13 @@ struct RoundTrip: ParsableCommand {
                 }
             }),
 
-            ("Remove JSON sidecar file", {
-                try corruptionTest(cleanDir: cleanDir, tmpBase: tmpBase, name: "sidecar-missing") { dir in
-                    let jsonFile = dir.appendingPathComponent("Call_2026-03-26_10-30-00.json")
-                    try fm.removeItem(at: jsonFile)
+            ("Remove Markdown file for JSON sidecar", {
+                try corruptionTest(cleanDir: cleanDir, tmpBase: tmpBase, name: "markdown-missing") { dir in
+                    let mdFile = dir.appendingPathComponent("Call_2026-03-26_10-30-00.md")
+                    try fm.removeItem(at: mdFile)
 
-                    let results = TranscriptValidator(directory: dir).validate()
-                    return results.contains { $0.status == .fail && $0.check == "transcript/sidecar-exists" }
+                    let results = JSONSidecarValidator(directory: dir).validate()
+                    return results.contains { $0.status == .fail && $0.check == "artifact/md-match" }
                 }
             }),
 

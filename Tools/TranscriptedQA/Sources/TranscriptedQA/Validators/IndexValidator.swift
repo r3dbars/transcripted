@@ -28,19 +28,30 @@ struct IndexValidator {
                 results.append(.fail("index/count-match", target: target, detail: "transcript_count=\(count) but array has \(transcripts.count) entries"))
             }
 
-            // Files exist on disk
-            var allExist = true
+            // Files exist on disk. Legacy indexes were built around JSON
+            // artifacts, but current Transcripted output is Markdown-first.
+            var allLegacyJSONExist = true
+            var allMarkdownExist = true
             for transcript in transcripts {
                 if let filename = transcript["filename"] as? String {
                     let jsonFile = directory.appendingPathComponent("\(filename).json")
                     if !FileManager.default.fileExists(atPath: jsonFile.path) {
                         results.append(.fail("index/file-on-disk", target: target, detail: "\(filename).json not found on disk"))
-                        allExist = false
+                        allLegacyJSONExist = false
+                    }
+
+                    let markdownFile = directory.appendingPathComponent("\(filename).md")
+                    if !FileManager.default.fileExists(atPath: markdownFile.path) {
+                        results.append(.fail("index/markdown-on-disk", target: target, detail: "\(filename).md not found on disk"))
+                        allMarkdownExist = false
                     }
                 }
             }
-            if allExist {
+            if allLegacyJSONExist {
                 results.append(.pass("index/files-exist", target: target))
+            }
+            if allMarkdownExist {
+                results.append(.pass("index/markdown-files-exist", target: target))
             }
         } else {
             results.append(.fail("index/structure", target: target, detail: "Missing transcript_count or transcripts array"))
