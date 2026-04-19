@@ -107,6 +107,12 @@ enum AgentConnectionGuide {
         3. If MCP cannot be used here, fall back to direct file access using the local folders below.
         4. If neither MCP nor folder access is possible, stop and tell me exactly what is missing, what you tried, and the smallest next step I need to take.
 
+        Agent environment guidance:
+        - Local agents running on this Mac, such as Codex, Claude Code in the terminal, Claude Code in an app, OpenCode, or OpenClaw, can usually read the local folders and bundled skill files. Use MCP when configured; otherwise use folder fallback.
+        - Desktop clients with local stdio MCP support, such as Claude Desktop, can use Transcripted MCP after the MCP config is added and the client is restarted.
+        - Remote or web chats, such as Claude chat in a browser, mobile chat, or any sandbox that cannot read `/Users/...` paths, cannot use local folders, local skill files, or local stdio MCP. Ask me to upload or paste captures, or use a remote MCP connector if one exists.
+        - Cowork or shared-agent environments may be local or remote. First determine whether the execution environment can read local Mac paths, then follow the matching rule above.
+
         \(mcpPromptBlock)
 
         Folder fallback:
@@ -132,15 +138,21 @@ enum AgentConnectionGuide {
         \(starterSkillPromptBlock)
 
         Skill loading rules:
-        - When your environment can read local files, open the relevant SKILL.md file above and treat it as the canonical behavior.
+        - Before offering task options, check whether the manifest and bundled SKILL.md files above are readable.
+        - If the files are readable, say "Bundled skills active" and list Summarize and Search Memory with their versions.
+        - When I ask for Summarize or Search Memory behavior, open the matching SKILL.md before answering and treat it as the canonical behavior.
         - Use the skill versions above when giving feedback or suggesting improvements.
         - If you cannot read the skill files, say that clearly and use this fallback:
           - Summarize: create a cited brief from meetings, dictations, or a date range.
           - Search Memory: find what was said, when it happened, and where it came from.
+        - If MCP setup requires restarting the agent, say so, then continue with folder fallback for the current session when folders are readable.
 
         First step:
-        Determine which connection mode is available: MCP, MCP setup, or folders.
-        Briefly tell me which mode you are using, then continue with my task.
+        1. Determine which environment type you are in: local Mac agent, desktop MCP client, remote/web chat, or unknown cowork/shared context.
+        2. Determine which connection mode is available: MCP, MCP setup, folders, uploaded/pasted files, or unavailable.
+        3. Confirm whether the bundled SKILL.md files are readable.
+        4. Briefly tell me which environment, connection mode, and skill versions are active.
+        5. Then continue with my task.
         """
 
         if let filename {

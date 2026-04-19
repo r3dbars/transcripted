@@ -29,12 +29,40 @@ func testAgentConnectionGuide() {
         assertTrue(prompt.contains("Summarize v0.1.0"), "prompt should include Summarize version")
         assertTrue(prompt.contains("Search Memory v0.1.0"), "prompt should include Search Memory version")
         assertTrue(
+            prompt.contains("Agent environment guidance:"),
+            "prompt should include environment-specific routing guidance"
+        )
+        assertTrue(
+            prompt.contains("Local agents running on this Mac, such as Codex, Claude Code in the terminal"),
+            "prompt should name local agent contexts"
+        )
+        assertTrue(
+            prompt.contains("Remote or web chats, such as Claude chat in a browser"),
+            "prompt should explain remote chat limitations"
+        )
+        assertTrue(
+            prompt.contains("Cowork or shared-agent environments may be local or remote."),
+            "prompt should force cowork-style environments to classify local vs remote execution"
+        )
+        assertTrue(
             prompt.contains("Treat the raw transcript or dictation text as the source of truth."),
             "prompt should ground answers in raw captures"
         )
         assertTrue(
-            prompt.contains("When your environment can read local files, open the relevant SKILL.md file above"),
-            "prompt should make SKILL.md files canonical"
+            prompt.contains("Before offering task options, check whether the manifest and bundled SKILL.md files above are readable."),
+            "prompt should require a skill-file check before offering tasks"
+        )
+        assertTrue(
+            prompt.contains("When I ask for Summarize or Search Memory behavior, open the matching SKILL.md before answering"),
+            "prompt should make SKILL.md files canonical for matching tasks"
+        )
+        assertTrue(
+            prompt.contains("Briefly tell me which environment, connection mode, and skill versions are active."),
+            "prompt should report active environment, connection, and skill versions"
+        )
+        assertTrue(
+            prompt.contains("continue with folder fallback for the current session when folders are readable"),
+            "prompt should keep Claude Code moving when MCP setup needs restart"
         )
         assertTrue(
             prompt.contains("If helpful, start with this meeting:\nPlanning Sync.md"),
