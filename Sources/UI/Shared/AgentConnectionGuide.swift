@@ -1,9 +1,19 @@
 import Foundation
 
 struct AgentConnectionStarterSkill {
+    let id: String
     let symbolName: String
     let title: String
+    let version: String
     let detail: String
+
+    var relativeSkillPath: String {
+        "\(id)/SKILL.md"
+    }
+
+    var displayDetail: String {
+        "v\(version) - \(detail)"
+    }
 }
 
 enum AgentConnectionGuide {
@@ -40,16 +50,50 @@ enum AgentConnectionGuide {
 
     static let starterSkills = [
         AgentConnectionStarterSkill(
+            id: "transcripted-summarize",
             symbolName: "doc.text",
             title: "Summarize",
+            version: "0.1.0",
             detail: "Create a cited brief from meetings, dictations, or a date range."
         ),
         AgentConnectionStarterSkill(
+            id: "transcripted-search-memory",
             symbolName: "magnifyingglass",
             title: "Search Memory",
+            version: "0.1.0",
             detail: "Find what was said, when it happened, and where it came from."
         ),
     ]
+
+    static var agentSkillsFolder: URL {
+        let fileManager = FileManager.default
+
+        if let resourceURL = Bundle.main.resourceURL {
+            let bundledURL = resourceURL.appendingPathComponent("AgentSkills", isDirectory: true)
+            if fileManager.fileExists(atPath: bundledURL.path) {
+                return bundledURL
+            }
+        }
+
+        let repoURL = URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
+            .appendingPathComponent("Resources", isDirectory: true)
+            .appendingPathComponent("AgentSkills", isDirectory: true)
+
+        if fileManager.fileExists(atPath: repoURL.path) {
+            return repoURL
+        }
+
+        return (Bundle.main.resourceURL ?? repoURL.deletingLastPathComponent())
+            .appendingPathComponent("AgentSkills", isDirectory: true)
+    }
+
+    static var agentSkillsManifest: URL {
+        agentSkillsFolder.appendingPathComponent("manifest.json", isDirectory: false)
+    }
+
+    static func skillFileURL(for skill: AgentConnectionStarterSkill) -> URL {
+        agentSkillsFolder.appendingPathComponent(skill.relativeSkillPath, isDirectory: false)
+    }
 
     static func starterPrompt(filename: String?) -> String {
         var prompt = """
@@ -84,45 +128,15 @@ enum AgentConnectionGuide {
         - Surface uncertainty clearly.
         - If setup is needed, minimize back-and-forth and propose the next concrete action.
 
-        Starter skills:
+        Bundled starter skill files:
+        \(starterSkillPromptBlock)
 
-        1. Summarize
-        Use this when I ask for a summary, recap, brief, daily review, weekly review, or "what did I do" style answer.
-
-        What to do:
-        - Resolve the scope first: one meeting, one dictation, a date range, a person, a project, or a topic.
-        - Read the relevant source material before summarizing. For a specific meeting, read the full meeting when possible.
-        - Filter out obvious junk such as test captures, accidental fragments, setup chatter, and empty or near-empty recordings.
-        - Produce a clean brief with these sections when relevant:
-          - Brief
-          - Main Threads
-          - Decisions
-          - Action Items
-          - Open Questions
-          - Risks / Blockers
-          - Worth Remembering
-          - Sources
-          - Uncertainty
-
-        Summarize rules:
-        - Do not invent owners, deadlines, decisions, or action items.
-        - If an owner, deadline, or status is missing, write "unknown".
-        - Separate decisions from action items.
-        - Cite the source meeting or dictation for important claims.
-
-        2. Search Memory
-        Use this when I ask what I said, when something happened, where an idea came from, who mentioned something, or what the history of a topic is.
-
-        What to do:
-        - Search first, then synthesize.
-        - Combine exact search, relevant context search, recency, date filters, people, and topics when the available connection mode supports them.
-        - Show the best matches with source name, date, speaker, timestamp, snippet, and why each match surfaced when available.
-        - Then give the answer, timeline, related threads, confidence level, sources, and uncertainty when relevant.
-
-        Search Memory rules:
-        - Do not answer from vague memory when sources are available.
-        - If the evidence is thin, say so and suggest the narrower search that would help.
-        - If nothing relevant is found, say "not found" and list what you searched.
+        Skill loading rules:
+        - When your environment can read local files, open the relevant SKILL.md file above and treat it as the canonical behavior.
+        - Use the skill versions above when giving feedback or suggesting improvements.
+        - If you cannot read the skill files, say that clearly and use this fallback:
+          - Summarize: create a cited brief from meetings, dictations, or a date range.
+          - Search Memory: find what was said, when it happened, and where it came from.
 
         First step:
         Determine which connection mode is available: MCP, MCP setup, or folders.
@@ -134,6 +148,16 @@ enum AgentConnectionGuide {
         }
 
         return prompt
+    }
+
+    static var starterSkillPromptBlock: String {
+        var lines = ["- Manifest: \(agentSkillsManifest.path)"]
+
+        for skill in starterSkills {
+            lines.append("- \(skill.title) v\(skill.version): \(skillFileURL(for: skill).path)")
+        }
+
+        return lines.joined(separator: "\n")
     }
 
     static var mcpPromptBlock: String {

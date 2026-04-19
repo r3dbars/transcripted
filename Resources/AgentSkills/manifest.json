@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "bundle_version": "0.1.0",
+  "skills": [
+    {
+      "id": "transcripted-summarize",
+      "display_name": "Summarize",
+      "version": "0.1.0",
+      "status": "experimental",
+      "path": "transcripted-summarize/SKILL.md",
+      "description": "Create cited briefs from Transcripted meetings, dictations, or date ranges."
+    },
+    {
+      "id": "transcripted-search-memory",
+      "display_name": "Search Memory",
+      "version": "0.1.0",
+      "status": "experimental",
+      "path": "transcripted-search-memory/SKILL.md",
+      "description": "Find what was said, when it happened, and where it came from."
+    }
+  ],
+  "iteration": {
+    "versioning": "Bump the individual skill version when changing behavior. Bump bundle_version when changing the shipped starter set.",
+    "feedback_focus": [
+      "Did the skill retrieve the right captures?",
+      "Did it cite sources clearly?",
+      "Did it avoid inventing missing owners, dates, or decisions?",
+      "Was the output shape useful enough to reuse?"
+    ]
+  }
+}

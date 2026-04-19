@@ -169,7 +169,7 @@ struct AgentConnectionWindowView: View {
                     AgentConnectionInfoRow(
                         symbolName: skill.symbolName,
                         title: skill.title,
-                        detail: skill.detail
+                        detail: skill.displayDetail
                     )
                 }
             }

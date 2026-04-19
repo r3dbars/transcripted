@@ -19,14 +19,14 @@ final class MenuAgentConnectPageView: NSView {
     )
     private let starterPromptLabel = NSTextField(labelWithString: "Starter skills")
     private let benefitOneRow = AgentConnectInfoRowView(
-        symbolName: "doc.text",
-        title: "Summarize",
-        body: "Create a cited brief from meetings, dictations, or a date range."
+        symbolName: AgentConnectionGuide.starterSkills[0].symbolName,
+        title: AgentConnectionGuide.starterSkills[0].title,
+        body: AgentConnectionGuide.starterSkills[0].displayDetail
     )
     private let benefitTwoRow = AgentConnectInfoRowView(
-        symbolName: "magnifyingglass",
-        title: "Search Memory",
-        body: "Find what was said, when it happened, and where it came from."
+        symbolName: AgentConnectionGuide.starterSkills[1].symbolName,
+        title: AgentConnectionGuide.starterSkills[1].title,
+        body: AgentConnectionGuide.starterSkills[1].displayDetail
     )
     private let manualSetupLabel = NSTextField(labelWithString: "Need manual setup?")
     private let mcpRow = AgentConnectInfoRowView(

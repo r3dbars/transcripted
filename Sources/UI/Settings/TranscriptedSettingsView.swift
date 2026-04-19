@@ -790,7 +790,7 @@ private struct AgentConnectionSettingsPage: View {
                     SettingsQuickLinkRow(
                         symbolName: skill.symbolName,
                         title: skill.title,
-                        detail: skill.detail
+                        detail: skill.displayDetail
                     ) {}
                     .disabled(true)
                 }
