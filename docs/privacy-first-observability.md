@@ -68,8 +68,12 @@ PostHog controls described below.
 - `dictation_completed`
 - `dictation_cancelled`
 - `dictation_no_speech`
+- `meeting_prompt_shown`
+- `meeting_prompt_dismissed`
+- `meeting_prompt_record_selected`
 - `meeting_recording_started`
 - `meeting_recording_stopped`
+- `meeting_recording_cancelled`
 - `meeting_transcript_saved`
 - `meeting_transcript_failed`
 

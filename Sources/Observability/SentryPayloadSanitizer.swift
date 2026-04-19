@@ -7,12 +7,16 @@ enum SentryPayloadSanitizer {
         "authorization",
         "bearer",
         "bundle",
+        "credential",
+        "dsn",
         "email",
         "error",
         "file",
+        "password",
         "path",
         "speaker",
         "source_app",
+        "secret",
         "text",
         "title",
         "token",
@@ -42,7 +46,7 @@ enum SentryPayloadSanitizer {
     )
     private static let bearerRegex = makeRegex(#"Bearer\s+[A-Za-z0-9._-]+"#, options: [.caseInsensitive])
     private static let secretAssignmentRegex = makeRegex(
-        #"(?i)\b((?:access_)?token|refresh_token|api[_-]?key|x-api-key|signature|x-amz-signature)\s*[:=]\s*([^\s,;]+)"#
+        #"(?i)\b((?:access_)?token|refresh_token|api[_-]?key|x-api-key|signature|x-amz-signature|password|passphrase|secret|client[_-]?secret|credential|dsn)\s*[:=]\s*([^\s,;]+)"#
     )
     private static let emailRegex = makeRegex(#"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}"#, options: [.caseInsensitive])
     private static let localHostnameRegex = makeRegex(#"\b[a-zA-Z0-9._-]+\.local\b"#)
