@@ -1,7 +1,8 @@
 // DiarizationService.swift
 // Dual-pipeline speaker diarization using FluidAudio.
 //
-// Streaming (Sortformer): Real-time diarization for live preview (future use).
+// Streaming (Sortformer): Real-time diarization for live preview (future use,
+// optional during app warmup).
 //   - DiarizerManager, T×4 output matrix, up to 4 speakers.
 //
 // Offline (PyAnnote): Post-recording diarization for final transcripts.
@@ -51,6 +52,7 @@ public class DiarizationService: ObservableObject {
     // Offline pipeline (PyAnnote) — for post-recording transcripts
     private var offlineDiarizerManager: OfflineDiarizerManager?
     private var offlineModelState: DiarizationModelState = .notLoaded
+    private var optionalStreamingWarmupTask: Task<Void, Never>?
 
     /// Provider that resolves bundled model directories. Embedders can swap this to
     /// redirect lookups (e.g. a shared cache in Application Support). Returning `nil`
@@ -61,38 +63,38 @@ public class DiarizationService: ObservableObject {
         self.bundleProvider = bundleProvider
     }
 
-    public var isReady: Bool { modelState == .ready }
+    public var isReady: Bool { modelState == .ready && offlineDiarizerManager != nil }
 
     // MARK: - Model Initialization
 
-    /// Load all diarization models (streaming + offline) from the app bundle or download.
+    /// Load the offline diarization models required by the current meeting pipeline.
+    /// Sortformer streaming is optional because no production meeting flow calls it yet.
     public func initialize() async {
-        guard diarizerManager == nil, offlineDiarizerManager == nil else {
-            AppLogger.transcription.debug("Diarization already initialized")
+        guard offlineDiarizerManager == nil else {
+            modelState = .ready
+            startOptionalStreamingWarmupIfAvailable()
+            AppLogger.transcription.debug("Offline diarization already initialized")
             return
         }
 
         modelState = .loading
-        AppLogger.transcription.info("Diarization initializing models")
+        AppLogger.transcription.info("Diarization initializing offline models")
 
         do {
-            // Initialize streaming (Sortformer) pipeline
-            try await initializeStreaming()
-
-            // Initialize offline (PyAnnote) pipeline
             try await initializeOffline()
 
             modelState = .ready
-            AppLogger.transcription.info("Diarization models loaded and ready")
+            startOptionalStreamingWarmupIfAvailable()
+            AppLogger.transcription.info("Offline diarization models loaded and ready")
         } catch {
             let kind = ModelDownloadService.classifyError(error)
             modelState = .failed(kind.detail)
-            AppLogger.transcription.error("Diarization model initialization failed", ["error": "\(error.localizedDescription)", "kind": kind.title])
+            AppLogger.transcription.error("Offline diarization model initialization failed", ["error": "\(error.localizedDescription)", "kind": kind.title])
         }
     }
 
     /// Load Sortformer streaming models from the app bundle or download from HuggingFace.
-    private func initializeStreaming() async throws {
+    private func initializeStreaming(allowDownload: Bool = true) async throws {
         let loadStart = Date()
         let manager = DiarizerManager(config: .default)
 
@@ -100,12 +102,16 @@ public class DiarizationService: ObservableObject {
             AppLogger.transcription.info("Sortformer loading from bundle", ["path": "\(bundlePath)"])
             let models = try await DiarizerModels.load(from: bundlePath)
             manager.initialize(models: models)
-        } else {
+        } else if allowDownload {
             AppLogger.transcription.info("Sortformer models not bundled, loading from cache or downloading")
             let models = try await ModelDownloadService.withRetry {
                 try await DiarizerModels.download()
             }
             manager.initialize(models: models)
+        } else {
+            throw NSError(domain: "DiarizationService", code: 3, userInfo: [
+                NSLocalizedDescriptionKey: "Sortformer streaming models are not bundled"
+            ])
         }
 
         diarizerManager = manager
@@ -237,6 +243,8 @@ public class DiarizationService: ObservableObject {
     // MARK: - Cleanup
 
     public func cleanup() {
+        optionalStreamingWarmupTask?.cancel()
+        optionalStreamingWarmupTask = nil
         diarizerManager = nil
         offlineDiarizerManager = nil
         modelState = .notLoaded
@@ -272,6 +280,30 @@ public class DiarizationService: ObservableObject {
         }
         AppLogger.transcription.error("speakerIdFromString failed to parse speaker ID, falling back to 0", ["raw_id": id])
         return 0
+    }
+}
+
+@available(macOS 14.0, *)
+private extension DiarizationService {
+    func startOptionalStreamingWarmupIfAvailable() {
+        guard diarizerManager == nil, optionalStreamingWarmupTask == nil else { return }
+        guard bundleProvider("sortformer-models") != nil else {
+            AppLogger.transcription.debug("Sortformer streaming models not bundled; skipping optional warmup")
+            return
+        }
+
+        optionalStreamingWarmupTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.optionalStreamingWarmupTask = nil }
+
+            do {
+                try await self.initializeStreaming(allowDownload: false)
+            } catch {
+                AppLogger.transcription.warning("Optional Sortformer streaming warmup skipped", [
+                    "error": error.localizedDescription
+                ])
+            }
+        }
     }
 }
 

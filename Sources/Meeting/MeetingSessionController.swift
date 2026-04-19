@@ -9,8 +9,9 @@
 //      so meeting captures follow the selected capture library while speakers DB,
 //      stats DB, failed-queue, logs, and scratch audio stay under the app-owned
 //      Transcripted Application Support folders.
-//   2. prepareModels() loads Parakeet + PyAnnote/WeSpeaker/Sortformer. Safe to
-//      call multiple times — each engine is idempotent.
+//   2. prepareModels() loads Parakeet + offline PyAnnote/WeSpeaker diarization.
+//      Optional streaming diarization warms only when bundled and never blocks
+//      the current meeting transcript path.
 //   3. startRecording() begins capture via MeetingCaptureBridge.
 //   4. stopRecording() awaits capture files, then either starts a background
 //      transcription immediately or enqueues it behind the current one.
@@ -45,23 +46,7 @@ final class MeetingSessionController: ObservableObject {
         case unknown = "unknown"
     }
 
-    struct ModelWarmupStatus: Equatable {
-        let title: String
-        let subtitle: String
-        let detail: String
-        let progress: Double
-        let dictationStatus: String
-        let meetingsStatus: String
-
-        static let ready = ModelWarmupStatus(
-            title: "Transcripted is ready",
-            subtitle: "Dictation and meetings are available",
-            detail: "",
-            progress: 1.0,
-            dictationStatus: "Ready",
-            meetingsStatus: "Ready"
-        )
-    }
+    typealias ModelWarmupStatus = MeetingWarmupStatus
 
     struct FailedMeetingItem: Identifiable, Equatable {
         let id: UUID
@@ -163,6 +148,7 @@ final class MeetingSessionController: ObservableObject {
     private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
     private var activeRecordingTrigger: StartTrigger = .unknown
     private var activeTranscriptionTrigger: StartTrigger = .unknown
+    private var shouldSurfaceMeetingWarmupFailure = false
 
     // MARK: - Init
 
@@ -251,6 +237,7 @@ final class MeetingSessionController: ObservableObject {
         }
 
         if showLoadingUI {
+            shouldSurfaceMeetingWarmupFailure = false
             state = .loadingModels
             refreshWarmupStatus()
         }
@@ -755,102 +742,19 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func refreshWarmupStatus() {
-        let dictationState = parakeetEngine.modelDownloadState
-        let meetingState = diarization.modelState
         let isMeetingWarmupInFlight = modelPreparationTask != nil || state == .loadingModels
-        let hasMeetingWarmupFailure: Bool
-        if case .failed = meetingState {
-            hasMeetingWarmupFailure = true
-        } else {
-            hasMeetingWarmupFailure = false
-        }
-        let shouldSurfaceMeetingWarmup = isMeetingWarmupInFlight || hasMeetingWarmupFailure
-
-        if case .ready = dictationState, case .ready = meetingState {
-            warmupStatus = .ready
-            return
-        }
-
-        switch dictationState {
-        case .downloading(let progress):
-            warmupStatus = ModelWarmupStatus(
-                title: "Getting Transcripted ready",
-                subtitle: "Downloading local dictation model",
-                detail: "Transcripted is downloading the on-device voice model used for dictation. This can take a minute or two on first launch.",
-                progress: max(0.08, min(0.62, 0.08 + progress * 0.54)),
-                dictationStatus: "Downloading \(Int(progress * 100))%",
-                meetingsStatus: "Waiting"
-            )
-        case .loading:
-            warmupStatus = ModelWarmupStatus(
-                title: "Getting Transcripted ready",
-                subtitle: "Loading local dictation model",
-                detail: "Transcripted has the model files and is loading dictation into memory.",
-                progress: 0.68,
-                dictationStatus: "Loading",
-                meetingsStatus: "Waiting"
-            )
-        case .failed(let message):
-            warmupStatus = ModelWarmupStatus(
-                title: "Couldn’t start dictation",
-                subtitle: "The local dictation model failed to load",
-                detail: message,
-                progress: 0,
-                dictationStatus: "Failed",
-                meetingsStatus: "Waiting"
-            )
-        case .ready:
-            guard shouldSurfaceMeetingWarmup else {
-                warmupStatus = .ready
-                return
-            }
-
-            switch meetingState {
-            case .ready:
-                warmupStatus = .ready
-            case .failed(let message):
-                warmupStatus = ModelWarmupStatus(
-                    title: "Couldn’t load meetings",
-                    subtitle: "Meeting transcription models failed to load",
-                    detail: message,
-                    progress: 0.72,
-                    dictationStatus: "Ready",
-                    meetingsStatus: "Failed"
-                )
-            case .loading:
-                warmupStatus = ModelWarmupStatus(
-                    title: "Getting Transcripted ready",
-                    subtitle: "Loading meeting transcription",
-                    detail: "Dictation is ready. Transcripted is still warming up meeting transcription in the background.",
-                    progress: 0.86,
-                    dictationStatus: "Ready",
-                    meetingsStatus: "Loading"
-                )
-            case .notLoaded:
-                warmupStatus = ModelWarmupStatus(
-                    title: "Getting Transcripted ready",
-                    subtitle: "Preparing meeting transcription",
-                    detail: "Dictation is ready. Meeting transcription is still starting up.",
-                    progress: 0.76,
-                    dictationStatus: "Ready",
-                    meetingsStatus: "Starting"
-                )
-            }
-        case .notLoaded:
-            warmupStatus = ModelWarmupStatus(
-                title: "Getting Transcripted ready",
-                subtitle: "Starting local dictation",
-                detail: "Transcripted is waking up the on-device dictation model.",
-                progress: 0.05,
-                dictationStatus: "Starting",
-                meetingsStatus: "Waiting"
-            )
-        }
+        warmupStatus = MeetingWarmupStatusPolicy.status(
+            dictationState: MeetingWarmupDictationState(parakeetEngine.modelDownloadState),
+            meetingState: MeetingWarmupMeetingState(diarization.modelState),
+            isMeetingWarmupInFlight: isMeetingWarmupInFlight,
+            shouldSurfaceMeetingWarmupFailure: shouldSurfaceMeetingWarmupFailure
+        )
     }
 
     private func applyModelPreparationResult(_ result: Result<Void, Error>, showLoadingUI: Bool) {
         switch result {
         case .success:
+            shouldSurfaceMeetingWarmupFailure = false
             switch state {
             case .recording, .transcribing:
                 break
@@ -858,6 +762,7 @@ final class MeetingSessionController: ObservableObject {
                 state = .ready
             }
         case .failure(let error):
+            shouldSurfaceMeetingWarmupFailure = showLoadingUI
             if showLoadingUI {
                 state = .error(error.localizedDescription)
             }
@@ -1198,6 +1103,38 @@ private extension DisplayStatus {
         case .finishing: return "finishing"
         case .transcriptSaved: return "transcript_saved"
         case .failed: return "failed"
+        }
+    }
+}
+
+private extension MeetingWarmupDictationState {
+    init(_ state: ParakeetModelState) {
+        switch state {
+        case .notLoaded:
+            self = .notLoaded
+        case .downloading(let progress):
+            self = .downloading(progress: progress)
+        case .loading:
+            self = .loading
+        case .ready:
+            self = .ready
+        case .failed(let message):
+            self = .failed(message)
+        }
+    }
+}
+
+private extension MeetingWarmupMeetingState {
+    init(_ state: DiarizationModelState) {
+        switch state {
+        case .notLoaded:
+            self = .notLoaded
+        case .loading:
+            self = .loading
+        case .ready:
+            self = .ready
+        case .failed(let message):
+            self = .failed(message)
         }
     }
 }
