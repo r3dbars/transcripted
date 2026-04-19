@@ -48,6 +48,11 @@ func testAnalyticsEventPolicy() {
         assertEqual(failed?.allowedProperties.contains("trigger"), true, "meeting failures should preserve trigger attribution")
     }
 
+    runSuite("AnalyticsEventPolicy allows meeting_file_imported with queue depth") {
+        let fileImported = AnalyticsEventPolicy.policy(forEvent: "meeting_file_imported")
+        assertEqual(fileImported?.allowedProperties.contains("queue_depth_bucket"), true, "file import should allow bucketed queue depth")
+    }
+
     runSuite("AnalyticsEventPolicy allows coarse meeting prompt telemetry") {
         let shown = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_shown")
         let dismissed = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_dismissed")

@@ -74,6 +74,7 @@ PostHog controls described below.
 - `meeting_recording_started`
 - `meeting_recording_stopped`
 - `meeting_recording_cancelled`
+- `meeting_file_imported`
 - `meeting_transcript_saved`
 - `meeting_transcript_failed`
 

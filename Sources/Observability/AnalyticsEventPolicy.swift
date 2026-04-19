@@ -115,5 +115,11 @@ struct AnalyticsEventPolicy: Equatable {
                 "trigger",
             ]
         ),
+        "meeting_file_imported": .init(
+            name: "meeting_file_imported",
+            allowedProperties: [
+                "queue_depth_bucket",
+            ]
+        ),
     ]
 }
