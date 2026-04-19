@@ -22,8 +22,8 @@ enum MenuTokens {
     static let actionPressedNS = NSColor.white.withAlphaComponent(0.10)
     static let actionDisabledNS = NSColor.white.withAlphaComponent(0.03)
     static let actionBorderNS = NSColor.white.withAlphaComponent(0.08)
-    static let flatRowHoverNS = NSColor.white.withAlphaComponent(0.045)
-    static let flatRowPressedNS = NSColor.white.withAlphaComponent(0.08)
+    static let flatRowHoverNS = NSColor.systemBlue.withAlphaComponent(0.95)
+    static let flatRowPressedNS = NSColor.systemBlue.withAlphaComponent(0.78)
     static let flatRowDisabledNS = NSColor.white.withAlphaComponent(0.02)
     static let badgeBackgroundNS = NSColor.white.withAlphaComponent(0.08)
     static let badgeBorderNS = NSColor.white.withAlphaComponent(0.12)
@@ -65,14 +65,15 @@ enum MenuTokens {
     static let savedBorder = Color(MenuTokens.savedBorderNS)
 
     // Layout
-    static let panelWidth: CGFloat = 372
-    static let panelHeight: CGFloat = 360
+    static let panelWidth: CGFloat = 304
+    static let panelHeight: CGFloat = 320
     static let onboardingWindowWidth: CGFloat = 620
     static let onboardingWindowHeight: CGFloat = 760
-    static let innerPadding: CGFloat = 12
-    static let sectionSpacing: CGFloat = 8
-    static let surfaceCornerRadius: CGFloat = 16
-    static let cardCornerRadius: CGFloat = 12
+    static let innerPadding: CGFloat = 10
+    static let sectionSpacing: CGFloat = 7
+    static let surfaceCornerRadius: CGFloat = 14
+    static let cardCornerRadius: CGFloat = 8
+    static let compactActionRowHeight: CGFloat = 30
     static let actionRowHeight: CGFloat = 46
     static let recentRowHeight: CGFloat = 40
     static let savedRowHeight: CGFloat = 54

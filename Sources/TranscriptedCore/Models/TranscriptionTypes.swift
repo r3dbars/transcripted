@@ -226,6 +226,11 @@ public struct TranscriptionMetadata {
 public enum UtteranceChannel: String, Sendable, Hashable {
     case mic
     case system
+
+    /// Canonical key for speaker maps keyed by channel + diarizer ID (e.g. "system_0", "mic_2").
+    func speakerKey(diarizerSpeakerId: String) -> String {
+        "\(rawValue)_\(diarizerSpeakerId)"
+    }
 }
 
 /// A named person the user can link a detected speaker to.

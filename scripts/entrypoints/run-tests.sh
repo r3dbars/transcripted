@@ -129,6 +129,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingPromptHeuristics.swift"
     "Sources/Meeting/MeetingRecordingCleanup.swift"
     "Sources/Meeting/MeetingSessionUIPolicy.swift"
+    "Sources/Meeting/MeetingWarmupStatusPolicy.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/Observability/AnalyticsReporter.swift"
     "Sources/Observability/AnalyticsEventPolicy.swift"

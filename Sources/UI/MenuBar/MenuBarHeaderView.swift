@@ -119,7 +119,7 @@ final class MenuBarHeaderView: NSView {
         let isReady = currentWarmupStatus == .ready
         let hasWarning = currentHotkeyError?.isEmpty == false
         if isReady {
-            return hasWarning ? 56 : 20
+            return hasWarning ? 56 : 0
         }
         return hasWarning ? 110 : 78
     }
