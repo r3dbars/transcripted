@@ -22,9 +22,11 @@ enum OverlayTokens {
     static let diffReplaceBorder = NSColor(red: 0.4, green: 0.7, blue: 1.0, alpha: 0.5)
 
     // Layout
+    static let recordingPillWidth: CGFloat  = 260
+    static let recordingPillHeight: CGFloat = 48
     static let panelWidth: CGFloat         = 360
-    static let panelCompactWidth: CGFloat  = 276
-    static let panelCompactHeight: CGFloat = 42   // header bar only, no content area
+    static let panelCompactWidth: CGFloat  = recordingPillWidth
+    static let panelCompactHeight: CGFloat = recordingPillHeight   // header bar only, no content area
     static let panelLoadingHeight: CGFloat = 100
     static let panelMinHeight: CGFloat     = 92
     static let panelActionErrorHeight: CGFloat = 122

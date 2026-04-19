@@ -4,69 +4,12 @@
 import AppKit
 
 @MainActor
-private final class OverlayPrimaryButton: NSButton {
-    override var title: String {
-        didSet {
-            updateTitleAppearance()
-            invalidateIntrinsicContentSize()
-        }
-    }
-
-    override var intrinsicContentSize: NSSize {
-        let base = super.intrinsicContentSize
-        return NSSize(width: base.width + 16, height: max(24, base.height + 6))
-    }
-
-    override var isHighlighted: Bool {
-        didSet { updateLayerAppearance() }
-    }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        commonInit()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    private func commonInit() {
-        isBordered = false
-        bezelStyle = .regularSquare
-        setButtonType(.momentaryPushIn)
-        wantsLayer = true
-        layer?.cornerRadius = 8
-        layer?.borderWidth = 1
-        focusRingType = .none
-        updateTitleAppearance()
-        updateLayerAppearance()
-    }
-
-    private func updateTitleAppearance() {
-        attributedTitle = NSAttributedString(
-            string: title,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
-                .foregroundColor: NSColor.black.withAlphaComponent(0.88)
-            ]
-        )
-    }
-
-    private func updateLayerAppearance() {
-        layer?.backgroundColor = (isHighlighted
-            ? NSColor.white.withAlphaComponent(0.78)
-            : NSColor.white.withAlphaComponent(0.94)
-        ).cgColor
-        layer?.borderColor = NSColor.black.withAlphaComponent(0.10).cgColor
-    }
-}
-
-@MainActor
 final class OverlayHeaderView: NSView {
     private let modeLabel = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
     let waveformHost = WaveformHostView(frame: .zero)
     private let shortcutHint = NSTextField(labelWithString: "")
-    private let stopButton = OverlayPrimaryButton(frame: .zero)
+    private let stopButton = OverlayRecordingStopButton(frame: .zero)
     var onStopRequested: (() -> Void)?
 
     override init(frame: NSRect) {
@@ -108,11 +51,10 @@ final class OverlayHeaderView: NSView {
         shortcutHint.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         addSubview(shortcutHint)
 
-        stopButton.title = "Stop"
         stopButton.isHidden = true
         stopButton.target = self
         stopButton.action = #selector(stopButtonPressed)
-        stopButton.toolTip = "Stop dictation"
+        stopButton.configure(accessibilityLabel: "Stop dictation", toolTip: "Stop dictation")
         addSubview(stopButton)
     }
 
@@ -126,9 +68,9 @@ final class OverlayHeaderView: NSView {
         let isCenteredListeningLayout = !waveformHost.isHidden && !stopButton.isHidden && shortcutHint.stringValue.isEmpty && spinner.isHidden
 
         if isCenteredListeningLayout {
-            let compactPad: CGFloat = 10
-            let spacing: CGFloat = 6
-            let preferredWaveWidth: CGFloat = 124
+            let compactPad: CGFloat = 12
+            let spacing: CGFloat = 10
+            let preferredWaveWidth: CGFloat = 120
             let availableWaveWidth = max(0, bounds.width - compactPad * 2 - labelSize.width - stopSize.width - spacing * 2)
             let waveWidth = min(preferredWaveWidth, availableWaveWidth)
             let groupWidth = labelSize.width + spacing + waveWidth + spacing + stopSize.width
@@ -143,9 +85,9 @@ final class OverlayHeaderView: NSView {
 
             waveformHost.frame = NSRect(
                 x: modeLabel.frame.maxX + spacing,
-                y: (h - 20) / 2,
+                y: (h - 18) / 2,
                 width: waveWidth,
-                height: 20
+                height: 18
             )
 
             stopButton.frame = NSRect(
