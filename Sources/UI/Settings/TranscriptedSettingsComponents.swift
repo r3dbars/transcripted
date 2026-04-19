@@ -203,6 +203,85 @@ struct SettingsStatusCard: View {
     }
 }
 
+struct SettingsActivityCard: View {
+    let symbolName: String
+    let title: String
+    let status: String
+    let detail: String
+    let tone: HomeTranscriptionActivityPresentation.Tone
+    let progress: Double?
+    let actionTitle: String?
+    let action: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(tintColor)
+                    .frame(width: 34, height: 34)
+                    .background(tintColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline)
+
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                Text(status)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tintColor)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(tintColor.opacity(0.12), in: Capsule())
+            }
+
+            if let progress {
+                VStack(alignment: .leading, spacing: 6) {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.linear)
+                        .tint(tintColor)
+
+                    Text("\(Int(progress * 100))% complete")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.88))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(tintColor.opacity(0.18), lineWidth: 1)
+        )
+    }
+
+    private var tintColor: Color {
+        switch tone {
+        case .working:
+            return .blue
+        case .success:
+            return .green
+        case .caution:
+            return .orange
+        }
+    }
+}
+
 struct SettingsQuickLinkRow: View {
     let symbolName: String
     let title: String
