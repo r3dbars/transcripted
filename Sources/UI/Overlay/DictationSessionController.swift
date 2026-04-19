@@ -622,9 +622,6 @@ class DictationSessionController: ObservableObject {
         case .listening: return "listening"
         case .drafting: return "drafting"
         case .success: return "success"
-        case .streaming: return "streaming"
-        case .review: return "review"
-        case .diffFlash: return "diff_flash"
         }
     }
 

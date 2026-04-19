@@ -256,13 +256,10 @@ final class OverlayHeaderView: NSView {
         case .idle:
             modeLabel.stringValue = "Dictation"
             modeLabel.textColor = OverlayTokens.textMuted
-        default:
-            modeLabel.stringValue = "Dictation"
-            modeLabel.textColor = OverlayTokens.textSecondary
         }
 
         // Spinner visibility
-        let showSpinner = state == .drafting || state == .streaming || state == .loading
+        let showSpinner = state == .drafting || state == .loading
         spinner.isHidden = !showSpinner
         if showSpinner { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
 
