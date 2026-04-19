@@ -42,6 +42,11 @@ final class MeetingSessionController: ObservableObject {
         case unknown = "unknown"
     }
 
+    enum RecordingCancelReason: String {
+        case discardButton = "discard_button"
+        case unknown = "unknown"
+    }
+
     enum TranscriptionCancelReason: String {
         case unknown = "unknown"
     }
@@ -148,6 +153,7 @@ final class MeetingSessionController: ObservableObject {
     private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
     private var activeRecordingTrigger: StartTrigger = .unknown
     private var activeTranscriptionTrigger: StartTrigger = .unknown
+    private var isFinishingRecording = false
     private var shouldSurfaceMeetingWarmupFailure = false
 
     // MARK: - Init
@@ -420,6 +426,9 @@ final class MeetingSessionController: ObservableObject {
     /// placed behind the current background task.
     func stopRecording(reason: StopReason = .unknown) async {
         guard case .recording = state else { return }
+        guard !isFinishingRecording else { return }
+        isFinishingRecording = true
+        defer { isFinishingRecording = false }
 
         let recordingTrigger = activeRecordingTrigger
 
@@ -501,6 +510,60 @@ final class MeetingSessionController: ObservableObject {
             properties: [
                 "capture_quality": healthInfo.captureQuality.rawValue,
                 "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
+                "reason": reason.rawValue,
+                "system_stream_present": boolString(files.systemURL != nil),
+                "trigger": recordingTrigger.rawValue,
+            ]
+        )
+    }
+
+    /// Cancel capture after an explicit confirmation, without queueing
+    /// transcription or saving a transcript.
+    func cancelRecording(reason: RecordingCancelReason = .unknown) async {
+        guard case .recording = state else { return }
+        guard !isFinishingRecording else { return }
+        isFinishingRecording = true
+        defer { isFinishingRecording = false }
+
+        let recordingTrigger = activeRecordingTrigger
+        let durationMs = Int(recordingDuration * 1000)
+
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_cancel_requested",
+            message: "Meeting cancellation requested",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "trigger": recordingTrigger.rawValue,
+                    "reason": reason.rawValue,
+                    "duration_ms": "\(durationMs)"
+                ]
+            )
+        )
+
+        let files = await capture.stopAndDiscardFiles()
+        activeRecordingTrigger = .unknown
+        restoreStateAfterRecordingEndedWithoutNewWork()
+        AppSoundPlayer.shared.play(.dictationCancelled)
+
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_recording_cancelled",
+            message: "Meeting recording cancelled",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "trigger": recordingTrigger.rawValue,
+                    "reason": reason.rawValue,
+                    "duration_ms": "\(durationMs)",
+                    "mic_file_present": boolString(files.micURL != nil),
+                    "system_file_present": boolString(files.systemURL != nil)
+                ]
+            )
+        )
+        AnalyticsReporter.track(
+            "meeting_recording_cancelled",
+            properties: [
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: Double(durationMs) / 1000),
                 "reason": reason.rawValue,
                 "system_stream_present": boolString(files.systemURL != nil),
                 "trigger": recordingTrigger.rawValue,
@@ -908,6 +971,20 @@ final class MeetingSessionController: ObservableObject {
             if case .transcribing = state {
                 state = .ready
             }
+        }
+    }
+
+    private func restoreStateAfterRecordingEndedWithoutNewWork() {
+        guard !hasVisibleBackgroundTranscriptionWork else {
+            state = .transcribing
+            return
+        }
+
+        switch lastTerminalTranscriptionOutcome {
+        case .failed(let message):
+            state = .error(message)
+        case .transcriptSaved, .none:
+            state = .ready
         }
     }
 
