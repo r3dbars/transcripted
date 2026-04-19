@@ -51,8 +51,8 @@ final class MeetingOverlayPanel: NSPanel {
 // MARK: - Root View
 
 /// Single horizontal pill-style view for the meeting overlay. Shows a record
-/// indicator, elapsed timer, two audio level rails, and a stop control while
-/// recording.
+/// indicator, state title, elapsed timer, audio level bar, and (when known) a
+/// participant list.
 ///
 /// Pure AppKit — no observers, no bindings. `update(...)` is called explicitly
 /// by `MeetingOverlayController` in response to Combine events.
@@ -63,11 +63,12 @@ final class MeetingOverlayRootView: NSView {
     private let titleLabel = NSTextField(labelWithString: "Meeting")
     private let timerLabel = NSTextField(labelWithString: "00:00")
     private let detailLabel = NSTextField(labelWithString: "")
+    private let micLabel = NSTextField(labelWithString: "Mic")
+    private let systemLabel = NSTextField(labelWithString: "System audio")
     private let micWaveform = WaveformHostView(frame: .zero)
     private let systemWaveform = WaveformHostView(frame: .zero)
     private let recordButton = NSButton()
     private let closeButton = NSButton()
-    private let stopButton = OverlayRecordingStopButton(frame: .zero)
     private let chevronButton = NSButton()
     private let warmupTitleLabel = NSTextField(labelWithString: "Getting Transcripted ready")
     private let warmupSubtitleLabel = NSTextField(labelWithString: "Loading dictation and meeting models")
@@ -114,6 +115,14 @@ final class MeetingOverlayRootView: NSView {
         detailLabel.lineBreakMode = .byTruncatingTail
         detailLabel.isHidden = true
         addSubview(detailLabel)
+
+        micLabel.font = NSFont.systemFont(ofSize: 8, weight: .medium)
+        micLabel.textColor = MeetingOverlayTokens.textSecondary
+        addSubview(micLabel)
+
+        systemLabel.font = NSFont.systemFont(ofSize: 8, weight: .medium)
+        systemLabel.textColor = MeetingOverlayTokens.textSecondary
+        addSubview(systemLabel)
 
         micWaveform.tintColor = MeetingOverlayTokens.waveformTint
         addSubview(micWaveform)
@@ -170,12 +179,6 @@ final class MeetingOverlayRootView: NSView {
         closeButton.action = #selector(handleSecondaryAction)
         closeButton.isHidden = true
         addSubview(closeButton)
-
-        stopButton.configure(accessibilityLabel: "Stop meeting recording", toolTip: "Stop meeting recording")
-        stopButton.target = self
-        stopButton.action = #selector(handleSecondaryAction)
-        stopButton.isHidden = true
-        addSubview(stopButton)
 
         // Chevron is intentionally hidden: meeting overlay is now status-only.
         if let img = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil) {
@@ -241,31 +244,49 @@ final class MeetingOverlayRootView: NSView {
         )
 
         // Explicit Stop action while recording.
-        let stopSize = stopButton.fittingSize
-        stopButton.frame = NSRect(
-            x: bounds.width - pad - stopSize.width,
-            y: headerMidY - stopSize.height / 2,
-            width: stopSize.width,
-            height: stopSize.height
+        let closeHeight: CGFloat = 22
+        let closeWidth = max(44, closeButton.fittingSize.width + 16)
+        closeButton.frame = NSRect(
+            x: bounds.width - pad - closeWidth,
+            y: headerMidY - closeHeight / 2,
+            width: closeWidth,
+            height: closeHeight
         )
 
         // Chevron button remains hidden, but keep a frame for layout stability.
         let chevronSize: CGFloat = 16
         chevronButton.frame = NSRect(
-            x: stopButton.frame.minX - chevronSize - 6,
+            x: closeButton.frame.minX - chevronSize - 6,
             y: headerMidY - chevronSize / 2,
             width: chevronSize,
             height: chevronSize
         )
 
-        // Meeting keeps two stacked rails so it reads as mic + system capture.
-        let levelBarRight = stopButton.frame.minX - 10
-        let levelBarX = timerLabel.frame.maxX + 12
+        // Two waveform strips (mic top, system bottom) mirror the dictation
+        // visualizer language, with small source labels for clarity.
+        let labelX = timerLabel.frame.maxX + 12
+        let systemLabelSize = systemLabel.fittingSize
+        let labelWidth = max(24, systemLabelSize.width)
+        let levelBarRight = closeButton.frame.minX - 10
+        let levelBarX = labelX + labelWidth + 8
         let levelBarWidth = max(0, levelBarRight - levelBarX)
         let levelBarHeight: CGFloat = 10
         let levelBarGap: CGFloat = 2
         let micY = headerMidY + 1
         let systemY = headerMidY + 1 - levelBarHeight - levelBarGap
+
+        micLabel.frame = NSRect(
+            x: labelX,
+            y: micY + (levelBarHeight - micLabel.fittingSize.height) / 2,
+            width: labelWidth,
+            height: micLabel.fittingSize.height
+        )
+        systemLabel.frame = NSRect(
+            x: labelX,
+            y: systemY + (levelBarHeight - systemLabel.fittingSize.height) / 2,
+            width: labelWidth,
+            height: systemLabel.fittingSize.height
+        )
 
         micWaveform.frame = NSRect(
             x: levelBarX,
@@ -396,14 +417,17 @@ final class MeetingOverlayRootView: NSView {
         titleLabel.isHidden = isPreparing || state == .recording
         timerLabel.isHidden = isPreparing || (state != .recording && !isPrompting)
         detailLabel.isHidden = !(isPrompting || isErrorState)
+        micLabel.isHidden = isPreparing || isPrompting
+        systemLabel.isHidden = isPreparing || isPrompting
         micWaveform.isHidden = isPreparing || isPrompting
         systemWaveform.isHidden = isPreparing || isPrompting
         let showLevels = state == .recording
+        micLabel.isHidden = !showLevels
+        systemLabel.isHidden = !showLevels
         micWaveform.isHidden = !showLevels
         systemWaveform.isHidden = !showLevels
         recordButton.isHidden = !isPrompting
-        closeButton.isHidden = !isPrompting
-        stopButton.isHidden = state != .recording
+        closeButton.isHidden = isPreparing || (state != .recording && !isPrompting)
         chevronButton.isHidden = true
         warmupTitleLabel.isHidden = !isPreparing
         warmupSubtitleLabel.isHidden = !isPreparing
@@ -442,6 +466,14 @@ final class MeetingOverlayRootView: NSView {
         case .recording:
             titleLabel.stringValue = "Recording meeting"
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotRecording.cgColor
+            closeButton.attributedTitle = NSAttributedString(
+                string: "Stop",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                    .foregroundColor: MeetingOverlayTokens.textPrimary
+                ]
+            )
+            closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
         case .transcribing:
             titleLabel.stringValue = "Saving transcript"
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotPrep.cgColor
@@ -509,8 +541,8 @@ enum MeetingOverlayTokens {
     static let dotError      = NSColor.systemRed
 
     static let panelWidth: CGFloat  = 360
-    static let recordingPanelWidth: CGFloat = OverlayTokens.recordingPillWidth
-    static let panelHeight: CGFloat = OverlayTokens.recordingPillHeight
+    static let recordingPanelWidth: CGFloat = 260
+    static let panelHeight: CGFloat = 48
     static let promptHeight: CGFloat = 88
     static let warmupHeight: CGFloat = 96
     static let errorHeight: CGFloat = 72
