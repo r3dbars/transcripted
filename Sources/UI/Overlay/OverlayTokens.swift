@@ -12,15 +12,6 @@ enum OverlayTokens {
     static let textSecondary = NSColor(white: 0.74, alpha: 1.0)
     static let textMuted     = NSColor(white: 0.58, alpha: 1.0)
 
-    // Diff colors
-    static let diffDeleteText    = NSColor(red: 1.0, green: 0.4, blue: 0.4, alpha: 1.0)
-    static let diffDeleteBg      = NSColor(red: 1.0, green: 0.3, blue: 0.3, alpha: 0.15)
-    static let diffDeleteBorder  = NSColor(red: 1.0, green: 0.4, blue: 0.4, alpha: 0.5)
-    static let diffInsertText    = NSColor(red: 0.3, green: 0.9, blue: 0.5, alpha: 1.0)
-    static let diffInsertBg      = NSColor(red: 0.3, green: 0.9, blue: 0.5, alpha: 0.15)
-    static let diffReplaceText   = NSColor(red: 0.4, green: 0.7, blue: 1.0, alpha: 1.0)
-    static let diffReplaceBorder = NSColor(red: 0.4, green: 0.7, blue: 1.0, alpha: 0.5)
-
     // Layout
     static let panelWidth: CGFloat         = 360
     static let panelCompactWidth: CGFloat  = 276
