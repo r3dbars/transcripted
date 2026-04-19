@@ -193,6 +193,7 @@ class ParakeetEngine: ObservableObject {
     /// on a fresh config-change burst. Bounded by `prewarmRetryBudget` to prevent
     /// infinite Task chains when the mic is permanently unavailable.
     private var prewarmRetryCount: Int = 0
+    private var prewarmRetryTask: Task<Void, Never>?
 
     // FluidAudio ASR
     private var asrManager: AsrManager?
@@ -422,12 +423,14 @@ class ParakeetEngine: ObservableObject {
         return path
     }
 
-    // MARK: - Pre-warm
+    // MARK: - Input readiness
 
     func prewarm() {
-        guard !isEnginePrewarmed, !isRecording else { return }
+        guard !isRecording else { return }
         installAudioObserversIfNeeded()
         scheduleInputDeviceNameRefresh()
+
+        releaseIdleAudioHardware(removeTap: false)
 
         let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         switch ParakeetPrewarmPolicy.decision(for: microphoneStatus) {
@@ -451,43 +454,34 @@ class ParakeetEngine: ObservableObject {
             return
         }
 
-        do {
-            let inputNode = audioEngine.inputNode
-            let outputFormat = inputNode.outputFormat(forBus: 0)
-            let hwFormat = inputNode.inputFormat(forBus: 0)
+        let inputNode = audioEngine.inputNode
+        let outputFormat = inputNode.outputFormat(forBus: 0)
+        let hwFormat = inputNode.inputFormat(forBus: 0)
 
-            // Validate both formats. AirPods on macOS run input in Hands-Free Profile
-            // (24kHz hw / 48kHz output bus); CoreAudio's internal converter handles
-            // the upsample and the tap delivers at the output bus rate. Both must be
-            // valid before declaring the engine ready — input alone or output alone
-            // can transiently report zero during device transitions.
-            guard outputFormat.sampleRate > 0, outputFormat.channelCount > 0,
-                  hwFormat.sampleRate > 0, hwFormat.channelCount > 0 else {
-                EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "prewarm_invalid_format",
-                    message: "Audio format invalid during prewarm",
-                    context: [
-                        "output_rate": "\(outputFormat.sampleRate)",
-                        "output_channels": "\(outputFormat.channelCount)",
-                        "hw_rate": "\(hwFormat.sampleRate)",
-                        "hw_channels": "\(hwFormat.channelCount)"
-                    ])
-                schedulePrewarmRetry()
-                return
-            }
-
-            nativeSampleRate = outputFormat.sampleRate
-
-            audioEngine.prepare()
-            try audioEngine.start()
-            isEnginePrewarmed = true
-            prewarmRetryCount = 0
-            markFormatReadyAndPublish()
-            print("🔥 PARAKEET | engine pre-warmed (\(inputDeviceName), \(nativeSampleRate)Hz)")
-        } catch {
-            EventReporter.shared.capture(level: .error, engine: "parakeet", event: "prewarm_failed",
-                message: error.localizedDescription, context: ["audio_device": inputDeviceName])
+        // Validate both formats. AirPods on macOS run input in Hands-Free Profile
+        // (24kHz hw / 48kHz output bus); CoreAudio's internal converter handles
+        // the upsample and the tap delivers at the output bus rate. Both must be
+        // valid before declaring the engine ready — input alone or output alone
+        // can transiently report zero during device transitions.
+        guard outputFormat.sampleRate > 0, outputFormat.channelCount > 0,
+              hwFormat.sampleRate > 0, hwFormat.channelCount > 0 else {
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "prewarm_invalid_format",
+                message: "Audio format invalid during prewarm",
+                context: [
+                    "output_rate": "\(outputFormat.sampleRate)",
+                    "output_channels": "\(outputFormat.channelCount)",
+                    "hw_rate": "\(hwFormat.sampleRate)",
+                    "hw_channels": "\(hwFormat.channelCount)"
+                ])
             schedulePrewarmRetry()
+            return
         }
+
+        nativeSampleRate = outputFormat.sampleRate
+
+        prewarmRetryCount = 0
+        markFormatReadyAndPublish()
+        print("🔥 PARAKEET | input ready (\(inputDeviceName), \(nativeSampleRate)Hz)")
     }
 
     private func schedulePrewarmRetry() {
@@ -504,7 +498,8 @@ class ParakeetEngine: ObservableObject {
         }
         prewarmRetryCount += 1
         let capturedGeneration = recoveryState.generation
-        Task { @MainActor [weak self] in
+        prewarmRetryTask?.cancel()
+        prewarmRetryTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
             guard let self, !self.recoveryState.isStale(generation: capturedGeneration) else { return }
             self.prewarm()
@@ -599,6 +594,8 @@ class ParakeetEngine: ObservableObject {
         // already stopped the engine internally before posting this notification,
         // so the tap and prewarm state are stale.
         cancelAudioWatchdog()
+        prewarmRetryTask?.cancel()
+        prewarmRetryTask = nil
 
         if isRecording {
             pendingSamplesLock.withLock {
@@ -655,11 +652,7 @@ class ParakeetEngine: ObservableObject {
                         userInfo: [NSLocalizedDescriptionKey: "Invalid audio format after device change (\(newFormat.sampleRate)Hz, \(newFormat.channelCount)ch)"])
                 }
                 self.nativeSampleRate = newFormat.sampleRate
-                print("🔄 PARAKEET | audio device changed → \(self.inputDeviceName) (\(newFormat.sampleRate)Hz), re-warming")
-                self.audioEngine.prepare()
-                try self.audioEngine.start()
-                self.isEnginePrewarmed = true
-                print("🔥 PARAKEET | engine re-warmed after device change")
+                print("🔄 PARAKEET | audio device changed → \(self.inputDeviceName) (\(newFormat.sampleRate)Hz), input ready")
 
                 guard !Task.isCancelled else { return }
                 guard self.recoveryState.finishRecovery(success: true, generation: myGeneration) else { return }
@@ -761,21 +754,6 @@ class ParakeetEngine: ObservableObject {
             recordingInterrupted = true
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_interrupted",
                 message: "Recording interrupted by system sleep/wake")
-        }
-
-        // Re-warm after a delay to let audio hardware reinitialize.
-        // Retry once if the first attempt fails (CoreAudio may need more time).
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRewarmDelay)
-            guard let self = self else { return }
-            self.prewarm()
-
-            if !self.isEnginePrewarmed {
-                EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "wake_prewarm_retry",
-                    message: "First prewarm after wake failed, retrying in 1s")
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                self.prewarm()
-            }
         }
     }
 
@@ -1060,6 +1038,8 @@ class ParakeetEngine: ObservableObject {
             }
         }
         audioEngine.inputNode.removeTap(onBus: 0)
+        audioEngine.stop()
+        isEnginePrewarmed = false
         pendingSamplesLock.lock()
         sampleBuffer.append(contentsOf: pendingSamples)
         pendingSamples.removeAll(keepingCapacity: true)
@@ -1291,6 +1271,8 @@ class ParakeetEngine: ObservableObject {
 
     func cancel() {
         cancelAudioWatchdog()
+        prewarmRetryTask?.cancel()
+        prewarmRetryTask = nil
         pendingSamplesLock.withLock {
             pendingSamples.removeAll(keepingCapacity: true)
         }
@@ -1305,10 +1287,21 @@ class ParakeetEngine: ObservableObject {
             isRecording = false
             audioLevel = 0
         }
+        releaseIdleAudioHardware(removeTap: false)
         sampleBuffer.removeAll()
         isTranscribing = false
         liveTranscript = ""
         committedStreamText = ""
+    }
+
+    private func releaseIdleAudioHardware(removeTap: Bool) {
+        if removeTap {
+            audioEngine.inputNode.removeTap(onBus: 0)
+        }
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+        isEnginePrewarmed = false
     }
 
     private func cancelAudioWatchdog() {
@@ -1317,6 +1310,16 @@ class ParakeetEngine: ObservableObject {
     }
 
     func cleanup() {
+        cancelAudioWatchdog()
+        prewarmRetryTask?.cancel()
+        prewarmRetryTask = nil
+        configChangeDebounceTask?.cancel()
+        configChangeDebounceTask = nil
+        configRecoveryTask?.cancel()
+        configRecoveryTask = nil
+        releaseIdleAudioHardware(removeTap: true)
+        isRecording = false
+        audioLevel = 0
         if let observer = configChangeObserver {
             NotificationCenter.default.removeObserver(observer)
             configChangeObserver = nil

@@ -41,12 +41,8 @@ enum TranscriptedConstants {
         sampleCount >= parakeetMinimumInferenceSamples
     }
 
-    /// Delay for audio engine re-warm after device change (nanoseconds)
+    /// Delay for audio input readiness retry after device change (nanoseconds)
     static let audioRecoveryDelay: UInt64 = 300_000_000  // 300ms
-
-    /// Delay for audio engine re-warm after system wake (nanoseconds)
-    /// Increased from 500ms to 1s — CoreAudio needs time to fully reinitialize after sleep
-    static let audioRewarmDelay: UInt64 = 1_000_000_000  // 1 second
 
     /// Watchdog timeout — if no audio samples arrive within this window after starting
     /// recording, the engine is likely a zombie (running but disconnected from hardware)
