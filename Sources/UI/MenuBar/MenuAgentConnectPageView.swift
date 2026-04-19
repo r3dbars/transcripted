@@ -17,21 +17,16 @@ final class MenuAgentConnectPageView: NSView {
     private let subtitleLabel = NSTextField(wrappingLabelWithString:
         "Copy one prompt, paste it into your agent, and let Transcripted use MCP when available or folders when not."
     )
-    private let starterPromptLabel = NSTextField(labelWithString: "What this helps with")
+    private let starterPromptLabel = NSTextField(labelWithString: "Starter skills")
     private let benefitOneRow = AgentConnectInfoRowView(
-        symbolName: "sparkles",
-        title: "Search past meetings faster",
-        body: "Your agent can work from the spoken context Transcripted already saved locally."
+        symbolName: "doc.text",
+        title: "Summarize",
+        body: "Create a cited brief from meetings, dictations, or a date range."
     )
     private let benefitTwoRow = AgentConnectInfoRowView(
-        symbolName: "checkmark.circle",
-        title: "Pull summaries and action items",
-        body: "The smart prompt can use MCP if it is ready, or fall back to local folders if it is not."
-    )
-    private let benefitThreeRow = AgentConnectInfoRowView(
-        symbolName: "checkmark.circle",
-        title: "Stay simple for beginners",
-        body: "Copy once, paste once, and only use manual setup if you actually need it."
+        symbolName: "magnifyingglass",
+        title: "Search Memory",
+        body: "Find what was said, when it happened, and where it came from."
     )
     private let manualSetupLabel = NSTextField(labelWithString: "Need manual setup?")
     private let mcpRow = AgentConnectInfoRowView(
@@ -95,7 +90,7 @@ final class MenuAgentConnectPageView: NSView {
             label.textColor = MenuTokens.textPrimaryNS
             addSubview(label)
         }
-        [benefitOneRow, benefitTwoRow, benefitThreeRow, mcpRow, folderRow].forEach { addSubview($0) }
+        [benefitOneRow, benefitTwoRow, mcpRow, folderRow].forEach { addSubview($0) }
 
         backButton.target = self
         backButton.action = #selector(goBack)
@@ -147,9 +142,6 @@ final class MenuAgentConnectPageView: NSView {
         y += AgentConnectInfoRowView.height + 14
 
         benefitTwoRow.frame = NSRect(x: pad, y: y, width: width, height: AgentConnectInfoRowView.height)
-        y += AgentConnectInfoRowView.height + 8
-
-        benefitThreeRow.frame = NSRect(x: pad, y: y, width: width, height: AgentConnectInfoRowView.height)
         y += AgentConnectInfoRowView.height + 18
 
         manualSetupLabel.frame = NSRect(x: pad, y: y, width: width, height: 16)
@@ -183,7 +175,6 @@ final class MenuAgentConnectPageView: NSView {
     var intrinsicHeight: CGFloat {
         MenuTokens.secondaryButtonSize + 14 + 22 + 24 + 42 + 16 + 22 +
         (AgentConnectInfoRowView.height + 14) +
-        (AgentConnectInfoRowView.height + 8) +
         (AgentConnectInfoRowView.height + 18) +
         22 +
         (AgentConnectInfoRowView.height + 10) +

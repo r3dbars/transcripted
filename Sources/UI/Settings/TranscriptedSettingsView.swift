@@ -779,18 +779,18 @@ private struct AgentConnectionSettingsPage: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Connect Your Agent",
-                summary: "Copy one smart prompt first, then use MCP or raw folders only if you need the more manual setup."
+                summary: "Copy one smart prompt with the Summarize and Search Memory starter skills."
             )
 
             SettingsSection(
                 title: "Main Path",
-                detail: "Most people only need the main prompt. It tells the agent to prefer MCP when available and fall back to folders when not."
+                detail: "Most people only need the main prompt. It tells the agent to prefer MCP when available, fall back to folders when not, and use the two starter skills."
             ) {
-                ForEach(Array(AgentConnectionGuide.benefitHighlights.enumerated()), id: \.offset) { index, highlight in
+                ForEach(Array(AgentConnectionGuide.starterSkills.enumerated()), id: \.offset) { _, skill in
                     SettingsQuickLinkRow(
-                        symbolName: index == 0 ? "sparkles" : "checkmark.circle.fill",
-                        title: highlight,
-                        detail: "Works from the same local Transcripted data already saved on this Mac."
+                        symbolName: skill.symbolName,
+                        title: skill.title,
+                        detail: skill.detail
                     ) {}
                     .disabled(true)
                 }

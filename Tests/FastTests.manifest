@@ -1,6 +1,7 @@
 # Fast test manifest
 # Format: <TestFile.swift>:<top-level entry function>
 
+AgentConnectionGuideTests.swift:testAgentConnectionGuide
 AnalyticsEventPolicyTests.swift:testAnalyticsEventPolicy
 AnalyticsPayloadSanitizerTests.swift:testAnalyticsPayloadSanitizer
 FailedMeetingPresentationTests.swift:testFailedMeetingPresentation

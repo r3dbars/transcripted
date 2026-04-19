@@ -1,5 +1,10 @@
 import Foundation
-import TranscriptedCore
+
+struct AgentConnectionStarterSkill {
+    let symbolName: String
+    let title: String
+    let detail: String
+}
 
 enum AgentConnectionGuide {
     static var localMCPBuildDirectory: URL? {
@@ -33,17 +38,24 @@ enum AgentConnectionGuide {
         DictationStoragePaths.transcriptsFolder
     }
 
-    static let benefitHighlights = [
-        "Search past meetings and dictations faster",
-        "Pull summaries and action items in one place",
-        "Give your agent the real spoken context from this Mac",
+    static let starterSkills = [
+        AgentConnectionStarterSkill(
+            symbolName: "doc.text",
+            title: "Summarize",
+            detail: "Create a cited brief from meetings, dictations, or a date range."
+        ),
+        AgentConnectionStarterSkill(
+            symbolName: "magnifyingglass",
+            title: "Search Memory",
+            detail: "Find what was said, when it happened, and where it came from."
+        ),
     ]
 
     static func starterPrompt(filename: String?) -> String {
         var prompt = """
         I use Transcripted on my Mac.
 
-        Your job is to connect to my Transcripted data using the best available method, then help me search, summarize, and organize my meetings and dictations.
+        Your job is to connect to my Transcripted data using the best available method, then help me search and summarize my meetings and dictations.
 
         Connection priority:
         1. If Transcripted MCP tools are already available in this environment, use them first.
@@ -66,8 +78,51 @@ enum AgentConnectionGuide {
         Working rules:
         - Prefer MCP over raw file inspection when both are available.
         - Use meetings and dictations together when the task spans both.
+        - Treat the raw transcript or dictation text as the source of truth.
+        - Keep summaries and answers grounded in source filenames, dates, speakers, and timestamps when available.
+        - Interpret relative dates in my local time zone. When I ask about today, yesterday, or last week, state the exact calendar dates you searched.
         - Surface uncertainty clearly.
         - If setup is needed, minimize back-and-forth and propose the next concrete action.
+
+        Starter skills:
+
+        1. Summarize
+        Use this when I ask for a summary, recap, brief, daily review, weekly review, or "what did I do" style answer.
+
+        What to do:
+        - Resolve the scope first: one meeting, one dictation, a date range, a person, a project, or a topic.
+        - Read the relevant source material before summarizing. For a specific meeting, read the full meeting when possible.
+        - Filter out obvious junk such as test captures, accidental fragments, setup chatter, and empty or near-empty recordings.
+        - Produce a clean brief with these sections when relevant:
+          - Brief
+          - Main Threads
+          - Decisions
+          - Action Items
+          - Open Questions
+          - Risks / Blockers
+          - Worth Remembering
+          - Sources
+          - Uncertainty
+
+        Summarize rules:
+        - Do not invent owners, deadlines, decisions, or action items.
+        - If an owner, deadline, or status is missing, write "unknown".
+        - Separate decisions from action items.
+        - Cite the source meeting or dictation for important claims.
+
+        2. Search Memory
+        Use this when I ask what I said, when something happened, where an idea came from, who mentioned something, or what the history of a topic is.
+
+        What to do:
+        - Search first, then synthesize.
+        - Combine exact search, relevant context search, recency, date filters, people, and topics when the available connection mode supports them.
+        - Show the best matches with source name, date, speaker, timestamp, snippet, and why each match surfaced when available.
+        - Then give the answer, timeline, related threads, confidence level, sources, and uncertainty when relevant.
+
+        Search Memory rules:
+        - Do not answer from vague memory when sources are available.
+        - If the evidence is thin, say so and suggest the narrower search that would help.
+        - If nothing relevant is found, say "not found" and list what you searched.
 
         First step:
         Determine which connection mode is available: MCP, MCP setup, or folders.

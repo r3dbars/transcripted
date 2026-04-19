@@ -161,15 +161,15 @@ struct AgentConnectionWindowView: View {
             AgentConnectionBodyText("Your agent will use Transcripted MCP tools if they are already connected. If not, it will fall back to your local Transcripted folders and can help you set up the better option later.")
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("What this helps with")
+                Text("Starter skills")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(AgentConnectionTheme.textPrimary)
 
-                ForEach(Array(AgentConnectionGuide.benefitHighlights.enumerated()), id: \.offset) { index, highlight in
+                ForEach(Array(AgentConnectionGuide.starterSkills.enumerated()), id: \.offset) { _, skill in
                     AgentConnectionInfoRow(
-                        symbolName: index == 0 ? "sparkles" : "checkmark.circle.fill",
-                        title: highlight,
-                        detail: "Works from the same local Transcripted data already saved on this Mac."
+                        symbolName: skill.symbolName,
+                        title: skill.title,
+                        detail: skill.detail
                     )
                 }
             }
