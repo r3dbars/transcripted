@@ -42,13 +42,13 @@ func testMeetingPromptHeuristics() {
         assertNil(prompt, "stale app activity should not keep prompting forever")
     }
 
-    runSuite("MeetingPromptHeuristics.allowsRuntimeOnlyPrompt — Teams must rely on stronger evidence") {
+    runSuite("MeetingPromptProvider.supportsRuntimeOnlyPrompt — Teams must rely on stronger evidence") {
         assertFalse(
-            MeetingPromptHeuristics.allowsRuntimeOnlyPrompt(for: .teams),
+            MeetingPromptProvider.teams.supportsRuntimeOnlyPrompt,
             "Teams should not prompt just because the app is open"
         )
         assertTrue(
-            MeetingPromptHeuristics.allowsRuntimeOnlyPrompt(for: .zoom),
+            MeetingPromptProvider.zoom.supportsRuntimeOnlyPrompt,
             "Zoom should keep the existing runtime-only prompt path"
         )
     }
@@ -77,32 +77,31 @@ func testMeetingPromptHeuristics() {
         assertEqual(interval, 30 * 60, "calendar prompts should preserve the longer snooze")
     }
 
-    runSuite("MeetingPromptHeuristics.calendarDismissMinimumInterval — Teams get a stickier dismissal") {
-        let zoomInterval = MeetingPromptHeuristics.calendarDismissMinimumInterval(
-            for: .zoom,
-            defaultInterval: 30 * 60
-        )
-        let teamsInterval = MeetingPromptHeuristics.calendarDismissMinimumInterval(
-            for: .teams,
-            defaultInterval: 30 * 60
-        )
-
-        assertEqual(zoomInterval, 30 * 60, "Zoom should keep the default calendar dismissal interval")
+    runSuite("MeetingPromptHeuristics.dismissMinimumInterval — Teams get a stickier dismissal") {
+        let defaultInterval: TimeInterval = 30 * 60
         assertEqual(
-            teamsInterval,
+            MeetingPromptHeuristics.dismissMinimumInterval(for: .zoom, default: defaultInterval),
+            defaultInterval,
+            "Zoom should keep the default dismissal interval"
+        )
+        assertEqual(
+            MeetingPromptHeuristics.dismissMinimumInterval(for: .teams, default: defaultInterval),
             MeetingPromptHeuristics.teamsDismissMinimumInterval,
             "Teams should stay quiet longer after a dismissal"
         )
-    }
-
-    runSuite("MeetingPromptHeuristics.runtimeDismissFallbackInterval — Teams get the longer fallback backoff") {
         assertEqual(
-            MeetingPromptHeuristics.runtimeDismissFallbackInterval(for: .zoom),
+            MeetingPromptHeuristics.dismissMinimumInterval(
+                for: .zoom,
+                default: MeetingPromptHeuristics.defaultRuntimeDismissFallbackInterval
+            ),
             MeetingPromptHeuristics.defaultRuntimeDismissFallbackInterval,
             "Zoom should keep the standard runtime fallback"
         )
         assertEqual(
-            MeetingPromptHeuristics.runtimeDismissFallbackInterval(for: .teams),
+            MeetingPromptHeuristics.dismissMinimumInterval(
+                for: .teams,
+                default: MeetingPromptHeuristics.defaultRuntimeDismissFallbackInterval
+            ),
             MeetingPromptHeuristics.teamsDismissMinimumInterval,
             "Teams should fall back to the longer dismissal interval"
         )
