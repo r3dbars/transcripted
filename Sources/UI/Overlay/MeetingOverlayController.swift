@@ -50,6 +50,84 @@ final class MeetingOverlayPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+@available(macOS 14.0, *)
+@MainActor
+final class MeetingOverlayTooltipPanel: NSPanel {
+    private let tooltipView = MeetingOverlayTooltipView()
+
+    init() {
+        super.init(
+            contentRect: NSRect(x: 0, y: 0, width: 80, height: 26),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: true
+        )
+        self.level = .statusBar
+        self.backgroundColor = .clear
+        self.isOpaque = false
+        self.hasShadow = true
+        self.ignoresMouseEvents = true
+        self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        self.contentView = tooltipView
+    }
+
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+
+    func update(text: String) -> NSSize {
+        tooltipView.update(text: text)
+    }
+}
+
+@available(macOS 14.0, *)
+@MainActor
+final class MeetingOverlayTooltipView: NSView {
+    private let label = NSTextField(labelWithString: "")
+    private let horizontalPadding: CGFloat = 10
+    private let verticalPadding: CGFloat = 6
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 7
+        layer?.masksToBounds = true
+        layer?.backgroundColor = NSColor(calibratedWhite: 0.10, alpha: 0.98).cgColor
+        layer?.borderWidth = 0.5
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
+
+        label.font = .systemFont(ofSize: 11, weight: .medium)
+        label.textColor = MeetingOverlayTokens.textPrimary
+        label.lineBreakMode = .byClipping
+        addSubview(label)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        let labelSize = label.fittingSize
+        label.frame = NSRect(
+            x: horizontalPadding,
+            y: (bounds.height - labelSize.height) / 2,
+            width: max(0, bounds.width - horizontalPadding * 2),
+            height: labelSize.height
+        )
+    }
+
+    func update(text: String) -> NSSize {
+        label.stringValue = text
+        let labelSize = label.fittingSize
+        let size = NSSize(
+            width: ceil(labelSize.width + horizontalPadding * 2),
+            height: max(24, ceil(labelSize.height + verticalPadding * 2))
+        )
+        frame = NSRect(origin: .zero, size: size)
+        needsLayout = true
+        return size
+    }
+}
+
 // MARK: - Root View
 
 /// Single horizontal pill-style view for the meeting overlay. Shows a record
@@ -80,6 +158,10 @@ final class MeetingOverlayRootView: NSView {
     private let cancelTooltip = "Cancel meeting recording"
     private let finishTooltip = "Finish and transcribe"
     private let dismissPromptTooltip = "Dismiss meeting prompt"
+    private let startTooltip = "Start meeting recording"
+    private var tooltipPanel: MeetingOverlayTooltipPanel?
+    private var tooltipTask: Task<Void, Never>?
+    private var tooltipTrackingAreas: [NSTrackingArea] = []
 
     /// Invoked when the user clicks the close/stop button.
     var onSecondaryAction: (() -> Void)?
@@ -89,6 +171,10 @@ final class MeetingOverlayRootView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         setupViews()
+    }
+
+    deinit {
+        tooltipTask?.cancel()
     }
 
     @available(*, unavailable)
@@ -166,8 +252,8 @@ final class MeetingOverlayRootView: NSView {
         recordButton.layer?.backgroundColor = OverlayTokens.accentGreen.cgColor
         recordButton.target = self
         recordButton.action = #selector(handlePrimaryAction)
-        recordButton.toolTip = "Start meeting recording"
-        recordButton.setAccessibilityLabel("Start meeting recording")
+        recordButton.toolTip = nil
+        recordButton.setAccessibilityLabel(startTooltip)
         recordButton.isHidden = true
         addSubview(recordButton)
 
@@ -181,7 +267,7 @@ final class MeetingOverlayRootView: NSView {
         cancelButton.image = cancelButtonImage()
         cancelButton.imagePosition = .imageOnly
         cancelButton.contentTintColor = MeetingOverlayTokens.quietActionTint
-        cancelButton.toolTip = cancelTooltip
+        cancelButton.toolTip = nil
         cancelButton.setAccessibilityLabel(cancelTooltip)
         cancelButton.setAccessibilityHelp("Shows a confirmation before discarding this meeting recording.")
         cancelButton.target = self
@@ -331,6 +417,7 @@ final class MeetingOverlayRootView: NSView {
             width: levelBarWidth,
             height: levelBarHeight * 2 + levelBarGap
         )
+        refreshTooltipTrackingAreas()
     }
 
     private func layoutRecording() {
@@ -384,6 +471,7 @@ final class MeetingOverlayRootView: NSView {
         micLabel.frame = .zero
         systemLabel.frame = .zero
         chevronButton.frame = .zero
+        refreshTooltipTrackingAreas()
     }
 
     private func layoutPrompt() {
@@ -434,6 +522,7 @@ final class MeetingOverlayRootView: NSView {
             width: primaryWidth,
             height: buttonHeight
         )
+        refreshTooltipTrackingAreas()
     }
 
     private func layoutError() {
@@ -459,6 +548,7 @@ final class MeetingOverlayRootView: NSView {
             width: bounds.width - pad * 2,
             height: 16
         )
+        refreshTooltipTrackingAreas()
     }
 
     private func layoutWarmup() {
@@ -468,6 +558,7 @@ final class MeetingOverlayRootView: NSView {
         warmupTitleLabel.frame = NSRect(x: pad, y: bounds.height - 36, width: contentWidth, height: 22)
         warmupSubtitleLabel.frame = NSRect(x: pad, y: bounds.height - 61, width: contentWidth, height: 18)
         warmupProgress.frame = NSRect(x: pad, y: 18, width: contentWidth, height: 10)
+        refreshTooltipTrackingAreas()
     }
 
     // MARK: - Update API
@@ -515,6 +606,7 @@ final class MeetingOverlayRootView: NSView {
         warmupProgress.isHidden = !isPreparing
 
         if isPreparing {
+            hideTooltip()
             warmupTitleLabel.stringValue = currentWarmupStatus.title
             warmupSubtitleLabel.stringValue = currentWarmupStatus.subtitle
             warmupProgress.doubleValue = currentWarmupStatus.progress
@@ -539,7 +631,7 @@ final class MeetingOverlayRootView: NSView {
             timerLabel.stringValue = prompt?.countdownText ?? ""
             updateStatusDot(color: MeetingOverlayTokens.dotPrompt)
             closeButton.attributedTitle = buttonTitle("Not now", size: 11, weight: .semibold)
-            closeButton.toolTip = dismissPromptTooltip
+            closeButton.toolTip = nil
             closeButton.setAccessibilityLabel(dismissPromptTooltip)
             closeButton.setAccessibilityHelp("Dismisses this meeting recording prompt.")
             closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
@@ -552,7 +644,7 @@ final class MeetingOverlayRootView: NSView {
             closeButton.image = stopButtonImage()
             closeButton.imagePosition = .imageOnly
             closeButton.contentTintColor = MeetingOverlayTokens.finishActionForeground
-            closeButton.toolTip = finishTooltip
+            closeButton.toolTip = nil
             closeButton.setAccessibilityLabel(finishTooltip)
             closeButton.setAccessibilityHelp("Stops recording, saves the audio, and starts transcription.")
             closeButton.layer?.backgroundColor = MeetingOverlayTokens.finishActionColor.cgColor
@@ -610,7 +702,7 @@ final class MeetingOverlayRootView: NSView {
         cancelButton.image = cancelButtonImage()
         cancelButton.imagePosition = .imageOnly
         cancelButton.contentTintColor = MeetingOverlayTokens.quietActionTint
-        cancelButton.toolTip = cancelTooltip
+        cancelButton.toolTip = nil
         cancelButton.setAccessibilityLabel(cancelTooltip)
         cancelButton.setAccessibilityHelp("Shows a confirmation before discarding this meeting recording.")
         cancelButton.layer?.cornerRadius = MeetingOverlayTokens.cancelHeight / 2
@@ -646,6 +738,92 @@ final class MeetingOverlayRootView: NSView {
         let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
         return NSImage(systemSymbolName: "xmark", accessibilityDescription: cancelTooltip)?
             .withSymbolConfiguration(config)
+    }
+
+    private func refreshTooltipTrackingAreas() {
+        for area in tooltipTrackingAreas {
+            removeTrackingArea(area)
+        }
+        tooltipTrackingAreas.removeAll()
+
+        addTooltipTrackingArea(for: cancelButton, text: cancelTooltip)
+        addTooltipTrackingArea(for: closeButton, text: currentState == .recording ? finishTooltip : dismissPromptTooltip)
+        addTooltipTrackingArea(for: recordButton, text: startTooltip)
+
+        if tooltipTrackingAreas.isEmpty {
+            hideTooltip()
+        }
+    }
+
+    private func addTooltipTrackingArea(for view: NSView, text: String) {
+        guard !view.isHidden, view.frame.width > 0, view.frame.height > 0 else { return }
+        let area = NSTrackingArea(
+            rect: view.frame,
+            options: [.mouseEnteredAndExited, .activeAlways],
+            owner: self,
+            userInfo: ["tooltipText": text, "anchorView": view]
+        )
+        tooltipTrackingAreas.append(area)
+        addTrackingArea(area)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard
+            let text = event.trackingArea?.userInfo?["tooltipText"] as? String,
+            let anchorView = event.trackingArea?.userInfo?["anchorView"] as? NSView
+        else { return }
+        scheduleTooltip(text, anchoredTo: anchorView)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hideTooltip()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            hideTooltip()
+        }
+    }
+
+    private func scheduleTooltip(_ text: String, anchoredTo anchorView: NSView) {
+        tooltipTask?.cancel()
+        tooltipTask = Task { @MainActor [weak self, weak anchorView] in
+            try? await Task.sleep(nanoseconds: MeetingOverlayTokens.tooltipDelayNanoseconds)
+            guard !Task.isCancelled, let self, let anchorView else { return }
+            self.showTooltip(text, anchoredTo: anchorView)
+        }
+    }
+
+    private func showTooltip(_ text: String, anchoredTo anchorView: NSView) {
+        guard let anchorWindow = window else { return }
+        let panel = tooltipPanel ?? MeetingOverlayTooltipPanel()
+        tooltipPanel = panel
+
+        let size = panel.update(text: text)
+        let anchorRect = anchorView.convert(anchorView.bounds, to: nil)
+        let anchorScreenRect = anchorWindow.convertToScreen(anchorRect)
+        let screenFrame = anchorWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+
+        var x = anchorScreenRect.midX - size.width / 2
+        var y = anchorScreenRect.maxY + MeetingOverlayTokens.tooltipOffset
+        if y + size.height > screenFrame.maxY - MeetingOverlayTokens.tooltipScreenInset {
+            y = anchorScreenRect.minY - size.height - MeetingOverlayTokens.tooltipOffset
+        }
+
+        x = min(max(x, screenFrame.minX + MeetingOverlayTokens.tooltipScreenInset),
+                screenFrame.maxX - size.width - MeetingOverlayTokens.tooltipScreenInset)
+        y = min(max(y, screenFrame.minY + MeetingOverlayTokens.tooltipScreenInset),
+                screenFrame.maxY - size.height - MeetingOverlayTokens.tooltipScreenInset)
+
+        panel.setFrame(NSRect(origin: NSPoint(x: x, y: y), size: size), display: true)
+        panel.orderFrontRegardless()
+    }
+
+    private func hideTooltip() {
+        tooltipTask?.cancel()
+        tooltipTask = nil
+        tooltipPanel?.orderOut(nil)
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
@@ -688,9 +866,9 @@ enum MeetingOverlayTokens {
     static let quietActionBg = NSColor.white.withAlphaComponent(0.08)
     static let quietActionBorder = NSColor.white.withAlphaComponent(0.14)
     static let quietActionTint = NSColor.white.withAlphaComponent(0.70)
-    static let finishActionColor = OverlayTokens.accentGreen
-    static let finishActionBorder = OverlayTokens.accentGreen.withAlphaComponent(0.70)
-    static let finishActionForeground = NSColor.black.withAlphaComponent(0.86)
+    static let finishActionColor = NSColor.white.withAlphaComponent(0.16)
+    static let finishActionBorder = NSColor.white.withAlphaComponent(0.24)
+    static let finishActionForeground = NSColor.white.withAlphaComponent(0.92)
 
     static let panelWidth: CGFloat  = 360
     static let recordingPanelWidth: CGFloat = 292
@@ -707,6 +885,9 @@ enum MeetingOverlayTokens {
     static let cancelHeight: CGFloat = 24
     static let stopHeight: CGFloat  = 28
     static let recordingWaveformWidth: CGFloat = 124
+    static let tooltipOffset: CGFloat = 8
+    static let tooltipScreenInset: CGFloat = 6
+    static let tooltipDelayNanoseconds: UInt64 = 80_000_000
 }
 
 // MARK: - Controller
