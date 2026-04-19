@@ -36,6 +36,10 @@ final class MeetingPromptDetector {
     private let pendingCooldown: TimeInterval = 90
     private let pollIntervalNanoseconds: UInt64 = 20_000_000_000
 
+    private static let meetingURLDetector = try? NSDataDetector(
+        types: NSTextCheckingResult.CheckingType.link.rawValue
+    )
+
     private static let browserBundleIdentifiers: Set<String> = [
         "com.apple.Safari",
         "com.google.Chrome",
@@ -84,28 +88,34 @@ final class MeetingPromptDetector {
         let until: Date
         switch candidate.source {
         case .calendarEvent:
-            let minimumInterval = MeetingPromptHeuristics.calendarDismissMinimumInterval(
+            let minimumInterval = MeetingPromptHeuristics.dismissMinimumInterval(
                 for: candidate.provider,
-                defaultInterval: baseInterval
+                default: baseInterval
             )
             until = max(
                 now.addingTimeInterval(minimumInterval),
                 candidate.endDate.addingTimeInterval(MeetingPromptHeuristics.calendarReminderPostStartGrace)
             )
             decision = MeetingPromptBackoffDecision(
-                kind: candidate.provider == .teams ? .calendarTeamsExtended : .calendarDefault,
+                kind: MeetingPromptHeuristics.backoffKind(for: candidate.provider, source: .calendarEvent),
                 until: until
             )
             suppressRuntimePrompts(for: candidate.provider, until: until)
         case .runtimeApp:
             if let resumeDate = nextRuntimePromptResumeDate(for: candidate.provider, now: now) {
                 until = resumeDate
-                decision = MeetingPromptBackoffDecision(kind: .runtimeUntilNextCalendar, until: until)
+                decision = MeetingPromptBackoffDecision(
+                    kind: MeetingPromptHeuristics.backoffKind(for: candidate.provider, source: .runtimeApp, hasResumeDate: true),
+                    until: until
+                )
             } else {
-                let fallbackInterval = MeetingPromptHeuristics.runtimeDismissFallbackInterval(for: candidate.provider)
+                let fallbackInterval = MeetingPromptHeuristics.dismissMinimumInterval(
+                    for: candidate.provider,
+                    default: MeetingPromptHeuristics.defaultRuntimeDismissFallbackInterval
+                )
                 until = now.addingTimeInterval(fallbackInterval)
                 decision = MeetingPromptBackoffDecision(
-                    kind: candidate.provider == .teams ? .runtimeTeamsExtended : .runtimeDefaultFallback,
+                    kind: MeetingPromptHeuristics.backoffKind(for: candidate.provider, source: .runtimeApp),
                     until: until
                 )
             }
@@ -215,8 +225,7 @@ final class MeetingPromptDetector {
         frontmostBundleID: String?
     ) -> [ScoredCandidate] {
         MeetingPromptProvider.allCases.compactMap { provider in
-            guard provider.supportsNativeRuntimePrompt else { return nil }
-            guard MeetingPromptHeuristics.allowsRuntimeOnlyPrompt(for: provider) else { return nil }
+            guard provider.supportsRuntimeOnlyPrompt else { return nil }
             guard provider.activeBundleIdentifiers.contains(where: runningBundleIDs.contains) else { return nil }
             if let suppressedUntil = runtimeSuppressedUntil[provider], suppressedUntil > now {
                 return nil
@@ -272,7 +281,6 @@ final class MeetingPromptDetector {
                     frontmostBundleID: frontmostBundleID
                 )
             }
-            .sorted(by: sortCandidates)
     }
 
     private func scoredCandidate(
@@ -403,17 +411,13 @@ final class MeetingPromptDetector {
     }
 
     private func extractFirstMeetingURL(in text: String) -> URL? {
+        guard let detector = Self.meetingURLDetector else { return nil }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
-            return nil
-        }
-
         let matches = detector.matches(in: text, options: [], range: range)
         for match in matches {
             guard let url = match.url, provider(for: url) != nil else { continue }
             return url
         }
-
         return nil
     }
 

@@ -7,6 +7,28 @@
     <description>Release feed for Transcripted macOS updates.</description>
     <language>en</language>
     <item>
+      <title>1.1.12</title>
+      <pubDate>Sun, 19 Apr 2026 02:22:54 GMT</pubDate>
+      <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.12</link>
+      <sparkle:version>1.1.12</sparkle:version>
+      <sparkle:shortVersionString>1.1.12</sparkle:shortVersionString>
+      <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.1.12</sparkle:releaseNotesLink>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.12/Transcripted-1.1.12.dmg" length="503316542" type="application/octet-stream" sparkle:edSignature="tyMGBXTf61HJp9NL+rHFGn0Kmay2FZ2g5aiJWMAOUFfgjDMeXpaQEt7l7cwMHKuqUFVCr8/TDAto5sAM3K14Cw=="/>
+    </item>
+    <item>
+      <title>1.1.11</title>
+      <pubDate>Sat, 18 Apr 2026 12:00:39 GMT</pubDate>
+      <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.11</link>
+      <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.1.11</sparkle:releaseNotesLink>
+      <sparkle:version>1.1.11</sparkle:version>
+      <sparkle:shortVersionString>1.1.11</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.11/Transcripted-1.1.11.dmg" length="503193049" type="application/octet-stream" sparkle:edSignature="r3XHWckeyeCU3lkgfIda5c9jDDph9K19xXbQ8ySleY6Y3umG4wS4WqX/e8M7Z4zM5cmFLrIYcqx8oJSrhYuLCw=="/>
+    </item>
+    <item>
       <title>1.1.10</title>
       <pubDate>Fri, 17 Apr 2026 19:44:46 GMT</pubDate>
       <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.10</link>

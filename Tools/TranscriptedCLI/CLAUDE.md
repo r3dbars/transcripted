@@ -56,6 +56,7 @@ They also honor:
 | File | Purpose |
 |------|---------|
 | `Tests/TranscriptedCLITests/ContextDirectoriesTests.swift` | Coverage for current Transcripted captures vs legacy Draft fallback path resolution |
+| `Tests/TranscriptedCLITests/ContextStoreTests.swift` | Coverage for `ContextStore` recent/search loading and dictation day-file filtering |
 
 ## Build And Run
 

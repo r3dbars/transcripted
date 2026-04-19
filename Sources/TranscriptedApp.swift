@@ -5,6 +5,7 @@ import SwiftUI
 import AppKit
 import Carbon
 import TranscriptedCore
+import UniformTypeIdentifiers
 
 @main
 struct TranscriptedApp: App {
@@ -23,15 +24,30 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     var popover: NSPopover?
     private var lastExternalApplication: NSRunningApplication?
     private var hasPresentedInitialOnboarding = false
-    private lazy var settingsWindowController = TranscriptedSettingsWindowController(appState: appState)
+    private let settingsTextPaster = ClipboardRestoringTextPaster()
+    private lazy var settingsActions = TranscriptedSettingsActions(
+        startDictation: { [weak self] in self?.startDictationFromSettings() },
+        startMeeting: { [weak self] in self?.startMeetingFromSettings() },
+        importAudioFile: { [weak self] in self?.importAudioFileFromSettings() },
+        pasteLastDictation: { [weak self] in self?.pasteLastDictationFromSettings() },
+        openConnectAgent: { [weak self] in self?.showSettingsWindow(page: .connectAgent) },
+        checkForUpdates: { [weak self] in self?.appState.sparkleUpdater.checkForUpdates() },
+        sendFeedback: { [weak self] in
+            guard let self else { return }
+            TranscriptedSupportActions.sendFeedback(logger: self.appState.logger)
+        }
+    )
+    private lazy var settingsWindowController = TranscriptedSettingsWindowController(
+        appState: appState,
+        actions: settingsActions
+    )
     private lazy var onboardingWindowController = TranscriptedOnboardingWindowController(
         makeView: { [unowned self] in self.makeOnboardingView() }
     )
     private lazy var menuPanelController = MenuBarPanelController(
         appState: appState,
         preferredSourceAppProvider: { [weak self] in self?.lastExternalApplication },
-        openSettingsWindow: { [weak self] in self?.showSettingsWindow() },
-        openAgentConnectWindow: { [weak self] in self?.showAgentConnectWindow() },
+        openSettingsWindow: { [weak self] page in self?.showSettingsWindow(page: page) },
         dismissPopover: { [weak self] in self?.closePopover() }
     )
 
@@ -189,12 +205,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
     }
 
-    private func showSettingsWindow() {
-        settingsWindowController.present()
-    }
-
-    private func showAgentConnectWindow() {
-        AgentConnectionWindowCoordinator.shared.show()
+    private func showSettingsWindow(page: TranscriptedSettingsPage = .home) {
+        settingsWindowController.present(page: page)
     }
 
     private func makeOnboardingView() -> PermissionsOnboardingView {
@@ -246,6 +258,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         _ = resolvedSourceApp()
         menuPanelController.refresh()
         popover.contentViewController = menuPanelController
+        popover.contentSize = menuPanelController.preferredContentSize
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -263,6 +276,48 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
 
         return nil
+    }
+
+    private func startDictationFromSettings() {
+        guard let session = appState.contextCapture.sessionController else { return }
+        let sourceApp = resolvedSourceApp()
+        sourceApp?.activate(options: [])
+        session.startDictation(sourceApp: sourceApp, trigger: .menu)
+    }
+
+    private func startMeetingFromSettings() {
+        let sourceApp = resolvedSourceApp()
+        sourceApp?.activate(options: [])
+        Task {
+            await appState.meetingSession.startRecording(trigger: .menu)
+        }
+    }
+
+    private func importAudioFileFromSettings() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.audio]
+        panel.prompt = "Transcribe"
+        panel.message = "Choose an audio file Transcripted should transcribe."
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        Task {
+            _ = await appState.meetingSession.importAudioFile(from: url)
+        }
+    }
+
+    private func pasteLastDictationFromSettings() {
+        guard let latestText = DictationTranscriptStore.latestSavedText() else {
+            NSSound.beep()
+            return
+        }
+
+        let sourceApp = resolvedSourceApp()
+        sourceApp?.activate(options: [])
+        _ = settingsTextPaster.paste(latestText)
     }
 
     @available(macOS 14.0, *)

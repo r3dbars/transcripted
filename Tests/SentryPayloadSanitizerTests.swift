@@ -15,8 +15,11 @@ func testSentryPayloadSanitizer() {
 
     runSuite("SentryPayloadSanitizer.sanitizeContext drops obviously sensitive keys") {
         let sanitized = SentryPayloadSanitizer.sanitizeContext([
+            "client_secret": "plain-secret",
+            "dsn": "https://example@sentry.invalid/1",
             "duration_ms": "123",
             "meeting_state": "transcribing",
+            "password": "hunter2",
             "title": "Private customer call",
             "transcript_url": "/Users/redbars/Library/Application Support/Draft/meetings/demo.md",
             "error": "meeting title leaked",
@@ -25,6 +28,9 @@ func testSentryPayloadSanitizer() {
 
         assertEqual(sanitized["duration_ms"], "123", "coarse numeric values should remain")
         assertEqual(sanitized["meeting_state"], "transcribing", "non-sensitive state should remain")
+        assertNil(sanitized["client_secret"], "client secrets should be dropped")
+        assertNil(sanitized["dsn"], "DSNs should be dropped")
+        assertNil(sanitized["password"], "password fields should be dropped")
         assertNil(sanitized["title"], "title should be dropped")
         assertNil(sanitized["transcript_url"], "transcript path should be dropped")
         assertNil(sanitized["error"], "free-form error payloads should be dropped")
@@ -44,14 +50,29 @@ func testSentryPayloadSanitizer() {
     }
 
     runSuite("SentryPayloadSanitizer.sanitizeText redacts raw URLs and common token formats") {
-        let input = "Download failed at https://example.com/private?token=abc123 with ghp_123456789012345678901234567890123456 and phc_abcdefghijklmnopqrstuvwxyz123456"
+        let input = "Download failed at https://example.com/private?token=abc123 with ghp_123456789012345678901234567890123456 phc_abcdefghijklmnopqrstuvwxyz123456 AKIAIOSFODNN7EXAMPLE AIzaSyA-BCDEFGHIJKLMNOPQRSTUVWXYZ123456"
         let sanitized = SentryPayloadSanitizer.sanitizeText(input)
 
         assertFalse(sanitized.contains("https://example.com/private?token=abc123"), "raw URLs should be redacted")
         assertFalse(sanitized.contains("ghp_123456789012345678901234567890123456"), "GitHub tokens should be redacted")
         assertFalse(sanitized.contains("phc_abcdefghijklmnopqrstuvwxyz123456"), "PostHog keys should be redacted")
+        assertFalse(sanitized.contains("AKIAIOSFODNN7EXAMPLE"), "AWS access key IDs should be redacted")
+        assertFalse(sanitized.contains("AIzaSyA-BCDEFGHIJKLMNOPQRSTUVWXYZ123456"), "Google API keys should be redacted")
         assertTrue(sanitized.contains("[redacted-url]"), "redacted URL marker should remain")
         assertTrue(sanitized.contains("[redacted-secret]"), "redacted secret marker should remain")
+    }
+
+    runSuite("SentryPayloadSanitizer.sanitizeText redacts password and secret assignments") {
+        let input = "Sync failed with password=hunter2 client_secret:supersecret credential=temp-pass dsn=https://example@sentry.invalid/1"
+        let sanitized = SentryPayloadSanitizer.sanitizeText(input)
+
+        assertFalse(sanitized.contains("hunter2"), "password assignment values should be redacted")
+        assertFalse(sanitized.contains("supersecret"), "client secret assignment values should be redacted")
+        assertFalse(sanitized.contains("temp-pass"), "credential assignment values should be redacted")
+        assertFalse(sanitized.contains("https://example@sentry.invalid/1"), "DSN URLs should be redacted")
+        assertTrue(sanitized.contains("password=[redacted-secret]"), "password marker should remain")
+        assertTrue(sanitized.contains("client_secret=[redacted-secret]"), "client secret marker should remain")
+        assertTrue(sanitized.contains("credential=[redacted-secret]"), "credential marker should remain")
     }
 
     runSuite("SentryPayloadSanitizer redacts case-insensitive bearer variants with tabs and multi-space") {
