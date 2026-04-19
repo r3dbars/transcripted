@@ -41,6 +41,8 @@ final class MeetingOverlayPanel: NSPanel {
         self.titleVisibility = .hidden
         self.isMovableByWindowBackground = true
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        self.acceptsMouseMovedEvents = true
+        self.allowsToolTipsWhenApplicationIsInactive = true
     }
 
     // Never steals keyboard focus — meeting UI is read-only status.
@@ -75,6 +77,9 @@ final class MeetingOverlayRootView: NSView {
     private let warmupProgress = NSProgressIndicator()
     private var currentState: MeetingOverlayController.OverlayState = .idle
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
+    private let cancelTooltip = "Cancel meeting recording"
+    private let finishTooltip = "Finish and transcribe"
+    private let dismissPromptTooltip = "Dismiss meeting prompt"
 
     /// Invoked when the user clicks the close/stop button.
     var onSecondaryAction: (() -> Void)?
@@ -161,6 +166,8 @@ final class MeetingOverlayRootView: NSView {
         recordButton.layer?.backgroundColor = OverlayTokens.accentGreen.cgColor
         recordButton.target = self
         recordButton.action = #selector(handlePrimaryAction)
+        recordButton.toolTip = "Start meeting recording"
+        recordButton.setAccessibilityLabel("Start meeting recording")
         recordButton.isHidden = true
         addSubview(recordButton)
 
@@ -174,7 +181,9 @@ final class MeetingOverlayRootView: NSView {
         cancelButton.image = cancelButtonImage()
         cancelButton.imagePosition = .imageOnly
         cancelButton.contentTintColor = NSColor.systemRed
-        cancelButton.toolTip = "Discard recording"
+        cancelButton.toolTip = cancelTooltip
+        cancelButton.setAccessibilityLabel(cancelTooltip)
+        cancelButton.setAccessibilityHelp("Shows a confirmation before discarding this meeting recording.")
         cancelButton.target = self
         cancelButton.action = #selector(handleCancelAction)
         cancelButton.isHidden = true
@@ -193,6 +202,8 @@ final class MeetingOverlayRootView: NSView {
         closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
         closeButton.layer?.borderWidth = 0
         closeButton.imageScaling = .scaleProportionallyDown
+        closeButton.setAccessibilityLabel(finishTooltip)
+        closeButton.setAccessibilityHelp("Stops recording, saves the audio, and starts transcription.")
         closeButton.target = self
         closeButton.action = #selector(handleSecondaryAction)
         closeButton.isHidden = true
@@ -528,6 +539,9 @@ final class MeetingOverlayRootView: NSView {
             timerLabel.stringValue = prompt?.countdownText ?? ""
             updateStatusDot(color: MeetingOverlayTokens.dotPrompt)
             closeButton.attributedTitle = buttonTitle("Not now", size: 11, weight: .semibold)
+            closeButton.toolTip = dismissPromptTooltip
+            closeButton.setAccessibilityLabel(dismissPromptTooltip)
+            closeButton.setAccessibilityHelp("Dismisses this meeting recording prompt.")
             closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
         case .recording:
             titleLabel.stringValue = "Recording meeting"
@@ -538,7 +552,9 @@ final class MeetingOverlayRootView: NSView {
             closeButton.image = stopButtonImage()
             closeButton.imagePosition = .imageOnly
             closeButton.contentTintColor = MeetingOverlayTokens.textPrimary
-            closeButton.toolTip = "Stop recording"
+            closeButton.toolTip = finishTooltip
+            closeButton.setAccessibilityLabel(finishTooltip)
+            closeButton.setAccessibilityHelp("Stops recording, saves the audio, and starts transcription.")
             closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
             closeButton.layer?.cornerRadius = MeetingOverlayTokens.stopHeight / 2
             closeButton.layer?.borderWidth = 0.5
@@ -594,7 +610,9 @@ final class MeetingOverlayRootView: NSView {
         cancelButton.image = cancelButtonImage()
         cancelButton.imagePosition = .imageOnly
         cancelButton.contentTintColor = NSColor.systemRed
-        cancelButton.toolTip = "Discard recording"
+        cancelButton.toolTip = cancelTooltip
+        cancelButton.setAccessibilityLabel(cancelTooltip)
+        cancelButton.setAccessibilityHelp("Shows a confirmation before discarding this meeting recording.")
         cancelButton.layer?.cornerRadius = MeetingOverlayTokens.cancelHeight / 2
         cancelButton.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.14).cgColor
         cancelButton.layer?.borderWidth = 0.5
@@ -620,13 +638,13 @@ final class MeetingOverlayRootView: NSView {
 
     private func stopButtonImage() -> NSImage? {
         let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
-        return NSImage(systemSymbolName: "stop.fill", accessibilityDescription: "Stop recording")?
+        return NSImage(systemSymbolName: "stop.fill", accessibilityDescription: finishTooltip)?
             .withSymbolConfiguration(config)
     }
 
     private func cancelButtonImage() -> NSImage? {
         let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
-        return NSImage(systemSymbolName: "xmark", accessibilityDescription: "Discard recording")?
+        return NSImage(systemSymbolName: "xmark", accessibilityDescription: cancelTooltip)?
             .withSymbolConfiguration(config)
     }
 
