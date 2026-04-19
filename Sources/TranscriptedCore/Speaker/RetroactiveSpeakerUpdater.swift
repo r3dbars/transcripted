@@ -258,7 +258,7 @@ extension TranscriptSaver {
             let obsidianEnabled = isObsidianFormatted(content)
             let updatesByChannelKey = Dictionary(uniqueKeysWithValues: updates.map {
                 (
-                    speakerUpdateKey(channel: $0.channel, diarizerSpeakerId: $0.diarizerSpeakerId),
+                    $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId),
                     (
                         oldName: currentSpeakerName(
                             in: content,
@@ -331,6 +331,14 @@ extension TranscriptSaver {
         }
     }
 
+    private static let micLabelRegex = try? NSRegularExpression(pattern: #"\[Mic/[^\]]*\]"#)
+    private static let localSpeakerBreakdownRegex = try? NSRegularExpression(
+        pattern: #"(?s)\n#### Local Speaker Breakdown\n.*?\n\n"#
+    )
+    private static let speakersDetectedLineRegex = try? NSRegularExpression(
+        pattern: #"\n- \*\*Speakers Detected:\*\* \d+\n"#
+    )
+
     /// Collapse mic speakers back to "You" after the user clicked "Keep as You" in the
     /// naming sheet. Rewrites the saved transcript to:
     ///   - Replace every `[Mic/Speaker N]` (or named) label with `[Mic/You]` in the body
@@ -356,18 +364,11 @@ extension TranscriptSaver {
             }
 
             // 1) Rewrite body mic labels. Replace `[Mic/<anything>]` with `[Mic/You]`.
-            //    Non-greedy match on bracketed content to avoid escaping other `]`.
-            do {
-                let pattern = #"\[Mic/[^\]]*\]"#
-                if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
-                    let range = NSRange(content.startIndex..., in: content)
-                    content = regex.stringByReplacingMatches(
-                        in: content,
-                        options: [],
-                        range: range,
-                        withTemplate: "[Mic/You]"
-                    )
-                }
+            if let regex = micLabelRegex {
+                let range = NSRange(content.startIndex..., in: content)
+                content = regex.stringByReplacingMatches(
+                    in: content, options: [], range: range, withTemplate: "[Mic/You]"
+                )
             }
 
             // 2) Mic section header: "Microphone (People in the Room)" -> "Microphone (You)"
@@ -376,46 +377,26 @@ extension TranscriptSaver {
                 with: "### Microphone (You)"
             )
 
-            // 3) Remove the "Local Speaker Breakdown" subsection entirely. It spans from
-            //    the header line through the next blank line before the next `---` or `####`
-            //    / `###` heading. Conservative regex — only remove when the section is present.
-            do {
-                let pattern = #"(?s)\n#### Local Speaker Breakdown\n.*?\n\n"#
-                if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
-                    let range = NSRange(content.startIndex..., in: content)
-                    content = regex.stringByReplacingMatches(
-                        in: content,
-                        options: [],
-                        range: range,
-                        withTemplate: "\n"
-                    )
-                }
+            // 3) Remove the "Local Speaker Breakdown" subsection entirely.
+            if let regex = localSpeakerBreakdownRegex {
+                let range = NSRange(content.startIndex..., in: content)
+                content = regex.stringByReplacingMatches(
+                    in: content, options: [], range: range, withTemplate: "\n"
+                )
             }
 
             // 4) Strip mic speakers from the YAML frontmatter `speakers:` block.
-            //    Each mic entry is a 5-line group ending with `    source: ...`, tagged
-            //    by `channel: mic`. We remove all such groups.
             content = stripYAMLSpeakerEntries(in: content, channel: "mic")
 
-            // 5) "Speakers Detected: N" line inside the mic stats block — drop it
-            //    since we're collapsing back to the single-speaker view.
-            do {
-                let pattern = #"\n- \*\*Speakers Detected:\*\* \d+\n"#
-                if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
-                    // Only replace the FIRST match (the mic block's one — remote block
-                    // is always written so removing both would break the remote stats).
-                    // We find the mic block anchor and scope to that.
-                    if let micHeaderRange = content.range(of: "### Microphone (You)") {
-                        let micSectionEnd = content.range(of: "\n\n### ", range: micHeaderRange.upperBound..<content.endIndex)?.lowerBound ?? content.endIndex
-                        let micSectionRange = NSRange(micHeaderRange.upperBound..<micSectionEnd, in: content)
-                        content = regex.stringByReplacingMatches(
-                            in: content,
-                            options: [],
-                            range: micSectionRange,
-                            withTemplate: "\n"
-                        )
-                    }
-                }
+            // 5) "Speakers Detected: N" line inside the mic stats block — drop it.
+            //    Only remove inside the mic section so the remote stats line is untouched.
+            if let regex = speakersDetectedLineRegex,
+               let micHeaderRange = content.range(of: "### Microphone (You)") {
+                let micSectionEnd = content.range(of: "\n\n### ", range: micHeaderRange.upperBound..<content.endIndex)?.lowerBound ?? content.endIndex
+                let micSectionRange = NSRange(micHeaderRange.upperBound..<micSectionEnd, in: content)
+                content = regex.stringByReplacingMatches(
+                    in: content, options: [], range: micSectionRange, withTemplate: "\n"
+                )
             }
 
             do {
@@ -839,7 +820,7 @@ extension TranscriptSaver {
         let speakerGroups = Dictionary(grouping: utterances, by: { $0.speakerId })
         let lines = speakerGroups.keys.sorted().map { speakerId in
             let utterances = speakerGroups[speakerId] ?? []
-            let speakerKey = speakerUpdateKey(channel: channel, diarizerSpeakerId: String(speakerId))
+            let speakerKey = channel.speakerKey(diarizerSpeakerId: String(speakerId))
             let speakerName = updatesByChannelKey[speakerKey]?.newName
                 ?? updatesByChannelKey[speakerKey]?.oldName
                 ?? currentSpeakerName(in: content, diarizerSpeakerId: String(speakerId), channel: channel)
@@ -915,10 +896,8 @@ extension TranscriptSaver {
                 return false
             }
 
-            let speakerKey = speakerUpdateKey(
-                channel: utterance.channel == 0 ? .mic : .system,
-                diarizerSpeakerId: String(utterance.speakerId)
-            )
+            let channel: UtteranceChannel = utterance.channel == 0 ? .mic : .system
+            let speakerKey = channel.speakerKey(diarizerSpeakerId: String(utterance.speakerId))
             guard let update = updatesByChannelKey[speakerKey] else { continue }
 
             let label = transcriptLabel(
@@ -963,10 +942,8 @@ extension TranscriptSaver {
                 return false
             }
 
-            let speakerKey = speakerUpdateKey(
-                channel: utterance.channel == 0 ? .mic : .system,
-                diarizerSpeakerId: String(utterance.speakerId)
-            )
+            let utteranceChannel: UtteranceChannel = utterance.channel == 0 ? .mic : .system
+            let speakerKey = utteranceChannel.speakerKey(diarizerSpeakerId: String(utterance.speakerId))
             if let update = updatesByChannelKey[speakerKey] {
                 let label = transcriptLabel(
                     for: update.newName,
@@ -985,12 +962,6 @@ extension TranscriptSaver {
         return true
     }
 
-    private static func speakerUpdateKey(
-        channel: UtteranceChannel,
-        diarizerSpeakerId: String
-    ) -> String {
-        "\(channel.rawValue)_\(diarizerSpeakerId)"
-    }
 
     private static func parseTranscriptLine(_ line: String) -> (timestamp: String, source: String, label: String, text: String)? {
         guard line.hasPrefix("["),

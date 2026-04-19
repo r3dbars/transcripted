@@ -225,6 +225,12 @@ extension Transcription {
             var speakerNewProfiles: [Int: UUID] = [:]
             var speakerIdRemap: [Int: Int] = [:]
 
+            // Pre-compute unweighted means for non-ghost speakers so the ghost merge inner
+            // loop doesn't recompute the same means once per ghost (O(G×N) → O(N)).
+            let nonGhostMeans: [Int: [Float]] = embeddingsPerSpeaker
+                .filter { !ghostSpeakerIdSet.contains($0.key) }
+                .reduce(into: [:]) { $0[$1.key] = Self.computeMeanEmbedding($1.value) }
+
             for (speakerId, embeddings) in embeddingsPerSpeaker {
                 let weights = embeddingWeights[speakerId] ?? Array(repeating: Float(1.0), count: embeddings.count)
                 let meanEmbedding = Self.computeWeightedMeanEmbedding(embeddings, weights: weights)
@@ -238,8 +244,7 @@ extension Transcription {
                 if isGhost {
                     var bestNonGhostId: Int?
                     var bestSimilarity: Double = -1
-                    for (otherId, otherEmbeddings) in embeddingsPerSpeaker where !ghostSpeakerIdSet.contains(otherId) {
-                        let otherMean = Self.computeMeanEmbedding(otherEmbeddings)
+                    for (otherId, otherMean) in nonGhostMeans {
                         let sim = Self.cosineSimilarityStatic(meanEmbedding, otherMean)
                         if sim > bestSimilarity {
                             bestSimilarity = sim
@@ -597,6 +602,12 @@ extension Transcription {
         var speakerIdRemap: [Int: Int] = [:]
         var newlyCreatedProfileIds: Set<UUID> = []
 
+        // Pre-compute unweighted means for non-ghost speakers so the ghost merge inner
+        // loop doesn't recompute the same means once per ghost (O(G×N) → O(N)).
+        let nonGhostMeans: [Int: [Float]] = embeddingsPerSpeaker
+            .filter { !ghostSpeakerIdSet.contains($0.key) }
+            .reduce(into: [:]) { $0[$1.key] = Self.computeMeanEmbedding($1.value) }
+
         for (speakerId, embeddings) in embeddingsPerSpeaker {
             let meanEmbedding = Self.computeMeanEmbedding(embeddings)
             let isGhost = ghostSpeakerIdSet.contains(speakerId)
@@ -604,8 +615,7 @@ extension Transcription {
             if isGhost {
                 var bestNonGhostId: Int?
                 var bestSimilarity: Double = -1
-                for (otherId, otherEmbeddings) in embeddingsPerSpeaker where !ghostSpeakerIdSet.contains(otherId) {
-                    let otherMean = Self.computeMeanEmbedding(otherEmbeddings)
+                for (otherId, otherMean) in nonGhostMeans {
                     let sim = Self.cosineSimilarityStatic(meanEmbedding, otherMean)
                     if sim > bestSimilarity { bestSimilarity = sim; bestNonGhostId = otherId }
                 }
