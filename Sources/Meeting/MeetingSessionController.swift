@@ -42,7 +42,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     enum RecordingCancelReason: String {
-        case escapeConfirmation = "escape_confirmation"
+        case discardButton = "discard_button"
         case unknown = "unknown"
     }
 

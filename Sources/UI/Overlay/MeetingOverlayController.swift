@@ -10,7 +10,6 @@
 
 import AppKit
 import Combine
-import Carbon
 import TranscriptedCore
 
 // MARK: - Panel
@@ -68,6 +67,7 @@ final class MeetingOverlayRootView: NSView {
     private let systemLabel = NSTextField(labelWithString: "System audio")
     private let audioWaveform = DualWaveformHostView(frame: .zero)
     private let recordButton = NSButton()
+    private let cancelButton = NSButton()
     private let closeButton = NSButton()
     private let chevronButton = NSButton()
     private let warmupTitleLabel = NSTextField(labelWithString: "Getting Transcripted ready")
@@ -78,6 +78,7 @@ final class MeetingOverlayRootView: NSView {
 
     /// Invoked when the user clicks the close/stop button.
     var onSecondaryAction: (() -> Void)?
+    var onCancelAction: (() -> Void)?
     var onPrimaryAction: (() -> Void)?
 
     override init(frame: NSRect) {
@@ -162,6 +163,22 @@ final class MeetingOverlayRootView: NSView {
         recordButton.action = #selector(handlePrimaryAction)
         recordButton.isHidden = true
         addSubview(recordButton)
+
+        cancelButton.isBordered = false
+        cancelButton.wantsLayer = true
+        cancelButton.layer?.cornerRadius = MeetingOverlayTokens.cancelHeight / 2
+        cancelButton.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.14).cgColor
+        cancelButton.layer?.borderWidth = 0.5
+        cancelButton.layer?.borderColor = NSColor.systemRed.withAlphaComponent(0.24).cgColor
+        cancelButton.imageScaling = .scaleProportionallyDown
+        cancelButton.image = cancelButtonImage()
+        cancelButton.imagePosition = .imageOnly
+        cancelButton.contentTintColor = NSColor.systemRed
+        cancelButton.toolTip = "Discard recording"
+        cancelButton.target = self
+        cancelButton.action = #selector(handleCancelAction)
+        cancelButton.isHidden = true
+        addSubview(cancelButton)
 
         closeButton.attributedTitle = NSAttributedString(
             string: "Stop",
@@ -309,8 +326,15 @@ final class MeetingOverlayRootView: NSView {
         let tokens = MeetingOverlayTokens.self
         let midY = bounds.height / 2
 
-        statusDot.frame = NSRect(
+        cancelButton.frame = NSRect(
             x: tokens.padLeft,
+            y: midY - tokens.cancelHeight / 2,
+            width: tokens.cancelHeight,
+            height: tokens.cancelHeight
+        )
+
+        statusDot.frame = NSRect(
+            x: cancelButton.frame.maxX + tokens.headerGap,
             y: midY - tokens.dotSize / 2,
             width: tokens.dotSize,
             height: tokens.dotSize
@@ -472,6 +496,7 @@ final class MeetingOverlayRootView: NSView {
         let showLevels = state == .recording
         audioWaveform.isHidden = !showLevels
         recordButton.isHidden = !isPrompting
+        cancelButton.isHidden = state != .recording
         closeButton.isHidden = isPreparing || (state != .recording && !isPrompting)
         chevronButton.isHidden = true
         warmupTitleLabel.isHidden = !isPreparing
@@ -566,6 +591,14 @@ final class MeetingOverlayRootView: NSView {
         closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
         closeButton.layer?.borderWidth = 0
         closeButton.layer?.borderColor = nil
+        cancelButton.image = cancelButtonImage()
+        cancelButton.imagePosition = .imageOnly
+        cancelButton.contentTintColor = NSColor.systemRed
+        cancelButton.toolTip = "Discard recording"
+        cancelButton.layer?.cornerRadius = MeetingOverlayTokens.cancelHeight / 2
+        cancelButton.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.14).cgColor
+        cancelButton.layer?.borderWidth = 0.5
+        cancelButton.layer?.borderColor = NSColor.systemRed.withAlphaComponent(0.24).cgColor
     }
 
     private func buttonTitle(_ title: String, size: CGFloat, weight: NSFont.Weight) -> NSAttributedString {
@@ -591,6 +624,12 @@ final class MeetingOverlayRootView: NSView {
             .withSymbolConfiguration(config)
     }
 
+    private func cancelButtonImage() -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+        return NSImage(systemSymbolName: "xmark", accessibilityDescription: "Discard recording")?
+            .withSymbolConfiguration(config)
+    }
+
     private func formatDuration(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds))
         let m = total / 60
@@ -600,6 +639,10 @@ final class MeetingOverlayRootView: NSView {
 
     @objc private func handleSecondaryAction() {
         onSecondaryAction?()
+    }
+
+    @objc private func handleCancelAction() {
+        onCancelAction?()
     }
 
     @objc private func handlePrimaryAction() {
@@ -626,7 +669,7 @@ enum MeetingOverlayTokens {
     static let dotError      = NSColor.systemRed
 
     static let panelWidth: CGFloat  = 360
-    static let recordingPanelWidth: CGFloat = 256
+    static let recordingPanelWidth: CGFloat = 292
     static let panelHeight: CGFloat = 44
     static let promptHeight: CGFloat = 88
     static let warmupHeight: CGFloat = 96
@@ -637,6 +680,7 @@ enum MeetingOverlayTokens {
     static let padRight: CGFloat    = 8
     static let headerGap: CGFloat   = 8
     static let timerFontSize: CGFloat = 13
+    static let cancelHeight: CGFloat = 24
     static let stopHeight: CGFloat  = 28
     static let recordingWaveformWidth: CGFloat = 124
 }
@@ -688,17 +732,9 @@ final class MeetingOverlayController {
     private var rootView: MeetingOverlayRootView?
     private var subscriptions: Set<AnyCancellable> = []
     private var autoHideTask: Task<Void, Never>?
-    private var globalEscapeMonitor: Any?
-    private var localEscapeMonitor: Any?
     private var isShowingCancelConfirmation = false
 
     deinit {
-        if let monitor = globalEscapeMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        if let monitor = localEscapeMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
         autoHideTask?.cancel()
         promptCountdownTask?.cancel()
     }
@@ -735,6 +771,7 @@ final class MeetingOverlayController {
         let rootView = MeetingOverlayRootView(frame: panel.contentView?.bounds ?? frame)
         rootView.autoresizingMask = [.width, .height]
         rootView.onSecondaryAction = { [weak self] in self?.handleSecondaryActionTapped() }
+        rootView.onCancelAction = { [weak self] in self?.handleCancelTapped() }
         rootView.onPrimaryAction = { [weak self] in self?.handlePrimaryActionTapped() }
         panel.contentView?.addSubview(rootView)
 
@@ -920,7 +957,6 @@ final class MeetingOverlayController {
         ))
         panel.alphaValue = 0
         panel.orderFrontRegardless()
-        installEscapeMonitors()
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.18
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -960,65 +996,17 @@ final class MeetingOverlayController {
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak panel] in
             panel?.orderOut(nil)
-            Task { @MainActor [weak self] in
-                self?.removeEscapeMonitors()
-            }
         })
     }
 
-    private func installEscapeMonitors() {
-        guard globalEscapeMonitor == nil, localEscapeMonitor == nil else { return }
-
-        globalEscapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard event.keyCode == UInt16(kVK_Escape) else { return }
-            Task { @MainActor [weak self] in
-                self?.handleEscapeKey()
-            }
-        }
-
-        localEscapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard event.keyCode == UInt16(kVK_Escape) else { return event }
-            Task { @MainActor [weak self] in
-                self?.handleEscapeKey()
-            }
-            return nil
-        }
-    }
-
-    private func removeEscapeMonitors() {
-        if let monitor = globalEscapeMonitor {
-            NSEvent.removeMonitor(monitor)
-            globalEscapeMonitor = nil
-        }
-        if let monitor = localEscapeMonitor {
-            NSEvent.removeMonitor(monitor)
-            localEscapeMonitor = nil
-        }
-    }
-
-    private func handleEscapeKey() {
-        switch state {
-        case .prompt:
-            dismissPrompt(notifyDetector: true)
-        case .recording:
-            showCancelRecordingConfirmation()
-        default:
-            break
-        }
-    }
-
-    private func showCancelRecordingConfirmation() {
+    private func handleCancelTapped() {
         guard !isShowingCancelConfirmation else { return }
         guard let session = meetingSession else { return }
         guard case .recording = session.state else { return }
 
         isShowingCancelConfirmation = true
-        removeEscapeMonitors()
         defer {
             isShowingCancelConfirmation = false
-            if panel?.isVisible == true {
-                installEscapeMonitors()
-            }
         }
 
         NSApp.activate(ignoringOtherApps: true)
@@ -1035,7 +1023,7 @@ final class MeetingOverlayController {
         guard response == .alertSecondButtonReturn else { return }
 
         Task { [weak session] in
-            await session?.cancelRecording(reason: .escapeConfirmation)
+            await session?.cancelRecording(reason: .discardButton)
         }
     }
 
