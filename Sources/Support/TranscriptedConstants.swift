@@ -123,6 +123,7 @@ enum TranscriptedConstants {
     static let listeningStartSoundFileName = "dictation-start.mp3"
     static let dictationDeliveredSoundFileName = "dictation-delivered.m4a"
     static let meetingTranscriptCompleteSoundFileName = "meeting-transcript-complete.mp3"
+    static let feedbackSubmittedSoundFileName = "wilhelm-scream.mp3"
 
     // MARK: - Hotkeys
 

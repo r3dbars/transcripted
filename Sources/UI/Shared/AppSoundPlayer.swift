@@ -21,6 +21,7 @@ final class AppSoundPlayer {
         case dictationCancelled
         case noSpeech
         case meetingTranscriptComplete
+        case feedbackSubmitted
 
         var bundledFileName: String? {
             switch self {
@@ -32,6 +33,8 @@ final class AppSoundPlayer {
                 return TranscriptedConstants.dictationDeliveredSoundFileName
             case .meetingTranscriptComplete:
                 return TranscriptedConstants.meetingTranscriptCompleteSoundFileName
+            case .feedbackSubmitted:
+                return TranscriptedConstants.feedbackSubmittedSoundFileName
             case .dictationCancelled:
                 return nil
             }
@@ -49,6 +52,8 @@ final class AppSoundPlayer {
                 return "Tink"
             case .meetingTranscriptComplete:
                 return "Glass"
+            case .feedbackSubmitted:
+                return "Glass"
             }
         }
 
@@ -56,7 +61,7 @@ final class AppSoundPlayer {
             switch self {
             case .dictationDelivered, .noSpeech:
                 return TranscriptedConstants.deliveredCueVolumeMultiplier
-            case .dictationStart, .dictationCancelled, .meetingTranscriptComplete:
+            case .dictationStart, .dictationCancelled, .meetingTranscriptComplete, .feedbackSubmitted:
                 return 1.0
             }
         }
@@ -76,8 +81,8 @@ final class AppSoundPlayer {
         sounds = loadedSounds
     }
 
-    func play(_ cue: Cue) {
-        guard UISoundPreferences.isEnabled() else { return }
+    func play(_ cue: Cue, respectingPreferences: Bool = true) {
+        guard !respectingPreferences || UISoundPreferences.isEnabled() else { return }
         guard let sound = sounds[cue] else { return }
         sound.stop()
         _ = sound.play()
