@@ -174,13 +174,13 @@ final class MeetingOverlayRootView: NSView {
         cancelButton.isBordered = false
         cancelButton.wantsLayer = true
         cancelButton.layer?.cornerRadius = MeetingOverlayTokens.cancelHeight / 2
-        cancelButton.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.14).cgColor
+        cancelButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
         cancelButton.layer?.borderWidth = 0.5
-        cancelButton.layer?.borderColor = NSColor.systemRed.withAlphaComponent(0.24).cgColor
+        cancelButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
         cancelButton.imageScaling = .scaleProportionallyDown
         cancelButton.image = cancelButtonImage()
         cancelButton.imagePosition = .imageOnly
-        cancelButton.contentTintColor = NSColor.systemRed
+        cancelButton.contentTintColor = MeetingOverlayTokens.quietActionTint
         cancelButton.toolTip = cancelTooltip
         cancelButton.setAccessibilityLabel(cancelTooltip)
         cancelButton.setAccessibilityHelp("Shows a confirmation before discarding this meeting recording.")
@@ -551,14 +551,14 @@ final class MeetingOverlayRootView: NSView {
             closeButton.attributedTitle = buttonTitle("", size: 12, weight: .semibold)
             closeButton.image = stopButtonImage()
             closeButton.imagePosition = .imageOnly
-            closeButton.contentTintColor = MeetingOverlayTokens.textPrimary
+            closeButton.contentTintColor = MeetingOverlayTokens.finishActionForeground
             closeButton.toolTip = finishTooltip
             closeButton.setAccessibilityLabel(finishTooltip)
             closeButton.setAccessibilityHelp("Stops recording, saves the audio, and starts transcription.")
-            closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
+            closeButton.layer?.backgroundColor = MeetingOverlayTokens.finishActionColor.cgColor
             closeButton.layer?.cornerRadius = MeetingOverlayTokens.stopHeight / 2
             closeButton.layer?.borderWidth = 0.5
-            closeButton.layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+            closeButton.layer?.borderColor = MeetingOverlayTokens.finishActionBorder.cgColor
         case .transcribing:
             titleLabel.stringValue = "Saving transcript"
             updateStatusDot(color: MeetingOverlayTokens.dotPrep)
@@ -609,14 +609,14 @@ final class MeetingOverlayRootView: NSView {
         closeButton.layer?.borderColor = nil
         cancelButton.image = cancelButtonImage()
         cancelButton.imagePosition = .imageOnly
-        cancelButton.contentTintColor = NSColor.systemRed
+        cancelButton.contentTintColor = MeetingOverlayTokens.quietActionTint
         cancelButton.toolTip = cancelTooltip
         cancelButton.setAccessibilityLabel(cancelTooltip)
         cancelButton.setAccessibilityHelp("Shows a confirmation before discarding this meeting recording.")
         cancelButton.layer?.cornerRadius = MeetingOverlayTokens.cancelHeight / 2
-        cancelButton.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.14).cgColor
+        cancelButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
         cancelButton.layer?.borderWidth = 0.5
-        cancelButton.layer?.borderColor = NSColor.systemRed.withAlphaComponent(0.24).cgColor
+        cancelButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
     }
 
     private func buttonTitle(_ title: String, size: CGFloat, weight: NSFont.Weight) -> NSAttributedString {
@@ -685,6 +685,12 @@ enum MeetingOverlayTokens {
     static let dotRecording  = NSColor(calibratedRed: 1.00, green: 0.27, blue: 0.23, alpha: 1.0)
     static let dotSaved      = NSColor.systemGreen
     static let dotError      = NSColor.systemRed
+    static let quietActionBg = NSColor.white.withAlphaComponent(0.08)
+    static let quietActionBorder = NSColor.white.withAlphaComponent(0.14)
+    static let quietActionTint = NSColor.white.withAlphaComponent(0.70)
+    static let finishActionColor = OverlayTokens.accentGreen
+    static let finishActionBorder = OverlayTokens.accentGreen.withAlphaComponent(0.70)
+    static let finishActionForeground = NSColor.black.withAlphaComponent(0.86)
 
     static let panelWidth: CGFloat  = 360
     static let recordingPanelWidth: CGFloat = 292
