@@ -37,6 +37,14 @@ func testAgentConnectionGuide() {
             "prompt should keep routing decisions away from the user"
         )
         assertTrue(
+            prompt.contains("behave like a friendly setup concierge"),
+            "prompt should request concierge-style setup behavior"
+        )
+        assertTrue(
+            prompt.contains("Ask one short, natural question at a time."),
+            "prompt should avoid dumping setup choices"
+        )
+        assertTrue(
             prompt.contains("Local agents running on this Mac, such as Codex, Claude Code in the terminal"),
             "prompt should name local agent contexts"
         )
@@ -47,6 +55,18 @@ func testAgentConnectionGuide() {
         assertTrue(
             prompt.contains("Cowork or shared-agent environments may be local or remote."),
             "prompt should force cowork-style environments to classify local vs remote execution"
+        )
+        assertTrue(
+            prompt.contains("Concierge setup style:"),
+            "prompt should include natural setup behavior guidance"
+        )
+        assertTrue(
+            prompt.contains("If a route works, say \"I found a working path\" and keep going."),
+            "prompt should keep working when any usable route exists"
+        )
+        assertTrue(
+            prompt.contains("Which app are you using: Claude Desktop, Claude Code, Codex, or something else?"),
+            "prompt should ask one natural setup question when blocked"
         )
         assertTrue(
             prompt.contains("Treat the raw transcript or dictation text as the source of truth."),
@@ -61,7 +81,7 @@ func testAgentConnectionGuide() {
             "prompt should make SKILL.md files canonical for matching tasks"
         )
         assertTrue(
-            prompt.contains("Briefly tell me the chosen route and active skill versions. Do not make me choose."),
+            prompt.contains("Briefly tell me the chosen route and active skill versions in natural language. Do not make me choose."),
             "prompt should report the chosen route without making the user choose"
         )
         assertTrue(

@@ -105,6 +105,8 @@ enum AgentConnectionGuide {
         - Do not ask me to choose a connection mode.
         - Silently pick the best available route, then continue.
         - Only stop when you cannot read any Transcripted data. If that happens, give me one smallest next step.
+        - If setup is needed, behave like a friendly setup concierge. Ask one short, natural question at a time.
+        - Prefer plain language like "I found a working path" and "This chat cannot reach your Mac directly" over protocol or debug language.
 
         Automatic route priority:
         1. If Transcripted MCP tools are already available in this environment, use them first.
@@ -117,6 +119,14 @@ enum AgentConnectionGuide {
         - Desktop clients with local stdio MCP support, such as Claude Desktop, can use Transcripted MCP after the MCP config is added and the client is restarted.
         - Remote or web chats, such as Claude chat in a browser, mobile chat, or any sandbox that cannot read `/Users/...` paths, cannot use local folders, local skill files, or local stdio MCP. Do not ask me to choose a mode. Say that this chat cannot reach my Mac directly, then ask me for the single smallest useful action: upload or paste captures, switch to a local agent, or use a remote connector if one is available.
         - Cowork or shared-agent environments may be local or remote. First determine whether the execution environment can read local Mac paths, then follow the matching rule above.
+
+        Concierge setup style:
+        - Start with "I'll check what I can use now."
+        - If a route works, say "I found a working path" and keep going.
+        - If direct tools are missing but folders work, say "We can use this now. Direct tools can be set up later."
+        - If setup is truly needed, ask one question such as "Which app are you using: Claude Desktop, Claude Code, Codex, or something else?"
+        - After the answer, give the exact next step for that app. Do not list every possible client.
+        - Avoid acronyms unless needed. If you mention MCP, call it "Transcripted direct tools" first.
 
         \(mcpPromptBlock)
 
@@ -156,7 +166,7 @@ enum AgentConnectionGuide {
         1. Silently determine which environment type you are in: local Mac agent, desktop MCP client, remote/web chat, or unknown cowork/shared context.
         2. Silently determine which connection mode is available: MCP, MCP setup, folders, uploaded/pasted files, or unavailable.
         3. Confirm whether the bundled SKILL.md files are readable.
-        4. Briefly tell me the chosen route and active skill versions. Do not make me choose.
+        4. Briefly tell me the chosen route and active skill versions in natural language. Do not make me choose.
         5. Then continue with my task.
         """
 
