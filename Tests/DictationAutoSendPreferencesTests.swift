@@ -7,6 +7,7 @@ func testDictationAutoSendPreferences() {
 
         assertFalse(DictationAutoSendPreferences.isEnabled(userDefaults: defaults), "auto enter should default off")
         assertEqual(DictationAutoSendPreferences.sendKey(userDefaults: defaults), .enter, "send key should default to Enter")
+        assertEqual(DictationAutoSendPreferences.allowedBundleIDs(userDefaults: defaults), [], "allowed app list should default empty")
     }
 
     runSuite("DictationAutoSendPreferences persists enabled state and send key") {
@@ -15,9 +16,15 @@ func testDictationAutoSendPreferences() {
 
         DictationAutoSendPreferences.setEnabled(true, userDefaults: defaults)
         DictationAutoSendPreferences.setSendKey(.commandEnter, userDefaults: defaults)
+        DictationAutoSendPreferences.setAllowedBundleIDs(["com.example.Chat", "com.example.Notes"], userDefaults: defaults)
 
         assertTrue(DictationAutoSendPreferences.isEnabled(userDefaults: defaults), "auto enter should read explicit enabled state")
         assertEqual(DictationAutoSendPreferences.sendKey(userDefaults: defaults), .commandEnter, "send key should read explicit Cmd+Enter")
+        assertEqual(
+            DictationAutoSendPreferences.allowedBundleIDs(userDefaults: defaults),
+            ["com.example.Chat", "com.example.Notes"],
+            "allowed app list should persist bundle IDs"
+        )
     }
 
     runSuite("DictationAutoSendPreferences falls back from unknown send key") {
@@ -35,7 +42,9 @@ func testDictationAutoSendPreferences() {
                 isEnabled: true,
                 delivery: .pasted,
                 text: "Send this",
-                duration: TranscriptedConstants.dictationAutoEnterMinimumDuration
+                duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
+                sourceBundleID: "com.example.Chat",
+                allowedBundleIDs: ["com.example.Chat"]
             ),
             "enabled pasted dictation with text should send"
         )
@@ -45,7 +54,9 @@ func testDictationAutoSendPreferences() {
                 isEnabled: false,
                 delivery: .pasted,
                 text: "Send this",
-                duration: TranscriptedConstants.dictationAutoEnterMinimumDuration
+                duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
+                sourceBundleID: "com.example.Chat",
+                allowedBundleIDs: ["com.example.Chat"]
             ),
             "disabled preference should not send"
         )
@@ -55,7 +66,9 @@ func testDictationAutoSendPreferences() {
                 isEnabled: true,
                 delivery: .copied,
                 text: "Send this",
-                duration: TranscriptedConstants.dictationAutoEnterMinimumDuration
+                duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
+                sourceBundleID: "com.example.Chat",
+                allowedBundleIDs: ["com.example.Chat"]
             ),
             "copied fallback should not send"
         )
@@ -65,7 +78,9 @@ func testDictationAutoSendPreferences() {
                 isEnabled: true,
                 delivery: .pasted,
                 text: "   \n",
-                duration: TranscriptedConstants.dictationAutoEnterMinimumDuration
+                duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
+                sourceBundleID: "com.example.Chat",
+                allowedBundleIDs: ["com.example.Chat"]
             ),
             "empty transcript should not send"
         )
@@ -75,9 +90,35 @@ func testDictationAutoSendPreferences() {
                 isEnabled: true,
                 delivery: .pasted,
                 text: "Too fast",
-                duration: TranscriptedConstants.dictationAutoEnterMinimumDuration - 0.01
+                duration: TranscriptedConstants.dictationAutoEnterMinimumDuration - 0.01,
+                sourceBundleID: "com.example.Chat",
+                allowedBundleIDs: ["com.example.Chat"]
             ),
             "very short accidental taps should not send"
+        )
+
+        assertFalse(
+            DictationAutoSendPolicy.shouldSend(
+                isEnabled: true,
+                delivery: .pasted,
+                text: "Send this",
+                duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
+                sourceBundleID: "com.example.Notes",
+                allowedBundleIDs: ["com.example.Chat"]
+            ),
+            "unselected apps should not send"
+        )
+
+        assertFalse(
+            DictationAutoSendPolicy.shouldSend(
+                isEnabled: true,
+                delivery: .pasted,
+                text: "Send this",
+                duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
+                sourceBundleID: nil,
+                allowedBundleIDs: ["com.example.Chat"]
+            ),
+            "unknown source apps should not send"
         )
     }
 }

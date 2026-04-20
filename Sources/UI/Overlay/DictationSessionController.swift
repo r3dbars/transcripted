@@ -726,7 +726,9 @@ class DictationSessionController: ObservableObject {
             isEnabled: DictationAutoSendPreferences.isEnabled(),
             delivery: delivery,
             text: text,
-            duration: duration
+            duration: duration,
+            sourceBundleID: sessionSourceApp?.bundleIdentifier,
+            allowedBundleIDs: DictationAutoSendPreferences.allowedBundleIDs()
         ) else {
             return .disabled
         }

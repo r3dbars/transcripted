@@ -39,6 +39,7 @@ enum DictationAutoSendKey: String, CaseIterable, Identifiable {
 enum DictationAutoSendPreferences {
     private static let enabledKey = "dictationAutoEnterEnabled"
     private static let keyKey = "dictationAutoEnterKey"
+    private static let allowedBundleIDsKey = "dictationAutoEnterAllowedBundleIDs"
 
     static func isEnabled(userDefaults: UserDefaults = .standard) -> Bool {
         userDefaults.bool(forKey: enabledKey)
@@ -60,6 +61,19 @@ enum DictationAutoSendPreferences {
     static func setSendKey(_ key: DictationAutoSendKey, userDefaults: UserDefaults = .standard) {
         userDefaults.set(key.rawValue, forKey: keyKey)
     }
+
+    static func allowedBundleIDs(userDefaults: UserDefaults = .standard) -> Set<String> {
+        let rawValues = userDefaults.stringArray(forKey: allowedBundleIDsKey) ?? []
+        return Set(rawValues.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+    }
+
+    static func setAllowedBundleIDs(_ bundleIDs: Set<String>, userDefaults: UserDefaults = .standard) {
+        let normalized = bundleIDs
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted()
+        userDefaults.set(normalized, forKey: allowedBundleIDsKey)
+    }
 }
 
 enum DictationAutoSendPolicy {
@@ -67,12 +81,15 @@ enum DictationAutoSendPolicy {
         isEnabled: Bool,
         delivery: DictationDelivery,
         text: String,
-        duration: TimeInterval
+        duration: TimeInterval,
+        sourceBundleID: String?,
+        allowedBundleIDs: Set<String>
     ) -> Bool {
         guard isEnabled else { return false }
         guard delivery == .pasted else { return false }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         guard duration >= TranscriptedConstants.dictationAutoEnterMinimumDuration else { return false }
+        guard let sourceBundleID, allowedBundleIDs.contains(sourceBundleID) else { return false }
         return true
     }
 }

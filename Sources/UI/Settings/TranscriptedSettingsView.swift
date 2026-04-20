@@ -2,6 +2,7 @@ import AppKit
 import Observation
 import SwiftUI
 import TranscriptedCore
+import UniformTypeIdentifiers
 
 struct TranscriptedSettingsView: View {
     @Bindable var navigation: TranscriptedSettingsNavigationModel
@@ -16,6 +17,8 @@ struct TranscriptedSettingsView: View {
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
     @State private var autoEnterKey = DictationAutoSendPreferences.sendKey()
+    @State private var autoEnterAllowedBundleIDs = DictationAutoSendPreferences.allowedBundleIDs()
+    @State private var autoEnterAppCandidates = AutoEnterAppCandidate.runningApps()
     @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
     @State private var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
     @State private var sentryTestStatus: String?
@@ -256,7 +259,7 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Shortcuts",
-                summary: "Choose the keyboard triggers Transcripted listens for anywhere on your Mac."
+                summary: "Choose the keyboard triggers Transcripted listens for and where Auto Enter is allowed."
             )
 
             SettingsSection(
@@ -277,6 +280,98 @@ struct TranscriptedSettingsView: View {
                 Text(rightOptionEnabled
                     ? "A quick tap of the right Option key will also start dictation."
                     : "Dictation will only use the configured keyboard shortcut."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            SettingsSection(
+                title: "Auto Enter",
+                detail: "Send only in the apps you choose after final dictation text is pasted."
+            ) {
+                Toggle("Send message when dictation ends", isOn: Binding(
+                    get: { autoEnterEnabled },
+                    set: { newValue in
+                        autoEnterEnabled = newValue
+                        DictationAutoSendPreferences.setEnabled(newValue)
+                    }
+                ))
+
+                Picker("Send key", selection: Binding(
+                    get: { autoEnterKey },
+                    set: { newValue in
+                        autoEnterKey = newValue
+                        DictationAutoSendPreferences.setSendKey(newValue)
+                    }
+                )) {
+                    ForEach(DictationAutoSendKey.allCases) { key in
+                        Text(key.title).tag(key)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(!autoEnterEnabled)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Allowed Apps")
+                            .font(.subheadline.weight(.semibold))
+
+                        Spacer()
+
+                        Button("Refresh") {
+                            refreshAutoEnterAppCandidates()
+                        }
+
+                        Button("Add App…") {
+                            chooseAutoEnterApp()
+                        }
+                    }
+
+                    if autoEnterAllowedBundleIDs.isEmpty {
+                        Text("Choose at least one app before Auto Enter can send.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(sortedAutoEnterAllowedBundleIDs, id: \.self) { bundleID in
+                            AutoEnterAllowedAppRow(
+                                title: autoEnterDisplayName(for: bundleID),
+                                bundleID: bundleID
+                            ) {
+                                setAutoEnterApp(bundleID, isAllowed: false)
+                            }
+                        }
+                    }
+                }
+                .disabled(!autoEnterEnabled)
+
+                if !autoEnterAppCandidates.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Running Apps")
+                            .font(.subheadline.weight(.semibold))
+
+                        ForEach(autoEnterAppCandidates) { app in
+                            Toggle(isOn: Binding(
+                                get: { autoEnterAllowedBundleIDs.contains(app.bundleID) },
+                                set: { isAllowed in
+                                    setAutoEnterApp(app.bundleID, isAllowed: isAllowed)
+                                }
+                            )) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(app.name)
+                                        .font(.subheadline)
+                                    Text(app.bundleID)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    .disabled(!autoEnterEnabled)
+                }
+
+                Text(autoEnterEnabled
+                    ? "Transcripted waits for the final paste, pauses briefly, then sends \(autoEnterKey.title) only in selected apps."
+                    : "Auto Enter is off. Dictation will paste text without pressing Enter."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -363,40 +458,6 @@ struct TranscriptedSettingsView: View {
                 Text("Transcripted uses Accessibility to paste automatically. If that is unavailable, it falls back to copying the text.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-
-            SettingsSection(
-                title: "Auto Enter",
-                detail: "Simulates pressing Enter after transcription completes and text is pasted."
-            ) {
-                Toggle("Send message when dictation ends", isOn: Binding(
-                    get: { autoEnterEnabled },
-                    set: { newValue in
-                        autoEnterEnabled = newValue
-                        DictationAutoSendPreferences.setEnabled(newValue)
-                    }
-                ))
-
-                Picker("Send key", selection: Binding(
-                    get: { autoEnterKey },
-                    set: { newValue in
-                        autoEnterKey = newValue
-                        DictationAutoSendPreferences.setSendKey(newValue)
-                    }
-                )) {
-                    ForEach(DictationAutoSendKey.allCases) { key in
-                        Text(key.title).tag(key)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .disabled(!autoEnterEnabled)
-
-                Text(autoEnterEnabled
-                    ? "Transcripted waits for the final transcript to paste, pauses briefly, then sends \(autoEnterKey.title)."
-                    : "Auto send is off. Dictation will paste text without pressing Enter."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
 
             SettingsSection(
@@ -690,6 +751,8 @@ struct TranscriptedSettingsView: View {
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
         autoEnterKey = DictationAutoSendPreferences.sendKey()
+        autoEnterAllowedBundleIDs = DictationAutoSendPreferences.allowedBundleIDs()
+        refreshAutoEnterAppCandidates()
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
         anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
         if case .unknown = sparkleUpdater.updateStatus.state {
@@ -742,6 +805,58 @@ struct TranscriptedSettingsView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         TranscriptedStoragePreferences.setCaptureLibraryURL(url)
         refreshStoragePaths()
+    }
+
+    private var sortedAutoEnterAllowedBundleIDs: [String] {
+        autoEnterAllowedBundleIDs.sorted { lhs, rhs in
+            autoEnterDisplayName(for: lhs).localizedCaseInsensitiveCompare(autoEnterDisplayName(for: rhs)) == .orderedAscending
+        }
+    }
+
+    private func setAutoEnterApp(_ bundleID: String, isAllowed: Bool) {
+        if isAllowed {
+            autoEnterAllowedBundleIDs.insert(bundleID)
+        } else {
+            autoEnterAllowedBundleIDs.remove(bundleID)
+        }
+        DictationAutoSendPreferences.setAllowedBundleIDs(autoEnterAllowedBundleIDs)
+    }
+
+    private func refreshAutoEnterAppCandidates() {
+        autoEnterAppCandidates = AutoEnterAppCandidate.runningApps()
+    }
+
+    private func chooseAutoEnterApp() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.prompt = "Add"
+        panel.message = "Choose an app where Transcripted should be allowed to send after dictation."
+        panel.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+
+        guard panel.runModal() == .OK,
+              let url = panel.url,
+              let bundle = Bundle(url: url),
+              let bundleID = bundle.bundleIdentifier else {
+            return
+        }
+
+        setAutoEnterApp(bundleID, isAllowed: true)
+        refreshAutoEnterAppCandidates()
+    }
+
+    private func autoEnterDisplayName(for bundleID: String) -> String {
+        if let candidate = autoEnterAppCandidates.first(where: { $0.bundleID == bundleID }) {
+            return candidate.name
+        }
+
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            return url.deletingPathExtension().lastPathComponent
+        }
+
+        return bundleID
     }
 
     private var aboutUpdateStatusTitle: String {
@@ -806,6 +921,64 @@ struct TranscriptedSettingsView: View {
         formatter.timeStyle = .short
         return formatter
     }()
+}
+
+private struct AutoEnterAppCandidate: Identifiable, Equatable {
+    let bundleID: String
+    let name: String
+
+    var id: String { bundleID }
+
+    static func runningApps() -> [AutoEnterAppCandidate] {
+        let transcriptedBundleID = Bundle.main.bundleIdentifier
+        let candidates = NSWorkspace.shared.runningApplications.compactMap { app -> AutoEnterAppCandidate? in
+            guard app.activationPolicy == .regular,
+                  let bundleID = app.bundleIdentifier,
+                  bundleID != transcriptedBundleID else {
+                return nil
+            }
+
+            return AutoEnterAppCandidate(
+                bundleID: bundleID,
+                name: app.localizedName ?? bundleID
+            )
+        }
+
+        var seen = Set<String>()
+        return candidates
+            .filter { seen.insert($0.bundleID).inserted }
+            .sorted { lhs, rhs in
+                lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+    }
+}
+
+private struct AutoEnterAllowedAppRow: View {
+    let title: String
+    let bundleID: String
+    let remove: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.green)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+
+                Text(bundleID)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 12)
+
+            Button("Remove", action: remove)
+        }
+    }
 }
 
 private struct AgentConnectionSettingsPage: View {
