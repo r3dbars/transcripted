@@ -40,7 +40,10 @@ public enum SystemAudioStatus: Equatable {
 /// Note: This class does NOT use @MainActor because it manages AVAudioEngine
 /// which requires synchronous access from audio tap callbacks on audio threads.
 /// UI updates are dispatched to main thread explicitly.
-public class Audio: ObservableObject {
+/// The mutable audio-capture state is guarded by dedicated queues, locks, and
+/// explicit main-thread dispatch where needed, so Dispatch callbacks can safely
+/// hold weak references to this object.
+public class Audio: ObservableObject, @unchecked Sendable {
     @Published public var isRecording: Bool = false
     @Published public private(set) var isMonitoring: Bool = false  // Lightweight level metering without file recording
     private var isStarting: Bool = false  // Prevents double-start during async setup
@@ -217,7 +220,7 @@ public class Audio: ObservableObject {
     @Published var systemAudioFailed: Bool = false
 
     // System audio capture
-    var systemAudioCapture: (any SystemAudioCaptureEngine)?
+    var systemAudioCapture: (any SystemAudioCaptureEngine & Sendable)?
 
     // Audio file recording
     var systemAudioFile: AVAudioFile?
