@@ -38,6 +38,34 @@ enum MeetingPromptProvider: String, CaseIterable, Hashable {
     var supportsRuntimeOnlyPrompt: Bool {
         supportsNativeRuntimePrompt && self != .teams
     }
+
+    static func provider(forMeetingHost host: String) -> MeetingPromptProvider? {
+        let normalizedHost = host
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+
+        if hostMatches(normalizedHost, domain: "zoom.us") {
+            return .zoom
+        }
+        if normalizedHost == "meet.google.com" {
+            return .googleMeet
+        }
+        if hostMatches(normalizedHost, domain: "teams.microsoft.com") {
+            return .teams
+        }
+        if hostMatches(normalizedHost, domain: "webex.com") {
+            return .webex
+        }
+        if hostMatches(normalizedHost, domain: "facetime.apple.com") {
+            return .facetime
+        }
+
+        return nil
+    }
+
+    private static func hostMatches(_ host: String, domain: String) -> Bool {
+        host == domain || host.hasSuffix(".\(domain)")
+    }
 }
 
 enum MeetingPromptSource: Equatable {
