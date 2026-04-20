@@ -58,6 +58,7 @@
 Meeting capture artifacts live under `<capture-library>/meetings/`:
 
 - `*.md`
+- `audio/*_audio/` retained mic/system audio copied from successful meeting captures
 
 App-owned meeting state lives under `~/Library/Application Support/Transcripted/state/`:
 
@@ -70,6 +71,12 @@ Temporary meeting scratch paths live under `~/Library/Application Support/Transc
 - raw audio captures
 - imported audio copies
 - `speaker_clips/`
+
+Successful live and imported meeting recordings are retained in the capture
+library before scratch cleanup. Failed live meeting transcriptions also copy
+their available recording audio there while keeping scratch files available for
+retry. Explicit discard still removes the scratch recording without saving a
+transcript or retained audio.
 
 Core logging for the embedded meeting pipeline is redirected to `~/Library/Application Support/Transcripted/logs/`.
 

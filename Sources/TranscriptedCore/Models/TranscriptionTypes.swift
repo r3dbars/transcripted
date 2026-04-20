@@ -253,6 +253,7 @@ public struct SpeakerNamingRequest {
     public let transcriptURL: URL
     public let systemAudioURL: URL
     public let micAudioURL: URL?
+    public let shouldRemoveTemporaryAudioOnCleanup: Bool
     public let onComplete: ([SpeakerNameUpdate]) -> Void
 
     public init(
@@ -262,6 +263,7 @@ public struct SpeakerNamingRequest {
         transcriptId: UUID,
         systemAudioURL: URL,
         micAudioURL: URL?,
+        shouldRemoveTemporaryAudioOnCleanup: Bool = true,
         onComplete: @escaping ([SpeakerNameUpdate]) -> Void
     ) {
         self.speakers = speakers
@@ -270,6 +272,7 @@ public struct SpeakerNamingRequest {
         self.transcriptId = transcriptId
         self.systemAudioURL = systemAudioURL
         self.micAudioURL = micAudioURL
+        self.shouldRemoveTemporaryAudioOnCleanup = shouldRemoveTemporaryAudioOnCleanup
         self.onComplete = onComplete
     }
 

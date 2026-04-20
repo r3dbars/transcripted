@@ -32,6 +32,7 @@ extension TranscriptionTaskManager {
         transcriptionResult: TranscriptionResult,
         micURL: URL?,
         systemURL: URL,
+        shouldRemoveTemporaryAudio: Bool = true,
         clips: [SpeakerNamingEntry]
     ) {
         let speakerDB = transcription.speakerDB
@@ -56,8 +57,10 @@ extension TranscriptionTaskManager {
                 transcriptId: transcriptId
             ) else {
                 SpeakerClipExtractor.cleanupClips(clips)
-                Self.removeTemporaryAudioFile(micURL, label: "mic audio")
-                Self.removeTemporaryAudioFile(systemURL, label: "system audio")
+                if shouldRemoveTemporaryAudio {
+                    Self.removeTemporaryAudioFile(micURL, label: "mic audio")
+                    Self.removeTemporaryAudioFile(systemURL, label: "system audio")
+                }
 
                 Task { @MainActor in
                     self?.finishNamingFlow(
@@ -76,8 +79,10 @@ extension TranscriptionTaskManager {
                 speakerDB: speakerDB
             ) else {
                 SpeakerClipExtractor.cleanupClips(clips)
-                Self.removeTemporaryAudioFile(micURL, label: "mic audio")
-                Self.removeTemporaryAudioFile(systemURL, label: "system audio")
+                if shouldRemoveTemporaryAudio {
+                    Self.removeTemporaryAudioFile(micURL, label: "mic audio")
+                    Self.removeTemporaryAudioFile(systemURL, label: "system audio")
+                }
 
                 Task { @MainActor in
                     self?.finishNamingFlow(
@@ -117,8 +122,10 @@ extension TranscriptionTaskManager {
             }
 
             SpeakerClipExtractor.cleanupClips(clips)
-            Self.removeTemporaryAudioFile(micURL, label: "mic audio")
-            Self.removeTemporaryAudioFile(systemURL, label: "system audio")
+            if shouldRemoveTemporaryAudio {
+                Self.removeTemporaryAudioFile(micURL, label: "mic audio")
+                Self.removeTemporaryAudioFile(systemURL, label: "system audio")
+            }
 
             Task { @MainActor in
                 self?.finishNamingFlow(
@@ -135,8 +142,10 @@ extension TranscriptionTaskManager {
     /// Called from applicationWillTerminate to prevent orphaned audio files.
     public func cleanupPendingNaming() {
         if let request = speakerNamingRequest {
-            Self.removeTemporaryAudioFile(request.micAudioURL, label: "pending mic audio")
-            Self.removeTemporaryAudioFile(request.systemAudioURL, label: "pending system audio")
+            if request.shouldRemoveTemporaryAudioOnCleanup {
+                Self.removeTemporaryAudioFile(request.micAudioURL, label: "pending mic audio")
+                Self.removeTemporaryAudioFile(request.systemAudioURL, label: "pending system audio")
+            }
             SpeakerClipExtractor.cleanupClips(request.speakers)
             speakerNamingRequest = nil
             AppLogger.pipeline.info("Cleaned up pending naming on shutdown")
