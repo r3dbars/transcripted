@@ -10,7 +10,6 @@ struct TranscriptedSettingsView: View {
     @ObservedObject private var parakeetEngine: ParakeetEngine
     @ObservedObject private var meetingSession: MeetingSessionController
     @ObservedObject private var sparkleUpdater: SparkleUpdaterController
-    @ObservedObject private var meetingAudioPlayback = MeetingAudioPlayback.shared
 
     private let actions: TranscriptedSettingsActions
 
@@ -186,13 +185,6 @@ struct TranscriptedSettingsView: View {
                     action: activity.transcriptURL.map { transcriptURL in
                         {
                             NSWorkspace.shared.open(transcriptURL)
-                        }
-                    },
-                    secondaryActionTitle: activity.audio.map { meetingAudioPlayback.buttonTitle(for: $0) },
-                    secondaryActionSystemImage: activity.audio.map { meetingAudioPlayback.symbolName(for: $0) },
-                    secondaryAction: activity.audio.map { audio in
-                        {
-                            meetingAudioPlayback.toggle(audio)
                         }
                     }
                 )

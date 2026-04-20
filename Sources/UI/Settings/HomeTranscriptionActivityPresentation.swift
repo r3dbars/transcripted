@@ -15,7 +15,6 @@ struct HomeTranscriptionActivityPresentation: Equatable {
     let tone: Tone
     let progress: Double?
     let transcriptURL: URL?
-    let audio: MeetingAudioAttachment?
 
     static func make(
         sessionState: MeetingSessionController.State,
@@ -33,8 +32,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
                 detail: "Transcripted is copying the audio into the meeting pipeline and getting everything ready to transcribe.",
                 tone: .working,
                 progress: displayStatus.progress,
-                transcriptURL: nil,
-                audio: nil
+                transcriptURL: nil
             )
         case .transcribing:
             return HomeTranscriptionActivityPresentation(
@@ -44,8 +42,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
                 detail: "Transcripted is working through the recording now. Longer files can take a bit, and speaker review will open automatically if it is needed.",
                 tone: .working,
                 progress: displayStatus.progress,
-                transcriptURL: nil,
-                audio: nil
+                transcriptURL: nil
             )
         case .finishing:
             return HomeTranscriptionActivityPresentation(
@@ -55,8 +52,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
                 detail: "Transcripted is writing the transcript now. If it found multiple people on the room mic, the speaker review window may appear next.",
                 tone: .working,
                 progress: displayStatus.progress,
-                transcriptURL: nil,
-                audio: nil
+                transcriptURL: nil
             )
         case .transcriptSaved:
             let transcriptURL = lastSavedTranscriptURL
@@ -78,8 +74,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
                 detail: detail,
                 tone: .success,
                 progress: 1.0,
-                transcriptURL: transcriptURL,
-                audio: transcriptURL.flatMap { MeetingAudioArchiveResolver.attachment(forTranscript: $0) }
+                transcriptURL: transcriptURL
             )
         case .failed(let message):
             return HomeTranscriptionActivityPresentation(
@@ -89,8 +84,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
                 detail: message,
                 tone: .caution,
                 progress: nil,
-                transcriptURL: nil,
-                audio: nil
+                transcriptURL: nil
             )
         case .idle:
             break
@@ -108,8 +102,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
                 detail: detail,
                 tone: .working,
                 progress: max(0.05, min(warmupStatus.progress, 0.92)),
-                transcriptURL: nil,
-                audio: nil
+                transcriptURL: nil
             )
         case .error(let message):
             return HomeTranscriptionActivityPresentation(
@@ -119,8 +112,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
                 detail: message,
                 tone: .caution,
                 progress: nil,
-                transcriptURL: nil,
-                audio: nil
+                transcriptURL: nil
             )
         case .idle, .ready, .recording, .transcribing:
             return nil

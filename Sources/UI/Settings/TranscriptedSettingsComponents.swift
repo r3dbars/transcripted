@@ -212,35 +212,6 @@ struct SettingsActivityCard: View {
     let progress: Double?
     let actionTitle: String?
     let action: (() -> Void)?
-    let secondaryActionTitle: String?
-    let secondaryActionSystemImage: String?
-    let secondaryAction: (() -> Void)?
-
-    init(
-        symbolName: String,
-        title: String,
-        status: String,
-        detail: String,
-        tone: HomeTranscriptionActivityPresentation.Tone,
-        progress: Double?,
-        actionTitle: String?,
-        action: (() -> Void)?,
-        secondaryActionTitle: String? = nil,
-        secondaryActionSystemImage: String? = nil,
-        secondaryAction: (() -> Void)? = nil
-    ) {
-        self.symbolName = symbolName
-        self.title = title
-        self.status = status
-        self.detail = detail
-        self.tone = tone
-        self.progress = progress
-        self.actionTitle = actionTitle
-        self.action = action
-        self.secondaryActionTitle = secondaryActionTitle
-        self.secondaryActionSystemImage = secondaryActionSystemImage
-        self.secondaryAction = secondaryAction
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -283,19 +254,8 @@ struct SettingsActivityCard: View {
                 }
             }
 
-            if action != nil || secondaryAction != nil {
-                HStack(spacing: 10) {
-                    if let actionTitle, let action {
-                        Button(actionTitle, action: action)
-                    }
-
-                    if let secondaryActionTitle, let secondaryActionSystemImage, let secondaryAction {
-                        Button(action: secondaryAction) {
-                            Label(secondaryActionTitle, systemImage: secondaryActionSystemImage)
-                        }
-                    }
-                }
-                .controlSize(.small)
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
             }
         }
         .padding(18)

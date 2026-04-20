@@ -2,7 +2,6 @@
 // Compact recent meetings list for the menubar popover.
 
 import AppKit
-import Combine
 import Foundation
 
 @MainActor
@@ -128,11 +127,6 @@ private final class RecentMeetingRowView: NSView {
     private let item: RecentMeetingItem
     private let titleLabel = NSTextField(labelWithString: "")
     private let dateLabel = NSTextField(labelWithString: "")
-    private let playButton = MenuIconButton(
-        symbolName: "play.fill",
-        accessibilityLabel: "Play meeting audio",
-        toolTip: "Play meeting audio"
-    )
     private let copyForAgentButton = MenuOutlineButton(
         title: "Copy for Agent",
         symbolName: "sparkles",
@@ -143,7 +137,6 @@ private final class RecentMeetingRowView: NSView {
     private let showsDivider: Bool
     private var trackingAreaRef: NSTrackingArea?
     private var resetTask: Task<Void, Never>?
-    private var playbackCancellables: Set<AnyCancellable> = []
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -184,13 +177,6 @@ private final class RecentMeetingRowView: NSView {
         dateLabel.textColor = MenuTokens.textSecondaryNS
         addSubview(dateLabel)
 
-        if item.audio != nil {
-            addSubview(playButton)
-            playButton.target = self
-            playButton.action = #selector(togglePlayback)
-            wirePlaybackUpdates()
-        }
-
         addSubview(copyForAgentButton)
         copyForAgentButton.target = self
         copyForAgentButton.action = #selector(copyForAgent)
@@ -226,10 +212,6 @@ private final class RecentMeetingRowView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard !playButton.frame.contains(point) else {
-            super.mouseDown(with: event)
-            return
-        }
         guard !copyForAgentButton.frame.contains(point) else {
             super.mouseDown(with: event)
             return
@@ -247,21 +229,7 @@ private final class RecentMeetingRowView: NSView {
             height: MenuTokens.secondaryButtonSize
         )
 
-        let textRightEdge: CGFloat
-        if item.audio != nil {
-            playButton.frame = NSRect(
-                x: copyForAgentButton.frame.minX - 8 - MenuTokens.secondaryButtonSize,
-                y: (bounds.height - MenuTokens.secondaryButtonSize) / 2,
-                width: MenuTokens.secondaryButtonSize,
-                height: MenuTokens.secondaryButtonSize
-            )
-            textRightEdge = playButton.frame.minX
-        } else {
-            playButton.frame = .zero
-            textRightEdge = copyForAgentButton.frame.minX
-        }
-
-        let textWidth = max(0, textRightEdge - 12)
+        let textWidth = max(0, copyForAgentButton.frame.minX - 12)
         titleLabel.frame = NSRect(x: 0, y: 6, width: textWidth, height: 14)
         dateLabel.frame = NSRect(x: 0, y: 21, width: textWidth, height: 12)
         divider.frame = NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
@@ -283,37 +251,6 @@ private final class RecentMeetingRowView: NSView {
             self.copyForAgentButton.title = "Copy for Agent"
             self.copyForAgentButton.setSymbol("sparkles", accessibilityLabel: "Copy meeting for agent")
         }
-    }
-
-    @objc private func togglePlayback() {
-        guard let audio = item.audio else { return }
-        MeetingAudioPlayback.shared.toggle(audio)
-    }
-
-    private func wirePlaybackUpdates() {
-        MeetingAudioPlayback.shared.$activeAttachmentID
-            .combineLatest(MeetingAudioPlayback.shared.$isPlaying, MeetingAudioPlayback.shared.$isPaused)
-            .sink { [weak self] _, _, _ in
-                self?.updatePlaybackButton()
-            }
-            .store(in: &playbackCancellables)
-
-        updatePlaybackButton()
-    }
-
-    private func updatePlaybackButton() {
-        guard let audio = item.audio else { return }
-        let playback = MeetingAudioPlayback.shared
-        let title = playback.buttonTitle(for: audio)
-        let symbol = playback.symbolName(for: audio)
-        let isActive = playback.isActive(audio)
-
-        playButton.setSymbol(
-            symbol,
-            accessibilityLabel: "\(title) meeting audio",
-            tintOverride: isActive ? NSColor.systemBlue : nil
-        )
-        playButton.toolTip = "\(title) meeting audio"
     }
 
 }
