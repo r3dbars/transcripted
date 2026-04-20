@@ -294,62 +294,7 @@ final class MeetingSessionController: ObservableObject {
             break
         }
 
-        let microphoneGranted = TranscriptedPermissionAccess.isGranted(.microphone)
-        var systemAudioRecordingGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
-        var startDecision = MeetingRecordingStartGate.evaluate(
-            microphoneGranted: microphoneGranted,
-            systemAudioRecordingGranted: systemAudioRecordingGranted
-        )
-        let shouldRevalidateCachedSystemAudioPermission = microphoneGranted && systemAudioRecordingGranted
-        let shouldRequestMissingSystemAudioPermission =
-            microphoneGranted &&
-            !startDecision.canStart &&
-            startDecision.failureReason == "system_audio_recording"
-
-        if shouldRevalidateCachedSystemAudioPermission || shouldRequestMissingSystemAudioPermission {
-            let permissionCheckMode = shouldRevalidateCachedSystemAudioPermission ? "revalidation" : "request"
-            DiagnosticsTrail.record(
-                engine: "meeting",
-                event: shouldRevalidateCachedSystemAudioPermission
-                    ? "meeting_start_revalidating_system_audio_permission"
-                    : "meeting_start_requesting_system_audio_permission",
-                message: shouldRevalidateCachedSystemAudioPermission
-                    ? "Meeting start is revalidating cached system audio permission"
-                    : "Meeting start is requesting system audio permission",
-                context: baseDiagnosticsContext(
-                    extra: [
-                        "trigger": trigger.rawValue,
-                        "permission_check": permissionCheckMode
-                    ]
-                )
-            )
-
-            systemAudioRecordingGranted = await TranscriptedPermissionAccess.requestSystemAudioRecordingAccessIfNeeded(
-                forceRefresh: shouldRevalidateCachedSystemAudioPermission
-            )
-            startDecision = MeetingRecordingStartGate.evaluate(
-                microphoneGranted: microphoneGranted,
-                systemAudioRecordingGranted: systemAudioRecordingGranted
-            )
-
-            DiagnosticsTrail.record(
-                level: systemAudioRecordingGranted ? .info : .warning,
-                engine: "meeting",
-                event: systemAudioRecordingGranted
-                    ? "meeting_start_system_audio_permission_granted"
-                    : "meeting_start_system_audio_permission_missing",
-                message: systemAudioRecordingGranted
-                    ? "System audio permission is ready for meeting capture"
-                    : "System audio permission is still missing for meeting capture",
-                context: baseDiagnosticsContext(
-                    extra: [
-                        "trigger": trigger.rawValue,
-                        "permission_check": permissionCheckMode
-                    ]
-                )
-            )
-        }
-
+        let startDecision = await resolveStartRecordingPermissionDecision(trigger: trigger)
         guard startDecision.canStart else {
             DiagnosticsTrail.record(
                 level: .warning,
@@ -371,23 +316,8 @@ final class MeetingSessionController: ObservableObject {
             return false
         }
 
-        switch state {
-        case .idle, .loadingModels, .error:
-            await prepareModels()
-            guard case .ready = state else {
-                DiagnosticsTrail.record(
-                    level: .warning,
-                    engine: "meeting",
-                    event: "meeting_start_blocked",
-                    message: "Meeting could not start because models were not ready",
-                    context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
-                )
-                return false
-            }
-        case .ready, .transcribing:
-            break
-        case .recording:
-            return true
+        guard await ensureModelsReadyForRecording(trigger: trigger) else {
+            return false
         }
 
         let started = await capture.startRecording()
@@ -419,6 +349,92 @@ final class MeetingSessionController: ObservableObject {
             ]
         )
         return true
+    }
+
+    private func resolveStartRecordingPermissionDecision(
+        trigger: StartTrigger
+    ) async -> MeetingRecordingStartDecision {
+        let microphoneGranted = TranscriptedPermissionAccess.isGranted(.microphone)
+        var systemAudioRecordingGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
+        var startDecision = MeetingRecordingStartGate.evaluate(
+            microphoneGranted: microphoneGranted,
+            systemAudioRecordingGranted: systemAudioRecordingGranted
+        )
+        let shouldRevalidateCachedSystemAudioPermission = microphoneGranted && systemAudioRecordingGranted
+        let shouldRequestMissingSystemAudioPermission =
+            microphoneGranted &&
+            !startDecision.canStart &&
+            startDecision.failureReason == "system_audio_recording"
+
+        guard shouldRevalidateCachedSystemAudioPermission || shouldRequestMissingSystemAudioPermission else {
+            return startDecision
+        }
+
+        let permissionCheckMode = shouldRevalidateCachedSystemAudioPermission ? "revalidation" : "request"
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: shouldRevalidateCachedSystemAudioPermission
+                ? "meeting_start_revalidating_system_audio_permission"
+                : "meeting_start_requesting_system_audio_permission",
+            message: shouldRevalidateCachedSystemAudioPermission
+                ? "Meeting start is revalidating cached system audio permission"
+                : "Meeting start is requesting system audio permission",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "trigger": trigger.rawValue,
+                    "permission_check": permissionCheckMode
+                ]
+            )
+        )
+
+        systemAudioRecordingGranted = await TranscriptedPermissionAccess.requestSystemAudioRecordingAccessIfNeeded(
+            forceRefresh: shouldRevalidateCachedSystemAudioPermission
+        )
+        startDecision = MeetingRecordingStartGate.evaluate(
+            microphoneGranted: microphoneGranted,
+            systemAudioRecordingGranted: systemAudioRecordingGranted
+        )
+
+        DiagnosticsTrail.record(
+            level: systemAudioRecordingGranted ? .info : .warning,
+            engine: "meeting",
+            event: systemAudioRecordingGranted
+                ? "meeting_start_system_audio_permission_granted"
+                : "meeting_start_system_audio_permission_missing",
+            message: systemAudioRecordingGranted
+                ? "System audio permission is ready for meeting capture"
+                : "System audio permission is still missing for meeting capture",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "trigger": trigger.rawValue,
+                    "permission_check": permissionCheckMode
+                ]
+            )
+        )
+
+        return startDecision
+    }
+
+    private func ensureModelsReadyForRecording(trigger: StartTrigger) async -> Bool {
+        switch state {
+        case .idle, .loadingModels, .error:
+            await prepareModels()
+            guard case .ready = state else {
+                DiagnosticsTrail.record(
+                    level: .warning,
+                    engine: "meeting",
+                    event: "meeting_start_blocked",
+                    message: "Meeting could not start because models were not ready",
+                    context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+                )
+                return false
+            }
+            return true
+        case .ready, .transcribing:
+            return true
+        case .recording:
+            return true
+        }
     }
 
     /// Stop capture and queue the finished meeting for background transcription.
