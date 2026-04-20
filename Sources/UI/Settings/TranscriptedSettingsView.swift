@@ -14,6 +14,8 @@ struct TranscriptedSettingsView: View {
 
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
+    @State private var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
+    @State private var autoEnterKey = DictationAutoSendPreferences.sendKey()
     @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
     @State private var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
     @State private var sentryTestStatus: String?
@@ -364,6 +366,40 @@ struct TranscriptedSettingsView: View {
             }
 
             SettingsSection(
+                title: "Auto Enter",
+                detail: "Simulates pressing Enter after transcription completes and text is pasted."
+            ) {
+                Toggle("Send message when dictation ends", isOn: Binding(
+                    get: { autoEnterEnabled },
+                    set: { newValue in
+                        autoEnterEnabled = newValue
+                        DictationAutoSendPreferences.setEnabled(newValue)
+                    }
+                ))
+
+                Picker("Send key", selection: Binding(
+                    get: { autoEnterKey },
+                    set: { newValue in
+                        autoEnterKey = newValue
+                        DictationAutoSendPreferences.setSendKey(newValue)
+                    }
+                )) {
+                    ForEach(DictationAutoSendKey.allCases) { key in
+                        Text(key.title).tag(key)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(!autoEnterEnabled)
+
+                Text(autoEnterEnabled
+                    ? "Transcripted waits for the final transcript to paste, pauses briefly, then sends \(autoEnterKey.title)."
+                    : "Auto send is off. Dictation will paste text without pressing Enter."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            SettingsSection(
                 title: "Recent Dictations",
                 detail: "These are the newest saved dictations from the last few days. Opening one jumps to the markdown file for that day."
             ) {
@@ -652,6 +688,8 @@ struct TranscriptedSettingsView: View {
         refreshRecentCaptures()
         rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
         uiSoundsEnabled = UISoundPreferences.isEnabled()
+        autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
+        autoEnterKey = DictationAutoSendPreferences.sendKey()
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
         anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
         if case .unknown = sparkleUpdater.updateStatus.state {
