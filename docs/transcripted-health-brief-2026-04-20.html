@@ -242,6 +242,11 @@
       background: linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0.20));
     }
 
+    .chart.web-chart {
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      height: 170px;
+    }
+
     .day {
       display: grid;
       align-items: end;
@@ -369,9 +374,9 @@
           <p>84 unresolved hang events across Sentry groups.</p>
         </div>
         <div class="mini-card">
-          <span class="label">Repo Mode</span>
-          <strong>Hardening</strong>
-          <p>Recent PRs focus on release, reliability, and cleanup.</p>
+          <span class="label">Website</span>
+          <strong>949 views</strong>
+          <p>Cloudflare traffic for transcripted.app over 7 days.</p>
         </div>
       </div>
     </header>
@@ -508,7 +513,7 @@
           <ul>
             <li><code>sentry_test_event</code> is a manual Settings verification event.</li>
             <li>The Sentry dashboard JavaScript error points at Sentry scripts, not Transcripted product code.</li>
-            <li>Cloudflare traffic analytics are permission-blocked, not proof of no website traffic.</li>
+            <li>Cloudflare traffic analytics now work; website traffic is visible again.</li>
           </ul>
         </article>
 
@@ -588,25 +593,46 @@
       <h2>Websites</h2>
       <div class="grid two-grid" style="margin-top: 16px;">
         <article class="card">
-          <div class="kicker warn">transcripted.app</div>
-          <h3>Deployment is healthy but a little behind</h3>
+          <div class="kicker info">transcripted.app</div>
+          <h3>Traffic is visible; deploy is a little behind</h3>
           <ul>
             <li>Pages project: <code>transcripted-web</code>.</li>
             <li>Latest production deploy succeeded on April 17, 2026.</li>
             <li>Deploy message references appcast 1.1.10 while the repo appcast is now 1.1.12.</li>
-            <li>Web analytics are not configured; zone analytics are blocked by token permissions.</li>
+            <li>Cloudflare returned 949 page views, 1,803 requests, and 2 threats from April 14-20.</li>
+            <li>Web Analytics site records are configured at the account level.</li>
           </ul>
+          <div class="chart web-chart" aria-label="transcripted.app page views from April 14 to April 20, 2026">
+            <div class="day"><div class="column" style="--h: 100%;"></div><span>Apr 14<br>212</span></div>
+            <div class="day"><div class="column" style="--h: 40%;"></div><span>Apr 15<br>84</span></div>
+            <div class="day"><div class="column" style="--h: 92%;"></div><span>Apr 16<br>196</span></div>
+            <div class="day"><div class="column" style="--h: 77%;"></div><span>Apr 17<br>164</span></div>
+            <div class="day"><div class="column" style="--h: 62%;"></div><span>Apr 18<br>132</span></div>
+            <div class="day"><div class="column" style="--h: 72%;"></div><span>Apr 19<br>152</span></div>
+            <div class="day"><div class="column" style="--h: 4%;"></div><span>Apr 20<br>9</span></div>
+          </div>
+          <p class="note">April 20 is partial. Daily unique visitor counts add up to 791 across the same rows, but that is not the same as 791 unique people.</p>
         </article>
 
         <article class="card">
           <div class="kicker ok">r3d.bar</div>
-          <h3>Personal site is fresh</h3>
+          <h3>Personal site is fresh and measurable</h3>
           <ul>
             <li>Pages project: <code>redbars</code>.</li>
             <li>Latest production deploy succeeded on April 19, 2026.</li>
             <li>The accessible domain is <code>r3d.bar</code>; the skill notes <code>r3d.br</code> can be a typo to verify.</li>
-            <li>Web analytics are also not configured here.</li>
+            <li>Cloudflare returned 648 page views, 1,116 requests, and 0 threats from April 14-20.</li>
+            <li>A Web Analytics site is configured for <code>r3d.bar</code>.</li>
           </ul>
+          <div class="chart web-chart" aria-label="r3d.bar page views from April 14 to April 20, 2026">
+            <div class="day"><div class="column green" style="--h: 91%;"></div><span>Apr 14<br>148</span></div>
+            <div class="day"><div class="column green" style="--h: 36%;"></div><span>Apr 15<br>58</span></div>
+            <div class="day"><div class="column green" style="--h: 100%;"></div><span>Apr 16<br>163</span></div>
+            <div class="day"><div class="column green" style="--h: 85%;"></div><span>Apr 17<br>138</span></div>
+            <div class="day"><div class="column green" style="--h: 44%;"></div><span>Apr 18<br>71</span></div>
+            <div class="day"><div class="column green" style="--h: 42%;"></div><span>Apr 19<br>69</span></div>
+            <div class="day"><div class="column green" style="--h: 3%;"></div><span>Apr 20<br>1</span></div>
+          </div>
         </article>
       </div>
     </section>
