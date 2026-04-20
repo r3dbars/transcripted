@@ -53,10 +53,10 @@ final class MenuAgentConnectPageView: NSView {
         toolTip: "Copy folder paths"
     )
     private let copyPromptButton = MenuOutlineButton(
-        title: "Copy agent prompt",
+        title: "Copy Agent Setup",
         symbolName: "doc.on.doc",
-        accessibilityLabel: "Copy agent prompt",
-        toolTip: "Copy agent prompt"
+        accessibilityLabel: "Copy Agent Setup",
+        toolTip: "Copy Agent Setup"
     )
 
     private var resetTask: Task<Void, Never>?
@@ -196,8 +196,8 @@ final class MenuAgentConnectPageView: NSView {
         resetTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard let self, !Task.isCancelled else { return }
-            self.copyPromptButton.title = "Copy agent prompt"
-            self.copyPromptButton.setSymbol("doc.on.doc", accessibilityLabel: "Copy agent prompt")
+            self.copyPromptButton.title = "Copy Agent Setup"
+            self.copyPromptButton.setSymbol("doc.on.doc", accessibilityLabel: "Copy Agent Setup")
         }
     }
 

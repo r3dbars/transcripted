@@ -6,7 +6,7 @@ import Foundation
 
 @MainActor
 final class MenuBarRecentMeetingsView: NSView {
-    private let headerLabel = NSTextField(labelWithString: "Meetings")
+    private let headerLabel = NSTextField(labelWithString: "Recent meetings")
     private let emptyLabel = NSTextField(labelWithString: "No meetings yet.")
     private let listContainer = FlippedRecentMeetingsContainer()
 
@@ -109,8 +109,13 @@ private final class FlippedRecentMeetingsContainer: NSView {
 }
 
 @MainActor
-private func copyTranscriptBody(from url: URL) -> Bool {
-    guard let text = MeetingTranscriptStyler.transcriptBody(at: url) else { return false }
+private func copyAgentBundle(for item: RecentMeetingItem) -> Bool {
+    guard let text = AgentConnectionGuide.portableMeetingBundle(
+        title: item.title,
+        date: item.date,
+        transcriptURL: item.transcriptURL
+    ) else { return false }
+
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
     pasteboard.setString(text, forType: .string)
@@ -122,10 +127,11 @@ private final class RecentMeetingRowView: NSView {
     private let item: RecentMeetingItem
     private let titleLabel = NSTextField(labelWithString: "")
     private let dateLabel = NSTextField(labelWithString: "")
-    private let copyButton = MenuIconButton(
-        symbolName: "doc.on.doc",
-        accessibilityLabel: "Copy transcript",
-        toolTip: "Copy transcript"
+    private let copyForAgentButton = MenuOutlineButton(
+        title: "Copy for Agent",
+        symbolName: "sparkles",
+        accessibilityLabel: "Copy meeting for agent",
+        toolTip: "Copy meeting for agent"
     )
     private let divider = NSView()
     private let showsDivider: Bool
@@ -171,9 +177,9 @@ private final class RecentMeetingRowView: NSView {
         dateLabel.textColor = MenuTokens.textSecondaryNS
         addSubview(dateLabel)
 
-        addSubview(copyButton)
-        copyButton.target = self
-        copyButton.action = #selector(copyTranscript)
+        addSubview(copyForAgentButton)
+        copyForAgentButton.target = self
+        copyForAgentButton.action = #selector(copyForAgent)
 
         divider.wantsLayer = true
         divider.layer?.backgroundColor = MenuTokens.sectionDividerNS.cgColor
@@ -206,7 +212,7 @@ private final class RecentMeetingRowView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard !copyButton.frame.contains(point) else {
+        guard !copyForAgentButton.frame.contains(point) else {
             super.mouseDown(with: event)
             return
         }
@@ -215,15 +221,15 @@ private final class RecentMeetingRowView: NSView {
 
     override func layout() {
         super.layout()
-        let buttonSize = MenuTokens.secondaryButtonSize
-        copyButton.frame = NSRect(
-            x: bounds.width - buttonSize,
-            y: (bounds.height - buttonSize) / 2,
-            width: buttonSize,
-            height: buttonSize
+        let buttonSize = copyForAgentButton.fittingSize
+        copyForAgentButton.frame = NSRect(
+            x: bounds.width - buttonSize.width,
+            y: (bounds.height - MenuTokens.secondaryButtonSize) / 2,
+            width: buttonSize.width,
+            height: MenuTokens.secondaryButtonSize
         )
 
-        let textWidth = max(0, copyButton.frame.minX - 12)
+        let textWidth = max(0, copyForAgentButton.frame.minX - 12)
         titleLabel.frame = NSRect(x: 0, y: 6, width: textWidth, height: 14)
         dateLabel.frame = NSRect(x: 0, y: 21, width: textWidth, height: 12)
         divider.frame = NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
@@ -233,15 +239,17 @@ private final class RecentMeetingRowView: NSView {
         NSSize(width: NSView.noIntrinsicMetric, height: MenuTokens.recentRowHeight)
     }
 
-    @objc private func copyTranscript() {
-        guard copyTranscriptBody(from: item.transcriptURL) else { return }
+    @objc private func copyForAgent() {
+        guard copyAgentBundle(for: item) else { return }
 
         resetTask?.cancel()
-        copyButton.setSymbol("checkmark", accessibilityLabel: "Transcript copied", tintOverride: MenuTokens.statusGreenNS)
+        copyForAgentButton.title = "Copied"
+        copyForAgentButton.setSymbol("checkmark", accessibilityLabel: "Meeting copied for agent")
         resetTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard let self, !Task.isCancelled else { return }
-            self.copyButton.setSymbol("doc.on.doc", accessibilityLabel: "Copy transcript")
+            self.copyForAgentButton.title = "Copy for Agent"
+            self.copyForAgentButton.setSymbol("sparkles", accessibilityLabel: "Copy meeting for agent")
         }
     }
 

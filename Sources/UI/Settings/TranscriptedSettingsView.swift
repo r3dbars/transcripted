@@ -796,7 +796,7 @@ private struct AgentConnectionSettingsPage: View {
                 }
 
                 HStack {
-                    Button("Copy Agent Prompt") {
+                    Button("Copy Agent Setup") {
                         viewModel.copyStarterPrompt()
                     }
                     .buttonStyle(.borderedProminent)

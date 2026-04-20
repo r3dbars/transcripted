@@ -17,6 +17,12 @@ struct AgentConnectionStarterSkill {
 }
 
 enum AgentConnectionGuide {
+    private static let portableDateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
     static var localMCPBuildDirectory: URL? {
         let bundleURL = Bundle.main.bundleURL.standardizedFileURL
         let buildDirectory = bundleURL.deletingLastPathComponent()
@@ -185,6 +191,53 @@ enum AgentConnectionGuide {
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    static func portableMeetingBundle(
+        title: String,
+        date: Date,
+        transcriptURL: URL
+    ) -> String? {
+        guard let transcriptBody = MeetingTranscriptStyler.transcriptBody(at: transcriptURL),
+              !transcriptBody.isEmpty else {
+            return nil
+        }
+
+        let skillBlocks = starterSkills.map { skill in
+            let skillText = (try? String(contentsOf: skillFileURL(for: skill), encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? "\(skill.title): \(skill.detail)"
+
+            return """
+            <skill id="\(skill.id)" name="\(skill.title)" version="\(skill.version)">
+            \(skillText)
+            </skill>
+            """
+        }.joined(separator: "\n\n")
+
+        return """
+        I use Transcripted on my Mac.
+
+        This is a portable Transcripted meeting bundle for any chat or agent. Use only the meeting content and embedded skills below. Do not claim access to my Mac, Transcripted MCP, or local folders unless this chat separately provides that access.
+
+        Embedded skills:
+        - Summarize v\(starterSkills[0].version)
+        - Search Memory v\(starterSkills[1].version)
+
+        If I ask for a summary, use the Summarize skill. If I ask what was said, where something came from, or when something happened, use the Search Memory skill. Cite the source file and meeting date for important claims.
+
+        Source:
+        - Title: \(title)
+        - Recorded at: \(portableDateFormatter.string(from: date))
+        - Source file: \(transcriptURL.lastPathComponent)
+        - Scope: this pasted meeting only
+
+        \(skillBlocks)
+
+        <meeting_transcript>
+        \(transcriptBody)
+        </meeting_transcript>
+        """
     }
 
     static var mcpPromptBlock: String {

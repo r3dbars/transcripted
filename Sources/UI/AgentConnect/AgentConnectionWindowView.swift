@@ -175,7 +175,7 @@ struct AgentConnectionWindowView: View {
             }
 
             HStack(spacing: 10) {
-                Button(viewModel.copyLabel(for: .prompt, default: "Copy agent prompt")) {
+                Button(viewModel.copyLabel(for: .prompt, default: "Copy Agent Setup")) {
                     viewModel.copyStarterPrompt()
                 }
                 .buttonStyle(AgentConnectionPrimaryButtonStyle())

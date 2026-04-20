@@ -135,4 +135,50 @@ func testAgentConnectionGuide() {
             )
         }
     }
+
+    runSuite("AgentConnectionGuide.portableMeetingBundle — embeds meeting and skills for any chat") {
+        let meetingURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedAgentBundleTests-\(UUID().uuidString).md")
+        defer { try? FileManager.default.removeItem(at: meetingURL) }
+
+        let meetingMarkdown = """
+        ---
+        title: "Launch Sync"
+        date: "2026-04-18"
+        time: "09:30:00"
+        duration: "0:03"
+        total_word_count: 12
+        ---
+
+        # Launch Sync
+
+        ## Transcript
+
+        **00:00**  [Speaker 1]
+        We decided to ship the agent setup and copy for agent flow.
+        """
+
+        try? meetingMarkdown.write(to: meetingURL, atomically: true, encoding: .utf8)
+
+        let bundle = AgentConnectionGuide.portableMeetingBundle(
+            title: "Launch Sync",
+            date: Date(timeIntervalSince1970: 1_765_994_400),
+            transcriptURL: meetingURL
+        )
+
+        assertNotNil(bundle, "portable meeting bundle should be produced for readable meeting markdown")
+        let text = bundle ?? ""
+        assertTrue(text.contains("portable Transcripted meeting bundle"), "bundle should explain that it works in any chat")
+        assertTrue(text.contains("transcripted-summarize"), "bundle should embed the Summarize skill")
+        assertTrue(text.contains("transcripted-search-memory"), "bundle should embed the Search Memory skill")
+        assertTrue(text.contains("Source file: \(meetingURL.lastPathComponent)"), "bundle should include source filename")
+        assertTrue(
+            text.contains("We decided to ship the agent setup and copy for agent flow."),
+            "bundle should include the meeting transcript body"
+        )
+        assertTrue(
+            text.contains("Do not claim access to my Mac"),
+            "bundle should prevent remote chats from pretending they have local access"
+        )
+    }
 }
