@@ -180,5 +180,21 @@ func testAgentConnectionGuide() {
             text.contains("Do not claim access to my Mac"),
             "bundle should prevent remote chats from pretending they have local access"
         )
+        assertTrue(
+            text.contains("If no task was included, ask one short question"),
+            "bundle should prevent pasted chats from summarizing before the user asks"
+        )
+        assertTrue(
+            text.contains("Do not critique tone, metaphors, writing style"),
+            "bundle should keep any-chat responses from turning into unsolicited critique"
+        )
+        assertTrue(
+            text.contains("Brief, Main Threads, Decisions, Action Items"),
+            "bundle should steer summaries into the embedded Summarize skill shape"
+        )
+        assertTrue(
+            text.contains("use the Search Memory skill within this pasted meeting only"),
+            "bundle should scope search-memory answers to the portable meeting"
+        )
     }
 }

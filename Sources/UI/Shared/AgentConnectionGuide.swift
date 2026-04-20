@@ -224,7 +224,12 @@ enum AgentConnectionGuide {
         - Summarize v\(starterSkills[0].version)
         - Search Memory v\(starterSkills[1].version)
 
-        If I ask for a summary, use the Summarize skill. If I ask what was said, where something came from, or when something happened, use the Search Memory skill. Cite the source file and meeting date for important claims.
+        Portable response rules:
+        - If no task was included, ask one short question instead of analyzing the meeting: "I can read this Transcripted meeting bundle. I can summarize it, find decisions/action items, or search within it. What would you like?"
+        - Do not critique tone, metaphors, writing style, usefulness, or what to ignore unless I explicitly ask for critique or opinion.
+        - If I ask for a summary or recap, use the Summarize skill and include these sections when useful: Brief, Main Threads, Decisions, Action Items, Open Questions, Risks / Blockers, Worth Remembering, Sources, Uncertainty.
+        - If I ask what was said, where something came from, or when something happened, use the Search Memory skill within this pasted meeting only.
+        - Cite the source file and meeting date for important claims.
 
         Source:
         - Title: \(title)
