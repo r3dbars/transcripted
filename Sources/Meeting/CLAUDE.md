@@ -37,7 +37,7 @@
 9. `TranscriptionTaskManager` runs one diarize → transcribe → save pipeline at a time. When `LocalSpeakerPreferences` is enabled, queued meeting work also asks the core pipeline to diarize the local mic channel instead of treating it as a single "You" speaker.
 10. A subscription on `taskManager.$lastSavedTranscriptURL` calls `MeetingTranscriptStyler.restyleTranscript(...)` and updates the recent-meetings UI state.
 11. If the speaker review sheet shows multiple local speakers, the user can either name them individually or collapse them back to a single "You" track via the UI's "Keep as You" path.
-12. Failed meetings can be retried, deleted, or dismissed from the menubar recent-meetings section, with `MeetingFailureKind` providing stable failure categories and `MeetingFailureCopy` keeping error copy consistent across retryable and non-retryable states.
+12. Failed meetings can be retried, deleted, or dismissed from the Settings meetings page, with `MeetingFailureKind` providing stable failure categories and `MeetingFailureCopy` keeping error copy consistent across retryable and non-retryable states.
 
 ## Key invariants
 
@@ -107,4 +107,4 @@ Relevant direct coverage:
 ## Agent notes
 
 - `MeetingSessionController` is the right place for app-level meeting behavior. If a change belongs to the reusable library, move down into `Sources/TranscriptedCore/`.
-- The menubar's recent-meetings UI is part of the meeting feature surface. Meeting changes often require checking `Sources/UI/MenuBar/MenuBarRecentMeetingsView.swift` and `Sources/UI/Overlay/MeetingOverlayController.swift`.
+- The menubar links to the Settings meetings page instead of rendering inline recent meetings. Meeting changes often require checking `Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift`, `Sources/UI/Settings/TranscriptedSettingsView.swift`, and `Sources/UI/Overlay/MeetingOverlayController.swift`.

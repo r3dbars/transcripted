@@ -77,20 +77,6 @@ final class MenuBarPanelController: NSViewController {
             pasteEnabled: latestDictation != nil
         )
 
-        content.recentMeetingsView.update(
-            meetings: RecentMeetingsScanner.loadRecent(limit: 3),
-            failedMeetings: appState.meetingSession.failedMeetings,
-            onRetryFailedMeeting: { [weak self] id in
-                self?.appState.meetingSession.retryFailedMeeting(id: id)
-            },
-            onDeleteFailedMeeting: { [weak self] id in
-                self?.appState.meetingSession.deleteFailedMeeting(id: id)
-            },
-            onDismissFailedMeeting: { [weak self] id in
-                self?.appState.meetingSession.dismissFailedMeeting(id: id)
-            }
-        )
-
         content.utilityActionsView.update(
             updateTitle: updatePresentation.title,
             updateVersion: updatePresentation.version,
@@ -144,13 +130,6 @@ final class MenuBarPanelController: NSViewController {
             }
             .store(in: &subscriptions)
 
-        appState.meetingSession.$lastSavedTranscriptURL
-            .combineLatest(appState.meetingSession.$failedMeetings)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _, _ in
-                self?.refresh()
-            }
-            .store(in: &subscriptions)
     }
 
     func prepareForClose() {

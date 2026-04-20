@@ -448,6 +448,29 @@ struct TranscriptedSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if !meetingSession.failedMeetings.isEmpty {
+                SettingsSection(
+                    title: "Needs Attention",
+                    detail: "Retry or clear meetings that could not finish transcribing."
+                ) {
+                    ForEach(meetingSession.failedMeetings) { item in
+                        SettingsFailedMeetingRow(
+                            item: item,
+                            retryAction: {
+                                meetingSession.retryFailedMeeting(id: item.id)
+                            },
+                            secondaryAction: {
+                                if item.hasAudioFiles {
+                                    meetingSession.deleteFailedMeeting(id: item.id)
+                                } else {
+                                    meetingSession.dismissFailedMeeting(id: item.id)
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+
             SettingsSection(
                 title: "Recent Meetings",
                 detail: "Open one of the last five saved meeting transcripts without digging through folders."
@@ -1123,6 +1146,56 @@ private struct SettingsRecentMeetingRow: View {
                 copyForAgentAction()
             } label: {
                 Label(isCopied ? "Copied" : "Copy for Agent", systemImage: isCopied ? "checkmark" : "sparkles")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+    }
+}
+
+private struct SettingsFailedMeetingRow: View {
+    let item: MeetingSessionController.FailedMeetingItem
+    let retryAction: () -> Void
+    let secondaryAction: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.orange)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(.subheadline.weight(.semibold))
+
+                Text(item.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(item.meta)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer(minLength: 12)
+
+            if item.isRetryable || item.isRetrying {
+                Button {
+                    retryAction()
+                } label: {
+                    Label(item.isRetrying ? "Retrying..." : "Retry", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!item.isRetryable || item.isRetrying)
+            }
+
+            Button(role: item.hasAudioFiles ? .destructive : nil) {
+                secondaryAction()
+            } label: {
+                Label(item.hasAudioFiles ? "Delete" : "Dismiss", systemImage: item.hasAudioFiles ? "trash" : "xmark")
             }
             .buttonStyle(.bordered)
             .controlSize(.small)

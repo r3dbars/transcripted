@@ -37,11 +37,8 @@ enum MenuTokens {
     static let accentButtonHoverNS = NSColor.systemBlue.withAlphaComponent(0.22)
     static let accentButtonPressedNS = NSColor.systemBlue.withAlphaComponent(0.28)
     static let accentButtonBorderNS = NSColor.systemBlue.withAlphaComponent(0.34)
-    static let recentHoverNS = NSColor.white.withAlphaComponent(0.05)
     static let savedBackgroundNS = NSColor.systemGreen.withAlphaComponent(0.14)
     static let savedBorderNS = NSColor.systemGreen.withAlphaComponent(0.24)
-    static let failedBackgroundNS = NSColor.systemOrange.withAlphaComponent(0.14)
-    static let failedBorderNS = NSColor.systemOrange.withAlphaComponent(0.24)
 
     // Compatibility aliases for existing AppKit controls still using the old names.
     static let cardBackgroundNS = actionBackgroundNS
@@ -75,9 +72,7 @@ enum MenuTokens {
     static let cardCornerRadius: CGFloat = 8
     static let compactActionRowHeight: CGFloat = 30
     static let actionRowHeight: CGFloat = 46
-    static let recentRowHeight: CGFloat = 40
     static let savedRowHeight: CGFloat = 54
-    static let failedRowHeight: CGFloat = 62
     static let badgeHeight: CGFloat = 22
     static let secondaryButtonSize: CGFloat = 28
     static let secondaryButtonCornerRadius: CGFloat = 8

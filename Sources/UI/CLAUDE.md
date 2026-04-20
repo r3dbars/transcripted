@@ -13,7 +13,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (44 Swift files)
+## Files (43 Swift files)
 
 ### Overlay/
 
@@ -40,7 +40,6 @@ dictation overlay and the meeting prompt / recording overlay.
 - `MenuBar/MenuBarModelStatusView.swift` — persistent local-model status badge with download progress, error state, and settings shortcut
 - `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar
 - `MenuBar/MenuBarPrimaryActionsView.swift` — groups the dictation, meeting, paste, and recent-meetings action rows at the top of the popover
-- `MenuBar/MenuBarRecentMeetingsView.swift` — recent meetings list in the popover
 - `MenuBar/MenuBarSettingsView.swift` — settings actions in the popover footer, including imported-audio transcription entry points
 - `MenuBar/MenuBarShortcutsView.swift` — keyboard shortcut hints in the popover
 - `MenuBar/MenuBarUtilityActionsView.swift` — groups the connect-agent, feedback, updates, settings, and quit action rows at the bottom of the popover
@@ -79,7 +78,7 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Shared/AgentConnectionGuide.swift` — shared smart-prompt, MCP setup, and folder fallback copy for the agent-connect flow
 - `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
-- `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts from disk for the menubar recent-meetings list
+- `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts from disk for the Settings meetings page
 - `Shared/SpeakerClipPlayback.swift` — reusable audio-preview helper for persisted speaker sample clips
 - `Shared/TranscriptedSupportActions.swift` — "Send feedback" flow that builds a GitHub-issue URL seeded with sanitized recent log lines
 
@@ -116,7 +115,7 @@ Manual checks:
 - detected-meeting prompts appear only when appropriate and can start or snooze a meeting cleanly
 - meeting overlay warms up and records cleanly
 - imported-audio transcription can be started from the menubar and lands in the normal recent-meetings flow
-- menubar popover renders shortcuts, recents, settings actions, and the agent-connect page cleanly
+- menubar popover renders shortcuts, primary actions, settings actions, and the agent-connect page cleanly
 - speaker settings can preview clips, toggle local-speaker splitting, and rename / merge people cleanly
 - completed meeting review cleanly separates "People in the room" from remote participants, and "Keep as You" restores the single-speaker local path when needed
 - permissions onboarding and first-run onboarding window still open correctly
