@@ -1209,10 +1209,11 @@ class ParakeetEngine: ObservableObject {
             let result = try await manager.transcribe(resampled, source: .microphone)
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let corrected = CustomDictionaryTextProcessor.apply(to: trimmed)
 
             let audioDuration = Double(resampled.count) / TranscriptedConstants.parakeetSampleRate
             let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
-            print("✅ PARAKEET | transcribed in \(String(format: "%.2f", elapsed))s: \"\(trimmed.prefix(80))...\"")
+            print("✅ PARAKEET | transcribed in \(String(format: "%.2f", elapsed))s: \"\(corrected.prefix(80))...\"")
 
             isTranscribing = false
             sampleBuffer.removeAll(keepingCapacity: true)
@@ -1230,10 +1231,10 @@ class ParakeetEngine: ObservableObject {
                     "elapsed_s": String(format: "%.3f", elapsed),
                     "audio_duration_s": String(format: "%.1f", audioDuration),
                     "rtf": String(format: "%.3f", rtf),
-                    "chars": "\(trimmed.count)",
+                    "chars": "\(corrected.count)",
                     "input_samples": "\(nativeCount)",
                 ])
-            return trimmed
+            return corrected
         } catch {
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             if let fallbackDecision = ParakeetShortAudioGate.dictationFallback(
@@ -1330,6 +1331,7 @@ class ParakeetEngine: ObservableObject {
         }
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
         let trimmed = resultText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let corrected = CustomDictionaryTextProcessor.apply(to: trimmed)
 
         let audioDuration = Double(samples.count) / TranscriptedConstants.parakeetSampleRate
         let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
@@ -1339,10 +1341,10 @@ class ParakeetEngine: ObservableObject {
                 "elapsed_s": String(format: "%.3f", elapsed),
                 "audio_duration_s": String(format: "%.2f", audioDuration),
                 "rtf": String(format: "%.3f", rtf),
-                "chars": "\(trimmed.count)",
+                "chars": "\(corrected.count)",
             ])
 
-        return trimmed
+        return corrected
     }
 
     // MARK: - Cleanup
