@@ -114,6 +114,7 @@ APP_SOURCES=(
     "Sources/Support/TranscriptedPermissionAccess.swift"
     "Sources/Support/TranscriptedStoragePaths.swift"
     "Sources/Support/LaunchAtLoginPreferences.swift"
+    "Sources/Support/DictationAutoSendPreferences.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"

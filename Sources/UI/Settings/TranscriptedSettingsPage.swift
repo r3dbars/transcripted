@@ -34,7 +34,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .general:
             return "Startup and app-wide behavior."
         case .shortcuts:
-            return "Keyboard triggers for dictation and meetings."
+            return "Keyboard triggers and Auto Enter app rules."
         case .meetings:
             return "Meeting recording, imports, and speaker controls."
         case .dictations:

@@ -25,6 +25,7 @@ class DictationSessionController: ObservableObject {
 
     private var interruptionSubscription: AnyCancellable?
     private let textPaster = ClipboardRestoringTextPaster()
+    private let autoSender = DictationAutoSender()
 
     var appState: TranscriptedAppState? {
         didSet { setupInterruptionObserver() }
@@ -385,6 +386,10 @@ class DictationSessionController: ObservableObject {
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
             let pasteOutcome = self.pasteWithClipboardRestore(text)
+            let autoSendOutcome = await self.performAutoEnterIfNeeded(
+                text: text,
+                delivery: pasteOutcome.delivery
+            )
             let saveFailureMessage = self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
             let wordCount = text.split(whereSeparator: \.isWhitespace).count
             let deliveryLevel: EventLevel = pasteOutcome.delivery == .pasted ? .info : .warning
@@ -398,6 +403,7 @@ class DictationSessionController: ObservableObject {
                     extra: [
                         "trigger": self.currentDictationTrigger.rawValue,
                         "delivery": pasteOutcome.diagnosticName,
+                        "auto_send": autoSendOutcome.diagnosticName,
                         "chars": "\(text.count)",
                         "words": "\(wordCount)",
                         "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000))"
@@ -423,10 +429,14 @@ class DictationSessionController: ObservableObject {
             }
             isDictating = false
             appState.logger.log("DICTATION | completed with outcome \(pasteOutcome)")
+            if case .failed(let message) = autoSendOutcome {
+                appState.logger.log("DICTATION | auto enter failed: \(message)")
+            }
             AnalyticsReporter.track(
                 "dictation_completed",
                 properties: [
                     "delivery": pasteOutcome.delivery.rawValue,
+                    "auto_send": autoSendOutcome.diagnosticName,
                     "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
                     "trigger": currentDictationTrigger.rawValue,
                     "word_count_bucket": AnalyticsReporter.wordCountBucket(wordCount),
@@ -705,6 +715,27 @@ class DictationSessionController: ObservableObject {
         }
 
         return outcome
+    }
+
+    private func performAutoEnterIfNeeded(
+        text: String,
+        delivery: DictationDelivery
+    ) async -> DictationAutoSendOutcome {
+        let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
+        guard DictationAutoSendPolicy.shouldSend(
+            isEnabled: DictationAutoSendPreferences.isEnabled(),
+            delivery: delivery,
+            text: text,
+            duration: duration,
+            sourceBundleID: sessionSourceApp?.bundleIdentifier,
+            allowedBundleIDs: DictationAutoSendPreferences.allowedBundleIDs()
+        ) else {
+            return .disabled
+        }
+
+        try? await Task.sleep(nanoseconds: TranscriptedConstants.dictationAutoEnterDelay)
+        guard !Task.isCancelled else { return .disabled }
+        return autoSender.send(DictationAutoSendPreferences.sendKey())
     }
 
     @discardableResult
