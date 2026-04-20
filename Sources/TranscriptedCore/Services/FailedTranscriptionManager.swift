@@ -49,7 +49,9 @@ public class FailedTranscriptionManager: ObservableObject {
             // tamper with. Validate each path is sandboxed within the user's home directory before
             // accepting it — this prevents a crafted JSON from directing removeItem(at:) to an
             // arbitrary path (e.g. /etc/hosts) when entries are cleaned up.
-            let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
+            // Trailing "/" ensures "/Users/alice" cannot match "/Users/alicemallory/...".
+            let rawHomeDir = FileManager.default.homeDirectoryForCurrentUser.path
+            let homeDir = rawHomeDir.hasSuffix("/") ? rawHomeDir : rawHomeDir + "/"
             let sandboxedEntries = loaded.filter { entry in
                 let micSafe = entry.micAudioURL.path.hasPrefix(homeDir)
                 let systemSafe = entry.systemAudioURL.map { $0.path.hasPrefix(homeDir) } ?? true
