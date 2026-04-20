@@ -3,8 +3,6 @@ import Foundation
 
 @MainActor
 enum TranscriptedSupportActions {
-    private static let feedbackIssueURLString = "https://github.com/r3dbars/transcripted/issues/new"
-
     static func sendFeedback(logger: AppLogger?) {
         guard let url = feedbackIssueURL(logger: logger) else { return }
         AppSoundPlayer.shared.play(.feedbackSubmitted, respectingPreferences: false)
@@ -12,25 +10,7 @@ enum TranscriptedSupportActions {
     }
 
     static func feedbackIssueURL(logger: AppLogger?) -> URL? {
-        let rawLogLines = logger?.entries.suffix(80).joined(separator: "\n") ?? "No in-app logs attached."
-        let logLines = AnalyticsPayloadSanitizer.redact(rawLogLines)
-        let title = "Transcripted Feedback"
-        let body = """
-        What happened:
-        [describe the issue here]
-
-        ---
-        Logs:
-        \(logLines)
-        """
-
-        var components = URLComponents(string: feedbackIssueURLString)
-        components?.queryItems = [
-            URLQueryItem(name: "title", value: title),
-            URLQueryItem(name: "body", value: body)
-        ]
-
-        return components?.url
+        FeedbackIssueBuilder.issueURL(rawLogLines: logger?.entries)
     }
 
     static var appVersionDescription: String {
