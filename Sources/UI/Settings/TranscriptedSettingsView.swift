@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 struct TranscriptedSettingsView: View {
     @Bindable var navigation: TranscriptedSettingsNavigationModel
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
-    @ObservedObject private var parakeetEngine: ParakeetEngine
+    @ObservedObject private var sttRouter: STTRouter
     @ObservedObject private var meetingSession: MeetingSessionController
     @ObservedObject private var sparkleUpdater: SparkleUpdaterController
 
@@ -16,6 +16,8 @@ struct TranscriptedSettingsView: View {
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
+    @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
+    @State private var showAdvancedModelControls = false
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
     @State private var autoEnterKey = DictationAutoSendPreferences.sendKey()
@@ -40,7 +42,7 @@ struct TranscriptedSettingsView: View {
         self.navigation = navigation
         self.speakerPeopleModel = speakerPeopleModel
         self.actions = actions
-        _parakeetEngine = ObservedObject(wrappedValue: appState.sttRouter.parakeetEngine)
+        _sttRouter = ObservedObject(wrappedValue: appState.sttRouter)
         _meetingSession = ObservedObject(wrappedValue: appState.meetingSession)
         _sparkleUpdater = ObservedObject(wrappedValue: appState.sparkleUpdater)
     }
@@ -104,6 +106,9 @@ struct TranscriptedSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .dictationTranscriptDidSave)) { _ in
             refreshRecentCaptures()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .transcriptionModelPreferenceDidChange)) { _ in
+            preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshPermissions()
             refreshRecentCaptures()
@@ -117,6 +122,8 @@ struct TranscriptedSettingsView: View {
             homePage
         case .general:
             generalPage
+        case .models:
+            modelsPage
         case .shortcuts:
             shortcutsPage
         case .meetings:
@@ -202,13 +209,16 @@ struct TranscriptedSettingsView: View {
                 title: "Setup Status",
                 detail: "These cards show whether Transcripted is ready for dictation, meetings, and local storage."
             ) {
-                let modelCard = FirstRunExperience.modelCard(for: FirstRunLocalModelState(parakeetEngine.modelDownloadState))
+                let modelCard = FirstRunExperience.modelCard(
+                    for: FirstRunLocalModelState(sttRouter.modelDownloadState),
+                    model: effectiveTranscriptionModel
+                )
 
                 SettingsStatusCard(
                     title: "Local voice model",
-                    status: modelCard.status,
-                    detail: modelCard.detail,
-                    tone: tone(for: modelCard.tone)
+                    status: effectiveTranscriptionModel.title,
+                    detail: "\(modelCard.detail) Active engine: \(effectiveTranscriptionModel.title).",
+                    tone: preferredTranscriptionModel == effectiveTranscriptionModel ? tone(for: modelCard.tone) : .caution
                 )
 
                 SettingsStatusCard(
@@ -239,6 +249,14 @@ struct TranscriptedSettingsView: View {
                 title: "What To Adjust Next",
                 detail: "These are the pages most people look at after the first successful recording."
             ) {
+                SettingsQuickLinkRow(
+                    symbolName: "cpu.fill",
+                    title: "Models",
+                    detail: "Review the local transcription engine and advanced options."
+                ) {
+                    navigation.selectedPage = .models
+                }
+
                 SettingsQuickLinkRow(
                     symbolName: "keyboard",
                     title: "Shortcuts",
@@ -412,6 +430,80 @@ struct TranscriptedSettingsView: View {
                 Text(launchAtLoginStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var modelsPage: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "Models",
+                summary: "Parakeet is the default local transcription model. Advanced users can switch dictation, meetings, and imported audio to Whisper."
+            )
+
+            SettingsSection(
+                title: "Current Model",
+                detail: "This is the engine Transcripted will use for dictation, meetings, and imported audio."
+            ) {
+                SettingsStatusCard(
+                    title: "Active transcription engine",
+                    status: effectiveTranscriptionModel.title,
+                    detail: activeModelDetail,
+                    tone: .ready
+                )
+
+                let modelCard = FirstRunExperience.modelCard(
+                    for: FirstRunLocalModelState(sttRouter.modelDownloadState),
+                    model: effectiveTranscriptionModel
+                )
+                SettingsStatusCard(
+                    title: "Model files",
+                    status: modelCard.status,
+                    detail: modelCard.detail,
+                    tone: tone(for: modelCard.tone)
+                )
+            }
+
+            SettingsSection(
+                title: "Advanced Preference",
+                detail: "Change this only when you want a different local transcription family. Parakeet stays the out-of-box default."
+            ) {
+                DisclosureGroup("Show advanced model options", isExpanded: $showAdvancedModelControls) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Picker("Preferred model", selection: Binding(
+                            get: { preferredTranscriptionModel },
+                            set: { newValue in
+                                updatePreferredTranscriptionModel(newValue)
+                            }
+                        )) {
+                            ForEach(TranscriptionModelChoice.allCases) { model in
+                                Text(model.title).tag(model)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        ForEach(TranscriptionModelChoice.allCases) { model in
+                            ModelChoiceRow(
+                                model: model,
+                                isPreferred: preferredTranscriptionModel == model,
+                                isEffective: effectiveTranscriptionModel == model
+                            )
+                        }
+
+                        HStack {
+                            Button("Use Default") {
+                                updatePreferredTranscriptionModel(.parakeetTDTv3)
+                            }
+                            .disabled(preferredTranscriptionModel == .parakeetTDTv3)
+
+                            Text("Changes apply to the next dictation, meeting, or imported audio file.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.top, 8)
+                }
             }
         }
     }
@@ -721,6 +813,14 @@ struct TranscriptedSettingsView: View {
         FileManager.default.transcriptedRecordingsDir
     }
 
+    private var effectiveTranscriptionModel: TranscriptionModelChoice {
+        TranscriptionModelPreferences.effectiveModel()
+    }
+
+    private var activeModelDetail: String {
+        "\(effectiveTranscriptionModel.summary) Audio and transcripts stay local."
+    }
+
     private var missingRequiredPermissions: [TranscriptedPermissionKind] {
         TranscriptedPermissionKind.allCases.filter { kind in
             kind.isRequiredOnFirstLaunch && !(permissionStates[kind] ?? false)
@@ -790,6 +890,8 @@ struct TranscriptedSettingsView: View {
         refreshRecentCaptures()
         rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
         refreshLaunchAtLoginState()
+        preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
+        showAdvancedModelControls = preferredTranscriptionModel != TranscriptionModelPreferences.defaultModel
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
         autoEnterKey = DictationAutoSendPreferences.sendKey()
@@ -836,6 +938,15 @@ struct TranscriptedSettingsView: View {
                 event: "launch_at_login_update_failed",
                 message: error.localizedDescription
             )
+        }
+    }
+
+    private func updatePreferredTranscriptionModel(_ model: TranscriptionModelChoice) {
+        preferredTranscriptionModel = model
+        showAdvancedModelControls = true
+        TranscriptionModelPreferences.setPreferredModel(model)
+        Task { @MainActor in
+            await sttRouter.initializeSelectedModel()
         }
     }
 
@@ -1039,6 +1150,61 @@ private struct AutoEnterAppCandidate: Identifiable, Equatable {
             .sorted { lhs, rhs in
                 lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
+    }
+}
+
+private struct ModelChoiceRow: View {
+    let model: TranscriptionModelChoice
+    let isPreferred: Bool
+    let isEffective: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbolName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(symbolColor)
+                .frame(width: 22)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(model.title)
+                        .font(.subheadline.weight(.semibold))
+
+                    Text(statusLabel)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(statusColor)
+                }
+
+                Text(model.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 12)
+        }
+    }
+
+    private var symbolName: String {
+        if isEffective { return "checkmark.circle.fill" }
+        return "circle"
+    }
+
+    private var symbolColor: Color {
+        if isEffective { return .green }
+        return .secondary
+    }
+
+    private var statusLabel: String {
+        if isEffective { return "Active" }
+        if isPreferred { return "Preferred" }
+        return model.availabilityStatus
+    }
+
+    private var statusColor: Color {
+        if isEffective { return .green }
+        return .secondary
     }
 }
 

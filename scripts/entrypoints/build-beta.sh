@@ -66,6 +66,8 @@ ESPEAK_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/ESpeakNG.framework"
 SENTRY_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sentry.framework"
 SPARKLE_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sparkle.framework"
 TRANSCRIPTED_CORE_MODULE="deps-modules/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
+ARGMAX_CORE_MODULE="deps-modules/ArgmaxCore.swiftmodule/arm64-apple-macos.swiftmodule"
+WHISPERKIT_MODULE="deps-modules/WhisperKit.swiftmodule/arm64-apple-macos.swiftmodule"
 
 dependency_input_listing() {
     {
@@ -321,10 +323,12 @@ if [ ! -f "$BETA_ENTITLEMENTS" ]; then
     exit 1
 fi
 
-if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -d "$ESPEAK_FRAMEWORK" ] || [ ! -d "$SENTRY_FRAMEWORK" ] || [ ! -d "$SPARKLE_FRAMEWORK" ]; then
+if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -f "$ARGMAX_CORE_MODULE" ] || [ ! -f "$WHISPERKIT_MODULE" ] || [ ! -d "$ESPEAK_FRAMEWORK" ] || [ ! -d "$SENTRY_FRAMEWORK" ] || [ ! -d "$SPARKLE_FRAMEWORK" ]; then
     echo "❌ Dependencies missing or stale — required for beta builds"
     echo "   Missing stamp: $DEPS_BUILD_STAMP"
     echo "   Missing module: $TRANSCRIPTED_CORE_MODULE"
+    echo "   Missing module: $ARGMAX_CORE_MODULE"
+    echo "   Missing module: $WHISPERKIT_MODULE"
     echo "   Missing framework: $ESPEAK_FRAMEWORK"
     echo "   Missing framework: $SENTRY_FRAMEWORK"
     echo "   Missing framework: $SPARKLE_FRAMEWORK"
@@ -386,7 +390,7 @@ echo "Injecting token for $USER_NAME..."
 cp "$BETA_CONFIG_PATH" "$BETA_CONFIG_BACKUP"
 inject_beta_token
 
-# Unified dependencies (FluidAudio + mlx-swift-lm)
+# Unified dependencies (FluidAudio + mlx-swift-lm + WhisperKit)
 echo "Dependencies found"
 
 DEPS_MODULE_FLAGS="-Ideps-modules"

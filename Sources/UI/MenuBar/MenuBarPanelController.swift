@@ -54,7 +54,7 @@ final class MenuBarPanelController: NSViewController {
         guard let content = contentView else { return }
 
         let warmupStatus = appState.meetingSession.warmupStatus
-        let modelState = FirstRunLocalModelState(appState.sttRouter.parakeetEngine.modelDownloadState)
+        let modelState = FirstRunLocalModelState(appState.sttRouter.modelDownloadState)
         let dictationState = FirstRunExperience.dictationAction(for: modelState)
         let meetingState = FirstRunExperience.meetingAction(
             dictationReady: appState.sttRouter.isModelLoaded,
@@ -115,7 +115,7 @@ final class MenuBarPanelController: NSViewController {
             }
             .store(in: &subscriptions)
 
-        appState.sttRouter.parakeetEngine.$modelDownloadState
+        appState.sttRouter.$modelDownloadState
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.refresh()

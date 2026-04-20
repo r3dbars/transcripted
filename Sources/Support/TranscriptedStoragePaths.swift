@@ -101,6 +101,11 @@ extension FileManager {
         return ensuredPrivateDirectory(at: url, context: "Transcripted cache")
     }
 
+    var transcriptedWhisperModelsDir: URL {
+        let url = transcriptedCacheDir.appendingPathComponent("whisperkit", isDirectory: true)
+        return ensuredPrivateDirectory(at: url, context: "Transcripted Whisper models")
+    }
+
     var transcriptedLogsDir: URL {
         ensuredPrivateDirectory(at: transcriptedLogsDirURL, context: "Transcripted logs")
     }

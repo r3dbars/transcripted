@@ -2,7 +2,7 @@
 // Gates the meeting pipeline on the STT + diarization models being loaded.
 // Delegates the actual download work to TranscriptedCore (DiarizationService
 // initializes the offline PyAnnote + WeSpeaker path required by meeting
-// transcripts) and the app's ParakeetEngine (which loads Parakeet TDT V3).
+// transcripts) and the app's selected speech-to-text router.
 // This file only coordinates the two calls and surfaces a single await point
 // for the session controller.
 
@@ -42,7 +42,7 @@ final class MeetingModelDownloader {
             // After both returns, confirm they actually reached a usable state.
             guard stt.isReady else {
                 throw NSError(domain: "MeetingModelDownloader", code: 2, userInfo: [
-                    NSLocalizedDescriptionKey: "Parakeet STT failed to load."
+                    NSLocalizedDescriptionKey: "Selected speech model failed to load."
                 ])
             }
             guard diarization.modelState == .ready else {

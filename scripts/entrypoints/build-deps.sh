@@ -24,6 +24,8 @@ DEPS_TOOLS="$DRAFT_DIR/deps-tools"
 FLUID_AUDIO_VERSION="${FLUID_AUDIO_VERSION:-0.7.9}"
 MLX_SWIFT_LM_REVISION="${MLX_SWIFT_LM_REVISION:-25b00d4}"
 SWIFT_TRANSFORMERS_VERSION="${SWIFT_TRANSFORMERS_VERSION:-1.2.1}"
+ARGMAX_OSS_SWIFT_VERSION="${ARGMAX_OSS_SWIFT_VERSION:-v0.18.0}"
+ARGMAX_OSS_SWIFT_REVISION="${ARGMAX_OSS_SWIFT_REVISION:-e2adabbe7d98dc4d0ab9a5b75424ecc42a9cdbef}"
 SPARKLE_VERSION="${SPARKLE_VERSION:-2.9.1}"
 SENTRY_COCOA_VERSION="${SENTRY_COCOA_VERSION:-9.10.0}"
 SPARKLE_SHA256="${SPARKLE_SHA256:-9fec2b888e6e2940b1bfbd5d3d010b9f67076b52170923549095cbb74132403b}"
@@ -97,6 +99,36 @@ download_sentry_distribution() {
     ditto "$framework_src" "$DEPS_FRAMEWORKS/Sentry.framework"
 }
 
+fetch_argmax_whisperkit_sources() {
+    local argmax_root="$DEPS_BUILD/argmax-oss-swift"
+    local actual_revision
+
+    echo "Fetching Argmax WhisperKit $ARGMAX_OSS_SWIFT_VERSION..."
+    rm -rf "$argmax_root" "$DEPS_BUILD/ArgmaxCore" "$DEPS_BUILD/WhisperKit"
+    git -c advice.detachedHead=false clone \
+        --quiet \
+        --depth 1 \
+        --branch "$ARGMAX_OSS_SWIFT_VERSION" \
+        https://github.com/argmaxinc/argmax-oss-swift.git \
+        "$argmax_root"
+
+    actual_revision="$(git -C "$argmax_root" rev-parse HEAD)"
+    if [ "$actual_revision" != "$ARGMAX_OSS_SWIFT_REVISION" ]; then
+        echo "[build-deps] ERROR: Argmax WhisperKit revision mismatch"
+        echo "[build-deps]   expected: $ARGMAX_OSS_SWIFT_REVISION"
+        echo "[build-deps]   actual:   $actual_revision"
+        exit 1
+    fi
+
+    for target in ArgmaxCore WhisperKit; do
+        if [ ! -d "$argmax_root/Sources/$target" ]; then
+            echo "[build-deps] ERROR: Argmax source target missing: Sources/$target"
+            exit 1
+        fi
+        ditto "$argmax_root/Sources/$target" "$DEPS_BUILD/$target"
+    done
+}
+
 resolve_package_graph() {
     local resolve_cmd=("swift" "package" "resolve" "--disable-dependency-cache")
 
@@ -104,6 +136,7 @@ resolve_package_graph() {
     echo "  FluidAudio:         $FLUID_AUDIO_VERSION"
     echo "  mlx-swift-lm rev:   $MLX_SWIFT_LM_REVISION"
     echo "  swift-transformers: $SWIFT_TRANSFORMERS_VERSION"
+    echo "  Argmax WhisperKit:  $ARGMAX_OSS_SWIFT_VERSION ($ARGMAX_OSS_SWIFT_REVISION)"
 
     if "${resolve_cmd[@]}"; then
         return 0
@@ -213,7 +246,7 @@ echo "[build-deps] Using TranscriptedCore from: $TRANSCRIPTED_ROOT"
 # Skip if already built (use --force to rebuild).
 # libExternalDeps.a was added later for SPM-based `swift test`, so require it too;
 # otherwise legacy worktrees would keep skipping while missing the archive.
-if [ -f "$DEPS_LIBS/libDraftDeps.a" ] && [ -f "$DEPS_LIBS/libExternalDeps.a" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULES" ] && [ -d "$DEPS_FRAMEWORKS/ESpeakNG.framework" ] && [ -d "$DEPS_FRAMEWORKS/Sentry.framework" ] && [ -d "$DEPS_FRAMEWORKS/Sparkle.framework" ] && [ -x "$DEPS_TOOLS/sparkle/bin/generate_appcast" ] && [ "${1:-}" != "--force" ]; then
+if [ -f "$DEPS_LIBS/libDraftDeps.a" ] && [ -f "$DEPS_LIBS/libExternalDeps.a" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULES" ] && [ -f "$DEPS_MODULES/ArgmaxCore.swiftmodule/arm64-apple-macos.swiftmodule" ] && [ -f "$DEPS_MODULES/WhisperKit.swiftmodule/arm64-apple-macos.swiftmodule" ] && [ -d "$DEPS_FRAMEWORKS/ESpeakNG.framework" ] && [ -d "$DEPS_FRAMEWORKS/Sentry.framework" ] && [ -d "$DEPS_FRAMEWORKS/Sparkle.framework" ] && [ -x "$DEPS_TOOLS/sparkle/bin/generate_appcast" ] && [ "${1:-}" != "--force" ]; then
     echo "Dependencies already built. Use --force to rebuild."
     echo "  libs:    $DEPS_LIBS/libDraftDeps.a"
     echo "           $DEPS_LIBS/libExternalDeps.a"
@@ -226,7 +259,7 @@ if [ -f "$DEPS_LIBS/libDraftDeps.a" ] && [ -f "$DEPS_LIBS/libExternalDeps.a" ] &
     exit 0
 fi
 
-echo "Building FluidAudio + mlx-swift-lm (unified)..."
+echo "Building FluidAudio + mlx-swift-lm + WhisperKit (unified)..."
 
 # Clean previous build
 rm -rf "$DEPS_LIBS" "$DEPS_MODULES" "$DEPS_FRAMEWORKS" "$DEPS_TOOLS"
@@ -237,6 +270,7 @@ mkdir -p "$DEPS_BUILD/Sources"
 # long dependency builds fail with "input file ... was modified during the build"
 # if the repo changes while SwiftPM is compiling.
 ditto "$TRANSCRIPTED_ROOT/Sources/TranscriptedCore" "$DEPS_BUILD/TranscriptedCore"
+fetch_argmax_whisperkit_sources
 
 # Create unified Package.swift — both dependencies resolved together
 cat > "$DEPS_BUILD/Package.swift" << 'PACKAGE_EOF'
@@ -251,6 +285,25 @@ let package = Package(
         .package(url: "https://github.com/huggingface/swift-transformers", exact: "SWIFT_TRANSFORMERS_VERSION_PLACEHOLDER"),
     ],
     targets: [
+        // WhisperKit is vendored from argmaxinc/argmax-oss-swift instead of
+        // consumed as a package dependency so the bundle keeps a single
+        // swift-transformers pin shared with mlx-swift-lm.
+        .target(
+            name: "ArgmaxCore",
+            dependencies: [
+                .product(name: "Hub", package: "swift-transformers"),
+            ],
+            path: "ArgmaxCore"
+        ),
+        .target(
+            name: "WhisperKit",
+            dependencies: [
+                "ArgmaxCore",
+                .product(name: "Hub", package: "swift-transformers"),
+                .product(name: "Tokenizers", package: "swift-transformers"),
+            ],
+            path: "WhisperKit"
+        ),
         // TranscriptedCore is built directly from its source tree rather than
         // consumed via .package(path:) because Core's own Package.swift uses
         // relative unsafeFlags (-I ./.deps-modules) that assume a prebuilt
@@ -274,6 +327,7 @@ let package = Package(
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+                "WhisperKit",
                 "TranscriptedCore",
             ],
             path: "Sources"
@@ -294,6 +348,7 @@ import FluidAudio
 import MLXLLM
 import MLXLMCommon
 import TranscriptedCore
+import WhisperKit
 SWIFT_EOF
 
 # Build in release mode
