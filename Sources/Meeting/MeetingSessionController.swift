@@ -491,6 +491,7 @@ final class MeetingSessionController: ObservableObject {
         )
 
         guard let micURL = files.micURL else {
+            MeetingRecordingCleanup.discardFiles(micURL: nil, systemURL: files.systemURL)
             DiagnosticsTrail.record(
                 level: .error,
                 engine: "meeting",

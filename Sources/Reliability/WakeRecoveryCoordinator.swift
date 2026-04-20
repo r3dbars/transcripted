@@ -11,6 +11,7 @@ final class WakeRecoveryCoordinator {
     private struct CompletedWakeRecovery {
         let task: Task<(Bool, String?), Never>
         let completedAtUptime: TimeInterval
+        let hotkeysRecovered: Bool
     }
 
     typealias HotkeyUnregister = () -> Void
@@ -77,10 +78,13 @@ final class WakeRecoveryCoordinator {
 
         wakeRecoveryTask = task
         let (hotkeysRecovered, hotkeyError) = await task.value
-        lastCompletedRecovery = CompletedWakeRecovery(
-            task: task,
-            completedAtUptime: ProcessInfo.processInfo.systemUptime
-        )
+        lastCompletedRecovery = hotkeysRecovered
+            ? CompletedWakeRecovery(
+                task: task,
+                completedAtUptime: ProcessInfo.processInfo.systemUptime,
+                hotkeysRecovered: hotkeysRecovered
+            )
+            : nil
         wakeRecoveryTask = nil
         return WakeRecoveryResult(
             hotkeysRecovered: hotkeysRecovered,
@@ -115,7 +119,10 @@ final class WakeRecoveryCoordinator {
     }
 
     private func recentRecoveryTask() -> Task<(Bool, String?), Never>? {
-        guard let lastCompletedRecovery else { return nil }
+        guard let lastCompletedRecovery, lastCompletedRecovery.hotkeysRecovered else {
+            self.lastCompletedRecovery = nil
+            return nil
+        }
 
         let elapsed = ProcessInfo.processInfo.systemUptime - lastCompletedRecovery.completedAtUptime
         guard elapsed <= recentRecoveryReuseWindow else {

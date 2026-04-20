@@ -101,6 +101,13 @@ struct TranscriptedSettingsView: View {
         .onChange(of: meetingSession.lastSavedTranscriptURL) { _, _ in
             refreshRecentCaptures()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .dictationTranscriptDidSave)) { _ in
+            refreshRecentCaptures()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshPermissions()
+            refreshRecentCaptures()
+        }
     }
 
     @ViewBuilder

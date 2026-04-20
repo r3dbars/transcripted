@@ -194,6 +194,7 @@ class ParakeetEngine: ObservableObject {
     /// infinite Task chains when the mic is permanently unavailable.
     private var prewarmRetryCount: Int = 0
     private var prewarmRetryTask: Task<Void, Never>?
+    private var isShuttingDown = false
 
     // FluidAudio ASR
     private var asrManager: AsrManager?
@@ -246,6 +247,7 @@ class ParakeetEngine: ObservableObject {
     /// Load Parakeet models from the app bundle (preferred) or download from HuggingFace (fallback).
     /// Bundle path: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/
     func initialize() async {
+        guard !isShuttingDown, !Task.isCancelled else { return }
         scheduleInputDeviceNameRefresh()
 
         guard asrManager == nil else {
@@ -283,6 +285,7 @@ class ParakeetEngine: ObservableObject {
                 loadSource = .bundle
                 print("📦 PARAKEET | loading from bundle: \(bundlePath.path)")
                 models = try await AsrModels.load(from: bundlePath, version: .v3)
+                guard !Task.isCancelled, !isShuttingDown else { return }
                 loadSourceName = loadSource.rawValue
             } else {
                 // Fallback: download from HuggingFace (~600MB on first run).
@@ -305,15 +308,21 @@ class ParakeetEngine: ObservableObject {
                 print("🌐 PARAKEET | models not bundled, downloading (~600MB)...")
                 modelDownloadState = .downloading(progress: 0.0)
                 let downloadedPath = try await AsrModels.download(version: .v3)
+                guard !Task.isCancelled, !isShuttingDown else { return }
                 modelDownloadState = .loading
                 print("🌐 PARAKEET | loading downloaded models from: \(downloadedPath.path)")
                 models = try await AsrModels.load(from: downloadedPath, version: .v3)
+                guard !Task.isCancelled, !isShuttingDown else { return }
                 loadSourceName = loadSource.rawValue
             }
 
             failureStage = .managerInitialize
             let manager = AsrManager(config: .default)
             try await manager.initialize(models: models)
+            guard !Task.isCancelled, !isShuttingDown else {
+                Task { manager.cleanup() }
+                return
+            }
 
             asrManager = manager
             asrManagerReady = true
@@ -328,6 +337,7 @@ class ParakeetEngine: ObservableObject {
             }
 
         } catch {
+            guard !Task.isCancelled, !isShuttingDown else { return }
             let friendlyMessage = ModelDownloadService.classifyError(error).detail
             modelDownloadState = .failed(friendlyMessage)
             print("❌ PARAKEET | model initialization failed: \(error.localizedDescription)")
@@ -426,6 +436,7 @@ class ParakeetEngine: ObservableObject {
     // MARK: - Input readiness
 
     func prewarm() {
+        guard !isShuttingDown else { return }
         guard !isRecording else { return }
         installAudioObserversIfNeeded()
         scheduleInputDeviceNameRefresh()
@@ -485,6 +496,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func schedulePrewarmRetry() {
+        guard !isShuttingDown else { return }
         // Bounded retry — give CoreAudio time to settle, but don't loop forever.
         // Each call counts toward the budget; budget resets on a successful prewarm
         // or on an explicit device change (which restarts the cycle anyway).
@@ -501,7 +513,10 @@ class ParakeetEngine: ObservableObject {
         prewarmRetryTask?.cancel()
         prewarmRetryTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-            guard let self, !self.recoveryState.isStale(generation: capturedGeneration) else { return }
+            guard !Task.isCancelled,
+                  let self,
+                  !self.isShuttingDown,
+                  !self.recoveryState.isStale(generation: capturedGeneration) else { return }
             self.prewarm()
         }
     }
@@ -807,10 +822,7 @@ class ParakeetEngine: ObservableObject {
             audioEngine.stop()
             isEnginePrewarmed = false
             markFormatUnreadyAndPublish()
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-                self?.prewarm()
-            }
+            schedulePrewarmRetry()
             return false
         }
 
@@ -1310,6 +1322,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     func cleanup() {
+        isShuttingDown = true
         cancelAudioWatchdog()
         prewarmRetryTask?.cancel()
         prewarmRetryTask = nil

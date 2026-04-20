@@ -48,7 +48,7 @@ enum TextPasteOutcome: Equatable {
 
 @MainActor
 final class ClipboardRestoringTextPaster {
-    private typealias PasteboardSnapshot = [[NSPasteboard.PasteboardType: Data]]
+    typealias PasteboardSnapshot = [[NSPasteboard.PasteboardType: Data]]
 
     private var clipboardRestoreTask: Task<Void, Never>?
 
@@ -62,6 +62,8 @@ final class ClipboardRestoringTextPaster {
     }
 
     func paste(_ text: String) -> TextPasteOutcome {
+        cancelPendingClipboardRestore()
+
         guard AXIsProcessTrusted() else {
             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
             _ = AXIsProcessTrustedWithOptions(options)
@@ -93,19 +95,23 @@ final class ClipboardRestoringTextPaster {
         vUp.post(tap: .cghidEventTap)
 
         let changeCountAfterSet = pasteboard.changeCount
-        clipboardRestoreTask?.cancel()
-        clipboardRestoreTask = Task { @MainActor in
-            defer {
-                restorePasteboardItems(savedItems, to: pasteboard)
-            }
-
+        clipboardRestoreTask = Task { @MainActor [weak self] in
             let startTime = CFAbsoluteTimeGetCurrent()
             while CFAbsoluteTimeGetCurrent() - startTime < TranscriptedConstants.clipboardRestoreTimeout {
                 try? await Task.sleep(nanoseconds: TranscriptedConstants.clipboardPollInterval)
+                guard !Task.isCancelled else { return }
                 if pasteboard.changeCount != changeCountAfterSet {
-                    break
+                    return
                 }
             }
+
+            guard !Task.isCancelled else { return }
+            self?.restorePasteboardItems(
+                savedItems,
+                temporaryString: text,
+                temporaryChangeCount: changeCountAfterSet,
+                to: pasteboard
+            )
         }
 
         return .pasted
@@ -117,7 +123,7 @@ final class ClipboardRestoringTextPaster {
         pasteboard.setString(text, forType: .string)
     }
 
-    private func snapshotPasteboardItems(from pasteboard: NSPasteboard) -> PasteboardSnapshot {
+    func snapshotPasteboardItems(from pasteboard: NSPasteboard) -> PasteboardSnapshot {
         pasteboard.pasteboardItems?.map { item in
             var typeData: [NSPasteboard.PasteboardType: Data] = [:]
             for type in item.types {
@@ -129,7 +135,17 @@ final class ClipboardRestoringTextPaster {
         } ?? []
     }
 
-    private func restorePasteboardItems(_ savedItems: PasteboardSnapshot, to pasteboard: NSPasteboard) {
+    func restorePasteboardItems(
+        _ savedItems: PasteboardSnapshot,
+        temporaryString: String,
+        temporaryChangeCount: Int,
+        to pasteboard: NSPasteboard
+    ) {
+        guard pasteboard.changeCount == temporaryChangeCount,
+              pasteboard.string(forType: .string) == temporaryString else {
+            return
+        }
+
         pasteboard.clearContents()
         let items = savedItems.map { typeData -> NSPasteboardItem in
             let item = NSPasteboardItem()
