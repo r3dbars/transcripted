@@ -17,7 +17,7 @@ import QuartzCore  // CACurrentMediaTime — real-time-safe monotonic clock
 /// - `AudioObjectRemovePropertyListener: no object with given ID` - Cleanup race condition (harmless)
 /// These are internal CoreAudio logs that cannot be suppressed from user code and don't affect functionality.
 @available(macOS 14.2, *)
-class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine {
+class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchecked Sendable {
 
     var errorMessagePublisher: AnyPublisher<String?, Never> {
         $errorMessage.eraseToAnyPublisher()

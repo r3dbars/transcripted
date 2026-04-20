@@ -13,7 +13,7 @@ import ScreenCaptureKit
 /// The public interface matches `SystemAudioCaptureEngine` so `Audio` can swap
 /// between this and the CoreAudio-based `SystemAudioCapture` transparently.
 @available(macOS 26.0, *)
-final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine {
+final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchecked Sendable {
     @Published var errorMessage: String?
 
     private var stream: SCStream?
