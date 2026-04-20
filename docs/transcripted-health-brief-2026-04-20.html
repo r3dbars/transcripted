@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transcripted Health Brief - April 20, 2026</title>
+  <style>
+    :root {
+      --bg: #f6f4ef;
+      --paper: #fffdf8;
+      --paper-soft: #fbf7ee;
+      --ink: #18212a;
+      --muted: #66717c;
+      --line: rgba(24, 33, 42, 0.12);
+      --green: #176c45;
+      --green-soft: #dff1e8;
+      --blue: #285ea8;
+      --blue-soft: #e0ebfa;
+      --amber: #9d5b11;
+      --amber-soft: #f5e5c7;
+      --red: #ae2727;
+      --red-soft: #f4dada;
+      --purple: #68479b;
+      --purple-soft: #ebe2f6;
+      --shadow: 0 18px 50px rgba(24, 33, 42, 0.10);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        linear-gradient(120deg, rgba(40, 94, 168, 0.10), transparent 36%),
+        linear-gradient(240deg, rgba(23, 108, 69, 0.12), transparent 32%),
+        var(--bg);
+      font-family: "Avenir Next", "Segoe UI", Helvetica, Arial, sans-serif;
+      line-height: 1.45;
+    }
+
+    .page {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 28px auto 52px;
+    }
+
+    .hero,
+    .section,
+    .card,
+    .mini-card {
+      border: 1px solid var(--line);
+      background: rgba(255, 253, 248, 0.94);
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      border-radius: 8px;
+      padding: 34px;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0;
+      height: 8px;
+      background: linear-gradient(90deg, var(--green), var(--blue), var(--amber), var(--red));
+    }
+
+    .section {
+      margin-top: 18px;
+      border-radius: 8px;
+      padding: 24px;
+    }
+
+    .eyebrow,
+    .kicker,
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .eyebrow {
+      color: var(--blue);
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      max-width: 820px;
+      margin-top: 12px;
+      font-size: clamp(2.3rem, 6vw, 4.4rem);
+    }
+
+    h2 {
+      font-size: clamp(1.45rem, 3vw, 2.1rem);
+    }
+
+    h3 {
+      font-size: 1.05rem;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .summary {
+      max-width: 820px;
+      margin-top: 14px;
+      font-size: 1.08rem;
+    }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .top-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-top: 24px;
+    }
+
+    .metric-grid,
+    .issue-grid,
+    .two-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .three-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .card,
+    .mini-card {
+      border-radius: 8px;
+      padding: 18px;
+    }
+
+    .mini-card {
+      box-shadow: none;
+      background: var(--paper-soft);
+    }
+
+    .label {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 0.76rem;
+      font-weight: 800;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .number {
+      display: block;
+      margin: 7px 0 4px;
+      font-size: clamp(2rem, 4vw, 3.2rem);
+      font-weight: 850;
+      line-height: 0.95;
+    }
+
+    .kicker,
+    .tag {
+      width: fit-content;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
+      margin-bottom: 12px;
+    }
+
+    .ok { color: var(--green); background: var(--green-soft); }
+    .info { color: var(--blue); background: var(--blue-soft); }
+    .warn { color: var(--amber); background: var(--amber-soft); }
+    .bad { color: var(--red); background: var(--red-soft); }
+    .soft { color: var(--purple); background: var(--purple-soft); }
+
+    .bar-list {
+      display: grid;
+      gap: 11px;
+      margin-top: 16px;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 130px minmax(0, 1fr) 64px;
+      gap: 12px;
+      align-items: center;
+      font-size: 0.92rem;
+    }
+
+    .track {
+      height: 14px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(24, 33, 42, 0.09);
+    }
+
+    .fill {
+      display: block;
+      height: 100%;
+      width: var(--w);
+      min-width: 4px;
+      border-radius: inherit;
+      background: var(--c, var(--blue));
+    }
+
+    .stack {
+      display: flex;
+      width: 100%;
+      height: 16px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(24, 33, 42, 0.09);
+    }
+
+    .seg { width: var(--w); background: var(--c); }
+
+    .chart {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+      align-items: end;
+      gap: 10px;
+      height: 190px;
+      margin-top: 18px;
+      padding: 14px 10px 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0.20));
+    }
+
+    .day {
+      display: grid;
+      align-items: end;
+      gap: 6px;
+      height: 100%;
+      min-width: 0;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.76rem;
+    }
+
+    .column {
+      width: 100%;
+      height: var(--h);
+      min-height: 3px;
+      border-radius: 6px 6px 0 0;
+      background: linear-gradient(180deg, var(--blue), #163e77);
+    }
+
+    .column.green {
+      background: linear-gradient(180deg, #2c9b66, var(--green));
+    }
+
+    .column.red {
+      background: linear-gradient(180deg, #d44f4f, var(--red));
+    }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+
+    th,
+    td {
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 0.74rem;
+      font-weight: 800;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      background: rgba(24, 33, 42, 0.04);
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+
+    li + li { margin-top: 6px; }
+
+    a {
+      color: inherit;
+      text-decoration-color: rgba(40, 94, 168, 0.45);
+      text-underline-offset: 0.16em;
+    }
+
+    code {
+      padding: 0.12rem 0.35rem;
+      border: 1px solid rgba(24, 33, 42, 0.10);
+      border-radius: 5px;
+      background: rgba(24, 33, 42, 0.05);
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.9em;
+    }
+
+    .note {
+      margin-top: 12px;
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 900px) {
+      .top-grid,
+      .metric-grid,
+      .issue-grid,
+      .two-grid,
+      .three-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero,
+      .section {
+        padding: 20px;
+      }
+
+      .bar-row {
+        grid-template-columns: 96px minmax(0, 1fr) 48px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div class="eyebrow">Transcripted health brief · April 20, 2026</div>
+      <h1>The app has real usage. The main risk is reliability.</h1>
+      <p class="summary">PostHog shows active product use across dictation and meetings, GitHub distribution is moving, and the loudest real production signal is repeated app hangs rather than a growth problem.</p>
+
+      <div class="grid top-grid">
+        <div class="mini-card">
+          <span class="label">Release</span>
+          <strong>1.1.12</strong>
+          <p>App, appcast, and latest GitHub release match.</p>
+        </div>
+        <div class="mini-card">
+          <span class="label">Users</span>
+          <strong>44 active devices</strong>
+          <p>PostHog 7-day active-device view.</p>
+        </div>
+        <div class="mini-card">
+          <span class="label">Real Signal</span>
+          <strong>App hangs</strong>
+          <p>84 unresolved hang events across Sentry groups.</p>
+        </div>
+        <div class="mini-card">
+          <span class="label">Repo Mode</span>
+          <strong>Hardening</strong>
+          <p>Recent PRs focus on release, reliability, and cleanup.</p>
+        </div>
+      </div>
+    </header>
+
+    <section class="section">
+      <h2>At A Glance</h2>
+      <div class="grid three-grid" style="margin-top: 16px;">
+        <article class="card">
+          <div class="kicker info">Product Usage</div>
+          <h3>Usage is real</h3>
+          <span class="number">446</span>
+          <p>launches in the last 7 days, with 44 active anonymous devices in the PostHog weekly-active view.</p>
+        </article>
+        <article class="card">
+          <div class="kicker ok">Core Workflow</div>
+          <h3>Dictation mostly completes</h3>
+          <span class="number">80.5%</span>
+          <p>901 completions from 1,119 dictation starts.</p>
+        </article>
+        <article class="card">
+          <div class="kicker warn">Release Health</div>
+          <h3>New release is early</h3>
+          <span class="number">7</span>
+          <p>downloads for v1.1.12 so far, too early to call it clean or broken.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Product Usage</h2>
+      <div class="grid two-grid" style="margin-top: 16px;">
+        <article class="card">
+          <div class="kicker info">Users And Workflows</div>
+          <div class="bar-list">
+            <div class="bar-row">
+              <span>Launches</span>
+              <div class="track"><span class="fill" style="--w: 100%; --c: var(--blue);"></span></div>
+              <strong>446</strong>
+            </div>
+            <div class="bar-row">
+              <span>Active devices</span>
+              <div class="track"><span class="fill" style="--w: 9.9%; --c: var(--green);"></span></div>
+              <strong>44</strong>
+            </div>
+            <div class="bar-row">
+              <span>Dictation starts</span>
+              <div class="track"><span class="fill" style="--w: 100%; --c: var(--purple);"></span></div>
+              <strong>1,119</strong>
+            </div>
+            <div class="bar-row">
+              <span>Dictation done</span>
+              <div class="track"><span class="fill" style="--w: 80.5%; --c: var(--green);"></span></div>
+              <strong>901</strong>
+            </div>
+            <div class="bar-row">
+              <span>Meeting saves</span>
+              <div class="track"><span class="fill" style="--w: 89%; --c: var(--blue);"></span></div>
+              <strong>129</strong>
+            </div>
+            <div class="bar-row">
+              <span>Meeting fails</span>
+              <div class="track"><span class="fill" style="--w: 11%; --c: var(--red);"></span></div>
+              <strong>16</strong>
+            </div>
+          </div>
+          <p class="note">Meeting success rate is 89.0% from saved vs failed transcript events.</p>
+        </article>
+
+        <article class="card">
+          <div class="kicker ok">Daily Active Devices</div>
+          <h3>Active devices by day</h3>
+          <div class="chart" aria-label="Daily active devices from April 13 to April 20, 2026">
+            <div class="day"><div class="column green" style="--h: 86%;"></div><span>Apr 13<br>12</span></div>
+            <div class="day"><div class="column green" style="--h: 100%;"></div><span>Apr 14<br>14</span></div>
+            <div class="day"><div class="column green" style="--h: 71%;"></div><span>Apr 15<br>10</span></div>
+            <div class="day"><div class="column green" style="--h: 100%;"></div><span>Apr 16<br>14</span></div>
+            <div class="day"><div class="column green" style="--h: 64%;"></div><span>Apr 17<br>9</span></div>
+            <div class="day"><div class="column green" style="--h: 29%;"></div><span>Apr 18<br>4</span></div>
+            <div class="day"><div class="column green" style="--h: 21%;"></div><span>Apr 19<br>3</span></div>
+            <div class="day"><div class="column green" style="--h: 3%;"></div><span>Apr 20<br>0</span></div>
+          </div>
+          <p class="note">April 20 is a partial day in the source query, so treat that last bar lightly.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Sentry: Real Vs Noise</h2>
+      <div class="grid issue-grid" style="margin-top: 16px;">
+        <article class="card">
+          <div class="kicker bad">Main Issue</div>
+          <h3>App hangs are the broadest production risk</h3>
+          <p>Sentry shows 25 unresolved issues. The biggest cluster is repeated 2-second app hangs across production releases, including recent 1.1.x versions.</p>
+          <div class="bar-list">
+            <div class="bar-row">
+              <span>App hangs</span>
+              <div class="track"><span class="fill" style="--w: 100%; --c: var(--red);"></span></div>
+              <strong>84</strong>
+            </div>
+            <div class="bar-row">
+              <span>Model init</span>
+              <div class="track"><span class="fill" style="--w: 18%; --c: var(--amber);"></span></div>
+              <strong>15</strong>
+            </div>
+            <div class="bar-row">
+              <span>Mic denied</span>
+              <div class="track"><span class="fill" style="--w: 12%; --c: var(--amber);"></span></div>
+              <strong>10</strong>
+            </div>
+            <div class="bar-row">
+              <span>503 errors</span>
+              <div class="track"><span class="fill" style="--w: 10%; --c: var(--amber);"></span></div>
+              <strong>8</strong>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="kicker warn">Watchlist</div>
+          <h3>Speech model startup still needs attention</h3>
+          <p><code>APPLE-MACOS-B</code> has 15 production events for <code>parakeet.model_init_failed</code>. The latest fetched event failed at bundle load on v1.1.10.</p>
+          <ul>
+            <li>Not seen in the fetched Sentry release list for v1.1.12 yet.</li>
+            <li>Still high leverage because failed model startup blocks transcription.</li>
+            <li>Mic authorization and transcription failures should stay below the app-hang work.</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="grid two-grid" style="margin-top: 14px;">
+        <article class="card">
+          <div class="kicker soft">Not Real Problems</div>
+          <h3>Do not chase dashboard noise</h3>
+          <ul>
+            <li><code>sentry_test_event</code> is a manual Settings verification event.</li>
+            <li>The Sentry dashboard JavaScript error points at Sentry scripts, not Transcripted product code.</li>
+            <li>Cloudflare traffic analytics are permission-blocked, not proof of no website traffic.</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <div class="kicker info">Latest Release</div>
+          <h3>v1.1.12 needs more time</h3>
+          <p>The release shipped April 19, 2026 and has 7 downloads so far. That is enough to watch, not enough to judge.</p>
+          <p class="note">Sentry did not return a configured release object for v1.1.12, even though events use <code>transcripted@version</code> tags.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>GitHub And Distribution</h2>
+      <div class="grid two-grid" style="margin-top: 16px;">
+        <article class="card">
+          <div class="kicker info">Traffic</div>
+          <h3>Discovery is stronger than installs</h3>
+          <div class="bar-list">
+            <div class="bar-row">
+              <span>Views</span>
+              <div class="track"><span class="fill" style="--w: 10%; --c: var(--blue);"></span></div>
+              <strong>805</strong>
+            </div>
+            <div class="bar-row">
+              <span>Unique views</span>
+              <div class="track"><span class="fill" style="--w: 7%; --c: var(--blue);"></span></div>
+              <strong>106</strong>
+            </div>
+            <div class="bar-row">
+              <span>Clones</span>
+              <div class="track"><span class="fill" style="--w: 100%; --c: var(--purple);"></span></div>
+              <strong>7,924</strong>
+            </div>
+            <div class="bar-row">
+              <span>Unique clones</span>
+              <div class="track"><span class="fill" style="--w: 18%; --c: var(--purple);"></span></div>
+              <strong>1,438</strong>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="kicker ok">Repo Stats</div>
+          <h3>Small but moving</h3>
+          <table class="table" style="margin-top: 14px;">
+            <thead>
+              <tr>
+                <th>Signal</th>
+                <th>Number</th>
+                <th>Plain read</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Stars</td>
+                <td>16 total, 11 new</td>
+                <td>Interest is rising.</td>
+              </tr>
+              <tr>
+                <td>Release downloads</td>
+                <td>234 total</td>
+                <td>Install conversion is the next bottleneck.</td>
+              </tr>
+              <tr>
+                <td>Open issues</td>
+                <td>2</td>
+                <td>Custom dictionary and model configuration.</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Websites</h2>
+      <div class="grid two-grid" style="margin-top: 16px;">
+        <article class="card">
+          <div class="kicker warn">transcripted.app</div>
+          <h3>Deployment is healthy but a little behind</h3>
+          <ul>
+            <li>Pages project: <code>transcripted-web</code>.</li>
+            <li>Latest production deploy succeeded on April 17, 2026.</li>
+            <li>Deploy message references appcast 1.1.10 while the repo appcast is now 1.1.12.</li>
+            <li>Web analytics are not configured; zone analytics are blocked by token permissions.</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <div class="kicker ok">r3d.bar</div>
+          <h3>Personal site is fresh</h3>
+          <ul>
+            <li>Pages project: <code>redbars</code>.</li>
+            <li>Latest production deploy succeeded on April 19, 2026.</li>
+            <li>The accessible domain is <code>r3d.bar</code>; the skill notes <code>r3d.br</code> can be a typo to verify.</li>
+            <li>Web analytics are also not configured here.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>What To Test</h2>
+      <table class="table" style="margin-top: 16px;">
+        <thead>
+          <tr>
+            <th>Scenario</th>
+            <th>Why</th>
+            <th>Pass condition</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Long dictation while app is idle</td>
+            <td>Targets the app-hang cluster.</td>
+            <td>No beachball and one clean completion.</td>
+          </tr>
+          <tr>
+            <td>Cold launch then first dictation</td>
+            <td>Targets model bundle-load failures.</td>
+            <td>Model prewarms or fails with useful recovery UI.</td>
+          </tr>
+          <tr>
+            <td>Meeting save after stop and cancel paths</td>
+            <td>Recent PRs touched meeting cancellation and warmup.</td>
+            <td>Saved transcript appears once, with no duplicate or missing markdown.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Bottom Line</h2>
+      <div class="grid three-grid" style="margin-top: 16px;">
+        <article class="card">
+          <div class="kicker bad">Fix Now</div>
+          <h3>Find the main-thread stall behind app hangs</h3>
+          <p>Start from the Sentry app-hang groups, then reproduce during idle, dictation, and meeting capture.</p>
+        </article>
+        <article class="card">
+          <div class="kicker warn">Fix Next</div>
+          <h3>Make model init failures actionable</h3>
+          <p>Improve bundle-load recovery and user messaging before adding broader telemetry.</p>
+        </article>
+        <article class="card">
+          <div class="kicker info">Set Up Next</div>
+          <h3>Close the release-health loop</h3>
+          <p>Add web analytics, keep transcripted.app current with the latest release, and watch v1.1.12 for first successful workflows.</p>
+        </article>
+      </div>
+
+      <div class="grid three-grid" style="margin-top: 14px;">
+        <a class="mini-card" href="https://github.com/r3dbars/transcripted/releases/tag/v1.1.12">Latest release</a>
+        <a class="mini-card" href="https://r3dbars.sentry.io/issues/?project=apple-macos&amp;query=is%3Aunresolved">Sentry unresolved issues</a>
+        <a class="mini-card" href="https://transcripted.app">transcripted.app</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
