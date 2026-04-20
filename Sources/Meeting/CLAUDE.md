@@ -86,6 +86,7 @@ Relevant direct coverage:
 - `Tests/FailedMeetingPresentationTests.swift`
 - `Tests/MeetingFailureKindTests.swift`
 - `Tests/MeetingPromptHeuristicsTests.swift`
+- `Tests/MeetingRecordingCleanupTests.swift`
 - `Tests/MeetingRecordingStartGateTests.swift`
 - `Tests/MeetingWarmupStatusPolicyTests.swift`
 - `Tests/MeetingSessionUIPolicyTests.swift`
