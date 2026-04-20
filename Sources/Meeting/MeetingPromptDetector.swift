@@ -422,25 +422,8 @@ final class MeetingPromptDetector {
     }
 
     private func provider(for url: URL) -> MeetingPromptProvider? {
-        guard let host = url.host?.lowercased() else { return nil }
-
-        if host.contains("zoom.us") {
-            return .zoom
-        }
-        if host == "meet.google.com" {
-            return .googleMeet
-        }
-        if host.contains("teams.microsoft.com") {
-            return .teams
-        }
-        if host.contains("webex.com") {
-            return .webex
-        }
-        if host.contains("facetime.apple.com") {
-            return .facetime
-        }
-
-        return nil
+        guard let host = url.host else { return nil }
+        return MeetingPromptProvider.provider(forMeetingHost: host)
     }
 
     private func provider(forBundleIdentifier bundleIdentifier: String) -> MeetingPromptProvider? {
