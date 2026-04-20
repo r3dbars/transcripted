@@ -4,6 +4,10 @@
 import AppKit
 import Foundation
 
+extension Notification.Name {
+    static let dictationTranscriptDidSave = Notification.Name("Transcripted.DictationTranscriptDidSave")
+}
+
 struct SavedDictationEntry: Identifiable {
     let url: URL
     let title: String
@@ -39,13 +43,15 @@ enum DictationTranscriptStore {
         createdAt: Date = Date(),
         directory: URL? = nil
     ) throws -> SavedDictationTranscript {
-        try DictationTranscriptWriter.save(
+        let saved = try DictationTranscriptWriter.save(
             text: text,
             sourceApp: sourceApp,
             delivery: delivery,
             createdAt: createdAt,
             directory: directory
         )
+        NotificationCenter.default.post(name: .dictationTranscriptDidSave, object: saved.url)
+        return saved
     }
 
     static func latestSavedText(directory: URL? = nil) -> String? {
@@ -99,7 +105,7 @@ enum DictationTranscriptStore {
         var currentSection: [String] = []
 
         for line in lines {
-            if line.hasPrefix("## ") {
+            if isEntryHeading(line) {
                 if !currentSection.isEmpty {
                     sections.append(currentSection.joined(separator: "\n"))
                 }
@@ -114,6 +120,13 @@ enum DictationTranscriptStore {
         }
 
         return sections
+    }
+
+    private static func isEntryHeading(_ line: String) -> Bool {
+        line.range(
+            of: #"^## \d{1,2}:\d{2} [AP]M - .+"#,
+            options: .regularExpression
+        ) != nil
     }
 
     private static func parseEntry(from rawSection: String, in url: URL) -> SavedDictationEntry? {

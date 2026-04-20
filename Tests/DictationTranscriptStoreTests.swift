@@ -111,6 +111,34 @@ func testDictationTranscriptStore() {
         assertEqual(recent[2].text, "same day first entry", "third recent dictation")
         assertEqual(recent[1].url.lastPathComponent, "Dictations_2026-04-08.md", "same-day dictations reuse the day file")
     }
+
+    runSuite("DictationTranscriptStore.latestSavedText — preserves markdown headings inside dictation body") {
+        let fm = FileManager.default
+        let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationStoreTests-\(UUID().uuidString)", isDirectory: true)
+        let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
+        try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        let text = """
+        Start with this.
+        ## Follow-up heading
+        Keep this line too.
+        """
+
+        _ = try? DictationTranscriptStore.save(
+            text: text,
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: isoDate("2026-04-10T11:20:00-0500"),
+            directory: outputDir
+        )
+
+        assertEqual(
+            DictationTranscriptStore.latestSavedText(directory: outputDir),
+            text,
+            "body headings should not split one saved dictation into multiple entries"
+        )
+    }
 }
 
 private func isoDate(_ string: String) -> Date {
