@@ -54,7 +54,7 @@ final class MenuBarPanelController: NSViewController {
         guard let content = contentView else { return }
 
         let warmupStatus = appState.meetingSession.warmupStatus
-        let modelState = FirstRunLocalModelState(appState.sttRouter.parakeetEngine.modelDownloadState)
+        let modelState = FirstRunLocalModelState(appState.sttRouter.modelDownloadState)
         let dictationState = FirstRunExperience.dictationAction(for: modelState)
         let meetingState = FirstRunExperience.meetingAction(
             dictationReady: appState.sttRouter.isModelLoaded,
@@ -75,20 +75,6 @@ final class MenuBarPanelController: NSViewController {
             meetingState: meetingState,
             pasteDetail: pasteDetail(for: latestDictation),
             pasteEnabled: latestDictation != nil
-        )
-
-        content.recentMeetingsView.update(
-            meetings: RecentMeetingsScanner.loadRecent(limit: 3),
-            failedMeetings: appState.meetingSession.failedMeetings,
-            onRetryFailedMeeting: { [weak self] id in
-                self?.appState.meetingSession.retryFailedMeeting(id: id)
-            },
-            onDeleteFailedMeeting: { [weak self] id in
-                self?.appState.meetingSession.deleteFailedMeeting(id: id)
-            },
-            onDismissFailedMeeting: { [weak self] id in
-                self?.appState.meetingSession.dismissFailedMeeting(id: id)
-            }
         )
 
         content.utilityActionsView.update(
@@ -115,7 +101,7 @@ final class MenuBarPanelController: NSViewController {
             }
             .store(in: &subscriptions)
 
-        appState.sttRouter.parakeetEngine.$modelDownloadState
+        appState.sttRouter.$modelDownloadState
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.refresh()
@@ -144,13 +130,6 @@ final class MenuBarPanelController: NSViewController {
             }
             .store(in: &subscriptions)
 
-        appState.meetingSession.$lastSavedTranscriptURL
-            .combineLatest(appState.meetingSession.$failedMeetings)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _, _ in
-                self?.refresh()
-            }
-            .store(in: &subscriptions)
     }
 
     func prepareForClose() {

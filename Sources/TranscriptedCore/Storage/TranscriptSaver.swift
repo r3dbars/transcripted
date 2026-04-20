@@ -95,9 +95,9 @@ public class TranscriptSaver {
         }
     }
 
-    // MARK: - Local Transcript Saving (Parakeet + PyAnnote)
+    // MARK: - Local Transcript Saving (STT + PyAnnote)
 
-    /// Save transcript from local Parakeet + PyAnnote diarization pipeline
+    /// Save transcript from the local STT + PyAnnote diarization pipeline
     /// - Parameters:
     ///   - result: TranscriptionResult from local pipeline
     ///   - speakerMappings: Optional mapping of speaker IDs to identified names
@@ -119,6 +119,38 @@ public class TranscriptSaver {
         notifier: TranscriptNotifier? = nil,
         speakerStore: (any SpeakerStore)? = nil,
         statsStore: (any StatsStore)? = nil
+    ) -> URL? {
+        return saveTranscript(
+            result,
+            transcriptId: transcriptId,
+            speakerMappings: speakerMappings,
+            speakerSources: speakerSources,
+            speakerDbIds: speakerDbIds,
+            directory: directory,
+            meetingTitle: meetingTitle,
+            healthInfo: healthInfo,
+            notifier: notifier,
+            speakerStore: speakerStore,
+            statsStore: statsStore,
+            transcriptionEngine: .parakeetLocal
+        )
+    }
+
+    @available(macOS 14.0, *)
+    @discardableResult
+    public static func saveTranscript(
+        _ result: TranscriptionResult,
+        transcriptId: UUID,
+        speakerMappings: [String: SpeakerMapping] = [:],
+        speakerSources: [String: String] = [:],
+        speakerDbIds: [String: UUID] = [:],
+        directory: URL? = nil,
+        meetingTitle: String? = nil,
+        healthInfo: RecordingHealthInfo? = nil,
+        notifier: TranscriptNotifier? = nil,
+        speakerStore: (any SpeakerStore)? = nil,
+        statsStore: (any StatsStore)? = nil,
+        transcriptionEngine: SpeechTranscriptionEngineDescriptor
     ) -> URL? {
         let saveDir = directory ?? defaultSaveDirectory
 
@@ -153,7 +185,8 @@ public class TranscriptSaver {
             speakerDbIds: speakerDbIds,
             date: Date(),
             meetingTitle: meetingTitle,
-            healthInfo: healthInfo
+            healthInfo: healthInfo,
+            transcriptionEngine: transcriptionEngine
         )
 
         // Serialize file writes to prevent concurrent corruption with retroactive speaker updates

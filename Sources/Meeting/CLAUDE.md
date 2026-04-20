@@ -2,7 +2,7 @@
 
 ## What this directory does
 
-`Sources/Meeting/` is the app-side adapter layer for the meeting feature. It keeps app-specific UI, storage, and `ParakeetEngine` ownership outside `TranscriptedCore` while reusing the core transcription pipeline.
+`Sources/Meeting/` is the app-side adapter layer for the meeting feature. It keeps app-specific UI, storage, and selected STT ownership outside `TranscriptedCore` while reusing the core transcription pipeline.
 
 ## Files
 
@@ -11,13 +11,13 @@
 - `MeetingFailureCopy.swift` — normalizes `MeetingFailureKind` values into user-facing titles and recovery copy
 - `MeetingFailureKind.swift` — canonical failure taxonomy that classifies raw meeting errors into stable machine-readable kinds
 - `MeetingImportedAudioPreparer.swift` — copies imported recordings into app-managed scratch paths, derives titles, and prepares single-file meeting transcription jobs
-- `MeetingModelDownloader.swift` — loads Parakeet and diarization models together
+- `MeetingModelDownloader.swift` — loads the selected STT and diarization models together
 - `MeetingWarmupStatusPolicy.swift` — centralizes the title/detail copy and visibility rules for quiet vs user-visible meeting model warmup states
 - `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, and asks the overlay to offer one-tap recording prompts
 - `MeetingPromptHeuristics.swift` — shared scoring and snooze rules for calendar- and runtime-based prompt candidates
 - `MeetingRecordingCleanup.swift` — removes scratch audio when a live meeting recording is explicitly discarded instead of saved
 - `MeetingRecordingStartGate.swift` — permission preflight for meeting recording, including missing-permission reasons and user-facing error messages
-- `MeetingSTTAdapter.swift` — adapts the app's shared `ParakeetEngine` to `TranscriptedCore.SpeechToTextEngine`
+- `MeetingSTTAdapter.swift` — adapts the app's shared `STTRouter` to `TranscriptedCore.SpeechToTextEngine`
 - `MeetingSessionController.swift` — top-level meeting state machine, permission gating, model warmup, capture start/stop, imported-audio handoff, queued transcription handoff, local-speaker-split handoff, failed-meeting actions, and transcript restyling
 - `MeetingSessionUIPolicy.swift` — centralizes when queued or active transcription work should keep the meeting overlay in its transcribing/saving state
 - `MeetingStoragePaths.swift` — current split meeting storage layout across the capture library, app state, logs, and temp folders
@@ -37,12 +37,12 @@
 9. `TranscriptionTaskManager` runs one diarize → transcribe → save pipeline at a time. When `LocalSpeakerPreferences` is enabled, queued meeting work also asks the core pipeline to diarize the local mic channel instead of treating it as a single "You" speaker.
 10. A subscription on `taskManager.$lastSavedTranscriptURL` calls `MeetingTranscriptStyler.restyleTranscript(...)` and updates the recent-meetings UI state.
 11. If the speaker review sheet shows multiple local speakers, the user can either name them individually or collapse them back to a single "You" track via the UI's "Keep as You" path.
-12. Failed meetings can be retried, deleted, or dismissed from the menubar recent-meetings section, with `MeetingFailureKind` providing stable failure categories and `MeetingFailureCopy` keeping error copy consistent across retryable and non-retryable states.
+12. Failed meetings can be retried, deleted, or dismissed from the Settings meetings page, with `MeetingFailureKind` providing stable failure categories and `MeetingFailureCopy` keeping error copy consistent across retryable and non-retryable states.
 
 ## Key invariants
 
 - `TranscriptedCore` owns the reusable pipeline. App code in this directory should prefer adapters and protocol seams over direct core edits.
-- `MeetingSTTAdapter.cleanup()` is intentionally a no-op. `TranscriptedAppState` owns `ParakeetEngine` lifecycle for the whole app.
+- `MeetingSTTAdapter.cleanup()` only clears the prepared meeting model. `TranscriptedAppState` owns STT engine lifecycle for the whole app.
 - Meeting captures should follow the current capture library, while databases, logs, and temp recordings stay under the app-owned Transcripted Application Support folders.
 - Imported meeting audio should be copied into app-controlled scratch space before transcription so later cleanup and metadata writes stay consistent with live captures.
 - Meeting recording cancellation must be explicit, visible, and confirmed because discard deletes the captured audio. Do not wire Escape to meeting cancellation.
@@ -107,4 +107,4 @@ Relevant direct coverage:
 ## Agent notes
 
 - `MeetingSessionController` is the right place for app-level meeting behavior. If a change belongs to the reusable library, move down into `Sources/TranscriptedCore/`.
-- The menubar's recent-meetings UI is part of the meeting feature surface. Meeting changes often require checking `Sources/UI/MenuBar/MenuBarRecentMeetingsView.swift` and `Sources/UI/Overlay/MeetingOverlayController.swift`.
+- The menubar links to the Settings meetings page instead of rendering inline recent meetings. Meeting changes often require checking `Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift`, `Sources/UI/Settings/TranscriptedSettingsView.swift`, and `Sources/UI/Overlay/MeetingOverlayController.swift`.

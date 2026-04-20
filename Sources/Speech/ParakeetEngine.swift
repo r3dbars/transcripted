@@ -143,6 +143,11 @@ enum ParakeetModelState {
     case failed(String)
 }
 
+struct RecordedSpeechSamples {
+    let nativeSampleCount: Int
+    let samples16k: [Float]
+}
+
 @MainActor
 class ParakeetEngine: ObservableObject {
     @Published var isRecording = false
@@ -1081,6 +1086,67 @@ class ParakeetEngine: ObservableObject {
     }
 
     // MARK: - Transcription
+
+    func drainRecordedSamplesForExternalTranscription(engineName: String) -> RecordedSpeechSamples? {
+        guard !isTranscribing else {
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: engineName,
+                event: "transcription_already_active",
+                message: "transcribe() called while transcription already in progress"
+            )
+            return nil
+        }
+
+        pendingSamplesLock.withLock {
+            sampleBuffer.append(contentsOf: pendingSamples)
+            pendingSamples.removeAll(keepingCapacity: true)
+        }
+
+        guard !sampleBuffer.isEmpty else {
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: engineName,
+                event: "no_audio_samples",
+                message: "No audio samples in buffer when transcribe() called"
+            )
+            return nil
+        }
+
+        isTranscribing = true
+        var samples: [Float] = []
+        swap(&samples, &sampleBuffer)
+        let inputRate = nativeSampleRate
+        let nativeCount = samples.count
+        let resampled = AudioResampler.resample(samples, from: inputRate, to: 16000)
+        samples.removeAll()
+        print("🔄 \(engineName.uppercased()) | resampled \(nativeCount) → \(resampled.count) samples")
+
+        let shortAudioDecision = ParakeetShortAudioGate.dictation(
+            nativeSampleCount: nativeCount,
+            resampledSampleCount: resampled.count
+        )
+        guard shortAudioDecision.shouldTranscribe else {
+            let audioDuration = shortAudioDecision.context["audio_duration_s"] ?? "0.00"
+            print("⚠️ \(engineName.uppercased()) | skipping transcription for short audio (\(audioDuration)s)")
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: engineName,
+                event: shortAudioDecision.event ?? "recording_too_short",
+                message: shortAudioDecision.message ?? "Dictation audio too short for transcription",
+                context: shortAudioDecision.context
+            )
+            finishExternalTranscription()
+            return nil
+        }
+
+        return RecordedSpeechSamples(nativeSampleCount: nativeCount, samples16k: resampled)
+    }
+
+    func finishExternalTranscription() {
+        isTranscribing = false
+        sampleBuffer.removeAll(keepingCapacity: true)
+    }
 
     func transcribe() async -> String? {
         guard !isTranscribing else {

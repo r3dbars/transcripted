@@ -52,7 +52,7 @@ extension TranscriptionTaskManager {
         )
     }
 
-    /// Local pipeline: Parakeet STT + PyAnnote diarization → Speaker identification → Save.
+    /// Local pipeline: selected STT + PyAnnote diarization → Speaker identification → Save.
     /// When `splitLocalSpeakers` is true, mic-channel diarization runs too, and local
     /// speakers thread through the same classification + naming flow as remote speakers.
     /// Note: nonisolated to keep heavy async work off the main thread
@@ -68,7 +68,14 @@ extension TranscriptionTaskManager {
 
         let transcription = await MainActor.run { self.transcription }
 
-        AppLogger.pipeline.info("Using local Parakeet + PyAnnote pipeline", ["splitLocalSpeakers": "\(splitLocalSpeakers)"])
+        let speechEngine = await MainActor.run {
+            transcription.parakeet.transcriptionEngineDescriptor
+        }
+
+        AppLogger.pipeline.info("Using local \(speechEngine.displayName) + PyAnnote pipeline", [
+            "splitLocalSpeakers": "\(splitLocalSpeakers)",
+            "transcription_engine": speechEngine.identifier
+        ])
 
         // Phase 1: Transcribe with local models
         let result = try await transcription.transcribeMultichannel(
@@ -270,7 +277,8 @@ extension TranscriptionTaskManager {
             healthInfo: healthInfo,
             notifier: notifier,
             speakerStore: speakerDB,
-            statsStore: statsStore
+            statsStore: statsStore,
+            transcriptionEngine: speechEngine
         ) else {
             throw PipelineError.saveFailed(detail: "Could not write transcript to \(outputFolder.lastPathComponent)")
         }

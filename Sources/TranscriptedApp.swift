@@ -212,7 +212,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private func makeOnboardingView() -> PermissionsOnboardingView {
         let hasPasteTarget = resolvedSourceApp() != nil
         return PermissionsOnboardingView(
-            parakeetEngine: appState.sttRouter.parakeetEngine,
+            sttRouter: appState.sttRouter,
             canStartDictation: hasPasteTarget,
             onStartDictation: { [weak self] in
                 self?.finishOnboardingAndStartDictation()
