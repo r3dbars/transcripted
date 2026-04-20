@@ -1069,6 +1069,7 @@ private struct SettingsRecentMeetingRow: View {
     let isCopied: Bool
     let openAction: () -> Void
     let copyForAgentAction: () -> Void
+    @ObservedObject private var playback = MeetingAudioPlayback.shared
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -1099,6 +1100,17 @@ private struct SettingsRecentMeetingRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
+
+            if let audio = item.audio {
+                Button {
+                    playback.toggle(audio)
+                } label: {
+                    Label(playback.buttonTitle(for: audio), systemImage: playback.symbolName(for: audio))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("\(playback.buttonTitle(for: audio)) meeting audio")
+            }
 
             Button {
                 copyForAgentAction()

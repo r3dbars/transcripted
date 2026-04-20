@@ -151,6 +151,9 @@ APP_SOURCES=(
     "Sources/UI/Shared/AgentConnectionGuide.swift"
     "Sources/UI/Shared/FirstRunExperience.swift"
     "Sources/UI/Shared/AppSoundPlayer.swift"
+    "Sources/UI/Shared/MeetingAudioArchiveResolver.swift"
+    "Sources/UI/Shared/MeetingAudioPlayback.swift"
+    "Sources/UI/Shared/RecentCaptureScanners.swift"
 )
 
 echo "Compiling tests..."
