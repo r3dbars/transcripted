@@ -22,6 +22,7 @@ struct TranscriptedSettingsView: View {
     @State private var recentMeetings = RecentMeetingsScanner.loadRecent(limit: 5)
     @State private var recentDictations = DictationTranscriptStore.recentSavedDictations(limit: 5)
     @State private var showSupportFolders = false
+    @State private var copiedAgentMeetingID: String?
 
     init(
         appState: TranscriptedAppState,
@@ -324,13 +325,17 @@ struct TranscriptedSettingsView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(recentMeetings) { item in
-                        SettingsQuickLinkRow(
-                            symbolName: "doc.text",
-                            title: item.title,
-                            detail: formattedRecentDate(item.date)
-                        ) {
-                            NSWorkspace.shared.open(item.transcriptURL)
-                        }
+                        SettingsRecentMeetingRow(
+                            item: item,
+                            detail: formattedRecentDate(item.date),
+                            isCopied: copiedAgentMeetingID == item.id,
+                            openAction: {
+                                NSWorkspace.shared.open(item.transcriptURL)
+                            },
+                            copyForAgentAction: {
+                                copyMeetingForAgent(item)
+                            }
+                        )
                     }
                 }
             }
@@ -760,6 +765,29 @@ struct TranscriptedSettingsView: View {
         Self.recentCaptureDateFormatter.string(from: date)
     }
 
+    private func copyMeetingForAgent(_ item: RecentMeetingItem) {
+        guard let bundle = AgentConnectionGuide.portableMeetingBundle(
+            title: item.title,
+            date: item.date,
+            transcriptURL: item.transcriptURL
+        ) else {
+            NSSound.beep()
+            return
+        }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(bundle, forType: .string)
+        copiedAgentMeetingID = item.id
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            if copiedAgentMeetingID == item.id {
+                copiedAgentMeetingID = nil
+            }
+        }
+    }
+
     private static let recentCaptureDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = .current
@@ -768,6 +796,54 @@ struct TranscriptedSettingsView: View {
         formatter.timeStyle = .short
         return formatter
     }()
+}
+
+private struct SettingsRecentMeetingRow: View {
+    let item: RecentMeetingItem
+    let detail: String
+    let isCopied: Bool
+    let openAction: () -> Void
+    let copyForAgentAction: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Button(action: openAction) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.primary)
+
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 12)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                copyForAgentAction()
+            } label: {
+                Label(isCopied ? "Copied" : "Copy for Agent", systemImage: isCopied ? "checkmark" : "sparkles")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+    }
 }
 
 private struct AgentConnectionSettingsPage: View {
