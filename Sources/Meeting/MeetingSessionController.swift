@@ -169,6 +169,7 @@ final class MeetingSessionController: ObservableObject {
         _ = MeetingStoragePaths.stateFolder
         _ = MeetingStoragePaths.logsFolder
         _ = MeetingStoragePaths.recordingsScratch
+        _ = MeetingStoragePaths.audioArchiveFolder
 
         // Build app-owned CoreStoragePaths so captures and internal state stay split.
         self.storagePaths = CoreStoragePaths(
@@ -218,6 +219,7 @@ final class MeetingSessionController: ObservableObject {
             diarization: services.diarization,
             speakerStore: services.speakerStore,
             speakerClipsDirectory: storagePaths.speakerClips,
+            retainedAudioDirectory: MeetingStoragePaths.audioArchiveFolder,
             statsStore: statsDatabase
         )
 
