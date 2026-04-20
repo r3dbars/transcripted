@@ -2,6 +2,7 @@ import Foundation
 
 enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     case home
+    case general
     case shortcuts
     case meetings
     case dictations
@@ -15,6 +16,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .home: return "Home"
+        case .general: return "General"
         case .shortcuts: return "Shortcuts"
         case .meetings: return "Meetings"
         case .dictations: return "Dictations"
@@ -29,6 +31,8 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .home:
             return "Quick actions and setup status."
+        case .general:
+            return "Startup and app-wide behavior."
         case .shortcuts:
             return "Keyboard triggers for dictation and meetings."
         case .meetings:
@@ -49,6 +53,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .home: return "house.fill"
+        case .general: return "gearshape.fill"
         case .shortcuts: return "keyboard"
         case .meetings: return "person.2.wave.2.fill"
         case .dictations: return "quote.bubble.fill"

@@ -2,7 +2,6 @@
 // Centralized engine ownership — lives in AppDelegate, survives window cycles
 
 import SwiftUI
-import ServiceManagement
 import TranscriptedCore
 
 @MainActor
@@ -54,15 +53,12 @@ class TranscriptedAppState: ObservableObject {
         guard !isInitialized else { return }
         isInitialized = true
 
-        #if BETA_BUILD
-        // Register as login item so model is pre-loaded when user needs it
         do {
-            try SMAppService.mainApp.register()
+            try LaunchAtLoginController.applySavedOptOutAtStartup()
         } catch {
-            EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_failed",
+            EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_opt_out_sync_failed",
                 message: error.localizedDescription)
         }
-        #endif
 
         sparkleUpdater.performStartupUpdateCheckIfNeeded()
 
