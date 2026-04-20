@@ -37,6 +37,7 @@ Each section captures:
 ## Test coverage
 
 - `Tests/DictationSessionTimeoutTests.swift`
+- `Tests/DictationTranscriptStoreTests.swift`
 - `Tests/DictationTranscriptWriterTests.swift`
 
 ## Agent notes
