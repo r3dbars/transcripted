@@ -445,14 +445,16 @@ final class MeetingSessionController: ObservableObject {
             )
         )
 
-        let files = await capture.stopAndAwaitFiles()
+        // Snapshot capture health before stop resets system-audio status/stats during cleanup.
         let healthInfo = capture.healthInfo()
+        let finalSystemAudioStatus = capture.systemAudioStatus
+        let files = await capture.stopAndAwaitFiles()
         let durationMs = Int(recordingDuration * 1000)
         activeRecordingTrigger = .unknown
         state = .transcribing
 
         DiagnosticsTrail.record(
-            level: capture.systemAudioStatus.isWarning ? .warning : .info,
+            level: finalSystemAudioStatus.isWarning ? .warning : .info,
             engine: "meeting",
             event: "meeting_recording_stopped",
             message: "Meeting recording stopped",
