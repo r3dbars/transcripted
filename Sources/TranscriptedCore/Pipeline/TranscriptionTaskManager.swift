@@ -165,6 +165,7 @@ public class TranscriptionTaskManager: ObservableObject {
     ) {
         if !activeTasks.isEmpty {
             AppLogger.pipeline.warning("Rejecting imported transcription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
+            removeRecordingFile(audioURL, label: "rejected imported recording")
             displayStatus = .failed(message: "Transcription already in progress")
             scheduleStatusReset(delay: 4)
             return
