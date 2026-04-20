@@ -13,6 +13,8 @@ struct TranscriptedSettingsView: View {
     private let actions: TranscriptedSettingsActions
 
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
+    @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
+    @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
     @State private var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
@@ -100,6 +102,8 @@ struct TranscriptedSettingsView: View {
         switch navigation.selectedPage {
         case .home:
             homePage
+        case .general:
+            generalPage
         case .shortcuts:
             shortcutsPage
         case .meetings:
@@ -278,6 +282,31 @@ struct TranscriptedSettingsView: View {
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var generalPage: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "General",
+                summary: "Control how Transcripted starts and behaves across macOS."
+            )
+
+            SettingsSection(
+                title: "Startup",
+                detail: "Choose whether Transcripted opens automatically after you log in."
+            ) {
+                Toggle("Launch Transcripted at login", isOn: Binding(
+                    get: { launchAtLoginEnabled },
+                    set: { newValue in
+                        updateLaunchAtLogin(newValue)
+                    }
+                ))
+
+                Text(launchAtLoginStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -651,6 +680,7 @@ struct TranscriptedSettingsView: View {
         refreshStoragePaths()
         refreshRecentCaptures()
         rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
+        refreshLaunchAtLoginState()
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
         anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
@@ -670,6 +700,30 @@ struct TranscriptedSettingsView: View {
     private func refreshRecentCaptures() {
         recentMeetings = RecentMeetingsScanner.loadRecent(limit: 5)
         recentDictations = DictationTranscriptStore.recentSavedDictations(limit: 5)
+    }
+
+    private func refreshLaunchAtLoginState() {
+        launchAtLoginEnabled = LaunchAtLoginController.isEnabled
+        launchAtLoginStatus = LaunchAtLoginController.statusDescription
+    }
+
+    private func updateLaunchAtLogin(_ enabled: Bool) {
+        let previousValue = launchAtLoginEnabled
+        launchAtLoginEnabled = enabled
+
+        do {
+            try LaunchAtLoginController.setEnabled(enabled)
+            refreshLaunchAtLoginState()
+        } catch {
+            launchAtLoginEnabled = previousValue
+            launchAtLoginStatus = "Could not update launch at login: \(error.localizedDescription)"
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "app",
+                event: "launch_at_login_update_failed",
+                message: error.localizedDescription
+            )
+        }
     }
 
     private func sendTestSentryEvent() {
