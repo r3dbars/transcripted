@@ -9,7 +9,7 @@
 - `ClipboardRestoringTextPaster.swift` — pastes text into the target app by briefly borrowing the clipboard and restoring prior contents after Cmd+V completes; reports paste/copy/fail outcomes for diagnostics
 - `HotkeyPreferences.swift` — data model, persistence, display, and validation for customizable keyboard shortcuts (dictation, meeting, draft hotkey bindings)
 - `LocalSpeakerPreferences.swift` — preference flag for local mic-channel speaker diarization; when enabled, the meeting pipeline runs offline diarization on the mic track and surfaces multiple local speakers in the post-meeting naming sheet
-- `TranscriptionModelPreferences.swift` — advanced model picker persistence; Parakeet remains the effective default until another runtime is bundled
+- `TranscriptionModelPreferences.swift` — advanced model picker persistence; Parakeet is the default and Whisper choices are available through Settings
 - `TranscriptedConstants.swift` — centralized configuration constants for timeouts, thresholds, limits, buffer sizes, and version metadata
 - `TranscriptedPermissionAccess.swift` — unified permission checks for microphone, accessibility, system audio recording, and calendar; shared by the meeting prompt detector, settings, and onboarding flows
 - `TranscriptedStoragePaths.swift` — app-support path helpers for the Transcripted capture library, state, cache, logs, and tmp layout, including user-configurable capture library relocation
@@ -18,7 +18,7 @@
 
 - `TranscriptedPermissionAccess` is the canonical place for app-level TCC permission queries. Keep duplicate permission branching out of feature-specific code.
 - `LocalSpeakerPreferences` defaults to off. The meeting pipeline reads this flag at recording time, so changes take effect on the next meeting.
-- `TranscriptionModelPreferences` defaults to Parakeet TDT V3. Unsupported advanced choices may be saved for UI intent, but runtime selection must fall back to Parakeet until that engine is actually linked.
+- `TranscriptionModelPreferences` defaults to Parakeet TDT V3. Advanced Whisper choices are available when users opt into them from Settings.
 - `ClipboardRestoringTextPaster` runs on the main thread and uses brief async delays for the paste round-trip. Keep the clipboard borrow window tight.
 - `TranscriptedStoragePaths` resolves the capture library from `UserDefaults` first, falling back to the default Application Support location. App-owned state, cache, logs, and temp files always stay under the fixed Application Support root.
 

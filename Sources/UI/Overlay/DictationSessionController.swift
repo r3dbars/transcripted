@@ -277,7 +277,7 @@ class DictationSessionController: ObservableObject {
         isDictating = false
     }
 
-    /// Stop dictation and paste — Parakeet batch transcription
+    /// Stop dictation and paste — selected local STT batch transcription
     func stopDictationAndPaste(trigger: DictationTrigger = .unknown) {
         guard let (appState, overlayController) = readyState() else { return }
         DiagnosticsTrail.record(
@@ -490,7 +490,7 @@ class DictationSessionController: ObservableObject {
             for _ in 0..<TranscriptedConstants.modelLoadMaxIterations {
                 guard !Task.isCancelled, self.isDictating else { return }
 
-                let modelState = appState.sttRouter.parakeetEngine.modelDownloadState
+                let modelState = appState.sttRouter.modelDownloadState
                 self.updateLoadingOverlay(sourceApp: sourceApp, modelState: modelState)
 
                 switch modelState {
@@ -523,10 +523,10 @@ class DictationSessionController: ObservableObject {
     private func retryModelWarmupIfNeeded() {
         guard let appState else { return }
 
-        switch appState.sttRouter.parakeetEngine.modelDownloadState {
+        switch appState.sttRouter.modelDownloadState {
         case .notLoaded, .failed:
             Task { @MainActor [weak appState] in
-                await appState?.sttRouter.parakeetEngine.initialize()
+                await appState?.sttRouter.initializeSelectedModel()
             }
         case .downloading, .loading, .ready:
             break
@@ -538,7 +538,7 @@ class DictationSessionController: ObservableObject {
         modelState: ParakeetModelState? = nil
     ) {
         guard let appState = appState else { return }
-        let presentation = loadingPresentation(for: modelState ?? appState.sttRouter.parakeetEngine.modelDownloadState)
+        let presentation = loadingPresentation(for: modelState ?? appState.sttRouter.modelDownloadState)
         overlayController?.showLoadingState(near: sourceApp, presentation: presentation)
     }
 

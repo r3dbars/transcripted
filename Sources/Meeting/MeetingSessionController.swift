@@ -9,7 +9,7 @@
 //      so meeting captures follow the selected capture library while speakers DB,
 //      stats DB, failed-queue, logs, and scratch audio stay under the app-owned
 //      Transcripted Application Support folders.
-//   2. prepareModels() loads Parakeet + offline PyAnnote/WeSpeaker diarization.
+//   2. prepareModels() loads the selected STT model + offline PyAnnote/WeSpeaker diarization.
 //      Optional streaming diarization warms only when bundled and never blocks
 //      the current meeting transcript path.
 //   3. startRecording() begins capture via MeetingCaptureBridge.
@@ -79,6 +79,7 @@ final class MeetingSessionController: ObservableObject {
 
         let kind: Kind
         let startTrigger: StartTrigger
+        let sttModel: TranscriptionModelChoice
     }
 
     private enum TerminalTranscriptionOutcome: Equatable {
@@ -135,7 +136,7 @@ final class MeetingSessionController: ObservableObject {
     // MARK: - Core services (owned)
 
     private let storagePaths: CoreStoragePaths
-    private let parakeetEngine: ParakeetEngine
+    private let sttRouter: STTRouter
     let capture: MeetingCaptureBridge
     let services: AppServices
     let taskManager: TranscriptionTaskManager
@@ -160,10 +161,10 @@ final class MeetingSessionController: ObservableObject {
 
     /// Construct the full Core stack with app-owned storage isolation.
     ///
-    /// - Parameter parakeet: The app's shared ParakeetEngine instance. Shared
-    ///   with STTRouter so we do not spin up a second AsrManager.
-    init(parakeet: ParakeetEngine) {
-        self.parakeetEngine = parakeet
+    /// - Parameter sttRouter: The app's shared speech router. Dictation,
+    ///   meetings, and imports all use this same selected local STT engine.
+    init(sttRouter: STTRouter) {
+        self.sttRouter = sttRouter
         // Ensure the capture library and app-owned directories exist on disk before use.
         _ = MeetingStoragePaths.root
         _ = MeetingStoragePaths.stateFolder
@@ -186,8 +187,8 @@ final class MeetingSessionController: ObservableObject {
         // raw mic/system WAV captures land in the app scratch folder.
         self.capture = MeetingCaptureBridge(audio: Audio(paths: storagePaths))
 
-        // STT: wrap the app's ParakeetEngine in the Core-facing adapter.
-        self.sttAdapter = MeetingSTTAdapter(engine: parakeet)
+        // STT: wrap the app's selected speech router in the Core-facing adapter.
+        self.sttAdapter = MeetingSTTAdapter(router: sttRouter)
 
         // Diarization: Core's concrete DiarizationService already conforms to
         // DiarizationEngine via an empty extension (see DiarizationService.swift).
@@ -223,7 +224,7 @@ final class MeetingSessionController: ObservableObject {
             statsStore: statsDatabase
         )
 
-        // Model downloader — coordinates Parakeet + PyAnnote readiness.
+        // Model downloader — coordinates selected STT + PyAnnote readiness.
         self.downloader = MeetingModelDownloader(stt: sttAdapter, diarization: diarization)
 
         wireSubscriptions()
@@ -235,7 +236,9 @@ final class MeetingSessionController: ObservableObject {
     /// Transitions state: idle → loadingModels → ready, or → error(String).
     ///
     func prepareModels(showLoadingUI: Bool = true) async {
-        if case .ready = state { return }
+        resetPreparedSpeechModelIfNeeded()
+
+        if case .ready = state, sttAdapter.isReady { return }
 
         if showLoadingUI, case .loadingModels = state {
             if let task = modelPreparationTask {
@@ -267,6 +270,7 @@ final class MeetingSessionController: ObservableObject {
 
         modelPreparationTask = task
         let result = await task.value
+        modelPreparationTask?.cancel()
         modelPreparationTask = nil
         applyModelPreparationResult(result, showLoadingUI: showLoadingUI)
     }
@@ -432,7 +436,22 @@ final class MeetingSessionController: ObservableObject {
                 return false
             }
             return true
-        case .ready, .transcribing:
+        case .ready:
+            if !isSpeechModelPreparedForSelection {
+                await prepareModels()
+                guard case .ready = state else {
+                    DiagnosticsTrail.record(
+                        level: .warning,
+                        engine: "meeting",
+                        event: "meeting_start_blocked",
+                        message: "Meeting could not start because the selected speech model was not ready",
+                        context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+                    )
+                    return false
+                }
+            }
+            return true
+        case .transcribing:
             return true
         case .recording:
             return true
@@ -611,6 +630,9 @@ final class MeetingSessionController: ObservableObject {
         } else if case .loadingModels = state {
             await prepareModels()
         } else if case .error = state {
+            await prepareModels()
+        }
+        if case .ready = state, !isSpeechModelPreparedForSelection {
             await prepareModels()
         }
 
@@ -809,7 +831,7 @@ final class MeetingSessionController: ObservableObject {
             }
             .store(in: &cancellables)
 
-        parakeetEngine.$modelDownloadState
+        sttRouter.$modelDownloadState
             .sink { [weak self] _ in
                 self?.refreshWarmupStatus()
             }
@@ -828,7 +850,7 @@ final class MeetingSessionController: ObservableObject {
     private func refreshWarmupStatus() {
         let isMeetingWarmupInFlight = modelPreparationTask != nil || state == .loadingModels
         warmupStatus = MeetingWarmupStatusPolicy.status(
-            dictationState: MeetingWarmupDictationState(parakeetEngine.modelDownloadState),
+            dictationState: MeetingWarmupDictationState(sttRouter.modelDownloadState),
             meetingState: MeetingWarmupMeetingState(diarization.modelState),
             isMeetingWarmupInFlight: isMeetingWarmupInFlight,
             shouldSurfaceMeetingWarmupFailure: shouldSurfaceMeetingWarmupFailure
@@ -855,6 +877,27 @@ final class MeetingSessionController: ObservableObject {
         refreshWarmupStatus()
     }
 
+    private func resetPreparedSpeechModelIfNeeded() {
+        let preparedEngine = sttAdapter.transcriptionEngineDescriptor.identifier
+        let selectedEngine = sttRouter.selectedModel.transcriptionEngineIdentifier
+        guard preparedEngine != selectedEngine else { return }
+
+        switch state {
+        case .recording, .transcribing:
+            refreshWarmupStatus()
+            return
+        case .idle, .loadingModels, .ready, .error:
+            break
+        }
+
+        modelPreparationTask = nil
+        sttAdapter.cleanup()
+        if case .ready = state {
+            state = .idle
+        }
+        refreshWarmupStatus()
+    }
+
     private enum QueueInsertionOutcome: Equatable {
         case startedImmediately
         case queued(position: Int)
@@ -869,6 +912,11 @@ final class MeetingSessionController: ObservableObject {
             activeTranscriptions: taskManager.activeCount,
             queuedTranscriptions: queuedTranscriptionJobs.count
         )
+    }
+
+    private var isSpeechModelPreparedForSelection: Bool {
+        sttAdapter.transcriptionEngineDescriptor.identifier == sttRouter.selectedModel.transcriptionEngineIdentifier
+            && sttAdapter.isReady
     }
 
     private var canStartQueuedTranscriptionImmediately: Bool {
@@ -894,7 +942,8 @@ final class MeetingSessionController: ObservableObject {
                 systemURL: systemURL,
                 healthInfo: healthInfo
             ),
-            startTrigger: startTrigger
+            startTrigger: startTrigger,
+            sttModel: sttRouter.selectedModel
         )
 
         return enqueue(job)
@@ -910,7 +959,8 @@ final class MeetingSessionController: ObservableObject {
                 audioURL: audioURL,
                 suggestedTitle: suggestedTitle
             ),
-            startTrigger: startTrigger
+            startTrigger: startTrigger,
+            sttModel: sttRouter.selectedModel
         )
 
         return enqueue(job)
@@ -929,6 +979,7 @@ final class MeetingSessionController: ObservableObject {
     private func startQueuedTranscription(_ job: QueuedTranscriptionJob) {
         lastTerminalTranscriptionOutcome = nil
         activeTranscriptionTrigger = job.startTrigger
+        sttAdapter.selectPreparedModel(job.sttModel)
 
         if !isCaptureSessionActive {
             state = .transcribing
@@ -1132,7 +1183,8 @@ final class MeetingSessionController: ObservableObject {
         var context: [String: String] = [
             "session_state": state.diagnosticName,
             "display_status": displayStatus.diagnosticName,
-            "dictation_model_state": parakeetEngine.modelDownloadState.diagnosticName,
+            "dictation_model": sttRouter.selectedModel.rawValue,
+            "dictation_model_state": sttRouter.modelDownloadState.diagnosticName,
             "meeting_model_state": diarization.modelState.diagnosticName,
             "system_audio_status": capture.systemAudioStatus.diagnosticName,
             "queue_depth": "\(queuedTranscriptionJobs.count)"

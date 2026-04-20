@@ -32,7 +32,7 @@ Important entry points:
 - `Meeting/` — app-side meeting bridge, prompts, imported-audio prep, storage, and transcript restyling
 - `Observability/` — events, debug log, anonymous analytics, Sparkle updater, and crash reporting
 - `Reliability/` — wake / sleep recovery coordination
-- `Speech/` — Parakeet STT, router, and recorded-audio buffering helpers
+- `Speech/` — local STT engines, router, and recorded-audio buffering helpers
 - `Support/` — app-wide path, storage, permission, hotkey, local-speaker preference, clipboard paste, and shared constant helpers
 - `TranscriptedCore/` — shared library boundary
 - `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `AgentConnect/`, and `Shared/`

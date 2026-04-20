@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 struct TranscriptedSettingsView: View {
     @Bindable var navigation: TranscriptedSettingsNavigationModel
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
-    @ObservedObject private var parakeetEngine: ParakeetEngine
+    @ObservedObject private var sttRouter: STTRouter
     @ObservedObject private var meetingSession: MeetingSessionController
     @ObservedObject private var sparkleUpdater: SparkleUpdaterController
 
@@ -42,7 +42,7 @@ struct TranscriptedSettingsView: View {
         self.navigation = navigation
         self.speakerPeopleModel = speakerPeopleModel
         self.actions = actions
-        _parakeetEngine = ObservedObject(wrappedValue: appState.sttRouter.parakeetEngine)
+        _sttRouter = ObservedObject(wrappedValue: appState.sttRouter)
         _meetingSession = ObservedObject(wrappedValue: appState.meetingSession)
         _sparkleUpdater = ObservedObject(wrappedValue: appState.sparkleUpdater)
     }
@@ -209,7 +209,10 @@ struct TranscriptedSettingsView: View {
                 title: "Setup Status",
                 detail: "These cards show whether Transcripted is ready for dictation, meetings, and local storage."
             ) {
-                let modelCard = FirstRunExperience.modelCard(for: FirstRunLocalModelState(parakeetEngine.modelDownloadState))
+                let modelCard = FirstRunExperience.modelCard(
+                    for: FirstRunLocalModelState(sttRouter.modelDownloadState),
+                    model: effectiveTranscriptionModel
+                )
 
                 SettingsStatusCard(
                     title: "Local voice model",
@@ -435,21 +438,24 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Models",
-                summary: "Parakeet is the default local transcription model. Advanced users can choose a preferred model for future runtimes."
+                summary: "Parakeet is the default local transcription model. Advanced users can switch dictation, meetings, and imported audio to Whisper."
             )
 
             SettingsSection(
                 title: "Current Model",
-                detail: "This is the engine Transcripted can actually use for dictation, meetings, and imported audio in this build."
+                detail: "This is the engine Transcripted will use for dictation, meetings, and imported audio."
             ) {
                 SettingsStatusCard(
                     title: "Active transcription engine",
                     status: effectiveTranscriptionModel.title,
                     detail: activeModelDetail,
-                    tone: preferredTranscriptionModel == effectiveTranscriptionModel ? .ready : .caution
+                    tone: .ready
                 )
 
-                let modelCard = FirstRunExperience.modelCard(for: FirstRunLocalModelState(parakeetEngine.modelDownloadState))
+                let modelCard = FirstRunExperience.modelCard(
+                    for: FirstRunLocalModelState(sttRouter.modelDownloadState),
+                    model: effectiveTranscriptionModel
+                )
                 SettingsStatusCard(
                     title: "Model files",
                     status: modelCard.status,
@@ -460,7 +466,7 @@ struct TranscriptedSettingsView: View {
 
             SettingsSection(
                 title: "Advanced Preference",
-                detail: "Change this only when you want to try another local transcription family. Parakeet remains the out-of-box default."
+                detail: "Change this only when you want a different local transcription family. Parakeet stays the out-of-box default."
             ) {
                 DisclosureGroup("Show advanced model options", isExpanded: $showAdvancedModelControls) {
                     VStack(alignment: .leading, spacing: 14) {
@@ -490,12 +496,10 @@ struct TranscriptedSettingsView: View {
                             }
                             .disabled(preferredTranscriptionModel == .parakeetTDTv3)
 
-                            if preferredTranscriptionModel != effectiveTranscriptionModel {
-                                Text("Whisper is saved as your preference, but this build will keep using Parakeet until a Whisper runtime is bundled.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
+                            Text("Changes apply to the next dictation, meeting, or imported audio file.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .padding(.top, 8)
@@ -810,15 +814,11 @@ struct TranscriptedSettingsView: View {
     }
 
     private var effectiveTranscriptionModel: TranscriptionModelChoice {
-        preferredTranscriptionModel.isRuntimeAvailable ? preferredTranscriptionModel : TranscriptionModelPreferences.defaultModel
+        TranscriptionModelPreferences.effectiveModel()
     }
 
     private var activeModelDetail: String {
-        if preferredTranscriptionModel == effectiveTranscriptionModel {
-            return "\(effectiveTranscriptionModel.summary) Audio and transcripts stay local."
-        }
-
-        return "\(preferredTranscriptionModel.title) is saved as the advanced preference, but this build has no Whisper runtime yet. Transcripted is using \(effectiveTranscriptionModel.title) instead."
+        "\(effectiveTranscriptionModel.summary) Audio and transcripts stay local."
     }
 
     private var missingRequiredPermissions: [TranscriptedPermissionKind] {
@@ -945,6 +945,9 @@ struct TranscriptedSettingsView: View {
         preferredTranscriptionModel = model
         showAdvancedModelControls = true
         TranscriptionModelPreferences.setPreferredModel(model)
+        Task { @MainActor in
+            await sttRouter.initializeSelectedModel()
+        }
     }
 
     private func sendTestSentryEvent() {
@@ -1185,12 +1188,12 @@ private struct ModelChoiceRow: View {
 
     private var symbolName: String {
         if isEffective { return "checkmark.circle.fill" }
-        return model.isRuntimeAvailable ? "circle" : "exclamationmark.triangle.fill"
+        return "circle"
     }
 
     private var symbolColor: Color {
         if isEffective { return .green }
-        return model.isRuntimeAvailable ? .secondary : .orange
+        return .secondary
     }
 
     private var statusLabel: String {
@@ -1201,7 +1204,7 @@ private struct ModelChoiceRow: View {
 
     private var statusColor: Color {
         if isEffective { return .green }
-        return model.isRuntimeAvailable ? .secondary : .orange
+        return .secondary
     }
 }
 

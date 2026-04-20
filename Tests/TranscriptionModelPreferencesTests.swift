@@ -18,7 +18,7 @@ func testTranscriptionModelPreferences() {
         )
     }
 
-    runSuite("TranscriptionModelPreferences stores Whisper preference but falls back until runtime exists") {
+    runSuite("TranscriptionModelPreferences stores Whisper preference as the effective runtime") {
         let suiteName = "TranscriptionModelPreferencesTests.whisper.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -32,8 +32,8 @@ func testTranscriptionModelPreferences() {
         )
         assertEqual(
             TranscriptionModelPreferences.effectiveModel(userDefaults: defaults),
-            .parakeetTDTv3,
-            "the app should keep using Parakeet until a Whisper runtime is bundled"
+            .whisperLargeV3Turbo,
+            "Whisper should become the effective runtime once selected"
         )
     }
 

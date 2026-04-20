@@ -34,22 +34,79 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
         case .parakeetTDTv3:
             return "Default local model. Fast, bundled, and tuned for Transcripted's current dictation and meeting pipeline."
         case .whisperLargeV3Turbo:
-            return "Advanced local option for broader language coverage once the Whisper runtime is bundled."
+            return "Advanced local Whisper option with broader language coverage and faster large-v3 inference."
         case .whisperLargeV3:
-            return "Advanced local option for maximum Whisper accuracy once the Whisper runtime is bundled."
+            return "Advanced local Whisper option for maximum multilingual accuracy."
         }
     }
 
     var availabilityStatus: String {
-        isRuntimeAvailable ? "Available" : "Runtime needed"
+        "Available"
     }
 
     var isRuntimeAvailable: Bool {
+        true
+    }
+
+    var isWhisper: Bool {
         switch self {
         case .parakeetTDTv3:
-            return true
-        case .whisperLargeV3Turbo, .whisperLargeV3:
             return false
+        case .whisperLargeV3Turbo, .whisperLargeV3:
+            return true
+        }
+    }
+
+    var engineName: String {
+        switch self {
+        case .parakeetTDTv3:
+            return "parakeet"
+        case .whisperLargeV3Turbo, .whisperLargeV3:
+            return "whisper"
+        }
+    }
+
+    var transcriptionEngineIdentifier: String {
+        switch self {
+        case .parakeetTDTv3:
+            return "parakeet_local"
+        case .whisperLargeV3Turbo:
+            return "whisper_large_v3_turbo_local"
+        case .whisperLargeV3:
+            return "whisper_large_v3_local"
+        }
+    }
+
+    var transcriptionEngineDisplayName: String {
+        switch self {
+        case .parakeetTDTv3:
+            return "Parakeet"
+        case .whisperLargeV3Turbo:
+            return "Whisper Large V3 Turbo"
+        case .whisperLargeV3:
+            return "Whisper Large V3"
+        }
+    }
+
+    var whisperKitModelName: String? {
+        switch self {
+        case .parakeetTDTv3:
+            return nil
+        case .whisperLargeV3Turbo:
+            return "large-v3-v20240930_turbo_632MB"
+        case .whisperLargeV3:
+            return "large-v3-v20240930_626MB"
+        }
+    }
+
+    var approximateDownloadSize: String {
+        switch self {
+        case .parakeetTDTv3:
+            return "~600 MB"
+        case .whisperLargeV3Turbo:
+            return "~632 MB"
+        case .whisperLargeV3:
+            return "~626 MB"
         }
     }
 }

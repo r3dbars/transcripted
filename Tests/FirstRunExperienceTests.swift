@@ -145,4 +145,15 @@ func testFirstRunExperience() {
 
         assertTrue(card.title.contains("Parakeet TDT V3"), "ready card should tell the user which model is running")
     }
+
+    runSuite("FirstRunExperience.modelCard — names Whisper when it is selected") {
+        let card = FirstRunExperience.modelCard(
+            for: .downloading(progress: 0.25),
+            model: .whisperLargeV3Turbo
+        )
+
+        assertEqual(card.title, "Downloading Whisper Large V3 Turbo", "advanced model card should name Whisper")
+        assertTrue(card.detail.contains("~632 MB"), "Whisper Turbo card should show the expected model size")
+        assertEqual(card.status, "25% complete", "Whisper card should keep progress behavior")
+    }
 }

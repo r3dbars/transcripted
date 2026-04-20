@@ -94,27 +94,30 @@ enum FirstRunExperience {
         )
     }
 
-    static func modelCard(for modelState: FirstRunLocalModelState) -> FirstRunModelCardState {
+    static func modelCard(
+        for modelState: FirstRunLocalModelState,
+        model: TranscriptionModelChoice = .parakeetTDTv3
+    ) -> FirstRunModelCardState {
         switch modelState {
         case .notLoaded:
             return FirstRunModelCardState(
-                title: "Getting Parakeet TDT V3 ready",
-                detail: "Transcripted uses Parakeet TDT V3, an on-device voice model, and starts it the first time you use it.",
+                title: "Getting \(model.title) ready",
+                detail: "Transcripted uses \(model.title), an on-device voice model, and starts it the first time you use it.",
                 status: "Starting",
                 progress: 0.06,
                 tone: .working
             )
         case .downloading(let progress):
             return FirstRunModelCardState(
-                title: "Downloading Parakeet TDT V3",
-                detail: "One-time ~600 MB download from huggingface.co. The model stays on this Mac so dictation runs locally.",
+                title: "Downloading \(model.title)",
+                detail: "One-time \(model.approximateDownloadSize) download from huggingface.co. The model stays on this Mac so dictation, meetings, and imports run locally.",
                 status: "\(Int(progress * 100))% complete",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 tone: .working
             )
         case .loading:
             return FirstRunModelCardState(
-                title: "Loading Parakeet TDT V3",
+                title: "Loading \(model.title)",
                 detail: "Transcripted has the model files and is loading them into memory.",
                 status: "Almost ready",
                 progress: 0.92,
@@ -122,7 +125,7 @@ enum FirstRunExperience {
             )
         case .ready:
             return FirstRunModelCardState(
-                title: "Parakeet TDT V3 ready on device",
+                title: "\(model.title) ready on device",
                 detail: "Your first dictation can start immediately.",
                 status: "Ready",
                 progress: 1.0,
@@ -130,7 +133,7 @@ enum FirstRunExperience {
             )
         case .failed(let message):
             return FirstRunModelCardState(
-                title: "Couldn't load Parakeet TDT V3",
+                title: "Couldn't load \(model.title)",
                 detail: message,
                 status: "Retry needed",
                 progress: nil,
