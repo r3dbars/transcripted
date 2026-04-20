@@ -33,7 +33,7 @@ Important entry points:
 - `Observability/` — events, debug log, anonymous analytics, Sparkle updater, and crash reporting
 - `Reliability/` — wake / sleep recovery coordination
 - `Speech/` — Parakeet STT, router, and recorded-audio buffering helpers
-- `Support/` — app-wide path, storage, permission, hotkey, local-speaker preference, and shared constant helpers
+- `Support/` — app-wide path, storage, permission, hotkey, local-speaker preference, clipboard paste, and shared constant helpers
 - `TranscriptedCore/` — shared library boundary
 - `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `AgentConnect/`, and `Shared/`
 
@@ -51,6 +51,7 @@ app target entirely. If a historical doc still mentions `Sources/Text/` or
 - touching meeting flow or imported-audio transcription: `Sources/Meeting/CLAUDE.md`
 - touching core library or meeting pipeline internals: `Sources/TranscriptedCore/CLAUDE.md`
 - touching STT / recording lifecycle: `Sources/Speech/CLAUDE.md`
+- touching app-wide support utilities: `Sources/Support/CLAUDE.md`
 - touching tests or package boundaries: `Tests/README.md`
 
 Prefer the local doc plus the actual Swift file list before assuming an older
