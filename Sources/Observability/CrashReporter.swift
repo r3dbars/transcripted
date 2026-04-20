@@ -9,40 +9,6 @@
 import Foundation
 import Sentry
 
-private enum SentryRuntimeConfiguration {
-    static let dsnInfoKey = "TranscriptedSentryDSN"
-    static let environmentInfoKey = "TranscriptedSentryEnvironment"
-
-    static func dsn() -> String? {
-        firstNonEmpty(
-            Bundle.main.object(forInfoDictionaryKey: dsnInfoKey) as? String,
-            ProcessInfo.processInfo.environment["SENTRY_DSN"]
-        )
-    }
-
-    static func environment() -> String {
-        firstNonEmpty(
-            Bundle.main.object(forInfoDictionaryKey: environmentInfoKey) as? String,
-            ProcessInfo.processInfo.environment["SENTRY_ENVIRONMENT"]
-        ) ?? "production"
-    }
-
-    static func releaseName() -> String {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
-        return "transcripted@\(version)"
-    }
-
-    static func dist() -> String? {
-        firstNonEmpty(Bundle.main.infoDictionary?["CFBundleVersion"] as? String)
-    }
-
-    private static func firstNonEmpty(_ candidates: String?...) -> String? {
-        candidates
-            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first(where: { !$0.isEmpty })
-    }
-}
-
 final class CrashReporter {
     static let shared = CrashReporter()
 
