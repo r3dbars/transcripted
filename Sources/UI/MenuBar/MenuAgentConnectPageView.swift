@@ -15,23 +15,18 @@ final class MenuAgentConnectPageView: NSView {
     )
     private let titleLabel = NSTextField(labelWithString: "Connect your agent")
     private let subtitleLabel = NSTextField(wrappingLabelWithString:
-        "Copy one prompt, paste it into your agent, and let Transcripted use MCP when available or folders when not."
+        "Copy once, paste anywhere, and let your agent pick the best available Transcripted connection."
     )
-    private let starterPromptLabel = NSTextField(labelWithString: "What this helps with")
+    private let starterPromptLabel = NSTextField(labelWithString: "Starter skills")
     private let benefitOneRow = AgentConnectInfoRowView(
-        symbolName: "sparkles",
-        title: "Search past meetings faster",
-        body: "Your agent can work from the spoken context Transcripted already saved locally."
+        symbolName: AgentConnectionGuide.starterSkills[0].symbolName,
+        title: AgentConnectionGuide.starterSkills[0].title,
+        body: AgentConnectionGuide.starterSkills[0].displayDetail
     )
     private let benefitTwoRow = AgentConnectInfoRowView(
-        symbolName: "checkmark.circle",
-        title: "Pull summaries and action items",
-        body: "The smart prompt can use MCP if it is ready, or fall back to local folders if it is not."
-    )
-    private let benefitThreeRow = AgentConnectInfoRowView(
-        symbolName: "checkmark.circle",
-        title: "Stay simple for beginners",
-        body: "Copy once, paste once, and only use manual setup if you actually need it."
+        symbolName: AgentConnectionGuide.starterSkills[1].symbolName,
+        title: AgentConnectionGuide.starterSkills[1].title,
+        body: AgentConnectionGuide.starterSkills[1].displayDetail
     )
     private let manualSetupLabel = NSTextField(labelWithString: "Need manual setup?")
     private let mcpRow = AgentConnectInfoRowView(
@@ -58,10 +53,10 @@ final class MenuAgentConnectPageView: NSView {
         toolTip: "Copy folder paths"
     )
     private let copyPromptButton = MenuOutlineButton(
-        title: "Copy agent prompt",
+        title: "Copy Agent Setup",
         symbolName: "doc.on.doc",
-        accessibilityLabel: "Copy agent prompt",
-        toolTip: "Copy agent prompt"
+        accessibilityLabel: "Copy Agent Setup",
+        toolTip: "Copy Agent Setup"
     )
 
     private var resetTask: Task<Void, Never>?
@@ -95,7 +90,7 @@ final class MenuAgentConnectPageView: NSView {
             label.textColor = MenuTokens.textPrimaryNS
             addSubview(label)
         }
-        [benefitOneRow, benefitTwoRow, benefitThreeRow, mcpRow, folderRow].forEach { addSubview($0) }
+        [benefitOneRow, benefitTwoRow, mcpRow, folderRow].forEach { addSubview($0) }
 
         backButton.target = self
         backButton.action = #selector(goBack)
@@ -147,9 +142,6 @@ final class MenuAgentConnectPageView: NSView {
         y += AgentConnectInfoRowView.height + 14
 
         benefitTwoRow.frame = NSRect(x: pad, y: y, width: width, height: AgentConnectInfoRowView.height)
-        y += AgentConnectInfoRowView.height + 8
-
-        benefitThreeRow.frame = NSRect(x: pad, y: y, width: width, height: AgentConnectInfoRowView.height)
         y += AgentConnectInfoRowView.height + 18
 
         manualSetupLabel.frame = NSRect(x: pad, y: y, width: width, height: 16)
@@ -183,7 +175,6 @@ final class MenuAgentConnectPageView: NSView {
     var intrinsicHeight: CGFloat {
         MenuTokens.secondaryButtonSize + 14 + 22 + 24 + 42 + 16 + 22 +
         (AgentConnectInfoRowView.height + 14) +
-        (AgentConnectInfoRowView.height + 8) +
         (AgentConnectInfoRowView.height + 18) +
         22 +
         (AgentConnectInfoRowView.height + 10) +
@@ -205,8 +196,8 @@ final class MenuAgentConnectPageView: NSView {
         resetTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard let self, !Task.isCancelled else { return }
-            self.copyPromptButton.title = "Copy agent prompt"
-            self.copyPromptButton.setSymbol("doc.on.doc", accessibilityLabel: "Copy agent prompt")
+            self.copyPromptButton.title = "Copy Agent Setup"
+            self.copyPromptButton.setSymbol("doc.on.doc", accessibilityLabel: "Copy Agent Setup")
         }
     }
 

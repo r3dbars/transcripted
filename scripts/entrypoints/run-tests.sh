@@ -119,6 +119,7 @@ APP_SOURCES=(
     "Sources/Dictation/DictationStoragePaths.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"
     "Sources/Dictation/DictationTranscriptStore.swift"
+    "Sources/Meeting/MeetingStoragePaths.swift"
     "Sources/Support/TranscriptedConstants.swift"
     "Sources/Speech/ParakeetModelInitDiagnostics.swift"
     "Sources/Speech/ParakeetPrewarmPolicy.swift"
@@ -147,6 +148,7 @@ APP_SOURCES=(
     "Sources/TranscriptedCore/Models/TranscriptionTypes.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerProfile.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift"
+    "Sources/UI/Shared/AgentConnectionGuide.swift"
     "Sources/UI/Shared/FirstRunExperience.swift"
     "Sources/UI/Shared/AppSoundPlayer.swift"
 )
