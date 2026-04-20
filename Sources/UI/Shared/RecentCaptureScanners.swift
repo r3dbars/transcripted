@@ -4,6 +4,7 @@ struct RecentMeetingItem: Identifiable {
     let title: String
     let date: Date
     let transcriptURL: URL
+    let audio: MeetingAudioAttachment?
 
     var id: String { transcriptURL.path }
 }
@@ -37,7 +38,12 @@ enum RecentMeetingsScanner {
                 .prefix(limit)
                 .map { entry in
                     let styled = MeetingTranscriptStyler.displayTranscript(at: entry.url)
-                    return RecentMeetingItem(title: styled.title, date: entry.date, transcriptURL: styled.url)
+                    return RecentMeetingItem(
+                        title: styled.title,
+                        date: entry.date,
+                        transcriptURL: styled.url,
+                        audio: MeetingAudioArchiveResolver.attachment(forTranscript: styled.url)
+                    )
                 }
         )
     }

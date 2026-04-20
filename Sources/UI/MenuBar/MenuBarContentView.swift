@@ -13,6 +13,7 @@ final class MenuBarContentView: NSView {
 
     let headerView = MenuBarHeaderView(frame: .zero)
     let primaryActionsView = MenuBarPrimaryActionsView(frame: .zero)
+    let recentMeetingsView = MenuBarRecentMeetingsView(frame: .zero)
     let utilityActionsView = MenuBarUtilityActionsView(frame: .zero)
 
     weak var appState: TranscriptedAppState? {
@@ -52,7 +53,7 @@ final class MenuBarContentView: NSView {
             documentView.addSubview($0)
         }
 
-        [headerView, primaryActionsView, utilityActionsView].forEach(documentView.addSubview(_:))
+        [headerView, primaryActionsView, recentMeetingsView, utilityActionsView].forEach(documentView.addSubview(_:))
     }
 
     override func layout() {
@@ -81,6 +82,15 @@ final class MenuBarContentView: NSView {
         let primaryHeight = primaryActionsView.intrinsicHeight
         primaryActionsView.frame = NSRect(x: pad, y: y, width: width, height: primaryHeight)
         y += primaryHeight + MenuTokens.sectionSpacing
+
+        let recentHeight = recentMeetingsView.intrinsicHeight
+        recentMeetingsView.isHidden = recentHeight <= 0
+        if recentHeight > 0 {
+            recentMeetingsView.frame = NSRect(x: pad, y: y, width: width, height: recentHeight)
+            y += recentHeight + MenuTokens.sectionSpacing
+        } else {
+            recentMeetingsView.frame = .zero
+        }
 
         sectionDivider.frame = NSRect(x: pad, y: y, width: width, height: 1)
         y += 7
