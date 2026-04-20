@@ -16,6 +16,7 @@ struct TranscriptedSettingsView: View {
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
+    @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
     @State private var autoEnterKey = DictationAutoSendPreferences.sendKey()
@@ -413,6 +414,48 @@ struct TranscriptedSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            SettingsSection(
+                title: "Custom Terms",
+                detail: "Add uncommon words, acronyms, and names Transcripted should favor in dictation and meetings."
+            ) {
+                VStack(alignment: .leading, spacing: 10) {
+                    TextEditor(text: Binding(
+                        get: { customDictionaryText },
+                        set: { updateCustomDictionaryText($0) }
+                    ))
+                    .font(.body)
+                    .frame(minHeight: 150)
+                    .padding(8)
+                    .scrollContentBackground(.hidden)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color(nsColor: .textBackgroundColor).opacity(0.72))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(customDictionaryStatusLine)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Button("Clear") {
+                            updateCustomDictionaryText("")
+                        }
+                        .disabled(customDictionaryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+
+                    Text("Use one term per line, or write spoken text -> preferred text for corrections like r three d bars -> r3dbars.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 
@@ -790,6 +833,7 @@ struct TranscriptedSettingsView: View {
         refreshRecentCaptures()
         rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
         refreshLaunchAtLoginState()
+        customDictionaryText = CustomDictionaryPreferences.rawText()
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
         autoEnterKey = DictationAutoSendPreferences.sendKey()
@@ -837,6 +881,20 @@ struct TranscriptedSettingsView: View {
                 message: error.localizedDescription
             )
         }
+    }
+
+    private var customDictionaryStatusLine: String {
+        let count = CustomDictionaryPreferences.entries(from: customDictionaryText).count
+        if count == 0 {
+            return "No custom terms yet."
+        }
+        return "\(count) custom term\(count == 1 ? "" : "s") active for new dictations and meetings."
+    }
+
+    private func updateCustomDictionaryText(_ text: String) {
+        let clampedText = CustomDictionaryPreferences.clampedRawText(text)
+        customDictionaryText = clampedText
+        CustomDictionaryPreferences.setRawText(clampedText)
     }
 
     private func sendTestSentryEvent() {
