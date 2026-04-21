@@ -69,26 +69,39 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     /// Attempt to reconstruct the typed PipelineError from the stored message.
     /// Returns nil for legacy entries that don't match any known pattern.
     private var pipelineError: PipelineError? {
-        if errorMessage.contains("no samples recorded") || errorMessage.contains("Empty audio file") {
+        let normalized = errorMessage.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if normalized.contains("no samples recorded") || normalized.contains("empty audio file") {
             return .emptyAudioFile
         }
-        if errorMessage.contains("Recording too short") || errorMessage.contains("at least") {
+        if Self.isRecordingTooShortMessage(normalized) {
             return .recordingTooShort(duration: 0)
         }
-        if errorMessage.contains("Invalid audio") {
+        if normalized.contains("invalid audio") {
             return .invalidAudioFormat(detail: errorMessage)
         }
-        if errorMessage.contains("System audio is required")
-            || errorMessage.contains("System Audio Recording") {
+        if normalized.contains("system audio is required")
+            || normalized.contains("system audio recording") {
             return .missingSystemAudio
         }
-        if errorMessage.contains("model not loaded") {
+        if normalized.contains("model not loaded") {
             return .modelNotLoaded(model: "Unknown")
         }
-        if errorMessage.contains("Failed to save") {
+        if normalized.contains("failed to save") {
             return .saveFailed(detail: errorMessage)
         }
         return nil
+    }
+
+    private static func isRecordingTooShortMessage(_ message: String) -> Bool {
+        let mentionsAudioMinimum = (
+            message.contains("at least 1 second")
+                || message.contains("at least 2 seconds")
+                || message.contains("at least one second")
+                || message.contains("at least two seconds")
+        ) && (message.contains("audio") || message.contains("recording"))
+
+        return message.contains("recording too short") || mentionsAudioMinimum
     }
 
     /// Checks if the audio files still exist on disk

@@ -1426,10 +1426,17 @@ private struct SettingsFailedMeetingRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.orange)
-                .frame(width: 24)
+            if item.failureKind == .recordingTooShort {
+                Image(systemName: "timer")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24)
+            } else {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.orange)
+                    .frame(width: 24)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)

@@ -16,6 +16,19 @@ enum MeetingFailureKind: String {
     case pipelineBusy = "pipeline_busy"
     case unexpectedError = "unexpected_error"
 
+    static func isRecordingTooShortMessage(_ message: String) -> Bool {
+        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let mentionsAudioMinimum = (
+            normalized.contains("at least 1 second")
+                || normalized.contains("at least 2 seconds")
+                || normalized.contains("at least one second")
+                || normalized.contains("at least two seconds")
+        ) && (normalized.contains("audio") || normalized.contains("recording"))
+
+        return normalized.contains("recording too short")
+            || mentionsAudioMinimum
+    }
+
     static func classify(message: String) -> MeetingFailureKind {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
@@ -41,15 +54,13 @@ enum MeetingFailureKind: String {
             return .audioDeviceUnavailable
         }
 
-        if normalized.contains("invalid audio format") {
-            return .invalidAudioFormat
+        if isRecordingTooShortMessage(normalized) {
+            return .recordingTooShort
         }
 
-        if normalized.contains("recording too short")
-            || normalized.contains("invalid audio data")
-            || normalized.contains("at least 1 second")
-            || normalized.contains("at least 2 seconds") {
-            return .recordingTooShort
+        if normalized.contains("invalid audio format")
+            || normalized.contains("invalid audio data") {
+            return .invalidAudioFormat
         }
 
         if normalized.contains("empty audio file")

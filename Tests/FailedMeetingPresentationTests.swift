@@ -8,12 +8,23 @@ func testFailedMeetingPresentation() {
             isRetryable: false
         )
 
-        assertEqual(copy.title, "Recording was too short", "short captures should stop looking like generic retries")
+        assertEqual(copy.title, "Recording ended too soon", "short captures should stop looking like generic retries")
         assertEqual(
             copy.detail,
-            "Transcripted needs at least a second of audio. Keep the meeting running a little longer, then retry.",
-            "short captures should explain how to avoid the failure next time"
+            "Nothing broke - there just was not enough audio to transcribe. Record at least two seconds before stopping.",
+            "short captures should explain the intentional terminal outcome"
         )
+    }
+
+    runSuite("FailedMeetingPresentation does not classify unrelated minimum-copy as short audio") {
+        let copy = MeetingFailureCopy.make(
+            forMessage: "Upload failed after at least one retry because the destination was unavailable.",
+            shortErrorMessage: "Upload failed after at least one retry.",
+            isRetryable: true
+        )
+
+        assertEqual(copy.title, "Transcript needs another pass", "generic retry copy should not look like short audio")
+        assertEqual(copy.detail, "Upload failed after at least one retry.", "generic retry detail should be preserved")
     }
 
     runSuite("FailedMeetingPresentation system audio failures point to settings") {
