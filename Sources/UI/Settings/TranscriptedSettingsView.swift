@@ -196,6 +196,8 @@ struct TranscriptedSettingsView: View {
                     detail: "Speak into the app you were using.",
                     tone: .accent,
                     menuBarVisibility: menuBarVisibilityBinding(for: .startDictation),
+                    actionHelp: "Start dictation now.",
+                    menuBarVisibilityHelp: "Show or hide Start Dictation in the menu bar popover.",
                     action: actions.startDictation
                 )
 
@@ -205,6 +207,8 @@ struct TranscriptedSettingsView: View {
                     detail: "Record your mic and computer audio.",
                     tone: .accent,
                     menuBarVisibility: menuBarVisibilityBinding(for: .startMeeting),
+                    actionHelp: "Start a meeting recording now.",
+                    menuBarVisibilityHelp: "Show or hide Start Meeting in the menu bar popover.",
                     action: actions.startMeeting
                 )
 
@@ -213,6 +217,8 @@ struct TranscriptedSettingsView: View {
                     title: "Paste Last Dictation",
                     detail: "Paste the newest saved dictation.",
                     menuBarVisibility: menuBarVisibilityBinding(for: .pasteLastDictation),
+                    actionHelp: "Paste the newest saved dictation into the current app.",
+                    menuBarVisibilityHelp: "Show or hide Paste Last Dictation in the menu bar popover.",
                     action: actions.pasteLastDictation
                 )
 
@@ -221,6 +227,8 @@ struct TranscriptedSettingsView: View {
                     title: "Recent Meetings",
                     detail: "Open saved meeting notes.",
                     menuBarVisibility: menuBarVisibilityBinding(for: .recentMeetings),
+                    actionHelp: "Open the Meetings page to browse saved meeting notes.",
+                    menuBarVisibilityHelp: "Show or hide Recent Meetings in the menu bar popover.",
                     action: {
                         navigation.selectedPage = .meetings
                     }

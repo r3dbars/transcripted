@@ -63,6 +63,8 @@ struct SettingsActionTile: View {
     let detail: String
     let tone: Tone
     let menuBarVisibility: Binding<Bool>?
+    let actionHelp: String
+    let menuBarVisibilityHelp: String?
     let action: () -> Void
 
     init(
@@ -71,6 +73,8 @@ struct SettingsActionTile: View {
         detail: String,
         tone: Tone = .neutral,
         menuBarVisibility: Binding<Bool>? = nil,
+        actionHelp: String? = nil,
+        menuBarVisibilityHelp: String? = nil,
         action: @escaping () -> Void
     ) {
         self.symbolName = symbolName
@@ -78,6 +82,8 @@ struct SettingsActionTile: View {
         self.detail = detail
         self.tone = tone
         self.menuBarVisibility = menuBarVisibility
+        self.actionHelp = actionHelp ?? detail
+        self.menuBarVisibilityHelp = menuBarVisibilityHelp
         self.action = action
     }
 
@@ -87,13 +93,14 @@ struct SettingsActionTile: View {
                 actionContent
             }
             .buttonStyle(.plain)
+            .help(actionHelp)
 
             if let menuBarVisibility {
                 Toggle("Show in menu bar", isOn: menuBarVisibility)
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.small)
-                    .help("Show in menu bar")
+                    .help(menuBarVisibilityHelp ?? "Show or hide \(title) in the menu bar popover.")
             }
         }
         .padding(16)
@@ -129,8 +136,17 @@ struct SettingsActionTile: View {
             Spacer(minLength: 12)
 
             Image(systemName: "arrow.right")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(actionButtonForeground)
+                .frame(width: 32, height: 32)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(actionButtonBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(actionButtonStroke, lineWidth: 1)
+                )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
@@ -160,6 +176,33 @@ struct SettingsActionTile: View {
             return Color.accentColor.opacity(0.18)
         case .neutral:
             return Color.primary.opacity(0.08)
+        }
+    }
+
+    private var actionButtonForeground: Color {
+        switch tone {
+        case .accent:
+            return .accentColor
+        case .neutral:
+            return .secondary
+        }
+    }
+
+    private var actionButtonBackground: Color {
+        switch tone {
+        case .accent:
+            return Color.accentColor.opacity(0.14)
+        case .neutral:
+            return Color.secondary.opacity(0.12)
+        }
+    }
+
+    private var actionButtonStroke: Color {
+        switch tone {
+        case .accent:
+            return Color.accentColor.opacity(0.28)
+        case .neutral:
+            return Color.primary.opacity(0.1)
         }
     }
 }

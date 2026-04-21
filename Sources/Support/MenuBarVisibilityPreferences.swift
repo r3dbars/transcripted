@@ -48,7 +48,7 @@ enum MenuBarOptionalItem: String, CaseIterable, Hashable, Identifiable {
     }
 
     fileprivate var preferenceKey: String {
-        "menu-bar-show-\(rawValue)"
+        "menu-bar-primary-show-\(rawValue)"
     }
 }
 
