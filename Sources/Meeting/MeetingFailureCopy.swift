@@ -20,6 +20,15 @@ struct MeetingFailureCopy: Equatable {
             )
         }
 
+        if message.contains("microphone access")
+            || message.contains("microphone permission")
+            || message.contains("mic_not_authorized") {
+            return MeetingFailureCopy(
+                title: "Turn on Microphone",
+                detail: "Turn on Microphone access in System Settings, then retry the meeting."
+            )
+        }
+
         if MeetingFailureKind.isRecordingTooShortMessage(message) {
             return MeetingFailureCopy(
                 title: "Recording ended too soon",

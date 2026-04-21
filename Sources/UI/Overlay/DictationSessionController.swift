@@ -118,6 +118,56 @@ class DictationSessionController: ObservableObject {
         currentDictationTrigger = trigger
         lastCompletedText = nil
 
+        switch TranscriptedPermissionAccess.microphoneAuthorizationStatus() {
+        case .authorized:
+            recordDictationStarted(appState: appState, trigger: trigger)
+            continueDictationStart(
+                appState: appState,
+                overlayController: overlayController,
+                sourceApp: sourceApp
+            )
+        case .notDetermined:
+            overlayController.showLoadingState(
+                near: sourceApp,
+                presentation: microphonePermissionPresentation()
+            )
+            startupTask?.cancel()
+            startupTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                let granted = await TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded()
+                guard !Task.isCancelled, self.isDictating else { return }
+                self.startupTask = nil
+                if granted {
+                    self.recordDictationStarted(appState: appState, trigger: trigger)
+                    self.continueDictationStart(
+                        appState: appState,
+                        overlayController: overlayController,
+                        sourceApp: sourceApp
+                    )
+                } else {
+                    self.presentMicrophonePermissionError(
+                        TranscriptedPermissionAccess.microphoneAuthorizationStatus(),
+                        sourceApp: sourceApp
+                    )
+                }
+            }
+        case .denied, .restricted:
+            presentMicrophonePermissionError(
+                TranscriptedPermissionAccess.microphoneAuthorizationStatus(),
+                sourceApp: sourceApp
+            )
+        @unknown default:
+            presentMicrophonePermissionError(
+                TranscriptedPermissionAccess.microphoneAuthorizationStatus(),
+                sourceApp: sourceApp
+            )
+        }
+    }
+
+    private func recordDictationStarted(
+        appState: TranscriptedAppState,
+        trigger: DictationTrigger
+    ) {
         DiagnosticsTrail.record(
             logger: appState.logger,
             engine: "dictation",
@@ -135,7 +185,14 @@ class DictationSessionController: ObservableObject {
                 "trigger": trigger.rawValue,
             ]
         )
+    }
 
+    private func continueDictationStart(
+        appState: TranscriptedAppState,
+        overlayController: FloatingOverlayController,
+        sourceApp: NSRunningApplication?
+    ) {
+        guard isDictating else { return }
         if appState.sttRouter.isModelLoaded {
             overlayController.state = .listening
             overlayController.showPanel(near: sourceApp)
@@ -179,9 +236,9 @@ class DictationSessionController: ObservableObject {
         guard isDictating else { return }
 
         // Permission check up front — no point waiting if the user denied mic access.
-        let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        let microphoneStatus = TranscriptedPermissionAccess.microphoneAuthorizationStatus()
         guard microphoneStatus == .authorized else {
-            presentMicrophonePermissionError(microphoneStatus)
+            presentMicrophonePermissionError(microphoneStatus, sourceApp: sourceApp)
             return
         }
 
@@ -255,9 +312,12 @@ class DictationSessionController: ObservableObject {
         isDictating = false
     }
 
-    private func presentMicrophonePermissionError(_ status: AVAuthorizationStatus) {
+    private func presentMicrophonePermissionError(
+        _ status: AVAuthorizationStatus,
+        sourceApp: NSRunningApplication? = nil
+    ) {
         guard let appState = appState, let overlayController = overlayController else { return }
-        let shouldOfferSettingsAction = shouldOfferMicrophoneSettingsAction(for: status)
+        let shouldOfferRecoveryAction = shouldOfferMicrophoneRecoveryAction(for: status)
         DiagnosticsTrail.record(
             logger: appState.logger,
             level: .error,
@@ -271,11 +331,35 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
+        if !overlayController.isVisible {
+            overlayController.showPanel(near: sourceApp)
+        }
         overlayController.showError(
             microphoneUnavailableMessage(for: status, openedSettings: false),
-            actionTitle: shouldOfferSettingsAction ? "Open Microphone Settings" : nil,
-            action: shouldOfferSettingsAction ? {
-                TranscriptedPermissionAccess.openSettings(for: .microphone)
+            actionTitle: shouldOfferRecoveryAction ? TranscriptedPermissionKind.microphoneActionTitle(for: status) : nil,
+            action: shouldOfferRecoveryAction ? { [weak self] in
+                guard let self else { return }
+                switch status {
+                case .notDetermined:
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        let granted = await TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded()
+                        guard granted else {
+                            self.presentMicrophonePermissionError(
+                                TranscriptedPermissionAccess.microphoneAuthorizationStatus(),
+                                sourceApp: sourceApp
+                            )
+                            return
+                        }
+                        self.startDictation(sourceApp: sourceApp, trigger: self.currentDictationTrigger)
+                    }
+                case .denied, .restricted:
+                    TranscriptedPermissionAccess.openSettings(for: .microphone)
+                case .authorized:
+                    self.startDictation(sourceApp: sourceApp, trigger: self.currentDictationTrigger)
+                @unknown default:
+                    TranscriptedPermissionAccess.openSettings(for: .microphone)
+                }
             } : nil
         )
         isDictating = false
@@ -486,10 +570,16 @@ class DictationSessionController: ObservableObject {
 
         startupTask?.cancel()
         updateLoadingOverlay(sourceApp: sourceApp)
-        retryModelWarmupIfNeeded()
 
         startupTask = Task { @MainActor [weak self] in
             guard let self else { return }
+
+            switch appState.sttRouter.modelDownloadState {
+            case .notLoaded, .failed:
+                await appState.sttRouter.initializeSelectedModel()
+            case .downloading, .loading, .ready:
+                break
+            }
 
             for _ in 0..<TranscriptedConstants.modelLoadMaxIterations {
                 guard !Task.isCancelled, self.isDictating else { return }
@@ -508,7 +598,13 @@ class DictationSessionController: ObservableObject {
                 case .failed(let message):
                     self.startupTask = nil
                     self.isDictating = false
-                    overlayController.showError("Dictation couldn't start: \(message)")
+                    overlayController.showError(
+                        "Dictation couldn't start: \(message)",
+                        actionTitle: "Retry Dictation",
+                        action: { [weak self] in
+                            self?.startDictation(sourceApp: sourceApp, trigger: self?.currentDictationTrigger ?? .unknown)
+                        }
+                    )
                     return
                 default:
                     break
@@ -520,20 +616,13 @@ class DictationSessionController: ObservableObject {
             guard !Task.isCancelled else { return }
             self.startupTask = nil
             self.isDictating = false
-            overlayController.showError("Dictation is still loading. Please try again in a moment.")
-        }
-    }
-
-    private func retryModelWarmupIfNeeded() {
-        guard let appState else { return }
-
-        switch appState.sttRouter.modelDownloadState {
-        case .notLoaded, .failed:
-            Task { @MainActor [weak appState] in
-                await appState?.sttRouter.initializeSelectedModel()
-            }
-        case .downloading, .loading, .ready:
-            break
+            overlayController.showError(
+                "Dictation is still loading. Please try again in a moment.",
+                actionTitle: "Retry Dictation",
+                action: { [weak self] in
+                    self?.startDictation(sourceApp: sourceApp, trigger: self?.currentDictationTrigger ?? .unknown)
+                }
+            )
         }
     }
 
@@ -595,6 +684,15 @@ class DictationSessionController: ObservableObject {
             detail: "Connecting to the new audio device.",
             progress: progress,
             status: status
+        )
+    }
+
+    private func microphonePermissionPresentation() -> FloatingOverlayController.LoadingPresentation {
+        .init(
+            title: "Allow microphone",
+            detail: "Transcripted needs microphone access before dictation can listen.",
+            progress: 0.16,
+            status: "Waiting for macOS permission"
         )
     }
 
@@ -671,17 +769,23 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
-        overlayController?.showError("Recording was interrupted. Try again.")
+        overlayController?.showError(
+            "Recording was interrupted. Check your microphone or audio device, then try again.",
+            actionTitle: "Retry Dictation",
+            action: { [weak self] in
+                self?.startDictation(sourceApp: self?.sessionSourceApp, trigger: self?.currentDictationTrigger ?? .unknown)
+            }
+        )
     }
 
-    private func shouldOfferMicrophoneSettingsAction(for status: AVAuthorizationStatus) -> Bool {
+    private func shouldOfferMicrophoneRecoveryAction(for status: AVAuthorizationStatus) -> Bool {
         switch status {
-        case .denied, .restricted:
+        case .notDetermined, .denied, .restricted:
             return true
-        case .notDetermined, .authorized:
+        case .authorized:
             return false
         @unknown default:
-            return false
+            return true
         }
     }
 
@@ -691,7 +795,7 @@ class DictationSessionController: ObservableObject {
     ) -> String {
         switch status {
         case .notDetermined:
-            return "Transcripted is still waiting for microphone permission."
+            return "Transcripted needs microphone access before dictation can listen."
         case .denied, .restricted:
             if openedSettings {
                 return "Microphone access is off. Transcripted opened the Microphone pane in System Settings."

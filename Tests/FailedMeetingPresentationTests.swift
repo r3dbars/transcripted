@@ -41,4 +41,19 @@ func testFailedMeetingPresentation() {
             "permission failures should point to the recovery step"
         )
     }
+
+    runSuite("FailedMeetingPresentation microphone failures point to settings") {
+        let copy = MeetingFailureCopy.make(
+            forMessage: "Turn on Microphone access in System Settings before recording a meeting.",
+            shortErrorMessage: "Turn on Microphone access in System Settings before recording a meeting.",
+            isRetryable: false
+        )
+
+        assertEqual(copy.title, "Turn on Microphone", "microphone failures should name the missing permission")
+        assertEqual(
+            copy.detail,
+            "Turn on Microphone access in System Settings, then retry the meeting.",
+            "microphone failures should point to the recovery step"
+        )
+    }
 }
