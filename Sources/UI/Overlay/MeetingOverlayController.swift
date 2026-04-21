@@ -159,14 +159,18 @@ final class MeetingOverlayRootView: NSView {
     private let finishTooltip = "Finish and transcribe"
     private let dismissPromptTooltip = "Dismiss meeting prompt"
     private let startTooltip = "Start meeting recording"
+    private let minimizeTooltip = "Minimize meeting widget"
+    private let expandTooltip = "Expand meeting widget"
     private var tooltipPanel: MeetingOverlayTooltipPanel?
     private var tooltipTask: Task<Void, Never>?
     private var tooltipTrackingAreas: [NSTrackingArea] = []
+    private var isRecordingMinimized = false
 
     /// Invoked when the user clicks the close/stop button.
     var onSecondaryAction: (() -> Void)?
     var onCancelAction: (() -> Void)?
     var onPrimaryAction: (() -> Void)?
+    var onToggleMinimized: (() -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -295,13 +299,16 @@ final class MeetingOverlayRootView: NSView {
         closeButton.isHidden = true
         addSubview(closeButton)
 
-        // Chevron is intentionally hidden: meeting overlay is now status-only.
-        if let img = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil) {
-            chevronButton.image = img
-            chevronButton.contentTintColor = MeetingOverlayTokens.textSecondary
-        }
-        chevronButton.bezelStyle = .inline
+        chevronButton.imageScaling = .scaleProportionallyDown
+        chevronButton.contentTintColor = MeetingOverlayTokens.quietActionTint
         chevronButton.isBordered = false
+        chevronButton.wantsLayer = true
+        chevronButton.layer?.cornerRadius = MeetingOverlayTokens.toggleHeight / 2
+        chevronButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
+        chevronButton.layer?.borderWidth = 0.5
+        chevronButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
+        chevronButton.target = self
+        chevronButton.action = #selector(handleToggleMinimized)
         chevronButton.isHidden = true
         addSubview(chevronButton)
     }
@@ -424,6 +431,11 @@ final class MeetingOverlayRootView: NSView {
         let tokens = MeetingOverlayTokens.self
         let midY = bounds.height / 2
 
+        if isRecordingMinimized {
+            layoutMinimizedRecording(midY: midY)
+            return
+        }
+
         cancelButton.frame = NSRect(
             x: tokens.padLeft,
             y: midY - tokens.cancelHeight / 2,
@@ -453,8 +465,15 @@ final class MeetingOverlayRootView: NSView {
             height: tokens.stopHeight
         )
 
+        chevronButton.frame = NSRect(
+            x: closeButton.frame.minX - tokens.headerGap - tokens.toggleHeight,
+            y: midY - tokens.toggleHeight / 2,
+            width: tokens.toggleHeight,
+            height: tokens.toggleHeight
+        )
+
         let barsLeft = timerLabel.frame.maxX + tokens.headerGap
-        let barsRight = closeButton.frame.minX - tokens.headerGap
+        let barsRight = chevronButton.frame.minX - tokens.headerGap
         let availableBarsWidth = max(0, barsRight - barsLeft)
         let barsWidth = min(tokens.recordingWaveformWidth, availableBarsWidth)
         let barsHeight: CGFloat = 22
@@ -470,7 +489,55 @@ final class MeetingOverlayRootView: NSView {
         detailLabel.frame = .zero
         micLabel.frame = .zero
         systemLabel.frame = .zero
-        chevronButton.frame = .zero
+        refreshTooltipTrackingAreas()
+    }
+
+    private func layoutMinimizedRecording(midY: CGFloat) {
+        let tokens = MeetingOverlayTokens.self
+
+        cancelButton.frame = NSRect(
+            x: tokens.minimizedPadLeft,
+            y: midY - tokens.cancelHeight / 2,
+            width: tokens.cancelHeight,
+            height: tokens.cancelHeight
+        )
+
+        statusDot.frame = NSRect(
+            x: cancelButton.frame.maxX + tokens.minimizedGap,
+            y: midY - tokens.dotSize / 2,
+            width: tokens.dotSize,
+            height: tokens.dotSize
+        )
+
+        closeButton.frame = NSRect(
+            x: bounds.width - tokens.padRight - tokens.stopHeight,
+            y: midY - tokens.stopHeight / 2,
+            width: tokens.stopHeight,
+            height: tokens.stopHeight
+        )
+
+        chevronButton.frame = NSRect(
+            x: closeButton.frame.minX - tokens.minimizedGap - tokens.toggleHeight,
+            y: midY - tokens.toggleHeight / 2,
+            width: tokens.toggleHeight,
+            height: tokens.toggleHeight
+        )
+
+        let titleX = statusDot.frame.maxX + tokens.minimizedGap
+        let titleWidth = max(0, chevronButton.frame.minX - titleX - tokens.minimizedGap)
+        let titleSize = titleLabel.fittingSize
+        titleLabel.frame = NSRect(
+            x: titleX,
+            y: midY - titleSize.height / 2,
+            width: min(titleWidth, titleSize.width),
+            height: titleSize.height
+        )
+
+        timerLabel.frame = .zero
+        detailLabel.frame = .zero
+        micLabel.frame = .zero
+        systemLabel.frame = .zero
+        audioWaveform.frame = .zero
         refreshTooltipTrackingAreas()
     }
 
@@ -573,9 +640,14 @@ final class MeetingOverlayRootView: NSView {
         systemLevel: Float,
         participants: [String],
         warmupStatus: MeetingSessionController.ModelWarmupStatus?,
-        prompt: MeetingOverlayController.PromptDisplay?
+        prompt: MeetingOverlayController.PromptDisplay?,
+        isRecordingMinimized: Bool
     ) {
         currentState = state
+        self.isRecordingMinimized = state == .recording && isRecordingMinimized
+        layer?.cornerRadius = self.isRecordingMinimized
+            ? MeetingOverlayTokens.minimizedCornerRadius
+            : MeetingOverlayTokens.cornerRadius
         if let warmupStatus {
             currentWarmupStatus = warmupStatus
         }
@@ -589,18 +661,17 @@ final class MeetingOverlayRootView: NSView {
             isErrorState = false
         }
         statusDot.isHidden = isPreparing
-        titleLabel.isHidden = isPreparing || state == .recording
-        timerLabel.isHidden = isPreparing || (state != .recording && !isPrompting)
+        titleLabel.isHidden = isPreparing || (state == .recording && !self.isRecordingMinimized)
+        timerLabel.isHidden = isPreparing || (state != .recording && !isPrompting) || self.isRecordingMinimized
         detailLabel.isHidden = !(isPrompting || isErrorState)
         micLabel.isHidden = true
         systemLabel.isHidden = true
-        audioWaveform.isHidden = isPreparing || isPrompting
-        let showLevels = state == .recording
+        let showLevels = state == .recording && !self.isRecordingMinimized
         audioWaveform.isHidden = !showLevels
         recordButton.isHidden = !isPrompting
         cancelButton.isHidden = state != .recording
         closeButton.isHidden = isPreparing || (state != .recording && !isPrompting)
-        chevronButton.isHidden = true
+        chevronButton.isHidden = state != .recording
         warmupTitleLabel.isHidden = !isPreparing
         warmupSubtitleLabel.isHidden = !isPreparing
         warmupProgress.isHidden = !isPreparing
@@ -636,7 +707,7 @@ final class MeetingOverlayRootView: NSView {
             closeButton.setAccessibilityHelp("Dismisses this meeting recording prompt.")
             closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
         case .recording:
-            titleLabel.stringValue = "Recording meeting"
+            titleLabel.stringValue = self.isRecordingMinimized ? "Rec" : "Recording meeting"
             updateStatusDot(color: MeetingOverlayTokens.dotRecording, haloOpacity: 0.24, haloRadius: 3)
             timerLabel.font = .monospacedDigitSystemFont(ofSize: MeetingOverlayTokens.timerFontSize, weight: .medium)
             timerLabel.textColor = MeetingOverlayTokens.textPrimary
@@ -651,6 +722,7 @@ final class MeetingOverlayRootView: NSView {
             closeButton.layer?.cornerRadius = MeetingOverlayTokens.stopHeight / 2
             closeButton.layer?.borderWidth = 0.5
             closeButton.layer?.borderColor = MeetingOverlayTokens.finishActionBorder.cgColor
+            updateChevronButtonAppearance()
         case .transcribing:
             titleLabel.stringValue = "Saving transcript"
             updateStatusDot(color: MeetingOverlayTokens.dotPrep)
@@ -682,7 +754,7 @@ final class MeetingOverlayRootView: NSView {
         currentSystemLevel = max(0, min(1, systemLevel))
         audioWaveform.primaryLevel = currentMicLevel
         audioWaveform.secondaryLevel = currentSystemLevel
-        let shouldAnimate = state == .recording
+        let shouldAnimate = state == .recording && !self.isRecordingMinimized
         audioWaveform.isActive = shouldAnimate
 
         needsLayout = true
@@ -721,6 +793,13 @@ final class MeetingOverlayRootView: NSView {
         cancelButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
         cancelButton.layer?.borderWidth = 0.5
         cancelButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
+        chevronButton.imagePosition = .imageOnly
+        chevronButton.contentTintColor = MeetingOverlayTokens.quietActionTint
+        chevronButton.toolTip = nil
+        chevronButton.layer?.cornerRadius = MeetingOverlayTokens.toggleHeight / 2
+        chevronButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
+        chevronButton.layer?.borderWidth = 0.5
+        chevronButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
     }
 
     private func buttonTitle(_ title: String, size: CGFloat, weight: NSFont.Weight) -> NSAttributedString {
@@ -752,6 +831,20 @@ final class MeetingOverlayRootView: NSView {
             .withSymbolConfiguration(config)
     }
 
+    private func updateChevronButtonAppearance() {
+        let tooltip = isRecordingMinimized ? expandTooltip : minimizeTooltip
+        chevronButton.image = chevronButtonImage()
+        chevronButton.setAccessibilityLabel(tooltip)
+        chevronButton.setAccessibilityHelp(tooltip)
+    }
+
+    private func chevronButtonImage() -> NSImage? {
+        let symbolName = isRecordingMinimized ? "chevron.right" : "chevron.left"
+        let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+        return NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+    }
+
     private func refreshTooltipTrackingAreas() {
         for area in tooltipTrackingAreas {
             removeTrackingArea(area)
@@ -761,6 +854,10 @@ final class MeetingOverlayRootView: NSView {
         addTooltipTrackingArea(for: cancelButton, text: cancelTooltip)
         addTooltipTrackingArea(for: closeButton, text: currentState == .recording ? finishTooltip : dismissPromptTooltip)
         addTooltipTrackingArea(for: recordButton, text: startTooltip)
+        addTooltipTrackingArea(
+            for: chevronButton,
+            text: isRecordingMinimized ? expandTooltip : minimizeTooltip
+        )
 
         if tooltipTrackingAreas.isEmpty {
             hideTooltip()
@@ -856,6 +953,10 @@ final class MeetingOverlayRootView: NSView {
     @objc private func handlePrimaryAction() {
         onPrimaryAction?()
     }
+
+    @objc private func handleToggleMinimized() {
+        onToggleMinimized?()
+    }
 }
 
 // MARK: - Design tokens (local — keeps the meeting overlay visually distinct
@@ -884,17 +985,23 @@ enum MeetingOverlayTokens {
 
     static let panelWidth: CGFloat  = 360
     static let recordingPanelWidth: CGFloat = 292
+    static let minimizedRecordingPanelWidth: CGFloat = 152
     static let panelHeight: CGFloat = 44
+    static let minimizedRecordingPanelHeight: CGFloat = 36
     static let promptHeight: CGFloat = 88
     static let warmupHeight: CGFloat = 96
     static let errorHeight: CGFloat = 72
     static let cornerRadius: CGFloat = 22
+    static let minimizedCornerRadius: CGFloat = 18
     static let dotSize: CGFloat     = 8
     static let padLeft: CGFloat     = 12
     static let padRight: CGFloat    = 8
     static let headerGap: CGFloat   = 8
+    static let minimizedPadLeft: CGFloat = 10
+    static let minimizedGap: CGFloat = 7
     static let timerFontSize: CGFloat = 13
     static let cancelHeight: CGFloat = 24
+    static let toggleHeight: CGFloat = 22
     static let stopHeight: CGFloat  = 28
     static let recordingWaveformWidth: CGFloat = 124
     static let tooltipOffset: CGFloat = 8
@@ -950,6 +1057,7 @@ final class MeetingOverlayController {
     private var subscriptions: Set<AnyCancellable> = []
     private var autoHideTask: Task<Void, Never>?
     private var isShowingCancelConfirmation = false
+    private var isRecordingMinimized = false
 
     deinit {
         autoHideTask?.cancel()
@@ -990,6 +1098,7 @@ final class MeetingOverlayController {
         rootView.onSecondaryAction = { [weak self] in self?.handleSecondaryActionTapped() }
         rootView.onCancelAction = { [weak self] in self?.handleCancelTapped() }
         rootView.onPrimaryAction = { [weak self] in self?.handlePrimaryActionTapped() }
+        rootView.onToggleMinimized = { [weak self] in self?.toggleRecordingMinimized() }
         panel.contentView?.addSubview(rootView)
 
         self.panel = panel
@@ -1095,6 +1204,7 @@ final class MeetingOverlayController {
     private func applySessionState(_ sessionState: MeetingSessionController.State) {
         switch sessionState {
         case .idle:
+            isRecordingMinimized = false
             if state == .prompt {
                 pushToView()
                 break
@@ -1102,12 +1212,14 @@ final class MeetingOverlayController {
             state = .idle
             hidePanel()
         case .loadingModels:
+            isRecordingMinimized = false
             state = .preparing
             currentPrompt = nil
             promptCandidate = nil
             promptCountdownTask?.cancel()
             showPanel()
         case .ready:
+            isRecordingMinimized = false
             if state == .prompt {
                 pushToView()
                 break
@@ -1132,12 +1244,14 @@ final class MeetingOverlayController {
             autoHideTask?.cancel()
             showPanel()
         case .transcribing:
+            isRecordingMinimized = false
             state = .transcribing
             currentPrompt = nil
             promptCandidate = nil
             promptCountdownTask?.cancel()
             showPanel()
         case .error(let message):
+            isRecordingMinimized = false
             state = .error(message)
             currentPrompt = nil
             promptCandidate = nil
@@ -1189,6 +1303,8 @@ final class MeetingOverlayController {
             return MeetingOverlayTokens.warmupHeight
         case .prompt:
             return MeetingOverlayTokens.promptHeight
+        case .recording where isRecordingMinimized:
+            return MeetingOverlayTokens.minimizedRecordingPanelHeight
         case .error:
             return MeetingOverlayTokens.errorHeight
         default:
@@ -1198,6 +1314,8 @@ final class MeetingOverlayController {
 
     private func currentPanelWidth() -> CGFloat {
         switch state {
+        case .recording where isRecordingMinimized:
+            return MeetingOverlayTokens.minimizedRecordingPanelWidth
         case .recording:
             return MeetingOverlayTokens.recordingPanelWidth
         default:
@@ -1280,6 +1398,12 @@ final class MeetingOverlayController {
         onPromptRecord?(candidate)
     }
 
+    private func toggleRecordingMinimized() {
+        guard state == .recording else { return }
+        isRecordingMinimized.toggle()
+        pushToView()
+    }
+
     private func dismissPrompt(notifyDetector: Bool) {
         promptCountdownTask?.cancel()
 
@@ -1326,7 +1450,8 @@ final class MeetingOverlayController {
             systemLevel: currentSystemLevel,
             participants: currentParticipants,
             warmupStatus: currentWarmupStatus,
-            prompt: currentPrompt
+            prompt: currentPrompt,
+            isRecordingMinimized: isRecordingMinimized
         )
     }
 
