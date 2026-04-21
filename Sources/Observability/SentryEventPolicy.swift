@@ -60,6 +60,11 @@ struct SentryEventPolicy: Equatable {
             event: "transcription_failed",
             summary: "Speech transcription failed."
         ),
+        "dictation.microphone_start_timeout": .init(
+            engine: "dictation",
+            event: "microphone_start_timeout",
+            summary: "Dictation microphone start timed out."
+        ),
         "capture.hotkey_register_failed": .init(
             engine: "capture",
             event: "hotkey_register_failed",

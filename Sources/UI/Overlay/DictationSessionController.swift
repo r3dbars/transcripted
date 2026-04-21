@@ -187,24 +187,33 @@ class DictationSessionController: ObservableObject {
 
         let startedAt = CFAbsoluteTimeGetCurrent()
         let deadline = startedAt + TranscriptedConstants.dictationRecoveryBudget
+        var startAttempts = 0
+        var readinessRefreshes = 0
 
         if !appState.sttRouter.isRecovering, !appState.sttRouter.inputFormatReady {
             appState.sttRouter.refreshInputReadiness()
+            readinessRefreshes += 1
         }
 
         while CFAbsoluteTimeGetCurrent() < deadline {
             guard isDictating, !Task.isCancelled else { return }
 
             let elapsed = CFAbsoluteTimeGetCurrent() - startedAt
+            let isRecovering = appState.sttRouter.isRecovering
+            let inputFormatReady = appState.sttRouter.inputFormatReady
             overlayController.showLoadingState(
                 near: sourceApp,
                 presentation: microphoneRecoveryPresentation(
                     elapsed: elapsed,
-                    deviceName: appState.sttRouter.inputDeviceName
+                    deviceName: appState.sttRouter.inputDeviceName,
+                    isRecovering: isRecovering,
+                    inputFormatReady: inputFormatReady,
+                    startAttempts: startAttempts
                 )
             )
 
-            if !appState.sttRouter.isRecovering, appState.sttRouter.inputFormatReady {
+            if !isRecovering, inputFormatReady {
+                startAttempts += 1
                 if appState.sttRouter.startRecording() {
                     overlayController.state = .listening
                     resizePanelToCompact()
@@ -218,13 +227,35 @@ class DictationSessionController: ObservableObject {
                         context: dictationContext(
                             extra: [
                                 "wait_ms": "\(waited)",
-                                "audio_device": appState.sttRouter.inputDeviceName
+                                "audio_device": appState.sttRouter.inputDeviceName,
+                                "start_attempts": "\(startAttempts)",
+                                "readiness_refreshes": "\(readinessRefreshes)"
                             ]
                         )
                     )
                     AppSoundPlayer.shared.play(.dictationStart)
                     installSessionTimeout()
                     return
+                }
+
+                DiagnosticsTrail.record(
+                    logger: appState.logger,
+                    level: .warning,
+                    engine: "dictation",
+                    event: "dictation_recording_retry",
+                    message: "Dictation microphone start failed; retrying",
+                    context: dictationContext(
+                        extra: [
+                            "attempt": "\(startAttempts)",
+                            "audio_device": appState.sttRouter.inputDeviceName,
+                            "is_recovering": "\(appState.sttRouter.isRecovering)",
+                            "format_ready": "\(appState.sttRouter.inputFormatReady)"
+                        ]
+                    )
+                )
+                if !appState.sttRouter.isRecovering {
+                    appState.sttRouter.refreshInputReadiness()
+                    readinessRefreshes += 1
                 }
             }
 
@@ -238,19 +269,25 @@ class DictationSessionController: ObservableObject {
             logger: appState.logger,
             level: .error,
             engine: "dictation",
-            event: "dictation_recording_failed",
+            event: "microphone_start_timeout",
             message: "Dictation recording failed to start within recovery budget",
             context: dictationContext(
                 extra: [
                     "wait_ms": "\(waited)",
                     "audio_device": appState.sttRouter.inputDeviceName,
                     "is_recovering": "\(appState.sttRouter.isRecovering)",
-                    "format_ready": "\(appState.sttRouter.inputFormatReady)"
+                    "format_ready": "\(appState.sttRouter.inputFormatReady)",
+                    "start_attempts": "\(startAttempts)",
+                    "readiness_refreshes": "\(readinessRefreshes)"
                 ]
             )
         )
         overlayController.showError(
-            microphoneTimeoutMessage(deviceName: appState.sttRouter.inputDeviceName)
+            microphoneTimeoutMessage(
+                deviceName: appState.sttRouter.inputDeviceName,
+                startAttempts: startAttempts,
+                inputFormatReady: appState.sttRouter.inputFormatReady
+            )
         )
         isDictating = false
     }
@@ -586,20 +623,44 @@ class DictationSessionController: ObservableObject {
         }
     }
 
-    private func microphoneRecoveryPresentation(elapsed: TimeInterval, deviceName: String) -> FloatingOverlayController.LoadingPresentation {
+    private func microphoneRecoveryPresentation(
+        elapsed: TimeInterval,
+        deviceName: String,
+        isRecovering: Bool,
+        inputFormatReady: Bool,
+        startAttempts: Int
+    ) -> FloatingOverlayController.LoadingPresentation {
         let budget = TranscriptedConstants.dictationRecoveryBudget
         let progress = min(0.85, 0.1 + (elapsed / budget) * 0.75)
-        let status: String? = elapsed > 1.5 ? "Still connecting to \(deviceName)…" : nil
+        let title = isRecovering || !inputFormatReady ? "Switching microphone" : "Starting microphone"
+        let detail = isRecovering || !inputFormatReady
+            ? "Connecting to the new audio device."
+            : "Opening the selected audio input."
+        let status: String?
+        if startAttempts > 1 {
+            status = "Retrying \(deviceName)"
+        } else if elapsed > 1.5 {
+            status = "Still connecting to \(deviceName)…"
+        } else {
+            status = nil
+        }
         return .init(
-            title: "Switching microphone",
-            detail: "Connecting to the new audio device.",
+            title: title,
+            detail: detail,
             progress: progress,
             status: status
         )
     }
 
-    private func microphoneTimeoutMessage(deviceName: String) -> String {
-        "Couldn't reach \(deviceName). Try selecting a different input in System Settings."
+    private func microphoneTimeoutMessage(
+        deviceName: String,
+        startAttempts: Int,
+        inputFormatReady: Bool
+    ) -> String {
+        if startAttempts > 0, inputFormatReady {
+            return "Couldn't start the microphone. Try again, or choose a different input in System Settings."
+        }
+        return "Couldn't reach \(deviceName). Try selecting a different input in System Settings."
     }
 
     /// Shrink the panel to compact (header-only) height without animation.
