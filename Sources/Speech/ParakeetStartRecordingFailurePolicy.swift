@@ -8,6 +8,7 @@ enum ParakeetStartRecordingFailureReason: Equatable {
 struct ParakeetStartRecordingFailureAction: Equatable {
     let markFormatUnready: Bool
     let schedulePrewarmRetry: Bool
+    let rebuildAudioEngine: Bool
 }
 
 enum ParakeetStartRecordingFailurePolicy {
@@ -23,7 +24,8 @@ enum ParakeetStartRecordingFailurePolicy {
 
         return ParakeetStartRecordingFailureAction(
             markFormatUnready: true,
-            schedulePrewarmRetry: shouldScheduleRetry
+            schedulePrewarmRetry: shouldScheduleRetry,
+            rebuildAudioEngine: true
         )
     }
 }

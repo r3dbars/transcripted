@@ -57,16 +57,17 @@ enum TranscriptedConstants {
     static let audioConfigChangeDebounceDelay: UInt64 = 250_000_000  // 250ms
 
     /// Total budget for dictation to wait on engine readiness after a device change.
-    /// Sized to cover Bluetooth/AirPods CoreAudio settle time (2-3s observed).
-    static let dictationRecoveryBudget: TimeInterval = 3.5
+    /// Sized to cover slower USB/Bluetooth CoreAudio graph rebuilds without trapping
+    /// users indefinitely; the overlay remains cancellable during this window.
+    static let dictationRecoveryBudget: TimeInterval = 6.0
 
     /// Poll interval while dictation waits on engine readiness (nanoseconds).
     static let dictationReadinessPollInterval: UInt64 = 150_000_000  // 150ms
 
     /// Max consecutive prewarm retries before giving up. Each retry waits
-    /// `audioRecoveryDelay` (300ms), so 10 retries = ~3s of background settling.
+    /// `audioRecoveryDelay` (300ms), so 18 retries = ~5.4s of background settling.
     /// Prevents infinite Task chains when the mic is permanently unavailable.
-    static let prewarmRetryBudget: Int = 10
+    static let prewarmRetryBudget: Int = 18
 
     /// Max attempts to restart recording after a device change. Each attempt waits
     /// `recordingRestartRetryDelay` (500ms) to give Bluetooth format negotiation time to settle.

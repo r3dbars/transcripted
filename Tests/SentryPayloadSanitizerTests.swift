@@ -47,6 +47,8 @@ func testSentryPayloadSanitizer() {
             "input_rate_hz": "48000",
             "output_rate_hz": "48000",
             "hw_channels": "1",
+            "start_attempts": "3",
+            "readiness_refreshes": "2",
             "status_domain": "com.apple.coreaudio.avfaudio",
             "status_code": "-10868",
             "input_device_class": "bluetooth",
@@ -63,6 +65,8 @@ func testSentryPayloadSanitizer() {
         assertEqual(sanitized["input_rate_hz"], "48000", "input rate should remain")
         assertEqual(sanitized["output_rate_hz"], "48000", "output rate should remain")
         assertEqual(sanitized["hw_channels"], "1", "hardware channel count should remain")
+        assertEqual(sanitized["start_attempts"], "3", "start attempt count should remain")
+        assertEqual(sanitized["readiness_refreshes"], "2", "readiness refresh count should remain")
         assertEqual(sanitized["status_domain"], "com.apple.coreaudio.avfaudio", "status domain should remain")
         assertEqual(sanitized["status_code"], "-10868", "status code should remain")
         assertEqual(sanitized["input_device_class"], "bluetooth", "coarse input device classes should remain")

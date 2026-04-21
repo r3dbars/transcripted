@@ -159,7 +159,7 @@ class ParakeetEngine: ObservableObject {
     @Published var isRecovering = false
     @Published var inputFormatReady = true
 
-    private let audioEngine = AVAudioEngine()
+    private var audioEngine = AVAudioEngine()
     private var inputTapInstalled = false
     private var sampleBuffer: [Float] = []
     private var nativeSampleRate: Double = 48000
@@ -529,17 +529,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func installAudioObserversIfNeeded() {
-        if configChangeObserver == nil {
-            configChangeObserver = NotificationCenter.default.addObserver(
-                forName: .AVAudioEngineConfigurationChange,
-                object: audioEngine,
-                queue: .main
-            ) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.handleAudioConfigChange()
-                }
-            }
-        }
+        installAudioEngineConfigObserverIfNeeded()
 
         if wakeObserver == nil {
             wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -554,6 +544,25 @@ class ParakeetEngine: ObservableObject {
         }
 
         installInputDeviceChangeListenerIfNeeded()
+    }
+
+    private func installAudioEngineConfigObserverIfNeeded() {
+        guard configChangeObserver == nil else { return }
+        configChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: audioEngine,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleAudioConfigChange()
+            }
+        }
+    }
+
+    private func removeAudioEngineConfigObserver() {
+        guard let observer = configChangeObserver else { return }
+        NotificationCenter.default.removeObserver(observer)
+        configChangeObserver = nil
     }
 
     private func installInputDeviceChangeListenerIfNeeded() {
@@ -632,6 +641,7 @@ class ParakeetEngine: ObservableObject {
 
         audioEngine.stop()
         isEnginePrewarmed = false
+        rebuildAudioEngine(reason: "configuration_change")
 
         // Cancel any in-flight recovery — the latest device change wins.
         // Bluetooth disconnect/reconnect fires multiple notifications over
@@ -663,17 +673,24 @@ class ParakeetEngine: ObservableObject {
                 // Two-step format validation. CoreAudio sometimes reports zero
                 // sample rate on first read after device change, even past the
                 // initial settle delay. One extra wait + re-read is enough.
-                var newFormat = self.audioEngine.inputNode.outputFormat(forBus: 0)
-                if newFormat.sampleRate == 0 || newFormat.channelCount == 0 {
+                let inputNode = self.audioEngine.inputNode
+                var newFormat = inputNode.outputFormat(forBus: 0)
+                var hwFormat = inputNode.inputFormat(forBus: 0)
+                if newFormat.sampleRate == 0 || newFormat.channelCount == 0 ||
+                   hwFormat.sampleRate == 0 || hwFormat.channelCount == 0 {
                     try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
                     guard !self.recoveryState.isStale(generation: myGeneration) else { return }
-                    newFormat = self.audioEngine.inputNode.outputFormat(forBus: 0)
+                    let refreshedInputNode = self.audioEngine.inputNode
+                    newFormat = refreshedInputNode.outputFormat(forBus: 0)
+                    hwFormat = refreshedInputNode.inputFormat(forBus: 0)
                 }
-                guard newFormat.sampleRate > 0, newFormat.channelCount > 0 else {
+                guard newFormat.sampleRate > 0, newFormat.channelCount > 0,
+                      hwFormat.sampleRate > 0, hwFormat.channelCount > 0 else {
                     throw NSError(domain: "ParakeetEngine", code: -1,
-                        userInfo: [NSLocalizedDescriptionKey: "Invalid audio format after device change (\(newFormat.sampleRate)Hz, \(newFormat.channelCount)ch)"])
+                        userInfo: [NSLocalizedDescriptionKey: "Invalid audio format after device change (output \(newFormat.sampleRate)Hz/\(newFormat.channelCount)ch, input \(hwFormat.sampleRate)Hz/\(hwFormat.channelCount)ch)"])
                 }
                 self.nativeSampleRate = newFormat.sampleRate
+                self.prewarmRetryCount = 0
                 print("🔄 PARAKEET | audio device changed → \(self.inputDeviceName) (\(newFormat.sampleRate)Hz), input ready")
 
                 guard !Task.isCancelled else { return }
@@ -727,6 +744,9 @@ class ParakeetEngine: ObservableObject {
                 EventReporter.shared.capture(level: .error, engine: "parakeet",
                     event: "device_change_rewarm_failed",
                     message: error.localizedDescription, context: ["audio_device": self.inputDeviceName])
+                self.rebuildAudioEngine(reason: "device_change_rewarm_failed")
+                self.prewarmRetryCount = 0
+                self.schedulePrewarmRetry()
             }
         }
     }
@@ -759,13 +779,45 @@ class ParakeetEngine: ObservableObject {
         inputTapInstalled = false
     }
 
-    private func resetAudioGraphAfterStartFailure() {
+    private func resetAudioGraphAfterStartFailure(reason: String, rebuildEngine: Bool) {
+        if rebuildEngine {
+            rebuildAudioEngine(reason: reason)
+            return
+        }
         removeRecordingTap()
         if audioEngine.isRunning {
             audioEngine.stop()
         }
         audioEngine.reset()
         isEnginePrewarmed = false
+    }
+
+    private func rebuildAudioEngine(reason: String) {
+        removeRecordingTap()
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+        audioEngine.reset()
+        removeAudioEngineConfigObserver()
+        audioEngine = AVAudioEngine()
+        inputTapInstalled = false
+        isEnginePrewarmed = false
+        didReceiveAudioSamples = false
+        if !isShuttingDown {
+            installAudioEngineConfigObserverIfNeeded()
+        }
+        EventReporter.shared.capture(
+            level: .warning,
+            engine: "parakeet",
+            event: "audio_engine_rebuilt",
+            message: "Audio engine rebuilt after microphone graph failure",
+            context: [
+                "reason": reason,
+                "recovering": "\(recoveryState.isRecovering)",
+                "format_ready": "\(recoveryState.inputFormatReady)",
+                "generation": "\(recoveryState.generation)"
+            ]
+        )
     }
 
     private func handleSystemWake() {
@@ -958,7 +1010,10 @@ class ParakeetEngine: ObservableObject {
                         hwFormat: hwFormat
                     )
                 )
-                resetAudioGraphAfterStartFailure()
+                resetAudioGraphAfterStartFailure(
+                    reason: "invalid_audio_format",
+                    rebuildEngine: startFailureAction.rebuildAudioEngine
+                )
                 if startFailureAction.markFormatUnready {
                     markFormatUnreadyAndPublish()
                 }
@@ -1069,7 +1124,10 @@ class ParakeetEngine: ObservableObject {
                         isRecoveryAttempt: isRecoveryAttempt,
                         failedAttempts: attempt
                     )
-                    resetAudioGraphAfterStartFailure()
+                    resetAudioGraphAfterStartFailure(
+                        reason: "audio_engine_start_failed",
+                        rebuildEngine: true
+                    )
 
                     if shouldRetry {
                         print("🔄 PARAKEET | audio engine start failed, resetting graph and retrying once: \(error.localizedDescription)")
@@ -1603,10 +1661,7 @@ class ParakeetEngine: ObservableObject {
         releaseIdleAudioHardware(removeTap: true)
         isRecording = false
         audioLevel = 0
-        if let observer = configChangeObserver {
-            NotificationCenter.default.removeObserver(observer)
-            configChangeObserver = nil
-        }
+        removeAudioEngineConfigObserver()
         if let observer = wakeObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
             wakeObserver = nil
