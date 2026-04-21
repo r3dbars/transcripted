@@ -27,7 +27,6 @@ struct TranscriptedSettingsView: View {
     private let actions: TranscriptedSettingsActions
     private let sidebarSections = SettingsSidebarSection.defaultSections
 
-    @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
@@ -336,25 +335,10 @@ struct TranscriptedSettingsView: View {
 
             SettingsSection(
                 title: "Keys",
-                detail: "Set one shortcut for dictation and one for meetings."
+                detail: "Set one dictation key and one meeting shortcut."
             ) {
                 HotkeyRecorderContainer()
                     .frame(height: 76)
-
-                Toggle("Tap the right Option key to start dictation", isOn: Binding(
-                    get: { rightOptionEnabled },
-                    set: { newValue in
-                        rightOptionEnabled = newValue
-                        HotkeyPreferences.setRightOptionDictation(enabled: newValue)
-                    }
-                ))
-
-                Text(rightOptionEnabled
-                    ? "Right Option can start dictation too."
-                    : "Dictation uses only the shortcut above."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
 
             SettingsSection(
@@ -1015,7 +999,6 @@ struct TranscriptedSettingsView: View {
         refreshPermissions()
         refreshStoragePaths()
         refreshRecentCaptures()
-        rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
         refreshLaunchAtLoginState()
         customDictionaryText = CustomDictionaryPreferences.rawText()
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()

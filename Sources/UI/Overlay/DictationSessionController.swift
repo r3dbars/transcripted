@@ -12,6 +12,7 @@ class DictationSessionController: ObservableObject {
 
     enum DictationTrigger: String {
         case rightOptionTap = "right_option_tap"
+        case physicalKey = "physical_key"
         case keyboardShortcut = "keyboard_shortcut"
         case overlayButton = "overlay_button"
         case menu = "menu"
