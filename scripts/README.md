@@ -50,6 +50,12 @@ not have to carry the full operational logic:
     - `0` = `PASS`
     - `2` = `FAIL`
     - `3` = pending (no top-level `PASS` / `FAIL` yet)
+- `scripts/ops/qa-gate-closeout.sh` — close a QA-gated GitHub issue automatically when `PASS` is detected
+  - Usage: `bash scripts/ops/qa-gate-closeout.sh <owner/repo> <issue-number>`
+  - Exit codes:
+    - `0` = issue closed (`PASS`)
+    - `2` = `FAIL` detected (left open)
+    - `3` = pending (left open)
 - `scripts/ops/build-codex-memory-index.py` — build a safe metadata-only index from local Codex session archives for Transcripted memory briefs
   - Usage: `python3 scripts/ops/build-codex-memory-index.py --verbose`
   - Writes:
