@@ -35,13 +35,18 @@ The settings window becomes the app's control center.
 It uses a native macOS sidebar with these pages:
 
 - `Home`
-- `Shortcuts`
-- `Meetings`
-- `Dictations`
-- `Storage`
-- `Connect Your Agent`
-- `Privacy`
-- `About`
+- `Recording`
+  - `Meetings`
+  - `Dictation`
+  - `Shortcuts`
+- `Setup`
+  - `General`
+  - `Models`
+  - `Storage`
+  - `Agent`
+- `Trust`
+  - `Privacy`
+  - `About`
 
 There is no first-class `Advanced` page in this version.
 
@@ -128,15 +133,37 @@ Contents:
 ### Shortcuts
 
 Purpose:
-Own all keyboard-trigger setup.
+Own all keyboard-trigger setup and send-after-paste rules.
 
 Contents:
 
 - dictation shortcut recorder
 - meeting shortcut recorder
-- `Tap the right Option key to start dictation`
+- right Option dictation toggle
+- send-after-paste app allowlist
 
 This page should not own privacy, storage, or analytics controls.
+
+### General
+
+Purpose:
+Own startup and custom words.
+
+Contents:
+
+- launch at login
+- custom words and spoken-text corrections
+
+### Models
+
+Purpose:
+Show the active local transcription engine and keep model switching tucked away.
+
+Contents:
+
+- active model status
+- model file status
+- optional model picker
 
 ### Meetings
 
@@ -152,7 +179,7 @@ Contents:
 
 Imported audio transcription lives here because it uses the meeting transcription pipeline.
 
-### Dictations
+### Dictation
 
 Purpose:
 Own dictation-specific behavior after speech has been captured.
@@ -182,7 +209,7 @@ Contents:
   - app logs
   - temporary recordings
 
-### Connect Your Agent
+### Agent
 
 Purpose:
 Keep agent setup discoverable without forcing it into the menubar flow.

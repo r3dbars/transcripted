@@ -21,9 +21,9 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .models: return "Models"
         case .shortcuts: return "Shortcuts"
         case .meetings: return "Meetings"
-        case .dictations: return "Dictations"
+        case .dictations: return "Dictation"
         case .storage: return "Storage"
-        case .connectAgent: return "Connect Your Agent"
+        case .connectAgent: return "Agent"
         case .privacy: return "Privacy"
         case .about: return "About"
         }
@@ -32,25 +32,25 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     var summary: String {
         switch self {
         case .home:
-            return "Quick actions and setup status."
+            return "Start capture and check setup."
         case .general:
-            return "Startup and app-wide behavior."
+            return "Startup and custom words."
         case .models:
-            return "Advanced transcription model controls."
+            return "Local transcription model."
         case .shortcuts:
-            return "Keyboard triggers and Auto Enter app rules."
+            return "Keys and send-after-paste rules."
         case .meetings:
-            return "Meeting recording, imports, and speaker controls."
+            return "Recording, imports, and speakers."
         case .dictations:
-            return "Paste-back behavior and dictation feedback."
+            return "Paste-back and sound cues."
         case .storage:
-            return "Where Transcripted keeps your captures and app data."
+            return "Where your files live."
         case .connectAgent:
-            return "Prompt-first agent setup with MCP and folder fallbacks."
+            return "One prompt, plus direct paths."
         case .privacy:
-            return "Permissions, crash reports, and anonymous analytics."
+            return "Permissions and optional reporting."
         case .about:
-            return "Version info, updates, and support."
+            return "Version, updates, and support."
         }
     }
 

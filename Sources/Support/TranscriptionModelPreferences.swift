@@ -32,11 +32,11 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
     var summary: String {
         switch self {
         case .parakeetTDTv3:
-            return "Default local model. Fast, bundled, and tuned for Transcripted's current dictation and meeting pipeline."
+            return "Default local model for dictation and meetings."
         case .whisperLargeV3Turbo:
-            return "Advanced local Whisper option with broader language coverage and faster large-v3 inference."
+            return "Local Whisper with broad language coverage."
         case .whisperLargeV3:
-            return "Advanced local Whisper option for maximum multilingual accuracy."
+            return "Local Whisper for maximum multilingual accuracy."
         }
     }
 
