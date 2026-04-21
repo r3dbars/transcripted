@@ -741,14 +741,16 @@ final class TranscriptIndex: @unchecked Sendable {
         if kind != .dictation {
             let meetings = try listMeetings(count: count, dateFrom: dateFrom, dateTo: dateTo)
             items.append(contentsOf: meetings.map {
-                RecentContextItem(
+                let firstUtterance = getFirstMeetingUtterance(filename: $0.filename)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return RecentContextItem(
                     kind: .meeting,
                     title: $0.title ?? $0.filename,
                     filename: $0.filename,
                     entryId: nil,
                     date: $0.date,
                     datetime: $0.datetime,
-                    preview: $0.speakers.map(\.name).joined(separator: ", "),
+                    preview: firstUtterance.isEmpty ? "No transcript captured." : String(firstUtterance.prefix(220)),
                     wordCount: $0.wordCount,
                     speakers: $0.speakers.map(\.name),
                     sourceAppName: nil,
@@ -994,6 +996,20 @@ final class TranscriptIndex: @unchecked Sendable {
             return colText(stmt, 0)
         }
         return ""
+    }
+
+    private func getFirstMeetingUtterance(filename: String) -> String {
+        queue.sync {
+            var stmt: OpaquePointer?
+            let sql = "SELECT text FROM utterances WHERE filename = ? ORDER BY utterance_start LIMIT 1"
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return "" }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, (filename as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                return colText(stmt, 0)
+            }
+            return ""
+        }
     }
 
     // MARK: - SQLite Helpers

@@ -208,4 +208,32 @@ final class TranscriptIndexTests: XCTestCase {
         XCTAssertEqual(result.items.count, 3)
         XCTAssertEqual(result.items.first?.kind, .dictation)
     }
+
+    func testRecentContextMeetingPreviewUsesFirstUtterance() throws {
+        try writeFixture(makeFixtureJSON(date: "2026-03-29T10:00:00-0500"), filename: "Call_2026-03-29_10-00-00", to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let result = try index.listRecentContext(kind: .meeting, count: 10)
+
+        XCTAssertEqual(result.items.count, 1)
+        XCTAssertEqual(result.items.first?.preview, "Good morning everyone")
+    }
+
+    func testRecentContextEmptyMeetingUsesExplicitPreview() throws {
+        try writeFixture(
+            makeFixtureJSON(
+                date: "2026-03-29T10:00:00-0500",
+                speakers: [],
+                utterances: []
+            ),
+            filename: "Call_2026-03-29_10-00-00",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let result = try index.listRecentContext(kind: .meeting, count: 10)
+
+        XCTAssertEqual(result.items.count, 1)
+        XCTAssertEqual(result.items.first?.preview, "No transcript captured.")
+    }
 }
