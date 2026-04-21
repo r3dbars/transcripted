@@ -157,6 +157,212 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testHandleNamingCompleteDiscardDeletesNewProfileAndClearsTranscriptLink() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let persistentSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        ).id
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Call_2026-04-10_15-01-23.md")
+        let clipURL = tempDirectory.appendingPathComponent("speaker-discard.wav")
+        let micURL = tempDirectory.appendingPathComponent("mic-discard.wav")
+        let systemURL = tempDirectory.appendingPathComponent("system-discard.wav")
+        let speakers = [
+            MarkdownSpeaker(
+                id: "1",
+                persistentSpeakerId: persistentSpeakerId,
+                name: "Speaker 1",
+                confidence: "unknown",
+                source: "db_pending"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "Speaker 1",
+                text: "Thanks for joining."
+            )
+        ]
+
+        try sampleTranscript(
+            transcriptId: transcriptId,
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [
+                BreakdownEntry(name: "Speaker 1", utterances: 1, wordCount: 5, duration: "00:03")
+            ]
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
+        try Data().write(to: clipURL)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        )
+
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(
+                    persistentSpeakerId: persistentSpeakerId,
+                    diarizerSpeakerId: "1",
+                    newName: "Speaker 1",
+                    previousName: nil,
+                    action: .discardedFromDatabase
+                )
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
+            micURL: micURL,
+            systemURL: systemURL,
+            clips: [
+                SpeakerNamingEntry(
+                    id: persistentSpeakerId,
+                    diarizerSpeakerId: "1",
+                    clipURL: clipURL,
+                    sampleText: "Thanks for joining.",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: true,
+                    needsConfirmation: false
+                )
+            ]
+        )
+
+        try await waitUntil {
+            harness.manager.speakerNamingRequest == nil
+                && harness.manager.displayStatus == .transcriptSaved
+        }
+
+        XCTAssertNil(harness.speakerDB.getSpeaker(id: persistentSpeakerId))
+
+        let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertFalse(savedTranscript.contains(persistentSpeakerId.uuidString))
+        XCTAssertTrue(savedTranscript.contains("source: unknown"))
+        XCTAssertTrue(savedTranscript.contains("[00:01] [System/Speaker 1] Thanks for joining."))
+    }
+
+    @MainActor
+    func testHandleNamingCompleteDiscardRestoresExistingProfileSnapshot() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let matchedProfile = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.2, count: 256),
+            existingId: nil
+        )
+        harness.speakerDB.setDisplayName(
+            id: matchedProfile.id,
+            name: "Nate",
+            source: NameSource.userManual
+        )
+        guard let matchedSnapshot = harness.speakerDB.getSpeaker(id: matchedProfile.id) else {
+            XCTFail("Expected matched profile snapshot")
+            return
+        }
+        _ = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.22, count: 256),
+            existingId: matchedProfile.id
+        )
+
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Call_2026-04-10_15-01-23.md")
+        let clipURL = tempDirectory.appendingPathComponent("speaker-discard-existing.wav")
+        let micURL = tempDirectory.appendingPathComponent("mic-discard-existing.wav")
+        let systemURL = tempDirectory.appendingPathComponent("system-discard-existing.wav")
+        let speakers = [
+            MarkdownSpeaker(
+                id: "1",
+                persistentSpeakerId: matchedProfile.id,
+                name: "Speaker 1",
+                confidence: "medium",
+                source: "db_pending"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "Speaker 1",
+                text: "Noisy sample."
+            )
+        ]
+
+        try sampleTranscript(
+            transcriptId: transcriptId,
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [
+                BreakdownEntry(name: "Speaker 1", utterances: 1, wordCount: 2, duration: "00:03")
+            ],
+            totalWords: 2
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
+        try Data().write(to: clipURL)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        )
+
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(
+                    persistentSpeakerId: matchedProfile.id,
+                    diarizerSpeakerId: "1",
+                    newName: "Speaker 1",
+                    previousName: "Nate",
+                    action: .discardedFromDatabase
+                )
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
+            micURL: micURL,
+            systemURL: systemURL,
+            clips: [
+                SpeakerNamingEntry(
+                    id: matchedProfile.id,
+                    diarizerSpeakerId: "1",
+                    clipURL: clipURL,
+                    sampleText: "Noisy sample.",
+                    currentName: "Nate",
+                    matchSimilarity: 0.81,
+                    needsNaming: false,
+                    needsConfirmation: true,
+                    matchedProfileSnapshot: matchedSnapshot
+                )
+            ]
+        )
+
+        try await waitUntil {
+            harness.manager.speakerNamingRequest == nil
+                && harness.manager.displayStatus == .transcriptSaved
+        }
+
+        let restoredProfile = harness.speakerDB.getSpeaker(id: matchedProfile.id)
+        XCTAssertEqual(restoredProfile?.displayName, "Nate")
+        XCTAssertEqual(restoredProfile?.callCount, matchedSnapshot.callCount)
+        XCTAssertEqual(restoredProfile?.disputeCount, matchedSnapshot.disputeCount + 1)
+
+        let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertFalse(savedTranscript.contains(matchedProfile.id.uuidString))
+        XCTAssertTrue(savedTranscript.contains("source: unknown"))
+    }
+
+    @MainActor
     func testHandleNamingCompletePreservesMicChannelUpdatesAndLocalBreakdown() async throws {
         let harness = try makeHarness()
         let transcriptId = UUID()
@@ -316,6 +522,181 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             savedTranscript
         )
         XCTAssertFalse(savedTranscript.contains("[Mic/Speaker 1]"))
+    }
+
+    @MainActor
+    func testHandleNamingCompleteCanNameOneMicSpeakerAsYouWithoutCollapsingOthers() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let youSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.4, count: 256),
+            existingId: nil
+        ).id
+        let otherSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.7, count: 256),
+            existingId: nil
+        ).id
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("MicRoom_2026-04-10_15-01-23.md")
+        let clipURL = tempDirectory.appendingPathComponent("speaker-mic-you.wav")
+        let micURL = tempDirectory.appendingPathComponent("mic-you-source.wav")
+        let systemURL = tempDirectory.appendingPathComponent("system-you-source.wav")
+
+        let transcript = """
+        ---
+        transcript_id: "\(transcriptId.uuidString)"
+        date: 2026-04-10
+        time: 15:01:23
+        duration: "1:30"
+        processing_time: "3.0s"
+        transcription_engine: parakeet_local
+        diarization_engine: pyannote_offline
+        sources: [mic, system_audio]
+        mic_utterances: 2
+        system_utterances: 0
+        mic_speakers: 2
+        system_speakers: 0
+        total_word_count: 6
+        speakers:
+          - id: "1"
+            channel: mic
+            db_id: "\(youSpeakerId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+          - id: "2"
+            channel: mic
+            db_id: "\(otherSpeakerId.uuidString)"
+            name: "Speaker 2"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        # Meeting Recording - Apr 10, 2026 at 3:01 PM
+
+        **Duration:** 1:30 | **Words:** 6 | **Utterances:** 2
+
+        ---
+
+        ## Channel & Speaker Analytics
+
+        ### Microphone (People in the Room)
+        - **Utterances:** 2
+        - **Words:** ~6
+        - **Speaking Time:** 00:06
+        - **Speakers Detected:** 2
+
+        #### Local Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~3 words, 00:03
+        - **Speaker 2:** 1 utterances, ~3 words, 00:03
+
+        ### Meeting Audio (Remote Participants)
+        - **Utterances:** 0
+        - **Words:** ~0
+        - **Speaking Time:** 00:00
+        - **Speakers Detected:** 0
+
+        #### Remote Speaker Breakdown
+
+
+        ---
+
+        ## Full Transcript
+
+        [00:01] [Mic/Speaker 1] I am speaking.
+
+        [00:05] [Mic/Speaker 2] Nate is speaking.
+
+        ---
+
+        *Generated by Transcripted with Parakeet + PyAnnote (local) | Duration: 1:30 | 6 words | 2 speakers*
+        """
+
+        try transcript.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let transcriptionResult = TranscriptionResult(
+            micUtterances: [
+                TranscriptionUtterance(
+                    start: 1,
+                    end: 4,
+                    channel: 0,
+                    speakerId: 1,
+                    persistentSpeakerId: youSpeakerId,
+                    matchSimilarity: nil,
+                    transcript: "I am speaking."
+                ),
+                TranscriptionUtterance(
+                    start: 5,
+                    end: 8,
+                    channel: 0,
+                    speakerId: 2,
+                    persistentSpeakerId: otherSpeakerId,
+                    matchSimilarity: nil,
+                    transcript: "Nate is speaking."
+                )
+            ],
+            systemUtterances: [],
+            duration: 90,
+            processingTime: 3.0
+        )
+        try Data().write(to: clipURL)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        )
+
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(
+                    persistentSpeakerId: youSpeakerId,
+                    diarizerSpeakerId: "1",
+                    channel: .mic,
+                    newName: "You",
+                    previousName: "Speaker 1",
+                    action: .named
+                )
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
+            micURL: micURL,
+            systemURL: systemURL,
+            clips: [
+                SpeakerNamingEntry(
+                    id: youSpeakerId,
+                    diarizerSpeakerId: "1",
+                    channel: .mic,
+                    clipURL: clipURL,
+                    sampleText: "I am speaking.",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: true,
+                    needsConfirmation: false,
+                    sessionEmbedding: [Float](repeating: 0.4, count: 256)
+                )
+            ]
+        )
+
+        try await waitUntil {
+            harness.manager.speakerNamingRequest == nil
+                && harness.manager.displayStatus == .transcriptSaved
+        }
+
+        let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(savedTranscript.contains("### Microphone (People in the Room)"))
+        XCTAssertTrue(savedTranscript.contains("#### Local Speaker Breakdown"))
+        XCTAssertTrue(savedTranscript.contains("- **You:** 1 utterances, ~3 words, 00:03"))
+        XCTAssertTrue(savedTranscript.contains("- **Speaker 2:** 1 utterances, ~3 words, 00:03"))
+        XCTAssertTrue(savedTranscript.contains("[00:01] [Mic/You] I am speaking."))
+        XCTAssertTrue(savedTranscript.contains("[00:05] [Mic/Speaker 2] Nate is speaking."))
+        XCTAssertEqual(harness.speakerDB.getSpeaker(id: youSpeakerId)?.displayName, "You")
+        XCTAssertNotNil(harness.speakerDB.getSpeaker(id: otherSpeakerId))
     }
 
     @MainActor

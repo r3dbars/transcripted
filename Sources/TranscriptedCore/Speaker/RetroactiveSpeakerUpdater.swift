@@ -414,6 +414,41 @@ extension TranscriptSaver {
         }
     }
 
+    /// Remove database identity links for speakers the user explicitly discarded during
+    /// review. The transcript stays readable with its current generic/suggested labels,
+    /// but it no longer points at a profile that was deleted or restored.
+    @discardableResult
+    static func discardSpeakerDatabaseLinks(
+        transcriptURL: URL,
+        discardedUpdates: [SpeakerNameUpdate]
+    ) -> Bool {
+        guard !discardedUpdates.isEmpty else { return true }
+
+        return fileUpdateQueue.sync {
+            guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
+                AppLogger.pipeline.error("Failed to read transcript for speaker discard", ["path": transcriptURL.path])
+                return false
+            }
+
+            for update in discardedUpdates {
+                removeSpeakerDatabaseLinkFromFrontmatter(in: &content, update: update)
+            }
+
+            do {
+                try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            } catch {
+                AppLogger.pipeline.error("Failed to write discarded speaker metadata", ["error": error.localizedDescription])
+                return false
+            }
+
+            AppLogger.pipeline.info("Removed discarded speaker database links", [
+                "path": transcriptURL.lastPathComponent,
+                "discarded": "\(discardedUpdates.count)"
+            ])
+            return true
+        }
+    }
+
     /// Remove speaker YAML entries whose `channel:` line matches `channel`.
     /// Speaker entries have the structure:
     ///   - id: "X"
@@ -451,6 +486,84 @@ extension TranscriptSaver {
             }
         }
         return lines.joined(separator: "\n")
+    }
+
+    private static func removeSpeakerDatabaseLinkFromFrontmatter(
+        in content: inout String,
+        update: SpeakerNameUpdate
+    ) {
+        guard let frontmatterRange = frontmatterContentRange(in: content) else { return }
+
+        var lines = String(content[frontmatterRange])
+            .components(separatedBy: "\n")
+
+        let targetIdLine = #"id: "\#(update.diarizerSpeakerId)""#
+        var lineIndex = 0
+
+        while lineIndex < lines.count {
+            let trimmed = lines[lineIndex].trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("- "),
+                  trimmed.contains(targetIdLine) else {
+                lineIndex += 1
+                continue
+            }
+
+            var nextEntryIndex: Int
+            if lineIndex + 1 < lines.count {
+                nextEntryIndex = lines[(lineIndex + 1)..<lines.count].firstIndex(where: { candidate in
+                    candidate.trimmingCharacters(in: .whitespaces).hasPrefix("- ")
+                }) ?? lines.count
+            } else {
+                nextEntryIndex = lines.count
+            }
+
+            var dbIdIndex: Int?
+            var confidenceIndex: Int?
+            var sourceIndex: Int?
+
+            if lineIndex + 1 < nextEntryIndex {
+                for index in (lineIndex + 1)..<nextEntryIndex {
+                    let candidate = lines[index].trimmingCharacters(in: .whitespaces)
+                    if candidate.hasPrefix("db_id:") {
+                        dbIdIndex = index
+                    } else if candidate.hasPrefix("confidence:") {
+                        confidenceIndex = index
+                    } else if candidate.hasPrefix("source:") {
+                        sourceIndex = index
+                    }
+                }
+            }
+
+            let block = lines[lineIndex..<nextEntryIndex]
+            guard speakerBlockMatchesChannel(block, channel: update.channel) else {
+                lineIndex = nextEntryIndex
+                continue
+            }
+
+            if let dbIdIndex {
+                lines.remove(at: dbIdIndex)
+                nextEntryIndex -= 1
+                if let index = confidenceIndex, index > dbIdIndex {
+                    confidenceIndex = index - 1
+                }
+                if let index = sourceIndex, index > dbIdIndex {
+                    sourceIndex = index - 1
+                }
+            }
+
+            if let confidenceIndex {
+                lines[confidenceIndex] = "    confidence: unknown"
+            }
+
+            if let sourceIndex {
+                lines[sourceIndex] = "    source: unknown"
+            } else {
+                lines.insert("    source: unknown", at: min(nextEntryIndex, lines.count))
+            }
+
+            content.replaceSubrange(frontmatterRange, with: lines.joined(separator: "\n"))
+            return
+        }
     }
 
     /// Resolve a transcript URL that may have been renamed by MeetingTranscriptStyler.
