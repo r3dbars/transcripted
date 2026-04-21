@@ -70,6 +70,12 @@ swift run transcripted-cli list-dictations --count 5
 swift run transcripted-cli diarize /path/to/audio.wav --json
 ```
 
+Binary path after build:
+
+```text
+.build/debug/transcripted-cli
+```
+
 When the repo-level dependency bundle is missing, `swift build` still builds the
 local context commands so agent retrieval can work on a fresh checkout. The
 offline audio commands (`diarize` and `batch`) then exit with an explicit
