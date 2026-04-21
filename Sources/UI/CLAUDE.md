@@ -69,7 +69,7 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Settings/TranscriptedSettingsActions.swift` — struct of callbacks (start dictation, start meeting, import audio, paste, connect agent, check updates, send feedback) injected into the settings view
 - `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`SettingsPageIntro`, `SettingsSection`) used across settings pages
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection
-- `Settings/TranscriptedSettingsPage.swift` — enum of settings pages (home, general, models, shortcuts, meetings, dictations, storage, connectAgent, privacy, about) with titles, summaries, and SF Symbol names
+- `Settings/TranscriptedSettingsPage.swift` — enum of settings pages (home, general, models, shortcuts, meetings, dictations, people, storage, connectAgent, privacy, about) with titles, summaries, and SF Symbol names
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 
@@ -117,7 +117,7 @@ Manual checks:
 - meeting overlay warms up and records cleanly
 - imported-audio transcription can be started from the menubar and lands in the normal recent-meetings flow
 - menubar popover renders shortcuts, primary actions, settings actions, and the agent-connect page cleanly
-- speaker settings can preview clips, toggle local-speaker splitting, and rename / merge people cleanly
+- speaker settings can preview clips, surface duplicates, toggle local-speaker splitting, and rename / merge people cleanly
 - completed meeting review cleanly separates "People in the room" from remote participants, and "Keep as You" restores the single-speaker local path when needed
 - permissions onboarding and first-run onboarding window still open correctly
 - first-run CTA copy updates correctly as permissions and local-model state change
