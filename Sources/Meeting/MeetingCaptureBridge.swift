@@ -44,6 +44,8 @@ final class MeetingCaptureBridge: ObservableObject {
     /// time `startRecording` runs so back-to-back sessions do not leak state.
     private var completionContinuation: CheckedContinuation<(micURL: URL?, systemURL: URL?), Never>?
     private var startContinuation: CheckedContinuation<Bool, Never>?
+    private var startAttemptID: UUID?
+    private var startTimeoutTask: Task<Void, Never>?
 
     init(audio: Audio = Audio()) {
         self.audio = audio
@@ -69,18 +71,26 @@ final class MeetingCaptureBridge: ObservableObject {
         errorMessage = nil
 
         return await withCheckedContinuation { continuation in
+            startTimeoutTask?.cancel()
             startContinuation?.resume(returning: false)
+
+            let attemptID = UUID()
+            startAttemptID = attemptID
             startContinuation = continuation
 
             audio.start()
 
-            Task { @MainActor [weak self] in
+            startTimeoutTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: TranscriptedConstants.meetingStartTimeout)
-                guard let self, let continuation = self.startContinuation else { return }
+                guard let self,
+                      self.startAttemptID == attemptID,
+                      let continuation = self.startContinuation else { return }
                 self.errorMessage = AudioCaptureStartState.timeoutFailureMessage(
                     existingErrorMessage: self.errorMessage
                 )
                 self.startContinuation = nil
+                self.startAttemptID = nil
+                self.startTimeoutTask = nil
                 if self.audio.isRecording {
                     self.audio.stop()
                 }
@@ -155,9 +165,15 @@ final class MeetingCaptureBridge: ObservableObject {
             return
         case .ready:
             startContinuation = nil
+            startAttemptID = nil
+            startTimeoutTask?.cancel()
+            startTimeoutTask = nil
             continuation.resume(returning: true)
         case .failed(let message):
             startContinuation = nil
+            startAttemptID = nil
+            startTimeoutTask?.cancel()
+            startTimeoutTask = nil
             errorMessage = message
             if audio.isRecording {
                 audio.stop()
