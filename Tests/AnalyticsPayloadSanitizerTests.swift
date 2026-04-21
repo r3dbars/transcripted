@@ -21,13 +21,14 @@ func testAnalyticsPayloadSanitizer() {
     runSuite("AnalyticsPayloadSanitizer redacts file paths and emails from values") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
-                "failure_kind": "Saved to /Users/redbars/secret.md by person@example.com",
+                "failure_kind": "Saved to /Users/redbars/Library/Application Support/Transcripted/logs/app.jsonl by person@example.com",
             ],
             allowedKeys: ["failure_kind"]
         )
 
         let value = sanitized["failure_kind"] ?? ""
         assertFalse(value.contains("/Users/redbars/"), "user paths should be redacted")
+        assertFalse(value.contains("Application Support/Transcripted/logs/app.jsonl"), "app support paths should be fully redacted")
         assertFalse(value.contains("person@example.com"), "emails should be redacted")
         assertTrue(value.contains("[redacted-path]"), "path marker should remain")
         assertTrue(value.contains("[redacted-email]"), "email marker should remain")

@@ -36,6 +36,7 @@ enum AnalyticsPayloadSanitizer {
         return try! NSRegularExpression(pattern: "(?!)")
     }
 
+    private static let appSupportPathRegex = makeRegex(#"/Users/[^/\s]+/Library/Application Support/(?:Transcripted|Draft)(?:/[^\s"]*)?"#)
     private static let userPathRegex = makeRegex(#"/Users/[^/\s]+/"#)
     private static let absolutePathRegex = makeRegex(#"(?<!https:)(?<!http:)/(?:Users|private|var|tmp|Volumes|Applications)[^\s"]*"#)
     private static let rawURLRegex = makeRegex(#"https?://[^\s"]+"#, options: [.caseInsensitive])
@@ -88,6 +89,8 @@ enum AnalyticsPayloadSanitizer {
 
         var result = trimmed
         var range = NSRange(result.startIndex..., in: result)
+        result = appSupportPathRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-path]")
+        range = NSRange(result.startIndex..., in: result)
         result = userPathRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "/Users/****/")
         range = NSRange(result.startIndex..., in: result)
         result = absolutePathRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-path]")

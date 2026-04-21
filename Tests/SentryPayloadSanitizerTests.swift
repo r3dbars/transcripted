@@ -49,6 +49,15 @@ func testSentryPayloadSanitizer() {
         assertTrue(sanitized.contains("[redacted-path]"), "redacted path marker should remain")
     }
 
+    runSuite("SentryPayloadSanitizer.sanitizeText redacts Transcripted app support paths with spaces") {
+        let input = "Read /Users/redbars/Library/Application Support/Transcripted/logs/app.jsonl before retry"
+        let sanitized = SentryPayloadSanitizer.sanitizeText(input)
+
+        assertFalse(sanitized.contains("/Users/redbars/"), "username should be redacted")
+        assertFalse(sanitized.contains("Application Support/Transcripted/logs/app.jsonl"), "app support path should be fully redacted")
+        assertTrue(sanitized.contains("[redacted-path]"), "redacted path marker should remain")
+    }
+
     runSuite("SentryPayloadSanitizer.sanitizeText redacts raw URLs and common token formats") {
         let input = "Download failed at https://example.com/private?token=abc123 with ghp_123456789012345678901234567890123456 phc_abcdefghijklmnopqrstuvwxyz123456 AKIAIOSFODNN7EXAMPLE AIzaSyA-BCDEFGHIJKLMNOPQRSTUVWXYZ123456"
         let sanitized = SentryPayloadSanitizer.sanitizeText(input)
