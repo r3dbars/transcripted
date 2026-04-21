@@ -12,7 +12,7 @@ struct AgentConnectionStarterSkill {
     }
 
     var displayDetail: String {
-        "v\(version) - \(detail)"
+        detail
     }
 }
 

@@ -4,6 +4,19 @@ import SwiftUI
 import TranscriptedCore
 import UniformTypeIdentifiers
 
+private struct SettingsSidebarSection: Identifiable {
+    let id: String
+    let title: String?
+    let pages: [TranscriptedSettingsPage]
+
+    static let defaultSections = [
+        SettingsSidebarSection(id: "home", title: nil, pages: [.home]),
+        SettingsSidebarSection(id: "recording", title: "Recording", pages: [.meetings, .dictations, .shortcuts]),
+        SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .models, .storage, .connectAgent]),
+        SettingsSidebarSection(id: "trust", title: "Trust", pages: [.privacy, .about])
+    ]
+}
+
 struct TranscriptedSettingsView: View {
     @Bindable var navigation: TranscriptedSettingsNavigationModel
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
@@ -12,6 +25,7 @@ struct TranscriptedSettingsView: View {
     @ObservedObject private var sparkleUpdater: SparkleUpdaterController
 
     private let actions: TranscriptedSettingsActions
+    private let sidebarSections = SettingsSidebarSection.defaultSections
 
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
@@ -50,9 +64,18 @@ struct TranscriptedSettingsView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(TranscriptedSettingsPage.allCases, selection: $navigation.selectedPage) { page in
-                Label(page.title, systemImage: page.systemImage)
-                    .tag(page)
+            List(selection: $navigation.selectedPage) {
+                ForEach(sidebarSections) { section in
+                    if let title = section.title {
+                        Section {
+                            sidebarRows(for: section.pages)
+                        } header: {
+                            Text(title)
+                        }
+                    } else {
+                        sidebarRows(for: section.pages)
+                    }
+                }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220)
             .listStyle(.sidebar)
@@ -117,6 +140,14 @@ struct TranscriptedSettingsView: View {
     }
 
     @ViewBuilder
+    private func sidebarRows(for pages: [TranscriptedSettingsPage]) -> some View {
+        ForEach(pages) { page in
+            Label(page.title, systemImage: page.systemImage)
+                .tag(page)
+        }
+    }
+
+    @ViewBuilder
     private var pageBody: some View {
         switch navigation.selectedPage {
         case .home:
@@ -146,7 +177,7 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Home",
-                summary: "Start recording quickly, import audio files, and see what still needs setup."
+                summary: "Start capture and fix anything marked orange."
             )
 
             let columns = [
@@ -158,7 +189,7 @@ struct TranscriptedSettingsView: View {
                 SettingsActionTile(
                     symbolName: "mic.fill",
                     title: "Start Dictation",
-                    detail: "Turn speech into text in the app you were just using.",
+                    detail: "Speak into the app you were using.",
                     tone: .accent,
                     action: actions.startDictation
                 )
@@ -166,7 +197,7 @@ struct TranscriptedSettingsView: View {
                 SettingsActionTile(
                     symbolName: "record.circle.fill",
                     title: "Start Meeting",
-                    detail: "Capture your mic and meeting audio together.",
+                    detail: "Record your mic and computer audio.",
                     tone: .accent,
                     action: actions.startMeeting
                 )
@@ -174,14 +205,14 @@ struct TranscriptedSettingsView: View {
                 SettingsActionTile(
                     symbolName: "waveform",
                     title: "Transcribe Audio File",
-                    detail: "Import an existing recording and run it through the meeting pipeline.",
+                    detail: "Turn a recording into notes.",
                     action: actions.importAudioFile
                 )
 
                 SettingsActionTile(
                     symbolName: "sparkles",
-                    title: "Connect Your Agent",
-                    detail: "Copy the main prompt or set up MCP when you want a deeper connection.",
+                    title: "Connect Agent",
+                    detail: "Let your agent read saved notes.",
                     action: {
                         navigation.selectedPage = .connectAgent
                     }
@@ -207,8 +238,8 @@ struct TranscriptedSettingsView: View {
             }
 
             SettingsSection(
-                title: "Setup Status",
-                detail: "These cards show whether Transcripted is ready for dictation, meetings, and local storage."
+                title: "Ready Check",
+                detail: "Green is ready. Orange needs attention."
             ) {
                 let modelCard = FirstRunExperience.modelCard(
                     for: FirstRunLocalModelState(sttRouter.modelDownloadState),
@@ -216,9 +247,9 @@ struct TranscriptedSettingsView: View {
                 )
 
                 SettingsStatusCard(
-                    title: "Local voice model",
-                    status: effectiveTranscriptionModel.title,
-                    detail: "\(modelCard.detail) Active engine: \(effectiveTranscriptionModel.title).",
+                    title: "Voice model",
+                    status: modelCard.status,
+                    detail: homeModelDetail(from: modelCard),
                     tone: preferredTranscriptionModel == effectiveTranscriptionModel ? tone(for: modelCard.tone) : .caution
                 )
 
@@ -226,7 +257,7 @@ struct TranscriptedSettingsView: View {
                     title: "Meeting tools",
                     status: meetingSession.warmupStatus.subtitle,
                     detail: meetingSession.warmupStatus.detail.isEmpty
-                        ? "Meeting capture and imported audio transcription share the same local setup."
+                        ? "Ready for live meetings and audio imports."
                         : meetingSession.warmupStatus.detail,
                     tone: meetingSession.warmupStatus == .ready ? .ready : .working
                 )
@@ -247,21 +278,13 @@ struct TranscriptedSettingsView: View {
             }
 
             SettingsSection(
-                title: "What To Adjust Next",
-                detail: "These are the pages most people look at after the first successful recording."
+                title: "Useful Pages",
+                detail: "The settings people usually need first."
             ) {
-                SettingsQuickLinkRow(
-                    symbolName: "cpu.fill",
-                    title: "Models",
-                    detail: "Review the local transcription engine and advanced options."
-                ) {
-                    navigation.selectedPage = .models
-                }
-
                 SettingsQuickLinkRow(
                     symbolName: "keyboard",
                     title: "Shortcuts",
-                    detail: "Change the global keys Transcripted listens for."
+                    detail: "Change the keys Transcripted listens for."
                 ) {
                     navigation.selectedPage = .shortcuts
                 }
@@ -269,15 +292,23 @@ struct TranscriptedSettingsView: View {
                 SettingsQuickLinkRow(
                     symbolName: "person.2.wave.2.fill",
                     title: "Meetings",
-                    detail: "Import audio files and tune speaker matching."
+                    detail: "Import audio and manage speakers."
                 ) {
                     navigation.selectedPage = .meetings
                 }
 
                 SettingsQuickLinkRow(
+                    symbolName: "externaldrive.fill",
+                    title: "Storage",
+                    detail: "See where Markdown files live."
+                ) {
+                    navigation.selectedPage = .storage
+                }
+
+                SettingsQuickLinkRow(
                     symbolName: "lock.shield.fill",
                     title: "Privacy",
-                    detail: "Review permissions, crash reporting, and anonymous analytics."
+                    detail: "Review permissions and reporting."
                 ) {
                     navigation.selectedPage = .privacy
                 }
@@ -290,12 +321,12 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Shortcuts",
-                summary: "Choose the keyboard triggers Transcripted listens for and where Auto Enter is allowed."
+                summary: "Keyboard triggers and send-after-paste rules."
             )
 
             SettingsSection(
-                title: "Keyboard Shortcuts",
-                detail: "Set one shortcut for dictation and one for meetings. Transcripted applies them immediately."
+                title: "Keys",
+                detail: "Set one shortcut for dictation and one for meetings."
             ) {
                 HotkeyRecorderContainer()
                     .frame(height: 76)
@@ -309,18 +340,18 @@ struct TranscriptedSettingsView: View {
                 ))
 
                 Text(rightOptionEnabled
-                    ? "A quick tap of the right Option key will also start dictation."
-                    : "Dictation will only use the configured keyboard shortcut."
+                    ? "Right Option can start dictation too."
+                    : "Dictation uses only the shortcut above."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
 
             SettingsSection(
-                title: "Auto Enter",
-                detail: "Send only in the apps you choose after final dictation text is pasted."
+                title: "Send After Paste",
+                detail: "Press Enter only in the apps you choose."
             ) {
-                Toggle("Send message when dictation ends", isOn: Binding(
+                Toggle("Send after dictation", isOn: Binding(
                     get: { autoEnterEnabled },
                     set: { newValue in
                         autoEnterEnabled = newValue
@@ -359,7 +390,7 @@ struct TranscriptedSettingsView: View {
                     }
 
                     if autoEnterAllowedBundleIDs.isEmpty {
-                        Text("Choose at least one app before Auto Enter can send.")
+                        Text("Add an app before Transcripted can send.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {
@@ -401,8 +432,8 @@ struct TranscriptedSettingsView: View {
                 }
 
                 Text(autoEnterEnabled
-                    ? "Transcripted waits for the final paste, pauses briefly, then sends \(autoEnterKey.title) only in selected apps."
-                    : "Auto Enter is off. Dictation will paste text without pressing Enter."
+                    ? "Transcripted sends \(autoEnterKey.title) after it pastes, only in selected apps."
+                    : "Off. Dictation only pastes text."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -414,12 +445,12 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "General",
-                summary: "Control how Transcripted starts and behaves across macOS."
+                summary: "Startup and words Transcripted should know."
             )
 
             SettingsSection(
                 title: "Startup",
-                detail: "Choose whether Transcripted opens automatically after you log in."
+                detail: "Open Transcripted when you log in."
             ) {
                 Toggle("Launch Transcripted at login", isOn: Binding(
                     get: { launchAtLoginEnabled },
@@ -434,8 +465,8 @@ struct TranscriptedSettingsView: View {
             }
 
             SettingsSection(
-                title: "Custom Terms",
-                detail: "Add uncommon words, acronyms, and names Transcripted should favor in dictation and meetings."
+                title: "Custom Words",
+                detail: "Names, acronyms, and phrases to favor."
             ) {
                 VStack(alignment: .leading, spacing: 10) {
                     TextEditor(text: Binding(
@@ -468,7 +499,7 @@ struct TranscriptedSettingsView: View {
                         .disabled(customDictionaryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
 
-                    Text("Use one term per line, or write spoken text -> preferred text for corrections like r three d bars -> r3dbars.")
+                    Text("One per line. Use spoken text -> preferred text for corrections.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -481,12 +512,12 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Models",
-                summary: "Parakeet is the default local transcription model. Advanced users can switch dictation, meetings, and imported audio to Whisper."
+                summary: "Choose the local engine used for transcription."
             )
 
             SettingsSection(
-                title: "Current Model",
-                detail: "This is the engine Transcripted will use for dictation, meetings, and imported audio."
+                title: "Active Model",
+                detail: "Used for dictation, meetings, and audio imports."
             ) {
                 SettingsStatusCard(
                     title: "Active transcription engine",
@@ -508,10 +539,10 @@ struct TranscriptedSettingsView: View {
             }
 
             SettingsSection(
-                title: "Advanced Preference",
-                detail: "Change this only when you want a different local transcription family. Parakeet stays the out-of-box default."
+                title: "Switch Model",
+                detail: "Parakeet is the default. Whisper is optional."
             ) {
-                DisclosureGroup("Show advanced model options", isExpanded: $showAdvancedModelControls) {
+                DisclosureGroup("Change model", isExpanded: $showAdvancedModelControls) {
                     VStack(alignment: .leading, spacing: 14) {
                         Picker("Preferred model", selection: Binding(
                             get: { preferredTranscriptionModel },
@@ -534,12 +565,12 @@ struct TranscriptedSettingsView: View {
                         }
 
                         HStack {
-                            Button("Use Default") {
+                            Button("Use Parakeet") {
                                 updatePreferredTranscriptionModel(.parakeetTDTv3)
                             }
                             .disabled(preferredTranscriptionModel == .parakeetTDTv3)
 
-                            Text("Changes apply to the next dictation, meeting, or imported audio file.")
+                            Text("Changes apply to the next capture.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -555,17 +586,17 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Meetings",
-                summary: "Control how Transcripted records meetings, imports audio files, and keeps speaker matching tidy."
+                summary: "Record meetings, import audio, and manage speakers."
             )
 
             SettingsSection(
-                title: "Meeting Actions",
-                detail: "Meetings can start live from your Mac or from an audio file you already recorded."
+                title: "Start or Import",
+                detail: "Record now, or transcribe a file."
             ) {
                 SettingsQuickLinkRow(
                     symbolName: "record.circle.fill",
                     title: "Start Meeting",
-                    detail: "Begin capturing your microphone and system audio together."
+                    detail: "Capture your mic and computer audio."
                 ) {
                     actions.startMeeting()
                 }
@@ -573,12 +604,12 @@ struct TranscriptedSettingsView: View {
                 SettingsQuickLinkRow(
                     symbolName: "waveform",
                     title: "Transcribe Audio File",
-                    detail: "Import a saved audio file and run it through the meeting transcription pipeline."
+                    detail: "Turn an audio file into meeting notes."
                 ) {
                     actions.importAudioFile()
                 }
 
-                Text("If a meeting action is blocked, check Privacy for microphone or system audio permissions.")
+                Text("Blocked? Open Privacy and check microphone or system audio.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -586,7 +617,7 @@ struct TranscriptedSettingsView: View {
             if !meetingSession.failedMeetings.isEmpty {
                 SettingsSection(
                     title: "Needs Attention",
-                    detail: "Retry or clear meetings that could not finish transcribing."
+                    detail: "Retry or clear unfinished meetings."
                 ) {
                     ForEach(meetingSession.failedMeetings) { item in
                         SettingsFailedMeetingRow(
@@ -607,8 +638,8 @@ struct TranscriptedSettingsView: View {
             }
 
             SettingsSection(
-                title: "Recent Meetings",
-                detail: "Open one of the last five saved meeting transcripts without digging through folders."
+                title: "Recent",
+                detail: "The last five saved meeting transcripts."
             ) {
                 if recentMeetings.isEmpty {
                     Text("No meeting transcripts saved yet.")
@@ -638,30 +669,30 @@ struct TranscriptedSettingsView: View {
     private var dictationsPage: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
-                title: "Dictations",
-                summary: "Control what happens after dictation finishes, including sound cues and pasting the latest saved dictation."
+                title: "Dictation",
+                summary: "Paste the latest dictation and set sound cues."
             )
 
             SettingsSection(
-                title: "Dictation Actions",
-                detail: "Use the latest saved dictation again without starting a new recording."
+                title: "Paste Last",
+                detail: "Use the newest saved dictation again."
             ) {
                 SettingsQuickLinkRow(
                     symbolName: "arrow.turn.down.right",
                     title: "Paste Last Dictation",
-                    detail: "Paste the newest saved dictation into the app you were just using."
+                    detail: "Paste into the app you were using."
                 ) {
                     actions.pasteLastDictation()
                 }
 
-                Text("Transcripted uses Accessibility to paste automatically. If that is unavailable, it falls back to copying the text.")
+                Text("If paste is unavailable, Transcripted copies the text.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             SettingsSection(
-                title: "Recent Dictations",
-                detail: "These are the newest saved dictations from the last few days. Opening one jumps to the markdown file for that day."
+                title: "Recent",
+                detail: "The newest saved dictations."
             ) {
                 if recentDictations.isEmpty {
                     Text("No dictations saved yet.")
@@ -681,8 +712,8 @@ struct TranscriptedSettingsView: View {
             }
 
             SettingsSection(
-                title: "Feedback Sounds",
-                detail: "Use quiet system sounds to confirm what happened after dictation starts or finishes."
+                title: "Sounds",
+                detail: "Play short cues for dictation state."
             ) {
                 Toggle("Play dictation feedback sounds", isOn: Binding(
                     get: { uiSoundsEnabled },
@@ -693,7 +724,7 @@ struct TranscriptedSettingsView: View {
                 ))
 
                 Text(uiSoundsEnabled
-                    ? "Transcripted will play subtle sounds when dictation starts, stops, completes, or ends with no speech."
+                    ? "Sounds play when dictation starts, stops, completes, or hears no speech."
                     : "Dictation sounds are off."
                 )
                 .font(.caption)
@@ -706,19 +737,19 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Storage",
-                summary: "Choose where captures live while keeping app-owned state, logs, and temporary files separate."
+                summary: "Choose where saved Markdown files live."
             )
 
             SettingsSection(
                 title: "Capture Library",
-                detail: "This is the main folder for the markdown files you may want to open yourself or hand to an agent later."
+                detail: "Your meeting and dictation Markdown files."
             ) {
                 StorageRow(title: "Capture library", url: captureLibraryURL)
                 StorageRow(title: "Meeting captures", url: MeetingStoragePaths.transcriptsFolder)
                 StorageRow(title: "Dictation captures", url: DictationStoragePaths.transcriptsFolder)
 
                 HStack {
-                    Button("Choose Capture Library") {
+                    Button("Choose Folder") {
                         chooseCaptureLibrary()
                     }
 
@@ -728,14 +759,14 @@ struct TranscriptedSettingsView: View {
                     }
                 }
 
-                Text("Choose a folder like an Obsidian vault if you want agents to read the raw Markdown captures directly.")
+                Text("Pick an Obsidian vault or any folder you want agents to read.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             SettingsSection(
                 title: "Support Folders",
-                detail: "These folders are usually only useful when troubleshooting, inspecting logs, or cleaning up storage."
+                detail: "Logs, cache, app state, and temporary audio."
             ) {
                 DisclosureGroup("Show support folders", isExpanded: $showSupportFolders) {
                     VStack(alignment: .leading, spacing: 12) {
@@ -758,12 +789,12 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Privacy",
-                summary: "Review the permissions Transcripted needs and choose whether optional reporting leaves this Mac."
+                summary: "Permissions and optional reporting."
             )
 
             SettingsSection(
                 title: "Permissions",
-                detail: "Transcripted only asks for permissions that help with local capture, paste-back, and optional meeting prompts."
+                detail: "Needed for capture, paste-back, and meeting prompts."
             ) {
                 ForEach(TranscriptedPermissionKind.allCases) { kind in
                     PermissionStatusRow(kind: kind, granted: permissionStates[kind] ?? false) {
@@ -774,8 +805,8 @@ struct TranscriptedSettingsView: View {
             }
 
             SettingsSection(
-                title: "Optional Reporting",
-                detail: "Crash reports and anonymous usage statistics stay separate, scoped, and scrubbed before anything leaves this Mac."
+                title: "Reporting",
+                detail: "Optional. Scrubbed before anything leaves this Mac."
             ) {
                 Toggle("Send crash and error reports", isOn: Binding(
                     get: { crashReportingEnabled },
@@ -787,7 +818,7 @@ struct TranscriptedSettingsView: View {
                 ))
                 .disabled(!CrashReporter.isAvailable)
 
-                Toggle("Send anonymous usage statistics", isOn: Binding(
+                Toggle("Send anonymous usage stats", isOn: Binding(
                     get: { anonymousAnalyticsEnabled },
                     set: { newValue in
                         anonymousAnalyticsEnabled = newValue
@@ -809,7 +840,7 @@ struct TranscriptedSettingsView: View {
                     }
                 }
 
-                Text("Transcripted never sends transcript text, audio, meeting titles, speaker names, source app names, emails, file paths, or raw URLs through either path.")
+                Text("Never sent: transcript text, audio, names, emails, file paths, raw URLs, or meeting titles.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -828,17 +859,17 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "About",
-                summary: "Transcripted is a local-first Mac app for dictation, meetings, and clean Markdown exports."
+                summary: "Version, updates, and support."
             )
 
             SettingsSection(
                 title: "Version",
-                detail: "Build info and update controls live here."
+                detail: "Build info and update controls."
             ) {
                 SettingsStatusCard(
                     title: "Transcripted",
                     status: TranscriptedSupportActions.appVersionDescription,
-                    detail: "Updates are delivered through Sparkle when the appcast is current and automatic checks are enabled.",
+                    detail: "Local-first dictation and meeting notes.",
                     tone: .ready
                 )
 
@@ -902,9 +933,9 @@ struct TranscriptedSettingsView: View {
 
     private var permissionsDetailLine: String {
         if missingRequiredPermissions.isEmpty {
-            return "Microphone and Accessibility are on. Optional meeting permissions can be adjusted any time."
+            return "Required permissions are on. Meeting permissions are optional."
         }
-        return "Turn on \(missingRequiredPermissions.map(\.title).joined(separator: " and ")) so Transcripted can record and paste back reliably."
+        return "Turn on \(missingRequiredPermissions.map(\.title).joined(separator: " and ")) to record and paste back."
     }
 
     private var isUsingDefaultCaptureLibrary: Bool {
@@ -914,19 +945,30 @@ struct TranscriptedSettingsView: View {
     private var crashReportingFootnote: String {
         if CrashReporter.isAvailable {
             return crashReportingEnabled
-                ? "Enabled. Transcripted will send scrubbed crash and error data to Sentry so reliability issues are easier to diagnose."
-                : "Off. Transcripted will keep crash and error details on this Mac only."
+                ? "On. Sends scrubbed crash and error data to Sentry."
+                : "Off. Crash and error details stay on this Mac."
         }
-        return "This build does not have a Sentry DSN configured yet, so crash and error reporting stay local."
+        return "Sentry is not configured in this build. Reports stay local."
     }
 
     private var analyticsFootnote: String {
         if AnalyticsReporter.isAvailable {
             return anonymousAnalyticsEnabled
-                ? "Enabled. Transcripted sends only allowlisted anonymous product events such as launches, dictation completions, and meeting workflow milestones."
-                : "Off. Transcripted will not send anonymous usage statistics unless you turn this back on."
+                ? "On. Sends only allowlisted anonymous product events."
+                : "Off. No anonymous usage stats leave this Mac."
         }
-        return "This build does not have a PostHog project key configured yet, so anonymous usage statistics stay disabled."
+        return "PostHog is not configured in this build. Usage stats stay off."
+    }
+
+    private func homeModelDetail(from modelCard: FirstRunModelCardState) -> String {
+        switch modelCard.tone {
+        case .ready:
+            return "\(effectiveTranscriptionModel.title) is ready on this Mac."
+        case .working:
+            return modelCard.title
+        case .failed:
+            return modelCard.detail
+        }
     }
 
     private func tone(for tone: FirstRunModelCardState.Tone) -> SettingsStatusCard.Tone {
@@ -1011,9 +1053,9 @@ struct TranscriptedSettingsView: View {
     private var customDictionaryStatusLine: String {
         let count = CustomDictionaryPreferences.entries(from: customDictionaryText).count
         if count == 0 {
-            return "No custom terms yet."
+            return "No custom words yet."
         }
-        return "\(count) custom term\(count == 1 ? "" : "s") active for new dictations and meetings."
+        return "\(count) custom word\(count == 1 ? "" : "s") active."
     }
 
     private func updateCustomDictionaryText(_ text: String) {
@@ -1057,7 +1099,7 @@ struct TranscriptedSettingsView: View {
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
         panel.prompt = "Choose"
-        panel.message = "Select the folder Transcripted should use as its capture library."
+        panel.message = "Choose where Transcripted saves meeting and dictation Markdown files."
         panel.directoryURL = captureLibraryURL
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -1091,7 +1133,7 @@ struct TranscriptedSettingsView: View {
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.applicationBundle]
         panel.prompt = "Add"
-        panel.message = "Choose an app where Transcripted should be allowed to send after dictation."
+        panel.message = "Choose an app where Transcripted may send after dictation."
         panel.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
 
         guard panel.runModal() == .OK,
@@ -1133,13 +1175,13 @@ struct TranscriptedSettingsView: View {
     private var aboutUpdateStatusDetail: String {
         switch sparkleUpdater.updateStatus.state {
         case .unknown, .readyToCheck:
-            return "Ask Sparkle to check whether a newer Transcripted release is ready."
+            return "Check for a newer release."
         case .checking:
-            return "Transcripted is probing for the latest available version now."
+            return "Looking for updates now."
         case .noUpdateAvailable:
-            return "This Mac is already on the newest version Sparkle can see right now."
+            return "This Mac is on the newest visible version."
         case .updateAvailable(let version):
-            return "Version \(version) is ready. Use the button below to open the standard Sparkle update flow."
+            return "Version \(version) is ready."
         }
     }
 
@@ -1435,13 +1477,13 @@ private struct AgentConnectionSettingsPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
-                title: "Connect Your Agent",
-                summary: "Copy one smart prompt with the Summarize and Search Memory starter skills. The agent picks the best route automatically."
+                title: "Agent",
+                summary: "Copy one prompt so your agent can read Transcripted notes."
             )
 
             SettingsSection(
-                title: "Main Path",
-                detail: "Most people only need the main prompt. Local agents read Transcripted directly; remote chats get one clear next step if they cannot reach this Mac."
+                title: "Main Prompt",
+                detail: "Best first step for Codex, Claude, Cursor, and similar agents."
             ) {
                 ForEach(Array(AgentConnectionGuide.starterSkills.enumerated()), id: \.offset) { _, skill in
                     SettingsQuickLinkRow(
@@ -1453,7 +1495,7 @@ private struct AgentConnectionSettingsPage: View {
                 }
 
                 HStack {
-                    Button("Copy Agent Setup") {
+                    Button("Copy Prompt") {
                         viewModel.copyStarterPrompt()
                     }
                     .buttonStyle(.borderedProminent)
@@ -1461,15 +1503,15 @@ private struct AgentConnectionSettingsPage: View {
             }
 
             SettingsSection(
-                title: "Optional MCP Setup",
-                detail: "Only use this if your agent supports MCP and you want the direct read-only tool connection."
+                title: "Direct Tools",
+                detail: "Optional read-only MCP setup."
             ) {
                 Text(viewModel.context.mcpSetupText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Button("Copy MCP Setup") {
+                Button("Copy Setup") {
                     viewModel.copyMCPSetup()
                 }
                 .buttonStyle(.bordered)
@@ -1477,11 +1519,11 @@ private struct AgentConnectionSettingsPage: View {
 
             SettingsSection(
                 title: "Manual Folders",
-                detail: "These are fallback paths for manual setup or quick inspection."
+                detail: "Fallback paths for agents or quick inspection."
             ) {
                 AgentFolderRow(
                     name: "Meetings",
-                    detail: "Saved meeting markdown files live here.",
+                    detail: "Meeting Markdown files.",
                     path: viewModel.context.meetingsFolderURL.path,
                     isAvailable: viewModel.fileExists(viewModel.context.meetingsFolderURL)
                 ) {
@@ -1489,8 +1531,8 @@ private struct AgentConnectionSettingsPage: View {
                 }
 
                 AgentFolderRow(
-                    name: "Dictations",
-                    detail: "Saved dictation days and entries live here.",
+                    name: "Dictation",
+                    detail: "Dictation Markdown files.",
                     path: viewModel.context.dictationsFolderURL.path,
                     isAvailable: viewModel.fileExists(viewModel.context.dictationsFolderURL)
                 ) {

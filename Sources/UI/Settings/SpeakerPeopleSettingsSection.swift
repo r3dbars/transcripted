@@ -205,7 +205,7 @@ struct SpeakerPeopleSettingsSection: View {
     var body: some View {
         SettingsSection(
             title: "People in the Room",
-            detail: "When you have multiple people physically in the same room speaking into the mic (and possibly others joining remotely), Transcripted can try to identify each local speaker separately."
+            detail: "Split the local mic into separate speakers."
         ) {
             Toggle(
                 "Identify multiple local speakers",
@@ -218,14 +218,14 @@ struct SpeakerPeopleSettingsSection: View {
                 )
             )
 
-            Text("After your first meeting with this on, name yourself once in the \u{201C}People in the room\u{201D} section of the review sheet. Future meetings will recognize your voice automatically. If the split looks wrong for any meeting, click \u{201C}Keep as You\u{201D} in the sheet.")
+            Text("After a meeting, name each local speaker once. If the split looks wrong, choose \"Keep as You\".")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
 
         SettingsSection(
             title: "People",
-            detail: "Review the speaker database Transcripted uses for meeting matching. Rename or merge people to keep future matches clean. Deleting a person stops future matching but does not rewrite past transcripts."
+            detail: "Rename, merge, or delete saved speaker profiles."
         ) {
             HStack(spacing: 12) {
                 TextField("Search people or IDs", text: $model.searchText)
