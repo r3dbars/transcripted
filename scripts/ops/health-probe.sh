@@ -191,9 +191,11 @@ probe_qa() {
     exit 0
   fi
 
-  local repo issue_number script_path
+  local repo issue_number script_path state_file quiet_no_change
   repo="${QA_GATE_REPO:-r3dbars/transcripted}"
   issue_number="${QA_GATE_ISSUE_NUMBER:-428}"
+  state_file="${QA_GATE_STATE_FILE:-}"
+  quiet_no_change="${QA_GATE_QUIET_NO_CHANGE:-0}"
   script_path="$REPO_ROOT/scripts/ops/qa-gate-check.sh"
 
   if [[ ! -x "$script_path" ]]; then
@@ -205,11 +207,22 @@ probe_qa() {
 
   set +e
   local output
-  output="$("$script_path" "$repo" "$issue_number" 2>&1)"
+  local cmd=("$script_path")
+  if [[ -n "$state_file" ]]; then
+    cmd+=(--state-file "$state_file")
+  fi
+  if [[ "$quiet_no_change" == "1" ]]; then
+    cmd+=(--quiet-no-change)
+  fi
+  cmd+=("$repo" "$issue_number")
+
+  output="$("${cmd[@]}" 2>&1)"
   local rc=$?
   set -e
 
-  echo "$output"
+  if [[ -n "$output" ]]; then
+    echo "$output"
+  fi
 
   # Keep the lane green for PASS and pending states.
   # Only FAIL (2) or operational errors should fail the probe.

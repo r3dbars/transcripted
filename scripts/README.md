@@ -38,10 +38,14 @@ not have to carry the full operational logic:
   - QA lane defaults to `r3dbars/transcripted#428` and can be overridden with:
     - `QA_GATE_REPO=<owner/repo>`
     - `QA_GATE_ISSUE_NUMBER=<issue-number>`
+    - `QA_GATE_STATE_FILE=<path>` (persist last-seen gate state)
+    - `QA_GATE_QUIET_NO_CHANGE=1` (suppress output when gate state is unchanged)
   - See `docs/ops-credentials.md` for credential setup and privacy guidelines
 - `scripts/ops/qa-gate-check.sh` — check a GitHub issue for a top-level QA `PASS` / `FAIL` comment
   - Usage: `bash scripts/ops/qa-gate-check.sh <owner/repo> <issue-number>`
   - Optional: `--json` for structured output (status object with `repo`, `issue`, `status`)
+  - Optional: `--state-file <path>` to persist last-seen status metadata
+  - Optional: `--quiet-no-change` to emit nothing when status/comment state is unchanged
   - Exit codes:
     - `0` = `PASS`
     - `2` = `FAIL`

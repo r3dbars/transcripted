@@ -13,15 +13,38 @@ set -euo pipefail
 usage() {
   echo "Usage: bash scripts/ops/qa-gate-check.sh <owner/repo> <issue-number>"
   echo "Optional: --json (print structured status output)"
+  echo "Optional: --state-file <path> (persist last seen gate state)"
+  echo "Optional: --quiet-no-change (suppress output if state did not change)"
   echo "Example: bash scripts/ops/qa-gate-check.sh r3dbars/transcripted 428"
 }
 
 JSON_MODE=0
+STATE_FILE=""
+QUIET_NO_CHANGE=0
 
-if [[ "${1:-}" == "--json" ]]; then
-  JSON_MODE=1
-  shift
-fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --json)
+      JSON_MODE=1
+      shift
+      ;;
+    --state-file)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --state-file requires a path"
+        exit 1
+      fi
+      STATE_FILE="$2"
+      shift 2
+      ;;
+    --quiet-no-change)
+      QUIET_NO_CHANGE=1
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
@@ -53,6 +76,8 @@ fi
 
 # Only top-level issue comments are checked here (not review comments).
 COMMENTS_JSON=$(gh api "repos/$REPO/issues/$ISSUE_NUMBER/comments")
+COMMENTS_COUNT=$(echo "$COMMENTS_JSON" | jq -r 'length')
+LATEST_COMMENT_ID=$(echo "$COMMENTS_JSON" | jq -r 'sort_by(.created_at) | last | .id // 0')
 
 LATEST_RESULT=$(
   echo "$COMMENTS_JSON" | jq -r '
@@ -76,29 +101,59 @@ LATEST_RESULT=$(
 )
 
 if [[ "$LATEST_RESULT" == "PASS" ]]; then
-  if [[ $JSON_MODE -eq 1 ]]; then
-    jq -n --arg repo "$REPO" --argjson issue "$ISSUE_NUMBER" --arg status "PASS" \
-      '{repo: $repo, issue: $issue, status: $status}'
-  else
-    echo "PASS: issue #$ISSUE_NUMBER has a top-level PASS comment"
-  fi
-  exit 0
+  STATUS="PASS"
+  EXIT_CODE=0
+elif [[ "$LATEST_RESULT" == "FAIL" ]]; then
+  STATUS="FAIL"
+  EXIT_CODE=2
+else
+  STATUS="PENDING"
+  EXIT_CODE=3
 fi
 
-if [[ "$LATEST_RESULT" == "FAIL" ]]; then
-  if [[ $JSON_MODE -eq 1 ]]; then
-    jq -n --arg repo "$REPO" --argjson issue "$ISSUE_NUMBER" --arg status "FAIL" \
-      '{repo: $repo, issue: $issue, status: $status}'
-  else
-    echo "FAIL: issue #$ISSUE_NUMBER has a top-level FAIL comment"
+NO_CHANGE=0
+if [[ -n "$STATE_FILE" && -f "$STATE_FILE" ]]; then
+  PREV_STATUS=$(jq -r '.status // ""' "$STATE_FILE" 2>/dev/null || echo "")
+  PREV_COUNT=$(jq -r '.comments_count // ""' "$STATE_FILE" 2>/dev/null || echo "")
+  PREV_LATEST_ID=$(jq -r '.latest_comment_id // ""' "$STATE_FILE" 2>/dev/null || echo "")
+  if [[ "$PREV_STATUS" == "$STATUS" && "$PREV_COUNT" == "$COMMENTS_COUNT" && "$PREV_LATEST_ID" == "$LATEST_COMMENT_ID" ]]; then
+    NO_CHANGE=1
   fi
-  exit 2
+fi
+
+if [[ -n "$STATE_FILE" ]]; then
+  mkdir -p "$(dirname "$STATE_FILE")"
+  jq -n \
+    --arg repo "$REPO" \
+    --argjson issue "$ISSUE_NUMBER" \
+    --arg status "$STATUS" \
+    --argjson comments_count "$COMMENTS_COUNT" \
+    --argjson latest_comment_id "$LATEST_COMMENT_ID" \
+    '{repo: $repo, issue: $issue, status: $status, comments_count: $comments_count, latest_comment_id: $latest_comment_id}' \
+    > "$STATE_FILE"
+fi
+
+if [[ $QUIET_NO_CHANGE -eq 1 && $NO_CHANGE -eq 1 ]]; then
+  exit "$EXIT_CODE"
 fi
 
 if [[ $JSON_MODE -eq 1 ]]; then
-  jq -n --arg repo "$REPO" --argjson issue "$ISSUE_NUMBER" --arg status "PENDING" \
-    '{repo: $repo, issue: $issue, status: $status}'
+  jq -n \
+    --arg repo "$REPO" \
+    --argjson issue "$ISSUE_NUMBER" \
+    --arg status "$STATUS" \
+    --argjson comments_count "$COMMENTS_COUNT" \
+    --argjson latest_comment_id "$LATEST_COMMENT_ID" \
+    --argjson no_change "$NO_CHANGE" \
+    '{repo: $repo, issue: $issue, status: $status, comments_count: $comments_count, latest_comment_id: $latest_comment_id, no_change: $no_change}'
 else
-  echo "PENDING: no top-level PASS/FAIL comment on issue #$ISSUE_NUMBER"
+  if [[ "$STATUS" == "PASS" ]]; then
+    echo "PASS: issue #$ISSUE_NUMBER has a top-level PASS comment"
+  elif [[ "$STATUS" == "FAIL" ]]; then
+    echo "FAIL: issue #$ISSUE_NUMBER has a top-level FAIL comment"
+  else
+    echo "PENDING: no top-level PASS/FAIL comment on issue #$ISSUE_NUMBER"
+  fi
 fi
-exit 3
+
+exit "$EXIT_CODE"
