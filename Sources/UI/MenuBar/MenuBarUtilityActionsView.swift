@@ -91,7 +91,7 @@ final class MenuBarUtilityActionsView: NSView {
         super.layout()
 
         var y: CGFloat = 0
-        for row in [connectAgentRow, feedbackRow, updatesRow, settingsRow, quitRow] {
+        for row in allRows {
             let rowHeight = row.intrinsicContentSize.height
             row.frame = NSRect(x: 0, y: y, width: bounds.width, height: rowHeight)
             y += rowHeight + 1
@@ -105,8 +105,14 @@ final class MenuBarUtilityActionsView: NSView {
     func dismissTransientUI() {}
 
     var intrinsicHeight: CGFloat {
-        [connectAgentRow, feedbackRow, updatesRow, settingsRow, quitRow]
+        let rows = allRows
+        let rowSpacing = max(0, rows.count - 1)
+        return rows
             .map { $0.intrinsicContentSize.height }
-            .reduce(0, +) + 4
+            .reduce(0, +) + CGFloat(rowSpacing)
+    }
+
+    private var allRows: [MenuBarActionRowView] {
+        [connectAgentRow, feedbackRow, updatesRow, settingsRow, quitRow]
     }
 }

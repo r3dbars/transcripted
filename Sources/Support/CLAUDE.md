@@ -4,7 +4,7 @@
 
 `Sources/Support/` holds app-wide helpers that do not belong to a single UI or pipeline surface. These types mostly wrap persisted preferences, shared constants, permission access, storage paths, or low-level paste / launch behavior used across dictation and meetings.
 
-## Files (11 Swift files)
+## Files (12 Swift files)
 
 - `ClipboardRestoringTextPaster.swift` — paste helper that preserves clipboard contents while inserting the latest dictation into the target app
 - `CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements plus text post-processing helpers
@@ -13,6 +13,7 @@
 - `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior
 - `LaunchAtLoginPreferences.swift` — persisted first-run preference state around launch-at-login UX
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
+- `MenuBarVisibilityPreferences.swift` — persisted Home toggles for optional menubar popover rows
 - `TranscriptedConstants.swift` — shared timing thresholds and app-wide behavior constants
 - `TranscriptedPermissionAccess.swift` — shared permission status, prompting, and Settings-deep-link helpers for microphone, accessibility, system-audio recording, and calendar access
 - `TranscriptedStoragePaths.swift` — canonical app-support path helpers for captures, state, cache, logs, and temporary files
@@ -41,6 +42,7 @@ Relevant direct coverage includes:
 - `Tests/CustomDictionaryPreferencesTests.swift`
 - `Tests/DictationAutoSendPreferencesTests.swift`
 - `Tests/LaunchAtLoginPreferencesTests.swift`
+- `Tests/MenuBarVisibilityPreferencesTests.swift`
 - `Tests/TranscriptedConstantsTests.swift`
 - `Tests/TranscriptedPermissionAccessTests.swift`
 - `Tests/TranscriptedStoragePathsTests.swift`
