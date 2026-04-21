@@ -82,6 +82,7 @@ private func shouldDescendInto(_ url: URL, root: URL) -> Bool {
     let relativePath = url.path.replacingOccurrences(of: root.path + "/", with: "")
     let excludedPrefixes = [
         ".build/",
+        ".claude/worktrees/",
         ".deps-build/",
         ".git/",
         ".swiftpm/",
