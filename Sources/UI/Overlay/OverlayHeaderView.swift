@@ -237,7 +237,8 @@ final class OverlayHeaderView: NSView {
     func update(
         state: FloatingOverlayController.OverlayState,
         dictationShortcutHint: String,
-        loadingTitle: String?
+        loadingTitle: String?,
+        isError: Bool = false
     ) {
         // Mode label text + color
         switch state {
@@ -245,7 +246,7 @@ final class OverlayHeaderView: NSView {
             modeLabel.stringValue = "Listening"
             modeLabel.textColor = OverlayTokens.textPrimary
         case .drafting:
-            modeLabel.stringValue = "Transcribing"
+            modeLabel.stringValue = isError ? "Dictation issue" : "Transcribing"
             modeLabel.textColor = OverlayTokens.textPrimary
         case .success:
             modeLabel.stringValue = "Pasted"
@@ -259,7 +260,7 @@ final class OverlayHeaderView: NSView {
         }
 
         // Spinner visibility
-        let showSpinner = state == .drafting || state == .loading
+        let showSpinner = (state == .drafting && !isError) || state == .loading
         spinner.isHidden = !showSpinner
         if showSpinner { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
 

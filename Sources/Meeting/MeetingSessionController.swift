@@ -361,7 +361,7 @@ final class MeetingSessionController: ObservableObject {
     private func resolveStartRecordingPermissionDecision(
         trigger: StartTrigger
     ) async -> MeetingRecordingStartDecision {
-        let microphoneGranted = TranscriptedPermissionAccess.isGranted(.microphone)
+        let microphoneGranted = await TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded()
         var systemAudioRecordingGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
         var startDecision = MeetingRecordingStartGate.evaluate(
             microphoneGranted: microphoneGranted,

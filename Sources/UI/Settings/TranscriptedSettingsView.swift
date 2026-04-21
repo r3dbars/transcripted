@@ -11,7 +11,7 @@ private struct SettingsSidebarSection: Identifiable {
 
     static let defaultSections = [
         SettingsSidebarSection(id: "home", title: nil, pages: [.home]),
-        SettingsSidebarSection(id: "recording", title: "Recording", pages: [.meetings, .dictations, .shortcuts]),
+        SettingsSidebarSection(id: "recording", title: "Recording", pages: [.meetings, .dictations, .people, .shortcuts]),
         SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .models, .storage, .connectAgent]),
         SettingsSidebarSection(id: "trust", title: "Trust", pages: [.privacy, .about])
     ]
@@ -27,7 +27,6 @@ struct TranscriptedSettingsView: View {
     private let actions: TranscriptedSettingsActions
     private let sidebarSections = SettingsSidebarSection.defaultSections
 
-    @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
     @State private var dictationShortcutMode = HotkeyPreferences.dictationShortcutMode()
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
@@ -46,6 +45,7 @@ struct TranscriptedSettingsView: View {
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
     @State private var recentMeetings = RecentMeetingsScanner.loadRecent(limit: 5)
     @State private var recentDictations = DictationTranscriptStore.recentSavedDictations(limit: 5)
+    @State private var menuBarItemVisibility = MenuBarVisibilityPreferences.snapshot()
     @State private var showSupportFolders = false
     @State private var copiedAgentMeetingID: String?
 
@@ -134,6 +134,9 @@ struct TranscriptedSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .transcriptionModelPreferenceDidChange)) { _ in
             preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .menuBarVisibilityPreferencesDidChange)) { _ in
+            refreshMenuBarVisibility()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshPermissions()
             refreshRecentCaptures()
@@ -163,6 +166,8 @@ struct TranscriptedSettingsView: View {
             meetingsPage
         case .dictations:
             dictationsPage
+        case .people:
+            peoplePage
         case .storage:
             storagePage
         case .connectAgent:
@@ -182,8 +187,8 @@ struct TranscriptedSettingsView: View {
             )
 
             let columns = [
-                GridItem(.flexible(minimum: 220), spacing: 14),
-                GridItem(.flexible(minimum: 220), spacing: 14)
+                GridItem(.flexible(minimum: 260), spacing: 14),
+                GridItem(.flexible(minimum: 260), spacing: 14)
             ]
 
             LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
@@ -192,6 +197,9 @@ struct TranscriptedSettingsView: View {
                     title: "Start Dictation",
                     detail: "Speak into the app you were using.",
                     tone: .accent,
+                    menuBarVisibility: menuBarVisibilityBinding(for: .startDictation),
+                    actionHelp: "Start dictation now.",
+                    menuBarVisibilityHelp: "Show or hide Start Dictation in the menu bar popover.",
                     action: actions.startDictation
                 )
 
@@ -200,22 +208,31 @@ struct TranscriptedSettingsView: View {
                     title: "Start Meeting",
                     detail: "Record your mic and computer audio.",
                     tone: .accent,
+                    menuBarVisibility: menuBarVisibilityBinding(for: .startMeeting),
+                    actionHelp: "Start a meeting recording now.",
+                    menuBarVisibilityHelp: "Show or hide Start Meeting in the menu bar popover.",
                     action: actions.startMeeting
                 )
 
                 SettingsActionTile(
-                    symbolName: "waveform",
-                    title: "Transcribe Audio File",
-                    detail: "Turn a recording into notes.",
-                    action: actions.importAudioFile
+                    symbolName: "arrow.turn.down.right",
+                    title: "Paste Last Dictation",
+                    detail: "Paste the newest saved dictation.",
+                    menuBarVisibility: menuBarVisibilityBinding(for: .pasteLastDictation),
+                    actionHelp: "Paste the newest saved dictation into the current app.",
+                    menuBarVisibilityHelp: "Show or hide Paste Last Dictation in the menu bar popover.",
+                    action: actions.pasteLastDictation
                 )
 
                 SettingsActionTile(
-                    symbolName: "sparkles",
-                    title: "Connect Agent",
-                    detail: "Let your agent read saved notes.",
+                    symbolName: "clock.arrow.circlepath",
+                    title: "Recent Meetings",
+                    detail: "Open saved meeting notes.",
+                    menuBarVisibility: menuBarVisibilityBinding(for: .recentMeetings),
+                    actionHelp: "Open the Meetings page to browse saved meeting notes.",
+                    menuBarVisibilityHelp: "Show or hide Recent Meetings in the menu bar popover.",
                     action: {
-                        navigation.selectedPage = .connectAgent
+                        navigation.selectedPage = .meetings
                     }
                 )
             }
@@ -293,9 +310,17 @@ struct TranscriptedSettingsView: View {
                 SettingsQuickLinkRow(
                     symbolName: "person.2.wave.2.fill",
                     title: "Meetings",
-                    detail: "Import audio and manage speakers."
+                    detail: "Record calls and import audio."
                 ) {
                     navigation.selectedPage = .meetings
+                }
+
+                SettingsQuickLinkRow(
+                    symbolName: "person.2.fill",
+                    title: "People",
+                    detail: "Review saved speakers and duplicates."
+                ) {
+                    navigation.selectedPage = .people
                 }
 
                 SettingsQuickLinkRow(
@@ -327,7 +352,7 @@ struct TranscriptedSettingsView: View {
 
             SettingsSection(
                 title: "Keys",
-                detail: "Set one shortcut for dictation and one for meetings."
+                detail: "Set one dictation key and one meeting shortcut."
             ) {
                 HotkeyRecorderContainer()
                     .frame(height: 76)
@@ -348,21 +373,6 @@ struct TranscriptedSettingsView: View {
                 Text(dictationShortcutMode.summary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
-                Toggle("Tap the right Option key for hands-free dictation", isOn: Binding(
-                    get: { rightOptionEnabled },
-                    set: { newValue in
-                        rightOptionEnabled = newValue
-                        HotkeyPreferences.setRightOptionDictation(enabled: newValue)
-                    }
-                ))
-
-                Text(rightOptionEnabled
-                    ? "Right Option starts and stops dictation with taps."
-                    : "Dictation uses only the shortcut above."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
 
             SettingsSection(
@@ -604,7 +614,7 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Meetings",
-                summary: "Record meetings, import audio, and manage speakers."
+                summary: "Record meetings, import audio, and open recent transcripts."
             )
 
             SettingsSection(
@@ -679,6 +689,15 @@ struct TranscriptedSettingsView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var peoplePage: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "People",
+                summary: "Review saved speakers, samples, and possible duplicates."
+            )
 
             SpeakerPeopleSettingsSection(model: speakerPeopleModel)
         }
@@ -1014,8 +1033,8 @@ struct TranscriptedSettingsView: View {
         refreshPermissions()
         refreshStoragePaths()
         refreshRecentCaptures()
-        rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
         dictationShortcutMode = HotkeyPreferences.dictationShortcutMode()
+        refreshMenuBarVisibility()
         refreshLaunchAtLoginState()
         customDictionaryText = CustomDictionaryPreferences.rawText()
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
@@ -1043,6 +1062,10 @@ struct TranscriptedSettingsView: View {
     private func refreshRecentCaptures() {
         recentMeetings = RecentMeetingsScanner.loadRecent(limit: 5)
         recentDictations = DictationTranscriptStore.recentSavedDictations(limit: 5)
+    }
+
+    private func refreshMenuBarVisibility() {
+        menuBarItemVisibility = MenuBarVisibilityPreferences.snapshot()
     }
 
     private func refreshLaunchAtLoginState() {
@@ -1090,6 +1113,16 @@ struct TranscriptedSettingsView: View {
         Task { @MainActor in
             await sttRouter.initializeSelectedModel()
         }
+    }
+
+    private func menuBarVisibilityBinding(for item: MenuBarOptionalItem) -> Binding<Bool> {
+        Binding(
+            get: { menuBarItemVisibility[item] ?? true },
+            set: { newValue in
+                menuBarItemVisibility[item] = newValue
+                MenuBarVisibilityPreferences.setVisible(item, newValue)
+            }
+        )
     }
 
     private func sendTestSentryEvent() {
