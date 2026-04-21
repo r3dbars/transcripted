@@ -1,0 +1,736 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transcripted Health Brief - 2026-04-20</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --surface-soft: #eef2f6;
+      --ink: #101820;
+      --muted: #52606d;
+      --faint: #7b8794;
+      --line: #d8dee6;
+      --green: #147d64;
+      --green-bg: #e5f4ef;
+      --amber: #9f580a;
+      --amber-bg: #fff1d6;
+      --red: #b42318;
+      --red-bg: #fde7e3;
+      --blue: #2458a6;
+      --blue-bg: #e7eefb;
+      --violet: #6750a4;
+      --violet-bg: #eee9fb;
+      --shadow: 0 18px 48px rgba(16, 24, 32, 0.08);
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      line-height: 1.48;
+    }
+
+    a {
+      color: inherit;
+      text-decoration-color: rgba(36, 88, 166, 0.45);
+      text-underline-offset: 0.18em;
+    }
+
+    code {
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      padding: 0.08rem 0.3rem;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #f7f9fb;
+      white-space: nowrap;
+    }
+
+    .page {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 28px auto 56px;
+    }
+
+    .hero {
+      background: #101820;
+      color: #fff;
+      border-radius: var(--radius);
+      padding: 34px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero p,
+    .hero .meta {
+      color: rgba(255, 255, 255, 0.76);
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 22px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .pill.dark {
+      color: var(--muted);
+      border-color: var(--line);
+      background: var(--surface);
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      max-width: 860px;
+      font-size: clamp(2.35rem, 5vw, 4.6rem);
+      line-height: 0.98;
+      letter-spacing: 0;
+    }
+
+    .hero-summary {
+      max-width: 820px;
+      margin-top: 18px;
+      font-size: clamp(1rem, 1.8vw, 1.2rem);
+    }
+
+    .section {
+      margin-top: 18px;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 18px;
+      margin-bottom: 16px;
+    }
+
+    h2 {
+      font-size: clamp(1.35rem, 2.3vw, 2rem);
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      font-size: 1.02rem;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .small {
+      color: var(--faint);
+      font-size: 0.88rem;
+    }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .grid.four {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      min-width: 0;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+
+    .card.soft {
+      background: var(--surface-soft);
+    }
+
+    .label {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      margin-bottom: 10px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 0.74rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .label.red {
+      color: var(--red);
+      background: var(--red-bg);
+    }
+
+    .label.amber {
+      color: var(--amber);
+      background: var(--amber-bg);
+    }
+
+    .label.green {
+      color: var(--green);
+      background: var(--green-bg);
+    }
+
+    .label.blue {
+      color: var(--blue);
+      background: var(--blue-bg);
+    }
+
+    .label.violet {
+      color: var(--violet);
+      background: var(--violet-bg);
+    }
+
+    .big {
+      margin-top: 6px;
+      font-size: clamp(2rem, 4vw, 3.1rem);
+      line-height: 1;
+      font-weight: 850;
+      letter-spacing: 0;
+    }
+
+    .bar-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 138px minmax(80px, 1fr) 70px;
+      gap: 10px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .track {
+      height: 9px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e4e9ef;
+    }
+
+    .fill {
+      height: 100%;
+      border-radius: inherit;
+      background: var(--blue);
+    }
+
+    .fill.green {
+      background: var(--green);
+    }
+
+    .fill.amber {
+      background: var(--amber);
+    }
+
+    .fill.red {
+      background: var(--red);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+
+    th,
+    td {
+      padding: 12px;
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--line);
+    }
+
+    th {
+      color: var(--muted);
+      background: #f5f7fa;
+      font-size: 0.76rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    .callout {
+      padding: 16px;
+      border-left: 4px solid var(--red);
+      border-radius: var(--radius);
+      background: var(--red-bg);
+    }
+
+    .callout.good {
+      border-left-color: var(--green);
+      background: var(--green-bg);
+    }
+
+    .callout.watch {
+      border-left-color: var(--amber);
+      background: var(--amber-bg);
+    }
+
+    .stack {
+      display: grid;
+      gap: 12px;
+    }
+
+    .source-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .source-links a {
+      display: inline-flex;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    @media (max-width: 900px) {
+      .grid.four,
+      .grid.three,
+      .grid.two {
+        grid-template-columns: 1fr;
+      }
+
+      .section-header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .bar-row {
+        grid-template-columns: 112px minmax(64px, 1fr) 58px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div class="meta">
+        <span class="pill">Transcripted health brief</span>
+        <span class="pill">Generated Apr 20, 2026, 8:26 PM CDT</span>
+        <span class="pill">Window: last 7 to 14 days</span>
+      </div>
+      <h1>The app is getting real use. The next win is making audio start boring.</h1>
+      <p class="hero-summary">
+        Transcripted is not in a dead-data state: dictation and meeting workflows are being used heavily for an early Mac app. The main product risk is a real production Parakeet audio-engine start failure on <code>1.1.12</code>; <code>1.1.13</code> has early successful usage, but not enough runtime yet to declare it clean.
+      </p>
+    </header>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <h2>At A Glance</h2>
+          <p class="muted">Decision-level read, not a dashboard dump.</p>
+        </div>
+        <span class="pill dark">Local repo: clean at scan time, detached at <code>origin/main</code></span>
+      </div>
+
+      <div class="grid four">
+        <article class="card">
+          <span class="label green">Latest release</span>
+          <h3><code>v1.1.13</code> is published and wired</h3>
+          <div class="big">5</div>
+          <p class="muted">DMG downloads so far. Sparkle appcast and Homebrew cask both point at <code>1.1.13</code>.</p>
+        </article>
+
+        <article class="card">
+          <span class="label blue">Usage</span>
+          <h3>Weekly active devices</h3>
+          <div class="big">37</div>
+          <p class="muted">PostHog shows 498 launches in the same 7-day window.</p>
+        </article>
+
+        <article class="card">
+          <span class="label red">Main issue</span>
+          <h3>Speech engine start failures</h3>
+          <div class="big">111</div>
+          <p class="muted">All production events, all on <code>transcripted@1.1.12</code>, last seen Apr 20 at 7:11 PM CDT.</p>
+        </article>
+
+        <article class="card">
+          <span class="label violet">Distribution</span>
+          <h3>GitHub interest is ahead of installs</h3>
+          <div class="big">854</div>
+          <p class="muted">14-day repo views, with 106 unique viewers, 8,399 clones, and 9 new stars.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <h2>Brief</h2>
+          <p class="muted">Current state in one sentence.</p>
+        </div>
+      </div>
+      <div class="callout good">
+        <strong>Transcripted is in a healthy early-release loop:</strong> real usage is happening, release plumbing is working, and the highest-leverage product fix is to harden the Parakeet audio-start path before chasing broader growth work.
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <h2>Main Issue</h2>
+          <p class="muted">This is the first thing I would fix.</p>
+        </div>
+        <a class="pill dark" href="https://r3dbars.sentry.io/issues/APPLE-MACOS-V">APPLE-MACOS-V</a>
+      </div>
+
+      <div class="grid two">
+        <article class="card">
+          <span class="label red">Fix now</span>
+          <h3><code>parakeet.audio_engine_start_failed</code></h3>
+          <p class="muted">
+            This is a real core-workflow bug, not instrumentation noise. It fires when dictation tries to start the speech audio engine and <code>AVAudioEngine.start()</code> fails after tap setup.
+          </p>
+          <ul>
+            <li>111 production events, first seen Apr 20 at 9:35 AM CDT.</li>
+            <li>100% of the issue is tagged <code>release=transcripted@1.1.12</code>.</li>
+            <li>Event context says Parakeet was loaded, meeting state was ready, and STT was not already recording.</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <span class="label amber">Likely area</span>
+          <h3>Audio graph lifecycle around dictation start</h3>
+          <p class="muted">
+            The relevant code path is <code>Sources/Speech/ParakeetEngine.swift</code>: it installs an input tap, prepares the engine, then starts it. A failure removes the tap and returns false, but it does not yet look like a full graph rebuild/retry path.
+          </p>
+          <ul>
+            <li>Pair this with <code>APPLE-MACOS-J</code>, a fatal CoreAudio <code>installTap</code> issue seen on nearby releases.</li>
+            <li>Add privacy-safe context only: route/device class, sample rates, channel counts, prewarm state, retry count.</li>
+            <li>Do not send transcript text, audio paths, meeting titles, names, emails, or absolute file paths.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <h2>Product Usage</h2>
+          <p class="muted">The usage story is stronger than the reliability story.</p>
+        </div>
+        <span class="pill dark">PostHog project 378427</span>
+      </div>
+
+      <div class="grid three">
+        <article class="card">
+          <span class="label blue">Dictation</span>
+          <h3>High-volume core loop</h3>
+          <div class="big">80.9%</div>
+          <p class="muted">923 completed out of 1,141 dictation starts in the 7-day window.</p>
+          <div class="bar-list" aria-label="Dictation event counts">
+            <div class="bar-row"><span>Started</span><span class="track"><span class="fill blue" style="width:100%"></span></span><strong>1,141</strong></div>
+            <div class="bar-row"><span>Completed</span><span class="track"><span class="fill green" style="width:81%"></span></span><strong>923</strong></div>
+            <div class="bar-row"><span>No speech</span><span class="track"><span class="fill amber" style="width:8%"></span></span><strong>88</strong></div>
+          </div>
+        </article>
+
+        <article class="card">
+          <span class="label green">Meetings</span>
+          <h3>Surprisingly solid save rate</h3>
+          <div class="big">124</div>
+          <p class="muted">Meeting transcripts saved in 7 days, with 8 tracked failures.</p>
+          <div class="bar-list" aria-label="Meeting event counts">
+            <div class="bar-row"><span>Started</span><span class="track"><span class="fill blue" style="width:100%"></span></span><strong>135</strong></div>
+            <div class="bar-row"><span>Saved</span><span class="track"><span class="fill green" style="width:92%"></span></span><strong>124</strong></div>
+            <div class="bar-row"><span>Failed</span><span class="track"><span class="fill red" style="width:6%"></span></span><strong>8</strong></div>
+          </div>
+        </article>
+
+        <article class="card">
+          <span class="label amber">New release</span>
+          <h3><code>1.1.13</code> is too young, but alive</h3>
+          <div class="big">17</div>
+          <p class="muted">Dictation completions already seen on <code>1.1.13</code>, plus 1 meeting transcript saved and 0 meeting failures. That is encouraging, not conclusive.</p>
+        </article>
+      </div>
+
+      <div class="grid two" style="margin-top: 14px;">
+        <article class="card soft">
+          <span class="label amber">Failure shape</span>
+          <h3>Most meeting failures are probably product-state handling</h3>
+          <p class="muted">6 of 8 meeting transcript failures are <code>recording_too_short</code>. That should be handled like a clean user-facing "too short to transcribe" state, not treated like a scary pipeline failure.</p>
+        </article>
+        <article class="card soft">
+          <span class="label blue">Version spread</span>
+          <h3>Users are still spread across recent builds</h3>
+          <p class="muted"><code>1.1.12</code>, <code>1.1.11</code>, <code>1.1.10</code>, and older <code>1.0.x</code> builds still show launches. Keep Sparkle and Homebrew boring and reliable.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <h2>Not Real Problems</h2>
+          <p class="muted">Things that should not distract you from the actual fix.</p>
+        </div>
+      </div>
+
+      <div class="grid three">
+        <article class="card">
+          <span class="label blue">Noise</span>
+          <h3><code>sentry_test_event</code></h3>
+          <p class="muted">6 events. This is Settings verification noise unless you are specifically testing Sentry wiring.</p>
+        </article>
+        <article class="card">
+          <span class="label blue">Dashboard-only</span>
+          <h3>Sentry JavaScript error</h3>
+          <p class="muted"><code>Object [object Object] has no method updateFrom</code> points at Sentry-hosted dashboard scripts, not Transcripted app code.</p>
+        </article>
+        <article class="card">
+          <span class="label amber">Permission gap</span>
+          <h3>Cloudflare analytics 403</h3>
+          <p class="muted">That means the current token cannot read zone analytics. It is not evidence that the websites have no traffic.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <h2>GitHub</h2>
+          <p class="muted">Repo and release signal from the last 14 days.</p>
+        </div>
+        <a class="pill dark" href="https://github.com/r3dbars/transcripted">r3dbars/transcripted</a>
+      </div>
+
+      <div class="grid four">
+        <article class="card">
+          <span class="label blue">Views</span>
+          <div class="big">854</div>
+          <p class="muted">106 unique viewers.</p>
+        </article>
+        <article class="card">
+          <span class="label blue">Clones</span>
+          <div class="big">8,399</div>
+          <p class="muted">1,518 unique cloners. This likely includes automation, but it is still real distribution surface.</p>
+        </article>
+        <article class="card">
+          <span class="label green">Stars</span>
+          <div class="big">16</div>
+          <p class="muted">9 new stars in the window.</p>
+        </article>
+        <article class="card">
+          <span class="label amber">Downloads</span>
+          <div class="big">265</div>
+          <p class="muted">All release assets combined. Latest release has 5 so far.</p>
+        </article>
+      </div>
+
+      <div class="callout watch" style="margin-top: 14px;">
+        <strong>Repo-level recommendation:</strong> treat the current branch as post-release hardening. Main is 8 commits past the <code>v1.1.13</code> tag, including performance work and settings copy. If the audio-start fix lands, cut a small <code>1.1.14</code> rather than waiting for a bigger feature bundle.
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <h2>Websites</h2>
+          <p class="muted">Deployment status, separated from analytics availability.</p>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Site</th>
+            <th>Status</th>
+            <th>Latest production deployment</th>
+            <th>Analytics read</th>
+            <th>Recommendation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a href="https://transcripted.app">transcripted.app</a></td>
+            <td>Cloudflare zone active; Pages deploy successful.</td>
+            <td>Apr 17, 2026. Commit message: <code>Update web appcast for 1.1.10</code>.</td>
+            <td>Web Analytics not configured; zone analytics blocked by token scope.</td>
+            <td>Check visible download/update copy against <code>1.1.13</code>. The appcast in this repo is current, but the site deployment itself is stale.</td>
+          </tr>
+          <tr>
+            <td><a href="https://r3d.bar">r3d.bar</a></td>
+            <td>Cloudflare zone active; Pages deploy successful.</td>
+            <td>Apr 19, 2026. Personal site is fresher than the product site.</td>
+            <td>Web Analytics not configured; zone analytics blocked by token scope.</td>
+            <td>Use it as an audience channel, but do not confuse missing analytics with missing traffic.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <h2>What To Test</h2>
+          <p class="muted">Small manual and automated checks that match the live failure shape.</p>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Scenario</th>
+            <th>Why it matters</th>
+            <th>Pass condition</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Start dictation repeatedly after app launch, sleep/wake, and input-device changes.</td>
+            <td>This matches the <code>audio_engine_start_failed</code> and <code>installTap</code> family.</td>
+            <td>No Sentry <code>APPLE-MACOS-V</code> events, no fatal <code>installTap</code> exceptions, and no stuck recording UI.</td>
+          </tr>
+          <tr>
+            <td>Use the actual released <code>1.1.13</code> DMG for a smoke pass.</td>
+            <td>Main has commits after the release tag, so source-tree behavior is not the same thing as shipped behavior.</td>
+            <td>One successful dictation, one successful meeting save, and no new production Sentry issue for <code>transcripted@1.1.13</code>.</td>
+          </tr>
+          <tr>
+            <td>Record meetings that are intentionally too short.</td>
+            <td>Most meeting failures are <code>recording_too_short</code>, which is a product state, not a pipeline mystery.</td>
+            <td>The app explains the short recording cleanly and does not make it feel like a system failure.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <h2>What To Fix</h2>
+          <p class="muted">Ranked by user pain, confidence, and fix leverage.</p>
+        </div>
+      </div>
+
+      <div class="grid three">
+        <article class="card">
+          <span class="label red">1. Ship</span>
+          <h3>Audio-engine start recovery</h3>
+          <p class="muted">Add a bounded recovery path around Parakeet dictation start: remove tap, stop/reset or recreate the engine, re-read formats, retry once, and report a clearer permanent failure if it still cannot start.</p>
+        </article>
+        <article class="card">
+          <span class="label amber">2. Cover</span>
+          <h3>Short-recording UX</h3>
+          <p class="muted">Promote <code>recording_too_short</code> into a deliberate UI state for meetings. Keep the analytics, but stop making a predictable bad-input path feel like a broken app.</p>
+        </article>
+        <article class="card">
+          <span class="label blue">3. Set up</span>
+          <h3>Release and site telemetry</h3>
+          <p class="muted">Watch <code>1.1.13</code> for another 24 hours, then cut <code>1.1.14</code> if the audio fix lands. Also enable Cloudflare Web Analytics or grant read scope so product-site traffic is visible.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <h2>Bottom Line</h2>
+          <p class="muted">The shortest useful version.</p>
+        </div>
+      </div>
+
+      <div class="grid three">
+        <article class="card">
+          <span class="label red">Fix now</span>
+          <h3>Harden Parakeet audio start</h3>
+          <p class="muted">This removes the top production failure and likely reduces adjacent CoreAudio crash noise.</p>
+        </article>
+        <article class="card">
+          <span class="label amber">Fix next</span>
+          <h3>Make too-short meetings boring</h3>
+          <p class="muted">The product already knows the failure kind. Turn it into a calm, expected outcome.</p>
+        </article>
+        <article class="card">
+          <span class="label blue">Set up next</span>
+          <h3>Close the growth loop</h3>
+          <p class="muted">GitHub interest is real. Make site analytics readable and keep release metadata moving so attention converts into installs.</p>
+        </article>
+      </div>
+
+      <div class="source-links">
+        <a href="https://r3dbars.sentry.io/issues/APPLE-MACOS-V">Top Sentry issue</a>
+        <a href="https://r3dbars.sentry.io/issues/?project=apple-macos&amp;query=is%3Aunresolved">Sentry unresolved list</a>
+        <a href="https://us.posthog.com/project/378427">PostHog project</a>
+        <a href="https://github.com/r3dbars/transcripted/releases/tag/v1.1.13">Latest release</a>
+        <a href="https://transcripted.app">transcripted.app</a>
+        <a href="https://r3d.bar">r3d.bar</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
