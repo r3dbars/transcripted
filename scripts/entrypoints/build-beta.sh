@@ -68,6 +68,9 @@ SPARKLE_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sparkle.framework"
 TRANSCRIPTED_CORE_MODULE="deps-modules/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
 ARGMAX_CORE_MODULE="deps-modules/ArgmaxCore.swiftmodule/arm64-apple-macos.swiftmodule"
 WHISPERKIT_MODULE="deps-modules/WhisperKit.swiftmodule/arm64-apple-macos.swiftmodule"
+MCP_PACKAGE_DIR="Tools/TranscriptedMCP"
+MCP_BINARY="$MCP_PACKAGE_DIR/.build/release/transcripted-mcp"
+BUNDLED_MCP_BINARY="$APP_BUNDLE/Contents/Helpers/transcripted-mcp"
 
 dependency_input_listing() {
     {
@@ -278,6 +281,7 @@ sign_embedded_payloads() {
     local framework_path
     local metallib_path
     local nested_code_path
+    local helper_path
 
     while IFS= read -r -d '' nested_code_path; do
         if [ "$sign_hash" = "-" ]; then
@@ -307,6 +311,32 @@ sign_embedded_payloads() {
         [ -f "$metallib_path" ] || continue
         codesign --force --sign "$sign_hash" "$metallib_path"
     done
+
+    for helper_path in "$APP_BUNDLE"/Contents/Helpers/*; do
+        [ -f "$helper_path" ] || continue
+        if [ "$sign_hash" = "-" ]; then
+            codesign --force --sign "$sign_hash" "$helper_path"
+        else
+            codesign --force \
+                --sign "$sign_hash" \
+                --options runtime \
+                --timestamp \
+                "$helper_path"
+        fi
+    done
+}
+
+bundle_mcp_server() {
+    echo "Building Transcripted MCP server..."
+    swift build -c release --package-path "$MCP_PACKAGE_DIR"
+
+    if [ ! -x "$MCP_BINARY" ]; then
+        echo "❌ MCP build finished without a runnable binary: $MCP_BINARY"
+        exit 1
+    fi
+
+    cp "$MCP_BINARY" "$BUNDLED_MCP_BINARY"
+    chmod 755 "$BUNDLED_MCP_BINARY"
 }
 
 cleanup() {
@@ -356,6 +386,7 @@ rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 mkdir -p "$APP_BUNDLE/Contents/Frameworks"
+mkdir -p "$APP_BUNDLE/Contents/Helpers"
 
 # Bundle Parakeet CoreML models
 PARAKEET_SRC="$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml"
@@ -384,6 +415,8 @@ cp Info.plist "$APP_BUNDLE/Contents/"
 if [ -d "Resources" ]; then
     cp -R Resources/. "$APP_BUNDLE/Contents/Resources/"
 fi
+
+bundle_mcp_server
 
 # Inject the user's beta token after dependency preflight succeeds.
 echo "Injecting token for $USER_NAME..."

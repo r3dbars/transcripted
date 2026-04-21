@@ -1532,13 +1532,73 @@ private struct AgentConnectionSettingsPage: View {
     @StateObject private var viewModel = AgentConnectionViewModel(
         context: AgentConnectionContext(meetingTitle: nil, meetingDate: nil, transcriptURL: nil)
     )
+    @State private var claudeDesktopStatus = ClaudeDesktopIntegrationInstaller.currentStatus()
+    @State private var claudeDesktopInstallResult: ClaudeDesktopIntegrationInstallResult?
+    @State private var claudeDesktopInstallError: String?
+    @State private var isInstallingClaudeDesktop = false
+    @State private var copiedClaudeDesktopConfig = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Agent",
-                summary: "Copy one prompt so your agent can read Transcripted notes."
+                summary: "Connect Claude Desktop or copy one prompt for other agents."
             )
+
+            SettingsSection(
+                title: "Claude Desktop",
+                detail: "Install Transcripted direct tools with one click."
+            ) {
+                ClaudeDesktopStatusRow(status: claudeDesktopStatus)
+
+                HStack(spacing: 10) {
+                    Button {
+                        installClaudeDesktop()
+                    } label: {
+                        Label(
+                            isInstallingClaudeDesktop ? "Installing..." : "Install for Claude Desktop",
+                            systemImage: isInstallingClaudeDesktop ? "hourglass" : "checkmark.circle"
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isInstallingClaudeDesktop || !claudeDesktopStatus.bundledBinaryExists)
+
+                    Button {
+                        copyClaudeDesktopConfig()
+                    } label: {
+                        Label(copiedClaudeDesktopConfig ? "Copied" : "Copy Config", systemImage: "doc.on.doc")
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button {
+                        revealClaudeDesktopConfig()
+                    } label: {
+                        Label("Show Config", systemImage: "folder")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!claudeDesktopStatus.configExists)
+
+                    if !claudeDesktopStatus.claudeDesktopLikelyInstalled {
+                        Button {
+                            openClaudeDesktopDownload()
+                        } label: {
+                            Label("Get Claude", systemImage: "arrow.down.circle")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+                if let claudeDesktopInstallResult {
+                    ClaudeDesktopSelfTestResultView(result: claudeDesktopInstallResult)
+                }
+
+                if let claudeDesktopInstallError {
+                    Label(claudeDesktopInstallError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
 
             SettingsSection(
                 title: "Main Prompt",
@@ -1563,7 +1623,7 @@ private struct AgentConnectionSettingsPage: View {
 
             SettingsSection(
                 title: "Direct Tools",
-                detail: "Optional read-only MCP setup."
+                detail: "Manual setup text for agents that support local MCP."
             ) {
                 Text(viewModel.context.mcpSetupText)
                     .font(.caption)
@@ -1604,6 +1664,176 @@ private struct AgentConnectionSettingsPage: View {
                 .buttonStyle(.bordered)
             }
         }
+        .onAppear(perform: refreshClaudeDesktopStatus)
+    }
+
+    private func refreshClaudeDesktopStatus() {
+        claudeDesktopStatus = ClaudeDesktopIntegrationInstaller.currentStatus()
+    }
+
+    private func installClaudeDesktop() {
+        guard !isInstallingClaudeDesktop else { return }
+        isInstallingClaudeDesktop = true
+        claudeDesktopInstallResult = nil
+        claudeDesktopInstallError = nil
+
+        Task {
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop()
+                }.value
+
+                claudeDesktopInstallResult = result
+                refreshClaudeDesktopStatus()
+            } catch {
+                claudeDesktopInstallError = error.localizedDescription
+                refreshClaudeDesktopStatus()
+            }
+
+            isInstallingClaudeDesktop = false
+        }
+    }
+
+    private func copyClaudeDesktopConfig() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(
+            ClaudeDesktopIntegrationInstaller.configSnippet(),
+            forType: .string
+        )
+
+        copiedClaudeDesktopConfig = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            copiedClaudeDesktopConfig = false
+        }
+    }
+
+    private func revealClaudeDesktopConfig() {
+        NSWorkspace.shared.activateFileViewerSelecting([claudeDesktopStatus.configURL])
+    }
+
+    private func openClaudeDesktopDownload() {
+        guard let url = URL(string: "https://claude.ai/download") else { return }
+        NSWorkspace.shared.open(url)
+    }
+}
+
+private struct ClaudeDesktopStatusRow: View {
+    let status: ClaudeDesktopIntegrationStatus
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbolName)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let configuredPath = status.configuredCommandPath,
+                   configuredPath != status.installedBinaryURL.path {
+                    Text(configuredPath)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+                }
+            }
+
+            Spacer(minLength: 12)
+        }
+    }
+
+    private var symbolName: String {
+        switch status.state {
+        case .installed:
+            return "checkmark.circle.fill"
+        case .notInstalled:
+            return "circle"
+        case .needsRepair:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch status.state {
+        case .installed:
+            return .green
+        case .notInstalled:
+            return .secondary
+        case .needsRepair:
+            return .orange
+        }
+    }
+
+    private var title: String {
+        switch status.state {
+        case .installed:
+            return "Installed"
+        case .notInstalled:
+            return "Not installed yet"
+        case .needsRepair:
+            return "Needs update"
+        }
+    }
+
+    private var detail: String {
+        if !status.bundledBinaryExists {
+            return "This app build does not include Transcripted direct tools yet."
+        }
+
+        if !status.configIsReadable {
+            return "Claude Desktop config is not readable JSON. Install will back it up and write a clean config."
+        }
+
+        switch status.state {
+        case .installed:
+            return "Claude Desktop is configured. Restart Claude Desktop if you just installed it."
+        case .notInstalled:
+            return status.claudeDesktopLikelyInstalled
+                ? "Click Install for Claude Desktop, then restart Claude Desktop."
+                : "Claude Desktop was not found. You can still install now, then install Claude Desktop."
+        case .needsRepair:
+            if !status.installedBinaryExists {
+                return "The server file is missing. Install will copy a fresh one and update Claude Desktop."
+            }
+            return "Claude Desktop points at another Transcripted server. Install will update it."
+        }
+    }
+}
+
+private struct ClaudeDesktopSelfTestResultView: View {
+    let result: ClaudeDesktopIntegrationInstallResult
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(
+                "Ready. Found \(result.selfTest.meetingFileCount) meeting files and \(result.selfTest.dictationFileCount) dictation files.",
+                systemImage: "checkmark.circle.fill"
+            )
+            .foregroundStyle(.green)
+
+            Text("Restart Claude Desktop to use Transcripted direct tools.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if let backupURL = result.backupURL {
+                Text("Previous config backed up to \(backupURL.lastPathComponent).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

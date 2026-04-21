@@ -42,6 +42,11 @@ The two build flows intentionally use separate committed entitlement files:
 - `config/entitlements/local.plist`
 - `config/entitlements/beta.plist`
 
+Both app build flows also build the release `transcripted-mcp` helper and
+bundle it at `Transcripted.app/Contents/Helpers/transcripted-mcp`. The helper is
+signed with the rest of the app so the in-app Claude Desktop installer can copy
+and self-test it without asking users to install Swift or clone the repo.
+
 `build.sh` and `build-beta.sh` now fail before they touch signing when the
 unified dependency artifacts are missing or older than the current
 `Sources/TranscriptedCore/`, `Package.swift`, or `build-deps.sh` inputs. They

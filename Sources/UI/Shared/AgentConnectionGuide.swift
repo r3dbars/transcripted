@@ -37,13 +37,33 @@ enum AgentConnectionGuide {
     }
 
     static var localMCPBinary: URL? {
+        let fileManager = FileManager.default
+
+        if let bundledBinary = ClaudeDesktopIntegrationInstaller.bundledMCPBinaryURL(fileManager: fileManager) {
+            return bundledBinary
+        }
+
+        let installedBinary = ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL
+        if fileManager.isExecutableFile(atPath: installedBinary.path) {
+            return installedBinary
+        }
+
         guard let buildDirectory = localMCPBuildDirectory else { return nil }
-        let binary = buildDirectory
+        let releaseBinary = buildDirectory
+            .appendingPathComponent(".build", isDirectory: true)
+            .appendingPathComponent("release", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+
+        if fileManager.isExecutableFile(atPath: releaseBinary.path) {
+            return releaseBinary
+        }
+
+        let debugBinary = buildDirectory
             .appendingPathComponent(".build", isDirectory: true)
             .appendingPathComponent("debug", isDirectory: true)
             .appendingPathComponent("transcripted-mcp", isDirectory: false)
 
-        return FileManager.default.fileExists(atPath: binary.path) ? binary : nil
+        return fileManager.isExecutableFile(atPath: debugBinary.path) ? debugBinary : nil
     }
 
     static var meetingsFolder: URL {
@@ -254,7 +274,7 @@ enum AgentConnectionGuide {
 
         if let buildDirectory = localMCPBuildDirectory {
             lines.append("- Build directory: \(buildDirectory.path)")
-            lines.append("- Build command: cd \(buildDirectory.path) && swift build")
+            lines.append("- Build command: cd \(buildDirectory.path) && swift build -c release")
         }
 
         if let binary = localMCPBinary {
@@ -304,19 +324,19 @@ enum AgentConnectionGuide {
         var lines = [
             "MCP is optional. If your agent supports it, Transcripted can expose direct read-only tools for recent context, search, meetings, dictations, and recaps.",
             "",
-            "Install the read-only `transcripted-mcp` server, add it to your MCP config, then restart your client. The server reads the same local Transcripted data automatically.",
+            "For Claude Desktop, use Transcripted Settings > Agent > Install for Claude Desktop. Transcripted installs the read-only server, writes the config, checks your local library, then asks you to restart Claude Desktop.",
         ]
-
-        if let buildDirectory = localMCPBuildDirectory {
-            lines.append("")
-            lines.append("Local build directory:")
-            lines.append("`\(buildDirectory.path)`")
-        }
 
         if let binary = localMCPBinary {
             lines.append("")
             lines.append("Local binary:")
             lines.append("`\(binary.path)`")
+        }
+
+        if let buildDirectory = localMCPBuildDirectory {
+            lines.append("")
+            lines.append("Source build fallback:")
+            lines.append("`cd \(buildDirectory.path) && swift build -c release`")
         }
 
         return lines.joined(separator: "\n")

@@ -14,6 +14,9 @@ APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 STAGED_APP_BINARY="$BUILD_DIR/$APP_NAME-bin"
 LOCAL_ENTITLEMENTS="config/entitlements/local.plist"
 SIGN_IDENTITY="${SIGN_IDENTITY:-${SIGNING_IDENTITY:-}}"
+MCP_PACKAGE_DIR="Tools/TranscriptedMCP"
+MCP_BINARY="$MCP_PACKAGE_DIR/.build/release/transcripted-mcp"
+BUNDLED_MCP_BINARY="$APP_BUNDLE/Contents/Helpers/transcripted-mcp"
 DEPS_ARCHIVE="deps-libs/libDraftDeps.a"
 DEPS_BUILD_STAMP="deps-libs/.build-deps-stamp"
 DEPS_MODULE_ROOT="deps-modules"
@@ -154,6 +157,7 @@ sign_embedded_code() {
     local framework_path
     local metallib_path
     local nested_code_path
+    local helper_path
 
     while IFS= read -r -d '' nested_code_path; do
         codesign --force --sign "$sign_hash" "$nested_code_path"
@@ -174,6 +178,24 @@ sign_embedded_code() {
         [ -f "$metallib_path" ] || continue
         codesign --force --sign "$sign_hash" "$metallib_path"
     done
+
+    for helper_path in "$APP_BUNDLE"/Contents/Helpers/*; do
+        [ -f "$helper_path" ] || continue
+        codesign --force --sign "$sign_hash" "$helper_path"
+    done
+}
+
+bundle_mcp_server() {
+    echo "Building Transcripted MCP server..."
+    swift build -c release --package-path "$MCP_PACKAGE_DIR"
+
+    if [ ! -x "$MCP_BINARY" ]; then
+        echo "MCP build finished without a runnable binary: $MCP_BINARY"
+        exit 1
+    fi
+
+    cp "$MCP_BINARY" "$BUNDLED_MCP_BINARY"
+    chmod 755 "$BUNDLED_MCP_BINARY"
 }
 
 echo "Building Transcripted..."
@@ -186,6 +208,7 @@ rm -rf "$BUILD_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 mkdir -p "$APP_BUNDLE/Contents/Frameworks"
+mkdir -p "$APP_BUNDLE/Contents/Helpers"
 
 # Bundle Parakeet model directories used by FluidAudio.
 # The runtime loader can resolve files from both the `-coreml` and legacy
@@ -220,6 +243,8 @@ cp Info.plist "$APP_BUNDLE/Contents/"
 if [ -d "Resources" ]; then
     cp -R Resources/. "$APP_BUNDLE/Contents/Resources/"
 fi
+
+bundle_mcp_server
 
 # Unified dependencies (FluidAudio + mlx-swift-lm + WhisperKit)
 echo "Dependencies found"

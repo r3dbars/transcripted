@@ -42,6 +42,31 @@ Current local folders:
 Use MCP when your client supports it and you want direct read-only tools instead
 of asking the model to inspect files manually.
 
+### Claude Desktop
+
+Use the in-app setup:
+
+1. Open Transcripted.
+2. Open Settings.
+3. Go to `Agent`.
+4. Click `Install for Claude Desktop`.
+5. Restart Claude Desktop.
+
+Transcripted copies the bundled `transcripted-mcp` helper into:
+
+```text
+~/Library/Application Support/Transcripted/mcp/transcripted-mcp
+```
+
+Then it safely merges this entry into Claude Desktop's config:
+
+```text
+~/Library/Application Support/Claude/claude_desktop_config.json
+```
+
+Existing MCP servers are preserved. If the config is invalid JSON,
+Transcripted backs it up before writing a clean config.
+
 Current `transcripted-mcp` capabilities:
 
 - `recent_context`
@@ -62,17 +87,17 @@ Current `transcripted-mcp` capabilities:
 - people lookups without hand-rolling folder searches
 - read-only access to local Transcripted data
 
-### Repo Setup
+### Source Build Fallback
 
 ```bash
 cd Tools/TranscriptedMCP
-swift build
+swift build -c release
 ```
 
 Binary path after build:
 
 ```text
-Tools/TranscriptedMCP/.build/debug/transcripted-mcp
+Tools/TranscriptedMCP/.build/release/transcripted-mcp
 ```
 
 Example Claude Desktop config:
@@ -81,7 +106,7 @@ Example Claude Desktop config:
 {
   "mcpServers": {
     "transcripted": {
-      "command": "/absolute/path/to/Tools/TranscriptedMCP/.build/debug/transcripted-mcp"
+      "command": "/absolute/path/to/Tools/TranscriptedMCP/.build/release/transcripted-mcp"
     }
   }
 }

@@ -113,6 +113,11 @@ Transcripted also includes an optional read-only MCP server for agents that
 support MCP. It gives tools for recent context, search, recaps, meeting reads,
 dictation reads, and speaker lookup.
 
+For Claude Desktop, open Transcripted Settings, go to `Agent`, then click
+`Install for Claude Desktop`. Transcripted installs the local server, writes the
+Claude Desktop config, checks your local library, and tells you when to restart
+Claude Desktop.
+
 See [docs/agent-connect.md](docs/agent-connect.md).
 
 ## Features

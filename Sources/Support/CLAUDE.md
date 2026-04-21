@@ -4,8 +4,9 @@
 
 `Sources/Support/` holds app-wide helpers that do not belong to a single UI or pipeline surface. These types mostly wrap persisted preferences, shared constants, permission access, storage paths, or low-level paste / launch behavior used across dictation and meetings.
 
-## Files (12 Swift files)
+## Files (13 Swift files)
 
+- `ClaudeDesktopIntegrationInstaller.swift` — installs the bundled read-only MCP helper for Claude Desktop, safely merges Claude's config JSON, and runs the helper self-test
 - `ClipboardRestoringTextPaster.swift` — paste helper that preserves clipboard contents while inserting the latest dictation into the target app
 - `CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements plus text post-processing helpers
 - `DictationAutoSendPreferences.swift` — persisted auto-send rules, allowed bundle list, and keypress-sending helpers for pasted dictation
@@ -26,6 +27,7 @@
 - `CustomDictionaryPreferences` and `DictationAutoSendPreferences` back the Settings `General` and `Dictation` pages. If you change parsing rules or policy thresholds, update the relevant tests.
 - `TranscriptedPermissionAccess` is the app-level permission seam. UI flows should call into it instead of duplicating TCC branching.
 - `TranscriptedStoragePaths` should stay as the canonical path resolver for the app target. `Sources/TranscriptedCore/Services/CoreStoragePaths.swift` is the injected library-side seam.
+- `ClaudeDesktopIntegrationInstaller` owns the Claude Desktop config merge. Preserve existing MCP servers and back up invalid JSON instead of overwriting blindly.
 
 ## Verification
 

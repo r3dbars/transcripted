@@ -114,6 +114,7 @@ APP_SOURCES=(
     "Sources/Support/TranscriptedPermissionKind.swift"
     "Sources/Support/TranscriptedPermissionAccess.swift"
     "Sources/Support/TranscriptedStoragePaths.swift"
+    "Sources/Support/ClaudeDesktopIntegrationInstaller.swift"
     "Sources/Support/LaunchAtLoginPreferences.swift"
     "Sources/Support/MenuBarVisibilityPreferences.swift"
     "Sources/Support/HotkeyPreferences.swift"
