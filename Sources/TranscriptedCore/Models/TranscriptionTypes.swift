@@ -381,5 +381,6 @@ public struct SpeakerNameUpdate: Sendable {
         case corrected  // user rejected suggestion and typed correct name
         case merged(targetProfileId: UUID)  // user linked this speaker to an existing profile
         case collapsedToMe  // user clicked "Keep as You" — collapse this mic speaker into the single owner
+        case discardedFromDatabase  // user kept this review row out of the speaker database
     }
 }

@@ -170,13 +170,11 @@ final class SpeakerNamingContentView: NSView {
         addSubview(scrollView)
 
         saveButton.bezelStyle = .rounded
-        saveButton.keyEquivalent = "\r"
         saveButton.target = self
         saveButton.action = #selector(handleSave)
         addSubview(saveButton)
 
         cancelButton.bezelStyle = .rounded
-        cancelButton.keyEquivalent = "\u{1b}" // Escape
         cancelButton.target = self
         cancelButton.action = #selector(handleCancel)
         addSubview(cancelButton)
@@ -383,6 +381,31 @@ final class SpeakerNamingContentView: NSView {
     }
 }
 
+// MARK: - Name field
+
+@available(macOS 14.0, *)
+private final class SpeakerNameComboBox: NSComboBox {
+    var onTextAreaClick: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let clickedTextArea = point.x < bounds.maxX - 24
+        super.mouseDown(with: event)
+
+        guard clickedTextArea else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.onTextAreaClick?()
+        }
+    }
+}
+
+@available(macOS 14.0, *)
+private final class NonExpandingTextFieldCell: NSTextFieldCell {
+    override func expansionFrame(withFrame cellFrame: NSRect, in view: NSView) -> NSRect {
+        .zero
+    }
+}
+
 // MARK: - One speaker row
 
 @available(macOS 14.0, *)
@@ -395,31 +418,45 @@ final class SpeakerRowView: NSView {
     private let labelField = NSTextField(labelWithString: "")
     private let evidenceField = NSTextField(labelWithString: "")
     private let sampleField = NSTextField(wrappingLabelWithString: "")
-    private let nameField = NSComboBox(frame: .zero)
+    private let nameField = SpeakerNameComboBox(frame: .zero)
     private let playButton = NSButton(title: "Play sample", target: nil, action: nil)
     private let confirmButton = NSButton(title: "Use Suggested", target: nil, action: nil)
+    private let discardButton = NSButton(title: "Discard", target: nil, action: nil)
 
     private var userConfirmed: Bool = false
+    private var isDiscarded: Bool = false
     private var isCollapsedToMe: Bool = false
-    private let collapsedOverlay = NSTextField(labelWithString: "Will be saved as \u{201C}You\u{201D}")
+    private let statusOverlay = NSTextField(labelWithString: "")
+    private var playbackObserver: NSObjectProtocol?
+    private var playbackTimer: Timer?
+    private var isOpeningNameTray = false
 
     init(entry: SpeakerNamingEntry, knownPeople: [SpeakerIdentityOption]) {
         self.entry = entry
         let optionLabels = Self.makeIdentityLabels(for: knownPeople.filter { $0.id != entry.id })
         self.knownPeopleByLabel = optionLabels.lookup
-        self.knownPeopleLabels = optionLabels.labels
+        if entry.channel == .mic,
+           !optionLabels.labels.contains(where: { Self.normalizedSearchText($0) == "you" }) {
+            self.knownPeopleLabels = ["You"] + optionLabels.labels
+        } else {
+            self.knownPeopleLabels = optionLabels.labels
+        }
         super.init(frame: .zero)
         setupViews()
+    }
+
+    deinit {
+        if let playbackObserver {
+            NotificationCenter.default.removeObserver(playbackObserver)
+        }
+        playbackTimer?.invalidate()
     }
 
     /// Apply or lift the "Keep as You" visual state. Called by the content view when
     /// the batch toggle is clicked.
     func setCollapsedToMe(_ collapsed: Bool) {
         isCollapsedToMe = collapsed
-        nameField.isEnabled = !collapsed
-        confirmButton.isEnabled = !collapsed
-        collapsedOverlay.isHidden = !collapsed
-        alphaValue = collapsed ? 0.55 : 1.0
+        updateStatePresentation()
     }
 
     /// Emit a SpeakerNameUpdate with `.collapsedToMe` for this row. Always used when
@@ -453,11 +490,13 @@ final class SpeakerRowView: NSView {
         }
         labelField.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         labelField.textColor = NSColor.labelColor
+        Self.disableExpansionFrame(for: labelField)
         addSubview(labelField)
 
         evidenceField.stringValue = evidenceDescription()
         evidenceField.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         evidenceField.textColor = NSColor.secondaryLabelColor
+        Self.disableExpansionFrame(for: evidenceField)
         addSubview(evidenceField)
 
         sampleField.stringValue = "\u{201C}\(entry.sampleText)\u{201D}"
@@ -465,17 +504,24 @@ final class SpeakerRowView: NSView {
         sampleField.textColor = NSColor.secondaryLabelColor
         sampleField.maximumNumberOfLines = 3
         sampleField.lineBreakMode = .byWordWrapping
+        Self.disableExpansionFrame(for: sampleField)
         addSubview(sampleField)
 
         nameField.isEditable = true
-        nameField.usesDataSource = false
+        nameField.usesDataSource = true
+        nameField.dataSource = self
+        nameField.delegate = self
+        nameField.completes = true
+        nameField.numberOfVisibleItems = min(max(knownPeopleLabels.count, 4), 8)
         nameField.font = NSFont.systemFont(ofSize: 12)
         if entry.currentName != nil {
             nameField.placeholderString = "Use the suggestion or choose a different person"
         } else {
             nameField.placeholderString = "Type a new name or choose an existing person"
         }
-        nameField.addItems(withObjectValues: knownPeopleLabels)
+        nameField.onTextAreaClick = { [weak self] in
+            self?.openNameTray()
+        }
         addSubview(nameField)
 
         playButton.bezelStyle = .rounded
@@ -489,10 +535,27 @@ final class SpeakerRowView: NSView {
         confirmButton.isHidden = !(entry.needsConfirmation && entry.currentName != nil)
         addSubview(confirmButton)
 
-        collapsedOverlay.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        collapsedOverlay.textColor = NSColor.secondaryLabelColor
-        collapsedOverlay.isHidden = true
-        addSubview(collapsedOverlay)
+        discardButton.bezelStyle = .inline
+        discardButton.target = self
+        discardButton.action = #selector(handleDiscardToggle)
+        discardButton.toolTip = "Leave this voice out of the speaker database"
+        addSubview(discardButton)
+
+        statusOverlay.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        statusOverlay.textColor = NSColor.secondaryLabelColor
+        Self.disableExpansionFrame(for: statusOverlay)
+        statusOverlay.isHidden = true
+        addSubview(statusOverlay)
+
+        playbackObserver = NotificationCenter.default.addObserver(
+            forName: SpeakerClipPlayback.stateDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.syncPlayButtonState()
+            }
+        }
     }
 
     override func layout() {
@@ -527,51 +590,83 @@ final class SpeakerRowView: NSView {
         )
 
         let fieldH: CGFloat = 22
+        let discardSize = discardButton.fittingSize
+        let discardW = max(72, discardSize.width + 8)
+        discardButton.frame = NSRect(
+            x: bounds.width - pad - discardW,
+            y: pad,
+            width: discardW,
+            height: fieldH
+        )
+
+        var fieldRightEdge = discardButton.frame.minX - 8
         if !confirmButton.isHidden {
             let btnSize = confirmButton.fittingSize
             let btnW = max(102, btnSize.width + 4)
             confirmButton.frame = NSRect(
-                x: bounds.width - pad - btnW,
+                x: fieldRightEdge - btnW,
                 y: pad,
                 width: btnW,
                 height: fieldH
             )
-            nameField.frame = NSRect(
-                x: pad,
-                y: pad,
-                width: confirmButton.frame.minX - pad - 8,
-                height: fieldH
-            )
-        } else {
-            nameField.frame = NSRect(x: pad, y: pad, width: w, height: fieldH)
+            fieldRightEdge = confirmButton.frame.minX - 8
         }
 
-        // "Will be saved as 'You'" overlay, right-aligned near the combobox.
-        let overlaySize = collapsedOverlay.fittingSize
-        collapsedOverlay.frame = NSRect(
-            x: bounds.width - pad - overlaySize.width,
-            y: pad + (fieldH - overlaySize.height) / 2,
-            width: overlaySize.width,
-            height: overlaySize.height
+        nameField.frame = NSRect(
+            x: pad,
+            y: pad,
+            width: max(120, fieldRightEdge - pad),
+            height: fieldH
+        )
+        statusOverlay.frame = NSRect(
+            x: nameField.frame.minX,
+            y: nameField.frame.minY + 1,
+            width: nameField.frame.width,
+            height: fieldH
         )
     }
 
     @objc private func handlePlaySample() {
         SpeakerClipPlayback.play(entry.clipURL)
+        syncPlayButtonState()
+        updatePlaybackPolling()
     }
 
     @objc private func handleConfirm() {
         userConfirmed = true
+        isDiscarded = false
         if let current = entry.currentName {
             nameField.stringValue = current
         }
         confirmButton.title = "Using Suggested"
+        updateStatePresentation()
+    }
+
+    @objc private func handleDiscardToggle() {
+        guard !isCollapsedToMe else { return }
+        isDiscarded.toggle()
+        if isDiscarded {
+            userConfirmed = false
+            SpeakerClipPlayback.stop()
+        }
+        updateStatePresentation()
     }
 
     /// Build a `SpeakerNameUpdate` reflecting the user's input for this row.
     /// Returns nil if the row has nothing to save (empty name, no confirmation).
     func buildUpdate() -> SpeakerNameUpdate? {
         let typed = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if isDiscarded {
+            return SpeakerNameUpdate(
+                persistentSpeakerId: entry.id,
+                diarizerSpeakerId: entry.diarizerSpeakerId,
+                channel: entry.channel,
+                newName: entry.currentName ?? "Speaker \(entry.diarizerSpeakerId)",
+                previousName: entry.currentName,
+                action: .discardedFromDatabase
+            )
+        }
 
         if userConfirmed, let current = entry.currentName, !current.isEmpty {
             if let suggestedProfileId = entry.suggestedProfileId {
@@ -595,7 +690,7 @@ final class SpeakerRowView: NSView {
 
         guard !typed.isEmpty else { return nil }
 
-        if let option = knownPeopleByLabel[typed] {
+        if let option = knownPeopleOption(matching: typed) {
             return SpeakerNameUpdate(
                 persistentSpeakerId: entry.id,
                 diarizerSpeakerId: entry.diarizerSpeakerId,
@@ -624,6 +719,147 @@ final class SpeakerRowView: NSView {
             previousName: entry.currentName,
             action: action
         )
+    }
+
+    private func updateStatePresentation() {
+        let locked = isCollapsedToMe || isDiscarded
+        nameField.isHidden = locked
+        nameField.isEnabled = !locked
+        statusOverlay.isHidden = !locked
+
+        if isCollapsedToMe {
+            statusOverlay.stringValue = "Will be saved as \u{201C}You\u{201D}"
+        } else if isDiscarded {
+            statusOverlay.stringValue = "Will be left out of the speaker database"
+        }
+
+        confirmButton.isEnabled = !locked
+        discardButton.isEnabled = !isCollapsedToMe
+        discardButton.title = isDiscarded ? "Undo discard" : "Discard"
+        alphaValue = locked ? 0.62 : 1.0
+        needsLayout = true
+    }
+
+    private func syncPlayButtonState() {
+        let isPlaying = SpeakerClipPlayback.isPlaying(entry.clipURL)
+        playButton.title = isPlaying ? "Stop sample" : "Play sample"
+    }
+
+    private func updatePlaybackPolling() {
+        playbackTimer?.invalidate()
+        guard SpeakerClipPlayback.isPlaying(entry.clipURL) else {
+            playbackTimer = nil
+            return
+        }
+
+        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] timer in
+            Task { @MainActor in
+                guard let self else {
+                    timer.invalidate()
+                    return
+                }
+                self.syncPlayButtonState()
+                if !SpeakerClipPlayback.isPlaying(self.entry.clipURL) {
+                    timer.invalidate()
+                    self.playbackTimer = nil
+                }
+            }
+        }
+    }
+
+    private func openNameTray() {
+        guard nameField.isEnabled, !knownPeopleLabels.isEmpty, !isOpeningNameTray else { return }
+        isOpeningNameTray = true
+        nameField.reloadData()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            defer { self.isOpeningNameTray = false }
+            guard self.nameField.isEnabled else { return }
+            self.nameField.performClick(nil)
+        }
+    }
+
+    private func visibleKnownPeopleLabels() -> [String] {
+        let query = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return knownPeopleLabels }
+        let matches = knownPeopleLabels.filter { labelMatches($0, query: query) }
+        return matches.isEmpty ? knownPeopleLabels : matches
+    }
+
+    private func bestKnownPeopleLabel(matching query: String) -> String? {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return knownPeopleLabels
+            .filter { labelMatches($0, query: trimmed) }
+            .sorted { lhs, rhs in
+                let lhsRank = matchRank(for: lhs, query: trimmed)
+                let rhsRank = matchRank(for: rhs, query: trimmed)
+                if lhsRank != rhsRank { return lhsRank < rhsRank }
+                return (knownPeopleByLabel[lhs]?.callCount ?? 0) > (knownPeopleByLabel[rhs]?.callCount ?? 0)
+            }
+            .first
+    }
+
+    private func knownPeopleOption(matching input: String) -> SpeakerIdentityOption? {
+        if let exact = knownPeopleByLabel[input] {
+            return exact
+        }
+
+        let normalizedInput = Self.normalizedSearchText(input)
+        let displayMatches = knownPeopleByLabel.values.filter {
+            Self.normalizedSearchText($0.displayName) == normalizedInput
+        }
+        guard displayMatches.count == 1 else { return nil }
+        return displayMatches[0]
+    }
+
+    private func labelMatches(_ label: String, query: String) -> Bool {
+        matchRank(for: label, query: query) < Int.max
+    }
+
+    private func matchRank(for label: String, query: String) -> Int {
+        let normalizedQuery = Self.normalizedSearchText(query)
+        guard !normalizedQuery.isEmpty else { return 0 }
+
+        let normalizedLabel = Self.normalizedSearchText(label)
+        let displayName = knownPeopleByLabel[label]?.displayName ?? label
+        let normalizedDisplayName = Self.normalizedSearchText(displayName)
+        let displayWords = normalizedDisplayName.split(separator: " ")
+
+        if normalizedDisplayName == normalizedQuery { return 0 }
+        if normalizedDisplayName.hasPrefix(normalizedQuery) { return 1 }
+        if displayWords.contains(where: { $0.hasPrefix(normalizedQuery) }) { return 2 }
+        if normalizedLabel.hasPrefix(normalizedQuery) { return 3 }
+        if normalizedDisplayName.contains(normalizedQuery) { return 4 }
+        if normalizedLabel.contains(normalizedQuery) { return 5 }
+        return Int.max
+    }
+
+    private static func normalizedSearchText(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private static func disableExpansionFrame(for field: NSTextField) {
+        let font = field.font
+        let textColor = field.textColor
+        let alignment = field.alignment
+        let lineBreakMode = field.lineBreakMode
+        let wraps = field.cell?.wraps ?? false
+        let cell = NonExpandingTextFieldCell(textCell: field.stringValue)
+        cell.wraps = wraps
+        cell.lineBreakMode = lineBreakMode
+        field.cell = cell
+        field.font = font
+        field.textColor = textColor
+        field.alignment = alignment
+        field.isEditable = false
+        field.isSelectable = false
+        field.isBezeled = false
+        field.isBordered = false
+        field.drawsBackground = false
     }
 
     private func evidenceDescription() -> String {
@@ -661,5 +897,44 @@ final class SpeakerRowView: NSView {
         }
 
         return (labels, lookup)
+    }
+}
+
+@available(macOS 14.0, *)
+extension SpeakerRowView: NSComboBoxDataSource, NSComboBoxDelegate {
+    func numberOfItems(in comboBox: NSComboBox) -> Int {
+        visibleKnownPeopleLabels().count
+    }
+
+    func comboBox(_ comboBox: NSComboBox, objectValueForItemAt index: Int) -> Any? {
+        let labels = visibleKnownPeopleLabels()
+        guard labels.indices.contains(index) else { return nil }
+        return labels[index]
+    }
+
+    func comboBox(_ comboBox: NSComboBox, completedString string: String) -> String? {
+        bestKnownPeopleLabel(matching: string)
+    }
+
+    func comboBox(_ comboBox: NSComboBox, indexOfItemWithStringValue string: String) -> Int {
+        visibleKnownPeopleLabels().firstIndex(of: string) ?? NSNotFound
+    }
+
+    func controlTextDidBeginEditing(_ obj: Notification) {
+        guard obj.object as AnyObject? === nameField else { return }
+        openNameTray()
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        guard obj.object as AnyObject? === nameField else { return }
+        nameField.reloadData()
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard control === nameField else { return false }
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            return true
+        }
+        return false
     }
 }

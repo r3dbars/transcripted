@@ -40,13 +40,14 @@ extension TranscriptionTaskManager {
             ($0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId), $0)
         })
 
-        // Partition updates: "Keep as You" collapsedToMe updates follow a different
-        // path (delete newly-created profiles, rewrite mic labels to "You") than
-        // regular name/merge/confirm updates. We process both during naming completion.
+        // Partition updates: special actions follow different paths than regular
+        // name/merge/confirm updates. We process all of them during naming completion.
         var collapsedUpdates: [SpeakerNameUpdate] = []
+        var discardedUpdates: [SpeakerNameUpdate] = []
         var regularUpdates: [SpeakerNameUpdate] = []
         for update in updates {
             if case .collapsedToMe = update.action { collapsedUpdates.append(update) }
+            else if case .discardedFromDatabase = update.action { discardedUpdates.append(update) }
             else { regularUpdates.append(update) }
         }
         let newlyCreatedMicProfileIds = transcriptionResult.newlyCreatedMicProfileIds
@@ -109,6 +110,13 @@ extension TranscriptionTaskManager {
                 )
             }
 
+            if didFinalizeTranscript && !discardedUpdates.isEmpty {
+                didFinalizeTranscript = TranscriptSaver.discardSpeakerDatabaseLinks(
+                    transcriptURL: resolvedURL,
+                    discardedUpdates: discardedUpdates
+                )
+            }
+
             if didFinalizeTranscript {
                 Self.applyPlannedNamingMutations(plannedChanges.mutations, speakerDB: speakerDB)
                 for update in collapsedUpdates where newlyCreatedMicProfileIds.contains(update.persistentSpeakerId) {
@@ -119,6 +127,11 @@ extension TranscriptionTaskManager {
                         "diarizerSpeakerId": update.diarizerSpeakerId
                     ])
                 }
+                Self.applyDiscardedSpeakerActions(
+                    discardedUpdates,
+                    clipsBySpeakerId: clipsBySpeakerId,
+                    speakerDB: speakerDB
+                )
             }
 
             SpeakerClipExtractor.cleanupClips(clips)
@@ -281,6 +294,11 @@ extension TranscriptionTaskManager {
             // Collapsed updates are handled upstream in handleNamingComplete because they
             // rewrite transcript text and delete only newly-created mic profiles.
             return (update.persistentSpeakerId, [])
+
+        case .discardedFromDatabase:
+            // Discarded updates are handled upstream because they remove transcript DB links
+            // and either delete a new profile or restore an existing matched profile snapshot.
+            return (update.persistentSpeakerId, [])
         }
     }
 
@@ -302,6 +320,44 @@ extension TranscriptionTaskManager {
                 speakerDB.incrementDisputeCount(id: id)
             case .resetDisputeCount(let id):
                 speakerDB.resetDisputeCount(id: id)
+            }
+        }
+    }
+
+    nonisolated private static func applyDiscardedSpeakerActions(
+        _ updates: [SpeakerNameUpdate],
+        clipsBySpeakerId: [String: SpeakerNamingEntry],
+        speakerDB: any SpeakerStore
+    ) {
+        for update in updates {
+            let key = update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)
+            guard let entry = clipsBySpeakerId[key] else {
+                AppLogger.speakers.warning("Skipped speaker discard because review entry was missing", [
+                    "speakerId": update.persistentSpeakerId.uuidString,
+                    "diarizerSpeakerId": update.diarizerSpeakerId
+                ])
+                continue
+            }
+
+            if let snapshot = entry.matchedProfileSnapshot {
+                speakerDB.restoreProfile(snapshot)
+                speakerDB.incrementDisputeCount(id: snapshot.id)
+                AppLogger.speakers.info("Discarded speaker sample and restored matched profile", [
+                    "profileId": snapshot.id.uuidString,
+                    "diarizerSpeakerId": update.diarizerSpeakerId
+                ])
+            } else if entry.currentName == nil && entry.matchSimilarity == nil {
+                speakerDB.deleteSpeaker(id: update.persistentSpeakerId)
+                SpeakerClipExtractor.deletePersistedClip(for: update.persistentSpeakerId)
+                AppLogger.speakers.info("Discarded newly-created speaker profile", [
+                    "profileId": update.persistentSpeakerId.uuidString,
+                    "diarizerSpeakerId": update.diarizerSpeakerId
+                ])
+            } else {
+                AppLogger.speakers.warning("Skipped speaker discard delete for existing profile without snapshot", [
+                    "profileId": update.persistentSpeakerId.uuidString,
+                    "diarizerSpeakerId": update.diarizerSpeakerId
+                ])
             }
         }
     }
