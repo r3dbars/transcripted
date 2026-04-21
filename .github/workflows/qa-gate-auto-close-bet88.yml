@@ -23,10 +23,22 @@ jobs:
         run: |
           set -euo pipefail
           body="$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH")"
+          first_line="$(
+            printf '%s\n' "$body" \
+              | sed -E 's/\r$//' \
+              | awk 'NF { print; exit }' \
+              | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'
+          )"
 
-          if echo "$body" | grep -Eiq '(^|[[:space:]])PASS([[:space:]]|$)'; then
+          # Only treat an explicit first-line QA declaration as a gate decision.
+          # Accepted forms:
+          #   PASS
+          #   PASS: <details>
+          #   FAIL
+          #   FAIL: <details>
+          if echo "$first_line" | grep -Eiq '^PASS([[:space:]]*:[[:space:]]*.*)?$'; then
             echo "status=pass" >> "$GITHUB_OUTPUT"
-          elif echo "$body" | grep -Eiq '(^|[[:space:]])FAIL([[:space:]]|$)'; then
+          elif echo "$first_line" | grep -Eiq '^FAIL([[:space:]]*:[[:space:]]*.*)?$'; then
             echo "status=fail" >> "$GITHUB_OUTPUT"
           else
             echo "status=none" >> "$GITHUB_OUTPUT"
