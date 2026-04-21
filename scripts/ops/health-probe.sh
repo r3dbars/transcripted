@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../" && pwd)"
 
 usage() {
-  echo "Usage: bash scripts/ops/health-probe.sh <github|sentry|posthog|cloudflare|all>"
+  echo "Usage: bash scripts/ops/health-probe.sh <github|sentry|posthog|cloudflare|qa|all>"
   exit 0
 }
 
@@ -180,11 +180,63 @@ probe_cloudflare() {
   done
 }
 
+probe_qa() {
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "SKIP qa: gh CLI not found"
+    exit 0
+  fi
+
+  if ! gh auth status >/dev/null 2>&1; then
+    echo "SKIP qa: not authenticated (run 'gh auth login')"
+    exit 0
+  fi
+
+  local repo issue_number script_path state_file quiet_no_change
+  repo="${QA_GATE_REPO:-r3dbars/transcripted}"
+  issue_number="${QA_GATE_ISSUE_NUMBER:-428}"
+  state_file="${QA_GATE_STATE_FILE:-}"
+  quiet_no_change="${QA_GATE_QUIET_NO_CHANGE:-0}"
+  script_path="$REPO_ROOT/scripts/ops/qa-gate-check.sh"
+
+  if [[ ! -x "$script_path" ]]; then
+    echo "ERROR qa: missing executable $script_path"
+    return 1
+  fi
+
+  echo "QA gate check ($repo#$issue_number)..."
+
+  set +e
+  local output
+  local cmd=("$script_path")
+  if [[ -n "$state_file" ]]; then
+    cmd+=(--state-file "$state_file")
+  fi
+  if [[ "$quiet_no_change" == "1" ]]; then
+    cmd+=(--quiet-no-change)
+  fi
+  cmd+=("$repo" "$issue_number")
+
+  output="$("${cmd[@]}" 2>&1)"
+  local rc=$?
+  set -e
+
+  if [[ -n "$output" ]]; then
+    echo "$output"
+  fi
+
+  # Keep the lane green for PASS and pending states.
+  # Only FAIL (2) or operational errors should fail the probe.
+  if [[ $rc -eq 0 || $rc -eq 3 ]]; then
+    return 0
+  fi
+  return $rc
+}
+
 run_all() {
   local failed_lane=""
   local exit_code=0
 
-  for lane in github sentry posthog cloudflare; do
+  for lane in github sentry posthog cloudflare qa; do
     echo "=== $lane ==="
     if ! probe_$lane; then
       failed_lane="$lane"
@@ -213,6 +265,9 @@ case "${1:-}" in
     ;;
   cloudflare)
     probe_cloudflare
+    ;;
+  qa)
+    probe_qa
     ;;
   all)
     run_all
