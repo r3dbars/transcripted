@@ -11,7 +11,7 @@ private struct SettingsSidebarSection: Identifiable {
 
     static let defaultSections = [
         SettingsSidebarSection(id: "home", title: nil, pages: [.home]),
-        SettingsSidebarSection(id: "recording", title: "Recording", pages: [.meetings, .dictations, .shortcuts]),
+        SettingsSidebarSection(id: "recording", title: "Recording", pages: [.meetings, .dictations, .people, .shortcuts]),
         SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .models, .storage, .connectAgent]),
         SettingsSidebarSection(id: "trust", title: "Trust", pages: [.privacy, .about])
     ]
@@ -162,6 +162,8 @@ struct TranscriptedSettingsView: View {
             meetingsPage
         case .dictations:
             dictationsPage
+        case .people:
+            peoplePage
         case .storage:
             storagePage
         case .connectAgent:
@@ -292,9 +294,17 @@ struct TranscriptedSettingsView: View {
                 SettingsQuickLinkRow(
                     symbolName: "person.2.wave.2.fill",
                     title: "Meetings",
-                    detail: "Import audio and manage speakers."
+                    detail: "Record calls and import audio."
                 ) {
                     navigation.selectedPage = .meetings
+                }
+
+                SettingsQuickLinkRow(
+                    symbolName: "person.2.fill",
+                    title: "People",
+                    detail: "Review saved speakers and duplicates."
+                ) {
+                    navigation.selectedPage = .people
                 }
 
                 SettingsQuickLinkRow(
@@ -586,7 +596,7 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Meetings",
-                summary: "Record meetings, import audio, and manage speakers."
+                summary: "Record meetings, import audio, and open recent transcripts."
             )
 
             SettingsSection(
@@ -661,6 +671,15 @@ struct TranscriptedSettingsView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var peoplePage: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "People",
+                summary: "Review saved speakers, samples, and possible duplicates."
+            )
 
             SpeakerPeopleSettingsSection(model: speakerPeopleModel)
         }
