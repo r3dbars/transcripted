@@ -15,19 +15,32 @@ REPO="${1:-r3dbars/transcripted}"
 ISSUE_NUMBER="${2:-428}"
 OWNER_LOGIN="${3:-r3dbars}"
 
-if ! command -v gh >/dev/null 2>&1; then
-  echo "ERROR: gh CLI is required" >&2
-  exit 2
-fi
-
 if ! command -v jq >/dev/null 2>&1; then
   echo "ERROR: jq is required" >&2
   exit 2
 fi
 
-comments_json="$(gh api --paginate \
-  "repos/${REPO}/issues/${ISSUE_NUMBER}/comments" \
-  --jq '.[]' | jq -s '.')"
+fetch_comments_json() {
+  if command -v gh >/dev/null 2>&1; then
+    gh api --paginate \
+      "repos/${REPO}/issues/${ISSUE_NUMBER}/comments" \
+      --jq '.[]' | jq -s '.'
+    return
+  fi
+
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    curl -fsSL \
+      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+      -H "Accept: application/vnd.github+json" \
+      "https://api.github.com/repos/${REPO}/issues/${ISSUE_NUMBER}/comments?per_page=100"
+    return
+  fi
+
+  echo "ERROR: neither gh CLI nor GITHUB_TOKEN fallback is available" >&2
+  return 2
+}
+
+comments_json="$(fetch_comments_json)"
 
 result_json="$(jq -c --arg owner "$OWNER_LOGIN" '
   def first_line:
