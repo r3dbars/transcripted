@@ -51,6 +51,7 @@ jobs:
         with:
           script: |
             const issue_number = context.payload.issue.number;
+            const child_issue_number = 456;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             await github.rest.issues.update({
@@ -66,6 +67,19 @@ jobs:
               issue_number,
               body: "Auto-close: detected top-level PASS comment for BET-88 QA gate."
             });
+            await github.rest.issues.update({
+              owner,
+              repo,
+              issue_number: child_issue_number,
+              state: "closed",
+              state_reason: "completed"
+            });
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: child_issue_number,
+              body: "Auto-close: BET-88 QA gate transitioned to PASS on #428."
+            });
 
       - name: Open or reuse follow-up issue on FAIL
         if: steps.detect.outputs.status == 'fail'
@@ -73,6 +87,7 @@ jobs:
         with:
           script: |
             const issue_number = context.payload.issue.number;
+            const child_issue_number = 456;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const failComment = context.payload.comment?.html_url ?? "";
@@ -111,4 +126,17 @@ jobs:
               repo,
               issue_number,
               body: `Auto-follow-up: detected top-level FAIL. Tracking fix in #${followup.number}.`
+            });
+            await github.rest.issues.update({
+              owner,
+              repo,
+              issue_number: child_issue_number,
+              state: "closed",
+              state_reason: "completed"
+            });
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: child_issue_number,
+              body: `Auto-close: BET-88 QA gate transitioned to FAIL on #428. Follow-up is #${followup.number}.`
             });
