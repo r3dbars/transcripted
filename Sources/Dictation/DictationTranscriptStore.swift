@@ -77,12 +77,22 @@ enum DictationTranscriptStore {
             return []
         }
 
-        return Array(
-            files
+        let dayFiles = files
             .filter { isDictationDayFile($0) }
-            .flatMap { entries(in: $0) }
-            .sorted { $0.createdAt > $1.createdAt }
-            .prefix(limit)
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+
+        var collectedEntries: [SavedDictationEntry] = []
+        for file in dayFiles {
+            collectedEntries.append(contentsOf: entries(in: file))
+            if collectedEntries.count >= limit {
+                break
+            }
+        }
+
+        return Array(
+            collectedEntries
+                .sorted { $0.createdAt > $1.createdAt }
+                .prefix(limit)
         )
     }
 

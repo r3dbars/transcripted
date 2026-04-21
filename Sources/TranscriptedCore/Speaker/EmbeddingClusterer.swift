@@ -154,8 +154,14 @@ public enum EmbeddingClusterer {
     ) -> [SpeakerSegment] {
         // Compute total speaking duration per speaker
         var durationPerSpeaker: [Int: Double] = [:]
+        var segmentCountPerSpeaker: [Int: Int] = [:]
+        var rawEmbeddingsPerSpeaker: [Int: [[Float]]] = [:]
         for seg in segments {
             durationPerSpeaker[seg.speakerId, default: 0] += seg.duration
+            segmentCountPerSpeaker[seg.speakerId, default: 0] += 1
+            if let embedding = seg.embedding, !embedding.isEmpty {
+                rawEmbeddingsPerSpeaker[seg.speakerId, default: []].append(embedding)
+            }
         }
 
         let smallIds = Set(durationPerSpeaker.filter { $0.value < minClusterDuration }.map { $0.key })
@@ -169,10 +175,7 @@ public enum EmbeddingClusterer {
         // Small clusters may have NO quality-filtered segments (all too short/quiet).
         // Fall back to unfiltered embeddings so we have something to compare.
         for smallId in smallIds where embeddings[smallId] == nil {
-            let rawEmbeddings = segments
-                .filter { $0.speakerId == smallId }
-                .compactMap { $0.embedding }
-                .filter { !$0.isEmpty }
+            let rawEmbeddings = rawEmbeddingsPerSpeaker[smallId] ?? []
             if !rawEmbeddings.isEmpty {
                 embeddings[smallId] = Transcription.computeMeanEmbedding(rawEmbeddings)
             }
@@ -183,7 +186,7 @@ public enum EmbeddingClusterer {
         for smallId in smallIds {
             // Protect multi-utterance speakers: 3+ separate speaking turns means
             // a real participant, not noise — regardless of total duration.
-            let segmentCount = segments.filter { $0.speakerId == smallId }.count
+            let segmentCount = segmentCountPerSpeaker[smallId] ?? 0
             if segmentCount >= 3 {
                 AppLogger.transcription.info("Small cluster protected by segment count", [
                     "smallSpk": "spk\(smallId)",

@@ -316,7 +316,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     //
     // Copy semantics:
     //   onMicPCMBuffer  — raw reference from the CoreAudio tap; caller MUST copy before async dispatch.
-    //   onSystemPCMBuffer — already deep-copied (bufferListNoCopy semantics); safe to retain as-is.
+    //   onSystemPCMBuffer — owned for async use; SCK buffers already own memory, legacy tap buffers are copied.
     public var onMicPCMBuffer: ((AVAudioPCMBuffer) -> Void)?
     public var onSystemPCMBuffer: ((AVAudioPCMBuffer) -> Void)?
 

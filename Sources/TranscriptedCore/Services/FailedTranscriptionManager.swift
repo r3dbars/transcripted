@@ -203,10 +203,21 @@ public class FailedTranscriptionManager: ObservableObject {
         let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
 
         let oldFailures = failedTranscriptions.filter { $0.timestamp < cutoffDate }
+        guard !oldFailures.isEmpty else {
+            AppLogger.pipeline.info("Cleaned up old failed transcriptions", ["count": "0", "olderThanDays": "\(days)"])
+            return
+        }
 
         for failure in oldFailures {
-            deleteFailedTranscription(id: failure.id)
+            removeAudioFile(failure.micAudioURL, label: "old failure mic audio")
+            if let systemURL = failure.systemAudioURL {
+                removeAudioFile(systemURL, label: "old failure system audio")
+            }
         }
+
+        let removedIds = Set(oldFailures.map { $0.id })
+        failedTranscriptions.removeAll { removedIds.contains($0.id) }
+        saveFailedTranscriptions()
 
         AppLogger.pipeline.info("Cleaned up old failed transcriptions", ["count": "\(oldFailures.count)", "olderThanDays": "\(days)"])
     }

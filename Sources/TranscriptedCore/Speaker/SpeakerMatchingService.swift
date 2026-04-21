@@ -29,8 +29,9 @@ extension Transcription {
             }
         }
 
-        let scale = Float(embeddings.count)
-        var mean = sum.map { $0 / scale }
+        var mean = sum
+        var scale = Float(embeddings.count)
+        vDSP_vsdiv(mean, 1, &scale, &mean, 1, vDSP_Length(mean.count))
 
         // L2 normalize
         var norm: Float = 0
@@ -128,7 +129,9 @@ extension Transcription {
             }
         }
 
-        var mean = sum.map { $0 / totalWeight }
+        var mean = sum
+        var scale = totalWeight
+        vDSP_vsdiv(mean, 1, &scale, &mean, 1, vDSP_Length(mean.count))
 
         // L2 normalize
         var norm: Float = 0

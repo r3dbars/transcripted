@@ -78,6 +78,11 @@ class STTRouter: ObservableObject {
     }
 
     func initialize(model: TranscriptionModelChoice) async {
+        guard !isModelLoaded(for: model) else {
+            refreshModelDownloadState()
+            return
+        }
+
         switch model {
         case .parakeetTDTv3:
             await parakeetEngine.initialize()
@@ -118,7 +123,7 @@ class STTRouter: ObservableObject {
                 return nil
             }
 
-            guard let recording = parakeetEngine.drainRecordedSamplesForExternalTranscription(
+            guard let recording = await parakeetEngine.drainRecordedSamplesForExternalTranscription(
                 engineName: model.engineName
             ) else {
                 return nil

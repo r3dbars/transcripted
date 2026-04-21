@@ -797,7 +797,6 @@ class ParakeetEngine: ObservableObject {
             pendingSamples.removeAll(keepingCapacity: true)
         }
         sampleBuffer.removeAll(keepingCapacity: true)
-        sampleBuffer.reserveCapacity(Int(nativeSampleRate * Double(TranscriptedConstants.audioBufferCapacitySeconds)))
 
         let inputNode = audioEngine.inputNode
         // The tap is installed with format: nil, which means buffers arrive at the
@@ -1057,10 +1056,7 @@ class ParakeetEngine: ObservableObject {
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
         isEnginePrewarmed = false
-        pendingSamplesLock.lock()
-        sampleBuffer.append(contentsOf: pendingSamples)
-        pendingSamples.removeAll(keepingCapacity: true)
-        pendingSamplesLock.unlock()
+        drainPendingSamplesIntoSampleBuffer()
         isRecording = false
         audioLevel = 0
         print("⏹️ PARAKEET | recording stopped (\(sampleBuffer.count) samples, \(String(format: "%.1f", Double(sampleBuffer.count) / nativeSampleRate))s)")
@@ -1070,6 +1066,18 @@ class ParakeetEngine: ObservableObject {
     // Live display is driven by StreamingEouAsrManager fed via the audio tap (see startRecording).
     // EOU callback in initializeEouModel() updates committedStreamText → liveTranscript.
     // No explicit start/stop methods needed — tap feeds the manager, reset() clears state.
+
+    private func drainPendingSamplesIntoSampleBuffer() {
+        pendingSamplesLock.withLock {
+            guard !pendingSamples.isEmpty else { return }
+            if sampleBuffer.isEmpty {
+                swap(&sampleBuffer, &pendingSamples)
+            } else {
+                sampleBuffer.append(contentsOf: pendingSamples)
+                pendingSamples.removeAll(keepingCapacity: false)
+            }
+        }
+    }
 
     /// Convert [Float] samples to AVAudioPCMBuffer for StreamingEouAsrManager.
     private func makePCMBuffer(from samples: [Float]) -> AVAudioPCMBuffer? {
@@ -1087,7 +1095,7 @@ class ParakeetEngine: ObservableObject {
 
     // MARK: - Transcription
 
-    func drainRecordedSamplesForExternalTranscription(engineName: String) -> RecordedSpeechSamples? {
+    func drainRecordedSamplesForExternalTranscription(engineName: String) async -> RecordedSpeechSamples? {
         guard !isTranscribing else {
             EventReporter.shared.capture(
                 level: .warning,
@@ -1098,10 +1106,7 @@ class ParakeetEngine: ObservableObject {
             return nil
         }
 
-        pendingSamplesLock.withLock {
-            sampleBuffer.append(contentsOf: pendingSamples)
-            pendingSamples.removeAll(keepingCapacity: true)
-        }
+        drainPendingSamplesIntoSampleBuffer()
 
         guard !sampleBuffer.isEmpty else {
             EventReporter.shared.capture(
@@ -1118,8 +1123,11 @@ class ParakeetEngine: ObservableObject {
         swap(&samples, &sampleBuffer)
         let inputRate = nativeSampleRate
         let nativeCount = samples.count
-        let resampled = AudioResampler.resample(samples, from: inputRate, to: 16000)
-        samples.removeAll()
+        let samplesForResampling = samples
+        samples.removeAll(keepingCapacity: false)
+        let resampled = await Task.detached(priority: .userInitiated) {
+            AudioResampler.resample(samplesForResampling, from: inputRate, to: 16000)
+        }.value
         print("🔄 \(engineName.uppercased()) | resampled \(nativeCount) → \(resampled.count) samples")
 
         let shortAudioDecision = ParakeetShortAudioGate.dictation(
@@ -1154,10 +1162,7 @@ class ParakeetEngine: ObservableObject {
                 message: "transcribe() called while transcription already in progress")
             return nil
         }
-        pendingSamplesLock.withLock {
-            sampleBuffer.append(contentsOf: pendingSamples)
-            pendingSamples.removeAll(keepingCapacity: true)
-        }
+        drainPendingSamplesIntoSampleBuffer()
         guard !sampleBuffer.isEmpty else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "no_audio_samples",
                 message: "No audio samples in buffer when transcribe() called")
@@ -1182,8 +1187,11 @@ class ParakeetEngine: ObservableObject {
         // Resample to 16kHz for Parakeet inference, then free the native-rate buffer
         // before inference — avoids holding both the raw and resampled arrays simultaneously.
         let nativeCount = samples.count
-        let resampled = AudioResampler.resample(samples, from: inputRate, to: 16000)
-        samples.removeAll()
+        let samplesForResampling = samples
+        samples.removeAll(keepingCapacity: false)
+        let resampled = await Task.detached(priority: .userInitiated) {
+            AudioResampler.resample(samplesForResampling, from: inputRate, to: 16000)
+        }.value
         print("🔄 PARAKEET | resampled \(nativeCount) → \(resampled.count) samples")
 
         let shortAudioDecision = ParakeetShortAudioGate.dictation(

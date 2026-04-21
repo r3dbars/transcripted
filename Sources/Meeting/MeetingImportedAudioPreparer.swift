@@ -1,6 +1,6 @@
 import Foundation
 
-struct PreparedImportedMeetingAudio {
+struct PreparedImportedMeetingAudio: Sendable {
     let copiedAudioURL: URL
     let suggestedTitle: String
 }

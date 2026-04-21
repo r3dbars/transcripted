@@ -219,7 +219,7 @@ extension StatsDatabase {
     }
 
     private func recordingExistsImpl(transcriptPath: String) -> Bool {
-        let sql = "SELECT COUNT(*) FROM recordings WHERE transcript_path = ?;"
+        let sql = "SELECT 1 FROM recordings WHERE transcript_path = ? LIMIT 1;"
         var statement: OpaquePointer?
         var exists = false
 
@@ -227,7 +227,7 @@ extension StatsDatabase {
             sqlite3_bind_text(statement, 1, (transcriptPath as NSString).utf8String, -1, SQLITE_TRANSIENT)
 
             if sqlite3_step(statement) == SQLITE_ROW {
-                exists = sqlite3_column_int(statement, 0) > 0
+                exists = true
             }
         } else {
             AppLogger.stats.error("Failed to prepare recordingExists", ["sqlite_error": dbErrorMessage()])
@@ -238,7 +238,7 @@ extension StatsDatabase {
     }
 
     private func recordingExistsImpl(id: String) -> Bool {
-        let sql = "SELECT COUNT(*) FROM recordings WHERE id = ?;"
+        let sql = "SELECT 1 FROM recordings WHERE id = ? LIMIT 1;"
         var statement: OpaquePointer?
         var exists = false
 
@@ -246,7 +246,7 @@ extension StatsDatabase {
             sqlite3_bind_text(statement, 1, (id as NSString).utf8String, -1, SQLITE_TRANSIENT)
 
             if sqlite3_step(statement) == SQLITE_ROW {
-                exists = sqlite3_column_int(statement, 0) > 0
+                exists = true
             }
         } else {
             AppLogger.stats.error("Failed to prepare recordingExistsById", ["sqlite_error": dbErrorMessage()])

@@ -38,6 +38,7 @@ class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchecked
         guard var desc = tapStreamDescription else { return nil }
         return AVAudioFormat(streamDescription: &desc)
     }
+    var deliversOwnedAudioBuffers: Bool { false }
 
     let queue = DispatchQueue(label: "SystemAudioCapture", qos: .userInitiated)
     var bufferCallback: ((AVAudioPCMBuffer) -> Void)?
