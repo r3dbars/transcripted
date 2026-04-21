@@ -28,6 +28,7 @@ struct TranscriptedSettingsView: View {
     private let sidebarSections = SettingsSidebarSection.defaultSections
 
     @State private var rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
+    @State private var dictationShortcutMode = HotkeyPreferences.dictationShortcutMode()
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
@@ -331,7 +332,24 @@ struct TranscriptedSettingsView: View {
                 HotkeyRecorderContainer()
                     .frame(height: 76)
 
-                Toggle("Tap the right Option key to start dictation", isOn: Binding(
+                Picker("Dictation mode", selection: Binding(
+                    get: { dictationShortcutMode },
+                    set: { newValue in
+                        dictationShortcutMode = newValue
+                        HotkeyPreferences.setDictationShortcutMode(newValue)
+                    }
+                )) {
+                    ForEach(DictationShortcutMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(dictationShortcutMode.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Tap the right Option key for hands-free dictation", isOn: Binding(
                     get: { rightOptionEnabled },
                     set: { newValue in
                         rightOptionEnabled = newValue
@@ -340,7 +358,7 @@ struct TranscriptedSettingsView: View {
                 ))
 
                 Text(rightOptionEnabled
-                    ? "Right Option can start dictation too."
+                    ? "Right Option starts and stops dictation with taps."
                     : "Dictation uses only the shortcut above."
                 )
                 .font(.caption)
@@ -997,6 +1015,7 @@ struct TranscriptedSettingsView: View {
         refreshStoragePaths()
         refreshRecentCaptures()
         rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
+        dictationShortcutMode = HotkeyPreferences.dictationShortcutMode()
         refreshLaunchAtLoginState()
         customDictionaryText = CustomDictionaryPreferences.rawText()
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()

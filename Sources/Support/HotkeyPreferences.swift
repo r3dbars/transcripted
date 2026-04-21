@@ -10,6 +10,31 @@ struct HotkeyBinding: Equatable {
     let modifiers: UInt32  // Carbon modifier mask
 }
 
+enum DictationShortcutMode: String, CaseIterable, Identifiable, Hashable {
+    case pushToTalk = "push_to_talk"
+    case handsFree = "hands_free"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .pushToTalk:
+            return "Push to Talk"
+        case .handsFree:
+            return "Hands-Free"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .pushToTalk:
+            return "Hold the dictation shortcut, speak, then release to paste."
+        case .handsFree:
+            return "Press once to start dictation, then press again to paste."
+        }
+    }
+}
+
 enum HotkeyPreferences {
 
     // MARK: - Defaults
@@ -17,6 +42,7 @@ enum HotkeyPreferences {
     static let defaultDraft = HotkeyBinding(keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(optionKey))
     static let defaultDictation = HotkeyBinding(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey))
     static let defaultMeeting = HotkeyBinding(keyCode: UInt32(kVK_ANSI_M), modifiers: UInt32(optionKey))
+    static let defaultDictationShortcutMode: DictationShortcutMode = .handsFree
 
     // MARK: - Right Option Tap-to-Dictate
 
@@ -43,6 +69,7 @@ enum HotkeyPreferences {
     private static let dictationModifiersKey = "hotkey-dictation-modifiers"
     private static let meetingKeyCodeKey     = "hotkey-meeting-keyCode"
     private static let meetingModifiersKey   = "hotkey-meeting-modifiers"
+    private static let dictationShortcutModeKey = "hotkey-dictation-shortcut-mode"
 
     // MARK: - Read
 
@@ -73,6 +100,17 @@ enum HotkeyPreferences {
         )
     }
 
+    static func dictationShortcutMode(userDefaults: UserDefaults = .standard) -> DictationShortcutMode {
+        guard
+            let rawValue = userDefaults.string(forKey: dictationShortcutModeKey),
+            let mode = DictationShortcutMode(rawValue: rawValue)
+        else {
+            return defaultDictationShortcutMode
+        }
+
+        return mode
+    }
+
     // MARK: - Write
 
     static func save(draft binding: HotkeyBinding) {
@@ -96,14 +134,20 @@ enum HotkeyPreferences {
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
 
-    static func resetToDefaults() {
-        let ud = UserDefaults.standard
+    static func setDictationShortcutMode(_ mode: DictationShortcutMode, userDefaults: UserDefaults = .standard) {
+        userDefaults.set(mode.rawValue, forKey: dictationShortcutModeKey)
+        NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
+    }
+
+    static func resetToDefaults(userDefaults: UserDefaults = .standard) {
+        let ud = userDefaults
         ud.removeObject(forKey: draftKeyCodeKey)
         ud.removeObject(forKey: draftModifiersKey)
         ud.removeObject(forKey: dictationKeyCodeKey)
         ud.removeObject(forKey: dictationModifiersKey)
         ud.removeObject(forKey: meetingKeyCodeKey)
         ud.removeObject(forKey: meetingModifiersKey)
+        ud.removeObject(forKey: dictationShortcutModeKey)
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
 

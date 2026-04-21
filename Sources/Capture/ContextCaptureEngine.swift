@@ -53,6 +53,54 @@ private func routeDictationToggle(sourceApp: NSRunningApplication?, trigger: Dic
 }
 
 @MainActor
+private func routeDictationHotkeyPress(sourceApp: NSRunningApplication?) {
+    switch HotkeyPreferences.dictationShortcutMode() {
+    case .handsFree:
+        routeDictationToggle(sourceApp: sourceApp, trigger: .keyboardShortcut)
+    case .pushToTalk:
+        guard let session = _sharedSessionController else { return }
+        DiagnosticsTrail.record(
+            logger: session.appState?.logger,
+            engine: "capture",
+            event: "dictation_push_to_talk_pressed",
+            message: "Dictation push-to-talk shortcut pressed",
+            context: [
+                "source_app_name": sourceApp?.localizedName ?? "",
+                "source_app_bundle_id": sourceApp?.bundleIdentifier ?? "",
+                "session_state": session.isDictating ? "dictating" : (session.isInSession ? "drafting" : "idle"),
+                "overlay_state": overlayStateName(session.overlayController?.state)
+            ]
+        )
+
+        guard !session.isDictating else { return }
+        if session.isInSession {
+            session.cancelSession()
+        }
+        session.startDictation(sourceApp: sourceApp, trigger: .keyboardShortcut)
+    }
+}
+
+@MainActor
+private func routeDictationHotkeyRelease() {
+    guard HotkeyPreferences.dictationShortcutMode() == .pushToTalk else { return }
+    guard let session = _sharedSessionController else { return }
+
+    DiagnosticsTrail.record(
+        logger: session.appState?.logger,
+        engine: "capture",
+        event: "dictation_push_to_talk_released",
+        message: "Dictation push-to-talk shortcut released",
+        context: [
+            "session_state": session.isDictating ? "dictating" : (session.isInSession ? "drafting" : "idle"),
+            "overlay_state": overlayStateName(session.overlayController?.state)
+        ]
+    )
+
+    guard session.isDictating else { return }
+    session.stopDictationAndPaste(trigger: .keyboardShortcut)
+}
+
+@MainActor
 private func overlayStateName(_ state: FloatingOverlayController.OverlayState?) -> String {
     guard let state else { return "unknown" }
     switch state {
@@ -82,6 +130,20 @@ private func hotkeyHandler(
         &hotkeyID
     )
     guard status == noErr else { return noErr }
+
+    let eventKind = GetEventKind(event)
+    let isPress = eventKind == UInt32(kEventHotKeyPressed)
+    let isRelease = eventKind == UInt32(kEventHotKeyReleased)
+
+    if hotkeyID.id == 2, isRelease {
+        Task { @MainActor in
+            routeDictationHotkeyRelease()
+        }
+        return noErr
+    }
+
+    guard isPress else { return noErr }
+
     guard shouldAcceptHotkeyAction() else {
         Task { @MainActor in
             EventReporter.shared.capture(
@@ -98,7 +160,7 @@ private func hotkeyHandler(
     if hotkeyID.id == 2 {
         let frontApp = NSWorkspace.shared.frontmostApplication
         Task { @MainActor in
-            routeDictationToggle(sourceApp: frontApp, trigger: .keyboardShortcut)
+            routeDictationHotkeyPress(sourceApp: frontApp)
         }
     } else if hotkeyID.id == 3 {
         // ⌥M — Meeting mode: toggle meeting recording.
@@ -222,7 +284,7 @@ class ContextCaptureEngine: ObservableObject {
     private let rightOptionDetector = RightOptionTapDetector()
 
     /// Human-readable display strings for current shortcuts (drives MenuBarPanel pills + overlay hints)
-    @Published var dictationShortcutDisplay: String = HotkeyPreferences.rightOptionDictationEnabled() ? "Right ⌥" : HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
+    @Published var dictationShortcutDisplay: String = ContextCaptureEngine.currentDictationShortcutDisplay()
     @Published var meetingShortcutDisplay: String = HotkeyPreferences.displayString(for: HotkeyPreferences.meetingBinding())
 
     /// Non-nil when hotkey registration failed — shown as a dismissible banner in MenuBarPanel
@@ -256,16 +318,22 @@ class ContextCaptureEngine: ObservableObject {
         _sharedSessionController = sessionController
         _sharedMeetingToggle = onMeetingToggle
 
-        // Register for kEventHotKeyPressed (dictation fallback + meeting mode)
-        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(
-            GetApplicationEventTarget(),
-            hotkeyHandler,
-            1,
-            &eventType,
-            nil,
-            &eventHandlerRef
-        )
+        // Register for hotkey press and release. Release is used only for
+        // dictation push-to-talk; meeting and hands-free dictation ignore it.
+        let eventTypes = [
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))
+        ]
+        _ = eventTypes.withUnsafeBufferPointer { buffer in
+            InstallEventHandler(
+                GetApplicationEventTarget(),
+                hotkeyHandler,
+                buffer.count,
+                buffer.baseAddress,
+                nil,
+                &eventHandlerRef
+            )
+        }
 
         // Register meeting hotkey from saved preferences (or defaults)
         registerHotkeysFromPreferences()
@@ -367,10 +435,18 @@ class ContextCaptureEngine: ObservableObject {
         hotkeyError = errors.isEmpty ? nil : "\(errors.joined(separator: " and ")) failed to register"
 
         // Update display strings
-        dictationShortcutDisplay = HotkeyPreferences.rightOptionDictationEnabled()
-            ? "Right ⌥"
-            : HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
+        dictationShortcutDisplay = Self.currentDictationShortcutDisplay()
         meetingShortcutDisplay = HotkeyPreferences.displayString(for: meetingBinding)
+    }
+
+    private static func currentDictationShortcutDisplay() -> String {
+        let primaryShortcut = HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
+        switch HotkeyPreferences.dictationShortcutMode() {
+        case .pushToTalk:
+            return "Hold \(primaryShortcut)"
+        case .handsFree:
+            return HotkeyPreferences.rightOptionDictationEnabled() ? "Right ⌥" : primaryShortcut
+        }
     }
 
     /// Handles a right Option key tap — same routing as ⌥Space (dictation toggle)

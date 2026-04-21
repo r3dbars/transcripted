@@ -35,8 +35,13 @@ class FloatingOverlayController {
 
     /// Human-readable shortcut hints (reads live from UserDefaults)
     var dictationShortcutHint: String {
-        if HotkeyPreferences.rightOptionDictationEnabled() { return "Right ⌥" }
-        return HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
+        let primaryShortcut = HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
+        switch HotkeyPreferences.dictationShortcutMode() {
+        case .pushToTalk:
+            return "Hold \(primaryShortcut)"
+        case .handsFree:
+            return HotkeyPreferences.rightOptionDictationEnabled() ? "Right ⌥" : primaryShortcut
+        }
     }
 
     // MARK: - State (plain vars with didSet — no @Published, no ObservableObject)
