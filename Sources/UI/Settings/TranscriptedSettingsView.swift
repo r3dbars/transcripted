@@ -195,6 +195,7 @@ struct TranscriptedSettingsView: View {
                     title: "Start Dictation",
                     detail: "Speak into the app you were using.",
                     tone: .accent,
+                    menuBarVisibility: menuBarVisibilityBinding(for: .startDictation),
                     action: actions.startDictation
                 )
 
@@ -203,36 +204,27 @@ struct TranscriptedSettingsView: View {
                     title: "Start Meeting",
                     detail: "Record your mic and computer audio.",
                     tone: .accent,
+                    menuBarVisibility: menuBarVisibilityBinding(for: .startMeeting),
                     action: actions.startMeeting
                 )
 
                 SettingsActionTile(
-                    symbolName: "waveform",
-                    title: "Transcribe Audio File",
-                    detail: "Turn a recording into notes.",
-                    action: actions.importAudioFile
+                    symbolName: "arrow.turn.down.right",
+                    title: "Paste Last Dictation",
+                    detail: "Paste the newest saved dictation.",
+                    menuBarVisibility: menuBarVisibilityBinding(for: .pasteLastDictation),
+                    action: actions.pasteLastDictation
                 )
 
                 SettingsActionTile(
-                    symbolName: "sparkles",
-                    title: "Connect Agent",
-                    detail: "Let your agent read saved notes.",
+                    symbolName: "clock.arrow.circlepath",
+                    title: "Recent Meetings",
+                    detail: "Open saved meeting notes.",
+                    menuBarVisibility: menuBarVisibilityBinding(for: .recentMeetings),
                     action: {
-                        navigation.selectedPage = .connectAgent
+                        navigation.selectedPage = .meetings
                     }
                 )
-            }
-
-            SettingsSection(
-                title: "Menu Bar",
-                detail: "Choose which primary actions appear in the menu bar popover."
-            ) {
-                ForEach(MenuBarOptionalItem.allCases) { item in
-                    MenuBarVisibilityToggleRow(
-                        item: item,
-                        isVisible: menuBarVisibilityBinding(for: item)
-                    )
-                }
             }
 
             if let activity = homeTranscriptionActivity {

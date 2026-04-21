@@ -62,6 +62,7 @@ struct SettingsActionTile: View {
     let title: String
     let detail: String
     let tone: Tone
+    let menuBarVisibility: Binding<Bool>?
     let action: () -> Void
 
     init(
@@ -69,52 +70,70 @@ struct SettingsActionTile: View {
         title: String,
         detail: String,
         tone: Tone = .neutral,
+        menuBarVisibility: Binding<Bool>? = nil,
         action: @escaping () -> Void
     ) {
         self.symbolName = symbolName
         self.title = title
         self.detail = detail
         self.tone = tone
+        self.menuBarVisibility = menuBarVisibility
         self.action = action
     }
 
     var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 14) {
-                Image(systemName: symbolName)
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(width: 34, height: 34)
-                    .background(iconBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.headline)
-                        .foregroundStyle(Color.primary)
-
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 12)
-
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
+        HStack(alignment: .center, spacing: 12) {
+            Button(action: action) {
+                actionContent
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(cardBackground)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(cardStroke, lineWidth: 1)
-            )
+            .buttonStyle(.plain)
+
+            if let menuBarVisibility {
+                Toggle("Show in menu bar", isOn: menuBarVisibility)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .help("Show in menu bar")
+            }
         }
-        .buttonStyle(.plain)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(cardStroke, lineWidth: 1)
+        )
+    }
+
+    private var actionContent: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: symbolName)
+                .font(.system(size: 16, weight: .semibold))
+                .frame(width: 34, height: 34)
+                .background(iconBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(Color.primary)
+
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 12)
+
+            Image(systemName: "arrow.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     private var iconBackground: Color {
@@ -316,33 +335,6 @@ struct SettingsQuickLinkRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
-    }
-}
-
-struct MenuBarVisibilityToggleRow: View {
-    let item: MenuBarOptionalItem
-    @Binding var isVisible: Bool
-
-    var body: some View {
-        Toggle(isOn: $isVisible) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: item.symbolName)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.title)
-                        .font(.subheadline.weight(.semibold))
-
-                    Text(item.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-        .toggleStyle(.switch)
     }
 }
 

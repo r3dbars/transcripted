@@ -110,7 +110,8 @@ When an update is found, the row also shows the available version as supporting 
 
 - `Version 1.1.10 ready`
 
-Primary action rows can be hidden from the Settings `Home` page:
+Primary action rows can be hidden from switches on the matching Settings
+`Home` action tiles:
 
 - `Start Dictation`
 - `Start Meeting`
