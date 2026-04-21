@@ -358,7 +358,8 @@ enum CLIContextStore {
         }) {
             return String(firstUtterance.text.prefix(220))
         }
-        return meeting.speakers.joined(separator: ", ")
+        let speakers = meeting.speakers.joined(separator: ", ")
+        return speakers.isEmpty ? "No transcript captured." : speakers
     }
 
     private static func extractTitle(from content: String) -> String? {
