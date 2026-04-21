@@ -115,6 +115,7 @@ APP_SOURCES=(
     "Sources/Support/TranscriptedPermissionAccess.swift"
     "Sources/Support/TranscriptedStoragePaths.swift"
     "Sources/Support/LaunchAtLoginPreferences.swift"
+    "Sources/Support/MenuBarVisibilityPreferences.swift"
     "Sources/Support/CustomDictionaryPreferences.swift"
     "Sources/Support/TranscriptionModelPreferences.swift"
     "Sources/Support/DictationAutoSendPreferences.swift"

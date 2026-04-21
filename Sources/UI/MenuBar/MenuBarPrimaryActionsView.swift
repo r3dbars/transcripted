@@ -44,7 +44,8 @@ final class MenuBarPrimaryActionsView: NSView {
         dictationState: MenuBarPrimaryActionState,
         meetingState: MenuBarPrimaryActionState,
         pasteDetail: String,
-        pasteEnabled: Bool
+        pasteEnabled: Bool,
+        showRecentMeetings: Bool
     ) {
         homeRow.update(
             symbolName: "house.fill",
@@ -83,6 +84,7 @@ final class MenuBarPrimaryActionsView: NSView {
             isEnabled: pasteEnabled
         )
 
+        recentMeetingsRow.isHidden = !showRecentMeetings
         recentMeetingsRow.update(
             symbolName: "clock.arrow.circlepath",
             title: "Recent Meetings",
@@ -101,7 +103,6 @@ final class MenuBarPrimaryActionsView: NSView {
         let firstHeight = dictationRow.intrinsicContentSize.height
         let secondHeight = meetingRow.intrinsicContentSize.height
         let thirdHeight = pasteRow.intrinsicContentSize.height
-        let fourthHeight = recentMeetingsRow.intrinsicContentSize.height
 
         var y: CGFloat = 0
         let homeHeight = homeRow.intrinsicContentSize.height
@@ -114,16 +115,30 @@ final class MenuBarPrimaryActionsView: NSView {
         dictationRow.frame = NSRect(x: 0, y: y, width: bounds.width, height: firstHeight)
         meetingRow.frame = NSRect(x: 0, y: dictationRow.frame.maxY + 2, width: bounds.width, height: secondHeight)
         pasteRow.frame = NSRect(x: 0, y: meetingRow.frame.maxY + 2, width: bounds.width, height: thirdHeight)
-        recentMeetingsRow.frame = NSRect(x: 0, y: pasteRow.frame.maxY + 2, width: bounds.width, height: fourthHeight)
+
+        if recentMeetingsRow.isHidden {
+            recentMeetingsRow.frame = .zero
+        } else {
+            recentMeetingsRow.frame = NSRect(
+                x: 0,
+                y: pasteRow.frame.maxY + 2,
+                width: bounds.width,
+                height: recentMeetingsRow.intrinsicContentSize.height
+            )
+        }
     }
 
     var intrinsicHeight: CGFloat {
-        homeRow.intrinsicContentSize.height
+        let optionalRecentHeight: CGFloat = recentMeetingsRow.isHidden
+            ? 0
+            : recentMeetingsRow.intrinsicContentSize.height + 2
+
+        return homeRow.intrinsicContentSize.height
             + 14
             + dictationRow.intrinsicContentSize.height
             + meetingRow.intrinsicContentSize.height
             + pasteRow.intrinsicContentSize.height
-            + recentMeetingsRow.intrinsicContentSize.height
-            + 6
+            + 4
+            + optionalRecentHeight
     }
 }

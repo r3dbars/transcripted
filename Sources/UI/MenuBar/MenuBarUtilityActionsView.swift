@@ -38,8 +38,15 @@ final class MenuBarUtilityActionsView: NSView {
         updateTitle: String,
         updateVersion: String?,
         updateTone: MenuBarActionRowView.Tone,
-        updateEnabled: Bool
+        updateEnabled: Bool,
+        showConnectAgent: Bool,
+        showFeedback: Bool,
+        showUpdates: Bool
     ) {
+        connectAgentRow.isHidden = !showConnectAgent
+        feedbackRow.isHidden = !showFeedback
+        updatesRow.isHidden = !showUpdates
+
         connectAgentRow.update(
             symbolName: "sparkles",
             title: "Connect Agent",
@@ -91,11 +98,13 @@ final class MenuBarUtilityActionsView: NSView {
         super.layout()
 
         var y: CGFloat = 0
-        for row in [connectAgentRow, feedbackRow, updatesRow, settingsRow, quitRow] {
+        for row in visibleRows {
             let rowHeight = row.intrinsicContentSize.height
             row.frame = NSRect(x: 0, y: y, width: bounds.width, height: rowHeight)
             y += rowHeight + 1
         }
+
+        hiddenRows.forEach { $0.frame = .zero }
     }
 
     private func sendFeedback() {
@@ -105,8 +114,22 @@ final class MenuBarUtilityActionsView: NSView {
     func dismissTransientUI() {}
 
     var intrinsicHeight: CGFloat {
-        [connectAgentRow, feedbackRow, updatesRow, settingsRow, quitRow]
+        let rows = visibleRows
+        let rowSpacing = max(0, rows.count - 1)
+        return rows
             .map { $0.intrinsicContentSize.height }
-            .reduce(0, +) + 4
+            .reduce(0, +) + CGFloat(rowSpacing)
+    }
+
+    private var allRows: [MenuBarActionRowView] {
+        [connectAgentRow, feedbackRow, updatesRow, settingsRow, quitRow]
+    }
+
+    private var visibleRows: [MenuBarActionRowView] {
+        allRows.filter { !$0.isHidden }
+    }
+
+    private var hiddenRows: [MenuBarActionRowView] {
+        allRows.filter(\.isHidden)
     }
 }

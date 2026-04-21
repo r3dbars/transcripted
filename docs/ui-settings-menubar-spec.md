@@ -110,6 +110,15 @@ When an update is found, the row also shows the available version as supporting 
 
 - `Version 1.1.10 ready`
 
+Optional rows can be hidden from the Settings `Home` page:
+
+- `Recent Meetings`
+- `Connect Agent`
+- `Submit Feedback`
+- updates row
+
+`Settings` and `Quit` always remain visible.
+
 ## Settings Window
 
 ### Home

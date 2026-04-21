@@ -62,6 +62,7 @@ final class MenuBarPanelController: NSViewController {
         )
         let latestDictation = DictationTranscriptStore.latestSavedDictation()
         let updatePresentation = menuUpdatePresentation(for: appState.sparkleUpdater.updateStatus)
+        let menuVisibility = MenuBarVisibilityPreferences.snapshot()
 
         content.headerView.update(
             warmupStatus: warmupStatus,
@@ -74,14 +75,18 @@ final class MenuBarPanelController: NSViewController {
             dictationState: dictationState,
             meetingState: meetingState,
             pasteDetail: pasteDetail(for: latestDictation),
-            pasteEnabled: latestDictation != nil
+            pasteEnabled: latestDictation != nil,
+            showRecentMeetings: menuVisibility[.recentMeetings] ?? true
         )
 
         content.utilityActionsView.update(
             updateTitle: updatePresentation.title,
             updateVersion: updatePresentation.version,
             updateTone: updatePresentation.tone,
-            updateEnabled: appState.sparkleUpdater.updateStatus.canCheckForUpdates
+            updateEnabled: appState.sparkleUpdater.updateStatus.canCheckForUpdates,
+            showConnectAgent: menuVisibility[.connectAgent] ?? true,
+            showFeedback: menuVisibility[.submitFeedback] ?? true,
+            showUpdates: menuVisibility[.updates] ?? true
         )
 
         if case .unknown = appState.sparkleUpdater.updateStatus.state {
@@ -124,6 +129,13 @@ final class MenuBarPanelController: NSViewController {
             .store(in: &subscriptions)
 
         appState.sparkleUpdater.$updateStatus
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.refresh()
+            }
+            .store(in: &subscriptions)
+
+        NotificationCenter.default.publisher(for: .menuBarVisibilityPreferencesDidChange)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.refresh()

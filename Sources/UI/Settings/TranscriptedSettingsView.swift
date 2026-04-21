@@ -45,6 +45,7 @@ struct TranscriptedSettingsView: View {
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
     @State private var recentMeetings = RecentMeetingsScanner.loadRecent(limit: 5)
     @State private var recentDictations = DictationTranscriptStore.recentSavedDictations(limit: 5)
+    @State private var menuBarItemVisibility = MenuBarVisibilityPreferences.snapshot()
     @State private var showSupportFolders = false
     @State private var copiedAgentMeetingID: String?
 
@@ -133,6 +134,9 @@ struct TranscriptedSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .transcriptionModelPreferenceDidChange)) { _ in
             preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .menuBarVisibilityPreferencesDidChange)) { _ in
+            refreshMenuBarVisibility()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshPermissions()
             refreshRecentCaptures()
@@ -217,6 +221,18 @@ struct TranscriptedSettingsView: View {
                         navigation.selectedPage = .connectAgent
                     }
                 )
+            }
+
+            SettingsSection(
+                title: "Menu Bar",
+                detail: "Choose which extra rows appear in the menu bar popover."
+            ) {
+                ForEach(MenuBarOptionalItem.allCases) { item in
+                    MenuBarVisibilityToggleRow(
+                        item: item,
+                        isVisible: menuBarVisibilityBinding(for: item)
+                    )
+                }
             }
 
             if let activity = homeTranscriptionActivity {
@@ -996,6 +1012,7 @@ struct TranscriptedSettingsView: View {
         refreshPermissions()
         refreshStoragePaths()
         refreshRecentCaptures()
+        refreshMenuBarVisibility()
         rightOptionEnabled = HotkeyPreferences.rightOptionDictationEnabled()
         refreshLaunchAtLoginState()
         customDictionaryText = CustomDictionaryPreferences.rawText()
@@ -1024,6 +1041,10 @@ struct TranscriptedSettingsView: View {
     private func refreshRecentCaptures() {
         recentMeetings = RecentMeetingsScanner.loadRecent(limit: 5)
         recentDictations = DictationTranscriptStore.recentSavedDictations(limit: 5)
+    }
+
+    private func refreshMenuBarVisibility() {
+        menuBarItemVisibility = MenuBarVisibilityPreferences.snapshot()
     }
 
     private func refreshLaunchAtLoginState() {
@@ -1071,6 +1092,16 @@ struct TranscriptedSettingsView: View {
         Task { @MainActor in
             await sttRouter.initializeSelectedModel()
         }
+    }
+
+    private func menuBarVisibilityBinding(for item: MenuBarOptionalItem) -> Binding<Bool> {
+        Binding(
+            get: { menuBarItemVisibility[item] ?? true },
+            set: { newValue in
+                menuBarItemVisibility[item] = newValue
+                MenuBarVisibilityPreferences.setVisible(item, newValue)
+            }
+        )
     }
 
     private func sendTestSentryEvent() {

@@ -319,6 +319,33 @@ struct SettingsQuickLinkRow: View {
     }
 }
 
+struct MenuBarVisibilityToggleRow: View {
+    let item: MenuBarOptionalItem
+    @Binding var isVisible: Bool
+
+    var body: some View {
+        Toggle(isOn: $isVisible) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: item.symbolName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.title)
+                        .font(.subheadline.weight(.semibold))
+
+                    Text(item.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .toggleStyle(.switch)
+    }
+}
+
 struct PermissionSnapshot {
     private(set) var values: [TranscriptedPermissionKind: Bool]
 
