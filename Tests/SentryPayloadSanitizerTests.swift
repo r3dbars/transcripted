@@ -49,6 +49,7 @@ func testSentryPayloadSanitizer() {
             "hw_channels": "1",
             "status_domain": "com.apple.coreaudio.avfaudio",
             "status_code": "-10868",
+            "input_device_class": "bluetooth",
             "audio_device": "Private AirPods",
             "error": "Failed to initialize active nodes",
             "source_app": "com.example.private",
@@ -64,6 +65,7 @@ func testSentryPayloadSanitizer() {
         assertEqual(sanitized["hw_channels"], "1", "hardware channel count should remain")
         assertEqual(sanitized["status_domain"], "com.apple.coreaudio.avfaudio", "status domain should remain")
         assertEqual(sanitized["status_code"], "-10868", "status code should remain")
+        assertEqual(sanitized["input_device_class"], "bluetooth", "coarse input device classes should remain")
         assertNil(sanitized["audio_device"], "raw audio device names should be dropped")
         assertNil(sanitized["error"], "free-form errors should be dropped")
         assertNil(sanitized["source_app"], "source app identifiers should be dropped")
