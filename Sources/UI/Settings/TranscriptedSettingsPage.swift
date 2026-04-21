@@ -7,6 +7,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     case shortcuts
     case meetings
     case dictations
+    case people
     case storage
     case connectAgent
     case privacy
@@ -22,6 +23,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .shortcuts: return "Shortcuts"
         case .meetings: return "Meetings"
         case .dictations: return "Dictation"
+        case .people: return "People"
         case .storage: return "Storage"
         case .connectAgent: return "Agent"
         case .privacy: return "Privacy"
@@ -40,9 +42,11 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .shortcuts:
             return "Keys and send-after-paste rules."
         case .meetings:
-            return "Recording, imports, and speakers."
+            return "Recording, imports, and recent calls."
         case .dictations:
             return "Paste-back and sound cues."
+        case .people:
+            return "Speaker profiles and duplicates."
         case .storage:
             return "Where your files live."
         case .connectAgent:
@@ -62,6 +66,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .shortcuts: return "keyboard"
         case .meetings: return "person.2.wave.2.fill"
         case .dictations: return "quote.bubble.fill"
+        case .people: return "person.2.fill"
         case .storage: return "externaldrive.fill"
         case .connectAgent: return "sparkles"
         case .privacy: return "lock.shield.fill"

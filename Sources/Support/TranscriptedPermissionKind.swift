@@ -65,7 +65,7 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
     var actionButtonTitle: String {
         switch self {
         case .microphone:
-            return Self.microphoneActionTitle(for: AVCaptureDevice.authorizationStatus(for: .audio))
+            return Self.microphoneActionTitle(for: TranscriptedPermissionAccess.microphoneAuthorizationStatus())
         case .accessibility:
             return Self.accessibilityActionTitle(isTrusted: AXIsProcessTrusted())
         case .systemAudioRecording:

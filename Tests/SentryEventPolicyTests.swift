@@ -18,6 +18,10 @@ func testSentryEventPolicy() {
             forEngine: "dictation",
             event: "microphone_start_timeout"
         )
+        let modelInitFailure = SentryEventPolicy.policy(
+            forEngine: "parakeet",
+            event: "model_init_failed"
+        )
         let unknown = SentryEventPolicy.policy(
             forEngine: "dictation",
             event: "dictation_export_failed"
@@ -27,6 +31,7 @@ func testSentryEventPolicy() {
         assertEqual(hotkeyFailure?.summary, "Transcripted could not register a keyboard shortcut.", "capture failure should stay allowlisted")
         assertEqual(audioStartFailure?.summary, "Speech audio engine failed to start.", "audio-start failures should stay allowlisted with a privacy-safe summary")
         assertEqual(microphoneStartTimeout?.summary, "Dictation microphone start timed out.", "microphone start timeouts should be visible in Sentry without raw device names")
+        assertEqual(modelInitFailure?.summary, "Speech model initialization failed.", "model-init failures should stay allowlisted with a privacy-safe summary")
         assertNil(unknown, "unknown events should stay local-only by default")
     }
 }

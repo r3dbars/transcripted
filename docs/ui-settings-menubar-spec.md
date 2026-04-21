@@ -110,6 +110,21 @@ When an update is found, the row also shows the available version as supporting 
 
 - `Version 1.1.10 ready`
 
+Primary action rows can be hidden from switches on the matching Settings
+`Home` action tiles:
+
+- `Start Dictation`
+- `Start Meeting`
+- `Paste Last Dictation`
+- `Recent Meetings`
+
+These switches default on. Hovering a switch explains that it shows or hides the
+matching row in the menu bar popover. The action arrow on each tile should read
+as an explicit icon button and expose a short hover description for the action.
+
+Utility rows such as `Connect Agent`, `Submit Feedback`, updates, `Settings`,
+and `Quit` remain visible in this version.
+
 ## Settings Window
 
 ### Home

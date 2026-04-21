@@ -18,14 +18,17 @@ final class MenuBarShortcutsView: NSView {
         accessibilityLabel: "Transcribe file",
         toolTip: "Choose an audio file to transcribe"
     )
-    private let resetHintLabel = NSTextField(labelWithString: "Edit shortcuts or import audio")
+    private let resetHintLabel = NSTextField(labelWithString: "Edit triggers or import audio")
     private let resetButton = MenuIconButton(
         symbolName: "arrow.counterclockwise",
         accessibilityLabel: "Reset shortcuts",
         toolTip: "Reset shortcuts"
     )
     private var keyMonitor: Any?
+    private var flagsMonitor: Any?
     private var recordingTarget: RecordingTarget?
+    private var pendingDictationModifier: PhysicalDictationTriggerBinding?
+    private var pendingDictationModifierKeyCode: UInt32?
     private var currentDictationState = MenuBarPrimaryActionState(isEnabled: true, subtitle: "Paste spoken text anywhere")
     private var currentMeetingState = MenuBarPrimaryActionState(isEnabled: true, subtitle: "Capture mic and system audio")
     private var canImportAudioFiles = true
@@ -48,6 +51,9 @@ final class MenuBarShortcutsView: NSView {
     deinit {
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)
+        }
+        if let flagsMonitor {
+            NSEvent.removeMonitor(flagsMonitor)
         }
     }
 
@@ -131,15 +137,15 @@ final class MenuBarShortcutsView: NSView {
         importButton.isEnabled = canImportAudioFiles && recordingTarget == nil
         resetButton.isEnabled = recordingTarget == nil
         resetHintLabel.alphaValue = 1.0
-        resetHintLabel.stringValue = "Edit shortcuts or import audio"
+        resetHintLabel.stringValue = "Edit triggers or import audio"
 
         dictationRow.update(
             symbolName: "mic.fill",
             title: "Dictation",
             subtitle: recordingTarget == .dictation
-                ? "Press shortcut…"
+                ? "Press key…"
                 : dictationState.subtitle,
-            key: recordingTarget == .dictation ? "Type keys" : dictationKey,
+            key: recordingTarget == .dictation ? "Any key" : dictationKey,
             isEditing: recordingTarget == .dictation,
             isEnabled: dictationState.isEnabled
         )
@@ -165,7 +171,20 @@ final class MenuBarShortcutsView: NSView {
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
-            if event.keyCode == UInt16(kVK_Escape) {
+            if target == .meeting, event.keyCode == UInt16(kVK_Escape) {
+                self.stopRecording()
+                self.refreshFromPreferences()
+                return nil
+            }
+
+            if target == .dictation {
+                self.pendingDictationModifier = nil
+                self.pendingDictationModifierKeyCode = nil
+                let candidate = PhysicalDictationTriggerPreferences.bindingForKeyDown(
+                    keyCode: UInt32(event.keyCode),
+                    modifierFlags: event.modifierFlags
+                )
+                PhysicalDictationTriggerPreferences.save(candidate)
                 self.stopRecording()
                 self.refreshFromPreferences()
                 return nil
@@ -177,16 +196,48 @@ final class MenuBarShortcutsView: NSView {
             )
             guard HotkeyPreferences.isValid(candidate) else { return nil }
 
-            switch target {
-            case .dictation:
-                HotkeyPreferences.save(dictation: candidate)
-            case .meeting:
-                HotkeyPreferences.save(meeting: candidate)
-            }
+            HotkeyPreferences.save(meeting: candidate)
 
             self.stopRecording()
             self.refreshFromPreferences()
             return nil
+        }
+
+        flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            guard let self else { return event }
+            guard target == .dictation else {
+                return event
+            }
+
+            let keyCode = UInt32(event.keyCode)
+            let modifiers = PhysicalDictationTriggerPreferences.modifiers(from: event.modifierFlags)
+
+            if let candidate = PhysicalDictationTriggerPreferences.bindingForFlagsChanged(
+                keyCode: keyCode,
+                modifierFlags: event.modifierFlags
+            ) {
+                if keyCode == UInt32(kVK_CapsLock) {
+                    PhysicalDictationTriggerPreferences.save(candidate)
+                    self.stopRecording()
+                    self.refreshFromPreferences()
+                    return nil
+                }
+
+                self.pendingDictationModifier = candidate
+                self.pendingDictationModifierKeyCode = keyCode
+                return nil
+            }
+
+            if let pending = self.pendingDictationModifier,
+               self.pendingDictationModifierKeyCode == keyCode,
+               PhysicalDictationTriggerPreferences.matchesFlagsChangedRelease(pending, keyCode: keyCode, modifiers: modifiers) {
+                PhysicalDictationTriggerPreferences.save(pending)
+                self.stopRecording()
+                self.refreshFromPreferences()
+                return nil
+            }
+
+            return event
         }
     }
 
@@ -195,7 +246,13 @@ final class MenuBarShortcutsView: NSView {
             NSEvent.removeMonitor(keyMonitor)
             self.keyMonitor = nil
         }
+        if let flagsMonitor {
+            NSEvent.removeMonitor(flagsMonitor)
+            self.flagsMonitor = nil
+        }
         recordingTarget = nil
+        pendingDictationModifier = nil
+        pendingDictationModifierKeyCode = nil
     }
 
     func cancelEditing() {
@@ -205,7 +262,7 @@ final class MenuBarShortcutsView: NSView {
 
     private func refreshFromPreferences() {
         update(
-            dictationKey: HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding()),
+            dictationKey: PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.binding()),
             meetingKey: HotkeyPreferences.displayString(for: HotkeyPreferences.meetingBinding()),
             dictationState: currentDictationState,
             meetingState: currentMeetingState,
@@ -219,6 +276,7 @@ final class MenuBarShortcutsView: NSView {
 
     @objc private func resetShortcuts() {
         HotkeyPreferences.resetToDefaults()
+        PhysicalDictationTriggerPreferences.resetToDefault()
         refreshFromPreferences()
     }
 

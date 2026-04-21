@@ -164,6 +164,51 @@ func testTranscriptedPermissionAccess() async {
         )
     }
 
+    await runSuite("TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded — skips requester when microphone is already authorized") {
+        let requestBox = PermissionRequestBox()
+        let granted = await TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded(
+            statusProvider: { .authorized },
+            activateForPrompt: {},
+            requester: { completion in
+                requestBox.callCount += 1
+                completion(false)
+            }
+        )
+
+        assertTrue(granted, "authorized microphone status should return true")
+        assertEqual(requestBox.callCount, 0, "authorized microphone status should not trigger another prompt")
+    }
+
+    await runSuite("TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded — prompts when microphone is not determined") {
+        let requestBox = PermissionRequestBox()
+        let granted = await TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded(
+            statusProvider: { .notDetermined },
+            activateForPrompt: {},
+            requester: { completion in
+                requestBox.callCount += 1
+                completion(true)
+            }
+        )
+
+        assertTrue(granted, "not-determined microphone access should return the requester result")
+        assertEqual(requestBox.callCount, 1, "not-determined microphone access should ask macOS once")
+    }
+
+    await runSuite("TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded — does not prompt after denial") {
+        let requestBox = PermissionRequestBox()
+        let granted = await TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded(
+            statusProvider: { .denied },
+            activateForPrompt: {},
+            requester: { completion in
+                requestBox.callCount += 1
+                completion(true)
+            }
+        )
+
+        assertFalse(granted, "denied microphone access should stay blocked until Settings changes")
+        assertEqual(requestBox.callCount, 0, "denied microphone access should not show a repeat system prompt")
+    }
+
     runSuite("TranscriptedPermissionAccess.systemAudioRecordingStatus — separates unknown from denied state") {
         let originalKnown = UserDefaults.standard.object(forKey: knownKey)
         let originalGranted = UserDefaults.standard.object(forKey: grantedKey)

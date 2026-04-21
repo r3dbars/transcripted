@@ -15,9 +15,10 @@
 
 ## Current Hotkey Flow
 
-- Hotkey id `2` routes dictation toggles into `DictationSessionController`
+- Hotkey id `2` routes dictation into `DictationSessionController`
+- Dictation can run as hands-free toggle or push-to-talk, based on `HotkeyPreferences`
 - Hotkey id `3` routes meeting toggles through the app-provided meeting closure
-- Rapid repeats are ignored using `TranscriptedConstants.hotkeyActionDebounceInterval`
+- Rapid press repeats are ignored using `TranscriptedConstants.hotkeyActionDebounceInterval`
 - Right-Option tap can act as an alternate dictation trigger
 
 ## Guardrails
@@ -38,6 +39,7 @@ bash run-tests.sh
 
 Manual checks:
 
-- dictation hotkey starts and stops dictation
+- hands-free dictation hotkey starts and stops dictation
+- push-to-talk starts dictation on press and stops/pastes on release
 - meeting hotkey toggles meeting capture
 - rapid repeat presses are ignored cleanly

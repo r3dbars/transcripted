@@ -128,16 +128,17 @@ final class OverlayRootView: NSView {
         currentState = state
         currentErrorMessage = errorMessage
 
+        let showLoading = state == .loading
+        let showError = state == .drafting && !errorMessage.isEmpty
+        let showContent = showLoading || showError
+
         // Update header
         headerView.update(
             state: state,
             dictationShortcutHint: dictationShortcutHint,
-            loadingTitle: state == .loading ? loadingPresentation.title : nil
+            loadingTitle: state == .loading ? loadingPresentation.title : nil,
+            isError: showError
         )
-
-        let showLoading = state == .loading
-        let showError = state == .drafting && !errorMessage.isEmpty
-        let showContent = showLoading || showError
 
         contentContainer.isHidden = !showContent
 

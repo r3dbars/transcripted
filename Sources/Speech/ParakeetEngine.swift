@@ -874,6 +874,7 @@ class ParakeetEngine: ObservableObject {
             "output_channels": "\(outputFormat.channelCount)",
             "input_rate_hz": String(format: "%.0f", hwFormat.sampleRate),
             "hw_channels": "\(hwFormat.channelCount)",
+            "input_device_class": inputDeviceClass(for: inputDeviceName),
         ]
 
         if let error {
@@ -883,6 +884,35 @@ class ParakeetEngine: ObservableObject {
         }
 
         return context
+    }
+
+    private func inputDeviceClass(for deviceName: String) -> String {
+        let normalized = deviceName.lowercased()
+
+        if normalized.contains("airpods")
+            || normalized.contains("bluetooth")
+            || normalized.contains("beats")
+            || normalized.contains("buds")
+            || normalized.contains("headset") {
+            return "bluetooth"
+        }
+
+        if normalized.contains("macbook")
+            || normalized.contains("built-in")
+            || normalized.contains("built in")
+            || normalized.contains("studio display") {
+            return "built_in"
+        }
+
+        if normalized.contains("usb")
+            || normalized.contains("scarlett")
+            || normalized.contains("rode")
+            || normalized.contains("shure")
+            || normalized.contains("yeti") {
+            return "external"
+        }
+
+        return "unknown"
     }
 
     private func reportAudioStartFailureIfNeeded(message: String, context: [String: String]) {
