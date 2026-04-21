@@ -111,6 +111,7 @@ $manifest_entries
 EOF
 
 APP_SOURCES=(
+    "Sources/Support/TranscriptedPermissionKind.swift"
     "Sources/Support/TranscriptedPermissionAccess.swift"
     "Sources/Support/TranscriptedStoragePaths.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
