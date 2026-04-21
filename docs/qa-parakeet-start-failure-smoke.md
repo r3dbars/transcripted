@@ -10,6 +10,22 @@ failure handling and retry behavior.
 - Dictation hotkey works in a normal path.
 - You can monitor logs/events while testing.
 
+## Suggested Log Monitoring
+
+Use one of these during the smoke run:
+
+```bash
+tail -f ~/Library/Application\ Support/Transcripted/logs/events.jsonl | rg "audio_format_unavailable|audio_engine_start_failed|recording_interrupted|zombie_engine"
+```
+
+or, if you want full event context without filtering:
+
+```bash
+tail -f ~/Library/Application\ Support/Transcripted/logs/events.jsonl
+```
+
+You should see `is_recovery_attempt` in the relevant Parakeet start-failure payloads.
+
 ## Scenario 1: Bluetooth device reconnect churn during dictation start
 
 1. Connect a Bluetooth headset/mic.
