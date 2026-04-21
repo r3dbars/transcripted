@@ -27,6 +27,7 @@ struct TranscriptedSettingsView: View {
     private let actions: TranscriptedSettingsActions
     private let sidebarSections = SettingsSidebarSection.defaultSections
 
+    @State private var dictationShortcutMode = HotkeyPreferences.dictationShortcutMode()
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
@@ -355,6 +356,23 @@ struct TranscriptedSettingsView: View {
             ) {
                 HotkeyRecorderContainer()
                     .frame(height: 76)
+
+                Picker("Dictation mode", selection: Binding(
+                    get: { dictationShortcutMode },
+                    set: { newValue in
+                        dictationShortcutMode = newValue
+                        HotkeyPreferences.setDictationShortcutMode(newValue)
+                    }
+                )) {
+                    ForEach(DictationShortcutMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(dictationShortcutMode.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             SettingsSection(
@@ -1015,6 +1033,7 @@ struct TranscriptedSettingsView: View {
         refreshPermissions()
         refreshStoragePaths()
         refreshRecentCaptures()
+        dictationShortcutMode = HotkeyPreferences.dictationShortcutMode()
         refreshMenuBarVisibility()
         refreshLaunchAtLoginState()
         customDictionaryText = CustomDictionaryPreferences.rawText()

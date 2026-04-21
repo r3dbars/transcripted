@@ -83,6 +83,7 @@ private func hotkeyHandler(
         &hotkeyID
     )
     guard status == noErr else { return noErr }
+
     guard shouldAcceptHotkeyAction() else {
         Task { @MainActor in
             EventReporter.shared.capture(
@@ -108,7 +109,8 @@ private func hotkeyHandler(
 
 private final class PhysicalDictationTriggerDetector {
     var bindingProvider: (() -> PhysicalDictationTriggerBinding)?
-    var onTrigger: (() -> Void)?
+    var onPress: (() -> Void)?
+    var onRelease: (() -> Void)?
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -200,7 +202,7 @@ private final class PhysicalDictationTriggerDetector {
             if !triggerDown && !isRepeat {
                 triggerDown = true
                 consumedKeyCode = keyCode
-                onTrigger?()
+                onPress?()
             }
             return nil
 
@@ -208,6 +210,7 @@ private final class PhysicalDictationTriggerDetector {
             if consumedKeyCode == keyCode {
                 triggerDown = false
                 consumedKeyCode = nil
+                onRelease?()
                 return nil
             }
             return Unmanaged.passUnretained(event)
@@ -215,14 +218,14 @@ private final class PhysicalDictationTriggerDetector {
         case .flagsChanged:
             if binding.keyCode == UInt32(kVK_CapsLock),
                PhysicalDictationTriggerPreferences.matchesFlagsChangedPress(binding, keyCode: keyCode, modifiers: modifiers) {
-                onTrigger?()
+                onPress?()
                 return nil
             }
 
             if PhysicalDictationTriggerPreferences.matchesFlagsChangedPress(binding, keyCode: keyCode, modifiers: modifiers) {
                 if !triggerDown {
                     triggerDown = true
-                    onTrigger?()
+                    onPress?()
                 }
                 return nil
             }
@@ -230,6 +233,7 @@ private final class PhysicalDictationTriggerDetector {
             if triggerDown,
                PhysicalDictationTriggerPreferences.matchesFlagsChangedRelease(binding, keyCode: keyCode, modifiers: modifiers) {
                 triggerDown = false
+                onRelease?()
                 return nil
             }
 
@@ -253,7 +257,7 @@ class ContextCaptureEngine: ObservableObject {
     private var physicalTriggerError: String?
 
     /// Human-readable display strings for current shortcuts (drives MenuBarPanel pills + overlay hints)
-    @Published var dictationShortcutDisplay: String = PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.binding())
+    @Published var dictationShortcutDisplay: String = ContextCaptureEngine.currentDictationShortcutDisplay()
     @Published var meetingShortcutDisplay: String = HotkeyPreferences.displayString(for: HotkeyPreferences.meetingBinding())
 
     /// Non-nil when hotkey registration failed — shown as a dismissible banner in MenuBarPanel
@@ -353,20 +357,35 @@ class ContextCaptureEngine: ObservableObject {
         carbonHotkeyError = errors.isEmpty ? nil : "\(errors.joined(separator: " and ")) failed to register"
         updateHotkeyError()
 
-        // Update display strings
-        dictationShortcutDisplay = PhysicalDictationTriggerPreferences.displayString(
+        // Update display strings.
+        dictationShortcutDisplay = Self.currentDictationShortcutDisplay()
+        meetingShortcutDisplay = HotkeyPreferences.displayString(for: meetingBinding)
+    }
+
+    private static func currentDictationShortcutDisplay() -> String {
+        let trigger = PhysicalDictationTriggerPreferences.displayString(
             for: PhysicalDictationTriggerPreferences.binding()
         )
-        meetingShortcutDisplay = HotkeyPreferences.displayString(for: meetingBinding)
+        switch HotkeyPreferences.dictationShortcutMode() {
+        case .pushToTalk:
+            return "Hold \(trigger)"
+        case .handsFree:
+            return trigger
+        }
     }
 
     private func configurePhysicalDictationTriggerDetector() {
         physicalDictationTriggerDetector.bindingProvider = {
             PhysicalDictationTriggerPreferences.binding()
         }
-        physicalDictationTriggerDetector.onTrigger = { [weak self] in
+        physicalDictationTriggerDetector.onPress = { [weak self] in
             Task { @MainActor [weak self] in
-                self?.handlePhysicalDictationTrigger()
+                self?.handlePhysicalDictationTriggerPress()
+            }
+        }
+        physicalDictationTriggerDetector.onRelease = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.handlePhysicalDictationTriggerRelease()
             }
         }
 
@@ -392,7 +411,7 @@ class ContextCaptureEngine: ObservableObject {
         hotkeyError = errors.isEmpty ? nil : errors.joined(separator: " and ")
     }
 
-    private func handlePhysicalDictationTrigger() {
+    private func handlePhysicalDictationTriggerPress() {
         guard shouldAcceptHotkeyAction() else {
             DiagnosticsTrail.record(
                 logger: sessionController?.appState?.logger,
@@ -410,7 +429,51 @@ class ContextCaptureEngine: ObservableObject {
         }
 
         let frontApp = NSWorkspace.shared.frontmostApplication
-        routeDictationToggle(sourceApp: frontApp, trigger: .physicalKey)
+        switch HotkeyPreferences.dictationShortcutMode() {
+        case .handsFree:
+            routeDictationToggle(sourceApp: frontApp, trigger: .physicalKey)
+        case .pushToTalk:
+            guard let session = sessionController else { return }
+            DiagnosticsTrail.record(
+                logger: session.appState?.logger,
+                engine: "capture",
+                event: "dictation_push_to_talk_pressed",
+                message: "Dictation push-to-talk trigger pressed",
+                context: [
+                    "trigger": "physical_key",
+                    "source_app_name": frontApp?.localizedName ?? "",
+                    "source_app_bundle_id": frontApp?.bundleIdentifier ?? "",
+                    "session_state": session.isDictating ? "dictating" : (session.isInSession ? "drafting" : "idle"),
+                    "overlay_state": overlayStateName(session.overlayController?.state)
+                ]
+            )
+
+            guard !session.isDictating else { return }
+            if session.isInSession {
+                session.cancelSession()
+            }
+            session.startDictation(sourceApp: frontApp, trigger: .physicalKey)
+        }
+    }
+
+    private func handlePhysicalDictationTriggerRelease() {
+        guard HotkeyPreferences.dictationShortcutMode() == .pushToTalk else { return }
+        guard let session = sessionController else { return }
+
+        DiagnosticsTrail.record(
+            logger: session.appState?.logger,
+            engine: "capture",
+            event: "dictation_push_to_talk_released",
+            message: "Dictation push-to-talk trigger released",
+            context: [
+                "trigger": "physical_key",
+                "session_state": session.isDictating ? "dictating" : (session.isInSession ? "drafting" : "idle"),
+                "overlay_state": overlayStateName(session.overlayController?.state)
+            ]
+        )
+
+        guard session.isDictating else { return }
+        session.stopDictationAndPaste(trigger: .physicalKey)
     }
 
     deinit {
