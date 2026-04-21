@@ -1,6 +1,21 @@
 import Foundation
 
 func testParakeetStartRecordingFailurePolicy() {
+    runSuite("ParakeetStartRecordingFailurePolicy all known failures mark format unready") {
+        let reasons: [ParakeetStartRecordingFailureReason] = [
+            .invalidAudioFormat,
+            .audioEngineStartFailed
+        ]
+
+        for reason in reasons {
+            let initial = ParakeetStartRecordingFailurePolicy.action(for: reason, isRecoveryAttempt: false)
+            let recovery = ParakeetStartRecordingFailurePolicy.action(for: reason, isRecoveryAttempt: true)
+
+            assertTrue(initial.markFormatUnready, "\(reason) should mark format unready on initial start")
+            assertTrue(recovery.markFormatUnready, "\(reason) should mark format unready on recovery start")
+        }
+    }
+
     runSuite("ParakeetStartRecordingFailurePolicy invalid format on initial start schedules retry") {
         let action = ParakeetStartRecordingFailurePolicy.action(
             for: .invalidAudioFormat,
