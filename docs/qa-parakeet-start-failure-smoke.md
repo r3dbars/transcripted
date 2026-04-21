@@ -71,3 +71,37 @@ Expected:
 - No persistent “stuck” state after a failed start.
 - Dictation can recover and start again after transient device instability.
 - Logged failure events include enough context for debugging (`audio_device`, format details, `is_recovery_attempt`).
+
+## QA Result Comment Format (for `#428`)
+
+The BET-88 gate automation reads the first non-empty line of your top-level
+comment on `#428`.
+
+Use one of these exact first-line forms:
+
+- `PASS`
+- `PASS: <short summary>`
+- `FAIL`
+- `FAIL: <short summary>`
+
+Example PASS comment:
+
+```text
+PASS: smoke validated on sleep/wake + Bluetooth churn, no nested retry loops observed.
+
+Evidence:
+- Scenario 1: pass
+- Scenario 2: pass
+- Scenario 3: pass
+```
+
+Example FAIL comment:
+
+```text
+FAIL: scenario 2 still gets stuck after wake when device graph flaps.
+
+Evidence:
+- Repro steps: <what you did>
+- Observed events: <relevant event names / snippets>
+- Expected vs actual: <brief delta>
+```
