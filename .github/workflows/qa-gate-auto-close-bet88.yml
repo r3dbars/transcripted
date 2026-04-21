@@ -12,7 +12,8 @@ jobs:
     if: >-
       ${{
         github.event.issue.number == 428 &&
-        github.actor != 'github-actions[bot]'
+        github.actor != 'github-actions[bot]' &&
+        github.event.comment.user.login == 'r3dbars'
       }}
     runs-on: ubuntu-latest
 
