@@ -2,6 +2,11 @@ import Foundation
 
 struct TranscriptValidator {
     let directory: URL
+    private let validTranscriptionEngines: Set<String> = [
+        "parakeet_local",
+        "whisper_large_v3_turbo_local",
+        "whisper_large_v3_local",
+    ]
 
     func validate() -> [ValidationResult] {
         var results: [ValidationResult] = []
@@ -44,10 +49,11 @@ struct TranscriptValidator {
             }
 
             // Engine values
-            if yaml.value(for: "transcription_engine") == "parakeet_local" {
+            if let transcriptionEngine = yaml.value(for: "transcription_engine"),
+               validTranscriptionEngines.contains(transcriptionEngine) {
                 results.append(.pass("transcript/yaml-engine-stt", target: name))
             } else {
-                results.append(.fail("transcript/yaml-engine-stt", target: name, detail: "Expected parakeet_local, got \(yaml.value(for: "transcription_engine") ?? "nil")"))
+                results.append(.fail("transcript/yaml-engine-stt", target: name, detail: "Expected supported local STT engine, got \(yaml.value(for: "transcription_engine") ?? "nil")"))
             }
 
             if yaml.value(for: "diarization_engine") == "pyannote_offline" {
