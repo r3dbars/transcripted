@@ -5,6 +5,10 @@ struct ParakeetRecoveryState: Equatable {
     private(set) var inputFormatReady: Bool = true
     private(set) var generation: UInt64 = 0
 
+    var canStartRecording: Bool {
+        !isRecovering && inputFormatReady
+    }
+
     mutating func beginConfigChange() -> UInt64 {
         generation &+= 1
         isRecovering = true
@@ -13,6 +17,10 @@ struct ParakeetRecoveryState: Equatable {
     }
 
     mutating func markFormatUnready() {
+        inputFormatReady = false
+    }
+
+    mutating func markStartFailed() {
         inputFormatReady = false
     }
 
@@ -33,5 +41,26 @@ struct ParakeetRecoveryState: Equatable {
 
     func isStale(generation: UInt64) -> Bool {
         generation != self.generation
+    }
+}
+
+struct ParakeetAudioStartRecoveryPolicy: Equatable {
+    static func shouldRetryStartFailure(
+        isRecoveryAttempt: Bool,
+        failedAttempts: Int,
+        retryBudget: Int = TranscriptedConstants.audioStartRecoveryAttempts
+    ) -> Bool {
+        guard !isRecoveryAttempt else { return false }
+        guard retryBudget > 0 else { return false }
+        return failedAttempts <= retryBudget
+    }
+
+    static func shouldReportFailure(
+        now: TimeInterval,
+        lastReportAt: TimeInterval?,
+        throttle: TimeInterval = TranscriptedConstants.audioStartFailureReportThrottle
+    ) -> Bool {
+        guard let lastReportAt else { return true }
+        return now - lastReportAt >= throttle
     }
 }

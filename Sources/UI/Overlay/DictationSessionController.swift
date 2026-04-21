@@ -188,6 +188,10 @@ class DictationSessionController: ObservableObject {
         let startedAt = CFAbsoluteTimeGetCurrent()
         let deadline = startedAt + TranscriptedConstants.dictationRecoveryBudget
 
+        if !appState.sttRouter.isRecovering, !appState.sttRouter.inputFormatReady {
+            appState.sttRouter.refreshInputReadiness()
+        }
+
         while CFAbsoluteTimeGetCurrent() < deadline {
             guard isDictating, !Task.isCancelled else { return }
 

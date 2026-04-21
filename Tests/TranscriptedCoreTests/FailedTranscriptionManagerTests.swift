@@ -97,6 +97,26 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertEqual(persisted, [safeEntry])
     }
 
+    func testFailedTranscriptionRetryabilityDoesNotOvermatchGenericMinimumLanguage() {
+        let failure = FailedTranscription(
+            micAudioURL: testRoot.appendingPathComponent("mic.wav"),
+            systemAudioURL: nil,
+            errorMessage: "Upload failed after at least one retry because the destination was unavailable."
+        )
+
+        XCTAssertTrue(failure.isRetryable)
+    }
+
+    func testFailedTranscriptionRetryabilityKeepsShortAudioPermanent() {
+        let failure = FailedTranscription(
+            micAudioURL: testRoot.appendingPathComponent("mic.wav"),
+            systemAudioURL: nil,
+            errorMessage: "Invalid audio data provided. Must be at least 1 second of 16kHz audio."
+        )
+
+        XCTAssertFalse(failure.isRetryable)
+    }
+
     private func makePaths(root: URL) -> CoreStoragePaths {
         CoreStoragePaths(
             transcripts: root.appendingPathComponent("captures/meetings", isDirectory: true),

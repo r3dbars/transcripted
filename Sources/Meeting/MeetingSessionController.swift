@@ -59,6 +59,7 @@ final class MeetingSessionController: ObservableObject {
         let title: String
         let detail: String
         let meta: String
+        let failureKind: MeetingFailureKind
         let isRetryable: Bool
         let isRetrying: Bool
         let hasAudioFiles: Bool
@@ -1110,6 +1111,7 @@ final class MeetingSessionController: ObservableObject {
                     "trigger": transcriptionTrigger.rawValue,
                 ]
             )
+            finalizeBackgroundTranscriptionStateIfNeeded()
         case .gettingReady:
             if previousStatus.diagnosticName != status.diagnosticName {
                 DiagnosticsTrail.record(

@@ -660,13 +660,18 @@ final class MeetingOverlayRootView: NSView {
             updateStatusDot(color: MeetingOverlayTokens.dotSaved)
             detailLabel.stringValue = ""
         case .error(let message):
+            let failureKind = MeetingFailureKind.classify(message: message)
             let copy = MeetingFailureCopy.make(
                 forMessage: message,
                 shortErrorMessage: message,
                 isRetryable: true
             )
             titleLabel.stringValue = copy.title
-            updateStatusDot(color: MeetingOverlayTokens.dotError)
+            updateStatusDot(
+                color: failureKind == .recordingTooShort
+                    ? MeetingOverlayTokens.dotIdle
+                    : MeetingOverlayTokens.dotError
+            )
             detailLabel.stringValue = copy.detail
         }
 

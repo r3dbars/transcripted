@@ -20,12 +20,10 @@ struct MeetingFailureCopy: Equatable {
             )
         }
 
-        if message.contains("recording too short")
-            || message.contains("at least")
-            || message.contains("invalid audio data") {
+        if MeetingFailureKind.isRecordingTooShortMessage(message) {
             return MeetingFailureCopy(
-                title: "Recording was too short",
-                detail: "Transcripted needs at least a second of audio. Keep the meeting running a little longer, then retry."
+                title: "Recording ended too soon",
+                detail: "Nothing broke - there just was not enough audio to transcribe. Record at least two seconds before stopping."
             )
         }
 

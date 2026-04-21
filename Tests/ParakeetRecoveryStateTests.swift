@@ -81,4 +81,58 @@ func testParakeetRecoveryState() {
         assertEqual(state.generation, before, "marking format unready should not bump generation")
         assertFalse(state.isRecovering, "marking format unready alone should not set recovery flag")
     }
+
+    runSuite("ParakeetRecoveryState.canStartRecording — requires recovery to be done and format ready") {
+        var state = ParakeetRecoveryState()
+        assertTrue(state.canStartRecording, "fresh state should allow recording starts")
+
+        let generation = state.beginConfigChange()
+        assertFalse(state.canStartRecording, "active recovery should block recording starts")
+
+        _ = state.finishRecovery(success: true, generation: generation)
+        assertTrue(state.canStartRecording, "successful recovery should allow recording starts again")
+
+        state.markStartFailed()
+        assertFalse(state.canStartRecording, "start failure should hold recording until prewarm marks format ready")
+    }
+
+    runSuite("ParakeetRecoveryState.markStartFailed — does not bump generation or enter recovery") {
+        var state = ParakeetRecoveryState()
+        let before = state.generation
+        state.markStartFailed()
+
+        assertFalse(state.inputFormatReady, "start failure should mark format unready")
+        assertFalse(state.isRecovering, "plain start failure should not pretend a device-change recovery is active")
+        assertEqual(state.generation, before, "plain start failure should not supersede device-change generations")
+    }
+
+    runSuite("ParakeetAudioStartRecoveryPolicy.shouldRetryStartFailure — retries only normal first failures") {
+        assertTrue(
+            ParakeetAudioStartRecoveryPolicy.shouldRetryStartFailure(isRecoveryAttempt: false, failedAttempts: 1, retryBudget: 1),
+            "normal first failure should get one immediate graph-reset retry"
+        )
+        assertFalse(
+            ParakeetAudioStartRecoveryPolicy.shouldRetryStartFailure(isRecoveryAttempt: false, failedAttempts: 2, retryBudget: 1),
+            "retry budget should cap repeated immediate attempts"
+        )
+        assertFalse(
+            ParakeetAudioStartRecoveryPolicy.shouldRetryStartFailure(isRecoveryAttempt: true, failedAttempts: 1, retryBudget: 1),
+            "recovery attempts should not recursively retry"
+        )
+    }
+
+    runSuite("ParakeetAudioStartRecoveryPolicy.shouldReportFailure — throttles repeated Sentry reports") {
+        assertTrue(
+            ParakeetAudioStartRecoveryPolicy.shouldReportFailure(now: 100, lastReportAt: nil, throttle: 15),
+            "first failure should report"
+        )
+        assertFalse(
+            ParakeetAudioStartRecoveryPolicy.shouldReportFailure(now: 110, lastReportAt: 100, throttle: 15),
+            "repeat failures inside the throttle window should stay local-only"
+        )
+        assertTrue(
+            ParakeetAudioStartRecoveryPolicy.shouldReportFailure(now: 116, lastReportAt: 100, throttle: 15),
+            "failures after the throttle window should report again"
+        )
+    }
 }
