@@ -97,6 +97,10 @@ class STTRouter: ObservableObject {
         return parakeetEngine.startRecording()
     }
 
+    func refreshInputReadiness() {
+        parakeetEngine.prewarm()
+    }
+
     func stopRecording() {
         parakeetEngine.stopRecording()
     }

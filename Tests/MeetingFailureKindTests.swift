@@ -9,6 +9,22 @@ func testMeetingFailureKind() {
         assertEqual(kind, .recordingTooShort, "short captures should stay out of the generic bucket")
     }
 
+    runSuite("MeetingFailureKind does not overmatch generic minimum language") {
+        let kind = MeetingFailureKind.classify(
+            message: "Upload failed after at least one retry because the destination was unavailable."
+        )
+
+        assertEqual(kind, .unexpectedError, "minimum-language without audio context should not become recording_too_short")
+    }
+
+    runSuite("MeetingFailureKind keeps generic invalid audio separate from short recordings") {
+        let kind = MeetingFailureKind.classify(
+            message: "Invalid audio data: file header could not be decoded."
+        )
+
+        assertEqual(kind, .invalidAudioFormat, "generic invalid audio should not masquerade as a too-short recording")
+    }
+
     runSuite("MeetingFailureKind classifies diarization failures") {
         let kind = MeetingFailureKind.classify(
             message: "PyAnnote inference failed: model weights missing"

@@ -76,6 +76,15 @@ enum TranscriptedConstants {
     /// BT format negotiation can take ~1-2s; 500ms between attempts covers most cases.
     static let recordingRestartRetryDelay: UInt64 = 500_000_000  // 500ms
 
+    /// Max immediate retries after AVAudioEngine fails to start for dictation.
+    /// Keep this small: the caller already has a readiness wait loop, and repeated
+    /// immediate attempts can spam Sentry while CoreAudio is still settling.
+    static let audioStartRecoveryAttempts: Int = 1
+
+    /// Minimum interval between Sentry reports for repeated audio-start failures.
+    /// Local logs still record each failure; off-device reports stay bounded.
+    static let audioStartFailureReportThrottle: TimeInterval = 15.0
+
     // MARK: - Model Loading
 
     /// Polling interval while waiting for voice model to load (nanoseconds)

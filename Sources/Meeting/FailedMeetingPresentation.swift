@@ -6,6 +6,7 @@ enum FailedMeetingPresentation {
         from failed: FailedTranscription,
         isRetrying: Bool
     ) -> MeetingSessionController.FailedMeetingItem {
+        let failureKind = MeetingFailureKind.classify(message: failed.errorMessage)
         let copy = MeetingFailureCopy.make(
             forMessage: failed.errorMessage,
             shortErrorMessage: failed.shortErrorMessage,
@@ -18,6 +19,7 @@ enum FailedMeetingPresentation {
             title: copy.title,
             detail: copy.detail,
             meta: meta(for: failed, isRetrying: isRetrying),
+            failureKind: failureKind,
             isRetryable: failed.isRetryable,
             isRetrying: isRetrying,
             hasAudioFiles: failed.audioFilesExist()

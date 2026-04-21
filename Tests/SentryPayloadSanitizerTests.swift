@@ -37,6 +37,38 @@ func testSentryPayloadSanitizer() {
         assertNil(sanitized["source_app_bundle_id"], "source app bundle IDs should be dropped")
     }
 
+    runSuite("SentryPayloadSanitizer.sanitizeContext keeps audio-start recovery diagnostics coarse") {
+        let sanitized = SentryPayloadSanitizer.sanitizeContext([
+            "attempt": "2",
+            "start_mode": "normal",
+            "recovering": "false",
+            "format_ready": "true",
+            "generation": "4",
+            "input_rate_hz": "48000",
+            "output_rate_hz": "48000",
+            "hw_channels": "1",
+            "status_domain": "com.apple.coreaudio.avfaudio",
+            "status_code": "-10868",
+            "audio_device": "Private AirPods",
+            "error": "Failed to initialize active nodes",
+            "source_app": "com.example.private",
+        ])
+
+        assertEqual(sanitized["attempt"], "2", "retry attempt should remain")
+        assertEqual(sanitized["start_mode"], "normal", "start mode should remain")
+        assertEqual(sanitized["recovering"], "false", "recovery flag should remain")
+        assertEqual(sanitized["format_ready"], "true", "format readiness should remain")
+        assertEqual(sanitized["generation"], "4", "recovery generation should remain")
+        assertEqual(sanitized["input_rate_hz"], "48000", "input rate should remain")
+        assertEqual(sanitized["output_rate_hz"], "48000", "output rate should remain")
+        assertEqual(sanitized["hw_channels"], "1", "hardware channel count should remain")
+        assertEqual(sanitized["status_domain"], "com.apple.coreaudio.avfaudio", "status domain should remain")
+        assertEqual(sanitized["status_code"], "-10868", "status code should remain")
+        assertNil(sanitized["audio_device"], "raw audio device names should be dropped")
+        assertNil(sanitized["error"], "free-form errors should be dropped")
+        assertNil(sanitized["source_app"], "source app identifiers should be dropped")
+    }
+
     runSuite("SentryPayloadSanitizer.sanitizeText redacts emails hostnames and non-home paths") {
         let input = "Contact me at person@example.com from Redbarss-MacBook-Pro.local and inspect /private/var/folders/demo/file.txt"
         let sanitized = SentryPayloadSanitizer.sanitizeText(input)
