@@ -88,7 +88,7 @@ struct SettingsActionTile: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
+        HStack(alignment: .center, spacing: 12) {
             Image(systemName: symbolName)
                 .font(.system(size: 16, weight: .semibold))
                 .frame(width: 34, height: 34)
@@ -109,7 +109,7 @@ struct SettingsActionTile: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
 
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 actionButton
 
                 if let menuBarVisibility {
@@ -139,7 +139,7 @@ struct SettingsActionTile: View {
             Image(systemName: "arrow.right")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(actionButtonForeground)
-                .frame(width: 32, height: 32)
+                .frame(width: 30, height: 30)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(actionButtonBackground)

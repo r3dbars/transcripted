@@ -185,7 +185,7 @@ struct TranscriptedSettingsView: View {
             )
 
             let columns = [
-                GridItem(.adaptive(minimum: 390), spacing: 14)
+                GridItem(.adaptive(minimum: 330), spacing: 14)
             ]
 
             LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
