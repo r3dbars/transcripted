@@ -34,7 +34,10 @@ not have to carry the full operational logic:
 ## Operational health probes
 
 - `scripts/ops/health-probe.sh` — run health checks for observability lanes (Sentry, PostHog, GitHub, Cloudflare)
-  - Usage: `bash scripts/ops/health-probe.sh <github|sentry|posthog|cloudflare|all>`
+  - Usage: `bash scripts/ops/health-probe.sh <github|sentry|posthog|cloudflare|qa|all>`
+  - QA lane defaults to `r3dbars/transcripted#428` and can be overridden with:
+    - `QA_GATE_REPO=<owner/repo>`
+    - `QA_GATE_ISSUE_NUMBER=<issue-number>`
   - See `docs/ops-credentials.md` for credential setup and privacy guidelines
 - `scripts/ops/qa-gate-check.sh` — check a GitHub issue for a top-level QA `PASS` / `FAIL` comment
   - Usage: `bash scripts/ops/qa-gate-check.sh <owner/repo> <issue-number>`
