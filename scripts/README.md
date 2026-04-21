@@ -36,6 +36,9 @@ not have to carry the full operational logic:
 - `scripts/ops/health-probe.sh` — run health checks for observability lanes (Sentry, PostHog, GitHub, Cloudflare)
   - Usage: `bash scripts/ops/health-probe.sh <github|sentry|posthog|cloudflare|all>`
   - See `docs/ops-credentials.md` for credential setup and privacy guidelines
+- `scripts/ops/qa-gate-check.sh` — one-shot check for the BET-88 QA gate comment on `#428` using the same strict owner + first-line PASS/FAIL rules as the auto-close workflow
+  - Usage: `bash scripts/ops/qa-gate-check.sh [repo] [issue_number] [owner_login]`
+  - Returns JSON and exits `0` for `pass`/`fail`, `3` for `PENDING`
 - `scripts/ops/build-codex-memory-index.py` — build a safe metadata-only index from local Codex session archives for Transcripted memory briefs
   - Usage: `python3 scripts/ops/build-codex-memory-index.py --verbose`
   - Writes:
