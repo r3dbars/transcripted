@@ -88,23 +88,42 @@ struct SettingsActionTile: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Button(action: action) {
-                actionContent
-            }
-            .buttonStyle(.plain)
-            .help(actionHelp)
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: symbolName)
+                .font(.system(size: 16, weight: .semibold))
+                .frame(width: 34, height: 34)
+                .background(iconBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-            if let menuBarVisibility {
-                Toggle("Show in menu bar", isOn: menuBarVisibility)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .help(menuBarVisibilityHelp ?? "Show or hide \(title) in the menu bar popover.")
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(2)
+
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
+
+            HStack(spacing: 12) {
+                actionButton
+
+                if let menuBarVisibility {
+                    Toggle("Show in menu bar", isOn: menuBarVisibility)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .help(menuBarVisibilityHelp ?? "Show or hide \(title) in the menu bar popover.")
+                }
+            }
+            .fixedSize(horizontal: true, vertical: false)
         }
         .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 82, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(cardBackground)
@@ -115,26 +134,8 @@ struct SettingsActionTile: View {
         )
     }
 
-    private var actionContent: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: symbolName)
-                .font(.system(size: 16, weight: .semibold))
-                .frame(width: 34, height: 34)
-                .background(iconBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(Color.primary)
-
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 12)
-
+    private var actionButton: some View {
+        Button(action: action) {
             Image(systemName: "arrow.right")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(actionButtonForeground)
@@ -148,8 +149,8 @@ struct SettingsActionTile: View {
                         .stroke(actionButtonStroke, lineWidth: 1)
                 )
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+        .help(actionHelp)
     }
 
     private var iconBackground: Color {
