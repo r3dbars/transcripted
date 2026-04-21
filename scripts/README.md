@@ -41,6 +41,7 @@ not have to carry the full operational logic:
   - See `docs/ops-credentials.md` for credential setup and privacy guidelines
 - `scripts/ops/qa-gate-check.sh` — check a GitHub issue for a top-level QA `PASS` / `FAIL` comment
   - Usage: `bash scripts/ops/qa-gate-check.sh <owner/repo> <issue-number>`
+  - Optional: `--json` for structured output (status object with `repo`, `issue`, `status`)
   - Exit codes:
     - `0` = `PASS`
     - `2` = `FAIL`

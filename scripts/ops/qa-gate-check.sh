@@ -12,8 +12,16 @@ set -euo pipefail
 
 usage() {
   echo "Usage: bash scripts/ops/qa-gate-check.sh <owner/repo> <issue-number>"
+  echo "Optional: --json (print structured status output)"
   echo "Example: bash scripts/ops/qa-gate-check.sh r3dbars/transcripted 428"
 }
+
+JSON_MODE=0
+
+if [[ "${1:-}" == "--json" ]]; then
+  JSON_MODE=1
+  shift
+fi
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
@@ -68,14 +76,29 @@ LATEST_RESULT=$(
 )
 
 if [[ "$LATEST_RESULT" == "PASS" ]]; then
-  echo "PASS: issue #$ISSUE_NUMBER has a top-level PASS comment"
+  if [[ $JSON_MODE -eq 1 ]]; then
+    jq -n --arg repo "$REPO" --argjson issue "$ISSUE_NUMBER" --arg status "PASS" \
+      '{repo: $repo, issue: $issue, status: $status}'
+  else
+    echo "PASS: issue #$ISSUE_NUMBER has a top-level PASS comment"
+  fi
   exit 0
 fi
 
 if [[ "$LATEST_RESULT" == "FAIL" ]]; then
-  echo "FAIL: issue #$ISSUE_NUMBER has a top-level FAIL comment"
+  if [[ $JSON_MODE -eq 1 ]]; then
+    jq -n --arg repo "$REPO" --argjson issue "$ISSUE_NUMBER" --arg status "FAIL" \
+      '{repo: $repo, issue: $issue, status: $status}'
+  else
+    echo "FAIL: issue #$ISSUE_NUMBER has a top-level FAIL comment"
+  fi
   exit 2
 fi
 
-echo "PENDING: no top-level PASS/FAIL comment on issue #$ISSUE_NUMBER"
+if [[ $JSON_MODE -eq 1 ]]; then
+  jq -n --arg repo "$REPO" --argjson issue "$ISSUE_NUMBER" --arg status "PENDING" \
+    '{repo: $repo, issue: $issue, status: $status}'
+else
+  echo "PENDING: no top-level PASS/FAIL comment on issue #$ISSUE_NUMBER"
+fi
 exit 3
