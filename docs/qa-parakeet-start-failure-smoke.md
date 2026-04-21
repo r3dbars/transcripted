@@ -9,6 +9,34 @@ failure handling and retry behavior.
 - Transcripted launches normally.
 - Dictation hotkey works in a normal path.
 - You can monitor logs/events while testing.
+- QA issue to update: `https://github.com/r3dbars/transcripted/issues/428`
+
+## Completion Protocol (required for BET-88 closeout)
+
+After running this checklist, post exactly one top-level comment in `#428`:
+
+- `PASS` if all pass criteria are met.
+- `FAIL` if any pass criterion fails.
+
+Use one of these templates:
+
+```md
+PASS
+
+- Scenarios run: 1, 2, 3
+- Device(s):
+- Notes:
+```
+
+```md
+FAIL
+
+- Failed scenario(s):
+- Repro steps:
+- Observed behavior:
+- Expected behavior:
+- `events.jsonl` excerpt (sanitized):
+```
 
 ## Suggested Log Monitoring
 
@@ -71,3 +99,8 @@ Expected:
 - No persistent “stuck” state after a failed start.
 - Dictation can recover and start again after transient device instability.
 - Logged failure events include enough context for debugging (`audio_device`, format details, `is_recovery_attempt`).
+
+## Closeout Mapping
+
+- If result is `PASS`: close `#428` and mark BET-88 complete.
+- If result is `FAIL`: open/link a follow-up fix issue and reference it from `#428`.
