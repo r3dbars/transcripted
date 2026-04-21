@@ -36,6 +36,12 @@ not have to carry the full operational logic:
 - `scripts/ops/health-probe.sh` — run health checks for observability lanes (Sentry, PostHog, GitHub, Cloudflare)
   - Usage: `bash scripts/ops/health-probe.sh <github|sentry|posthog|cloudflare|all>`
   - See `docs/ops-credentials.md` for credential setup and privacy guidelines
+- `scripts/ops/qa-gate-check.sh` — check a GitHub issue for a top-level QA `PASS` / `FAIL` comment
+  - Usage: `bash scripts/ops/qa-gate-check.sh <owner/repo> <issue-number>`
+  - Exit codes:
+    - `0` = `PASS`
+    - `2` = `FAIL`
+    - `3` = pending (no top-level `PASS` / `FAIL` yet)
 - `scripts/ops/build-codex-memory-index.py` — build a safe metadata-only index from local Codex session archives for Transcripted memory briefs
   - Usage: `python3 scripts/ops/build-codex-memory-index.py --verbose`
   - Writes:
@@ -45,7 +51,12 @@ not have to carry the full operational logic:
     - `build/codex-memory-index/transcripted-paperclip-task-seeds.json`
     - `build/codex-memory-index/transcripted-codex-digest.md`
   - Optional: `--limit 200` to scan only the newest 200 session files while iterating
+  - Optional: `--since-hours 24` to only include sessions from the last N hours
+  - Optional: `--nightly-report` to generate a decision-ready nightly archive miner report
   - Optional: `--mlx-summarize --mlx-model <model-id>` to generate local intent summaries through an MLX OpenAI-compatible endpoint
+  - Guardrail: `--mlx-summarize` now requires `--allow-local-model-calls`
+- `scripts/ops/nightly-transcripted-archive-miner.sh` — run the nightly Transcripted archive miner profile (24h window + decision report)
+  - Usage: `bash scripts/ops/nightly-transcripted-archive-miner.sh`
 
 ## Rule of thumb
 
