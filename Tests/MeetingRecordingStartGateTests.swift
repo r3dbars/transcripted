@@ -31,6 +31,22 @@ func testMeetingRecordingStartGate() {
         assertEqual(decision.missingPermissions, ["system_audio_recording"], "missing permission list should stay explicit")
     }
 
+    runSuite("MeetingRecordingStartGate.evaluate — blocks meeting capture when Microphone is missing") {
+        let decision = MeetingRecordingStartGate.evaluate(
+            microphoneGranted: false,
+            systemAudioRecordingGranted: true
+        )
+
+        assertFalse(decision.canStart, "meeting capture should fail fast when Microphone is missing")
+        assertEqual(
+            decision.errorMessage,
+            "Turn on Microphone access in System Settings before recording a meeting.",
+            "microphone failures should tell the user exactly what to fix"
+        )
+        assertEqual(decision.failureReason, "microphone", "microphone failures should stay classified for diagnostics")
+        assertEqual(decision.missingPermissions, ["microphone"], "missing permission list should stay explicit")
+    }
+
     runSuite("MeetingRecordingStartGate.evaluate — blocks meeting capture when both permissions are missing") {
         let decision = MeetingRecordingStartGate.evaluate(
             microphoneGranted: false,
