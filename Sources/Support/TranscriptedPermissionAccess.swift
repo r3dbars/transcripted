@@ -23,7 +23,7 @@ enum TranscriptedPermissionAccess {
     static func isGranted(_ kind: TranscriptedPermissionKind) -> Bool {
         switch kind {
         case .microphone:
-            return AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+            return microphoneAuthorizationStatus() == .authorized
         case .accessibility:
             return AXIsProcessTrusted()
         case .systemAudioRecording:
@@ -33,11 +33,40 @@ enum TranscriptedPermissionAccess {
         }
     }
 
+    static func microphoneAuthorizationStatus() -> AVAuthorizationStatus {
+        AVCaptureDevice.authorizationStatus(for: .audio)
+    }
+
+    @MainActor
+    static func requestMicrophoneAccessIfNeeded(
+        statusProvider: () -> AVAuthorizationStatus = { AVCaptureDevice.authorizationStatus(for: .audio) },
+        activateForPrompt: @MainActor () -> Void = { activateForPermissionPrompt() },
+        requester: @escaping (@escaping @Sendable (Bool) -> Void) -> Void = { completion in
+            AVCaptureDevice.requestAccess(for: .audio, completionHandler: completion)
+        }
+    ) async -> Bool {
+        switch statusProvider() {
+        case .authorized:
+            return true
+        case .notDetermined:
+            activateForPrompt()
+            return await withCheckedContinuation { continuation in
+                requester { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+        case .denied, .restricted:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
     @MainActor
     static func openSettings(for kind: TranscriptedPermissionKind) {
         switch kind {
         case .microphone:
-            switch AVCaptureDevice.authorizationStatus(for: .audio) {
+            switch microphoneAuthorizationStatus() {
             case .authorized:
                 break
             case .notDetermined:

@@ -1,0 +1,56 @@
+name: BET-88 QA Gate Auto Close
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+
+jobs:
+  close_on_pass:
+    if: >-
+      ${{
+        github.event.issue.number == 428 &&
+        github.actor != 'github-actions[bot]'
+      }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Detect gate keyword
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH")"
+
+          if echo "$body" | grep -Eiq '(^|[[:space:]])PASS([[:space:]]|$)'; then
+            echo "status=pass" >> "$GITHUB_OUTPUT"
+          elif echo "$body" | grep -Eiq '(^|[[:space:]])FAIL([[:space:]]|$)'; then
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=none" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Close issue on PASS
+        if: steps.detect.outputs.status == 'pass'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue_number = context.payload.issue.number;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            await github.rest.issues.update({
+              owner,
+              repo,
+              issue_number,
+              state: "closed",
+              state_reason: "completed"
+            });
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body: "Auto-close: detected top-level PASS comment for BET-88 QA gate."
+            });
+

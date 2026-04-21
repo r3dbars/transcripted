@@ -3,6 +3,7 @@
 
 import AppKit
 import Carbon
+import CoreGraphics
 
 // MARK: - Carbon Hotkey Handler (C-level callback)
 
@@ -95,12 +96,7 @@ private func hotkeyHandler(
         return noErr
     }
 
-    if hotkeyID.id == 2 {
-        let frontApp = NSWorkspace.shared.frontmostApplication
-        Task { @MainActor in
-            routeDictationToggle(sourceApp: frontApp, trigger: .keyboardShortcut)
-        }
-    } else if hotkeyID.id == 3 {
+    if hotkeyID.id == 3 {
         // ⌥M — Meeting mode: toggle meeting recording.
         // No screenshot, no cross-mode switching with draft/dictation.
         Task { @MainActor in
@@ -110,104 +106,138 @@ private func hotkeyHandler(
     return noErr
 }
 
-// MARK: - Right Option Tap Detection
+private final class PhysicalDictationTriggerDetector {
+    var bindingProvider: (() -> PhysicalDictationTriggerBinding)?
+    var onTrigger: (() -> Void)?
 
-/// Detects taps (press + release < 300ms, no other key pressed) on the right Option key.
-/// Uses flagsChanged monitors (global + local) to track right Option state, and a keyDown
-/// monitor to detect if the user is using right Option as a modifier (hold + press another key).
-/// Thread-safe: all state accessed only on MainActor via the ContextCaptureEngine owner.
-private final class RightOptionTapDetector {
-    private var globalFlagsMonitor: Any?
-    private var localFlagsMonitor: Any?
-    private var globalKeyDownMonitor: Any?
-    private var localKeyDownMonitor: Any?
+    private var eventTap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
+    private var triggerDown = false
+    private var consumedKeyCode: UInt32?
 
-    private var rightOptionDownTime: Date?
-    private var otherKeyPressed = false
-
-    /// Right Option keyCode (kVK_RightOption = 0x3D = 61)
-    private let kRightOptionKeyCode: UInt16 = 61
-
-    /// Maximum hold duration to count as a "tap" for starting dictation.
-    private let startTapDuration: TimeInterval = 0.35
-
-    /// While dictation is already active, be more forgiving about how long the
-    /// user holds Right Option before releasing to stop.
-    var maxTapDurationProvider: (() -> TimeInterval)?
-
-    /// Called on MainActor when a valid right Option tap is detected
-    var onTap: (() -> Void)?
-    var onInteraction: ((String, [String: String]) -> Void)?
-
-    func install() {
-        // --- flagsChanged monitors (detect right Option press/release) ---
-        globalFlagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            self?.handleFlagsChanged(event)
-        }
-        localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            self?.handleFlagsChanged(event)
-            return event
-        }
-
-        // --- keyDown monitors (detect other keys pressed while right Option held) ---
-        globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] _ in
-            if self?.rightOptionDownTime != nil {
-                if self?.otherKeyPressed == false {
-                    self?.onInteraction?("right_option_chord_detected", [:])
-                }
-                self?.otherKeyPressed = true
-            }
-        }
-        localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if self?.rightOptionDownTime != nil {
-                if self?.otherKeyPressed == false {
-                    self?.onInteraction?("right_option_chord_detected", [:])
-                }
-                self?.otherKeyPressed = true
-            }
-            return event
-        }
+    private static let callback: CGEventTapCallBack = { _, type, event, userInfo in
+        guard let userInfo else { return Unmanaged.passUnretained(event) }
+        let detector = Unmanaged<PhysicalDictationTriggerDetector>
+            .fromOpaque(userInfo)
+            .takeUnretainedValue()
+        return detector.handle(type: type, event: event)
     }
 
-    private func handleFlagsChanged(_ event: NSEvent) {
-        guard event.keyCode == kRightOptionKeyCode else { return }
+    func install() -> String? {
+        remove()
 
-        let optionDown = event.modifierFlags.contains(.option)
+        let eventMask =
+            (CGEventMask(1) << CGEventType.keyDown.rawValue) |
+            (CGEventMask(1) << CGEventType.keyUp.rawValue) |
+            (CGEventMask(1) << CGEventType.flagsChanged.rawValue)
 
-        if optionDown && rightOptionDownTime == nil {
-            // Right Option just pressed
-            rightOptionDownTime = Date()
-            otherKeyPressed = false
-            onInteraction?("right_option_pressed", [:])
-        } else if !optionDown, let downTime = rightOptionDownTime {
-            // Right Option just released — check if it was a tap
-            let elapsed = Date().timeIntervalSince(downTime)
-            rightOptionDownTime = nil
-
-            let maxTapDuration = maxTapDurationProvider?() ?? startTapDuration
-            let accepted = elapsed <= maxTapDuration && !otherKeyPressed
-            onInteraction?("right_option_released", [
-                "elapsed_ms": "\(Int(elapsed * 1000))",
-                "max_tap_ms": "\(Int(maxTapDuration * 1000))",
-                "other_key_pressed": "\(otherKeyPressed)",
-                "accepted": "\(accepted)"
-            ])
-            if accepted {
-                onTap?()
-            }
+        let userInfo = Unmanaged.passUnretained(self).toOpaque()
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: eventMask,
+            callback: Self.callback,
+            userInfo: userInfo
+        ) else {
+            triggerDown = false
+            consumedKeyCode = nil
+            return TranscriptedPermissionAccess.isGranted(.accessibility)
+                ? "Dictation trigger failed to start"
+                : "Dictation trigger needs Accessibility permission"
         }
+
+        guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
+            CFMachPortInvalidate(tap)
+            triggerDown = false
+            consumedKeyCode = nil
+            return "Dictation trigger failed to start"
+        }
+
+        eventTap = tap
+        runLoopSource = source
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        return nil
     }
 
     func remove() {
-        if let m = globalFlagsMonitor { NSEvent.removeMonitor(m) }
-        if let m = localFlagsMonitor { NSEvent.removeMonitor(m) }
-        if let m = globalKeyDownMonitor { NSEvent.removeMonitor(m) }
-        if let m = localKeyDownMonitor { NSEvent.removeMonitor(m) }
-        globalFlagsMonitor = nil
-        localFlagsMonitor = nil
-        globalKeyDownMonitor = nil
-        localKeyDownMonitor = nil
-        rightOptionDownTime = nil
+        if let source = runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        }
+        if let eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
+            CFMachPortInvalidate(eventTap)
+        }
+        runLoopSource = nil
+        eventTap = nil
+        triggerDown = false
+        consumedKeyCode = nil
+    }
+
+    private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let eventTap {
+                CGEvent.tapEnable(tap: eventTap, enable: true)
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
+        guard let binding = bindingProvider?() else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        let keyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
+        let modifiers = PhysicalDictationTriggerPreferences.modifiers(from: event.flags)
+
+        switch type {
+        case .keyDown:
+            guard PhysicalDictationTriggerPreferences.matchesKeyDown(binding, keyCode: keyCode, modifiers: modifiers) else {
+                return Unmanaged.passUnretained(event)
+            }
+
+            let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+            if !triggerDown && !isRepeat {
+                triggerDown = true
+                consumedKeyCode = keyCode
+                onTrigger?()
+            }
+            return nil
+
+        case .keyUp:
+            if consumedKeyCode == keyCode {
+                triggerDown = false
+                consumedKeyCode = nil
+                return nil
+            }
+            return Unmanaged.passUnretained(event)
+
+        case .flagsChanged:
+            if binding.keyCode == UInt32(kVK_CapsLock),
+               PhysicalDictationTriggerPreferences.matchesFlagsChangedPress(binding, keyCode: keyCode, modifiers: modifiers) {
+                onTrigger?()
+                return nil
+            }
+
+            if PhysicalDictationTriggerPreferences.matchesFlagsChangedPress(binding, keyCode: keyCode, modifiers: modifiers) {
+                if !triggerDown {
+                    triggerDown = true
+                    onTrigger?()
+                }
+                return nil
+            }
+
+            if triggerDown,
+               PhysicalDictationTriggerPreferences.matchesFlagsChangedRelease(binding, keyCode: keyCode, modifiers: modifiers) {
+                triggerDown = false
+                return nil
+            }
+
+            return Unmanaged.passUnretained(event)
+
+        default:
+            return Unmanaged.passUnretained(event)
+        }
     }
 }
 
@@ -215,14 +245,15 @@ private final class RightOptionTapDetector {
 
 @MainActor
 class ContextCaptureEngine: ObservableObject {
-    private var hotkeyRef: EventHotKeyRef?
     private var meetingHotkeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
     private var hotkeyChangeObserver: NSObjectProtocol?
-    private let rightOptionDetector = RightOptionTapDetector()
+    private let physicalDictationTriggerDetector = PhysicalDictationTriggerDetector()
+    private var carbonHotkeyError: String?
+    private var physicalTriggerError: String?
 
     /// Human-readable display strings for current shortcuts (drives MenuBarPanel pills + overlay hints)
-    @Published var dictationShortcutDisplay: String = HotkeyPreferences.rightOptionDictationEnabled() ? "Right ⌥" : HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
+    @Published var dictationShortcutDisplay: String = PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.binding())
     @Published var meetingShortcutDisplay: String = HotkeyPreferences.displayString(for: HotkeyPreferences.meetingBinding())
 
     /// Non-nil when hotkey registration failed — shown as a dismissible banner in MenuBarPanel
@@ -256,7 +287,7 @@ class ContextCaptureEngine: ObservableObject {
         _sharedSessionController = sessionController
         _sharedMeetingToggle = onMeetingToggle
 
-        // Register for kEventHotKeyPressed (dictation fallback + meeting mode)
+        // Register for kEventHotKeyPressed (meeting mode)
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(
             GetApplicationEventTarget(),
@@ -270,7 +301,7 @@ class ContextCaptureEngine: ObservableObject {
         // Register meeting hotkey from saved preferences (or defaults)
         registerHotkeysFromPreferences()
 
-        configureRightOptionDetector()
+        configurePhysicalDictationTriggerDetector()
 
         // Listen for preference changes (from HotkeyRecorderView)
         hotkeyChangeObserver = NotificationCenter.default.addObserver(
@@ -284,67 +315,23 @@ class ContextCaptureEngine: ObservableObject {
         }
     }
 
-    /// Unregisters current dictation/meeting hotkeys and re-registers with latest preferences.
-    /// Preserves the event handler — only the key+modifier bindings change.
+    /// Unregisters the current meeting hotkey and re-registers with latest preferences.
+    /// Preserves the event handler — only the key+modifier binding changes.
     private func reRegisterHotkeys() {
-        if let ref = hotkeyRef {
-            UnregisterEventHotKey(ref)
-            hotkeyRef = nil
-        }
         if let ref = meetingHotkeyRef {
             UnregisterEventHotKey(ref)
             meetingHotkeyRef = nil
         }
         registerHotkeysFromPreferences()
 
-        // Re-evaluate right Option tap detector
-        rightOptionDetector.remove()
-        configureRightOptionDetector()
-    }
-
-    private func configureRightOptionDetector() {
-        rightOptionDetector.maxTapDurationProvider = { [weak self] in
-            self?.sessionController?.isDictating == true ? 1.0 : 0.35
-        }
-        rightOptionDetector.onInteraction = { [weak self] event, context in
-            self?.recordRightOptionInteraction(event: event, context: context)
-        }
-        guard HotkeyPreferences.rightOptionDictationEnabled() else {
-            rightOptionDetector.onTap = nil
-            return
-        }
-
-        rightOptionDetector.onTap = { [weak self] in
-            Task { @MainActor [weak self] in
-                self?.handleRightOptionTap()
-            }
-        }
-        rightOptionDetector.install()
+        // Re-evaluate physical dictation trigger detector.
+        physicalDictationTriggerDetector.remove()
+        configurePhysicalDictationTriggerDetector()
     }
 
     private func registerHotkeysFromPreferences() {
-        let dictationBinding = HotkeyPreferences.dictationBinding()
         let meetingBinding = HotkeyPreferences.meetingBinding()
         var errors: [String] = []
-
-        // Dictation fallback shortcut — hotkey ID 2
-        let dictationHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 2)  // 'DRFT'
-        let dictationStatus = RegisterEventHotKey(
-            dictationBinding.keyCode,
-            dictationBinding.modifiers,
-            dictationHotkeyID,
-            GetApplicationEventTarget(),
-            0,
-            &hotkeyRef
-        )
-        if dictationStatus != noErr {
-            // Carbon leaves the ref undefined on failure — nil it so unregister
-            // doesn't later call UnregisterEventHotKey on a bogus pointer.
-            hotkeyRef = nil
-            errors.append("Dictation shortcut")
-            EventReporter.shared.capture(level: .error, engine: "capture", event: "hotkey_register_failed",
-                message: "Dictation hotkey registration failed", context: ["os_status": "\(dictationStatus)"])
-        }
 
         // Meeting mode — hotkey ID 3 (Carbon hotkey: modifier + key)
         let meetingHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 3)  // 'DRFT'
@@ -363,27 +350,58 @@ class ContextCaptureEngine: ObservableObject {
                 message: "Meeting hotkey registration failed", context: ["os_status": "\(meetingStatus)"])
         }
 
-        // Surface registration failures to the user via MenuBarPanel
-        hotkeyError = errors.isEmpty ? nil : "\(errors.joined(separator: " and ")) failed to register"
+        carbonHotkeyError = errors.isEmpty ? nil : "\(errors.joined(separator: " and ")) failed to register"
+        updateHotkeyError()
 
         // Update display strings
-        dictationShortcutDisplay = HotkeyPreferences.rightOptionDictationEnabled()
-            ? "Right ⌥"
-            : HotkeyPreferences.displayString(for: HotkeyPreferences.dictationBinding())
+        dictationShortcutDisplay = PhysicalDictationTriggerPreferences.displayString(
+            for: PhysicalDictationTriggerPreferences.binding()
+        )
         meetingShortcutDisplay = HotkeyPreferences.displayString(for: meetingBinding)
     }
 
-    /// Handles a right Option key tap — same routing as ⌥Space (dictation toggle)
-    private func handleRightOptionTap() {
+    private func configurePhysicalDictationTriggerDetector() {
+        physicalDictationTriggerDetector.bindingProvider = {
+            PhysicalDictationTriggerPreferences.binding()
+        }
+        physicalDictationTriggerDetector.onTrigger = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.handlePhysicalDictationTrigger()
+            }
+        }
+
+        physicalTriggerError = physicalDictationTriggerDetector.install()
+        if let physicalTriggerError {
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "capture",
+                event: "physical_dictation_trigger_failed",
+                message: physicalTriggerError,
+                context: [
+                    "trigger": PhysicalDictationTriggerPreferences.displayString(
+                        for: PhysicalDictationTriggerPreferences.binding()
+                    )
+                ]
+            )
+        }
+        updateHotkeyError()
+    }
+
+    private func updateHotkeyError() {
+        let errors = [carbonHotkeyError, physicalTriggerError].compactMap { $0 }
+        hotkeyError = errors.isEmpty ? nil : errors.joined(separator: " and ")
+    }
+
+    private func handlePhysicalDictationTrigger() {
         guard shouldAcceptHotkeyAction() else {
             DiagnosticsTrail.record(
                 logger: sessionController?.appState?.logger,
                 level: .info,
                 engine: "capture",
                 event: "hotkey_repeat_ignored",
-                message: "Ignored rapid repeat dictation tap",
+                message: "Ignored rapid repeat dictation trigger",
                 context: [
-                    "hotkey_id": "right_option",
+                    "hotkey_id": "physical_dictation_trigger",
                     "session_state": sessionController?.isDictating == true ? "dictating" : (sessionController?.isInSession == true ? "drafting" : "idle"),
                     "overlay_state": overlayStateName(sessionController?.overlayController?.state)
                 ]
@@ -392,46 +410,19 @@ class ContextCaptureEngine: ObservableObject {
         }
 
         let frontApp = NSWorkspace.shared.frontmostApplication
-
-        guard let session = sessionController else { return }
-        if session.isDictating {
-            session.stopDictationAndPaste(trigger: .rightOptionTap)
-        } else if session.isInSession {
-            session.cancelSession()
-            session.startDictation(sourceApp: frontApp, trigger: .rightOptionTap)
-        } else {
-            session.startDictation(sourceApp: frontApp, trigger: .rightOptionTap)
-        }
-    }
-
-    private func recordRightOptionInteraction(event: String, context: [String: String]) {
-        DiagnosticsTrail.record(
-            logger: sessionController?.appState?.logger,
-            engine: "capture",
-            event: event,
-            message: "Right Option dictation interaction",
-            context: context.merging([
-                "session_state": sessionController?.isDictating == true ? "dictating" : (sessionController?.isInSession == true ? "drafting" : "idle"),
-                "overlay_state": overlayStateName(sessionController?.overlayController?.state)
-            ]) { current, _ in current }
-        )
+        routeDictationToggle(sourceApp: frontApp, trigger: .physicalKey)
     }
 
     deinit {
-        if let ref = hotkeyRef { UnregisterEventHotKey(ref) }
         if let ref = meetingHotkeyRef { UnregisterEventHotKey(ref) }
         if let ref = eventHandlerRef { RemoveEventHandler(ref) }
         if let observer = hotkeyChangeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
-        rightOptionDetector.remove()
+        physicalDictationTriggerDetector.remove()
     }
 
     func unregisterHotkey() {
-        if let ref = hotkeyRef {
-            UnregisterEventHotKey(ref)
-            hotkeyRef = nil
-        }
         if let ref = meetingHotkeyRef {
             UnregisterEventHotKey(ref)
             meetingHotkeyRef = nil
@@ -444,7 +435,7 @@ class ContextCaptureEngine: ObservableObject {
             NotificationCenter.default.removeObserver(observer)
             hotkeyChangeObserver = nil
         }
-        rightOptionDetector.remove()
+        physicalDictationTriggerDetector.remove()
         _sharedSessionController = nil
         _sharedMeetingToggle = nil
     }

@@ -23,15 +23,15 @@ enum HotkeyPreferences {
     private static let rightOptionDictationKey = "hotkey-rightOption-dictation-enabled"
 
     /// Whether tapping the right Option key toggles dictation (default: true)
-    static func rightOptionDictationEnabled() -> Bool {
-        let ud = UserDefaults.standard
+    static func rightOptionDictationEnabled(userDefaults: UserDefaults = .standard) -> Bool {
+        let ud = userDefaults
         // Default to true if never set
         if ud.object(forKey: rightOptionDictationKey) == nil { return true }
         return ud.bool(forKey: rightOptionDictationKey)
     }
 
-    static func setRightOptionDictation(enabled: Bool) {
-        UserDefaults.standard.set(enabled, forKey: rightOptionDictationKey)
+    static func setRightOptionDictation(enabled: Bool, userDefaults: UserDefaults = .standard) {
+        userDefaults.set(enabled, forKey: rightOptionDictationKey)
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
 
@@ -46,8 +46,8 @@ enum HotkeyPreferences {
 
     // MARK: - Read
 
-    static func draftBinding() -> HotkeyBinding {
-        let ud = UserDefaults.standard
+    static func draftBinding(userDefaults: UserDefaults = .standard) -> HotkeyBinding {
+        let ud = userDefaults
         guard ud.object(forKey: draftKeyCodeKey) != nil else { return defaultDraft }
         return HotkeyBinding(
             keyCode: UInt32(ud.integer(forKey: draftKeyCodeKey)),
@@ -55,8 +55,8 @@ enum HotkeyPreferences {
         )
     }
 
-    static func dictationBinding() -> HotkeyBinding {
-        let ud = UserDefaults.standard
+    static func dictationBinding(userDefaults: UserDefaults = .standard) -> HotkeyBinding {
+        let ud = userDefaults
         guard ud.object(forKey: dictationKeyCodeKey) != nil else { return defaultDictation }
         return HotkeyBinding(
             keyCode: UInt32(ud.integer(forKey: dictationKeyCodeKey)),
@@ -64,8 +64,8 @@ enum HotkeyPreferences {
         )
     }
 
-    static func meetingBinding() -> HotkeyBinding {
-        let ud = UserDefaults.standard
+    static func meetingBinding(userDefaults: UserDefaults = .standard) -> HotkeyBinding {
+        let ud = userDefaults
         guard ud.object(forKey: meetingKeyCodeKey) != nil else { return defaultMeeting }
         return HotkeyBinding(
             keyCode: UInt32(ud.integer(forKey: meetingKeyCodeKey)),
@@ -75,22 +75,22 @@ enum HotkeyPreferences {
 
     // MARK: - Write
 
-    static func save(draft binding: HotkeyBinding) {
-        let ud = UserDefaults.standard
+    static func save(draft binding: HotkeyBinding, userDefaults: UserDefaults = .standard) {
+        let ud = userDefaults
         ud.set(Int(binding.keyCode), forKey: draftKeyCodeKey)
         ud.set(Int(binding.modifiers), forKey: draftModifiersKey)
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
 
-    static func save(dictation binding: HotkeyBinding) {
-        let ud = UserDefaults.standard
+    static func save(dictation binding: HotkeyBinding, userDefaults: UserDefaults = .standard) {
+        let ud = userDefaults
         ud.set(Int(binding.keyCode), forKey: dictationKeyCodeKey)
         ud.set(Int(binding.modifiers), forKey: dictationModifiersKey)
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
 
-    static func save(meeting binding: HotkeyBinding) {
-        let ud = UserDefaults.standard
+    static func save(meeting binding: HotkeyBinding, userDefaults: UserDefaults = .standard) {
+        let ud = userDefaults
         ud.set(Int(binding.keyCode), forKey: meetingKeyCodeKey)
         ud.set(Int(binding.modifiers), forKey: meetingModifiersKey)
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
@@ -120,7 +120,7 @@ enum HotkeyPreferences {
         return parts.joined()
     }
 
-    private static func keyName(for keyCode: UInt32) -> String {
+    static func keyName(for keyCode: UInt32) -> String {
         switch Int(keyCode) {
         // Letters
         case kVK_ANSI_A: return "A"
@@ -194,6 +194,17 @@ enum HotkeyPreferences {
         case kVK_ANSI_Period:       return "."
         case kVK_ANSI_Slash:        return "/"
         case kVK_ANSI_Grave:        return "`"
+        case kVK_ANSI_KeypadEnter:  return "Keypad Enter"
+        case kVK_Command:           return "Left ⌘"
+        case kVK_RightCommand:      return "Right ⌘"
+        case kVK_Shift:             return "Left ⇧"
+        case kVK_RightShift:        return "Right ⇧"
+        case kVK_Option:            return "Left ⌥"
+        case kVK_RightOption:       return "Right ⌥"
+        case kVK_Control:           return "Left ⌃"
+        case kVK_RightControl:      return "Right ⌃"
+        case kVK_Function:          return "Fn"
+        case kVK_CapsLock:          return "Caps Lock"
         default: return "Key\(keyCode)"
         }
     }
