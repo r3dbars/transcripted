@@ -100,17 +100,13 @@ enum DictationTranscriptWriter {
             characterCount: characterCount
         )
 
-        let body: String
-        if FileManager.default.fileExists(atPath: url.path),
-           let existing = try? String(contentsOf: url, encoding: .utf8),
-           !existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let separator = existing.hasSuffix("\n\n") ? "" : "\n\n"
-            body = existing + separator + section
+        if hasExistingContent(at: url) {
+            try appendSection(section, to: url)
         } else {
-            body = dayHeader + "\n\n" + section
+            let body = dayHeader + "\n\n" + section
+            try body.write(to: url, atomically: true, encoding: .utf8)
         }
 
-        try body.write(to: url, atomically: true, encoding: .utf8)
         FileManager.default.restrictFileToOwnerOnly(at: url)
 
         return SavedDictationTranscript(url: url, title: title)
@@ -162,6 +158,41 @@ enum DictationTranscriptWriter {
 
         \(text)
         """
+    }
+
+    private static func hasExistingContent(at url: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path),
+              let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+              let size = values.fileSize else {
+            return false
+        }
+        return size > 0
+    }
+
+    private static func appendSection(_ section: String, to url: URL) throws {
+        guard let handle = FileHandle(forWritingAtPath: url.path) else {
+            throw NSError(
+                domain: "DictationTranscriptWriter",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Could not open dictation transcript for appending."]
+            )
+        }
+        defer { try? handle.close() }
+
+        let separator = fileEndsWithBlankLine(url) ? "" : "\n\n"
+        guard let data = (separator + section).data(using: .utf8) else { return }
+        handle.seekToEndOfFile()
+        handle.write(data)
+    }
+
+    private static func fileEndsWithBlankLine(_ url: URL) -> Bool {
+        guard let handle = FileHandle(forReadingAtPath: url.path) else { return false }
+        defer { try? handle.close() }
+
+        let fileLength = handle.seekToEndOfFile()
+        guard fileLength >= 2 else { return false }
+        handle.seek(toFileOffset: fileLength - 2)
+        return handle.readDataToEndOfFile() == Data([0x0A, 0x0A])
     }
 
     private static func buildTitle(from text: String, createdAt: Date) -> String {

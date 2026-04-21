@@ -28,6 +28,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
     private let statsLock = NSLock()
 
     var audioFormat: AVAudioFormat? { _audioFormat }
+    var deliversOwnedAudioBuffers: Bool { true }
 
     var bufferSuccessRate: Double {
         statsLock.lock()

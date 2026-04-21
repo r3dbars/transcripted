@@ -255,19 +255,26 @@ public class DiarizationService: ObservableObject {
 
     /// Log per-speaker segment summaries (shared by offline and streaming pipelines).
     private nonisolated func logSpeakerSummaries(_ segments: [SpeakerSegment]) {
-        let speakerIds = Set(segments.map { $0.speakerId })
-        for id in speakerIds.sorted() {
-            let speakerSegments = segments.filter { $0.speakerId == id }
-            let totalDuration = speakerSegments.reduce(0.0) { $0 + $1.duration }
-            AppLogger.transcription.debug("Speaker \(id): \(speakerSegments.count) segments, \(String(format: "%.1f", totalDuration))s")
+        var summaries: [Int: (count: Int, duration: Double)] = [:]
+        for segment in segments {
+            let current = summaries[segment.speakerId] ?? (count: 0, duration: 0)
+            summaries[segment.speakerId] = (
+                count: current.count + 1,
+                duration: current.duration + segment.duration
+            )
+        }
+
+        for id in summaries.keys.sorted() {
+            guard let summary = summaries[id] else { continue }
+            AppLogger.transcription.debug("Speaker \(id): \(summary.count) segments, \(String(format: "%.1f", summary.duration))s")
         }
     }
 
     /// Convert FluidAudio's string speaker ID (e.g., "speaker_0") to integer
     private nonisolated func speakerIdFromString(_ id: String) -> Int {
         // Sortformer uses "speaker_0", "speaker_1", etc.
-        if let lastComponent = id.split(separator: "_").last,
-           let intId = Int(lastComponent) {
+        if let separator = id.lastIndex(of: "_"),
+           let intId = Int(id[id.index(after: separator)...]) {
             return intId
         }
         // PyAnnote offline uses "S0", "S1", "S2", etc.

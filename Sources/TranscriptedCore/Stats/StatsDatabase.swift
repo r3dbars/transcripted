@@ -192,10 +192,12 @@ public final class StatsDatabase {
         // Create indexes for common queries
         let createDateIndex = "CREATE INDEX IF NOT EXISTS idx_recordings_date ON recordings(date);"
         let createDateTimeIndex = "CREATE INDEX IF NOT EXISTS idx_recordings_date_time ON recordings(date DESC, time DESC);"
+        let createTranscriptPathIndex = "CREATE INDEX IF NOT EXISTS idx_recordings_transcript_path ON recordings(transcript_path);"
         executeSQL(createRecordingsTable)
         executeSQL(createDailyActivityTable)
         executeSQL(createDateIndex)
         executeSQL(createDateTimeIndex)
+        executeSQL(createTranscriptPathIndex)
         FileManager.default.restrictSQLiteArtifactsToOwnerOnly(atPath: dbPath.path)
     }
 

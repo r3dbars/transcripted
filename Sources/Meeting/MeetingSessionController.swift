@@ -645,7 +645,9 @@ final class MeetingSessionController: ObservableObject {
 
         let preparedAudio: PreparedImportedMeetingAudio
         do {
-            preparedAudio = try MeetingImportedAudioPreparer.prepareImportedAudio(from: sourceURL)
+            preparedAudio = try await Task.detached(priority: .utility) {
+                try MeetingImportedAudioPreparer.prepareImportedAudio(from: sourceURL)
+            }.value
         } catch {
             DiagnosticsTrail.record(
                 level: .error,

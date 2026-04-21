@@ -1,4 +1,5 @@
 import Foundation
+import Accelerate
 @preconcurrency import AVFoundation
 
 // MARK: - Audio Level Processing & Silence Detection
@@ -17,10 +18,7 @@ extension Audio {
         guard frameLength > 0 else { return }
 
         var sum: Float = 0
-        for i in 0..<frameLength {
-            let sample = channelData[i]
-            sum += sample * sample
-        }
+        vDSP_dotpr(channelData, 1, channelData, 1, &sum, vDSP_Length(frameLength))
 
         let rms = sqrt(sum / Float(frameLength))
         let power = 20 * log10(max(rms, 0.00001))
@@ -89,10 +87,7 @@ extension Audio {
         guard frameLength > 0 else { return }
 
         var sum: Float = 0
-        for i in 0..<frameLength {
-            let sample = channelData[i]
-            sum += sample * sample
-        }
+        vDSP_dotpr(channelData, 1, channelData, 1, &sum, vDSP_Length(frameLength))
 
         let rms = sqrt(sum / Float(frameLength))
         let power = 20 * log10(max(rms, 0.00001))
@@ -115,13 +110,14 @@ extension Audio {
         let silenceThreshold: Float = 0.001  // Very low threshold for silence
 
         if peakLevel < silenceThreshold {
+            let now = Date()
             // System audio is silent
             if systemAudioSilenceStart == nil {
-                systemAudioSilenceStart = Date()
+                systemAudioSilenceStart = now
             }
 
             guard let silenceStart = systemAudioSilenceStart else { return }
-            let silenceDuration = Date().timeIntervalSince(silenceStart)
+            let silenceDuration = now.timeIntervalSince(silenceStart)
             if silenceDuration > systemAudioSilenceThreshold {
                 // Prolonged silence - show warning (but only if not already in a worse state)
                 DispatchQueue.main.async { [weak self] in
@@ -134,7 +130,9 @@ extension Audio {
             }
         } else {
             // Audio present - reset silence tracking
+            let wasTrackingSilence = systemAudioSilenceStart != nil
             systemAudioSilenceStart = nil
+            guard wasTrackingSilence else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 // Only reset to healthy if we were in silent state (not failed/reconnecting)

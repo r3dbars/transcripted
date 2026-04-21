@@ -683,6 +683,13 @@ final class MeetingOverlayRootView: NSView {
         needsLayout = true
     }
 
+    func updateAudioLevels(micLevel: Float, systemLevel: Float) {
+        currentMicLevel = max(0, min(1, micLevel))
+        currentSystemLevel = max(0, min(1, systemLevel))
+        audioWaveform.primaryLevel = currentMicLevel
+        audioWaveform.secondaryLevel = currentSystemLevel
+    }
+
     private func applyBaseVisualStyle() {
         titleLabel.font = .systemFont(ofSize: 11, weight: .semibold)
         titleLabel.textColor = MeetingOverlayTokens.textPrimary
@@ -1058,7 +1065,7 @@ final class MeetingOverlayController {
             .receive(on: RunLoop.main)
             .sink { [weak self] level in
                 self?.currentMicLevel = level
-                self?.pushToView()
+                self?.pushAudioLevelsToView()
             }
             .store(in: &subscriptions)
 
@@ -1066,7 +1073,7 @@ final class MeetingOverlayController {
             .receive(on: RunLoop.main)
             .sink { [weak self] level in
                 self?.currentSystemLevel = level
-                self?.pushToView()
+                self?.pushAudioLevelsToView()
             }
             .store(in: &subscriptions)
 
@@ -1315,6 +1322,13 @@ final class MeetingOverlayController {
             participants: currentParticipants,
             warmupStatus: currentWarmupStatus,
             prompt: currentPrompt
+        )
+    }
+
+    private func pushAudioLevelsToView() {
+        rootView?.updateAudioLevels(
+            micLevel: currentMicLevel,
+            systemLevel: currentSystemLevel
         )
     }
 
