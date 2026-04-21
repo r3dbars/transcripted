@@ -18,10 +18,7 @@ enum LocalSpeakerPreferences {
     /// Whether mic-channel diarization runs during meeting transcription.
     /// Default: false. Read by the pipeline runner on each meeting.
     static func isEnabled() -> Bool {
-        // Default false if never set; explicit bool otherwise.
-        let ud = UserDefaults.standard
-        if ud.object(forKey: enabledKey) == nil { return false }
-        return ud.bool(forKey: enabledKey)
+        UserDefaults.standard.bool(forKey: enabledKey)
     }
 
     static func setEnabled(_ enabled: Bool) {

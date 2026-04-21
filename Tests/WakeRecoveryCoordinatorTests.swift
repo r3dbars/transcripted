@@ -210,4 +210,29 @@ func testWakeRecoveryCoordinator() async {
         assertEqual(readinessCount, 1, "reused wake should not wait for readiness again")
         assertEqual(sleepCount, 1, "reused wake should not add retry sleeps")
     }
+
+    await runSuite("WakeRecoveryCoordinator.handleSystemWake — does not reuse a failed completed recovery") {
+        let hotkeys = await MainActor.run { HotkeyScript(scriptedErrors: ["busy", nil]) }
+
+        let coordinator = await MainActor.run {
+            WakeRecoveryCoordinator(
+                hotkeyRetryAttempts: 1,
+                hotkeyRetryDelay: 1,
+                unregisterHotkeys: { hotkeys.unregister() },
+                registerHotkeys: { hotkeys.register() },
+                currentHotkeyError: { hotkeys.currentError },
+                waitForRuntimeReadiness: {}
+            )
+        }
+
+        let firstResult = await coordinator.handleSystemWake()
+        let secondResult = await coordinator.handleSystemWake()
+
+        assertFalse(firstResult.hotkeysRecovered, "first wake should fail with scripted hotkey error")
+        assertTrue(firstResult.performedRecovery, "first wake should perform recovery")
+        assertTrue(secondResult.hotkeysRecovered, "second wake should retry instead of replaying the failed task")
+        assertTrue(secondResult.performedRecovery, "failed completed recoveries should not be reused")
+        let registerCalls = await MainActor.run { hotkeys.registerCalls }
+        assertEqual(registerCalls, 2, "second wake should perform a fresh hotkey registration")
+    }
 }

@@ -13,7 +13,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (34 Swift files)
+## Files (46 Swift files)
 
 ### Overlay/
 
@@ -34,13 +34,15 @@ dictation overlay and the meeting prompt / recording overlay.
 ### MenuBar/
 
 - `MenuBar/MenuAgentConnectPageView.swift` — agent connection page in the menubar popover
+- `MenuBar/MenuBarActionRowView.swift` — AppKit control backing both primary and utility action rows, with tone, size, and press-handler styling
 - `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover
 - `MenuBar/MenuBarHeaderView.swift` — popover header with app name and status
 - `MenuBar/MenuBarModelStatusView.swift` — persistent local-model status badge with download progress, error state, and settings shortcut
 - `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar
-- `MenuBar/MenuBarRecentMeetingsView.swift` — recent meetings list in the popover
+- `MenuBar/MenuBarPrimaryActionsView.swift` — groups the dictation, meeting, paste, and recent-meetings action rows at the top of the popover
 - `MenuBar/MenuBarSettingsView.swift` — settings actions in the popover footer, including imported-audio transcription entry points
 - `MenuBar/MenuBarShortcutsView.swift` — keyboard shortcut hints in the popover
+- `MenuBar/MenuBarUtilityActionsView.swift` — groups the connect-agent, feedback, updates, settings, and quit action rows at the bottom of the popover
 - `MenuBar/MenuIconButton.swift` — icon-only button style for menubar items
 - `MenuBar/MenuOutlineButton.swift` — outlined button style for menubar actions
 - `MenuBar/MenuTokens.swift` — design tokens for menubar views
@@ -58,11 +60,16 @@ The current agent-connect surfaces should keep one simple mental model:
 
 ### Settings/
 
+- `Settings/HomeTranscriptionActivityPresentation.swift` — presentation model derived from `MeetingSessionController` state for the home page's live transcription activity card (tone, progress, transcript URL)
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
-- `Settings/TranscriptedOnboardingWindowController.swift` — dedicated first-launch window that hosts onboarding before users drop into the menubar flow
 - `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits
 - `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, naming, merging, previewing, and deleting saved speaker profiles, plus the toggle for identifying multiple local speakers on the mic track
+- `Settings/TranscriptedOnboardingWindowController.swift` — dedicated first-launch window that hosts onboarding before users drop into the menubar flow
+- `Settings/TranscriptedSettingsActions.swift` — struct of callbacks (start dictation, start meeting, import audio, paste, connect agent, check updates, send feedback) injected into the settings view
+- `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`SettingsPageIntro`, `SettingsSection`) used across settings pages
+- `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection
+- `Settings/TranscriptedSettingsPage.swift` — enum of settings pages (home, general, models, shortcuts, meetings, dictations, storage, connectAgent, privacy, about) with titles, summaries, and SF Symbol names
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 
@@ -70,8 +77,11 @@ The current agent-connect surfaces should keep one simple mental model:
 
 - `Shared/AgentConnectionGuide.swift` — shared smart-prompt, MCP setup, and folder fallback copy for the agent-connect flow
 - `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
+- `Shared/FeedbackIssueBuilder.swift` — builds sanitized feedback issue payloads and support links from current app state
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
+- `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts from disk for the Settings meetings page
 - `Shared/SpeakerClipPlayback.swift` — reusable audio-preview helper for persisted speaker sample clips
+- `Shared/TranscriptedSupportActions.swift` — "Send feedback" flow that builds a GitHub-issue URL seeded with sanitized recent log lines
 
 Cross-cutting permission checks now live in `Sources/Support/TranscriptedPermissionAccess.swift`
 so the meeting prompt detector and the settings/onboarding flows share the same
@@ -106,7 +116,7 @@ Manual checks:
 - detected-meeting prompts appear only when appropriate and can start or snooze a meeting cleanly
 - meeting overlay warms up and records cleanly
 - imported-audio transcription can be started from the menubar and lands in the normal recent-meetings flow
-- menubar popover renders shortcuts, recents, settings actions, and the agent-connect page cleanly
+- menubar popover renders shortcuts, primary actions, settings actions, and the agent-connect page cleanly
 - speaker settings can preview clips, toggle local-speaker splitting, and rename / merge people cleanly
 - completed meeting review cleanly separates "People in the room" from remote participants, and "Keep as You" restores the single-speaker local path when needed
 - permissions onboarding and first-run onboarding window still open correctly

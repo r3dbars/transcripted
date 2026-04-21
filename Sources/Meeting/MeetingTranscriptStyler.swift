@@ -347,6 +347,10 @@ enum MeetingTranscriptStyler {
 
         do {
             try fm.moveItem(at: url, to: targetURL)
+            renameAudioDirectoryIfNeeded(
+                from: audioDirectoryURL(for: url),
+                to: audioDirectoryURL(for: targetURL)
+            )
             return targetURL
         } catch {
             logFailure(
@@ -359,6 +363,51 @@ enum MeetingTranscriptStyler {
                 ]
             )
             return url
+        }
+    }
+
+    private static func audioDirectoryURL(for transcriptURL: URL) -> URL {
+        transcriptURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("audio", isDirectory: true)
+            .appendingPathComponent("\(transcriptURL.deletingPathExtension().lastPathComponent)_audio", isDirectory: true)
+    }
+
+    private static func renameAudioDirectoryIfNeeded(from sourceURL: URL, to targetURL: URL) {
+        let fm = FileManager.default
+        guard sourceURL != targetURL, fm.fileExists(atPath: sourceURL.path) else { return }
+
+        let finalURL = uniqueAudioDirectoryURL(preferredURL: targetURL)
+
+        do {
+            try fm.moveItem(at: sourceURL, to: finalURL)
+        } catch {
+            logFailure(
+                event: "meeting_audio_directory_rename_failed",
+                message: "Failed to rename retained meeting audio",
+                context: [
+                    "from": sourceURL.lastPathComponent,
+                    "to": finalURL.lastPathComponent,
+                    "error": error.localizedDescription
+                ]
+            )
+        }
+    }
+
+    private static func uniqueAudioDirectoryURL(preferredURL: URL) -> URL {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: preferredURL.path) else { return preferredURL }
+
+        let directory = preferredURL.deletingLastPathComponent()
+        let stem = preferredURL.lastPathComponent
+        var suffix = 2
+
+        while true {
+            let candidate = directory.appendingPathComponent("\(stem) \(suffix)", isDirectory: true)
+            if !fm.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+            suffix += 1
         }
     }
 

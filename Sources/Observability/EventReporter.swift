@@ -30,6 +30,7 @@ struct ObservabilityEvent: Codable {
 private actor EventFileWriter {
     private let fileURL: URL
     private var handle: FileHandle?
+    private var isPrepared = false
     private let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.outputFormatting = []  // Compact — one record per line
@@ -42,14 +43,6 @@ private actor EventFileWriter {
     }
 
     func append(_ event: ObservabilityEvent) {
-        let storageDir = fileURL.deletingLastPathComponent()
-        do {
-            try FileManager.default.createPrivateDirectory(at: storageDir)
-        } catch {
-            fputs("⚠️ EVENT | failed to create directory \(storageDir.path): \(error.localizedDescription)\n", stderr)
-            return
-        }
-
         let data: Data
         do {
             data = try encoder.encode(event)
@@ -57,39 +50,40 @@ private actor EventFileWriter {
             fputs("⚠️ EVENT | failed to encode event '\(event.event)': \(error.localizedDescription)\n", stderr)
             return
         }
-        guard let line = String(data: data, encoding: .utf8) else {
-            fputs("⚠️ EVENT | failed to convert encoded data to UTF-8 for event: \(event.event)\n", stderr)
-            return
+
+        guard prepareIfNeeded() else { return }
+
+        var lineData = data
+        lineData.append(0x0A)
+        handle?.write(lineData)
+    }
+
+    private func prepareIfNeeded() -> Bool {
+        guard !isPrepared else { return true }
+
+        let storageDir = fileURL.deletingLastPathComponent()
+        do {
+            try FileManager.default.createPrivateDirectory(at: storageDir)
+        } catch {
+            fputs("⚠️ EVENT | failed to create directory \(storageDir.path): \(error.localizedDescription)\n", stderr)
+            return false
         }
 
-        let lineData = (line + "\n").data(using: .utf8) ?? Data()
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+            FileManager.default.restrictFileToOwnerOnly(at: fileURL)
+            print("📊 EVENT | created events.jsonl at \(fileURL.path)")
+        }
 
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            if handle == nil {
-                do {
-                    handle = try FileHandle(forWritingTo: fileURL)
-                } catch {
-                    fputs("⚠️ EVENT | failed to open FileHandle for \(fileURL.path): \(error.localizedDescription)\n", stderr)
-                }
-            }
+        do {
+            handle = try FileHandle(forWritingTo: fileURL)
             handle?.seekToEndOfFile()
-            handle?.write(lineData)
-        } else {
-            do {
-                try lineData.write(to: fileURL)
-                FileManager.default.restrictFileToOwnerOnly(at: fileURL)
-                print("📊 EVENT | created events.jsonl at \(fileURL.path)")
-            } catch {
-                fputs("⚠️ EVENT | failed to create events.jsonl: \(error.localizedDescription)\n", stderr)
-            }
-            do {
-                handle = try FileHandle(forWritingTo: fileURL)
-            } catch {
-                fputs("⚠️ EVENT | failed to open FileHandle after creation: \(error.localizedDescription)\n", stderr)
-            }
+            isPrepared = true
+            return true
+        } catch {
+            fputs("⚠️ EVENT | failed to open FileHandle for \(fileURL.path): \(error.localizedDescription)\n", stderr)
+            return false
         }
-
-        FileManager.default.restrictFileToOwnerOnly(at: fileURL)
     }
 
     deinit {

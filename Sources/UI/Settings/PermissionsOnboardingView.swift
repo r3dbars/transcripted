@@ -27,7 +27,7 @@ struct PermissionsOnboardingView: View {
     private static let completionKey = "permissionsOnboardingCompleted"
     private static let forceKey = "forcePermissionsOnboarding"
 
-    @ObservedObject private var parakeetEngine: ParakeetEngine
+    @ObservedObject private var sttRouter: STTRouter
     let canStartDictation: Bool
     var onStartDictation: (() -> Void)?
     var onComplete: () -> Void
@@ -40,12 +40,12 @@ struct PermissionsOnboardingView: View {
     @State private var pollTimer: Timer?
 
     init(
-        parakeetEngine: ParakeetEngine,
+        sttRouter: STTRouter,
         canStartDictation: Bool = false,
         onStartDictation: (() -> Void)? = nil,
         onComplete: @escaping () -> Void
     ) {
-        _parakeetEngine = ObservedObject(wrappedValue: parakeetEngine)
+        _sttRouter = ObservedObject(wrappedValue: sttRouter)
         self.canStartDictation = canStartDictation
         self.onStartDictation = onStartDictation
         self.onComplete = onComplete
@@ -185,14 +185,17 @@ struct PermissionsOnboardingView: View {
     }
 
     private var modelStatus: FirstRunModelCardState {
-        FirstRunExperience.modelCard(for: FirstRunLocalModelState(parakeetEngine.modelDownloadState))
+        FirstRunExperience.modelCard(
+            for: FirstRunLocalModelState(sttRouter.modelDownloadState),
+            model: sttRouter.selectedModel
+        )
     }
 
     private var primaryAction: FirstRunPrimaryActionState {
         FirstRunExperience.primaryAction(
             hasRequiredPermissions: hasRequiredPermissions,
             hasPasteTarget: canStartDictation && onStartDictation != nil,
-            modelState: FirstRunLocalModelState(parakeetEngine.modelDownloadState)
+            modelState: FirstRunLocalModelState(sttRouter.modelDownloadState)
         )
     }
 

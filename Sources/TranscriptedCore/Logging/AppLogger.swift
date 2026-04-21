@@ -27,6 +27,8 @@ public final class AppLogger: @unchecked Sendable {
     public static let app = SubsystemLogger("app")
 
     let fileLogger: FileLogger
+    private let osLogLock = NSLock()
+    private var osLogs: [String: OSLog] = [:]
 
     private init() {
         fileLogger = FileLogger()
@@ -37,7 +39,7 @@ public final class AppLogger: @unchecked Sendable {
         fileLogger.write(level: level, subsystem: subsystem, message: message, metadata: metadata)
 
         // Write to os.Logger (Console.app)
-        let osLog = OSLog(subsystem: "com.transcripted.\(subsystem)", category: subsystem)
+        let osLog = cachedOSLog(for: subsystem)
         let logType: OSLogType = switch level {
         case "debug": .debug
         case "warning": .error
@@ -59,6 +61,19 @@ public final class AppLogger: @unchecked Sendable {
         guard let metadata = metadata, !metadata.isEmpty else { return "" }
         let pairs = metadata.map { "\($0.key)=\($0.value)" }
         return " {\(pairs.joined(separator: ", "))}"
+    }
+
+    private func cachedOSLog(for subsystem: String) -> OSLog {
+        osLogLock.lock()
+        defer { osLogLock.unlock() }
+
+        if let cached = osLogs[subsystem] {
+            return cached
+        }
+
+        let created = OSLog(subsystem: "com.transcripted.\(subsystem)", category: subsystem)
+        osLogs[subsystem] = created
+        return created
     }
 }
 

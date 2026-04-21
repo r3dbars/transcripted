@@ -7,6 +7,7 @@ public class FailedTranscriptionManager: ObservableObject {
     @Published public var failedTranscriptions: [FailedTranscription] = []
 
     private let storageURL: URL
+    private let allowedAudioRoots: [URL]
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -24,6 +25,12 @@ public class FailedTranscriptionManager: ObservableObject {
             ])
         }
         self.storageURL = paths.failedQueue
+        self.allowedAudioRoots = [
+            paths.audioCaptures,
+            paths.transcripts
+                .deletingLastPathComponent()
+                .appendingPathComponent("audio", isDirectory: true),
+        ].map(Self.canonicalDirectoryURL)
 
         // Configure date encoding/decoding
         encoder.dateEncodingStrategy = .iso8601
@@ -46,13 +53,11 @@ public class FailedTranscriptionManager: ObservableObject {
             let loaded = try decoder.decode([FailedTranscription].self, from: data)
 
             // Security: audio file paths are deserialized from a JSON file that the user could
-            // tamper with. Validate each path is sandboxed within the user's home directory before
-            // accepting it — this prevents a crafted JSON from directing removeItem(at:) to an
-            // arbitrary path (e.g. /etc/hosts) when entries are cleaned up.
-            let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
+            // tamper with. Canonicalize first, then only accept files under Transcripted-owned
+            // scratch/archive audio roots so cleanup cannot be redirected to arbitrary files.
             let sandboxedEntries = loaded.filter { entry in
-                let micSafe = entry.micAudioURL.path.hasPrefix(homeDir)
-                let systemSafe = entry.systemAudioURL.map { $0.path.hasPrefix(homeDir) } ?? true
+                let micSafe = isSafeAudioURL(entry.micAudioURL)
+                let systemSafe = entry.systemAudioURL.map(isSafeAudioURL) ?? true
                 if !micSafe || !systemSafe {
                     AppLogger.pipeline.error("Rejected failed transcription entry with out-of-sandbox audio path", [
                         "micURL": entry.micAudioURL.path,
@@ -198,10 +203,21 @@ public class FailedTranscriptionManager: ObservableObject {
         let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
 
         let oldFailures = failedTranscriptions.filter { $0.timestamp < cutoffDate }
+        guard !oldFailures.isEmpty else {
+            AppLogger.pipeline.info("Cleaned up old failed transcriptions", ["count": "0", "olderThanDays": "\(days)"])
+            return
+        }
 
         for failure in oldFailures {
-            deleteFailedTranscription(id: failure.id)
+            removeAudioFile(failure.micAudioURL, label: "old failure mic audio")
+            if let systemURL = failure.systemAudioURL {
+                removeAudioFile(systemURL, label: "old failure system audio")
+            }
         }
+
+        let removedIds = Set(oldFailures.map { $0.id })
+        failedTranscriptions.removeAll { removedIds.contains($0.id) }
+        saveFailedTranscriptions()
 
         AppLogger.pipeline.info("Cleaned up old failed transcriptions", ["count": "\(oldFailures.count)", "olderThanDays": "\(days)"])
     }
@@ -220,5 +236,27 @@ public class FailedTranscriptionManager: ObservableObject {
                 "error": error.localizedDescription
             ])
         }
+    }
+
+    private func isSafeAudioURL(_ url: URL) -> Bool {
+        let canonicalURL = Self.canonicalFileURL(url)
+        return allowedAudioRoots.contains { root in
+            Self.isFile(canonicalURL, containedIn: root)
+        }
+    }
+
+    private static func canonicalFileURL(_ url: URL) -> URL {
+        url.standardizedFileURL.resolvingSymlinksInPath()
+    }
+
+    private static func canonicalDirectoryURL(_ url: URL) -> URL {
+        url.standardizedFileURL.resolvingSymlinksInPath()
+    }
+
+    private static func isFile(_ fileURL: URL, containedIn directoryURL: URL) -> Bool {
+        let filePath = canonicalFileURL(fileURL).path
+        let directoryPath = canonicalDirectoryURL(directoryURL).path
+        let normalizedDirectoryPath = directoryPath.hasSuffix("/") ? directoryPath : directoryPath + "/"
+        return filePath == directoryPath || filePath.hasPrefix(normalizedDirectoryPath)
     }
 }

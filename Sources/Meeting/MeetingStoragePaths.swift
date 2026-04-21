@@ -15,6 +15,13 @@ enum MeetingStoragePaths {
         root
     }
 
+    /// Retained mic/system audio for saved meetings.
+    static var audioArchiveFolder: URL {
+        let url = root.appendingPathComponent("audio", isDirectory: true)
+        FileManager.default.ensurePrivateDirectory(at: url, context: "meeting audio archive")
+        return url
+    }
+
     static var stateFolder: URL {
         FileManager.default.transcriptedStateDir
     }

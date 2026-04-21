@@ -7,10 +7,17 @@ historical, and which local doc to read before editing a subsystem.
 ## Read Order
 
 1. `README.md`
-2. `docs/repo-layout.md`
-3. `AGENTS.md` or root `CLAUDE.md`
-4. the nearest local `CLAUDE.md`
-5. source comments
+2. `AGENTS.md` or root `CLAUDE.md`
+3. `docs/repo-layout.md`
+4. `docs/agent-onboarding.md`
+5. `Sources/CLAUDE.md`
+6. the nearest local `CLAUDE.md`
+7. `Tests/README.md` when touching verification or package seams
+8. `docs/storage-paths.md` when touching persisted output or path resolution
+9. `docs/release-packaging.md` and `docs/sparkle-updates.md` when touching packaging, notarization, releases, or in-app updates
+10. `Sources/Observability/CLAUDE.md` when touching crash reporting, analytics, or Sparkle plumbing
+11. `Sources/Reliability/CLAUDE.md` when touching wake / sleep recovery or hotkey recovery
+12. source comments
 
 For the active directory map and command surface, prefer `docs/repo-layout.md`.
 
@@ -28,6 +35,12 @@ For the active directory map and command surface, prefer `docs/repo-layout.md`.
   Local subsystem docs.
 - `Tools/*/CLAUDE.md`
   Standalone tool package docs where present.
+- `Tests/README.md`
+  Verification surfaces and fast-test runner rules.
+- `docs/storage-paths.md`
+  Canonical app, tool, and fallback storage layout.
+- `docs/release-packaging.md` + `docs/sparkle-updates.md`
+  Release, notarization, Sparkle, and Homebrew contract.
 - `docs/archive/`
   Historical merge/todo docs and other archived planning notes.
 

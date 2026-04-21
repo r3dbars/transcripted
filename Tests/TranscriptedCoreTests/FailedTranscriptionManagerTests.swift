@@ -29,6 +29,13 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         let safeSystemURL = paths.audioCaptures.appendingPathComponent("safe-system.wav")
         FileManager.default.createFile(atPath: safeMicURL.path, contents: Data("mic".utf8))
         FileManager.default.createFile(atPath: safeSystemURL.path, contents: Data("system".utf8))
+        let traversalTargetURL = testRoot.appendingPathComponent("outside.wav")
+        FileManager.default.createFile(atPath: traversalTargetURL.path, contents: Data("outside".utf8))
+        let traversalMicURL = URL(fileURLWithPath: paths.audioCaptures.path + "/../../outside.wav")
+        let documentsURL = testRoot.appendingPathComponent("Documents", isDirectory: true)
+        try FileManager.default.createDirectory(at: documentsURL, withIntermediateDirectories: true)
+        let homeFileURL = documentsURL.appendingPathComponent("foo.wav")
+        FileManager.default.createFile(atPath: homeFileURL.path, contents: Data("home".utf8))
 
         let safeEntry = FailedTranscription(
             id: UUID(),
@@ -51,8 +58,28 @@ final class FailedTranscriptionManagerTests: XCTestCase {
             systemAudioURL: URL(fileURLWithPath: "/tmp/transcripted-unsafe-system.wav"),
             errorMessage: "Temporary transcription failure"
         )
+        let traversalEntry = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 4_000),
+            micAudioURL: traversalMicURL,
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure"
+        )
+        let arbitraryHomeEntry = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 5_000),
+            micAudioURL: homeFileURL,
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure"
+        )
 
-        let encoded = try JSONEncoder.iso8601.encode([safeEntry, unsafeMicEntry, unsafeSystemEntry])
+        let encoded = try JSONEncoder.iso8601.encode([
+            safeEntry,
+            unsafeMicEntry,
+            unsafeSystemEntry,
+            traversalEntry,
+            arbitraryHomeEntry,
+        ])
         try FileManager.default.createDirectory(
             at: paths.failedQueue.deletingLastPathComponent(),
             withIntermediateDirectories: true

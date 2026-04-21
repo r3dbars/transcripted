@@ -9,40 +9,6 @@
 import Foundation
 import Sentry
 
-private enum SentryRuntimeConfiguration {
-    static let dsnInfoKey = "TranscriptedSentryDSN"
-    static let environmentInfoKey = "TranscriptedSentryEnvironment"
-
-    static func dsn() -> String? {
-        firstNonEmpty(
-            Bundle.main.object(forInfoDictionaryKey: dsnInfoKey) as? String,
-            ProcessInfo.processInfo.environment["SENTRY_DSN"]
-        )
-    }
-
-    static func environment() -> String {
-        firstNonEmpty(
-            Bundle.main.object(forInfoDictionaryKey: environmentInfoKey) as? String,
-            ProcessInfo.processInfo.environment["SENTRY_ENVIRONMENT"]
-        ) ?? "production"
-    }
-
-    static func releaseName() -> String {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
-        return "transcripted@\(version)"
-    }
-
-    static func dist() -> String? {
-        firstNonEmpty(Bundle.main.infoDictionary?["CFBundleVersion"] as? String)
-    }
-
-    private static func firstNonEmpty(_ candidates: String?...) -> String? {
-        candidates
-            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first(where: { !$0.isEmpty })
-    }
-}
-
 final class CrashReporter {
     static let shared = CrashReporter()
 
@@ -210,8 +176,23 @@ final class CrashReporter {
                 if let type = exception.type {
                     exception.type = SentryPayloadSanitizer.sanitizeText(type)
                 }
+                if let module = exception.module {
+                    exception.module = SentryPayloadSanitizer.sanitizeText(module)
+                }
+                sanitize(stacktrace: exception.stacktrace)
             }
         }
+
+        if let threads = event.threads {
+            for thread in threads {
+                if let name = thread.name {
+                    thread.name = SentryPayloadSanitizer.sanitizeText(name)
+                }
+                sanitize(stacktrace: thread.stacktrace)
+            }
+        }
+
+        sanitize(stacktrace: event.stacktrace)
 
         event.request = nil
         event.user = nil
@@ -219,6 +200,29 @@ final class CrashReporter {
         event.serverName = nil
 
         return event
+    }
+
+    private func sanitize(stacktrace: SentryStacktrace?) {
+        guard let stacktrace else { return }
+        stacktrace.registers = [:]
+
+        for frame in stacktrace.frames {
+            frame.fileName = nil
+            frame.contextLine = nil
+            frame.preContext = nil
+            frame.postContext = nil
+            frame.vars = nil
+
+            if let function = frame.function {
+                frame.function = SentryPayloadSanitizer.sanitizeText(function)
+            }
+            if let module = frame.module {
+                frame.module = SentryPayloadSanitizer.sanitizeText(module)
+            }
+            if let package = frame.package {
+                frame.package = SentryPayloadSanitizer.sanitizeText(package)
+            }
+        }
     }
 
     private func sentryLevel(for level: EventLevel) -> SentryLevel {

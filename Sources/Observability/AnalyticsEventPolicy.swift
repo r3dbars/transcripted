@@ -91,6 +91,15 @@ struct AnalyticsEventPolicy: Equatable {
                 "trigger",
             ]
         ),
+        "meeting_recording_cancelled": .init(
+            name: "meeting_recording_cancelled",
+            allowedProperties: [
+                "duration_bucket",
+                "reason",
+                "system_stream_present",
+                "trigger",
+            ]
+        ),
         "meeting_transcript_saved": .init(
             name: "meeting_transcript_saved",
             allowedProperties: [
@@ -104,6 +113,12 @@ struct AnalyticsEventPolicy: Equatable {
                 "failure_kind",
                 "queue_depth_bucket",
                 "trigger",
+            ]
+        ),
+        "meeting_file_imported": .init(
+            name: "meeting_file_imported",
+            allowedProperties: [
+                "queue_depth_bucket",
             ]
         ),
     ]

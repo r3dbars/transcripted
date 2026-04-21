@@ -82,7 +82,7 @@ public enum ModelDownloadService {
     public static func checkNetworkReachability() async -> Bool {
         // Box to safely track whether continuation has been resumed.
         // Both the handler and timeout run on the same serial queue, so no lock needed.
-        class ResumeGuard { var done = false }
+        final class ResumeGuard: @unchecked Sendable { var done = false }
 
         return await withCheckedContinuation { continuation in
             let monitor = NWPathMonitor()

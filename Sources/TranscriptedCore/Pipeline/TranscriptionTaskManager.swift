@@ -23,6 +23,7 @@ public class TranscriptionTaskManager: ObservableObject {
 
     public let failedTranscriptionManager: FailedTranscriptionManager
     public let statsStore: (any StatsStore)?
+    let retainedAudioDirectory: URL?
 
     /// Embedder-supplied notifier for transcript-saved and failure events. Optional — when
     /// `nil`, notification hooks become no-ops, which keeps Core usable from headless contexts
@@ -35,12 +36,14 @@ public class TranscriptionTaskManager: ObservableObject {
         diarization: any DiarizationEngine,
         speakerStore: any SpeakerStore,
         speakerClipsDirectory: URL = CoreStoragePaths.default.speakerClips,
+        retainedAudioDirectory: URL? = nil,
         statsStore: (any StatsStore)? = nil,
         notifier: TranscriptNotifier? = nil
     ) {
         self.failedTranscriptionManager = failedTranscriptionManager
         self.statsStore = statsStore
         self.notifier = notifier
+        self.retainedAudioDirectory = retainedAudioDirectory
         self.transcription = Transcription(
             speechToText: speechToText,
             diarization: diarization,
@@ -140,6 +143,11 @@ public class TranscriptionTaskManager: ObservableObject {
                 AppLogger.pipeline.error("Transcription task failed", ["taskId": "\(task.id)", "error": "\(error.localizedDescription)"])
 
                 await MainActor.run {
+                    self.archiveFailedRecordingAudioIfConfigured(
+                        micURL: micURL,
+                        systemURL: systemURL,
+                        taskId: task.id
+                    )
                     self.displayStatus = .failed(message: "Transcription failed")
                     self.failedTranscriptionManager.addFailedTranscription(
                         micAudioURL: micURL,
@@ -165,6 +173,7 @@ public class TranscriptionTaskManager: ObservableObject {
     ) {
         if !activeTasks.isEmpty {
             AppLogger.pipeline.warning("Rejecting imported transcription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
+            removeRecordingFile(audioURL, label: "rejected imported recording")
             displayStatus = .failed(message: "Transcription already in progress")
             scheduleStatusReset(delay: 4)
             return
@@ -422,6 +431,38 @@ public class TranscriptionTaskManager: ObservableObject {
             AppLogger.pipeline.warning("Failed to remove recording file", [
                 "label": label,
                 "file": url.lastPathComponent,
+                "error": error.localizedDescription
+            ])
+        }
+    }
+
+    private func archiveFailedRecordingAudioIfConfigured(
+        micURL: URL?,
+        systemURL: URL?,
+        taskId: UUID
+    ) {
+        guard let retainedAudioDirectory else { return }
+
+        let failedStem = "Failed_\(DateFormattingHelper.formatFilename(Date()))_\(String(taskId.uuidString.prefix(8)))"
+        let placeholderTranscriptURL = retainedAudioDirectory
+            .appendingPathComponent(failedStem)
+            .appendingPathExtension("md")
+
+        do {
+            let retainedAudio = try RecordingAudioArchiver.archive(
+                micURL: micURL,
+                systemURL: systemURL,
+                transcriptURL: placeholderTranscriptURL,
+                archiveRoot: retainedAudioDirectory
+            )
+            AppLogger.pipeline.info("Retained failed meeting audio files", [
+                "directory": retainedAudio.directory.lastPathComponent,
+                "mic": retainedAudio.micURL?.lastPathComponent ?? "none",
+                "system": retainedAudio.systemURL?.lastPathComponent ?? "none"
+            ])
+        } catch {
+            AppLogger.pipeline.warning("Failed to retain failed meeting audio", [
+                "taskId": taskId.uuidString,
                 "error": error.localizedDescription
             ])
         }

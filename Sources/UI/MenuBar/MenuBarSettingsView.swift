@@ -14,8 +14,8 @@ final class MenuBarSettingsView: NSView {
     )
     private let settingsButton = MenuIconButton(
         symbolName: "gearshape",
-        accessibilityLabel: "Open settings",
-        toolTip: "Open settings"
+        accessibilityLabel: "Settings",
+        toolTip: "Settings"
     )
     private let updatesButton = MenuIconButton(
         symbolName: "arrow.triangle.2.circlepath.circle",
@@ -95,29 +95,7 @@ final class MenuBarSettingsView: NSView {
     }
 
     @objc private func sendFeedback() {
-        // Logs can contain file paths with usernames, pasted tokens, or other
-        // incidental PII. Scrub through the analytics sanitizer before embedding
-        // them in a public GitHub issue URL.
-        let rawLogLines = appState?.logger.entries.suffix(80).joined(separator: "\n") ?? "No in-app logs attached."
-        let logLines = AnalyticsPayloadSanitizer.redact(rawLogLines)
-        let title = "Transcripted Feedback"
-        let body = """
-        What happened:
-        [describe the issue here]
-
-        ---
-        Logs:
-        \(logLines)
-        """
-
-        var components = URLComponents(string: "https://github.com/r3dbars/transcripted/issues/new")
-        components?.queryItems = [
-            URLQueryItem(name: "title", value: title),
-            URLQueryItem(name: "body", value: body)
-        ]
-
-        guard let url = components?.url else { return }
-        NSWorkspace.shared.open(url)
+        TranscriptedSupportActions.sendFeedback(logger: appState?.logger)
     }
 
     @objc private func quitApp() {

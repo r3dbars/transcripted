@@ -2,7 +2,6 @@
 // Centralized engine ownership — lives in AppDelegate, survives window cycles
 
 import SwiftUI
-import ServiceManagement
 import TranscriptedCore
 
 @MainActor
@@ -18,7 +17,7 @@ class TranscriptedAppState: ObservableObject {
     /// don't exercise the meeting feature don't pay the construction cost.
     @available(macOS 14.0, *)
     lazy var meetingSession: MeetingSessionController = MeetingSessionController(
-        parakeet: sttRouter.parakeetEngine
+        sttRouter: sttRouter
     )
 
     private var promptsObserver: NSObjectProtocol?
@@ -54,15 +53,12 @@ class TranscriptedAppState: ObservableObject {
         guard !isInitialized else { return }
         isInitialized = true
 
-        #if BETA_BUILD
-        // Register as login item so model is pre-loaded when user needs it
         do {
-            try SMAppService.mainApp.register()
+            try LaunchAtLoginController.applySavedOptOutAtStartup()
         } catch {
-            EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_failed",
+            EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_opt_out_sync_failed",
                 message: error.localizedDescription)
         }
-        #endif
 
         sparkleUpdater.performStartupUpdateCheckIfNeeded()
 
@@ -76,7 +72,8 @@ class TranscriptedAppState: ObservableObject {
         EventReporter.shared.setEngineStateSummary { [weak self] in
             guard let self else { return [:] }
             return [
-                "parakeet_loaded": "\(sttRouter.parakeetEngine.isModelLoaded)",
+                "stt_model": sttRouter.selectedModel.rawValue,
+                "stt_model_loaded": "\(sttRouter.isModelLoaded)",
                 "stt_recording": "\(sttRouter.isRecording)",
                 "meeting_state": meetingStateSummary,
             ]
@@ -121,7 +118,7 @@ class TranscriptedAppState: ObservableObject {
         wakeRecoveryCoordinator.cancel()
         runtimeReadinessTask?.cancel()
         runtimeReadinessTask = nil
-        sttRouter.parakeetEngine.cleanup()
+        sttRouter.cleanup()
         contextCapture.unregisterHotkey()
         if let observer = promptsObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -140,7 +137,7 @@ class TranscriptedAppState: ObservableObject {
             // touching AVAudioEngine input nodes on the main thread. Sentry app
             // hang reports showed launch-time prewarm blocking inside CoreAudio.
             guard !Task.isCancelled else { return }
-            await self.sttRouter.parakeetEngine.initialize()
+            await self.sttRouter.initializeSelectedModel()
             guard !Task.isCancelled else { return }
 
             if #available(macOS 14.0, *) {

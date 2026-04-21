@@ -34,6 +34,38 @@ enum MeetingPromptProvider: String, CaseIterable, Hashable {
     var supportsNativeRuntimePrompt: Bool {
         !activeBundleIdentifiers.isEmpty
     }
+
+    var supportsRuntimeOnlyPrompt: Bool {
+        supportsNativeRuntimePrompt && self != .teams
+    }
+
+    static func provider(forMeetingHost host: String) -> MeetingPromptProvider? {
+        let normalizedHost = host
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+
+        if hostMatches(normalizedHost, domain: "zoom.us") {
+            return .zoom
+        }
+        if normalizedHost == "meet.google.com" {
+            return .googleMeet
+        }
+        if hostMatches(normalizedHost, domain: "teams.microsoft.com") {
+            return .teams
+        }
+        if hostMatches(normalizedHost, domain: "webex.com") {
+            return .webex
+        }
+        if hostMatches(normalizedHost, domain: "facetime.apple.com") {
+            return .facetime
+        }
+
+        return nil
+    }
+
+    private static func hostMatches(_ host: String, domain: String) -> Bool {
+        host == domain || host.hasSuffix(".\(domain)")
+    }
 }
 
 enum MeetingPromptSource: Equatable {
@@ -81,10 +113,6 @@ enum MeetingPromptHeuristics {
     static let calendarReminderLeadTime: TimeInterval = 60
     static let calendarReminderPostStartGrace: TimeInterval = 5 * 60
 
-    static func allowsRuntimeOnlyPrompt(for provider: MeetingPromptProvider) -> Bool {
-        provider != .teams
-    }
-
     static func snoozeInterval(
         for source: MeetingPromptSource,
         explicit explicitInterval: TimeInterval?,
@@ -102,21 +130,22 @@ enum MeetingPromptHeuristics {
         }
     }
 
-    static func calendarDismissMinimumInterval(
-        for provider: MeetingPromptProvider,
-        defaultInterval: TimeInterval
-    ) -> TimeInterval {
-        if provider == .teams {
-            return max(defaultInterval, teamsDismissMinimumInterval)
-        }
-        return defaultInterval
+    static func dismissMinimumInterval(for provider: MeetingPromptProvider, default defaultInterval: TimeInterval) -> TimeInterval {
+        provider == .teams ? max(defaultInterval, teamsDismissMinimumInterval) : defaultInterval
     }
 
-    static func runtimeDismissFallbackInterval(for provider: MeetingPromptProvider) -> TimeInterval {
-        if provider == .teams {
-            return teamsDismissMinimumInterval
+    static func backoffKind(
+        for provider: MeetingPromptProvider,
+        source: MeetingPromptSource,
+        hasResumeDate: Bool = false
+    ) -> MeetingPromptBackoffKind {
+        switch source {
+        case .calendarEvent:
+            return provider == .teams ? .calendarTeamsExtended : .calendarDefault
+        case .runtimeApp:
+            if hasResumeDate { return .runtimeUntilNextCalendar }
+            return provider == .teams ? .runtimeTeamsExtended : .runtimeDefaultFallback
         }
-        return defaultRuntimeDismissFallbackInterval
     }
 
     static func reason(
