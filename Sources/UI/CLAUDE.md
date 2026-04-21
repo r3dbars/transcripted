@@ -13,7 +13,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (43 Swift files)
+## Files (46 Swift files)
 
 ### Overlay/
 
@@ -69,7 +69,7 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Settings/TranscriptedSettingsActions.swift` — struct of callbacks (start dictation, start meeting, import audio, paste, connect agent, check updates, send feedback) injected into the settings view
 - `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`SettingsPageIntro`, `SettingsSection`) used across settings pages
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection
-- `Settings/TranscriptedSettingsPage.swift` — enum of settings pages (home, shortcuts, meetings, dictations, storage, connectAgent, privacy, about) with titles and SF Symbol names
+- `Settings/TranscriptedSettingsPage.swift` — enum of settings pages (home, general, models, shortcuts, meetings, dictations, storage, connectAgent, privacy, about) with titles, summaries, and SF Symbol names
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 
@@ -77,6 +77,7 @@ The current agent-connect surfaces should keep one simple mental model:
 
 - `Shared/AgentConnectionGuide.swift` — shared smart-prompt, MCP setup, and folder fallback copy for the agent-connect flow
 - `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
+- `Shared/FeedbackIssueBuilder.swift` — builds sanitized feedback issue payloads and support links from current app state
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
 - `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts from disk for the Settings meetings page
 - `Shared/SpeakerClipPlayback.swift` — reusable audio-preview helper for persisted speaker sample clips

@@ -1,36 +1,47 @@
-# Support helpers
+# Support Directory
 
 ## What this directory does
 
-`Sources/Support/` contains app-wide utility types that cut across features. These are standalone helpers shared by dictation, meeting, capture, and UI code without belonging to any single feature directory.
+`Sources/Support/` holds app-wide helpers that do not belong to a single UI or pipeline surface. These types mostly wrap persisted preferences, shared constants, permission access, storage paths, or low-level paste / launch behavior used across dictation and meetings.
 
-## Files
+## Files (11 Swift files)
 
-- `ClipboardRestoringTextPaster.swift` — pastes text into the target app by briefly borrowing the clipboard and restoring prior contents after Cmd+V completes; reports paste/copy/fail outcomes for diagnostics
-- `HotkeyPreferences.swift` — data model, persistence, display, and validation for customizable keyboard shortcuts (dictation, meeting, draft hotkey bindings)
-- `LocalSpeakerPreferences.swift` — preference flag for local mic-channel speaker diarization; when enabled, the meeting pipeline runs offline diarization on the mic track and surfaces multiple local speakers in the post-meeting naming sheet
-- `TranscriptionModelPreferences.swift` — advanced model picker persistence; Parakeet is the default and Whisper choices are available through Settings
-- `TranscriptedConstants.swift` — centralized configuration constants for timeouts, thresholds, limits, buffer sizes, and version metadata
-- `TranscriptedPermissionAccess.swift` — unified permission checks for microphone, accessibility, system audio recording, and calendar; shared by the meeting prompt detector, settings, and onboarding flows
-- `TranscriptedStoragePaths.swift` — app-support path helpers for the Transcripted capture library, state, cache, logs, and tmp layout, including user-configurable capture library relocation
+- `ClipboardRestoringTextPaster.swift` — paste helper that preserves clipboard contents while inserting the latest dictation into the target app
+- `CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements plus text post-processing helpers
+- `DictationAutoSendPreferences.swift` — persisted auto-send rules, allowed bundle list, and keypress-sending helpers for pasted dictation
+- `HotkeyPreferences.swift` — persisted global hotkey bindings, right-Option toggle, display formatting, and validation
+- `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior
+- `LaunchAtLoginPreferences.swift` — persisted first-run preference state around launch-at-login UX
+- `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
+- `TranscriptedConstants.swift` — shared timing thresholds and app-wide behavior constants
+- `TranscriptedPermissionAccess.swift` — shared permission status, prompting, and Settings-deep-link helpers for microphone, accessibility, system-audio recording, and calendar access
+- `TranscriptedStoragePaths.swift` — canonical app-support path helpers for captures, state, cache, logs, and temporary files
+- `TranscriptionModelPreferences.swift` — persisted local transcription-model selection shared by dictation and meetings
 
-## Key invariants
+## Current notes
 
-- `TranscriptedPermissionAccess` is the canonical place for app-level TCC permission queries. Keep duplicate permission branching out of feature-specific code.
-- `LocalSpeakerPreferences` defaults to off. The meeting pipeline reads this flag at recording time, so changes take effect on the next meeting.
-- `TranscriptionModelPreferences` defaults to Parakeet TDT V3. Advanced Whisper choices are available when users opt into them from Settings.
-- `ClipboardRestoringTextPaster` runs on the main thread and uses brief async delays for the paste round-trip. Keep the clipboard borrow window tight.
-- `TranscriptedStoragePaths` resolves the capture library from `UserDefaults` first, falling back to the default Application Support location. App-owned state, cache, logs, and temp files always stay under the fixed Application Support root.
+- Keep preference keys and notification names centralized here so UI and controllers do not drift.
+- `TranscriptionModelPreferences` is the shared switch between `Parakeet` and the available local Whisper variants. Model-specific runtime behavior still belongs in `Sources/Speech/` and `Sources/Meeting/`.
+- `CustomDictionaryPreferences` and `DictationAutoSendPreferences` back the Settings `General` and `Dictation` pages. If you change parsing rules or policy thresholds, update the relevant tests.
+- `TranscriptedPermissionAccess` is the app-level permission seam. UI flows should call into it instead of duplicating TCC branching.
+- `TranscriptedStoragePaths` should stay as the canonical path resolver for the app target. `Sources/TranscriptedCore/Services/CoreStoragePaths.swift` is the injected library-side seam.
 
 ## Verification
+
+After changing support code:
 
 ```bash
 bash build.sh
 bash run-tests.sh
 ```
 
-Relevant direct coverage:
+Relevant direct coverage includes:
 
+- `Tests/ClipboardRestoringTextPasterTests.swift`
+- `Tests/CustomDictionaryPreferencesTests.swift`
+- `Tests/DictationAutoSendPreferencesTests.swift`
+- `Tests/LaunchAtLoginPreferencesTests.swift`
 - `Tests/TranscriptedConstantsTests.swift`
 - `Tests/TranscriptedPermissionAccessTests.swift`
 - `Tests/TranscriptedStoragePathsTests.swift`
+- `Tests/TranscriptionModelPreferencesTests.swift`

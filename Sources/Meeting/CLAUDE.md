@@ -12,7 +12,6 @@
 - `MeetingFailureKind.swift` — canonical failure taxonomy that classifies raw meeting errors into stable machine-readable kinds
 - `MeetingImportedAudioPreparer.swift` — copies imported recordings into app-managed scratch paths, derives titles, and prepares single-file meeting transcription jobs
 - `MeetingModelDownloader.swift` — loads the selected STT and diarization models together
-- `MeetingWarmupStatusPolicy.swift` — centralizes the title/detail copy and visibility rules for quiet vs user-visible meeting model warmup states
 - `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, and asks the overlay to offer one-tap recording prompts
 - `MeetingPromptHeuristics.swift` — shared scoring and snooze rules for calendar- and runtime-based prompt candidates
 - `MeetingRecordingCleanup.swift` — removes scratch audio when a live meeting recording is explicitly discarded instead of saved
@@ -22,7 +21,7 @@
 - `MeetingSessionUIPolicy.swift` — centralizes when queued or active transcription work should keep the meeting overlay in its transcribing/saving state
 - `MeetingStoragePaths.swift` — current split meeting storage layout across the capture library, app state, logs, and temp folders
 - `MeetingTranscriptStyler.swift` — restyles saved transcripts and renames files after save
-- `MeetingWarmupStatusPolicy.swift` — centralizes the user-facing warmup progress, copy, and ready/failure state for dictation + meeting model startup across overlay, menubar, and settings surfaces
+- `MeetingWarmupStatusPolicy.swift` — centralizes the user-facing warmup progress, copy, visibility, and ready/failure state for dictation + meeting model startup across overlay, menubar, and settings surfaces
 
 ## End-to-end flow
 
@@ -100,7 +99,6 @@ Relevant direct coverage:
 - `Tests/MeetingWarmupStatusPolicyTests.swift`
 - `Tests/MeetingSessionUIPolicyTests.swift`
 - `Tests/MeetingTranscriptStylerTests.swift`
-- `Tests/MeetingWarmupStatusPolicyTests.swift`
 - `Tests/SpeakerNamingPolicyTests.swift`
 - `Tests/Integration/AppCoreIntegrationSmoke.swift`
 
