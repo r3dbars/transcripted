@@ -110,14 +110,15 @@ When an update is found, the row also shows the available version as supporting 
 
 - `Version 1.1.10 ready`
 
-Optional rows can be hidden from the Settings `Home` page:
+Primary action rows can be hidden from the Settings `Home` page:
 
+- `Start Dictation`
+- `Start Meeting`
+- `Paste Last Dictation`
 - `Recent Meetings`
-- `Connect Agent`
-- `Submit Feedback`
-- updates row
 
-`Settings` and `Quit` always remain visible.
+Utility rows such as `Connect Agent`, `Submit Feedback`, updates, `Settings`,
+and `Quit` remain visible in this version.
 
 ## Settings Window
 

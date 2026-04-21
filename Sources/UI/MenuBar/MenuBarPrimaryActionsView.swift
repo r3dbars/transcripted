@@ -45,6 +45,9 @@ final class MenuBarPrimaryActionsView: NSView {
         meetingState: MenuBarPrimaryActionState,
         pasteDetail: String,
         pasteEnabled: Bool,
+        showStartDictation: Bool,
+        showStartMeeting: Bool,
+        showPasteLastDictation: Bool,
         showRecentMeetings: Bool
     ) {
         homeRow.update(
@@ -55,6 +58,7 @@ final class MenuBarPrimaryActionsView: NSView {
             size: .utility
         )
 
+        dictationRow.isHidden = !showStartDictation
         dictationRow.update(
             symbolName: "mic.fill",
             title: "Start Dictation",
@@ -65,6 +69,7 @@ final class MenuBarPrimaryActionsView: NSView {
             isEnabled: dictationState.isEnabled
         )
 
+        meetingRow.isHidden = !showStartMeeting
         meetingRow.update(
             symbolName: "record.circle.fill",
             title: "Start Meeting",
@@ -75,6 +80,7 @@ final class MenuBarPrimaryActionsView: NSView {
             isEnabled: meetingState.isEnabled
         )
 
+        pasteRow.isHidden = !showPasteLastDictation
         pasteRow.update(
             symbolName: "arrow.turn.down.right",
             title: "Paste Last Dictation",
@@ -100,45 +106,54 @@ final class MenuBarPrimaryActionsView: NSView {
     override func layout() {
         super.layout()
 
-        let firstHeight = dictationRow.intrinsicContentSize.height
-        let secondHeight = meetingRow.intrinsicContentSize.height
-        let thirdHeight = pasteRow.intrinsicContentSize.height
-
         var y: CGFloat = 0
         let homeHeight = homeRow.intrinsicContentSize.height
         homeRow.frame = NSRect(x: 0, y: y, width: bounds.width, height: homeHeight)
-        y += homeHeight + 6
 
-        homeDivider.frame = NSRect(x: 0, y: y, width: bounds.width, height: 1)
-        y += 7
-
-        dictationRow.frame = NSRect(x: 0, y: y, width: bounds.width, height: firstHeight)
-        meetingRow.frame = NSRect(x: 0, y: dictationRow.frame.maxY + 2, width: bounds.width, height: secondHeight)
-        pasteRow.frame = NSRect(x: 0, y: meetingRow.frame.maxY + 2, width: bounds.width, height: thirdHeight)
-
-        if recentMeetingsRow.isHidden {
-            recentMeetingsRow.frame = .zero
+        let rows = visibleActionRows
+        if rows.isEmpty {
+            homeDivider.frame = .zero
         } else {
-            recentMeetingsRow.frame = NSRect(
-                x: 0,
-                y: pasteRow.frame.maxY + 2,
-                width: bounds.width,
-                height: recentMeetingsRow.intrinsicContentSize.height
-            )
+            y += homeHeight + 6
+            homeDivider.frame = NSRect(x: 0, y: y, width: bounds.width, height: 1)
+            y += 7
+
+            for (index, row) in rows.enumerated() {
+                let rowHeight = row.intrinsicContentSize.height
+                row.frame = NSRect(x: 0, y: y, width: bounds.width, height: rowHeight)
+                y += rowHeight
+                if index < rows.count - 1 {
+                    y += 2
+                }
+            }
         }
+
+        hiddenActionRows.forEach { $0.frame = .zero }
     }
 
     var intrinsicHeight: CGFloat {
-        let optionalRecentHeight: CGFloat = recentMeetingsRow.isHidden
-            ? 0
-            : recentMeetingsRow.intrinsicContentSize.height + 2
+        let rows = visibleActionRows
+        guard !rows.isEmpty else {
+            return homeRow.intrinsicContentSize.height
+        }
+
+        let rowSpacing = max(0, rows.count - 1) * 2
 
         return homeRow.intrinsicContentSize.height
             + 14
-            + dictationRow.intrinsicContentSize.height
-            + meetingRow.intrinsicContentSize.height
-            + pasteRow.intrinsicContentSize.height
-            + 4
-            + optionalRecentHeight
+            + rows.map { $0.intrinsicContentSize.height }.reduce(0, +)
+            + CGFloat(rowSpacing)
+    }
+
+    private var actionRows: [MenuBarActionRowView] {
+        [dictationRow, meetingRow, pasteRow, recentMeetingsRow]
+    }
+
+    private var visibleActionRows: [MenuBarActionRowView] {
+        actionRows.filter { !$0.isHidden }
+    }
+
+    private var hiddenActionRows: [MenuBarActionRowView] {
+        actionRows.filter(\.isHidden)
     }
 }

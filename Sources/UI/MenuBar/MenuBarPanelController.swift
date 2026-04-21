@@ -76,6 +76,9 @@ final class MenuBarPanelController: NSViewController {
             meetingState: meetingState,
             pasteDetail: pasteDetail(for: latestDictation),
             pasteEnabled: latestDictation != nil,
+            showStartDictation: menuVisibility[.startDictation] ?? true,
+            showStartMeeting: menuVisibility[.startMeeting] ?? true,
+            showPasteLastDictation: menuVisibility[.pasteLastDictation] ?? true,
             showRecentMeetings: menuVisibility[.recentMeetings] ?? true
         )
 
@@ -83,10 +86,7 @@ final class MenuBarPanelController: NSViewController {
             updateTitle: updatePresentation.title,
             updateVersion: updatePresentation.version,
             updateTone: updatePresentation.tone,
-            updateEnabled: appState.sparkleUpdater.updateStatus.canCheckForUpdates,
-            showConnectAgent: menuVisibility[.connectAgent] ?? true,
-            showFeedback: menuVisibility[.submitFeedback] ?? true,
-            showUpdates: menuVisibility[.updates] ?? true
+            updateEnabled: appState.sparkleUpdater.updateStatus.canCheckForUpdates
         )
 
         if case .unknown = appState.sparkleUpdater.updateStatus.state {

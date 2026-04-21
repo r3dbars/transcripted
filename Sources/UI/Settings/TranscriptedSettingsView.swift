@@ -225,7 +225,7 @@ struct TranscriptedSettingsView: View {
 
             SettingsSection(
                 title: "Menu Bar",
-                detail: "Choose which extra rows appear in the menu bar popover."
+                detail: "Choose which primary actions appear in the menu bar popover."
             ) {
                 ForEach(MenuBarOptionalItem.allCases) { item in
                     MenuBarVisibilityToggleRow(

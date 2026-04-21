@@ -1,49 +1,49 @@
 import Foundation
 
 enum MenuBarOptionalItem: String, CaseIterable, Hashable, Identifiable {
+    case startDictation
+    case startMeeting
+    case pasteLastDictation
     case recentMeetings
-    case connectAgent
-    case submitFeedback
-    case updates
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .startDictation:
+            return "Start Dictation"
+        case .startMeeting:
+            return "Start Meeting"
+        case .pasteLastDictation:
+            return "Paste Last Dictation"
         case .recentMeetings:
             return "Recent Meetings"
-        case .connectAgent:
-            return "Connect Agent"
-        case .submitFeedback:
-            return "Submit Feedback"
-        case .updates:
-            return "Updates"
         }
     }
 
     var detail: String {
         switch self {
+        case .startDictation:
+            return "Show the dictation starter."
+        case .startMeeting:
+            return "Show the meeting recorder."
+        case .pasteLastDictation:
+            return "Show the latest dictation paste action."
         case .recentMeetings:
             return "Open saved meeting notes."
-        case .connectAgent:
-            return "Open agent setup."
-        case .submitFeedback:
-            return "Send feedback from the menu."
-        case .updates:
-            return "Show update checks in the menu."
         }
     }
 
     var symbolName: String {
         switch self {
+        case .startDictation:
+            return "mic.fill"
+        case .startMeeting:
+            return "record.circle.fill"
+        case .pasteLastDictation:
+            return "arrow.turn.down.right"
         case .recentMeetings:
             return "clock.arrow.circlepath"
-        case .connectAgent:
-            return "sparkles"
-        case .submitFeedback:
-            return "bubble.left"
-        case .updates:
-            return "arrow.triangle.2.circlepath.circle"
         }
     }
 

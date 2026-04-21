@@ -19,32 +19,32 @@ func testMenuBarVisibilityPreferences() {
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
+        MenuBarVisibilityPreferences.setVisible(.startDictation, false, userDefaults: defaults)
+        MenuBarVisibilityPreferences.setVisible(.startMeeting, false, userDefaults: defaults)
+        MenuBarVisibilityPreferences.setVisible(.pasteLastDictation, true, userDefaults: defaults)
         MenuBarVisibilityPreferences.setVisible(.recentMeetings, false, userDefaults: defaults)
-        MenuBarVisibilityPreferences.setVisible(.connectAgent, false, userDefaults: defaults)
-        MenuBarVisibilityPreferences.setVisible(.submitFeedback, true, userDefaults: defaults)
-        MenuBarVisibilityPreferences.setVisible(.updates, false, userDefaults: defaults)
 
+        assertFalse(
+            MenuBarVisibilityPreferences.isVisible(.startDictation, userDefaults: defaults),
+            "Start Dictation should respect explicit hidden state"
+        )
+        assertFalse(
+            MenuBarVisibilityPreferences.isVisible(.startMeeting, userDefaults: defaults),
+            "Start Meeting should respect explicit hidden state"
+        )
+        assertTrue(
+            MenuBarVisibilityPreferences.isVisible(.pasteLastDictation, userDefaults: defaults),
+            "Paste Last Dictation should respect explicit visible state"
+        )
         assertFalse(
             MenuBarVisibilityPreferences.isVisible(.recentMeetings, userDefaults: defaults),
             "Recent Meetings should respect explicit hidden state"
         )
-        assertFalse(
-            MenuBarVisibilityPreferences.isVisible(.connectAgent, userDefaults: defaults),
-            "Connect Agent should respect explicit hidden state"
-        )
-        assertTrue(
-            MenuBarVisibilityPreferences.isVisible(.submitFeedback, userDefaults: defaults),
-            "Submit Feedback should respect explicit visible state"
-        )
-        assertFalse(
-            MenuBarVisibilityPreferences.isVisible(.updates, userDefaults: defaults),
-            "Updates should respect explicit hidden state"
-        )
 
         let snapshot = MenuBarVisibilityPreferences.snapshot(userDefaults: defaults)
+        assertEqual(snapshot[.startDictation], false, "snapshot should include Start Dictation")
+        assertEqual(snapshot[.startMeeting], false, "snapshot should include Start Meeting")
+        assertEqual(snapshot[.pasteLastDictation], true, "snapshot should include Paste Last Dictation")
         assertEqual(snapshot[.recentMeetings], false, "snapshot should include Recent Meetings")
-        assertEqual(snapshot[.connectAgent], false, "snapshot should include Connect Agent")
-        assertEqual(snapshot[.submitFeedback], true, "snapshot should include Submit Feedback")
-        assertEqual(snapshot[.updates], false, "snapshot should include Updates")
     }
 }
