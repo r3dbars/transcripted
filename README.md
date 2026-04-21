@@ -1,94 +1,170 @@
-<img width="625" height="329" alt="Screenshot 2026-04-10 at 7 31 17 PM" src="https://github.com/user-attachments/assets/86453a3e-9eee-4525-b985-777366296cf5" />
+<img width="625" height="329" alt="Transcripted meeting and dictation capture on macOS" src="https://github.com/user-attachments/assets/86453a3e-9eee-4525-b985-777366296cf5" />
 
 # Transcripted
 
-Turn meetings and dictation into clean notes.
+Audio context for your agent.
 
-Transcripted is a local Mac app that records meetings, captures dictation, and
-saves clean Markdown files on your Mac. You can read them yourself, or point
-your agent at the folder later.
+Transcripted is a local Mac app that turns meetings, dictation, and audio files
+into clean Markdown on your Mac. Point Claude, Codex, Cursor, Obsidian, or any
+file-reading agent at the folder and ask it what happened, what matters, and
+what you should do next.
 
 [Download the latest release](https://github.com/r3dbars/transcripted/releases/latest)
 · [Visit transcripted.app](https://transcripted.app)
 
-## What You Get
+## Why This Exists
 
-- Clean meeting notes with speaker names
-- Dictation notes for your follow-up thoughts
-- Import audio files you already have on your Mac
-- Plain Markdown files on disk
-- Files you can hand to your agent later
-- Local-first storage you can inspect yourself
+A lot of your best context is spoken.
 
-## How To Get Started
+It happens in meetings, calls, quick thoughts, voice notes, and half-formed
+ideas you say out loud before they ever become writing.
 
-1. Download Transcripted from the latest GitHub release.
-2. Record a meeting, capture a dictation, or import an audio file you already have.
-3. Open the saved Markdown files yourself, or point your agent at the folder.
+Most of that context disappears.
 
-### Install With Homebrew
+Transcripted saves it as plain local Markdown so your agent and second brain can
+use it later.
 
-If you prefer Homebrew, you can install and update Transcripted from the
-terminal:
+Ask things like:
 
-```bash
-brew tap r3dbars/transcripted https://github.com/r3dbars/transcripted
-brew install --cask transcripted
-```
+- What did I promise to follow up on this week?
+- What did we decide in the pricing call?
+- Find every time we talked about onboarding.
+- Turn my last three dictations into a plan.
+- Pull the strongest product ideas from my recent meetings.
+- What am I repeating across conversations?
 
-`brew upgrade --cask transcripted` picks up new releases. Transcripted also
-self-updates through Sparkle, so you can install either way.
+## What It Does
 
-## Just Markdown. Not A Black Box.
+- Records meetings from your Mac
+- Captures quick dictation and pastes it back where you were typing
+- Imports audio files you already have
+- Saves readable Markdown files on disk
+- Keeps audio and transcripts local by default
+- Gives your agent a folder of real spoken context
 
-Transcripted starts with readable Markdown. You do not need to learn a
-proprietary format to get value from it.
+## The Outcome
+
+You get a local memory layer for spoken work.
+
+Not another trapped notes database.
+Not a meeting bot joining your calls.
+Not a black box.
+
+Just files your tools can read.
+
+Use Transcripted with:
+
+- Obsidian as a second brain
+- Claude or Claude Code for meeting recall
+- Codex for project context
+- Cursor for engineering and product memory
+- Any agent that can read local files
+
+## Local Markdown
+
+Transcripted saves normal Markdown files.
 
 Meeting example:
 
 ```md
 # Product Review
 
-## Summary
-
-Keep annual pricing manual for now.
-Onboarding friction is still the blocker.
+Recorded Apr 10 at 3:01 PM  -  32:14  -  4,230 words
 
 ## Transcript
 
-[00:00] Sarah: Keep annual pricing manual for now.
-[00:04] Michael: Onboarding friction is still the blocker.
+**00:00** [Sarah]
+Keep annual pricing manual for now.
+
+**00:04** [Michael]
+Onboarding friction is still the blocker.
 ```
 
 Dictation example:
 
 ```md
-# Dictation
-2026-04-07 9:15 AM
+# Dictations for April 10, 2026
+
+## 9:15 AM
 
 Need to test the onboarding changes before touching pricing.
 ```
 
-The main thing is simple: Transcripted saves readable Markdown files you can
-open anywhere.
+You can open these files yourself, search them, sync them, back them up, or hand
+them to an agent.
 
-## Local By Default
+## Agent Setup
+
+The simplest path:
+
+1. Open Transcripted.
+2. Record a meeting, capture a dictation, or import audio.
+3. Point your agent at the Transcripted capture folder.
+4. Ask questions across your spoken context.
+
+Default folders:
+
+```text
+~/Library/Application Support/Transcripted/captures/meetings/
+~/Library/Application Support/Transcripted/captures/dictations/
+```
+
+Transcripted also includes an optional read-only MCP server for agents that
+support MCP. It gives tools for recent context, search, recaps, meeting reads,
+dictation reads, and speaker lookup.
+
+See [docs/agent-connect.md](docs/agent-connect.md).
+
+## Features
+
+- Local meeting recording with mic and system audio
+- Dictation with paste-back
+- Audio file import
+- Speaker labels and speaker review
+- Custom dictionary for names, acronyms, and uncommon words
+- Local transcription models, with Parakeet as the default and Whisper as an advanced option
+- Auto Enter for selected apps after dictation
+- Launch at login
+- Local Markdown capture library
+- Optional MCP access for agents
+
+## Privacy
+
+Transcripted is local-first.
 
 - Audio stays on your Mac
-- Saved files stay on your Mac
-- Transcripted records from your Mac and does not join as a meeting bot
-- By default, captures live under `~/Library/Application Support/Transcripted/captures/`
+- Markdown files stay on your Mac
+- Transcripted records from your Mac and does not join meetings as a bot
+- You choose what folders your agents can read
+- App state, logs, and temporary files stay under Transcripted Application Support
 
-For the full storage map, compatibility paths, and migration details, see
-[docs/storage-paths.md](docs/storage-paths.md).
+For the full storage map, see [docs/storage-paths.md](docs/storage-paths.md).
 
-## Works With Your Agent
+## Install
 
-Point Claude, Codex, Cursor, Obsidian, or any other file-reading tool at your
-Transcripted folder.
+Download the latest `.dmg`:
 
-On supported agents, Transcripted also includes a read-only local MCP server
-for search, recap, and direct file access.
+[github.com/r3dbars/transcripted/releases/latest](https://github.com/r3dbars/transcripted/releases/latest)
+
+Requirements:
+
+- macOS 26+
+- Apple Silicon Mac recommended
+
+### Homebrew
+
+```bash
+brew tap r3dbars/transcripted https://github.com/r3dbars/transcripted
+brew install --cask transcripted
+```
+
+To update:
+
+```bash
+brew upgrade --cask transcripted
+```
+
+Transcripted also supports in-app updates through Sparkle.
 
 ## Build From Source
 
@@ -98,7 +174,7 @@ bash build.sh
 ```
 
 `build.sh` is the main app build. `Package.swift` exists for
-`TranscriptedCore` tests and smoke coverage, not as the primary app build.
+`TranscriptedCore` tests and smoke coverage.
 
 ## Run Tests
 
@@ -106,22 +182,19 @@ bash build.sh
 bash run-tests.sh
 ```
 
-If you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run:
+If you touch meeting capture or `TranscriptedCore`, also run:
 
 ```bash
 bash run-integration-smoke.sh
-```
-
-If you touch `Package.swift` or the public `TranscriptedCore` seam, also run:
-
-```bash
 swift test
 ```
 
-For build and release details, see [scripts/README.md](scripts/README.md) and
-[docs/repo-layout.md](docs/repo-layout.md).
+More details:
 
-## Contributing And Security
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [docs/repo-layout.md](docs/repo-layout.md)
+- [SECURITY.md](SECURITY.md)
 
-- See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and architecture notes
-- See [SECURITY.md](SECURITY.md) for privacy architecture and vulnerability reporting
+## License
+
+MIT
