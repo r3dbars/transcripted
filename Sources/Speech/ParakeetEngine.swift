@@ -797,6 +797,7 @@ class ParakeetEngine: ObservableObject {
             pendingSamples.removeAll(keepingCapacity: true)
         }
         sampleBuffer.removeAll(keepingCapacity: true)
+        sampleBuffer.reserveCapacity(Int(nativeSampleRate * Double(TranscriptedConstants.audioBufferCapacitySeconds)))
 
         let inputNode = audioEngine.inputNode
         // The tap is installed with format: nil, which means buffers arrive at the
@@ -809,6 +810,10 @@ class ParakeetEngine: ObservableObject {
         let hwFormat = inputNode.inputFormat(forBus: 0)
         guard outputFormat.sampleRate > 0, outputFormat.channelCount > 0,
               hwFormat.sampleRate > 0, hwFormat.channelCount > 0 else {
+            let startFailureAction = ParakeetStartRecordingFailurePolicy.action(
+                for: .invalidAudioFormat,
+                isRecoveryAttempt: isRecoveryAttempt
+            )
             print("⚠️ PARAKEET | input format unavailable: output=\(outputFormat.sampleRate)Hz/\(outputFormat.channelCount)ch hw=\(hwFormat.sampleRate)Hz/\(hwFormat.channelCount)ch")
             EventReporter.shared.capture(
                 level: .warning,
@@ -821,12 +826,17 @@ class ParakeetEngine: ObservableObject {
                     "output_channels": "\(outputFormat.channelCount)",
                     "hw_rate": "\(hwFormat.sampleRate)",
                     "hw_channels": "\(hwFormat.channelCount)",
+                    "is_recovery_attempt": "\(isRecoveryAttempt)"
                 ]
             )
             audioEngine.stop()
             isEnginePrewarmed = false
-            markFormatUnreadyAndPublish()
-            schedulePrewarmRetry()
+            if startFailureAction.markFormatUnready {
+                markFormatUnreadyAndPublish()
+            }
+            if startFailureAction.schedulePrewarmRetry {
+                schedulePrewarmRetry()
+            }
             return false
         }
 
@@ -917,10 +927,31 @@ class ParakeetEngine: ObservableObject {
                 try audioEngine.start()
                 isEnginePrewarmed = true
             } catch {
+                let startFailureAction = ParakeetStartRecordingFailurePolicy.action(
+                    for: .audioEngineStartFailed,
+                    isRecoveryAttempt: isRecoveryAttempt
+                )
                 inputNode.removeTap(onBus: 0)  // Clean up tap to prevent double-install crash
                 print("❌ PARAKEET | audio engine failed: \(error.localizedDescription)")
                 EventReporter.shared.capture(level: .error, engine: "parakeet",
-                    event: "audio_engine_start_failed", message: error.localizedDescription)
+                    event: "audio_engine_start_failed",
+                    message: error.localizedDescription,
+                    context: [
+                        "audio_device": inputDeviceName,
+                        "output_rate": "\(outputFormat.sampleRate)",
+                        "output_channels": "\(outputFormat.channelCount)",
+                        "hw_rate": "\(hwFormat.sampleRate)",
+                        "hw_channels": "\(hwFormat.channelCount)",
+                        "is_recovery_attempt": "\(isRecoveryAttempt)"
+                    ])
+                audioEngine.stop()
+                isEnginePrewarmed = false
+                if startFailureAction.markFormatUnready {
+                    markFormatUnreadyAndPublish()
+                }
+                if startFailureAction.schedulePrewarmRetry {
+                    schedulePrewarmRetry()
+                }
                 return false
             }
         }

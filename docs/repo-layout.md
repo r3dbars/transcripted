@@ -70,6 +70,7 @@ Use these docs for these jobs:
 - `docs/storage-paths.md` — canonical storage and fallback path map
 - `docs/release-packaging.md` — release packaging flow
 - `docs/sparkle-updates.md` — Sparkle update contract
+- `docs/qa-parakeet-start-failure-smoke.md` — manual BET-88 validation checklist for Parakeet start-failure recovery
 - `Tests/README.md` — verification surfaces and fast-test runner behavior
 - `Sources/*/CLAUDE.md` — subsystem-local ownership and verification notes
 

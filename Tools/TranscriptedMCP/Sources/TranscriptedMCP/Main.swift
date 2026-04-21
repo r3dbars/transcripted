@@ -31,7 +31,7 @@ struct TranscriptedMCP {
         let watchers = directories.watchedDirectories.map { directory in
             FileWatcher(directory: directory) { changedURL in
                 do {
-                    try index.indexSingleFile(changedURL)
+                    try index.indexSingleFile(changedURL, allowedRoots: directories.watchedDirectories)
                 } catch {
                     log("Failed to index \(changedURL.lastPathComponent): \(error.localizedDescription)")
                 }

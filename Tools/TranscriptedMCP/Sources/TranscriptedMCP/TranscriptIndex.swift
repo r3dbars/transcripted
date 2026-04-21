@@ -210,11 +210,29 @@ final class TranscriptIndex: @unchecked Sendable {
         }
     }
 
-    func indexSingleFile(_ url: URL) throws {
+    func indexSingleFile(_ url: URL, allowedRoots: [URL]) throws {
         try queue.sync {
             guard let kind = TranscriptLoader.artifactKind(for: url) else { return }
-            let filename = url.deletingPathExtension().lastPathComponent
-            try reindex(file: url, filename: filename, kind: kind)
+            let standardizedURL = url.standardizedFileURL
+            guard let containingRoot = allowedRoots.first(where: { root in
+                let basePath = root.standardizedFileURL.path
+                return standardizedURL.path == basePath
+                    || standardizedURL.path.hasPrefix(basePath + "/")
+            }) else {
+                log("Skipping index update outside watched roots: \(url.path)")
+                return
+            }
+
+            let filename = standardizedURL.deletingPathExtension().lastPathComponent
+            switch PathSecurity.validateExistingFile(standardizedURL, under: containingRoot) {
+            case .valid(let safeURL):
+                try reindex(file: safeURL, filename: filename, kind: kind)
+            case .missing:
+                try removeFromIndex(filename: filename)
+            case .invalid:
+                log("Skipping invalid or unsafe file change: \(url.path)")
+                try removeFromIndex(filename: filename)
+            }
         }
     }
 

@@ -103,6 +103,20 @@ final class TranscriptIndexTests: XCTestCase {
         XCTAssertTrue(results.isEmpty)
     }
 
+    func testIndexSingleFileRejectsSymlinkEscape() throws {
+        let outsideDir = makeTempDir()
+        defer { removeTempDir(outsideDir) }
+
+        let outsideFile = outsideDir.appendingPathComponent("Call_2026-03-29_10-00-00.md")
+        try makeFixtureJSON().write(to: outsideFile, atomically: true, encoding: .utf8)
+
+        let symlinkURL = tempDir.appendingPathComponent("Call_2026-03-29_10-00-00.md")
+        try FileManager.default.createSymbolicLink(at: symlinkURL, withDestinationURL: outsideFile)
+
+        try index.indexSingleFile(symlinkURL, allowedRoots: [tempDir])
+        XCTAssertTrue(try index.listRecentMeetings(count: 10).isEmpty)
+    }
+
     func testFTS5SpecialCharacters() throws {
         let fixture = makeFixtureJSON(utterances: [
             ("mic_0", 0.0, 5.0, "The C++ implementation is ready"),

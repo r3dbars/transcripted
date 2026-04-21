@@ -31,6 +31,22 @@ not have to carry the full operational logic:
 - `scripts/release/update-cask.sh` — bump `Casks/transcripted.rb` to point at a newly published GitHub release
 - `scripts/dev/onboarding.sh` — inspect, reset, or force the first-run onboarding state while iterating on copy and layout
 
+## Operational health probes
+
+- `scripts/ops/health-probe.sh` — run health checks for observability lanes (Sentry, PostHog, GitHub, Cloudflare)
+  - Usage: `bash scripts/ops/health-probe.sh <github|sentry|posthog|cloudflare|all>`
+  - See `docs/ops-credentials.md` for credential setup and privacy guidelines
+- `scripts/ops/build-codex-memory-index.py` — build a safe metadata-only index from local Codex session archives for Transcripted memory briefs
+  - Usage: `python3 scripts/ops/build-codex-memory-index.py --verbose`
+  - Writes:
+    - `build/codex-memory-index/transcripted-codex-index.json`
+    - `build/codex-memory-index/transcripted-codex-stats.json`
+    - `build/codex-memory-index/transcripted-codex-followups.json`
+    - `build/codex-memory-index/transcripted-paperclip-task-seeds.json`
+    - `build/codex-memory-index/transcripted-codex-digest.md`
+  - Optional: `--limit 200` to scan only the newest 200 session files while iterating
+  - Optional: `--mlx-summarize --mlx-model <model-id>` to generate local intent summaries through an MLX OpenAI-compatible endpoint
+
 ## Rule of thumb
 
 If a command is not listed above, do not assume it is part of the current app build or release contract.
