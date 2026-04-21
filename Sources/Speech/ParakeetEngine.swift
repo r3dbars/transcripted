@@ -780,6 +780,13 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func resetAudioGraphAfterStartFailure(reason: String, rebuildEngine: Bool) {
+        // Keep runtime/UI state coherent when startRecording fails before we ever
+        // transition to a stable recording session.
+        cancelAudioWatchdog()
+        isRecording = false
+        audioLevel = 0
+        didReceiveAudioSamples = false
+
         if rebuildEngine {
             rebuildAudioEngine(reason: reason)
             return
