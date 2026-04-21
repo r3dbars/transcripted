@@ -33,6 +33,7 @@ Meeting captures live under:
 The meetings capture folder contains user-facing artifacts:
 
 - markdown transcripts: `<capture-library>/meetings/*.md`
+- retained recording audio: `<capture-library>/meetings/audio/*_audio/`
 
 App-owned meeting state is stored separately under:
 
@@ -44,6 +45,12 @@ Temporary audio scratch paths live under:
 
 - raw recordings: `~/Library/Application Support/Transcripted/tmp/recordings/`
 - speaker clips: `~/Library/Application Support/Transcripted/tmp/recordings/speaker_clips/`
+
+Successful live and imported meeting recordings are copied from scratch into
+the meeting capture library before scratch cleanup. Failed live meeting
+transcriptions also copy their available recording audio there while keeping
+the scratch files available for retry. Explicitly discarded recordings still
+delete their scratch audio.
 
 These paths are defined on the app side in `Sources/Meeting/MeetingStoragePaths.swift`
 and then injected into `TranscriptedCore` through `CoreStoragePaths`.

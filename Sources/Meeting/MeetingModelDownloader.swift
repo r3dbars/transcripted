@@ -1,9 +1,10 @@
 // MeetingModelDownloader.swift
 // Gates the meeting pipeline on the STT + diarization models being loaded.
 // Delegates the actual download work to TranscriptedCore (DiarizationService
-// initializes PyAnnote + WeSpeaker + Sortformer) and the app's ParakeetEngine
-// (which loads Parakeet TDT V3). This file only coordinates the two calls and
-// surfaces a single await point for the session controller.
+// initializes the offline PyAnnote + WeSpeaker path required by meeting
+// transcripts) and the app's selected speech-to-text router.
+// This file only coordinates the two calls and surfaces a single await point
+// for the session controller.
 
 import Foundation
 import TranscriptedCore
@@ -20,12 +21,9 @@ final class MeetingModelDownloader {
         self.diarization = diarization
     }
 
-    /// Ensure both STT and diarization models are loaded before the first meeting
-    /// recording starts. Safe to call multiple times - each underlying engine is
-    /// idempotent after first successful load.
-    ///
-    /// Network reachability is checked first so we can short-circuit with a clear
-    /// error on offline machines instead of dying inside FluidAudio's retry loop.
+    /// Ensure STT and required offline diarization models are loaded before the
+    /// first meeting recording starts. Safe to call multiple times - each
+    /// underlying engine is idempotent after first successful load.
     func ensureModelsReady() async throws {
         // Fast path: both already loaded.
         if stt.isReady && diarization.modelState == .ready {
@@ -44,7 +42,7 @@ final class MeetingModelDownloader {
             // After both returns, confirm they actually reached a usable state.
             guard stt.isReady else {
                 throw NSError(domain: "MeetingModelDownloader", code: 2, userInfo: [
-                    NSLocalizedDescriptionKey: "Parakeet STT failed to load."
+                    NSLocalizedDescriptionKey: "Selected speech model failed to load."
                 ])
             }
             guard diarization.modelState == .ready else {

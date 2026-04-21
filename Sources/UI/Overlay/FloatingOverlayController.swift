@@ -28,12 +28,9 @@ class FloatingOverlayController {
     enum OverlayState {
         case idle
         case loading      // Voice model still loading — waiting for readiness
-        case listening    // Recording (both modes)
-        case drafting     // Processing (vision+draft for draft mode, polish for dictation)
+        case listening    // Recording dictation
+        case drafting     // Processing dictation
         case success      // Finished successfully — brief confirmation before dismiss
-        case streaming    // Tokens arriving (draft mode only)
-        case review       // Editable draft (draft mode only)
-        case diffFlash    // Read-only word diff of user's edits before confirming
     }
 
     /// Human-readable shortcut hints (reads live from UserDefaults)
@@ -51,8 +48,6 @@ class FloatingOverlayController {
         }
     }
     var isVisible = false
-    var reviewText: String = ""
-    var streamingText: String = ""
     var errorMessage: String = ""
     private var errorActionTitle: String?
     private var errorActionHandler: (() -> Void)?
@@ -62,7 +57,7 @@ class FloatingOverlayController {
     var loadingPresentation: LoadingPresentation = .initial {
         didSet { pushStateToViews() }
     }
-    /// Closure for Escape during non-review states (listening/drafting/streaming)
+    /// Closure for Escape during active dictation overlay states.
     var onEscapeDuringSession: (() -> Void)?
     var onStopListening: (() -> Void)?
 
@@ -250,7 +245,6 @@ class FloatingOverlayController {
 
         panel.setFrameOrigin(origin)
         panel.setContentSize(panelSize)
-        panel.allowKeyStatus = false
         panel.ignoresMouseEvents = false
 
         // Spring entrance
@@ -295,8 +289,7 @@ class FloatingOverlayController {
         let gen = hideGeneration
         panel.ignoresMouseEvents = true
 
-        // Demote panel from key BEFORE animation — prevents intercepting ⌘V paste
-        panel.allowKeyStatus = false
+        // Make sure the overlay cannot intercept the follow-up paste.
         panel.resignKey()
         panel.orderOut(nil)
 
@@ -481,7 +474,6 @@ class FloatingOverlayController {
         guard isVisible else { return }
         removeEscapeMonitor()
         panel?.ignoresMouseEvents = true
-        panel?.allowKeyStatus = false
         panel?.orderOut(nil)
         panel?.alphaValue = 1.0
         panel?.contentView?.layer?.removeAllAnimations()
@@ -494,8 +486,6 @@ class FloatingOverlayController {
         successDismissTask?.cancel()
         successDismissTask = nil
         state = .idle
-        reviewText = ""
-        streamingText = ""
         errorMessage = ""
         errorActionTitle = nil
         errorActionHandler = nil
@@ -564,8 +554,6 @@ class FloatingOverlayController {
             return errorPanelSize()
         case .idle, .listening, .drafting, .success:
             return NSSize(width: OverlayTokens.panelCompactWidth, height: OverlayTokens.panelCompactHeight)
-        default:
-            return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight)
         }
     }
 

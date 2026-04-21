@@ -4,9 +4,6 @@
 import AppKit
 
 class FloatingOverlayPanel: NSPanel {
-    /// When true, the panel can become key window (for text editing in review mode)
-    var allowKeyStatus = false
-
     override init(
         contentRect: NSRect,
         styleMask style: NSWindow.StyleMask,
@@ -31,7 +28,6 @@ class FloatingOverlayPanel: NSPanel {
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     }
 
-    // Dynamic: non-key during listening/drafting, key-capable during review
-    override var canBecomeKey: Bool { allowKeyStatus }
+    override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }

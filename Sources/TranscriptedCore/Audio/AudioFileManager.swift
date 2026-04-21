@@ -121,22 +121,28 @@ extension Audio {
                         // Calculate system audio level synchronously (fast, no I/O)
                         self.calculateSystemLevel(buffer: systemBuffer)
 
-                        // CRITICAL: Copy buffer before async dispatch
-                        // System audio uses bufferListNoCopy - memory is only valid during callback
-                        guard let bufferCopy = self.deepCopyBuffer(systemBuffer) else {
-                            if currentBufferCount <= 3 {
-                                AppLogger.audioSystem.warning("Failed to copy system audio buffer", ["bufferNumber": "\(currentBufferCount)"])
+                        let bufferForAsyncUse: AVAudioPCMBuffer
+                        if capture.deliversOwnedAudioBuffers {
+                            bufferForAsyncUse = systemBuffer
+                        } else {
+                            // CoreAudio process taps use borrowed buffer memory. Copy before any
+                            // async consumer sees it.
+                            guard let bufferCopy = self.deepCopyBuffer(systemBuffer) else {
+                                if currentBufferCount <= 3 {
+                                    AppLogger.audioSystem.warning("Failed to copy system audio buffer", ["bufferNumber": "\(currentBufferCount)"])
+                                }
+                                return
                             }
-                            return
+                            bufferForAsyncUse = bufferCopy
                         }
 
                         // Debug: Log format details on first few buffers
                         if currentBufferCount <= 3 {
-                            let fmt = bufferCopy.format
-                            AppLogger.audioSystem.debug("System buffer", ["number": "\(currentBufferCount)", "sampleRate": "\(Int(fmt.sampleRate))", "channels": "\(fmt.channelCount)", "frames": "\(bufferCopy.frameLength)"])
+                            let fmt = bufferForAsyncUse.format
+                            AppLogger.audioSystem.debug("System buffer", ["number": "\(currentBufferCount)", "sampleRate": "\(Int(fmt.sampleRate))", "channels": "\(fmt.channelCount)", "frames": "\(bufferForAsyncUse.frameLength)"])
                         }
 
-                        self.onSystemPCMBuffer?(bufferCopy)
+                        self.onSystemPCMBuffer?(bufferForAsyncUse)
 
                         // Dispatch file write to background queue (non-blocking)
                         // File already exists, so this is just a write operation
@@ -145,7 +151,7 @@ extension Audio {
                                   self.consecutiveSystemWriteErrors < self.maxConsecutiveWriteErrors,
                                   let audioFile = self.systemAudioFile else { return }
                             do {
-                                try audioFile.write(from: bufferCopy)
+                                try audioFile.write(from: bufferForAsyncUse)
                                 self.consecutiveSystemWriteErrors = 0
                             } catch {
                                 self.consecutiveSystemWriteErrors += 1
@@ -262,6 +268,11 @@ extension Audio {
 
         self.onMicPCMBuffer?(buffer)
 
+        guard let bufferForAsyncUse = deepCopyBuffer(buffer) else {
+            AppLogger.audioMic.warning("Failed to copy mic buffer for async write")
+            return
+        }
+
         micAudioFileQueue.async { [weak self] in
             guard let self = self,
                   self.consecutiveMicWriteErrors < self.maxConsecutiveWriteErrors,
@@ -270,13 +281,13 @@ extension Audio {
 
             do {
                 if self.inputChannelCount > 1 {
-                    guard let monoBuffer = self.manualDownmix(buffer: buffer, to: monoFormat) else {
+                    guard let monoBuffer = self.manualDownmix(buffer: bufferForAsyncUse, to: monoFormat) else {
                         AppLogger.audioMic.error("Failed to downmix buffer")
                         return
                     }
                     try audioFile.write(from: monoBuffer)
                 } else {
-                    try audioFile.write(from: buffer)
+                    try audioFile.write(from: bufferForAsyncUse)
                 }
                 self.consecutiveMicWriteErrors = 0
             } catch {

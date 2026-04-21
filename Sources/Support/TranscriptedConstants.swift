@@ -41,12 +41,8 @@ enum TranscriptedConstants {
         sampleCount >= parakeetMinimumInferenceSamples
     }
 
-    /// Delay for audio engine re-warm after device change (nanoseconds)
+    /// Delay for audio input readiness retry after device change (nanoseconds)
     static let audioRecoveryDelay: UInt64 = 300_000_000  // 300ms
-
-    /// Delay for audio engine re-warm after system wake (nanoseconds)
-    /// Increased from 500ms to 1s — CoreAudio needs time to fully reinitialize after sleep
-    static let audioRewarmDelay: UInt64 = 1_000_000_000  // 1 second
 
     /// Watchdog timeout — if no audio samples arrive within this window after starting
     /// recording, the engine is likely a zombie (running but disconnected from hardware)
@@ -96,6 +92,14 @@ enum TranscriptedConstants {
     /// Clipboard restore timeout in seconds
     static let clipboardRestoreTimeout: Double = 2.0
 
+    // MARK: - Dictation Auto Enter
+
+    /// Small pause after paste-back before optionally pressing Enter.
+    static let dictationAutoEnterDelay: UInt64 = 200_000_000  // 200ms
+
+    /// Ignore extremely short sessions so quick accidental taps do not submit.
+    static let dictationAutoEnterMinimumDuration: TimeInterval = 0.3
+
     // MARK: - Debug Logging
 
     /// Debug log rotation threshold in bytes
@@ -123,6 +127,7 @@ enum TranscriptedConstants {
     static let listeningStartSoundFileName = "dictation-start.mp3"
     static let dictationDeliveredSoundFileName = "dictation-delivered.m4a"
     static let meetingTranscriptCompleteSoundFileName = "meeting-transcript-complete.mp3"
+    static let feedbackSubmittedSoundFileName = "wilhelm-scream.mp3"
 
     // MARK: - Hotkeys
 

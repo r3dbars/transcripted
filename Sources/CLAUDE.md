@@ -15,7 +15,9 @@ Important entry points:
 - `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, wake-recovery coordination, and lazy `MeetingSessionController`
 - `Support/TranscriptedStoragePaths.swift` — app-support path helpers for the Transcripted capture-library, state, cache, logs, and tmp layout
 - `Support/HotkeyPreferences.swift` — persisted hotkey settings used by capture routing
+- `Support/CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements applied to final dictation and meeting transcript text
 - `Support/LocalSpeakerPreferences.swift` — persisted toggle that decides whether meeting transcription should split the local mic into multiple named speakers or keep it as a single "You" track
+- `Support/TranscriptionModelPreferences.swift` — persisted local model selection shared by dictation and meetings (`Parakeet`, `Whisper Large V3 Turbo`, `Whisper Large V3`)
 - `Support/TranscriptedConstants.swift` — shared timing and behavior constants used across the app target
 - `Capture/ContextCaptureEngine.swift` — right-option dictation handling, keyboard hotkeys, meeting hotkey routing
 - `UI/Overlay/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
@@ -32,8 +34,8 @@ Important entry points:
 - `Meeting/` — app-side meeting bridge, prompts, imported-audio prep, storage, and transcript restyling
 - `Observability/` — events, debug log, anonymous analytics, Sparkle updater, and crash reporting
 - `Reliability/` — wake / sleep recovery coordination
-- `Speech/` — Parakeet STT, router, and recorded-audio buffering helpers
-- `Support/` — app-wide path, storage, permission, hotkey, local-speaker preference, and shared constant helpers
+- `Speech/` — local STT engines, router, and recorded-audio buffering helpers
+- `Support/` — app-wide path, storage, permission, hotkey, clipboard paste, custom-dictionary, auto-send, local-speaker, and transcription-model preference helpers
 - `TranscriptedCore/` — shared library boundary
 - `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `AgentConnect/`, and `Shared/`
 
@@ -51,6 +53,7 @@ app target entirely. If a historical doc still mentions `Sources/Text/` or
 - touching meeting flow or imported-audio transcription: `Sources/Meeting/CLAUDE.md`
 - touching core library or meeting pipeline internals: `Sources/TranscriptedCore/CLAUDE.md`
 - touching STT / recording lifecycle: `Sources/Speech/CLAUDE.md`
+- touching app-wide support utilities: `Sources/Support/CLAUDE.md`
 - touching tests or package boundaries: `Tests/README.md`
 
 Prefer the local doc plus the actual Swift file list before assuming an older

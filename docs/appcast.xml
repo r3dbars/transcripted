@@ -1,87 +1,120 @@
-<?xml version="1.0" ?>
+<?xml version="1.0" standalone="yes"?>
 <rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
-  <channel>
-    <title>Transcripted Updates</title>
-    <link>https://github.com/r3dbars/transcripted</link>
-    <atom:link href="https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml" rel="self" type="application/rss+xml"/>
-    <description>Release feed for Transcripted macOS updates.</description>
-    <language>en</language>
-    <item>
-      <title>1.1.10</title>
-      <pubDate>Fri, 17 Apr 2026 19:44:46 GMT</pubDate>
-      <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.10</link>
-      <sparkle:version>1.1.10</sparkle:version>
-      <sparkle:shortVersionString>1.1.10</sparkle:shortVersionString>
-      <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.1.10</sparkle:releaseNotesLink>
-      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.10/Transcripted-1.1.10.dmg" length="502721532" type="application/octet-stream" sparkle:edSignature="bShxoOEQ6bKgHQGBGiXAQ3BIOmudVrgnbtGS1h9f3yYGE6Yd091mqjR+BD7mg4FJ9jjQlZstE4ZNGugrF3f4DQ=="/>
-    </item>
-    <item>
-      <title>1.0.9</title>
-      <pubDate>Fri, 17 Apr 2026 18:24:06 GMT</pubDate>
-      <link>https://github.com/r3dbars/transcripted/releases/tag/v1.0.9</link>
-      <sparkle:version>1.0.9</sparkle:version>
-      <sparkle:shortVersionString>1.0.9</sparkle:shortVersionString>
-      <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.0.9</sparkle:releaseNotesLink>
-      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.0.9/Transcripted-1.0.9.dmg" length="502688154" type="application/octet-stream" sparkle:edSignature="w4Cw8zDn/4vfeJbuIq8OPJNs5naALADafyVZSrLsg/W68eBqVw4HRy/8c/lSvB68/sCZgwrfa9vWLPVLEpnZDA=="/>
-    </item>
-    <item>
-      <title>1.0.8</title>
-      <pubDate>Fri, 17 Apr 2026 17:13:16 GMT</pubDate>
-      <link>https://github.com/r3dbars/transcripted/releases/tag/v1.0.8</link>
-      <sparkle:version>1.0.8</sparkle:version>
-      <sparkle:shortVersionString>1.0.8</sparkle:shortVersionString>
-      <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.0.8</sparkle:releaseNotesLink>
-      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.0.8/Transcripted-1.0.8.dmg" length="502664309" type="application/octet-stream" sparkle:edSignature="l3EA/xoFcRhpjEBPx4BYBQCWWfRd8C95qLd0/bIR0LBj2vQsUNZert5TdjTs9g5Snxm/rTIYymfX/BquXOC2Cg=="/>
-    </item>
-    <item>
-      <title>1.0.7</title>
-      <pubDate>Tue, 14 Apr 2026 05:51:44 -0500</pubDate>
-      <link>https://github.com/r3dbars/transcripted</link>
-      <sparkle:fullReleaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.0.7</sparkle:fullReleaseNotesLink>
-      <sparkle:version>1.0.7</sparkle:version>
-      <sparkle:shortVersionString>1.0.7</sparkle:shortVersionString>
-      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.0.7/Transcripted-1.0.7.dmg" length="502675765" type="application/octet-stream" sparkle:edSignature="Q98ME9znEwbm2Gy9CyYVe6Bhqel8n6seNBa0xpj2iiYi2WgSruw8FCANBGWkVBsU9gXANw8bBGS+ZfjsykVRBg=="/>
-    </item>
-    <item>
-      <title>1.0.6</title>
-      <pubDate>Mon, 13 Apr 2026 19:50:36 GMT</pubDate>
-      <link>https://github.com/r3dbars/transcripted/releases/tag/v1.0.6</link>
-      <sparkle:version>1.0.6</sparkle:version>
-      <sparkle:shortVersionString>1.0.6</sparkle:shortVersionString>
-      <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.0.6</sparkle:releaseNotesLink>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.0.6/Transcripted-1.0.6.dmg" length="502646081" type="application/octet-stream" sparkle:edSignature="QWSKxul7wWJBM2GTL8F4xKhp7q/9IfJVvtZJsC63pE5BoL85oRmKSTQRtWzx0DZPmKScQmw8VXMom7E9gQJPCQ=="/>
-    </item>
-    <item>
-      <title>1.0.5</title>
-      <pubDate>Mon, 13 Apr 2026 13:46:48 GMT</pubDate>
-      <link>https://github.com/r3dbars/transcripted/releases/tag/v1.0.5</link>
-      <sparkle:version>1.0.5</sparkle:version>
-      <sparkle:shortVersionString>1.0.5</sparkle:shortVersionString>
-      <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.0.5</sparkle:releaseNotesLink>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.0.5/Transcripted-1.0.5.dmg" length="502640480" type="application/octet-stream" sparkle:edSignature="kvlnlYL4tbnNLZjIjdJwA+0FCZ8CV4dW55PhYxgEWDJ9kbPrNRYNRlWq887xWhwWJ/R065gqD5WN0JtxvFeUAw=="/>
-    </item>
-    <item>
-      <title>1.0.4</title>
-      <pubDate>Sun, 12 Apr 2026 18:58:26 GMT</pubDate>
-      <link>https://github.com/r3dbars/transcripted/releases/tag/v1.0.4</link>
-      <sparkle:version>1.0.4</sparkle:version>
-      <sparkle:shortVersionString>1.0.4</sparkle:shortVersionString>
-      <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.0.4</sparkle:releaseNotesLink>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.0.4/Transcripted-1.0.4.dmg" length="509228201" type="application/octet-stream" sparkle:edSignature="xz6/eZzqaQwyYX79B2ztJ79IZEPSXKrTIf9DXhEP43Aep8RSus6AJgr2WLJj5+Qq34nNWql4ynn8kDyiAjXpBg=="/>
-    </item>
-  </channel>
+    <channel>
+        <title>Transcripted Updates</title>
+        <link>https://github.com/r3dbars/transcripted</link>
+        <atom:link href="https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml" rel="self" type="application/rss+xml"/>
+        <description>Release feed for Transcripted macOS updates.</description>
+        <language>en</language>
+        <item>
+            <title>1.1.13</title>
+            <pubDate>Mon, 20 Apr 2026 17:56:58 -0500</pubDate>
+            <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.13</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.1.13</sparkle:fullReleaseNotesLink>
+            <sparkle:version>1.1.13</sparkle:version>
+            <sparkle:shortVersionString>1.1.13</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.13/Transcripted-1.1.13.dmg" length="504141336" type="application/octet-stream" sparkle:edSignature="C/BPy2Mrk3/ELyGKbvLP8lYDqDiUX5Oaw2/CAr+5hz5L5DxaGHkhe6TdtleyxuuI17qeozn3IeKip7lft1jkCg=="/>
+        </item>
+        <item>
+            <title>1.1.12</title>
+            <pubDate>Sun, 19 Apr 2026 02:22:54 GMT</pubDate>
+            <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.12</link>
+            <sparkle:version>1.1.12</sparkle:version>
+            <sparkle:shortVersionString>1.1.12</sparkle:shortVersionString>
+            <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.1.12</sparkle:releaseNotesLink>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.12/Transcripted-1.1.12.dmg" length="503316542" type="application/octet-stream" sparkle:edSignature="tyMGBXTf61HJp9NL+rHFGn0Kmay2FZ2g5aiJWMAOUFfgjDMeXpaQEt7l7cwMHKuqUFVCr8/TDAto5sAM3K14Cw=="/>
+        </item>
+        <item>
+            <title>1.1.11</title>
+            <pubDate>Sat, 18 Apr 2026 12:00:39 GMT</pubDate>
+            <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.11</link>
+            <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.1.11</sparkle:releaseNotesLink>
+            <sparkle:version>1.1.11</sparkle:version>
+            <sparkle:shortVersionString>1.1.11</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.11/Transcripted-1.1.11.dmg" length="503193049" type="application/octet-stream" sparkle:edSignature="r3XHWckeyeCU3lkgfIda5c9jDDph9K19xXbQ8ySleY6Y3umG4wS4WqX/e8M7Z4zM5cmFLrIYcqx8oJSrhYuLCw=="/>
+        </item>
+        <item>
+            <title>1.1.10</title>
+            <pubDate>Fri, 17 Apr 2026 19:44:46 GMT</pubDate>
+            <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.10</link>
+            <sparkle:version>1.1.10</sparkle:version>
+            <sparkle:shortVersionString>1.1.10</sparkle:shortVersionString>
+            <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.1.10</sparkle:releaseNotesLink>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.10/Transcripted-1.1.10.dmg" length="502721532" type="application/octet-stream" sparkle:edSignature="bShxoOEQ6bKgHQGBGiXAQ3BIOmudVrgnbtGS1h9f3yYGE6Yd091mqjR+BD7mg4FJ9jjQlZstE4ZNGugrF3f4DQ=="/>
+        </item>
+        <item>
+            <title>1.0.9</title>
+            <pubDate>Fri, 17 Apr 2026 18:24:06 GMT</pubDate>
+            <link>https://github.com/r3dbars/transcripted/releases/tag/v1.0.9</link>
+            <sparkle:version>1.0.9</sparkle:version>
+            <sparkle:shortVersionString>1.0.9</sparkle:shortVersionString>
+            <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.0.9</sparkle:releaseNotesLink>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.0.9/Transcripted-1.0.9.dmg" length="502688154" type="application/octet-stream" sparkle:edSignature="w4Cw8zDn/4vfeJbuIq8OPJNs5naALADafyVZSrLsg/W68eBqVw4HRy/8c/lSvB68/sCZgwrfa9vWLPVLEpnZDA=="/>
+        </item>
+        <item>
+            <title>1.0.8</title>
+            <pubDate>Fri, 17 Apr 2026 17:13:16 GMT</pubDate>
+            <link>https://github.com/r3dbars/transcripted/releases/tag/v1.0.8</link>
+            <sparkle:version>1.0.8</sparkle:version>
+            <sparkle:shortVersionString>1.0.8</sparkle:shortVersionString>
+            <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.0.8</sparkle:releaseNotesLink>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.0.8/Transcripted-1.0.8.dmg" length="502664309" type="application/octet-stream" sparkle:edSignature="l3EA/xoFcRhpjEBPx4BYBQCWWfRd8C95qLd0/bIR0LBj2vQsUNZert5TdjTs9g5Snxm/rTIYymfX/BquXOC2Cg=="/>
+        </item>
+        <item>
+            <title>1.0.7</title>
+            <pubDate>Tue, 14 Apr 2026 05:51:44 -0500</pubDate>
+            <link>https://github.com/r3dbars/transcripted</link>
+            <sparkle:fullReleaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.0.7</sparkle:fullReleaseNotesLink>
+            <sparkle:version>1.0.7</sparkle:version>
+            <sparkle:shortVersionString>1.0.7</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.0.7/Transcripted-1.0.7.dmg" length="502675765" type="application/octet-stream" sparkle:edSignature="Q98ME9znEwbm2Gy9CyYVe6Bhqel8n6seNBa0xpj2iiYi2WgSruw8FCANBGWkVBsU9gXANw8bBGS+ZfjsykVRBg=="/>
+        </item>
+        <item>
+            <title>1.0.6</title>
+            <pubDate>Mon, 13 Apr 2026 19:50:36 GMT</pubDate>
+            <link>https://github.com/r3dbars/transcripted/releases/tag/v1.0.6</link>
+            <sparkle:version>1.0.6</sparkle:version>
+            <sparkle:shortVersionString>1.0.6</sparkle:shortVersionString>
+            <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.0.6</sparkle:releaseNotesLink>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.0.6/Transcripted-1.0.6.dmg" length="502646081" type="application/octet-stream" sparkle:edSignature="QWSKxul7wWJBM2GTL8F4xKhp7q/9IfJVvtZJsC63pE5BoL85oRmKSTQRtWzx0DZPmKScQmw8VXMom7E9gQJPCQ=="/>
+        </item>
+        <item>
+            <title>1.0.5</title>
+            <pubDate>Mon, 13 Apr 2026 13:46:48 GMT</pubDate>
+            <link>https://github.com/r3dbars/transcripted/releases/tag/v1.0.5</link>
+            <sparkle:version>1.0.5</sparkle:version>
+            <sparkle:shortVersionString>1.0.5</sparkle:shortVersionString>
+            <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.0.5</sparkle:releaseNotesLink>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.0.5/Transcripted-1.0.5.dmg" length="502640480" type="application/octet-stream" sparkle:edSignature="kvlnlYL4tbnNLZjIjdJwA+0FCZ8CV4dW55PhYxgEWDJ9kbPrNRYNRlWq887xWhwWJ/R065gqD5WN0JtxvFeUAw=="/>
+        </item>
+        <item>
+            <title>1.0.4</title>
+            <pubDate>Sun, 12 Apr 2026 18:58:26 GMT</pubDate>
+            <link>https://github.com/r3dbars/transcripted/releases/tag/v1.0.4</link>
+            <sparkle:version>1.0.4</sparkle:version>
+            <sparkle:shortVersionString>1.0.4</sparkle:shortVersionString>
+            <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.0.4</sparkle:releaseNotesLink>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.0.4/Transcripted-1.0.4.dmg" length="509228201" type="application/octet-stream" sparkle:edSignature="xz6/eZzqaQwyYX79B2ztJ79IZEPSXKrTIf9DXhEP43Aep8RSus6AJgr2WLJj5+Qq34nNWql4ynn8kDyiAjXpBg=="/>
+        </item>
+    </channel>
 </rss>

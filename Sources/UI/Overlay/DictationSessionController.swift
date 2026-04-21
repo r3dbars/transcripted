@@ -19,42 +19,13 @@ class DictationSessionController: ObservableObject {
         case unknown = "unknown"
     }
 
-    private enum DictationPasteOutcome {
-        case pasted
-        case copied(String)
-        case failed(String)
-
-        var delivery: DictationDelivery {
-            switch self {
-            case .pasted: return .pasted
-            case .copied: return .copied
-            case .failed: return .failed
-            }
-        }
-
-        var diagnosticName: String {
-            switch self {
-            case .pasted: return "pasted"
-            case .copied: return "copied"
-            case .failed: return "failed"
-            }
-        }
-
-        var diagnosticMessage: String {
-            switch self {
-            case .pasted:
-                return "Dictation pasted successfully"
-            case .copied(let message), .failed(let message):
-                return message
-            }
-        }
-    }
-
     @Published var isInSession = false
     @Published var isDictating = false
     @Published var lastCompletedText: String?
 
     private var interruptionSubscription: AnyCancellable?
+    private let textPaster = ClipboardRestoringTextPaster()
+    private let autoSender = DictationAutoSender()
 
     var appState: TranscriptedAppState? {
         didSet { setupInterruptionObserver() }
@@ -89,7 +60,6 @@ class DictationSessionController: ObservableObject {
     private var sessionSourceApp: NSRunningApplication?
     private var startupTask: Task<Void, Never>?
     private var streamingTask: Task<Void, Never>?
-    private var clipboardRestoreTask: Task<Void, Never>?
     private var recordingStartRetryTask: Task<Void, Never>?
     private var sessionTimeoutTask: Task<Void, Never>?
     private var sessionStartTime: CFAbsoluteTime = 0
@@ -102,7 +72,6 @@ class DictationSessionController: ObservableObject {
     deinit {
         startupTask?.cancel()
         streamingTask?.cancel()
-        clipboardRestoreTask?.cancel()
         recordingStartRetryTask?.cancel()
         sessionTimeoutTask?.cancel()
     }
@@ -308,7 +277,7 @@ class DictationSessionController: ObservableObject {
         isDictating = false
     }
 
-    /// Stop dictation and paste — Parakeet batch transcription
+    /// Stop dictation and paste — selected local STT batch transcription
     func stopDictationAndPaste(trigger: DictationTrigger = .unknown) {
         guard let (appState, overlayController) = readyState() else { return }
         DiagnosticsTrail.record(
@@ -417,6 +386,10 @@ class DictationSessionController: ObservableObject {
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
             let pasteOutcome = self.pasteWithClipboardRestore(text)
+            let autoSendOutcome = await self.performAutoEnterIfNeeded(
+                text: text,
+                delivery: pasteOutcome.delivery
+            )
             let saveFailureMessage = self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
             let wordCount = text.split(whereSeparator: \.isWhitespace).count
             let deliveryLevel: EventLevel = pasteOutcome.delivery == .pasted ? .info : .warning
@@ -430,6 +403,7 @@ class DictationSessionController: ObservableObject {
                     extra: [
                         "trigger": self.currentDictationTrigger.rawValue,
                         "delivery": pasteOutcome.diagnosticName,
+                        "auto_send": autoSendOutcome.diagnosticName,
                         "chars": "\(text.count)",
                         "words": "\(wordCount)",
                         "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000))"
@@ -444,7 +418,7 @@ class DictationSessionController: ObservableObject {
                 } else {
                     overlayController.showSuccessAndDismiss()
                 }
-            case .copied(let message), .failed(let message):
+            case .copied(let message, reason: _), .failed(let message):
                 let combinedMessage: String
                 if let saveFailureMessage {
                     combinedMessage = "\(message) \(saveFailureMessage)"
@@ -455,10 +429,14 @@ class DictationSessionController: ObservableObject {
             }
             isDictating = false
             appState.logger.log("DICTATION | completed with outcome \(pasteOutcome)")
+            if case .failed(let message) = autoSendOutcome {
+                appState.logger.log("DICTATION | auto enter failed: \(message)")
+            }
             AnalyticsReporter.track(
                 "dictation_completed",
                 properties: [
                     "delivery": pasteOutcome.delivery.rawValue,
+                    "auto_send": autoSendOutcome.diagnosticName,
                     "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
                     "trigger": currentDictationTrigger.rawValue,
                     "word_count_bucket": AnalyticsReporter.wordCountBucket(wordCount),
@@ -512,7 +490,7 @@ class DictationSessionController: ObservableObject {
             for _ in 0..<TranscriptedConstants.modelLoadMaxIterations {
                 guard !Task.isCancelled, self.isDictating else { return }
 
-                let modelState = appState.sttRouter.parakeetEngine.modelDownloadState
+                let modelState = appState.sttRouter.modelDownloadState
                 self.updateLoadingOverlay(sourceApp: sourceApp, modelState: modelState)
 
                 switch modelState {
@@ -545,10 +523,10 @@ class DictationSessionController: ObservableObject {
     private func retryModelWarmupIfNeeded() {
         guard let appState else { return }
 
-        switch appState.sttRouter.parakeetEngine.modelDownloadState {
+        switch appState.sttRouter.modelDownloadState {
         case .notLoaded, .failed:
             Task { @MainActor [weak appState] in
-                await appState?.sttRouter.parakeetEngine.initialize()
+                await appState?.sttRouter.initializeSelectedModel()
             }
         case .downloading, .loading, .ready:
             break
@@ -560,7 +538,7 @@ class DictationSessionController: ObservableObject {
         modelState: ParakeetModelState? = nil
     ) {
         guard let appState = appState else { return }
-        let presentation = loadingPresentation(for: modelState ?? appState.sttRouter.parakeetEngine.modelDownloadState)
+        let presentation = loadingPresentation(for: modelState ?? appState.sttRouter.modelDownloadState)
         overlayController?.showLoadingState(near: sourceApp, presentation: presentation)
     }
 
@@ -654,9 +632,6 @@ class DictationSessionController: ObservableObject {
         case .listening: return "listening"
         case .drafting: return "drafting"
         case .success: return "success"
-        case .streaming: return "streaming"
-        case .review: return "review"
-        case .diffFlash: return "diff_flash"
         }
     }
 
@@ -665,8 +640,7 @@ class DictationSessionController: ObservableObject {
         startupTask = nil
         streamingTask?.cancel()
         streamingTask = nil
-        clipboardRestoreTask?.cancel()
-        clipboardRestoreTask = nil
+        textPaster.cancelPendingClipboardRestore()
         recordingStartRetryTask?.cancel()
         recordingStartRetryTask = nil
         sessionTimeoutTask?.cancel()
@@ -727,91 +701,47 @@ class DictationSessionController: ObservableObject {
     }
 
     private func pasteWithClipboardRestore(_ text: String) -> DictationPasteOutcome {
-        guard let appState = appState else { return .failed("Couldn't paste dictation") }
+        let outcome = textPaster.paste(text)
 
-        // Check Accessibility permission BEFORE modifying clipboard
-        guard AXIsProcessTrusted() else {
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
-            appState.logger.log("DICTATION | Accessibility missing, copying text instead")
-            copyTextToClipboard(text)
-            return .copied("Couldn't paste automatically. Accessibility is off, so the text was copied.")
-        }
-
-        let pasteboard = NSPasteboard.general
-
-        // Save current clipboard contents
-        let savedItems: [[NSPasteboard.PasteboardType: Data]] = pasteboard.pasteboardItems?.map { item in
-            var typeData: [NSPasteboard.PasteboardType: Data] = [:]
-            for type in item.types {
-                if let data = item.data(forType: type) {
-                    typeData[type] = data
-                }
-            }
-            return typeData
-        } ?? []
-
-        // Set our drafted text
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-
-        // Simulate Cmd+V — target app is already frontmost (overlay is non-activating)
-        guard let vDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true),
-              let vUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false) else {
+        switch outcome.copyReason {
+        case .accessibilityMissing:
+            appState?.logger.log("DICTATION | Accessibility missing, copying text instead")
+        case .pasteEventCreationFailed:
             EventReporter.shared.capture(level: .error, engine: "overlay", event: "cgevent_create_failed",
                 message: "CGEvent creation returned nil — paste will not work")
-            appState.logger.log("DICTATION | CGEvent paste failed, keeping text on clipboard")
-            return .copied("Couldn't paste automatically. The text was copied instead.")
+            appState?.logger.log("DICTATION | CGEvent paste failed, keeping text on clipboard")
+        case nil:
+            break
         }
-        vDown.flags = .maskCommand
-        vDown.post(tap: .cghidEventTap)
 
-        vUp.flags = .maskCommand
-        vUp.post(tap: .cghidEventTap)
-
-        // Restore clipboard after paste completes.
-        // Poll changeCount every 50ms — some apps (rich text editors) write back to the
-        // clipboard on paste, which increments changeCount. If no change detected, fall
-        // back to a 2-second timeout (more conservative than the old 500ms for slow
-        // Electron apps like Slack/Teams).
-        let changeCountAfterSet = pasteboard.changeCount
-        clipboardRestoreTask?.cancel()
-        clipboardRestoreTask = Task { @MainActor in
-            // Defer guarantees the dictated text is wiped from the global pasteboard
-            // even if this task is cancelled or the actor is torn down mid-loop —
-            // otherwise a clipboard manager could scrape it indefinitely.
-            defer {
-                pasteboard.clearContents()
-                let items = savedItems.map { typeData -> NSPasteboardItem in
-                    let item = NSPasteboardItem()
-                    for (type, data) in typeData {
-                        item.setData(data, forType: type)
-                    }
-                    return item
-                }
-                if !items.isEmpty {
-                    pasteboard.writeObjects(items)
-                }
-            }
-            let startTime = CFAbsoluteTimeGetCurrent()
-            while CFAbsoluteTimeGetCurrent() - startTime < TranscriptedConstants.clipboardRestoreTimeout {
-                try? await Task.sleep(nanoseconds: TranscriptedConstants.clipboardPollInterval)
-                if pasteboard.changeCount != changeCountAfterSet { break }
-            }
-        }
-        return .pasted
+        return outcome
     }
 
-    private func copyTextToClipboard(_ text: String) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+    private func performAutoEnterIfNeeded(
+        text: String,
+        delivery: DictationDelivery
+    ) async -> DictationAutoSendOutcome {
+        let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
+        guard DictationAutoSendPolicy.shouldSend(
+            isEnabled: DictationAutoSendPreferences.isEnabled(),
+            delivery: delivery,
+            text: text,
+            duration: duration,
+            sourceBundleID: sessionSourceApp?.bundleIdentifier,
+            allowedBundleIDs: DictationAutoSendPreferences.allowedBundleIDs()
+        ) else {
+            return .disabled
+        }
+
+        try? await Task.sleep(nanoseconds: TranscriptedConstants.dictationAutoEnterDelay)
+        guard !Task.isCancelled else { return .disabled }
+        return autoSender.send(DictationAutoSendPreferences.sendKey())
     }
 
     @discardableResult
     private func persistDictationTranscript(text: String, delivery: DictationDelivery) -> String? {
         do {
-            let saved = try DictationTranscriptWriter.save(
+            let saved = try DictationTranscriptStore.save(
                 text: text,
                 sourceApp: sessionSourceApp,
                 delivery: delivery
@@ -853,6 +783,21 @@ class DictationSessionController: ObservableObject {
         }
 
         return context
+    }
+}
+
+private typealias DictationPasteOutcome = TextPasteOutcome
+
+private extension TextPasteOutcome {
+    var delivery: DictationDelivery {
+        switch self {
+        case .pasted:
+            return .pasted
+        case .copied:
+            return .copied
+        case .failed:
+            return .failed
+        }
     }
 }
 

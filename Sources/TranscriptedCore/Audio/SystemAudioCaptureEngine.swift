@@ -16,6 +16,11 @@ public protocol SystemAudioCaptureEngine: AnyObject {
     /// Fraction of received buffers that contained actual audio data (0.0–1.0).
     var bufferSuccessRate: Double { get }
 
+    /// True when delivered `AVAudioPCMBuffer`s own their sample memory beyond the callback.
+    /// Legacy CoreAudio taps wrap borrowed memory, while ScreenCaptureKit conversion already
+    /// copies into an owned buffer.
+    var deliversOwnedAudioBuffers: Bool { get }
+
     /// Publishes error messages for UI status updates (device changes, failures, etc.).
     var errorMessagePublisher: AnyPublisher<String?, Never> { get }
 

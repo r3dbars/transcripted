@@ -36,7 +36,7 @@ func testAnalyticsPayloadSanitizer() {
     runSuite("AnalyticsPayloadSanitizer redacts raw URLs and common secret values") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
-                "failure_kind": "Upload failed at https://example.com/path?token=abc123 with github_pat_abcdefghijklmnopqrstuvwxyz_1234567890 and api_key=secret-value",
+                "failure_kind": "Upload failed at https://example.com/path?token=abc123 with github_pat_abcdefghijklmnopqrstuvwxyz_1234567890 AKIAIOSFODNN7EXAMPLE AIzaSyA-BCDEFGHIJKLMNOPQRSTUVWXYZ123456 and api_key=secret-value password=hunter2 client_secret:supersecret credential=temp-pass",
             ],
             allowedKeys: ["failure_kind"]
         )
@@ -44,7 +44,12 @@ func testAnalyticsPayloadSanitizer() {
         let value = sanitized["failure_kind"] ?? ""
         assertFalse(value.contains("https://example.com/path?token=abc123"), "raw URLs should be redacted")
         assertFalse(value.contains("github_pat_abcdefghijklmnopqrstuvwxyz_1234567890"), "GitHub fine-grained tokens should be redacted")
+        assertFalse(value.contains("AKIAIOSFODNN7EXAMPLE"), "AWS access key IDs should be redacted")
+        assertFalse(value.contains("AIzaSyA-BCDEFGHIJKLMNOPQRSTUVWXYZ123456"), "Google API keys should be redacted")
         assertFalse(value.contains("api_key=secret-value"), "inline secret assignments should be redacted")
+        assertFalse(value.contains("hunter2"), "password assignment values should be redacted")
+        assertFalse(value.contains("supersecret"), "client secret assignment values should be redacted")
+        assertFalse(value.contains("temp-pass"), "credential assignment values should be redacted")
         assertTrue(value.contains("[redacted-url]"), "URL marker should remain")
         assertTrue(value.contains("[redacted-secret]"), "secret marker should remain")
     }

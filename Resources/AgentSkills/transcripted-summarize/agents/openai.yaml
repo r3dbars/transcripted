@@ -1,0 +1,4 @@
+interface:
+  display_name: "Summarize"
+  short_description: "Create cited briefs from Transcripted meetings and dictations."
+  default_prompt: "Summarize this Transcripted meeting, dictation, or date range with sources."

@@ -6,6 +6,7 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerDoesNotCreateSiblingArtifacts()
         testMeetingTranscriptStylerIsIdempotent()
         testMeetingTranscriptStylerPreservesExplicitTitle()
+        testMeetingTranscriptStylerRenamesRetainedAudioDirectory()
     }
 }
 
@@ -71,6 +72,28 @@ private func testMeetingTranscriptStylerPreservesExplicitTitle() {
     assertEqual(styled.title, "Customer Interview April", "Styler should respect an explicit imported transcript title")
     assertEqual(styled.url.lastPathComponent, "Customer Interview April.md", "Explicit titles should drive the final transcript filename")
     assertTrue(updatedMarkdown?.contains("# Customer Interview April") == true, "Explicit titles should be written back into the rendered markdown")
+}
+
+private func testMeetingTranscriptStylerRenamesRetainedAudioDirectory() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let originalStem = "Call_2026-04-07_09-14-00"
+    let transcriptURL = directory.appendingPathComponent("\(originalStem).md")
+    let audioRoot = directory.appendingPathComponent("audio", isDirectory: true)
+    let audioDirectory = audioRoot.appendingPathComponent("\(originalStem)_audio", isDirectory: true)
+    let micURL = audioDirectory.appendingPathComponent("microphone.wav")
+    try? FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
+    FileManager.default.createFile(atPath: micURL.path, contents: Data("mic".utf8))
+    try? sampleMeetingTranscript().write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+    let styledAudioDirectory = audioRoot.appendingPathComponent("Meeting with Alex_audio", isDirectory: true)
+
+    assertEqual(styled.url.lastPathComponent, "Meeting with Alex.md", "Styler should still rename the transcript")
+    assertTrue(FileManager.default.fileExists(atPath: styledAudioDirectory.path), "Retained audio directory should follow the transcript rename")
+    assertTrue(FileManager.default.fileExists(atPath: styledAudioDirectory.appendingPathComponent("microphone.wav").path), "Retained audio files should move with the directory")
+    assertFalse(FileManager.default.fileExists(atPath: audioDirectory.path), "Original retained audio directory should be replaced")
 }
 
 private func sampleMeetingTranscript() -> String {

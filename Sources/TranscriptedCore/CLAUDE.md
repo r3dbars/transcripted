@@ -4,7 +4,7 @@
 
 `Sources/TranscriptedCore/` is the reusable meeting transcription library embedded in this repo. It is consumed by the app through `Sources/Meeting/`, and it can also be tested as a standalone Swift package through the root `Package.swift`.
 
-## Subsystems (58 Swift files)
+## Subsystems (59 Swift files)
 
 - `Audio/` (14 files) — mic + system audio capture, imported-audio prep helpers, device recovery, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, and merge helpers
 - `Logging/` (2 files) — shared app logger and JSONL file logger
@@ -14,7 +14,7 @@
 - `Services/` (7 files) — DI container (`AppServices`), model bundle / download management, path indirection, recording validation, diarization, and failed-transcription persistence
 - `Speaker/` (10 files) — speaker DB, embedding matching / clustering, clip extraction, naming policy / coordinator, profile merging, retroactive transcript updates
 - `Stats/` (4 files) — recording stats database, models, queries, and service
-- `Storage/` (3 files) — transcript save, scanner, formatter
+- `Storage/` (4 files) — transcript save, scanner, formatter, and retained-recording audio archiving
 - `Utilities/` (2 files) — date formatting and file permission helpers
 
 ## The seams embedders should know

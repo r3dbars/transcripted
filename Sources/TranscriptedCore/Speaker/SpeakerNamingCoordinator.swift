@@ -32,23 +32,22 @@ extension TranscriptionTaskManager {
         transcriptionResult: TranscriptionResult,
         micURL: URL?,
         systemURL: URL,
+        shouldRemoveTemporaryAudio: Bool = true,
         clips: [SpeakerNamingEntry]
     ) {
         let speakerDB = transcription.speakerDB
         let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map {
-            (Self.speakerClipLookupKey(channel: $0.channel, diarizerSpeakerId: $0.diarizerSpeakerId), $0)
+            ($0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId), $0)
         })
 
         // Partition updates: "Keep as You" collapsedToMe updates follow a different
         // path (delete newly-created profiles, rewrite mic labels to "You") than
         // regular name/merge/confirm updates. We process both during naming completion.
-        let collapsedUpdates = updates.filter {
-            if case .collapsedToMe = $0.action { return true }
-            return false
-        }
-        let regularUpdates = updates.filter {
-            if case .collapsedToMe = $0.action { return false }
-            return true
+        var collapsedUpdates: [SpeakerNameUpdate] = []
+        var regularUpdates: [SpeakerNameUpdate] = []
+        for update in updates {
+            if case .collapsedToMe = update.action { collapsedUpdates.append(update) }
+            else { regularUpdates.append(update) }
         }
         let newlyCreatedMicProfileIds = transcriptionResult.newlyCreatedMicProfileIds
 
@@ -58,8 +57,10 @@ extension TranscriptionTaskManager {
                 transcriptId: transcriptId
             ) else {
                 SpeakerClipExtractor.cleanupClips(clips)
-                Self.removeTemporaryAudioFile(micURL, label: "mic audio")
-                Self.removeTemporaryAudioFile(systemURL, label: "system audio")
+                if shouldRemoveTemporaryAudio {
+                    Self.removeTemporaryAudioFile(micURL, label: "mic audio")
+                    Self.removeTemporaryAudioFile(systemURL, label: "system audio")
+                }
 
                 Task { @MainActor in
                     self?.finishNamingFlow(
@@ -78,8 +79,10 @@ extension TranscriptionTaskManager {
                 speakerDB: speakerDB
             ) else {
                 SpeakerClipExtractor.cleanupClips(clips)
-                Self.removeTemporaryAudioFile(micURL, label: "mic audio")
-                Self.removeTemporaryAudioFile(systemURL, label: "system audio")
+                if shouldRemoveTemporaryAudio {
+                    Self.removeTemporaryAudioFile(micURL, label: "mic audio")
+                    Self.removeTemporaryAudioFile(systemURL, label: "system audio")
+                }
 
                 Task { @MainActor in
                     self?.finishNamingFlow(
@@ -119,8 +122,10 @@ extension TranscriptionTaskManager {
             }
 
             SpeakerClipExtractor.cleanupClips(clips)
-            Self.removeTemporaryAudioFile(micURL, label: "mic audio")
-            Self.removeTemporaryAudioFile(systemURL, label: "system audio")
+            if shouldRemoveTemporaryAudio {
+                Self.removeTemporaryAudioFile(micURL, label: "mic audio")
+                Self.removeTemporaryAudioFile(systemURL, label: "system audio")
+            }
 
             Task { @MainActor in
                 self?.finishNamingFlow(
@@ -137,8 +142,10 @@ extension TranscriptionTaskManager {
     /// Called from applicationWillTerminate to prevent orphaned audio files.
     public func cleanupPendingNaming() {
         if let request = speakerNamingRequest {
-            Self.removeTemporaryAudioFile(request.micAudioURL, label: "pending mic audio")
-            Self.removeTemporaryAudioFile(request.systemAudioURL, label: "pending system audio")
+            if request.shouldRemoveTemporaryAudioOnCleanup {
+                Self.removeTemporaryAudioFile(request.micAudioURL, label: "pending mic audio")
+                Self.removeTemporaryAudioFile(request.systemAudioURL, label: "pending system audio")
+            }
             SpeakerClipExtractor.cleanupClips(request.speakers)
             speakerNamingRequest = nil
             AppLogger.pipeline.info("Cleaned up pending naming on shutdown")
@@ -155,7 +162,7 @@ extension TranscriptionTaskManager {
         var mutations: [PlannedSpeakerMutation] = []
 
         for update in updates {
-            let entry = clipsBySpeakerId[speakerClipLookupKey(channel: update.channel, diarizerSpeakerId: update.diarizerSpeakerId)]
+            let entry = clipsBySpeakerId[update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)]
             guard let plan = planPersistentSpeakerResolution(
                 for: update,
                 entry: entry,
@@ -332,13 +339,6 @@ extension TranscriptionTaskManager {
         (name ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-    }
-
-    nonisolated private static func speakerClipLookupKey(
-        channel: UtteranceChannel,
-        diarizerSpeakerId: String
-    ) -> String {
-        "\(channel.rawValue)_\(diarizerSpeakerId)"
     }
 
     @MainActor private func finishNamingFlow(

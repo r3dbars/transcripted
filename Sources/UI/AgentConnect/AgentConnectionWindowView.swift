@@ -140,7 +140,7 @@ struct AgentConnectionWindowView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(AgentConnectionTheme.textPrimary)
 
-                Text("Copy one prompt, paste it into your agent, and let Transcripted use MCP when available or folders when not.")
+                Text("Copy once, paste anywhere, and let your agent pick the best available Transcripted connection.")
                     .font(.system(size: 12))
                     .foregroundStyle(AgentConnectionTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -158,24 +158,24 @@ struct AgentConnectionWindowView: View {
             title: "Copy this into your agent",
             subtitle: "This is the main path for most people."
         ) {
-            AgentConnectionBodyText("Your agent will use Transcripted MCP tools if they are already connected. If not, it will fall back to your local Transcripted folders and can help you set up the better option later.")
+            AgentConnectionBodyText("Your agent will choose the best route automatically. Local agents can read Transcripted directly; remote chats get one clear next step if they cannot reach this Mac.")
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("What this helps with")
+                Text("Starter skills")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(AgentConnectionTheme.textPrimary)
 
-                ForEach(Array(AgentConnectionGuide.benefitHighlights.enumerated()), id: \.offset) { index, highlight in
+                ForEach(Array(AgentConnectionGuide.starterSkills.enumerated()), id: \.offset) { _, skill in
                     AgentConnectionInfoRow(
-                        symbolName: index == 0 ? "sparkles" : "checkmark.circle.fill",
-                        title: highlight,
-                        detail: "Works from the same local Transcripted data already saved on this Mac."
+                        symbolName: skill.symbolName,
+                        title: skill.title,
+                        detail: skill.displayDetail
                     )
                 }
             }
 
             HStack(spacing: 10) {
-                Button(viewModel.copyLabel(for: .prompt, default: "Copy agent prompt")) {
+                Button(viewModel.copyLabel(for: .prompt, default: "Copy Agent Setup")) {
                     viewModel.copyStarterPrompt()
                 }
                 .buttonStyle(AgentConnectionPrimaryButtonStyle())

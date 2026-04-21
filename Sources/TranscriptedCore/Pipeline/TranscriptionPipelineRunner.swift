@@ -52,7 +52,7 @@ extension TranscriptionTaskManager {
         )
     }
 
-    /// Local pipeline: Parakeet STT + PyAnnote diarization → Speaker identification → Save.
+    /// Local pipeline: selected STT + PyAnnote diarization → Speaker identification → Save.
     /// When `splitLocalSpeakers` is true, mic-channel diarization runs too, and local
     /// speakers thread through the same classification + naming flow as remote speakers.
     /// Note: nonisolated to keep heavy async work off the main thread
@@ -68,7 +68,14 @@ extension TranscriptionTaskManager {
 
         let transcription = await MainActor.run { self.transcription }
 
-        AppLogger.pipeline.info("Using local Parakeet + PyAnnote pipeline", ["splitLocalSpeakers": "\(splitLocalSpeakers)"])
+        let speechEngine = await MainActor.run {
+            transcription.parakeet.transcriptionEngineDescriptor
+        }
+
+        AppLogger.pipeline.info("Using local \(speechEngine.displayName) + PyAnnote pipeline", [
+            "splitLocalSpeakers": "\(splitLocalSpeakers)",
+            "transcription_engine": speechEngine.identifier
+        ])
 
         // Phase 1: Transcribe with local models
         let result = try await transcription.transcribeMultichannel(
@@ -270,12 +277,19 @@ extension TranscriptionTaskManager {
             healthInfo: healthInfo,
             notifier: notifier,
             speakerStore: speakerDB,
-            statsStore: statsStore
+            statsStore: statsStore,
+            transcriptionEngine: speechEngine
         ) else {
             throw PipelineError.saveFailed(detail: "Could not write transcript to \(outputFolder.lastPathComponent)")
         }
 
         AppLogger.pipeline.info("Phase 2 complete: Transcript saved", ["file": savedURL.lastPathComponent])
+
+        let shouldRemoveScratchAudio = await archiveRecordingAudioIfConfigured(
+            micURL: micURL,
+            systemURL: systemURL,
+            savedURL: savedURL
+        )
 
         // Phase 3: Speaker naming — for system speakers that need action, plus any mic
         // speakers surfaced by local-speaker split. Entries from both channels flow
@@ -370,6 +384,7 @@ extension TranscriptionTaskManager {
                     transcriptId: transcriptId,
                     systemAudioURL: systemURL,
                     micAudioURL: micURL,
+                    shouldRemoveTemporaryAudioOnCleanup: shouldRemoveScratchAudio,
                     onComplete: { [weak self] updates in
                         self?.handleNamingComplete(
                             updates: updates,
@@ -378,6 +393,7 @@ extension TranscriptionTaskManager {
                             transcriptionResult: result,
                             micURL: micURL,
                             systemURL: systemURL,
+                            shouldRemoveTemporaryAudio: shouldRemoveScratchAudio,
                             clips: capturedEntries
                         )
                     }
@@ -392,13 +408,45 @@ extension TranscriptionTaskManager {
             return savedURL
         }
 
-        // No naming needed — clean up audio files
-        if let micURL {
+        // No naming needed — clean up scratch audio once retained copies exist.
+        if shouldRemoveScratchAudio, let micURL {
             try? FileManager.default.removeItem(at: micURL)
         }
-        try? FileManager.default.removeItem(at: systemURL)
+        if shouldRemoveScratchAudio {
+            try? FileManager.default.removeItem(at: systemURL)
+        }
 
         return savedURL
+    }
+
+    nonisolated private func archiveRecordingAudioIfConfigured(
+        micURL: URL?,
+        systemURL: URL,
+        savedURL: URL
+    ) async -> Bool {
+        let retainedAudioDirectory = await MainActor.run { self.retainedAudioDirectory }
+        guard let retainedAudioDirectory else { return true }
+
+        do {
+            let retainedAudio = try RecordingAudioArchiver.archive(
+                micURL: micURL,
+                systemURL: systemURL,
+                transcriptURL: savedURL,
+                archiveRoot: retainedAudioDirectory
+            )
+            AppLogger.pipeline.info("Retained meeting audio files", [
+                "directory": retainedAudio.directory.lastPathComponent,
+                "mic": retainedAudio.micURL?.lastPathComponent ?? "none",
+                "system": retainedAudio.systemURL?.lastPathComponent ?? "none"
+            ])
+            return true
+        } catch {
+            AppLogger.pipeline.warning("Failed to retain meeting audio; leaving scratch files in place", [
+                "transcript": savedURL.lastPathComponent,
+                "error": error.localizedDescription
+            ])
+            return false
+        }
     }
 
 }

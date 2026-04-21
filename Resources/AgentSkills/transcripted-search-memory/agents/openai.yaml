@@ -1,0 +1,4 @@
+interface:
+  display_name: "Search Memory"
+  short_description: "Find Transcripted memories with sources."
+  default_prompt: "Search my Transcripted memory for this topic and cite the matching meetings or dictations."

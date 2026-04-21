@@ -22,6 +22,8 @@ ESPEAK_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/ESpeakNG.framework"
 SENTRY_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sentry.framework"
 SPARKLE_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sparkle.framework"
 TRANSCRIPTED_CORE_MODULE="$DEPS_MODULE_ROOT/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
+ARGMAX_CORE_MODULE="$DEPS_MODULE_ROOT/ArgmaxCore.swiftmodule/arm64-apple-macos.swiftmodule"
+WHISPERKIT_MODULE="$DEPS_MODULE_ROOT/WhisperKit.swiftmodule/arm64-apple-macos.swiftmodule"
 
 dependency_input_listing() {
     {
@@ -59,7 +61,7 @@ ensure_deps_ready() {
     local build_stamp_mtime
     local build_stamp_path
 
-    if [ -f "$DEPS_ARCHIVE" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -d "$ESPEAK_FRAMEWORK" ] && [ -d "$SENTRY_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
+    if [ -f "$DEPS_ARCHIVE" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -f "$ARGMAX_CORE_MODULE" ] && [ -f "$WHISPERKIT_MODULE" ] && [ -d "$ESPEAK_FRAMEWORK" ] && [ -d "$SENTRY_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
         newest_input="$(newest_dependency_input)"
         build_stamp="$(deps_build_stamp_info)"
 
@@ -86,6 +88,8 @@ ensure_deps_ready() {
     echo "  $DEPS_BUILD_STAMP"
     echo "  $DEPS_MODULE_ROOT/"
     echo "  $TRANSCRIPTED_CORE_MODULE"
+    echo "  $ARGMAX_CORE_MODULE"
+    echo "  $WHISPERKIT_MODULE"
     echo "  $ESPEAK_FRAMEWORK"
     echo "  $SENTRY_FRAMEWORK"
     echo "  $SPARKLE_FRAMEWORK"
@@ -217,7 +221,7 @@ if [ -d "Resources" ]; then
     cp -R Resources/. "$APP_BUNDLE/Contents/Resources/"
 fi
 
-# Unified dependencies (FluidAudio + mlx-swift-lm)
+# Unified dependencies (FluidAudio + mlx-swift-lm + WhisperKit)
 echo "Dependencies found"
 
 # Build the -I flags for all module directories
