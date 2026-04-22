@@ -15,6 +15,13 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
 
         var state: State
         var canCheckForUpdates: Bool
+
+        var availableUpdateVersion: String? {
+            if case .updateAvailable(let version) = state {
+                return version
+            }
+            return nil
+        }
     }
 
     @Published private(set) var updateStatus = UpdateStatus(
@@ -25,7 +32,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     private lazy var updaterController = SPUStandardUpdaterController(
         startingUpdater: true,
         updaterDelegate: self,
-        userDriverDelegate: nil
+        userDriverDelegate: self
     )
     private var canCheckObservation: NSKeyValueObservation?
     private var hasPerformedStartupCheck = false
@@ -118,6 +125,10 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     }
 
     private func versionString(for item: SUAppcastItem) -> String {
+        Self.displayVersionString(for: item)
+    }
+
+    nonisolated private static func displayVersionString(for item: SUAppcastItem) -> String {
         let displayVersion = item.displayVersionString.trimmingCharacters(in: .whitespacesAndNewlines)
         if !displayVersion.isEmpty {
             return displayVersion
@@ -158,5 +169,31 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
         }
 
         setUpdateStatus(fallbackState, canCheckForUpdates: updater.canCheckForUpdates)
+    }
+}
+
+extension SparkleUpdaterController: SPUStandardUserDriverDelegate {
+    nonisolated var supportsGentleScheduledUpdateReminders: Bool { true }
+
+    nonisolated func standardUserDriverShouldHandleShowingScheduledUpdate(
+        _ update: SUAppcastItem,
+        andInImmediateFocus immediateFocus: Bool
+    ) -> Bool {
+        false
+    }
+
+    nonisolated func standardUserDriverWillHandleShowingUpdate(
+        _ handleShowingUpdate: Bool,
+        forUpdate update: SUAppcastItem,
+        state: SPUUserUpdateState
+    ) {
+        let version = Self.displayVersionString(for: update)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.setUpdateStatus(
+                .updateAvailable(version: version),
+                canCheckForUpdates: self.updaterController.updater.canCheckForUpdates
+            )
+        }
     }
 }

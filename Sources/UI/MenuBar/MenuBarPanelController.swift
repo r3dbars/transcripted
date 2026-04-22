@@ -86,6 +86,7 @@ final class MenuBarPanelController: NSViewController {
 
         content.utilityActionsView.update(
             updateTitle: updatePresentation.title,
+            updateDetail: updatePresentation.detail,
             updateVersion: updatePresentation.version,
             updateTone: updatePresentation.tone,
             updateEnabled: appState.sparkleUpdater.updateStatus.canCheckForUpdates
@@ -199,30 +200,34 @@ final class MenuBarPanelController: NSViewController {
 
     private func menuUpdatePresentation(
         for status: SparkleUpdaterController.UpdateStatus
-    ) -> (title: String, version: String?, tone: MenuBarActionRowView.Tone) {
+    ) -> (title: String, detail: String, version: String?, tone: MenuBarActionRowView.Tone) {
         switch status.state {
         case .unknown, .readyToCheck:
             return (
                 "Check for Updates",
+                "",
                 nil,
                 .standard
             )
         case .checking:
             return (
-                "Checking…",
+                "Checking for Updates…",
+                "",
                 nil,
                 .standard
             )
         case .noUpdateAvailable:
             return (
                 "Check for Updates",
+                "",
                 nil,
                 .standard
             )
         case .updateAvailable(let version):
             return (
                 "Update Available",
-                version,
+                "Version \(version) ready",
+                "Install",
                 .accent
             )
         }

@@ -85,15 +85,8 @@ struct TranscriptedSettingsView: View {
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 0) {
                     Divider()
-                    HStack {
-                        Text(TranscriptedSupportActions.appVersionDescription)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(.thinMaterial)
+                    settingsSidebarFooter
+                        .background(.thinMaterial)
                 }
             }
         } detail: {
@@ -155,6 +148,48 @@ struct TranscriptedSettingsView: View {
             Label(page.title, systemImage: page.systemImage)
                 .tag(page)
         }
+    }
+
+    private var settingsSidebarFooter: some View {
+        Button {
+            actions.checkForUpdates()
+        } label: {
+            HStack(spacing: 8) {
+                if sparkleUpdater.updateStatus.availableUpdateVersion != nil {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 7, height: 7)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(settingsFooterTitle)
+                        .font(.caption.weight(settingsFooterIsUpdateAvailable ? .semibold : .regular))
+                        .foregroundStyle(settingsFooterIsUpdateAvailable ? Color.primary : Color.secondary)
+                        .lineLimit(1)
+
+                    if let detail = settingsFooterDetail {
+                        Text(detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer(minLength: 6)
+
+                Image(systemName: settingsFooterIsUpdateAvailable ? "arrow.down.circle.fill" : "arrow.triangle.2.circlepath")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(settingsFooterIsUpdateAvailable ? Color.accentColor : Color.secondary)
+                    .opacity(sparkleUpdater.updateStatus.canCheckForUpdates ? 1 : 0.45)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, settingsFooterIsUpdateAvailable ? 8 : 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!sparkleUpdater.updateStatus.canCheckForUpdates)
+        .help(settingsFooterHelp)
     }
 
     @ViewBuilder
@@ -930,6 +965,39 @@ struct TranscriptedSettingsView: View {
                 }
             }
         }
+    }
+
+    private var settingsFooterIsUpdateAvailable: Bool {
+        sparkleUpdater.updateStatus.availableUpdateVersion != nil
+    }
+
+    private var settingsFooterTitle: String {
+        if let version = sparkleUpdater.updateStatus.availableUpdateVersion {
+            return "Update \(version) available"
+        }
+
+        switch sparkleUpdater.updateStatus.state {
+        case .checking:
+            return "Checking for updates"
+        case .noUpdateAvailable, .unknown, .readyToCheck:
+            return TranscriptedSupportActions.appVersionDescription
+        case .updateAvailable:
+            return TranscriptedSupportActions.appVersionDescription
+        }
+    }
+
+    private var settingsFooterDetail: String? {
+        if sparkleUpdater.updateStatus.availableUpdateVersion != nil {
+            return TranscriptedSupportActions.appVersionDescription
+        }
+        return nil
+    }
+
+    private var settingsFooterHelp: String {
+        if let version = sparkleUpdater.updateStatus.availableUpdateVersion {
+            return "Install update \(version)."
+        }
+        return "Check for updates."
     }
 
     private var appStateFolder: URL {
