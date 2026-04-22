@@ -511,7 +511,7 @@ final class SpeakerRowView: NSView {
         nameField.usesDataSource = true
         nameField.dataSource = self
         nameField.delegate = self
-        nameField.completes = true
+        nameField.completes = false
         nameField.numberOfVisibleItems = min(max(knownPeopleLabels.count, 4), 8)
         nameField.font = NSFont.systemFont(ofSize: 12)
         if entry.currentName != nil {
@@ -782,22 +782,26 @@ final class SpeakerRowView: NSView {
     private func visibleKnownPeopleLabels() -> [String] {
         let query = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return knownPeopleLabels }
-        let matches = knownPeopleLabels.filter { labelMatches($0, query: query) }
-        return matches.isEmpty ? knownPeopleLabels : matches
+        return sortedKnownPeopleLabels(matching: query)
     }
 
-    private func bestKnownPeopleLabel(matching query: String) -> String? {
+    private func sortedKnownPeopleLabels(matching query: String) -> [String] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
+        guard !trimmed.isEmpty else { return knownPeopleLabels }
         return knownPeopleLabels
-            .filter { labelMatches($0, query: trimmed) }
-            .sorted { lhs, rhs in
-                let lhsRank = matchRank(for: lhs, query: trimmed)
-                let rhsRank = matchRank(for: rhs, query: trimmed)
-                if lhsRank != rhsRank { return lhsRank < rhsRank }
-                return (knownPeopleByLabel[lhs]?.callCount ?? 0) > (knownPeopleByLabel[rhs]?.callCount ?? 0)
+            .compactMap { label -> (label: String, rank: Int)? in
+                let rank = matchRank(for: label, query: trimmed)
+                guard rank < Int.max else { return nil }
+                return (label, rank)
             }
-            .first
+            .sorted { lhs, rhs in
+                if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
+                let lhsCalls = knownPeopleByLabel[lhs.label]?.callCount ?? 0
+                let rhsCalls = knownPeopleByLabel[rhs.label]?.callCount ?? 0
+                if lhsCalls != rhsCalls { return lhsCalls > rhsCalls }
+                return lhs.label.localizedStandardCompare(rhs.label) == .orderedAscending
+            }
+            .map { $0.label }
     }
 
     private func knownPeopleOption(matching input: String) -> SpeakerIdentityOption? {
@@ -811,10 +815,6 @@ final class SpeakerRowView: NSView {
         }
         guard displayMatches.count == 1 else { return nil }
         return displayMatches[0]
-    }
-
-    private func labelMatches(_ label: String, query: String) -> Bool {
-        matchRank(for: label, query: query) < Int.max
     }
 
     private func matchRank(for label: String, query: String) -> Int {
@@ -913,7 +913,7 @@ extension SpeakerRowView: NSComboBoxDataSource, NSComboBoxDelegate {
     }
 
     func comboBox(_ comboBox: NSComboBox, completedString string: String) -> String? {
-        bestKnownPeopleLabel(matching: string)
+        nil
     }
 
     func comboBox(_ comboBox: NSComboBox, indexOfItemWithStringValue string: String) -> Int {
