@@ -53,6 +53,8 @@ final class MenuBarPanelController: NSViewController {
     func refresh() {
         guard let content = contentView else { return }
 
+        appState.contextCapture.refreshShortcutStatus()
+
         let warmupStatus = appState.meetingSession.warmupStatus
         let modelState = FirstRunLocalModelState(appState.sttRouter.modelDownloadState)
         let dictationState = FirstRunExperience.dictationAction(for: modelState)

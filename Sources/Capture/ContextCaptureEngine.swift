@@ -374,6 +374,20 @@ class ContextCaptureEngine: ObservableObject {
         }
     }
 
+    func refreshShortcutStatus() {
+        let nextDictationDisplay = Self.currentDictationShortcutDisplay()
+        if dictationShortcutDisplay != nextDictationDisplay {
+            dictationShortcutDisplay = nextDictationDisplay
+        }
+
+        let nextMeetingDisplay = HotkeyPreferences.displayString(for: HotkeyPreferences.meetingBinding())
+        if meetingShortcutDisplay != nextMeetingDisplay {
+            meetingShortcutDisplay = nextMeetingDisplay
+        }
+
+        updateHotkeyError()
+    }
+
     private func configurePhysicalDictationTriggerDetector() {
         physicalDictationTriggerDetector.bindingProvider = {
             PhysicalDictationTriggerPreferences.binding()
@@ -407,8 +421,15 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private func updateHotkeyError() {
-        let errors = [carbonHotkeyError, physicalTriggerError].compactMap { $0 }
-        hotkeyError = errors.isEmpty ? nil : errors.joined(separator: " and ")
+        let errors = [
+            carbonHotkeyError,
+            physicalTriggerError,
+            PhysicalDictationTriggerPreferences.functionKeyConflictWarning()
+        ].compactMap { $0 }
+        let nextError = errors.isEmpty ? nil : errors.joined(separator: " and ")
+        if hotkeyError != nextError {
+            hotkeyError = nextError
+        }
     }
 
     private func handlePhysicalDictationTriggerPress() {

@@ -24,11 +24,48 @@ enum PhysicalDictationTriggerModifiers {
     static let all: UInt32 = command | shift | option | control | function | capsLock
 }
 
+enum FunctionKeySystemAction: Equatable {
+    case notConfigured
+    case doNothing
+    case changeInputSource
+    case showEmojiAndSymbols
+    case startDictation
+    case unknown(Int)
+
+    var title: String {
+        switch self {
+        case .notConfigured:
+            return "the macOS default"
+        case .doNothing:
+            return "Do Nothing"
+        case .changeInputSource:
+            return "Change Input Source"
+        case .showEmojiAndSymbols:
+            return "Emoji & Symbols"
+        case .startDictation:
+            return "Start Dictation"
+        case .unknown:
+            return "another system action"
+        }
+    }
+
+    var conflictsWithBareFunctionKey: Bool {
+        switch self {
+        case .doNothing, .notConfigured:
+            return false
+        case .changeInputSource, .showEmojiAndSymbols, .startDictation, .unknown:
+            return true
+        }
+    }
+}
+
 enum PhysicalDictationTriggerPreferences {
     static let defaultBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
 
     private static let keyCodeKey = "dictationTrigger-keyCode"
     private static let modifiersKey = "dictationTrigger-modifiers"
+    private static let functionKeyUsageDomain = "com.apple.HIToolbox" as CFString
+    private static let functionKeyUsageKey = "AppleFnUsageType" as CFString
 
     static func binding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
         guard userDefaults.object(forKey: keyCodeKey) != nil else {
@@ -49,6 +86,45 @@ enum PhysicalDictationTriggerPreferences {
 
     static func resetToDefault(userDefaults: UserDefaults = .standard) {
         save(defaultBinding, userDefaults: userDefaults)
+    }
+
+    static func functionKeySystemAction() -> FunctionKeySystemAction {
+        let value = CFPreferencesCopyAppValue(functionKeyUsageKey, functionKeyUsageDomain)
+        if let number = value as? NSNumber {
+            return functionKeySystemAction(rawValue: number.intValue)
+        }
+        if let string = value as? String, let rawValue = Int(string) {
+            return functionKeySystemAction(rawValue: rawValue)
+        }
+        return .notConfigured
+    }
+
+    static func functionKeySystemAction(rawValue: Int?) -> FunctionKeySystemAction {
+        guard let rawValue else { return .notConfigured }
+        switch rawValue {
+        case 0:
+            return .doNothing
+        case 1:
+            return .changeInputSource
+        case 2:
+            return .showEmojiAndSymbols
+        case 3:
+            return .startDictation
+        default:
+            return .unknown(rawValue)
+        }
+    }
+
+    static func functionKeyConflictWarning(
+        for binding: PhysicalDictationTriggerBinding = PhysicalDictationTriggerPreferences.binding(),
+        systemAction: FunctionKeySystemAction = PhysicalDictationTriggerPreferences.functionKeySystemAction()
+    ) -> String? {
+        guard binding.keyCode == UInt32(kVK_Function),
+              systemAction.conflictsWithBareFunctionKey else {
+            return nil
+        }
+
+        return "Fn is also set to \(systemAction.title) in macOS. Set Keyboard > Press Fn/Globe key to Do Nothing."
     }
 
     static func displayString(for binding: PhysicalDictationTriggerBinding) -> String {

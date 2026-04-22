@@ -28,6 +28,7 @@ struct TranscriptedSettingsView: View {
     private let sidebarSections = SettingsSidebarSection.defaultSections
 
     @State private var dictationShortcutMode = HotkeyPreferences.dictationShortcutMode()
+    @State private var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning()
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
@@ -137,9 +138,13 @@ struct TranscriptedSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .menuBarVisibilityPreferencesDidChange)) { _ in
             refreshMenuBarVisibility()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .hotkeysDidChange)) { _ in
+            refreshShortcutState()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshPermissions()
             refreshRecentCaptures()
+            refreshShortcutState()
         }
     }
 
@@ -373,6 +378,18 @@ struct TranscriptedSettingsView: View {
                 Text(dictationShortcutMode.summary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if let dictationTriggerSystemWarning {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+
+                        Text(dictationTriggerSystemWarning)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .font(.caption)
+                }
             }
 
             SettingsSection(
@@ -1033,7 +1050,7 @@ struct TranscriptedSettingsView: View {
         refreshPermissions()
         refreshStoragePaths()
         refreshRecentCaptures()
-        dictationShortcutMode = HotkeyPreferences.dictationShortcutMode()
+        refreshShortcutState()
         refreshMenuBarVisibility()
         refreshLaunchAtLoginState()
         customDictionaryText = CustomDictionaryPreferences.rawText()
@@ -1062,6 +1079,11 @@ struct TranscriptedSettingsView: View {
     private func refreshRecentCaptures() {
         recentMeetings = RecentMeetingsScanner.loadRecent(limit: 5)
         recentDictations = DictationTranscriptStore.recentSavedDictations(limit: 5)
+    }
+
+    private func refreshShortcutState() {
+        dictationShortcutMode = HotkeyPreferences.dictationShortcutMode()
+        dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning()
     }
 
     private func refreshMenuBarVisibility() {

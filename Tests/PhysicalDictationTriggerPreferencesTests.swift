@@ -31,6 +31,77 @@ func testPhysicalDictationTriggerPreferences() {
         assertEqual(PhysicalDictationTriggerPreferences.displayString(for: fn), "Fn", "Fn should have a readable display name")
     }
 
+    runSuite("PhysicalDictationTriggerPreferences decodes macOS Fn actions") {
+        assertEqual(
+            PhysicalDictationTriggerPreferences.functionKeySystemAction(rawValue: nil),
+            .notConfigured,
+            "missing AppleFnUsageType should be treated as not configured"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.functionKeySystemAction(rawValue: 0),
+            .doNothing,
+            "AppleFnUsageType 0 should mean Do Nothing"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.functionKeySystemAction(rawValue: 1),
+            .changeInputSource,
+            "AppleFnUsageType 1 should mean Change Input Source"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.functionKeySystemAction(rawValue: 2),
+            .showEmojiAndSymbols,
+            "AppleFnUsageType 2 should mean Emoji & Symbols"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.functionKeySystemAction(rawValue: 3),
+            .startDictation,
+            "AppleFnUsageType 3 should mean Start Dictation"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.functionKeySystemAction(rawValue: 99),
+            .unknown(99),
+            "unknown values should still be preserved for diagnostics"
+        )
+    }
+
+    runSuite("PhysicalDictationTriggerPreferences warns when bare Fn conflicts with macOS") {
+        let fn = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function))
+        let fnSpace = PhysicalDictationTriggerBinding(
+            keyCode: UInt32(kVK_Space),
+            modifiers: PhysicalDictationTriggerModifiers.function
+        )
+        let rightOption = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
+
+        assertNil(
+            PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+                for: fn,
+                systemAction: .doNothing
+            ),
+            "bare Fn should be safe when macOS leaves Fn alone"
+        )
+        assertNotNil(
+            PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+                for: fn,
+                systemAction: .showEmojiAndSymbols
+            ),
+            "bare Fn should warn when macOS opens emoji with the same key"
+        )
+        assertNil(
+            PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+                for: fnSpace,
+                systemAction: .showEmojiAndSymbols
+            ),
+            "Fn chords should not warn like bare Fn"
+        )
+        assertNil(
+            PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+                for: rightOption,
+                systemAction: .showEmojiAndSymbols
+            ),
+            "non-Fn physical triggers should not warn about Fn settings"
+        )
+    }
+
     runSuite("PhysicalDictationTriggerPreferences migrates legacy shortcut when right Option is disabled") {
         let (defaults, suiteName) = makePhysicalTriggerDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
