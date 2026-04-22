@@ -45,6 +45,19 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         }
     }
 
+    var analyticsValue: String {
+        switch self {
+        case .microphone:
+            return "microphone"
+        case .accessibility:
+            return "pasteback"
+        case .systemAudioRecording:
+            return "system_recording"
+        case .calendar:
+            return "calendar"
+        }
+    }
+
     var summary: String {
         switch self {
         case .microphone:

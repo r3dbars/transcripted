@@ -6,6 +6,7 @@ import Foundation
 
 extension Notification.Name {
     static let dictationTranscriptDidSave = Notification.Name("Transcripted.DictationTranscriptDidSave")
+    static let dictationNoSpeechDetected = Notification.Name("Transcripted.DictationNoSpeechDetected")
 }
 
 struct SavedDictationEntry: Identifiable {

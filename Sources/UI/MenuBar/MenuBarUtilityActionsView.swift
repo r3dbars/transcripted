@@ -26,10 +26,16 @@ final class MenuBarUtilityActionsView: NSView {
 
     private func setupViews() {
         connectAgentRow.onPress = { [weak self] in self?.onOpenConnectAgent?() }
-        feedbackRow.onPress = { [weak self] in self?.sendFeedback() }
+        feedbackRow.onPress = { [weak self] in
+            self?.trackMenuAction("submit_feedback")
+            self?.sendFeedback()
+        }
         updatesRow.onPress = { [weak self] in self?.onCheckForUpdates?() }
         settingsRow.onPress = { [weak self] in self?.onOpenSettings?() }
-        quitRow.onPress = { NSApplication.shared.terminate(nil) }
+        quitRow.onPress = { [weak self] in
+            self?.trackMenuAction("quit")
+            NSApplication.shared.terminate(nil)
+        }
 
         [connectAgentRow, feedbackRow, updatesRow, settingsRow, quitRow].forEach(addSubview(_:))
     }
@@ -101,6 +107,18 @@ final class MenuBarUtilityActionsView: NSView {
 
     private func sendFeedback() {
         TranscriptedSupportActions.sendFeedback(logger: appState?.logger)
+    }
+
+    private func trackMenuAction(_ actionID: String) {
+        AnalyticsReporter.track(
+            "menu_bar_action_clicked",
+            properties: [
+                "action_id": actionID,
+                "dictation_ready": appState?.sttRouter.isModelLoaded == true ? "true" : "false",
+                "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
+                "paste_available": DictationTranscriptStore.latestSavedDictation() == nil ? "false" : "true",
+            ]
+        )
     }
 
     func dismissTransientUI() {}

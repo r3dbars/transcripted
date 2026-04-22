@@ -15,6 +15,15 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var analyticsValue: String {
+        switch self {
+        case .connectAgent:
+            return "connect_agent"
+        default:
+            return rawValue
+        }
+    }
+
     var title: String {
         switch self {
         case .home: return "Home"

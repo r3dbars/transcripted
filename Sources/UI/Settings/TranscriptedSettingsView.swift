@@ -116,9 +116,11 @@ struct TranscriptedSettingsView: View {
         .onAppear(perform: refreshState)
         .task(id: navigation.presentationID) {
             refreshState()
+            trackSettingsPageViewed(navigation.selectedPage, source: "presentation")
         }
-        .onChange(of: navigation.selectedPage) { _, _ in
+        .onChange(of: navigation.selectedPage) { _, page in
             refreshRecentCaptures()
+            trackSettingsPageViewed(page, source: "navigation")
         }
         .onChange(of: meetingSession.lastSavedTranscriptURL) { _, _ in
             refreshRecentCaptures()
@@ -241,7 +243,10 @@ struct TranscriptedSettingsView: View {
                     menuBarVisibility: menuBarVisibilityBinding(for: .startDictation),
                     actionHelp: "Start dictation now.",
                     menuBarVisibilityHelp: "Show or hide Start Dictation in the menu bar popover.",
-                    action: actions.startDictation
+                    action: {
+                        trackSettingsAction("start_dictation", page: .home)
+                        actions.startDictation()
+                    }
                 )
 
                 SettingsActionTile(
@@ -252,7 +257,10 @@ struct TranscriptedSettingsView: View {
                     menuBarVisibility: menuBarVisibilityBinding(for: .startMeeting),
                     actionHelp: "Start a meeting recording now.",
                     menuBarVisibilityHelp: "Show or hide Start Meeting in the menu bar popover.",
-                    action: actions.startMeeting
+                    action: {
+                        trackSettingsAction("start_meeting", page: .home)
+                        actions.startMeeting()
+                    }
                 )
 
                 SettingsActionTile(
@@ -262,7 +270,10 @@ struct TranscriptedSettingsView: View {
                     menuBarVisibility: menuBarVisibilityBinding(for: .pasteLastDictation),
                     actionHelp: "Paste the newest saved dictation into the current app.",
                     menuBarVisibilityHelp: "Show or hide Paste Last Dictation in the menu bar popover.",
-                    action: actions.pasteLastDictation
+                    action: {
+                        trackSettingsAction("paste_last_dictation", page: .home)
+                        actions.pasteLastDictation()
+                    }
                 )
 
                 SettingsActionTile(
@@ -273,6 +284,7 @@ struct TranscriptedSettingsView: View {
                     actionHelp: "Open the Meetings page to browse saved meeting notes.",
                     menuBarVisibilityHelp: "Show or hide Recent Meetings in the menu bar popover.",
                     action: {
+                        trackSettingsAction("open_recent_meetings", page: .home)
                         navigation.selectedPage = .meetings
                     }
                 )
@@ -289,6 +301,7 @@ struct TranscriptedSettingsView: View {
                     actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript",
                     action: activity.transcriptURL.map { transcriptURL in
                         {
+                            trackSettingsAction("open_current_activity", page: .home)
                             NSWorkspace.shared.open(transcriptURL)
                         }
                     }
@@ -345,6 +358,7 @@ struct TranscriptedSettingsView: View {
                     title: "Shortcuts",
                     detail: "Change the keys Transcripted listens for."
                 ) {
+                    trackSettingsAction("quick_link_shortcuts", page: .home)
                     navigation.selectedPage = .shortcuts
                 }
 
@@ -353,6 +367,7 @@ struct TranscriptedSettingsView: View {
                     title: "Meetings",
                     detail: "Record calls and import audio."
                 ) {
+                    trackSettingsAction("quick_link_meetings", page: .home)
                     navigation.selectedPage = .meetings
                 }
 
@@ -361,6 +376,7 @@ struct TranscriptedSettingsView: View {
                     title: "People",
                     detail: "Review saved speakers and duplicates."
                 ) {
+                    trackSettingsAction("quick_link_people", page: .home)
                     navigation.selectedPage = .people
                 }
 
@@ -369,6 +385,7 @@ struct TranscriptedSettingsView: View {
                     title: "Storage",
                     detail: "See where Markdown files live."
                 ) {
+                    trackSettingsAction("quick_link_storage", page: .home)
                     navigation.selectedPage = .storage
                 }
 
@@ -377,6 +394,7 @@ struct TranscriptedSettingsView: View {
                     title: "Privacy",
                     detail: "Review permissions and reporting."
                 ) {
+                    trackSettingsAction("quick_link_privacy", page: .home)
                     navigation.selectedPage = .privacy
                 }
             }
@@ -419,6 +437,7 @@ struct TranscriptedSettingsView: View {
                     get: { autoEnterEnabled },
                     set: { newValue in
                         autoEnterEnabled = newValue
+                        trackSettingsToggle("auto_send", enabled: newValue, page: .shortcuts)
                         DictationAutoSendPreferences.setEnabled(newValue)
                     }
                 ))
@@ -427,6 +446,7 @@ struct TranscriptedSettingsView: View {
                     get: { autoEnterKey },
                     set: { newValue in
                         autoEnterKey = newValue
+                        trackSettingsAction("change_auto_send_key", page: .shortcuts)
                         DictationAutoSendPreferences.setSendKey(newValue)
                     }
                 )) {
@@ -445,10 +465,12 @@ struct TranscriptedSettingsView: View {
                         Spacer()
 
                         Button("Refresh") {
+                            trackSettingsAction("refresh_auto_send_apps", page: .shortcuts)
                             refreshAutoEnterAppCandidates()
                         }
 
                         Button("Add App…") {
+                            trackSettingsAction("add_auto_send_app", page: .shortcuts)
                             chooseAutoEnterApp()
                         }
                     }
@@ -662,6 +684,7 @@ struct TranscriptedSettingsView: View {
                     title: "Start Meeting",
                     detail: "Capture your mic and computer audio."
                 ) {
+                    trackSettingsAction("start_meeting", page: .meetings)
                     actions.startMeeting()
                 }
 
@@ -670,6 +693,7 @@ struct TranscriptedSettingsView: View {
                     title: "Transcribe Audio File",
                     detail: "Turn an audio file into meeting notes."
                 ) {
+                    trackSettingsAction("import_recording", page: .meetings)
                     actions.importAudioFile()
                 }
 
@@ -687,9 +711,11 @@ struct TranscriptedSettingsView: View {
                         SettingsFailedMeetingRow(
                             item: item,
                             retryAction: {
+                                trackSettingsAction("retry_failed_meeting", page: .meetings)
                                 meetingSession.retryFailedMeeting(id: item.id)
                             },
                             secondaryAction: {
+                                trackSettingsAction(item.hasAudioFiles ? "delete_failed_meeting" : "dismiss_failed_meeting", page: .meetings)
                                 if item.hasAudioFiles {
                                     meetingSession.deleteFailedMeeting(id: item.id)
                                 } else {
@@ -716,9 +742,11 @@ struct TranscriptedSettingsView: View {
                             detail: formattedRecentDate(item.date),
                             isCopied: copiedAgentMeetingID == item.id,
                             openAction: {
+                                trackSettingsAction("open_recent_meeting", page: .meetings)
                                 NSWorkspace.shared.open(item.transcriptURL)
                             },
                             copyForAgentAction: {
+                                trackSettingsAction("copy_recent_meeting_for_agent", page: .meetings)
                                 copyMeetingForAgent(item)
                             }
                         )
@@ -755,6 +783,7 @@ struct TranscriptedSettingsView: View {
                     title: "Paste Last Dictation",
                     detail: "Paste into the app you were using."
                 ) {
+                    trackSettingsAction("paste_last_dictation", page: .dictations)
                     actions.pasteLastDictation()
                 }
 
@@ -778,6 +807,7 @@ struct TranscriptedSettingsView: View {
                             title: item.title,
                             detail: "\(formattedRecentDate(item.createdAt)) • \(item.sourceAppName)"
                         ) {
+                            trackSettingsAction("open_recent_dictation", page: .dictations)
                             NSWorkspace.shared.open(item.url)
                         }
                     }
@@ -792,6 +822,7 @@ struct TranscriptedSettingsView: View {
                     get: { uiSoundsEnabled },
                     set: { newValue in
                         uiSoundsEnabled = newValue
+                        trackSettingsToggle("dictation_sounds", enabled: newValue, page: .dictations)
                         UISoundPreferences.setEnabled(newValue)
                     }
                 ))
@@ -823,12 +854,21 @@ struct TranscriptedSettingsView: View {
 
                 HStack {
                     Button("Choose Folder") {
+                        trackSettingsAction("choose_capture_library", page: .storage)
                         chooseCaptureLibrary()
                     }
 
                     Button("Reset to Default") {
+                        trackSettingsAction("reset_capture_library", page: .storage)
                         TranscriptedStoragePreferences.setCaptureLibraryURL(nil)
                         refreshStoragePaths()
+                        AnalyticsReporter.track(
+                            "settings_capture_library_changed",
+                            properties: [
+                                "location_type": "default",
+                                "page_id": TranscriptedSettingsPage.storage.analyticsValue,
+                            ]
+                        )
                     }
                 }
 
@@ -871,6 +911,7 @@ struct TranscriptedSettingsView: View {
             ) {
                 ForEach(TranscriptedPermissionKind.allCases) { kind in
                     PermissionStatusRow(kind: kind, granted: permissionStates[kind] ?? false) {
+                        trackPermissionCTA(kind)
                         TranscriptedPermissionAccess.openSettings(for: kind)
                         refreshPermissions()
                     }
@@ -885,6 +926,7 @@ struct TranscriptedSettingsView: View {
                     get: { crashReportingEnabled },
                     set: { newValue in
                         crashReportingEnabled = newValue
+                        trackSettingsToggle("crash_reporting", enabled: newValue, page: .privacy)
                         CrashReportingPreferences.setEnabled(newValue)
                         sentryTestStatus = nil
                     }
@@ -895,13 +937,20 @@ struct TranscriptedSettingsView: View {
                     get: { anonymousAnalyticsEnabled },
                     set: { newValue in
                         anonymousAnalyticsEnabled = newValue
-                        AnalyticsPreferences.setEnabled(newValue)
+                        if newValue {
+                            AnalyticsPreferences.setEnabled(true)
+                            trackSettingsToggle("anonymous_analytics", enabled: true, page: .privacy)
+                        } else {
+                            trackSettingsToggle("anonymous_analytics", enabled: false, page: .privacy)
+                            AnalyticsPreferences.setEnabled(false)
+                        }
                     }
                 ))
                 .disabled(!AnalyticsReporter.isAvailable)
 
                 HStack {
                     Button("Send Test Sentry Event") {
+                        trackSettingsAction("send_test_sentry_event", page: .privacy)
                         sendTestSentryEvent()
                     }
                     .disabled(!CrashReporter.isAvailable || !crashReportingEnabled)
@@ -955,11 +1004,13 @@ struct TranscriptedSettingsView: View {
 
                 HStack {
                     Button(aboutUpdateButtonTitle) {
+                        trackSettingsAction("check_updates", page: .about)
                         actions.checkForUpdates()
                     }
                     .disabled(!sparkleUpdater.updateStatus.canCheckForUpdates)
 
                     Button("Submit Feedback") {
+                        trackSettingsAction("submit_feedback", page: .about)
                         actions.sendFeedback()
                     }
                 }
@@ -1120,6 +1171,48 @@ struct TranscriptedSettingsView: View {
         }
     }
 
+    private func trackSettingsPageViewed(_ page: TranscriptedSettingsPage, source: String) {
+        AnalyticsReporter.track(
+            "settings_page_viewed",
+            properties: [
+                "page_id": page.analyticsValue,
+                "source": source,
+            ]
+        )
+    }
+
+    private func trackSettingsAction(_ actionID: String, page: TranscriptedSettingsPage? = nil) {
+        AnalyticsReporter.track(
+            "settings_action_clicked",
+            properties: [
+                "action_id": actionID,
+                "page_id": (page ?? navigation.selectedPage).analyticsValue,
+            ]
+        )
+    }
+
+    private func trackSettingsToggle(_ settingID: String, enabled: Bool, page: TranscriptedSettingsPage? = nil) {
+        AnalyticsReporter.track(
+            "settings_toggle_changed",
+            properties: [
+                "enabled": enabled ? "true" : "false",
+                "page_id": (page ?? navigation.selectedPage).analyticsValue,
+                "setting_id": settingID,
+            ]
+        )
+    }
+
+    private func trackPermissionCTA(_ kind: TranscriptedPermissionKind) {
+        AnalyticsReporter.track(
+            "settings_permission_cta_clicked",
+            properties: [
+                "page_id": navigation.selectedPage.analyticsValue,
+                "permission_kind": kind.analyticsValue,
+                "prior_status": permissionStates[kind] == true ? "ready" : "pending",
+            ]
+        )
+    }
+
     private func refreshPermissions() {
         permissionStates = PermissionSnapshot.current()
     }
@@ -1151,6 +1244,7 @@ struct TranscriptedSettingsView: View {
     private func updateLaunchAtLogin(_ enabled: Bool) {
         let previousValue = launchAtLoginEnabled
         launchAtLoginEnabled = enabled
+        trackSettingsToggle("launch_at_login", enabled: enabled, page: .general)
 
         do {
             try LaunchAtLoginController.setEnabled(enabled)
@@ -1184,6 +1278,7 @@ struct TranscriptedSettingsView: View {
     private func updatePreferredTranscriptionModel(_ model: TranscriptionModelChoice) {
         preferredTranscriptionModel = model
         showAdvancedModelControls = true
+        trackSettingsAction("switch_model", page: .models)
         TranscriptionModelPreferences.setPreferredModel(model)
         Task { @MainActor in
             await sttRouter.initializeSelectedModel()
@@ -1195,6 +1290,7 @@ struct TranscriptedSettingsView: View {
             get: { menuBarItemVisibility[item] ?? true },
             set: { newValue in
                 menuBarItemVisibility[item] = newValue
+                trackSettingsToggle("menu_bar_\(item.analyticsValue)", enabled: newValue, page: .home)
                 MenuBarVisibilityPreferences.setVisible(item, newValue)
             }
         )
@@ -1232,6 +1328,13 @@ struct TranscriptedSettingsView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         TranscriptedStoragePreferences.setCaptureLibraryURL(url)
         refreshStoragePaths()
+        AnalyticsReporter.track(
+            "settings_capture_library_changed",
+            properties: [
+                "location_type": isUsingDefaultCaptureLibrary ? "default" : "custom",
+                "page_id": TranscriptedSettingsPage.storage.analyticsValue,
+            ]
+        )
     }
 
     private var sortedAutoEnterAllowedBundleIDs: [String] {
@@ -1246,6 +1349,7 @@ struct TranscriptedSettingsView: View {
         } else {
             autoEnterAllowedBundleIDs.remove(bundleID)
         }
+        trackSettingsToggle("auto_send_app_allowed", enabled: isAllowed, page: .shortcuts)
         DictationAutoSendPreferences.setAllowedBundleIDs(autoEnterAllowedBundleIDs)
     }
 

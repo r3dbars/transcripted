@@ -1,0 +1,1406 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transcripted Onboarding Deep Dive</title>
+  <style>
+    :root {
+      --bg: #111214;
+      --panel: #191b1f;
+      --panel-2: #22252b;
+      --ink: #f3f4f6;
+      --muted: #b9bec7;
+      --dim: #8f96a3;
+      --line: #333842;
+      --blue: #4ea1ff;
+      --green: #59d17c;
+      --yellow: #f5c84c;
+      --orange: #ff9d4d;
+      --red: #ff6b6b;
+      --purple: #ad8cff;
+      --shadow: rgba(0, 0, 0, 0.24);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    a {
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    code {
+      color: #e7eefc;
+      background: #2a2e36;
+      border: 1px solid #3a404c;
+      border-radius: 6px;
+      padding: 0.1rem 0.32rem;
+      font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+      font-size: 0.9em;
+    }
+
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 42px 24px 80px;
+    }
+
+    .hero {
+      padding: 34px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: linear-gradient(135deg, #1c1f27 0%, #15171b 62%, #121316 100%);
+      box-shadow: 0 18px 60px var(--shadow);
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--blue);
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 880px;
+      font-size: clamp(2.1rem, 5vw, 4.2rem);
+      line-height: 1.02;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 44px 0 14px;
+      font-size: 1.65rem;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 26px 0 10px;
+      font-size: 1.16rem;
+    }
+
+    p {
+      margin: 0 0 13px;
+      color: var(--muted);
+    }
+
+    ul,
+    ol {
+      color: var(--muted);
+      padding-left: 1.25rem;
+    }
+
+    li {
+      margin: 0.38rem 0;
+    }
+
+    .hero p {
+      max-width: 900px;
+      font-size: 1.08rem;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 30px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #20242b;
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 18px 0 36px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(17, 18, 20, 0.92);
+      backdrop-filter: blur(12px);
+    }
+
+    .nav a {
+      padding: 7px 10px;
+      border: 1px solid #2c313a;
+      border-radius: 8px;
+      color: var(--ink);
+      background: #1a1d22;
+      font-size: 0.9rem;
+      font-weight: 650;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 14px;
+    }
+
+    .card {
+      grid-column: span 4;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      box-shadow: 0 10px 30px var(--shadow);
+    }
+
+    .card.wide {
+      grid-column: span 6;
+    }
+
+    .card.full {
+      grid-column: 1 / -1;
+    }
+
+    .card h3 {
+      margin-top: 0;
+    }
+
+    .grade {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 46px;
+      height: 34px;
+      margin-right: 8px;
+      border-radius: 8px;
+      color: #111214;
+      font-weight: 900;
+      letter-spacing: 0;
+    }
+
+    .grade-a { background: var(--green); }
+    .grade-b { background: #8fdf91; }
+    .grade-c { background: var(--yellow); }
+    .grade-d { background: var(--orange); }
+    .grade-f { background: var(--red); }
+
+    .severity {
+      display: inline-flex;
+      min-width: 42px;
+      justify-content: center;
+      padding: 4px 8px;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      font-weight: 800;
+      color: #111214;
+    }
+
+    .p0 { background: var(--red); }
+    .p1 { background: var(--orange); }
+    .p2 { background: var(--yellow); }
+    .p3 { background: var(--blue); color: #06111f; }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 780px;
+    }
+
+    th,
+    td {
+      padding: 12px 13px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      color: var(--ink);
+      background: #23272f;
+      font-size: 0.88rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    td {
+      color: var(--muted);
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .callout {
+      padding: 16px 18px;
+      border: 1px solid #3f4755;
+      border-left: 5px solid var(--blue);
+      border-radius: 10px;
+      background: #1b2028;
+    }
+
+    .callout strong {
+      color: var(--ink);
+    }
+
+    .danger {
+      border-left-color: var(--red);
+    }
+
+    .warn {
+      border-left-color: var(--orange);
+    }
+
+    .good {
+      border-left-color: var(--green);
+    }
+
+    .quote {
+      color: var(--dim);
+      font-size: 0.95rem;
+    }
+
+    .small {
+      color: var(--dim);
+      font-size: 0.9rem;
+    }
+
+    details {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      padding: 14px 16px;
+      margin: 12px 0;
+    }
+
+    summary {
+      cursor: pointer;
+      color: var(--ink);
+      font-weight: 800;
+    }
+
+    .ranked {
+      counter-reset: issue;
+      display: grid;
+      gap: 12px;
+    }
+
+    .issue {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 12px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+    }
+
+    .issue h3 {
+      margin: 0 0 6px;
+    }
+
+    .issue p {
+      margin-bottom: 8px;
+    }
+
+    .scoreline {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .tag {
+      display: inline-flex;
+      padding: 4px 8px;
+      border-radius: 7px;
+      background: #252a33;
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .checklist li {
+      margin-bottom: 0.65rem;
+    }
+
+    @media (max-width: 860px) {
+      .page {
+        padding: 24px 14px 64px;
+      }
+
+      .hero {
+        padding: 24px 18px;
+      }
+
+      .card,
+      .card.wide {
+        grid-column: 1 / -1;
+      }
+
+      .two-col {
+        grid-template-columns: 1fr;
+      }
+
+      .nav {
+        position: static;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <p class="eyebrow">Transcripted onboarding audit</p>
+      <h1>The current onboarding is clear enough to finish, but not strong enough to create the aha.</h1>
+      <p>
+        The app asks users to complete setup. It does not yet guide them all the way to the emotional payoff:
+        spoken context becomes local Markdown, then an agent can use it. That missing bridge is the main retention risk.
+      </p>
+      <div class="meta">
+        <span class="pill">Generated 2026-04-22</span>
+        <span class="pill">Repo: transcripted-latest</span>
+        <span class="pill">Build verified with signed local app</span>
+        <span class="pill">Computer Use walkthrough included</span>
+        <span class="pill">6 subagent audits included</span>
+      </div>
+    </section>
+
+    <nav class="nav" aria-label="Report sections">
+      <a href="#summary">Summary</a>
+      <a href="#evidence">Evidence</a>
+      <a href="#grades">Grades</a>
+      <a href="#top-fixes">Top Fixes</a>
+      <a href="#journey">Journey</a>
+      <a href="#friction">Friction</a>
+      <a href="#analytics">PostHog</a>
+      <a href="#sentry">Sentry</a>
+      <a href="#tests">Tests</a>
+      <a href="#manual">Manual QA</a>
+      <a href="#file-map">File Map</a>
+    </nav>
+
+    <section id="summary">
+      <h2>Executive Summary</h2>
+      <div class="grid">
+        <article class="card">
+          <h3><span class="grade grade-c">C</span>Overall onboarding</h3>
+          <p>
+            Clear structure, good local-first intent, and a working first-dictation path. But it is too much setup, too little payoff,
+            too little instrumentation, and too much friction before the user has received value.
+          </p>
+        </article>
+        <article class="card">
+          <h3><span class="grade grade-d">D</span>Funnel visibility</h3>
+          <p>
+            PostHog currently sees launch, completion, and later dictation/meeting outcomes. It cannot see the actual onboarding funnel:
+            who saw it, clicked permissions, got stuck, closed it, waited on the model, or reached first value.
+          </p>
+        </article>
+        <article class="card">
+          <h3><span class="grade grade-f">F</span>Menu keyboard access</h3>
+          <p>
+            The immediate post-onboarding popover is built from custom mouse-only rows. Computer Use could not address the rows as controls,
+            and the code has mouse handlers without keyboard or accessibility button semantics.
+          </p>
+        </article>
+        <article class="card wide">
+          <h3>Biggest Product Problem</h3>
+          <p>
+            The app says "Welcome" and asks for permissions. It should say, in substance:
+            "Say one sentence. We will paste it back, save Markdown locally, and show you how your agent can use it."
+          </p>
+          <p>
+            The current flow can end in a no-speech error, a generic menu, or a settings screen. None of those are the aha.
+          </p>
+        </article>
+        <article class="card wide">
+          <h3>Biggest Measurement Problem</h3>
+          <p>
+            The event taxonomy is missing the onboarding funnel. It also has two concrete property-loss bugs:
+            <code>system_audio_recording_enabled</code> likely gets dropped because the sanitizer drops keys containing <code>audio</code>,
+            and <code>dictation_completed.auto_send</code> is sent by code but not allowlisted.
+          </p>
+        </article>
+      </div>
+
+      <div class="callout danger" style="margin-top: 16px;">
+        <strong>Most important recommendation:</strong>
+        turn onboarding into a guided first capture, not a permissions checklist. The product should optimize for first useful dictation,
+        first saved Markdown, and first agent use. Permissions are only supporting steps.
+      </div>
+    </section>
+
+    <section id="evidence">
+      <h2>What I Actually Tested</h2>
+      <div class="two-col">
+        <div class="callout good">
+          <strong>Done</strong>
+          <ul>
+            <li>Read repo docs, UI docs, observability docs, test docs, and storage/build notes.</li>
+            <li>Located first-run routing, window controller, onboarding view, permission helpers, menu bar, settings, analytics, and Sentry code.</li>
+            <li>Built dependencies with <code>bash build-deps.sh --force</code>.</li>
+            <li>Built and launched the signed app with <code>bash build.sh</code>.</li>
+            <li>Forced onboarding with <code>scripts/dev/onboarding.sh force-on</code>.</li>
+            <li>Used Computer Use to inspect onboarding, scroll states, first dictation, post-onboarding popover, Settings Home, and Agent page.</li>
+            <li>Checked local observability logs and credential availability.</li>
+          </ul>
+        </div>
+        <div class="callout warn">
+          <strong>Limits</strong>
+          <ul>
+            <li>No live PostHog or Sentry read queries: <code>POSTHOG_PERSONAL_API_KEY</code>, <code>POSTHOG_PROJECT_ID</code>, and <code>SENTRY_AUTH_TOKEN</code> were unset.</li>
+            <li>No full fresh-user TCC reset for Microphone, Accessibility, Calendar, or System Audio. I audited those via code and existing tests.</li>
+            <li>I did not submit external data or create a PostHog survey. This report is a design and implementation plan.</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>Computer Use Notes</h3>
+      <ul>
+        <li>First launch initially appeared to show Settings because another Transcripted build from a different worktree was running with the same legacy bundle id. After killing duplicate processes, the intended onboarding appeared.</li>
+        <li>The onboarding window was <code>Welcome to Transcripted</code>, with a visible hero, required permissions, model card, partial "Optional later" content, and a fixed footer CTA.</li>
+        <li>At the first fold, the optional and consent sections were cut off while <code>Start first dictation</code> remained visible. This makes it easy to skip important trust/setup context.</li>
+        <li>Clicking <code>Start first dictation</code> launched the compact overlay. Stopping without speech showed <code>Dictation issue</code> and <code>No speech detected</code>.</li>
+        <li>After completion, the menu popover was visually simple and useful, but Computer Use exposed only the popover as a whole, not the individual rows.</li>
+        <li>The Agent page is functional, but the copy is extremely thin: <code>Agent</code>, <code>Pick one.</code>, <code>Install in Claude</code>, <code>Copy for Agent</code>.</li>
+      </ul>
+
+      <h3>Build Notes</h3>
+      <ul>
+        <li><code>bash build.sh</code> initially failed because dependencies were missing or stale. Running <code>bash build-deps.sh --force</code> fixed that.</li>
+        <li>The final build signed with Developer ID and passed launch smoke.</li>
+        <li>App identifier is still <code>com.justinbetker.draft</code>, which is a support, testing, and permission-state footgun.</li>
+      </ul>
+    </section>
+
+    <section id="grades">
+      <h2>Grades By Screen And Section</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Area</th>
+              <th>Grade</th>
+              <th>Why</th>
+              <th>Best Fix</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Launch and first-run routing</td>
+              <td><span class="grade grade-b">B-</span></td>
+              <td>Onboarding reliably gates the menu until completion, but multiple running builds with the same bundle id confused testing and could confuse support.</td>
+              <td>Rename bundle id to Transcripted, add single-instance handling, and track <code>onboarding_shown</code>.</td>
+            </tr>
+            <tr>
+              <td>Hero</td>
+              <td><span class="grade grade-c">C</span></td>
+              <td>"Welcome" plus "core permissions" starts with admin work. It underplays local Markdown and agent value.</td>
+              <td>Lead with outcome: "Capture spoken context as local Markdown your tools can search."</td>
+            </tr>
+            <tr>
+              <td>Feature pills</td>
+              <td><span class="grade grade-c">C</span></td>
+              <td>"Menu bar utility / Dictation first / Meetings later" makes the app feel smaller than the product promise.</td>
+              <td>Use "Dictate anywhere / Record meetings / Save local Markdown" or similar.</td>
+            </tr>
+            <tr>
+              <td>Required permissions</td>
+              <td><span class="grade grade-c">C+</span></td>
+              <td>Good separation of required versus later permissions, but Accessibility is scary and weakly explained.</td>
+              <td>Add trust copy: "Used only for hotkeys and paste-back. Transcripted does not read your screen."</td>
+            </tr>
+            <tr>
+              <td>Hard block on Accessibility</td>
+              <td><span class="grade grade-d">D</span></td>
+              <td>This can stop users before first value. Dictation could still create value with manual copy or an in-app transcript preview.</td>
+              <td>Allow a "Try dictation without paste-back" path after Microphone is granted.</td>
+            </tr>
+            <tr>
+              <td>Local model card</td>
+              <td><span class="grade grade-b">B-</span></td>
+              <td>Good local-first disclosure and progress, but "Parakeet TDT V3" is too technical for first-run.</td>
+              <td>Lead with "Local voice model"; put Parakeet as secondary detail.</td>
+            </tr>
+            <tr>
+              <td>Optional permissions</td>
+              <td><span class="grade grade-c">C</span></td>
+              <td>"Optional later" is accurate for onboarding but hides that System Audio is required for the full meeting promise.</td>
+              <td>Rename to "For meetings later" and provide explicit grant buttons or a "Set up meetings now" branch.</td>
+            </tr>
+            <tr>
+              <td>Observability consent</td>
+              <td><span class="grade grade-d">D+</span></td>
+              <td>Transparent but heavy. It asks for trust before value and says "for this release," which feels temporary/defensive.</td>
+              <td>Move after first success, or collapse into one simple privacy row with an advanced link.</td>
+            </tr>
+            <tr>
+              <td>Footer CTA</td>
+              <td><span class="grade grade-b">B-</span></td>
+              <td>"Start first dictation" is the right direction. Disabled state and fallback "Continue to Transcripted" are weaker.</td>
+              <td>Make CTA outcome-specific: "Try a 10-second dictation" and "Open menu bar controls."</td>
+            </tr>
+            <tr>
+              <td>First dictation handoff</td>
+              <td><span class="grade grade-c">C</span></td>
+              <td>Technically works, but it can immediately end in "No speech detected" without a guided retry or sample prompt.</td>
+              <td>Show a retry CTA, sample phrase, and success path to saved Markdown.</td>
+            </tr>
+            <tr>
+              <td>No-speech recovery</td>
+              <td><span class="grade grade-d">D</span></td>
+              <td>First value can become an error state. In testing, the inspected overlay showed only the issue, not a clear recovery path.</td>
+              <td>Use first-run-specific recovery: "Try again", "Need help?", "Open menu", and "Use a sample capture."</td>
+            </tr>
+            <tr>
+              <td>Menu bar popover visuals</td>
+              <td><span class="grade grade-c">C+</span></td>
+              <td>Simple and direct. But "Home" has no detail, Connect Agent is below the fold of attention, and first-run coaching ends too soon.</td>
+              <td>Highlight next action after onboarding and add a first-run success state.</td>
+            </tr>
+            <tr>
+              <td>Menu bar popover accessibility</td>
+              <td><span class="grade grade-f">F</span></td>
+              <td>Custom rows appear mouse-only from code and Computer Use accessibility tree.</td>
+              <td>Use real buttons or implement full NSAccessibility button semantics and keyboard activation.</td>
+            </tr>
+            <tr>
+              <td>Settings Home</td>
+              <td><span class="grade grade-c">C+</span></td>
+              <td>Useful, but mixes actions, readiness, visibility toggles, and navigation before the user has value.</td>
+              <td>Hide menu-visibility toggles from first-run context; focus on first capture and agent connection.</td>
+            </tr>
+            <tr>
+              <td>Agent setup page</td>
+              <td><span class="grade grade-c">C</span></td>
+              <td>Functional but under-explained. It should be central to the aha, not just a sparse settings page.</td>
+              <td>After first capture, show "Ask your agent about this capture" with Claude/Codex paths.</td>
+            </tr>
+            <tr>
+              <td>PostHog coverage</td>
+              <td><span class="grade grade-d">D</span></td>
+              <td>Only completion is tracked for onboarding, and even that is biased by analytics opt-out.</td>
+              <td>Add explicit funnel events and property allowlists.</td>
+            </tr>
+            <tr>
+              <td>Sentry coverage</td>
+              <td><span class="grade grade-b">B</span></td>
+              <td>Privacy posture is strong and error forwarding is tightly allowlisted. Onboarding-specific reliability events are missing.</td>
+              <td>Keep clickstream out of Sentry. Add only failure breadcrumbs/events.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="top-fixes">
+      <h2>Most Obvious Things To Fix</h2>
+      <div class="ranked">
+        <article class="issue">
+          <span class="severity p0">P0</span>
+          <div>
+            <h3>Instrument the onboarding funnel before optimizing blind.</h3>
+            <p>
+              Today, the app cannot answer the most basic onboarding questions: who saw it, who clicked a permission CTA,
+              which permission blocked them, who closed it, who waited on the model, who started first dictation, or who got no speech.
+            </p>
+            <p><strong>Fix:</strong> add explicit PostHog events for every section, click, state transition, and exit. Keep properties coarse and allowlisted.</p>
+            <p class="quote">Evidence: <code>AnalyticsEventPolicy.swift:16</code> only allowlists <code>onboarding_completed</code> for onboarding.</p>
+          </div>
+        </article>
+
+        <article class="issue">
+          <span class="severity p0">P0</span>
+          <div>
+            <h3>Make the first value moment explicit.</h3>
+            <p>
+              The product promise is not permission setup. It is spoken context becoming useful. Current onboarding does not show the Markdown result,
+              does not show where it was saved, and does not show how an agent can use it.
+            </p>
+            <p><strong>Fix:</strong> after first dictation, show a success panel: saved text, Markdown location, "Copy for Agent", and "Open capture folder".</p>
+          </div>
+        </article>
+
+        <article class="issue">
+          <span class="severity p1">P1</span>
+          <div>
+            <h3>Replace the setup-first hero with an outcome-first hero.</h3>
+            <p>
+              Current copy says "We will get the core permissions ready." That makes users evaluate cost before value.
+            </p>
+            <p><strong>Fix:</strong> use a concrete one-screen promise: "Turn meetings, dictation, and audio into local Markdown your agents can read."</p>
+          </div>
+        </article>
+
+        <article class="issue">
+          <span class="severity p1">P1</span>
+          <div>
+            <h3>Do not hard-block first value on Accessibility.</h3>
+            <p>
+              Accessibility is useful for hotkeys and paste-back, but it is also the scariest permission. Making it mandatory before any value is risky.
+            </p>
+            <p><strong>Fix:</strong> require Microphone for first dictation, but allow a degraded path: record -> show transcript -> copy manually -> save Markdown.</p>
+            <p class="quote">Evidence: <code>FirstRunExperience.swift:38</code> requires Microphone and Accessibility; <code>PermissionsOnboardingView.swift:239</code> refuses completion without both.</p>
+          </div>
+        </article>
+
+        <article class="issue">
+          <span class="severity p1">P1</span>
+          <div>
+            <h3>Make the post-onboarding menu accessible.</h3>
+            <p>
+              The immediate post-onboarding surface should be rock solid. Right now the custom menu rows are not exposed as individual controls.
+            </p>
+            <p><strong>Fix:</strong> use <code>NSButton</code> rows or implement accessible role, title, value, help, action, focus ring, Space/Return activation, and disabled reason.</p>
+            <p class="quote">Evidence: <code>MenuBarActionRowView.swift:244</code> handles mouse events directly; Computer Use saw only the popover, not rows.</p>
+          </div>
+        </article>
+
+        <article class="issue">
+          <span class="severity p1">P1</span>
+          <div>
+            <h3>Move or compress observability consent.</h3>
+            <p>
+              It is transparent, but it is too much trust negotiation before the user has seen value. It also appears below the fold and can be skipped.
+            </p>
+            <p><strong>Fix:</strong> ask after first success, or collapse to: "Help improve Transcripted with privacy-safe diagnostics" plus two toggles in Settings.</p>
+          </div>
+        </article>
+
+        <article class="issue">
+          <span class="severity p1">P1</span>
+          <div>
+            <h3>Fix analytics property loss.</h3>
+            <p>
+              <code>system_audio_recording_enabled</code> contains <code>audio</code>, and the analytics sanitizer drops any key containing <code>audio</code>.
+              Separately, <code>auto_send</code> is sent on dictation completion but not allowlisted.
+            </p>
+            <p><strong>Fix:</strong> rename properties to safe enum keys or add explicit allowlist precedence before sensitive-fragment dropping.</p>
+          </div>
+        </article>
+
+        <article class="issue">
+          <span class="severity p2">P2</span>
+          <div>
+            <h3>Make first no-speech a recovery flow, not a dead end.</h3>
+            <p>
+              My first Computer Use run ended in <code>No speech detected</code>. That is normal if someone clicks Stop quickly, but it is a bad first experience.
+            </p>
+            <p><strong>Fix:</strong> show "Try again", "Say: remind me to review the pricing call", and "Open Transcripted menu". Track <code>first_capture_empty</code>.</p>
+          </div>
+        </article>
+
+        <article class="issue">
+          <span class="severity p2">P2</span>
+          <div>
+            <h3>Clarify meeting setup instead of burying it.</h3>
+            <p>
+              Meetings are core to the product, but onboarding says "Meetings later" and optional rows have no actions.
+            </p>
+            <p><strong>Fix:</strong> offer a branch: "I mainly want meeting notes" -> set up System Audio now -> run a meeting recording dry run.</p>
+          </div>
+        </article>
+
+        <article class="issue">
+          <span class="severity p2">P2</span>
+          <div>
+            <h3>Rename the bundle id.</h3>
+            <p>
+              The bundle id is still <code>com.justinbetker.draft</code>. This affects TCC, defaults, logs, support screenshots, and testing.
+            </p>
+            <p><strong>Fix:</strong> plan a migration to a Transcripted bundle id with explicit TCC and defaults implications.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="journey">
+      <h2>Current Journey Map</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Step</th>
+              <th>What Happens Now</th>
+              <th>User Risk</th>
+              <th>Recommended Change</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1. Launch</td>
+              <td>App launches as accessory/menu-bar app, creates status item, then presents onboarding if completion key is false.</td>
+              <td>User may not understand where the app lives or how to get it back if they close the window.</td>
+              <td>Show a short "Transcripted lives here" animation or pointer to the menu bar icon, and track <code>onboarding_shown</code>.</td>
+            </tr>
+            <tr>
+              <td>2. Welcome hero</td>
+              <td>Hero frames onboarding as getting permissions ready.</td>
+              <td>Cost appears before value.</td>
+              <td>Lead with "Capture spoken context as local Markdown your agents can read."</td>
+            </tr>
+            <tr>
+              <td>3. Required permissions</td>
+              <td>Microphone and Accessibility are required. CTA is disabled until both are ready.</td>
+              <td>Accessibility may scare users away before any value.</td>
+              <td>Allow first dictation with Microphone only; explain Accessibility as paste-back/hotkey enhancement.</td>
+            </tr>
+            <tr>
+              <td>4. Model readiness</td>
+              <td>Shows Parakeet state and download/load progress.</td>
+              <td>Technical model name may distract; offline/slow download can feel like app is stuck.</td>
+              <td>Use plain language, estimated wait, retry state, and local-first proof.</td>
+            </tr>
+            <tr>
+              <td>5. Optional later</td>
+              <td>System Audio and Calendar are display-only rows in onboarding.</td>
+              <td>Meeting-first users do not know how to become meeting-ready.</td>
+              <td>Add "Set up meetings now" branch or action buttons.</td>
+            </tr>
+            <tr>
+              <td>6. Consent</td>
+              <td>Crash and analytics toggles are on by default when configured.</td>
+              <td>Trust cost before value; opt-out creates analytics blind spots.</td>
+              <td>Delay, simplify, or make the first launch event wait until after consent.</td>
+            </tr>
+            <tr>
+              <td>7. CTA</td>
+              <td>Starts first dictation when a remembered app exists, otherwise continues to menu.</td>
+              <td>Remembered app may not be a text field; fallback can delay aha.</td>
+              <td>Open a built-in scratch capture if no clear paste target exists.</td>
+            </tr>
+            <tr>
+              <td>8. First dictation</td>
+              <td>Compact overlay listens, then transcribes/pastes/saves or shows error.</td>
+              <td>No-speech or paste failure can become the first emotional result.</td>
+              <td>Use first-run overlay copy, sample prompt, and explicit retry/success screen.</td>
+            </tr>
+            <tr>
+              <td>9. Menu popover</td>
+              <td>Shows Home, Start Dictation, Start Meeting, Paste Last, Recent Meetings, Connect Agent, etc.</td>
+              <td>No first-run coaching; keyboard and VoiceOver users may be blocked.</td>
+              <td>Highlight next action and make rows accessible controls.</td>
+            </tr>
+            <tr>
+              <td>10. Agent connection</td>
+              <td>Agent setup lives in Settings -> Agent and says "Pick one."</td>
+              <td>The agent aha is too far from the first capture.</td>
+              <td>After first saved capture, show "Ask your agent what you just said" and lead to Agent setup.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="friction">
+      <h2>Detailed Friction Inventory</h2>
+
+      <details open>
+        <summary>First impression and trust</summary>
+        <ul>
+          <li>The hero starts with permissions, not the reason the app exists.</li>
+          <li>"Menu bar utility" undersells the product. Transcripted is a memory layer, not merely a utility.</li>
+          <li>"Meetings later" is operationally true but strategically weak because meetings are one of the core use cases.</li>
+          <li>Accessibility copy says "For shortcuts and paste-back", but does not explicitly say what it will not do.</li>
+          <li>The old screenshot at <code>docs/screenshots/onboarding.png</code> still shows a Draft writing-profile onboarding flow. That is stale and misleading for docs or QA.</li>
+        </ul>
+      </details>
+
+      <details open>
+        <summary>Permissions</summary>
+        <ul>
+          <li>Microphone and Accessibility are both mandatory before completion, even though a mic-only first capture could create value.</li>
+          <li>Optional permissions show status but no CTA, so users cannot set up meetings from onboarding.</li>
+          <li>System Audio status is cached in defaults. It can show "Ready" based on cached state until meeting start revalidates.</li>
+          <li>Calendar copy says it is for meeting prompts, but runtime app prompts can happen without calendar.</li>
+          <li>The app still uses the Draft bundle id for TCC/defaults, which can make permission instructions and support logs confusing.</li>
+        </ul>
+      </details>
+
+      <details open>
+        <summary>Layout and hierarchy</summary>
+        <ul>
+          <li>The onboarding window is fixed at <code>620x760</code>, non-resizable, and hides zoom.</li>
+          <li>The first fold cuts into the optional permissions card while the footer CTA remains visible.</li>
+          <li>Consent and "what happens next" are below the fold for many users.</li>
+          <li>Many small labels use muted text on dark/badge backgrounds. Contrast is likely under target for 10-11 point labels.</li>
+          <li>Cards inside cards make the lower half feel dense and repetitive.</li>
+        </ul>
+      </details>
+
+      <details open>
+        <summary>First capture</summary>
+        <ul>
+          <li>The primary CTA says "Start first dictation", but there is no sample phrase or countdown.</li>
+          <li>The app assumes the remembered source app is a useful paste target. It may be Finder, Settings, or another non-text context.</li>
+          <li>If no paste target exists, the fallback tells the user to click into a text field later. That delays the aha.</li>
+          <li>The no-speech state can be the first post-onboarding result.</li>
+          <li>The success path does not teach where Markdown went or how to use it with an agent.</li>
+        </ul>
+      </details>
+
+      <details open>
+        <summary>Post-onboarding surfaces</summary>
+        <ul>
+          <li>The menu popover is visually good but accessibility-poor.</li>
+          <li>"Connect Agent" is present, but not framed as the next step after a saved capture.</li>
+          <li>Settings Home is useful but too admin-heavy for first success: menu visibility toggles, ready checks, and page links compete with the first action.</li>
+          <li>The Agent settings page has very little explanatory copy. "Pick one" is too thin for a core setup step.</li>
+        </ul>
+      </details>
+
+      <details open>
+        <summary>Observability and analytics</summary>
+        <ul>
+          <li><code>app_launched</code> can be sent before the user sees analytics consent because analytics defaults on when configured.</li>
+          <li><code>onboarding_completed</code> is not sent if the user turns analytics off before completing.</li>
+          <li>There is no event for <code>onboarding_shown</code>, so completion rate cannot be calculated reliably.</li>
+          <li>There is no event for permission CTA clicks or permission transitions.</li>
+          <li>There is no event for closing onboarding before completion.</li>
+          <li>There is no event for first-dictation no-speech from onboarding as a first-run funnel exit.</li>
+          <li>Sentry is strong on privacy but missing onboarding-specific failure context.</li>
+        </ul>
+      </details>
+    </section>
+
+    <section id="analytics">
+      <h2>PostHog Plan</h2>
+      <div class="callout">
+        <strong>Principle:</strong>
+        do not use broad autocapture for this native macOS onboarding. Use explicit event calls with stable action ids and coarse properties.
+        The app captures sensitive local work context, and the current transport is a custom direct <code>/capture/</code> client, not the PostHog SDK.
+      </div>
+
+      <h3>Current State</h3>
+      <ul>
+        <li>PostHog config is read from <code>Info.plist</code>, environment, or local overrides in <code>AnalyticsReporter.swift</code>.</li>
+        <li>Transport sends direct capture requests and adds <code>distinct_id</code>, <code>app_version</code>, <code>os_major</code>, and <code>session_id</code>.</li>
+        <li>Allowed events live in <code>AnalyticsEventPolicy.swift</code>.</li>
+        <li>Current onboarding event: <code>onboarding_completed</code> only.</li>
+        <li>Sanitizer drops sensitive property names and redacts sensitive values.</li>
+      </ul>
+
+      <h3>Critical Event Taxonomy</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Event</th>
+              <th>When To Fire</th>
+              <th>Properties</th>
+              <th>Why It Matters</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>onboarding_shown</code></td>
+              <td>When the window is presented.</td>
+              <td><code>entrypoint</code>, <code>has_paste_target</code>, <code>required_missing_count</code>, <code>model_state</code>, <code>analytics_available</code>, <code>crash_reporting_available</code></td>
+              <td>Denominator for all funnels.</td>
+            </tr>
+            <tr>
+              <td><code>onboarding_section_viewed</code></td>
+              <td>When a section first becomes visible or is rendered above fold.</td>
+              <td><code>section</code>, <code>position</code>, <code>scroll_depth_bucket</code></td>
+              <td>Shows whether users ever see optional permissions, consent, and next steps.</td>
+            </tr>
+            <tr>
+              <td><code>onboarding_permission_cta_clicked</code></td>
+              <td>When a permission action button is clicked.</td>
+              <td><code>permission_kind</code>, <code>required</code>, <code>prior_status</code>, <code>destination</code></td>
+              <td>Shows intent and permission friction by kind.</td>
+            </tr>
+            <tr>
+              <td><code>onboarding_permission_status_changed</code></td>
+              <td>When polling detects a status transition.</td>
+              <td><code>permission_kind</code>, <code>from_status</code>, <code>to_status</code>, <code>elapsed_bucket</code></td>
+              <td>Measures success after System Settings handoff.</td>
+            </tr>
+            <tr>
+              <td><code>onboarding_model_state_changed</code></td>
+              <td>When model state changes during onboarding.</td>
+              <td><code>model_kind</code>, <code>from_state</code>, <code>to_state</code>, <code>progress_bucket</code>, <code>failure_kind</code></td>
+              <td>Shows whether local model startup/download causes drop-off.</td>
+            </tr>
+            <tr>
+              <td><code>onboarding_reporting_toggle_changed</code></td>
+              <td>When crash or analytics toggle changes.</td>
+              <td><code>reporting_kind</code>, <code>enabled</code>, <code>available</code></td>
+              <td>Measures trust cost. Note: opt-out events require explicit consent design.</td>
+            </tr>
+            <tr>
+              <td><code>onboarding_primary_cta_clicked</code></td>
+              <td>When footer CTA is clicked.</td>
+              <td><code>cta_kind</code>, <code>should_start_dictation</code>, <code>has_paste_target</code>, <code>model_state</code>, <code>required_missing_count</code></td>
+              <td>Separates permission completion from first action.</td>
+            </tr>
+            <tr>
+              <td><code>onboarding_dismissed</code></td>
+              <td>When the window closes before completion.</td>
+              <td><code>close_source</code>, <code>required_missing_count</code>, <code>model_state</code>, <code>duration_bucket</code></td>
+              <td>Captures abandonments that are invisible today.</td>
+            </tr>
+            <tr>
+              <td><code>onboarding_completed</code></td>
+              <td>When completion is marked.</td>
+              <td><code>completion_path</code>, <code>duration_bucket</code>, <code>mic_status</code>, <code>accessibility_status</code>, <code>meeting_audio_status</code>, <code>calendar_status</code>, <code>model_state</code>, <code>has_paste_target</code></td>
+              <td>Current event should be expanded and property names should avoid sanitizer collisions.</td>
+            </tr>
+            <tr>
+              <td><code>dictation_requested</code></td>
+              <td>When the user asks to start dictation.</td>
+              <td><code>trigger</code>, <code>model_state</code>, <code>has_paste_target</code></td>
+              <td>Current <code>dictation_started</code> fires before audio is necessarily flowing. This separates request from actual start.</td>
+            </tr>
+            <tr>
+              <td><code>dictation_listening_started</code></td>
+              <td>When audio samples are flowing.</td>
+              <td><code>trigger</code>, <code>startup_latency_bucket</code>, <code>input_class</code></td>
+              <td>Measures if first capture actually begins.</td>
+            </tr>
+            <tr>
+              <td><code>first_capture_empty</code></td>
+              <td>When first onboarding dictation yields no speech/text.</td>
+              <td><code>trigger</code>, <code>duration_bucket</code>, <code>model_state</code></td>
+              <td>Important first-run failure path.</td>
+            </tr>
+            <tr>
+              <td><code>first_capture_saved</code></td>
+              <td>When the first dictation or meeting Markdown is saved.</td>
+              <td><code>capture_kind</code>, <code>delivery</code>, <code>word_count_bucket</code>, <code>duration_bucket</code></td>
+              <td>Best practical aha metric.</td>
+            </tr>
+            <tr>
+              <td><code>agent_setup_cta_shown</code></td>
+              <td>After first saved capture or on Agent page.</td>
+              <td><code>surface</code>, <code>capture_kind</code>, <code>agent_option</code></td>
+              <td>Measures transition from capture to agent value.</td>
+            </tr>
+            <tr>
+              <td><code>agent_setup_cta_clicked</code></td>
+              <td>When user chooses Claude install or copy-for-agent.</td>
+              <td><code>surface</code>, <code>agent_option</code>, <code>status</code></td>
+              <td>Connects onboarding to the core "agent can use this" loop.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Funnel Definitions</h3>
+      <ul class="checklist">
+        <li><strong>Dictation activation:</strong> <code>app_launched</code> -> <code>onboarding_shown</code> -> <code>onboarding_completed</code> -> <code>dictation_requested</code> -> <code>dictation_listening_started</code> -> <code>first_capture_saved</code>.</li>
+        <li><strong>Permission success:</strong> <code>onboarding_shown</code> -> <code>onboarding_permission_cta_clicked</code> -> <code>onboarding_permission_status_changed(to_status=granted)</code> -> <code>onboarding_completed</code>, broken down by <code>permission_kind</code>.</li>
+        <li><strong>Model readiness:</strong> <code>onboarding_shown</code> -> <code>onboarding_model_state_changed(to_state=ready)</code> -> <code>onboarding_primary_cta_clicked</code> -> <code>dictation_listening_started</code>.</li>
+        <li><strong>Meeting setup:</strong> <code>onboarding_shown</code> -> <code>meeting_setup_cta_clicked</code> -> <code>meeting_audio_permission_result</code> -> <code>meeting_recording_started</code> -> <code>meeting_transcript_saved</code>.</li>
+        <li><strong>Agent aha:</strong> <code>first_capture_saved</code> -> <code>agent_setup_cta_shown</code> -> <code>agent_setup_cta_clicked</code> -> <code>agent_setup_completed</code>.</li>
+      </ul>
+
+      <h3>Cohorts To Build</h3>
+      <ul>
+        <li>Users stuck on Microphone.</li>
+        <li>Users stuck on Accessibility.</li>
+        <li>Users who completed onboarding but never requested dictation.</li>
+        <li>Users whose first dictation was no-speech.</li>
+        <li>Users who saved first capture but never opened Agent setup.</li>
+        <li>Users who chose meeting path but hit System Audio friction.</li>
+        <li>Users who toggled analytics or crash reporting off during onboarding.</li>
+        <li>Users with model startup/download failure before first capture.</li>
+      </ul>
+
+      <h3>Dashboards</h3>
+      <ul>
+        <li><strong>Onboarding conversion:</strong> shown, completed, first dictation requested, first listening started, first capture saved.</li>
+        <li><strong>Permission friction:</strong> CTA clicks, grant rates, time to grant, abandonments by permission.</li>
+        <li><strong>First value quality:</strong> no-speech, paste failure, saved word count, duration bucket, retry rate.</li>
+        <li><strong>Agent value:</strong> first capture saved to Agent CTA shown/clicked/completed.</li>
+        <li><strong>Meeting readiness:</strong> System Audio unknown/denied/granted, meeting start blocks, first meeting saved.</li>
+      </ul>
+
+      <h3>Privacy Rules For PostHog</h3>
+      <ul>
+        <li>Never send transcript text, audio references, meeting titles, speaker names, emails, source app names, bundle ids, raw URLs, file paths, or raw error messages.</li>
+        <li>Prefer enums and buckets: <code>permission_kind=accessibility</code>, <code>duration_bucket=10_29s</code>, <code>failure_kind=no_speech</code>.</li>
+        <li>Use allowlist-first sanitization. Current sensitive-fragment dropping is good, but it accidentally drops legitimate coarse keys like <code>system_audio_recording_enabled</code>.</li>
+        <li>Do not use broad autocapture for native app setup. PostHog autocapture can collect many interaction types depending on SDK and config. This app should use explicit actions only.</li>
+        <li>Session replay should be opt-in only, sampled, and heavily masked. For this app, explicit events are safer and probably enough.</li>
+      </ul>
+
+      <h3>PostHog Product Features To Use</h3>
+      <ul>
+        <li><strong>Funnels:</strong> use for step-by-step drop-off and time-to-convert analysis.</li>
+        <li><strong>Cohorts:</strong> use to isolate stuck users and compare return behavior.</li>
+        <li><strong>Surveys:</strong> after failure or first success, ask one lightweight question like "What nearly stopped you from finishing setup?"</li>
+        <li><strong>Feature flags:</strong> test consent timing, Microphone-only path, meeting-first branch, and first-capture success panel.</li>
+      </ul>
+
+      <p class="small">
+        Official references: <a href="https://posthog.com/docs/product-analytics/autocapture">PostHog autocapture</a>,
+        <a href="https://posthog.com/docs/product-analytics/funnels">PostHog funnels</a>,
+        <a href="https://posthog.com/docs/data/cohorts">PostHog cohorts</a>,
+        <a href="https://posthog.com/docs/surveys">PostHog surveys</a>.
+      </p>
+    </section>
+
+    <section id="sentry">
+      <h2>Sentry Plan</h2>
+      <div class="callout good">
+        <strong>Current Sentry posture is mostly right.</strong>
+        Sentry is for crashes and reliability failures, not onboarding clickstream. Keep automatic breadcrumbs, screenshots, view hierarchy,
+        request data, and PII off unless there is a very deliberate privacy review.
+      </div>
+
+      <h3>Current State</h3>
+      <ul>
+        <li><code>CrashReporter.swift</code> sets <code>sendDefaultPii=false</code>, disables network breadcrumbs, sets <code>maxBreadcrumbs=0</code>, blocks screenshots/view hierarchy, and sanitizes before send.</li>
+        <li><code>EventReporter.swift</code> forwards only <code>.error</code> events that match <code>SentryEventPolicy</code>.</li>
+        <li><code>SentryEventPolicy.swift</code> covers model/audio/hotkey/paste failures, not onboarding-specific reliability failures.</li>
+      </ul>
+
+      <h3>What To Add</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Sentry Signal</th>
+              <th>Trigger</th>
+              <th>Safe Context</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>onboarding.model_init_failed</code></td>
+              <td>Local model fails before first capture.</td>
+              <td><code>model_kind</code>, <code>failure_stage</code>, <code>bundled_model_present</code></td>
+              <td>Keep raw error out; use failure kind.</td>
+            </tr>
+            <tr>
+              <td><code>onboarding.model_download_failed</code></td>
+              <td>Runtime model download fails during onboarding.</td>
+              <td><code>model_kind</code>, <code>download_source</code>, <code>failure_kind</code></td>
+              <td>No URLs, no file paths.</td>
+            </tr>
+            <tr>
+              <td><code>onboarding.first_dictation_start_failed</code></td>
+              <td>CTA is clicked but dictation cannot start.</td>
+              <td><code>permission_state</code>, <code>model_state</code>, <code>trigger=onboarding</code></td>
+              <td>This is reliability, not product analytics.</td>
+            </tr>
+            <tr>
+              <td><code>onboarding.permission_prompt_failed</code></td>
+              <td>Permission request API fails unexpectedly.</td>
+              <td><code>permission_kind</code>, <code>status_before</code>, <code>prompt_source</code></td>
+              <td>Do not send System Settings URLs or app names.</td>
+            </tr>
+            <tr>
+              <td><code>meeting.system_audio_permission_request_failed</code></td>
+              <td>ScreenCaptureKit permission probe fails in a non-user-cancel way.</td>
+              <td><code>permission_check</code>, <code>failure_kind</code>, <code>macos_major</code></td>
+              <td>Useful because meeting setup is a high-value funnel.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Manual Breadcrumbs If You Ever Enable Them</h3>
+      <p>
+        If Sentry breadcrumbs become useful, keep them manual and allowlisted. Do not enable broad automatic breadcrumbs.
+      </p>
+      <ul>
+        <li><code>onboarding_shown</code></li>
+        <li><code>permission_cta_clicked</code> with <code>permission_kind</code></li>
+        <li><code>permission_status_changed</code> with coarse from/to statuses</li>
+        <li><code>model_state_changed</code></li>
+        <li><code>primary_cta_clicked</code></li>
+        <li><code>dictation_listening_started</code></li>
+      </ul>
+
+      <p class="small">
+        Official references: <a href="https://docs.sentry.io/platforms/apple/configuration/options/">Sentry Apple options</a>.
+      </p>
+    </section>
+
+    <section id="tests">
+      <h2>Automated Test Plan</h2>
+      <p>
+        The current tests are good for extracted policy, but the actual onboarding shell is under-tested. Do not unit-test the SwiftUI body directly.
+        Extract state, completion, and analytics decisions into pure helpers under <code>Sources/UI/Shared/</code>, then test them with the fast runner.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Test</th>
+              <th>Purpose</th>
+              <th>Files To Touch</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>PermissionsOnboardingStateTests</code></td>
+              <td>Rows, granted flags, required/optional grouping, CTA enablement, status labels.</td>
+              <td><code>Sources/UI/Shared/PermissionsOnboardingState.swift</code>, <code>Tests/FastTests.manifest</code>, <code>run-tests.sh</code> source list.</td>
+            </tr>
+            <tr>
+              <td><code>OnboardingCompletionPolicyTests</code></td>
+              <td>Completion key, force override, no-complete unless requirements pass.</td>
+              <td>Extract from <code>PermissionsOnboardingView</code> into a helper.</td>
+            </tr>
+            <tr>
+              <td>Extend <code>FirstRunExperienceTests</code></td>
+              <td>Table-test all model states with paste target yes/no, including progress edges and failed states.</td>
+              <td><code>Tests/FirstRunExperienceTests.swift</code>.</td>
+            </tr>
+            <tr>
+              <td><code>OnboardingAnalyticsPolicyTests</code></td>
+              <td>Ensure every new onboarding event and property is allowlisted and sanitized correctly.</td>
+              <td><code>AnalyticsEventPolicy.swift</code>, <code>AnalyticsPayloadSanitizerTests.swift</code>.</td>
+            </tr>
+            <tr>
+              <td><code>FirstDictationOnboardingFlowTests</code></td>
+              <td>Completion marked, window dismissed, source app activated if present, dictation starts with trigger <code>onboarding</code>.</td>
+              <td>Extract a small coordinator from <code>TranscriptedApp.finishOnboardingAndStartDictation()</code>.</td>
+            </tr>
+            <tr>
+              <td>Accessibility smoke</td>
+              <td>Assert menu rows expose button role/title/action and can be activated by keyboard.</td>
+              <td><code>MenuBarActionRowView</code> or replacement <code>NSButton</code> row component.</td>
+            </tr>
+            <tr>
+              <td>Launch UI smoke</td>
+              <td>After onboarding reset, assert the welcome window appears. After completion, assert main popover appears.</td>
+              <td>New local UI smoke script, probably not fast tests.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Current Coverage Worth Keeping</h3>
+      <ul>
+        <li><code>FirstRunExperienceTests.swift</code> covers required/optional split, CTA states, and model copy.</li>
+        <li><code>TranscriptedPermissionAccessTests.swift</code> covers permission helper behavior.</li>
+        <li><code>MeetingRecordingStartGateTests.swift</code> covers meeting permission copy and gating.</li>
+        <li><code>AnalyticsEventPolicyTests.swift</code>, <code>AnalyticsPayloadSanitizerTests.swift</code>, <code>SentryEventPolicyTests.swift</code>, and <code>SentryPayloadSanitizerTests.swift</code> cover privacy-critical observability policy.</li>
+      </ul>
+    </section>
+
+    <section id="manual">
+      <h2>Manual QA Matrix</h2>
+      <p>
+        Run this on a fresh macOS user or VM where possible. Defaults reset is not enough for TCC.
+      </p>
+      <div class="grid">
+        <article class="card wide">
+          <h3>Fresh Install</h3>
+          <ul>
+            <li>No permissions granted.</li>
+            <li>Microphone grant path.</li>
+            <li>Accessibility grant path.</li>
+            <li>Deny Microphone, then recover.</li>
+            <li>Deny Accessibility, then recover.</li>
+            <li>Close onboarding before completion and reopen from menu bar.</li>
+          </ul>
+        </article>
+        <article class="card wide">
+          <h3>First Dictation Targets</h3>
+          <ul>
+            <li>TextEdit text field.</li>
+            <li>Notes.</li>
+            <li>Safari web input.</li>
+            <li>Slack/Discord/Teams.</li>
+            <li>Finder or non-text foreground app.</li>
+            <li>Secure/password field.</li>
+          </ul>
+        </article>
+        <article class="card wide">
+          <h3>Model Conditions</h3>
+          <ul>
+            <li>Bundled model ready.</li>
+            <li>Runtime download required.</li>
+            <li>Offline while model missing.</li>
+            <li>Slow network.</li>
+            <li>Download failure and retry.</li>
+          </ul>
+        </article>
+        <article class="card wide">
+          <h3>Meetings</h3>
+          <ul>
+            <li>System Audio unknown.</li>
+            <li>System Audio denied.</li>
+            <li>System Audio granted then revoked.</li>
+            <li>Calendar denied.</li>
+            <li>Runtime prompt with Zoom/Meet/Teams active.</li>
+            <li>Meeting prompt timeout versus explicit Not Now.</li>
+          </ul>
+        </article>
+        <article class="card wide">
+          <h3>Accessibility</h3>
+          <ul>
+            <li>Keyboard-only onboarding.</li>
+            <li>VoiceOver through permission cards and toggles.</li>
+            <li>Keyboard-only menu popover.</li>
+            <li>Larger text / display zoom.</li>
+            <li>Reduced motion.</li>
+            <li>High contrast mode.</li>
+          </ul>
+        </article>
+        <article class="card wide">
+          <h3>Analytics Verification</h3>
+          <ul>
+            <li>Tail local <code>events.jsonl</code>.</li>
+            <li>Check PostHog ingestion for each funnel event.</li>
+            <li>Verify opt-out behavior.</li>
+            <li>Verify no sensitive values in PostHog properties.</li>
+            <li>Send test Sentry event from Settings.</li>
+            <li>Verify allowlisted Sentry failures are scrubbed.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="file-map">
+      <h2>File Map And Evidence</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Why It Matters</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>Sources/TranscriptedApp.swift:65</code></td>
+              <td>App lifecycle, status item, onboarding presentation, completion, first-dictation handoff.</td>
+            </tr>
+            <tr>
+              <td><code>Sources/UI/Settings/TranscriptedOnboardingWindowController.swift:15</code></td>
+              <td>Fixed onboarding window configuration, closable title window, hidden zoom.</td>
+            </tr>
+            <tr>
+              <td><code>Sources/UI/Settings/PermissionsOnboardingView.swift:26</code></td>
+              <td>Main onboarding screen, state, copy, polling, completion, consent toggles, analytics completion call.</td>
+            </tr>
+            <tr>
+              <td><code>Sources/UI/Shared/FirstRunExperience.swift:37</code></td>
+              <td>Permission policy, CTA copy/state, model card copy, menu action subtitles.</td>
+            </tr>
+            <tr>
+              <td><code>Sources/Support/TranscriptedPermissionKind.swift:5</code></td>
+              <td>Permission names, summaries, buttons, required flags.</td>
+            </tr>
+            <tr>
+              <td><code>Sources/Support/TranscriptedPermissionAccess.swift:23</code></td>
+              <td>Permission status reads, prompts, System Settings deep links, System Audio cache.</td>
+            </tr>
+            <tr>
+              <td><code>Sources/UI/MenuBar/MenuBarActionRowView.swift:244</code></td>
+              <td>Custom mouse-only menu rows.</td>
+            </tr>
+            <tr>
+              <td><code>Sources/UI/MenuBar/MenuBarPanelController.swift:53</code></td>
+              <td>Main popover refresh, action routing, post-onboarding surface.</td>
+            </tr>
+            <tr>
+              <td><code>Sources/UI/Settings/TranscriptedSettingsView.swift:188</code></td>
+              <td>Settings Home, ready check, action tiles, useful pages.</td>
+            </tr>
+            <tr>
+              <td><code>Sources/UI/Settings/TranscriptedSettingsView.swift:1538</code></td>
+              <td>Agent page and setup IA.</td>
+            </tr>
+            <tr>
+              <td><code>Sources/Observability/AnalyticsReporter.swift:82</code></td>
+              <td>Custom PostHog transport, anonymous id, session id, HTTPS enforcement.</td>
+            </tr>
+            <tr>
+              <td><code>Sources/Observability/AnalyticsEventPolicy.swift:11</code></td>
+              <td>Analytics event allowlist.</td>
+            </tr>
+            <tr>
+              <td><code>Sources/Observability/AnalyticsPayloadSanitizer.swift:3</code></td>
+              <td>Analytics privacy rules and property dropping.</td>
+            </tr>
+            <tr>
+              <td><code>Sources/Observability/CrashReporter.swift:23</code></td>
+              <td>Sentry setup and scrub-before-send policy.</td>
+            </tr>
+            <tr>
+              <td><code>Sources/Observability/SentryEventPolicy.swift:12</code></td>
+              <td>Allowlisted non-fatal Sentry forwarding.</td>
+            </tr>
+            <tr>
+              <td><code>Sources/UI/Overlay/DictationSessionController.swift</code></td>
+              <td>Dictation lifecycle, first-run trigger, analytics outcomes, save/paste behavior.</td>
+            </tr>
+            <tr>
+              <td><code>Sources/Meeting/MeetingRecordingStartGate.swift:17</code></td>
+              <td>Meeting permission copy and start blockers.</td>
+            </tr>
+            <tr>
+              <td><code>scripts/dev/onboarding.sh:1</code></td>
+              <td>Onboarding reset/force helper, still targeting legacy bundle id.</td>
+            </tr>
+            <tr>
+              <td><code>Info.plist:11</code></td>
+              <td>Legacy bundle id and permission strings.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="source-links">
+      <h2>External References Used</h2>
+      <ul>
+        <li><a href="https://posthog.com/docs/product-analytics/autocapture">PostHog autocapture docs</a></li>
+        <li><a href="https://posthog.com/docs/product-analytics/funnels">PostHog funnels docs</a></li>
+        <li><a href="https://posthog.com/docs/data/cohorts">PostHog cohorts docs</a></li>
+        <li><a href="https://posthog.com/docs/surveys">PostHog surveys docs</a></li>
+        <li><a href="https://docs.sentry.io/platforms/apple/configuration/options/">Sentry Apple configuration options</a></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

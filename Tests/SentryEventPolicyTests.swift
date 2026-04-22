@@ -22,6 +22,14 @@ func testSentryEventPolicy() {
             forEngine: "parakeet",
             event: "model_init_failed"
         )
+        let onboardingStartFailure = SentryEventPolicy.policy(
+            forEngine: "onboarding",
+            event: "first_dictation_start_failed"
+        )
+        let onboardingStopFailure = SentryEventPolicy.policy(
+            forEngine: "onboarding",
+            event: "first_dictation_stop_failed"
+        )
         let unknown = SentryEventPolicy.policy(
             forEngine: "dictation",
             event: "dictation_export_failed"
@@ -32,6 +40,8 @@ func testSentryEventPolicy() {
         assertEqual(audioStartFailure?.summary, "Speech audio engine failed to start.", "audio-start failures should stay allowlisted with a privacy-safe summary")
         assertEqual(microphoneStartTimeout?.summary, "Dictation microphone start timed out.", "microphone start timeouts should be visible in Sentry without raw device names")
         assertEqual(modelInitFailure?.summary, "Speech model initialization failed.", "model-init failures should stay allowlisted with a privacy-safe summary")
+        assertEqual(onboardingStartFailure?.summary, "Onboarding could not start first dictation.", "onboarding start wiring failures should be visible without clickstream data")
+        assertEqual(onboardingStopFailure?.summary, "Onboarding could not stop first dictation.", "onboarding stop wiring failures should be visible without clickstream data")
         assertNil(unknown, "unknown events should stay local-only by default")
     }
 }

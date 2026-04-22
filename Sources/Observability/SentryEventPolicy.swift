@@ -65,6 +65,16 @@ struct SentryEventPolicy: Equatable {
             event: "microphone_start_timeout",
             summary: "Dictation microphone start timed out."
         ),
+        "onboarding.first_dictation_start_failed": .init(
+            engine: "onboarding",
+            event: "first_dictation_start_failed",
+            summary: "Onboarding could not start first dictation."
+        ),
+        "onboarding.first_dictation_stop_failed": .init(
+            engine: "onboarding",
+            event: "first_dictation_stop_failed",
+            summary: "Onboarding could not stop first dictation."
+        ),
         "capture.hotkey_register_failed": .init(
             engine: "capture",
             event: "hotkey_register_failed",

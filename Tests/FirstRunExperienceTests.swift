@@ -1,6 +1,72 @@
 import Foundation
 
 func testFirstRunExperience() {
+    runSuite("FirstRunExperience.onboardingSteps — follows the approved first-value journey") {
+        let steps = FirstRunExperience.onboardingSteps()
+
+        assertEqual(
+            steps,
+            [.hero, .value, .dictationSetup, .testDictation, .dictationResult, .meetingsIntro, .meetingSetup, .agentPayoff],
+            "onboarding should teach value, prove dictation, introduce meetings, then explain agent payoff"
+        )
+        assertEqual(
+            FirstRunOnboardingStep.hero.screenTitle,
+            "Speak and get clean local Markdown your agents can use.",
+            "hero should use the approved value proposition"
+        )
+        assertEqual(
+            FirstRunOnboardingStep.value.screenTitle,
+            "What Transcripted does",
+            "second screen should explain the product instead of asking users to choose a path"
+        )
+    }
+
+    runSuite("FirstRunExperience.onboardingAction — gates first dictation on microphone plus paste-back") {
+        let blocked = FirstRunExperience.onboardingAction(
+            for: .dictationSetup,
+            microphoneGranted: true,
+            accessibilityGranted: false,
+            hasFirstDictation: false
+        )
+        let ready = FirstRunExperience.onboardingAction(
+            for: .dictationSetup,
+            microphoneGranted: true,
+            accessibilityGranted: true,
+            hasFirstDictation: false
+        )
+
+        assertEqual(blocked.primaryTitle, "Turn on Microphone and Paste-back", "blocked setup should name both required dictation capabilities")
+        assertFalse(blocked.isPrimaryEnabled, "dictation setup should block until paste-back is ready")
+        assertEqual(ready.primaryTitle, "Continue", "ready setup should let users reach the first dictation test")
+        assertTrue(ready.isPrimaryEnabled, "ready setup should unlock")
+    }
+
+    runSuite("FirstRunExperience.onboardingAction — presents meetings and agent payoff after first dictation") {
+        let result = FirstRunExperience.onboardingAction(
+            for: .dictationResult,
+            microphoneGranted: true,
+            accessibilityGranted: true,
+            hasFirstDictation: true
+        )
+        let meetings = FirstRunExperience.onboardingAction(
+            for: .meetingsIntro,
+            microphoneGranted: true,
+            accessibilityGranted: true,
+            hasFirstDictation: true
+        )
+        let agent = FirstRunExperience.onboardingAction(
+            for: .agentPayoff,
+            microphoneGranted: true,
+            accessibilityGranted: true,
+            hasFirstDictation: true
+        )
+
+        assertEqual(result.primaryTitle, "Continue", "saved first dictation should move into meetings")
+        assertEqual(meetings.primaryTitle, "Set up meetings", "meeting intro should offer setup")
+        assertEqual(meetings.secondaryTitle, "Skip for now", "meeting intro should not trap dictation-first users")
+        assertEqual(agent.primaryTitle, "Open Transcripted", "last step should land users in the app")
+    }
+
     runSuite("FirstRunExperience.onboardingPermissions — keeps dictation setup separate from later meeting permissions") {
         let required = FirstRunExperience.onboardingRequiredPermissions()
         let optional = FirstRunExperience.onboardingOptionalPermissions()
