@@ -72,7 +72,7 @@ func testTranscriptedStoragePaths() {
             restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         }
 
-        let customRoot = FileManager.default.temporaryDirectory
+        let customRoot = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("TranscriptedStoragePathsTests-custom-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: customRoot) }
 
@@ -109,5 +109,27 @@ func testTranscriptedStoragePaths() {
                 "storage directory should be restricted to owner-only access: \(directory.lastPathComponent)"
             )
         }
+    }
+
+    runSuite("Transcripted capture library helpers — reject unsafe capture folders") {
+        let original = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        defer {
+            restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        }
+
+        let disallowedRoot = URL(fileURLWithPath: "/System/Library/Transcripted", isDirectory: true)
+
+        TranscriptedStoragePreferences.setCaptureLibraryURL(disallowedRoot)
+
+        assertEqual(
+            UserDefaults.standard.string(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey),
+            nil,
+            "unsafe capture-library paths should not be persisted"
+        )
+        assertEqual(
+            FileManager.default.transcriptedCaptureLibraryDir,
+            FileManager.default.transcriptedDefaultCaptureLibraryDir,
+            "storage should fall back to the default Transcripted Library capture root"
+        )
     }
 }

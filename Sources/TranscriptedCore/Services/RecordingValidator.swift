@@ -148,7 +148,7 @@ public enum RecordingValidator {
 
         // Resolve symlinks so that a symlink pointing at e.g. /System cannot bypass
         // the forbidden-prefix check below.
-        let resolved = url.resolvingSymlinksInPath()
+        let resolved = url.standardizedFileURL.resolvingSymlinksInPath()
         let resolvedPath = resolved.path
 
         // Reject system directories

@@ -13,17 +13,44 @@ enum TranscriptedStoragePreferences {
         if let customPath = userDefaults.string(forKey: captureLibraryLocationKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !customPath.isEmpty {
-            return URL(fileURLWithPath: customPath, isDirectory: true).standardizedFileURL
+            let candidate = URL(fileURLWithPath: customPath, isDirectory: true)
+            // Security: reject tampered preferences that target traversal or system
+            // roots while preserving the user's ability to choose their own library.
+            if isSafeCaptureLibraryURL(candidate) {
+                return candidate.standardizedFileURL
+            }
         }
 
         return fileManager.transcriptedDefaultCaptureLibraryDir
     }
 
-    static func setCaptureLibraryURL(_ url: URL?, userDefaults: UserDefaults = .standard) {
+    static func setCaptureLibraryURL(
+        _ url: URL?,
+        userDefaults: UserDefaults = .standard
+    ) {
         if let url {
-            userDefaults.set(url.standardizedFileURL.path, forKey: captureLibraryLocationKey)
+            // Security: keep unsafe roots out of preferences while preserving custom
+            // capture-library locations chosen in Settings.
+            guard isSafeCaptureLibraryURL(url) else {
+                userDefaults.removeObject(forKey: captureLibraryLocationKey)
+                return
+            }
+            let candidate = url.standardizedFileURL
+            userDefaults.set(candidate.path, forKey: captureLibraryLocationKey)
         } else {
             userDefaults.removeObject(forKey: captureLibraryLocationKey)
+        }
+    }
+
+    static func isSafeCaptureLibraryURL(_ url: URL) -> Bool {
+        if url.pathComponents.contains("..") {
+            return false
+        }
+
+        let candidate = url.standardizedFileURL.resolvingSymlinksInPath()
+        let forbiddenPrefixes = ["/System", "/Library", "/usr", "/bin", "/sbin", "/private"]
+        return !forbiddenPrefixes.contains { prefix in
+            candidate.path == prefix || candidate.path.hasPrefix(prefix + "/")
         }
     }
 }
