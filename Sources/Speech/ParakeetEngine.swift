@@ -394,6 +394,7 @@ class ParakeetEngine: ObservableObject {
     private var cachedInputDeviceName = "Unknown"
     private var lastAudioStartFailureReportAt: TimeInterval?
     private var lastInputSelectionReportKey: String?
+    private var ignoreInputSelectionConfigChangesUntil: CFAbsoluteTime = 0
 
     var isModelLoaded: Bool { asrManagerReady }
     var inputDeviceName: String { cachedInputDeviceName }
@@ -816,6 +817,10 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func handleAudioConfigChange() {
+        if CFAbsoluteTimeGetCurrent() < ignoreInputSelectionConfigChangesUntil {
+            return
+        }
+
         // Track whether any config change in the current burst interrupted a
         // recording. Once set, subsequent changes in the same burst inherit it.
         if isRecording {
@@ -1079,12 +1084,24 @@ class ParakeetEngine: ObservableObject {
             return nil
         }
 
+        guard selection.didOverrideDefault else {
+            cachedInputDeviceName = selection.selectedInput.name
+            lastInputSelectionReportKey = nil
+            return selection
+        }
+
+        guard inputNode.auAudioUnit.deviceID != selection.selectedInput.id else {
+            cachedInputDeviceName = selection.selectedInput.name
+            return selection
+        }
+
         do {
+            ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent() + 1.0
             try inputNode.auAudioUnit.setDeviceID(selection.selectedInput.id)
             cachedInputDeviceName = selection.selectedInput.name
 
             let reportKey = "\(selection.defaultInput.id)->\(selection.selectedInput.id)"
-            if selection.didOverrideDefault, lastInputSelectionReportKey != reportKey {
+            if lastInputSelectionReportKey != reportKey {
                 lastInputSelectionReportKey = reportKey
                 print("🎤 PARAKEET | using \(selection.selectedInput.name) instead of \(selection.defaultInput.name) to avoid Bluetooth headset mode")
                 EventReporter.shared.capture(
@@ -1094,10 +1111,9 @@ class ParakeetEngine: ObservableObject {
                     message: "Dictation input changed away from Bluetooth headset microphone",
                     context: inputSelectionContext(selection, operation: operation)
                 )
-            } else if !selection.didOverrideDefault {
-                lastInputSelectionReportKey = nil
             }
         } catch {
+            ignoreInputSelectionConfigChangesUntil = 0
             cachedInputDeviceName = selection.defaultInput.name
             var context = inputSelectionContext(selection, operation: operation)
             context["error"] = error.localizedDescription
