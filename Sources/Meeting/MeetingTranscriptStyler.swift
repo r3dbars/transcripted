@@ -402,13 +402,14 @@ enum MeetingTranscriptStyler {
         let stem = preferredURL.lastPathComponent
         var suffix = 2
 
-        while true {
+        while suffix <= 999 {
             let candidate = directory.appendingPathComponent("\(stem) \(suffix)", isDirectory: true)
             if !fm.fileExists(atPath: candidate.path) {
                 return candidate
             }
             suffix += 1
         }
+        return directory.appendingPathComponent("\(stem) \(UUID().uuidString)", isDirectory: true)
     }
 
     private static func fallbackTitle(for url: URL) -> String {
@@ -442,7 +443,7 @@ enum MeetingTranscriptStyler {
         var candidateStem = preferredStem
         var suffix = 2
 
-        while true {
+        while suffix <= 999 {
             let candidateURL = directory.appendingPathComponent(candidateStem).appendingPathExtension("md")
             let markdownTaken = candidateURL != originalURL && fm.fileExists(atPath: candidateURL.path)
 
@@ -453,6 +454,7 @@ enum MeetingTranscriptStyler {
             candidateStem = "\(preferredStem) \(suffix)"
             suffix += 1
         }
+        return directory.appendingPathComponent("\(preferredStem) \(UUID().uuidString)").appendingPathExtension("md")
     }
 }
 

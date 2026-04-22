@@ -11,7 +11,6 @@ enum MeetingRecordingCleanup {
         let urls = Set([micURL, systemURL].compactMap { $0 })
 
         for url in urls {
-            guard fileManager.fileExists(atPath: url.path) else { continue }
             do {
                 try fileManager.removeItem(at: url)
                 discarded.append(url)

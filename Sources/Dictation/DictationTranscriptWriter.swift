@@ -161,8 +161,7 @@ enum DictationTranscriptWriter {
     }
 
     private static func hasExistingContent(at url: URL) -> Bool {
-        guard FileManager.default.fileExists(atPath: url.path),
-              let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
               let size = values.fileSize else {
             return false
         }
