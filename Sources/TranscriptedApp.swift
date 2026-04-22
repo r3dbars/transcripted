@@ -30,7 +30,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         startMeeting: { [weak self] in self?.startMeetingFromSettings() },
         importAudioFile: { [weak self] in self?.importAudioFileFromSettings() },
         pasteLastDictation: { [weak self] in self?.pasteLastDictationFromSettings() },
-        openConnectAgent: { [weak self] in self?.showSettingsWindow(page: .connectAgent) },
+        openConnectAgent: { [weak self] in self?.showSettingsWindow(page: .connectAgent, source: "settings_action") },
         checkForUpdates: { [weak self] in self?.appState.sparkleUpdater.checkForUpdates() },
         sendFeedback: { [weak self] in
             guard let self else { return }
@@ -47,7 +47,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private lazy var menuPanelController = MenuBarPanelController(
         appState: appState,
         preferredSourceAppProvider: { [weak self] in self?.lastExternalApplication },
-        openSettingsWindow: { [weak self] page in self?.showSettingsWindow(page: page) },
+        openSettingsWindow: { [weak self] page in self?.showSettingsWindow(page: page, source: "menu_bar") },
         dismissPopover: { [weak self] in self?.closePopover() }
     )
 
@@ -200,7 +200,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     @objc private func openSettingsFromAppMenu(_ sender: Any?) {
         closePopover()
-        showSettingsWindow()
+        showSettingsWindow(source: "app_menu")
     }
 
     private func installSettingsMenuHandler() {
@@ -221,8 +221,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
     }
 
-    private func showSettingsWindow(page: TranscriptedSettingsPage = .home) {
-        settingsWindowController.present(page: page)
+    private func showSettingsWindow(
+        page: TranscriptedSettingsPage = .home,
+        source: String = "unknown"
+    ) {
+        settingsWindowController.present(page: page, source: source)
     }
 
     private func makeOnboardingView() -> PermissionsOnboardingView {
@@ -245,7 +248,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 return await self.stopOnboardingMeetingDryRun()
             },
             onOpenAgentSettings: { [weak self] in
-                self?.showSettingsWindow(page: .connectAgent)
+                self?.showSettingsWindow(page: .connectAgent, source: "onboarding")
             },
             onComplete: { [weak self] in
                 self?.finishOnboarding()
@@ -271,7 +274,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         guard let button = statusItem?.button, let popover = popover else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self else { return }
-            self.showMainPopover(relativeTo: button, popover: popover)
+            self.showMainPopover(relativeTo: button, popover: popover, entrypoint: "onboarding_completed")
         }
     }
 
@@ -285,9 +288,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func startOnboardingDictationTest() {
-        let sourceApp = resolvedSourceApp()
-        sourceApp?.activate(options: [])
-        sessionController.startDictation(sourceApp: sourceApp, trigger: .onboarding)
+        NSApp.activate(ignoringOtherApps: true)
+        sessionController.startDictation(sourceApp: nil, trigger: .onboarding)
     }
 
     private func stopOnboardingDictationTest() {
@@ -304,13 +306,61 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         return true
     }
 
-    private func showMainPopover(relativeTo button: NSStatusBarButton, popover: NSPopover) {
+    private func showMainPopover(
+        relativeTo button: NSStatusBarButton,
+        popover: NSPopover,
+        entrypoint: String = "status_item"
+    ) {
         _ = resolvedSourceApp()
         menuPanelController.refresh()
+        trackMenuBarOpened(entrypoint: entrypoint)
         popover.contentViewController = menuPanelController
         popover.contentSize = menuPanelController.preferredContentSize
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func trackMenuBarOpened(entrypoint: String) {
+        let modelState: String
+        switch appState.sttRouter.modelDownloadState {
+        case .notLoaded:
+            modelState = "not_loaded"
+        case .downloading:
+            modelState = "downloading"
+        case .loading:
+            modelState = "loading"
+        case .ready:
+            modelState = "ready"
+        case .failed:
+            modelState = "failed"
+        }
+
+        let updateState: String
+        switch appState.sparkleUpdater.updateStatus.state {
+        case .unknown:
+            updateState = "unknown"
+        case .readyToCheck:
+            updateState = "ready"
+        case .checking:
+            updateState = "checking"
+        case .noUpdateAvailable:
+            updateState = "up_to_date"
+        case .updateAvailable:
+            updateState = "available"
+        }
+
+        AnalyticsReporter.track(
+            "menu_bar_opened",
+            properties: [
+                "dictation_ready": appState.sttRouter.isModelLoaded ? "true" : "false",
+                "entrypoint": entrypoint,
+                "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
+                "model_state": modelState,
+                "paste_available": DictationTranscriptStore.latestSavedDictation() == nil ? "false" : "true",
+                "recent_meetings_available": RecentMeetingsScanner.loadRecent(limit: 1).isEmpty ? "false" : "true",
+                "update_state": updateState,
+            ]
+        )
     }
 
     private func resolvedSourceApp() -> NSRunningApplication? {

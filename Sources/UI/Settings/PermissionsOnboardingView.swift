@@ -59,6 +59,9 @@ struct PermissionsOnboardingView: View {
     @State private var trackedSteps: Set<FirstRunOnboardingStep> = []
     @State private var trackedShown = false
     @State private var lastTrackedModelState: String?
+    @State private var onboardingStartedAt = Date()
+    @State private var currentStepStartedAt = Date()
+    @State private var didCompleteOnboarding = false
 
     init(
         sttRouter: STTRouter,
@@ -123,6 +126,8 @@ struct PermissionsOnboardingView: View {
         .background(MenuTokens.cardBackground)
         .preferredColorScheme(.dark)
         .onAppear {
+            onboardingStartedAt = Date()
+            currentStepStartedAt = Date()
             checkAllPermissions(trackChanges: false)
             crashReportingEnabled = CrashReportingPreferences.isEnabled()
             anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
@@ -132,6 +137,7 @@ struct PermissionsOnboardingView: View {
             trackModelStateIfChanged()
         }
         .onDisappear {
+            trackDismissedIfNeeded()
             stopMeetingDryRunIfNeeded()
             stopPolling()
         }
@@ -295,7 +301,7 @@ struct PermissionsOnboardingView: View {
     }
 
     private func handlePrimaryAction() {
-        trackPrimaryCTA(currentAction.primaryTitle)
+        trackPrimaryCTA(currentAction.primaryTitle, ctaType: "primary")
 
         switch currentStep {
         case .hero, .value:
@@ -331,7 +337,7 @@ struct PermissionsOnboardingView: View {
 
     private func handleSecondaryAction() {
         guard let title = currentAction.secondaryTitle else { return }
-        trackPrimaryCTA(title)
+        trackPrimaryCTA(title, ctaType: "secondary")
 
         switch currentStep {
         case .testDictation:
@@ -355,6 +361,7 @@ struct PermissionsOnboardingView: View {
 
     private func move(to step: FirstRunOnboardingStep) {
         currentStep = step
+        currentStepStartedAt = Date()
     }
 
     private func requestPermission(_ kind: TranscriptedPermissionKind) {
@@ -595,6 +602,7 @@ struct PermissionsOnboardingView: View {
 
     private func completeOnboarding() {
         stopPolling()
+        didCompleteOnboarding = true
         AnalyticsReporter.track(
             "onboarding_completed",
             properties: [
@@ -603,6 +611,8 @@ struct PermissionsOnboardingView: View {
                 "completion_path": "guided",
                 "crash_reporting_enabled": crashReportingEnabled ? "true" : "false",
                 "first_dictation_saved": firstSavedDictation == nil ? "false" : "true",
+                "flow_elapsed_bucket": flowElapsedBucket,
+                "meeting_dry_run_completed": meetingDryRunCompleted ? "true" : "false",
                 "meeting_recording_ready": systemRecordingGranted ? "true" : "false",
                 "model_state": modelStateAnalyticsValue,
                 "step_id": currentStep.analyticsValue,
@@ -716,6 +726,7 @@ struct PermissionsOnboardingView: View {
         AnalyticsReporter.track(
             "onboarding_step_viewed",
             properties: [
+                "flow_elapsed_bucket": flowElapsedBucket,
                 "model_state": modelStateAnalyticsValue,
                 "step_id": step.analyticsValue,
                 "step_index": "\(step.rawValue + 1)",
@@ -738,15 +749,41 @@ struct PermissionsOnboardingView: View {
         )
     }
 
-    private func trackPrimaryCTA(_ title: String) {
+    private func trackDismissedIfNeeded() {
+        guard trackedShown, !didCompleteOnboarding else { return }
+        AnalyticsReporter.track(
+            "onboarding_dismissed",
+            properties: [
+                "first_dictation_saved": firstSavedDictation == nil ? "false" : "true",
+                "flow_elapsed_bucket": flowElapsedBucket,
+                "meeting_dry_run_completed": meetingDryRunCompleted ? "true" : "false",
+                "model_state": modelStateAnalyticsValue,
+                "step_id": currentStep.analyticsValue,
+                "step_index": "\(currentStep.rawValue + 1)",
+            ]
+        )
+    }
+
+    private func trackPrimaryCTA(_ title: String, ctaType: String) {
         AnalyticsReporter.track(
             "onboarding_primary_cta_clicked",
             properties: [
                 "cta": title.analyticsSlug,
+                "cta_type": ctaType,
+                "flow_elapsed_bucket": flowElapsedBucket,
                 "model_state": modelStateAnalyticsValue,
+                "step_elapsed_bucket": stepElapsedBucket,
                 "step_id": currentStep.analyticsValue,
             ]
         )
+    }
+
+    private var flowElapsedBucket: String {
+        AnalyticsReporter.durationBucket(seconds: Date().timeIntervalSince(onboardingStartedAt))
+    }
+
+    private var stepElapsedBucket: String {
+        AnalyticsReporter.durationBucket(seconds: Date().timeIntervalSince(currentStepStartedAt))
     }
 
     private func permissionStatusValue(_ kind: TranscriptedPermissionKind) -> String {
@@ -1783,21 +1820,6 @@ private struct AppIconPreview: View {
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: min(16, size * 0.22), style: .continuous))
             .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
-    }
-}
-
-private extension TranscriptedPermissionKind {
-    var analyticsValue: String {
-        switch self {
-        case .microphone:
-            return "microphone"
-        case .accessibility:
-            return "pasteback"
-        case .systemAudioRecording:
-            return "system_recording"
-        case .calendar:
-            return "calendar"
-        }
     }
 }
 

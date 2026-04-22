@@ -1083,10 +1083,13 @@ final class MeetingSessionController: ObservableObject {
             )
             AnalyticsReporter.track(
                 "meeting_transcript_saved",
-                properties: [
+                properties: savedTranscriptAnalyticsProperties().merging(
+                    [
                     "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
                     "trigger": transcriptionTrigger.rawValue,
-                ]
+                    ],
+                    uniquingKeysWith: { _, new in new }
+                )
             )
             AppSoundPlayer.shared.play(.meetingTranscriptComplete)
         case .failed(let message):
@@ -1183,6 +1186,66 @@ final class MeetingSessionController: ObservableObject {
 
     private func analyticsFailureKind(from message: String) -> String {
         MeetingFailureKind.classify(message: message).rawValue
+    }
+
+    private func savedTranscriptAnalyticsProperties() -> [String: String] {
+        guard let url = taskManager.lastSavedTranscriptURL ?? lastSavedTranscriptURL,
+              let raw = try? String(contentsOf: url, encoding: .utf8),
+              let values = transcriptFrontmatterValues(from: raw) else {
+            return [:]
+        }
+
+        var properties: [String: String] = [:]
+
+        if let duration = values["duration"],
+           let durationSeconds = transcriptDurationSeconds(from: duration) {
+            properties["duration_bucket"] = AnalyticsReporter.durationBucket(seconds: Double(durationSeconds))
+        }
+
+        if let wordCount = Int(values["total_word_count"] ?? "") {
+            properties["word_count_bucket"] = AnalyticsReporter.wordCountBucket(wordCount)
+        }
+
+        let participantCount = (Int(values["mic_speakers"] ?? "") ?? 0)
+            + (Int(values["system_speakers"] ?? "") ?? 0)
+        if participantCount > 0 {
+            properties["participant_count_bucket"] = AnalyticsReporter.countBucket(participantCount)
+        }
+
+        return properties
+    }
+
+    private func transcriptFrontmatterValues(from raw: String) -> [String: String]? {
+        guard raw.hasPrefix("---\n"),
+              let endRange = raw.range(
+                of: "\n---\n",
+                range: raw.index(raw.startIndex, offsetBy: 4)..<raw.endIndex
+              ) else {
+            return nil
+        }
+
+        let frontmatter = String(raw[raw.index(raw.startIndex, offsetBy: 4)..<endRange.lowerBound])
+        var values: [String: String] = [:]
+        for line in frontmatter.components(separatedBy: "\n") {
+            let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { continue }
+            values[parts[0].trimmingCharacters(in: .whitespaces)] = parts[1]
+                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+        }
+        return values
+    }
+
+    private func transcriptDurationSeconds(from value: String) -> Int? {
+        let parts = value.split(separator: ":").compactMap { Int($0) }
+        switch parts.count {
+        case 2:
+            return parts[0] * 60 + parts[1]
+        case 3:
+            return parts[0] * 3600 + parts[1] * 60 + parts[2]
+        default:
+            return nil
+        }
     }
 
     private func baseDiagnosticsContext(extra: [String: String] = [:]) -> [String: String] {

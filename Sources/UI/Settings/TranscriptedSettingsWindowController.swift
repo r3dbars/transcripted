@@ -44,11 +44,18 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func present(page: TranscriptedSettingsPage = .home) {
+    func present(page: TranscriptedSettingsPage = .home, source: String = "unknown") {
         guard let window else { return }
         speakerPeopleModel.refresh()
         navigationModel.selectedPage = page
         navigationModel.presentationID = UUID()
+        AnalyticsReporter.track(
+            "settings_opened",
+            properties: [
+                "page_id": page.analyticsValue,
+                "source": source,
+            ]
+        )
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

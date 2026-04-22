@@ -154,6 +154,7 @@ final class MenuBarPanelController: NSViewController {
 
     private func startDictationFromMenu() {
         guard let session = appState.contextCapture.sessionController else { return }
+        trackMenuAction("start_dictation")
         let sourceApp = resolvedSourceApp()
         dismissPopover()
         sourceApp?.activate(options: [])
@@ -161,6 +162,7 @@ final class MenuBarPanelController: NSViewController {
     }
 
     private func startMeetingFromMenu() {
+        trackMenuAction("start_meeting")
         let sourceApp = resolvedSourceApp()
         dismissPopover()
         sourceApp?.activate(options: [])
@@ -170,6 +172,7 @@ final class MenuBarPanelController: NSViewController {
     }
 
     private func pasteLastDictationFromMenu() {
+        trackMenuAction("paste_last_dictation")
         guard let latestText = DictationTranscriptStore.latestSavedText() else {
             NSSound.beep()
             return
@@ -182,13 +185,27 @@ final class MenuBarPanelController: NSViewController {
     }
 
     private func openSettingsFromMenu(_ page: TranscriptedSettingsPage) {
+        trackMenuAction(page == .home ? "home" : "open_\(page.analyticsValue)")
         dismissPopover()
         openSettingsWindow(page)
     }
 
     private func checkForUpdatesFromMenu() {
+        trackMenuAction("check_updates")
         dismissPopover()
         appState.sparkleUpdater.checkForUpdates()
+    }
+
+    private func trackMenuAction(_ actionID: String) {
+        AnalyticsReporter.track(
+            "menu_bar_action_clicked",
+            properties: [
+                "action_id": actionID,
+                "dictation_ready": appState.sttRouter.isModelLoaded ? "true" : "false",
+                "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
+                "paste_available": DictationTranscriptStore.latestSavedDictation() == nil ? "false" : "true",
+            ]
+        )
     }
 
     private func resolvedSourceApp() -> NSRunningApplication? {

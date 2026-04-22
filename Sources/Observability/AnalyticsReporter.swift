@@ -122,6 +122,21 @@ final class AnalyticsReporter {
         }
     }
 
+    static func countBucket(_ count: Int) -> String {
+        switch count {
+        case ..<1:
+            return "0"
+        case 1:
+            return "1"
+        case 2...3:
+            return "2_3"
+        case 4...9:
+            return "4_9"
+        default:
+            return "10_plus"
+        }
+    }
+
     static func queueDepthBucket(_ depth: Int) -> String {
         switch depth {
         case ..<1:

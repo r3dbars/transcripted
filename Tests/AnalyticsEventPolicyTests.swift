@@ -10,8 +10,10 @@ func testAnalyticsEventPolicy() {
         let meetingDryRun = AnalyticsEventPolicy.policy(forEvent: "onboarding_meeting_dry_run_clicked")
         let agentClicked = AnalyticsEventPolicy.policy(forEvent: "onboarding_agent_cta_clicked")
         let completed = AnalyticsEventPolicy.policy(forEvent: "onboarding_completed")
+        let dismissed = AnalyticsEventPolicy.policy(forEvent: "onboarding_dismissed")
 
         assertEqual(shown?.allowedProperties.contains("meeting_recording_ready"), true, "onboarding shown should preserve meeting-readiness attribution")
+        assertEqual(stepViewed?.allowedProperties.contains("flow_elapsed_bucket"), true, "step views should preserve coarse elapsed time")
         assertEqual(stepViewed?.allowedProperties.contains("step_id"), true, "step views should preserve funnel step")
         assertEqual(permissionClicked?.allowedProperties.contains("permission_kind"), true, "permission clicks should preserve the clicked permission")
         assertEqual(permissionChanged?.allowedProperties.contains("to_status"), true, "permission status changes should preserve the new status")
@@ -19,14 +21,18 @@ func testAnalyticsEventPolicy() {
         assertEqual(meetingDryRun?.allowedProperties.contains("meeting_recording_ready"), true, "meeting dry runs should keep setup readiness")
         assertEqual(agentClicked?.allowedProperties.contains("agent_cta"), true, "agent CTAs should preserve the action id")
         assertEqual(completed?.allowedProperties.contains("first_dictation_saved"), true, "completion should preserve whether first value happened")
+        assertEqual(completed?.allowedProperties.contains("flow_elapsed_bucket"), true, "completion should preserve coarse time to finish")
+        assertEqual(dismissed?.allowedProperties.contains("step_index"), true, "dismissal should preserve where users dropped")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "meeting_recording_ready": "true",
                 "permission_kind": "system_recording",
+                "flow_elapsed_bucket": "30_119s",
                 "step_id": "meeting_setup",
             ],
             allowedKeys: [
+                "flow_elapsed_bucket",
                 "meeting_recording_ready",
                 "permission_kind",
                 "step_id",
@@ -34,7 +40,42 @@ func testAnalyticsEventPolicy() {
         )
         assertEqual(sanitized["meeting_recording_ready"], "true", "meeting_recording_ready should avoid the audio-key sanitizer drop")
         assertEqual(sanitized["permission_kind"], "system_recording", "permission kind should survive as a coarse enum")
+        assertEqual(sanitized["flow_elapsed_bucket"], "30_119s", "coarse elapsed buckets should survive sanitization")
         assertEqual(sanitized["step_id"], "meeting_setup", "step id should survive sanitization")
+    }
+
+    runSuite("AnalyticsEventPolicy allows menu and settings behavior events") {
+        let menuOpened = AnalyticsEventPolicy.policy(forEvent: "menu_bar_opened")
+        let menuAction = AnalyticsEventPolicy.policy(forEvent: "menu_bar_action_clicked")
+        let settingsOpened = AnalyticsEventPolicy.policy(forEvent: "settings_opened")
+        let settingsPage = AnalyticsEventPolicy.policy(forEvent: "settings_page_viewed")
+        let settingsAction = AnalyticsEventPolicy.policy(forEvent: "settings_action_clicked")
+        let settingsToggle = AnalyticsEventPolicy.policy(forEvent: "settings_toggle_changed")
+        let settingsPermission = AnalyticsEventPolicy.policy(forEvent: "settings_permission_cta_clicked")
+        let captureLibrary = AnalyticsEventPolicy.policy(forEvent: "settings_capture_library_changed")
+
+        assertEqual(menuOpened?.allowedProperties.contains("paste_available"), true, "menu opens should preserve whether paste has value")
+        assertEqual(menuAction?.allowedProperties.contains("action_id"), true, "menu clicks should preserve the clicked action")
+        assertEqual(settingsOpened?.allowedProperties.contains("source"), true, "settings opens should preserve entry source")
+        assertEqual(settingsPage?.allowedProperties.contains("page_id"), true, "settings page views should preserve page id")
+        assertEqual(settingsAction?.allowedProperties.contains("action_id"), true, "settings actions should preserve action id")
+        assertEqual(settingsToggle?.allowedProperties.contains("setting_id"), true, "settings toggles should preserve setting id")
+        assertEqual(settingsPermission?.allowedProperties.contains("permission_kind"), true, "settings permission CTAs should preserve permission kind")
+        assertEqual(captureLibrary?.allowedProperties.contains("location_type"), true, "capture library changes should preserve default-vs-custom only")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "action_id": "start_dictation",
+                "page_id": "home",
+                "setting_id": "menu_bar_start_dictation",
+                "source": "menu_bar",
+            ],
+            allowedKeys: ["action_id", "page_id", "setting_id", "source"]
+        )
+        assertEqual(sanitized["action_id"], "start_dictation", "action ids should survive sanitization")
+        assertEqual(sanitized["page_id"], "home", "page ids should survive sanitization")
+        assertEqual(sanitized["setting_id"], "menu_bar_start_dictation", "setting ids should survive sanitization")
+        assertEqual(sanitized["source"], "menu_bar", "source enums should survive sanitization")
     }
 
     runSuite("AnalyticsEventPolicy preserves dictation auto-send attribution") {
@@ -86,6 +127,9 @@ func testAnalyticsEventPolicy() {
         let failed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
 
         assertEqual(saved?.allowedProperties.contains("trigger"), true, "meeting saves should preserve trigger attribution")
+        assertEqual(saved?.allowedProperties.contains("duration_bucket"), true, "meeting saves should preserve coarse duration")
+        assertEqual(saved?.allowedProperties.contains("word_count_bucket"), true, "meeting saves should preserve coarse word output")
+        assertEqual(saved?.allowedProperties.contains("participant_count_bucket"), true, "meeting saves should preserve coarse participant count")
         assertEqual(failed?.allowedProperties.contains("trigger"), true, "meeting failures should preserve trigger attribution")
     }
 

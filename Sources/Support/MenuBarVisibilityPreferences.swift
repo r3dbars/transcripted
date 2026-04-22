@@ -8,6 +8,19 @@ enum MenuBarOptionalItem: String, CaseIterable, Hashable, Identifiable {
 
     var id: String { rawValue }
 
+    var analyticsValue: String {
+        switch self {
+        case .startDictation:
+            return "start_dictation"
+        case .startMeeting:
+            return "start_meeting"
+        case .pasteLastDictation:
+            return "paste_last_dictation"
+        case .recentMeetings:
+            return "recent_meetings"
+        }
+    }
+
     var title: String {
         switch self {
         case .startDictation:
