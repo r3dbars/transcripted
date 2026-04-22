@@ -147,6 +147,7 @@ final class MeetingOverlayRootView: NSView {
     private let systemLabel = NSTextField(labelWithString: "System audio")
     private let audioWaveform = DualWaveformHostView(frame: .zero)
     private let recordButton = NSButton()
+    private let remindButton = NSButton()
     private let cancelButton = NSButton()
     private let closeButton = NSButton()
     private let chevronButton = NSButton()
@@ -158,6 +159,7 @@ final class MeetingOverlayRootView: NSView {
     private let cancelTooltip = "Cancel meeting recording"
     private let finishTooltip = "Finish and transcribe"
     private let dismissPromptTooltip = "Dismiss meeting prompt"
+    private let remindPromptTooltip = "Remind me soon"
     private let startTooltip = "Start meeting recording"
     private let minimizeTooltip = "Minimize meeting widget"
     private let expandTooltip = "Expand meeting widget"
@@ -168,6 +170,7 @@ final class MeetingOverlayRootView: NSView {
 
     /// Invoked when the user clicks the close/stop button.
     var onSecondaryAction: (() -> Void)?
+    var onRemindAction: (() -> Void)?
     var onCancelAction: (() -> Void)?
     var onPrimaryAction: (() -> Void)?
     var onToggleMinimized: (() -> Void)?
@@ -260,6 +263,21 @@ final class MeetingOverlayRootView: NSView {
         recordButton.setAccessibilityLabel(startTooltip)
         recordButton.isHidden = true
         addSubview(recordButton)
+
+        remindButton.attributedTitle = buttonTitle("Remind me soon", size: 11, weight: .semibold)
+        remindButton.isBordered = false
+        remindButton.wantsLayer = true
+        remindButton.layer?.cornerRadius = 8
+        remindButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
+        remindButton.layer?.borderWidth = 0.5
+        remindButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
+        remindButton.target = self
+        remindButton.action = #selector(handleRemindAction)
+        remindButton.toolTip = nil
+        remindButton.setAccessibilityLabel(remindPromptTooltip)
+        remindButton.setAccessibilityHelp("Dismisses this prompt and asks again in a little bit.")
+        remindButton.isHidden = true
+        addSubview(remindButton)
 
         cancelButton.isBordered = false
         cancelButton.wantsLayer = true
@@ -573,14 +591,24 @@ final class MeetingOverlayRootView: NSView {
             height: 16
         )
 
-        let secondaryWidth = max(62, closeButton.fittingSize.width + 18)
+        let secondaryWidth = max(68, closeButton.fittingSize.width + 18)
+        let remindWidth = max(118, remindButton.fittingSize.width + 18)
         let primaryWidth = max(74, recordButton.fittingSize.width + 18)
         let buttonHeight: CGFloat = 24
+        let buttonGap: CGFloat = 8
+        let totalButtonWidth = secondaryWidth + remindWidth + primaryWidth + buttonGap * 2
+        let buttonStartX = max(pad, bounds.width - pad - totalButtonWidth)
 
         closeButton.frame = NSRect(
-            x: bounds.width - pad - secondaryWidth - primaryWidth - 8,
+            x: buttonStartX,
             y: 10,
             width: secondaryWidth,
+            height: buttonHeight
+        )
+        remindButton.frame = NSRect(
+            x: closeButton.frame.maxX + buttonGap,
+            y: 10,
+            width: remindWidth,
             height: buttonHeight
         )
         recordButton.frame = NSRect(
@@ -669,6 +697,7 @@ final class MeetingOverlayRootView: NSView {
         let showLevels = state == .recording && !self.isRecordingMinimized
         audioWaveform.isHidden = !showLevels
         recordButton.isHidden = !isPrompting
+        remindButton.isHidden = !isPrompting
         cancelButton.isHidden = state != .recording
         closeButton.isHidden = isPreparing || (state != .recording && !isPrompting)
         chevronButton.isHidden = state != .recording
@@ -706,6 +735,12 @@ final class MeetingOverlayRootView: NSView {
             closeButton.setAccessibilityLabel(dismissPromptTooltip)
             closeButton.setAccessibilityHelp("Dismisses this meeting recording prompt.")
             closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+            remindButton.attributedTitle = buttonTitle("Remind me soon", size: 11, weight: .semibold)
+            remindButton.setAccessibilityLabel(remindPromptTooltip)
+            remindButton.setAccessibilityHelp("Dismisses this prompt and asks again in a little bit.")
+            remindButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
+            remindButton.layer?.borderWidth = 0.5
+            remindButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
         case .recording:
             titleLabel.stringValue = self.isRecordingMinimized ? "Rec" : "Recording meeting"
             updateStatusDot(color: MeetingOverlayTokens.dotRecording, haloOpacity: 0.24, haloRadius: 3)
@@ -783,6 +818,15 @@ final class MeetingOverlayRootView: NSView {
         closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
         closeButton.layer?.borderWidth = 0
         closeButton.layer?.borderColor = nil
+        remindButton.attributedTitle = buttonTitle("Remind me soon", size: 11, weight: .semibold)
+        remindButton.image = nil
+        remindButton.imagePosition = .noImage
+        remindButton.contentTintColor = MeetingOverlayTokens.textPrimary
+        remindButton.toolTip = nil
+        remindButton.layer?.cornerRadius = 8
+        remindButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
+        remindButton.layer?.borderWidth = 0.5
+        remindButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
         cancelButton.image = cancelButtonImage()
         cancelButton.imagePosition = .imageOnly
         cancelButton.contentTintColor = MeetingOverlayTokens.quietActionTint
@@ -853,6 +897,7 @@ final class MeetingOverlayRootView: NSView {
 
         addTooltipTrackingArea(for: cancelButton, text: cancelTooltip)
         addTooltipTrackingArea(for: closeButton, text: currentState == .recording ? finishTooltip : dismissPromptTooltip)
+        addTooltipTrackingArea(for: remindButton, text: remindPromptTooltip)
         addTooltipTrackingArea(for: recordButton, text: startTooltip)
         addTooltipTrackingArea(
             for: chevronButton,
@@ -944,6 +989,10 @@ final class MeetingOverlayRootView: NSView {
 
     @objc private func handleSecondaryAction() {
         onSecondaryAction?()
+    }
+
+    @objc private func handleRemindAction() {
+        onRemindAction?()
     }
 
     @objc private func handleCancelAction() {
@@ -1071,6 +1120,7 @@ final class MeetingOverlayController {
     weak var meetingSession: MeetingSessionController?
     var onPromptRecord: ((MeetingPromptDetector.Candidate) -> Void)?
     var onPromptDismiss: ((MeetingPromptDetector.Candidate) -> Void)?
+    var onPromptRemindSoon: ((MeetingPromptDetector.Candidate) -> Void)?
 
     // MARK: - Setup
 
@@ -1096,6 +1146,7 @@ final class MeetingOverlayController {
         let rootView = MeetingOverlayRootView(frame: panel.contentView?.bounds ?? frame)
         rootView.autoresizingMask = [.width, .height]
         rootView.onSecondaryAction = { [weak self] in self?.handleSecondaryActionTapped() }
+        rootView.onRemindAction = { [weak self] in self?.handleRemindActionTapped() }
         rootView.onCancelAction = { [weak self] in self?.handleCancelTapped() }
         rootView.onPrimaryAction = { [weak self] in self?.handlePrimaryActionTapped() }
         rootView.onToggleMinimized = { [weak self] in self?.toggleRecordingMinimized() }
@@ -1396,6 +1447,16 @@ final class MeetingOverlayController {
         guard case .prompt = state, let candidate = promptCandidate else { return }
         promptCountdownTask?.cancel()
         onPromptRecord?(candidate)
+    }
+
+    private func handleRemindActionTapped() {
+        guard case .prompt = state, let candidate = promptCandidate else { return }
+        promptCountdownTask?.cancel()
+        onPromptRemindSoon?(candidate)
+        promptCandidate = nil
+        currentPrompt = nil
+        state = .idle
+        hidePanel()
     }
 
     private func toggleRecordingMinimized() {

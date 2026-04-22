@@ -77,7 +77,30 @@ final class MeetingPromptDetector {
     }
 
     @discardableResult
+    func dismiss(candidate: Candidate) -> MeetingPromptBackoffDecision {
+        return dismiss(candidate: candidate, interval: nil)
+    }
+
+    @discardableResult
+    func remindSoon(candidate: Candidate) -> MeetingPromptBackoffDecision {
+        let now = Date()
+        let until = now.addingTimeInterval(MeetingPromptHeuristics.remindSoonInterval)
+        let decision = MeetingPromptBackoffDecision(
+            kind: MeetingPromptHeuristics.remindSoonBackoffKind(for: candidate.source),
+            until: until
+        )
+        suppressRuntimePrompts(for: candidate.provider, until: until)
+        snoozedUntil[candidate.id] = until
+        pendingUntil[candidate.id] = until
+        return decision
+    }
+
+    @discardableResult
     func snooze(candidate: Candidate, interval: TimeInterval? = nil) -> MeetingPromptBackoffDecision {
+        return dismiss(candidate: candidate, interval: interval)
+    }
+
+    private func dismiss(candidate: Candidate, interval: TimeInterval?) -> MeetingPromptBackoffDecision {
         let now = Date()
         let baseInterval = MeetingPromptHeuristics.snoozeInterval(
             for: candidate.source,

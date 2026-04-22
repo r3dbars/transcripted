@@ -82,9 +82,11 @@ enum MeetingPromptReason: String, Equatable {
 enum MeetingPromptBackoffKind: String, Equatable {
     case calendarDefault = "calendar_default"
     case calendarTeamsExtended = "calendar_teams_extended"
+    case calendarShortReminder = "calendar_short_reminder"
     case runtimeUntilNextCalendar = "runtime_until_next_calendar"
     case runtimeDefaultFallback = "runtime_default_fallback"
     case runtimeTeamsExtended = "runtime_teams_extended"
+    case runtimeShortReminder = "runtime_short_reminder"
 }
 
 struct MeetingPromptBackoffDecision: Equatable {
@@ -106,7 +108,8 @@ struct RuntimeMeetingPromptPresentation: Equatable {
 }
 
 enum MeetingPromptHeuristics {
-    static let runtimeReminderSnoozeInterval: TimeInterval = 2 * 60
+    static let remindSoonInterval: TimeInterval = 2 * 60
+    static let runtimeReminderSnoozeInterval: TimeInterval = remindSoonInterval
     static let defaultRuntimeDismissFallbackInterval: TimeInterval = 30 * 60
     static let teamsDismissMinimumInterval: TimeInterval = 2 * 60 * 60
     static let runtimeActivityFreshness: TimeInterval = 5 * 60
@@ -145,6 +148,15 @@ enum MeetingPromptHeuristics {
         case .runtimeApp:
             if hasResumeDate { return .runtimeUntilNextCalendar }
             return provider == .teams ? .runtimeTeamsExtended : .runtimeDefaultFallback
+        }
+    }
+
+    static func remindSoonBackoffKind(for source: MeetingPromptSource) -> MeetingPromptBackoffKind {
+        switch source {
+        case .calendarEvent:
+            return .calendarShortReminder
+        case .runtimeApp:
+            return .runtimeShortReminder
         }
     }
 

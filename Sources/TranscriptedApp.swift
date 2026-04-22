@@ -100,7 +100,18 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
             meetingOverlayController.onPromptDismiss = { [weak self] candidate in
                 guard let self else { return }
-                let backoffDecision = self.meetingPromptDetector.snooze(candidate: candidate)
+                let backoffDecision = self.meetingPromptDetector.dismiss(candidate: candidate)
+                AnalyticsReporter.track(
+                    "meeting_prompt_dismissed",
+                    properties: self.analyticsProperties(
+                        for: candidate,
+                        backoffKind: backoffDecision.kind
+                    )
+                )
+            }
+            meetingOverlayController.onPromptRemindSoon = { [weak self] candidate in
+                guard let self else { return }
+                let backoffDecision = self.meetingPromptDetector.remindSoon(candidate: candidate)
                 AnalyticsReporter.track(
                     "meeting_prompt_dismissed",
                     properties: self.analyticsProperties(
