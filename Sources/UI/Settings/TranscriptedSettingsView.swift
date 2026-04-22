@@ -1546,56 +1546,10 @@ private struct AgentConnectionSettingsPage: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Agent",
-                summary: "Two good paths. Web chats are fallback only."
+                summary: "Claude Desktop gets direct tools. Local agents get one prompt."
             )
 
-            SettingsSection(
-                title: "Choose Your App",
-                detail: "Use Claude Desktop for direct tools, or copy one prompt for a local coding agent."
-            ) {
-                AgentRouteCard(
-                    symbolName: "bubble.left.and.text.bubble.right.fill",
-                    title: "Claude Desktop",
-                    detail: "Best experience. Transcripted installs direct tools, then you restart Claude Desktop."
-                ) {
-                    HStack(spacing: 10) {
-                        Button {
-                            installClaudeDesktop()
-                        } label: {
-                            Label(
-                                isInstallingClaudeDesktop ? "Installing..." : "Install",
-                                systemImage: isInstallingClaudeDesktop ? "hourglass" : "checkmark.circle"
-                            )
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(isInstallingClaudeDesktop || !claudeDesktopStatus.bundledBinaryExists)
-
-                        if !claudeDesktopStatus.claudeDesktopLikelyInstalled {
-                            Button {
-                                openClaudeDesktopDownload()
-                            } label: {
-                                Label("Get Claude", systemImage: "arrow.down.circle")
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
-
-                    ClaudeDesktopCompactStatus(status: claudeDesktopStatus)
-                }
-
-                AgentRouteCard(
-                    symbolName: "terminal.fill",
-                    title: "Local Coding Agents",
-                    detail: "Claude Code, Codex, Cursor, Windsurf, Zed, OpenCode, OpenClaw, Cline, Continue, and VS Code agents."
-                ) {
-                    Button {
-                        copyLocalAgentPrompt()
-                    } label: {
-                        Label(copiedLocalAgentPrompt ? "Copied" : "Copy Prompt", systemImage: "doc.on.doc")
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-            }
+            agentActionSection
 
             if let claudeDesktopInstallResult {
                 ClaudeDesktopSelfTestResultView(result: claudeDesktopInstallResult)
@@ -1686,6 +1640,130 @@ private struct AgentConnectionSettingsPage: View {
         .onAppear(perform: refreshClaudeDesktopStatus)
     }
 
+    private var agentActionSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Choose Your App")
+                    .font(.headline)
+
+                Text("Pick one. No JSON, no Terminal, no source build.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 12) {
+                AgentConnectActionButton(
+                    symbolName: claudeDesktopActionSymbol,
+                    eyebrow: "Claude Desktop",
+                    title: claudeDesktopActionTitle,
+                    detail: "Best full-library experience. Installs Transcripted direct tools.",
+                    statusText: claudeDesktopStatusText,
+                    statusSymbolName: claudeDesktopStatusSymbol,
+                    tint: claudeDesktopStatusTint,
+                    isEnabled: claudeDesktopActionEnabled
+                ) {
+                    installClaudeDesktop()
+                }
+
+                AgentConnectActionButton(
+                    symbolName: copiedLocalAgentPrompt ? "checkmark" : "chevron.left.forwardslash.chevron.right",
+                    eyebrow: "Local Coding Agents",
+                    title: copiedLocalAgentPrompt ? "Copied" : "Copy for Agent",
+                    detail: "Claude Code, Codex, Cursor, Windsurf, Zed, Cline, Continue, OpenCode, and OpenClaw.",
+                    statusText: "For agents running on this Mac",
+                    statusSymbolName: "folder",
+                    tint: Color(nsColor: .systemBlue),
+                    isEnabled: true
+                ) {
+                    copyLocalAgentPrompt()
+                }
+            }
+
+            if !claudeDesktopStatus.claudeDesktopLikelyInstalled {
+                Button {
+                    openClaudeDesktopDownload()
+                } label: {
+                    Label("Get Claude Desktop", systemImage: "arrow.down.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+    }
+
+    private var claudeDesktopActionTitle: String {
+        if isInstallingClaudeDesktop {
+            return "Installing..."
+        }
+
+        switch claudeDesktopStatus.state {
+        case .installed:
+            return "Install in Claude"
+        case .notInstalled:
+            return "Install in Claude"
+        case .needsRepair:
+            return "Repair Claude Setup"
+        }
+    }
+
+    private var claudeDesktopActionSymbol: String {
+        if isInstallingClaudeDesktop {
+            return "hourglass"
+        }
+
+        switch claudeDesktopStatus.state {
+        case .installed:
+            return "checkmark"
+        case .notInstalled:
+            return "sparkles"
+        case .needsRepair:
+            return "arrow.clockwise"
+        }
+    }
+
+    private var claudeDesktopActionEnabled: Bool {
+        !isInstallingClaudeDesktop
+            && claudeDesktopStatus.bundledBinaryExists
+    }
+
+    private var claudeDesktopStatusText: String {
+        if !claudeDesktopStatus.bundledBinaryExists {
+            return "Direct tools missing from this build"
+        }
+
+        switch claudeDesktopStatus.state {
+        case .installed:
+            return "Installed. Restart Claude if needed"
+        case .notInstalled:
+            return "One click, then restart Claude Desktop"
+        case .needsRepair:
+            return "Needs repair"
+        }
+    }
+
+    private var claudeDesktopStatusSymbol: String {
+        switch claudeDesktopStatus.state {
+        case .installed:
+            return "checkmark.circle.fill"
+        case .notInstalled:
+            return "arrow.right.circle"
+        case .needsRepair:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var claudeDesktopStatusTint: Color {
+        switch claudeDesktopStatus.state {
+        case .installed:
+            return .green
+        case .notInstalled:
+            return Color(nsColor: .systemOrange)
+        case .needsRepair:
+            return .orange
+        }
+    }
+
     private func refreshClaudeDesktopStatus() {
         claudeDesktopStatus = ClaudeDesktopIntegrationInstaller.currentStatus()
     }
@@ -1765,102 +1843,80 @@ private struct AgentConnectionSettingsPage: View {
     }
 }
 
-private struct AgentRouteCard<Content: View>: View {
+private struct AgentConnectActionButton: View {
     let symbolName: String
+    let eyebrow: String
     let title: String
     let detail: String
-    let content: Content
+    let statusText: String
+    let statusSymbolName: String
+    let tint: Color
+    let isEnabled: Bool
+    let action: () -> Void
 
-    init(
-        symbolName: String,
-        title: String,
-        detail: String,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.symbolName = symbolName
-        self.title = title
-        self.detail = detail
-        self.content = content()
-    }
+    @State private var isHovered = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: symbolName)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 34, height: 34)
-                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 42, height: 42)
+                    .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(tint.opacity(0.18), lineWidth: 1)
+                    )
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title)
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(eyebrow.uppercased())
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
 
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    Text(title)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.88)
 
-                HStack(spacing: 10) {
-                    content
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Label(statusText, systemImage: statusSymbolName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(tint)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.88)
+                        .padding(.top, 2)
                 }
-                .padding(.top, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(tint.opacity(isEnabled ? 0.95 : 0.45))
+                    .frame(width: 26, height: 26)
+                    .background(tint.opacity(isEnabled ? 0.11 : 0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            .frame(maxWidth: .infinity, minHeight: 142, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(isHovered && isEnabled ? 0.95 : 0.78))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(tint.opacity(isHovered && isEnabled ? 0.56 : 0.28), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .opacity(isEnabled ? 1.0 : 0.72)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.75))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
-    }
-}
-
-private struct ClaudeDesktopCompactStatus: View {
-    let status: ClaudeDesktopIntegrationStatus
-
-    var body: some View {
-        Label(text, systemImage: symbolName)
-            .font(.caption)
-            .foregroundStyle(tint)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private var text: String {
-        switch status.state {
-        case .installed:
-            return "Installed. Restart Claude Desktop if you just installed it."
-        case .notInstalled:
-            return status.bundledBinaryExists ? "Not installed yet." : "This app build is missing direct tools."
-        case .needsRepair:
-            return "Needs update. Click Install to repair it."
-        }
-    }
-
-    private var symbolName: String {
-        switch status.state {
-        case .installed:
-            return "checkmark.circle.fill"
-        case .notInstalled:
-            return "circle"
-        case .needsRepair:
-            return "exclamationmark.triangle.fill"
-        }
-    }
-
-    private var tint: Color {
-        switch status.state {
-        case .installed:
-            return .green
-        case .notInstalled:
-            return .secondary
-        case .needsRepair:
-            return .orange
-        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .onHover { isHovered = $0 }
     }
 }
 
