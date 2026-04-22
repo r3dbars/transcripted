@@ -7,9 +7,15 @@ set -euo pipefail
 # - first non-empty line must be PASS / PASS: ... / FAIL / FAIL: ...
 #
 # Usage:
-#   bash scripts/ops/qa-gate-check.sh [repo] [issue_number] [owner_login]
+#   bash scripts/ops/qa-gate-check.sh [--json] [repo] [issue_number] [owner_login]
 # Example:
 #   bash scripts/ops/qa-gate-check.sh r3dbars/transcripted 428 r3dbars
+
+if [[ "${1:-}" == "--json" ]]; then
+  # Compatibility no-op. The script always emits JSON; this accepts the flag
+  # form used in older issue comments and automation notes.
+  shift
+fi
 
 REPO="${1:-r3dbars/transcripted}"
 ISSUE_NUMBER="${2:-428}"
