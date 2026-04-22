@@ -77,17 +77,22 @@ Also run when the package seam changes:
 
 Current direct core coverage includes:
 
+- `Tests/TranscriptedCoreTests/AudioInitializationTests.swift`
 - `Tests/TranscriptedCoreTests/CoreStoragePathsTests.swift`
 - `Tests/TranscriptedCoreTests/DatabaseFilePermissionsTests.swift`
 - `Tests/TranscriptedCoreTests/EmbeddingClustererTests.swift`
+- `Tests/TranscriptedCoreTests/FailedTranscriptionManagerTests.swift`
+- `Tests/TranscriptedCoreTests/FileLoggerTests.swift`
 - `Tests/TranscriptedCoreTests/MicRecordingFileMergerTests.swift`
-- `Tests/TranscriptedCoreTests/TranscriptMetadataBuilderTests.swift`
+- `Tests/TranscriptedCoreTests/RecordingAudioArchiverTests.swift`
 - `Tests/TranscriptedCoreTests/RetroactiveSpeakerUpdaterTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerMatchingServiceTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerNamingCoordinatorTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerProfileMergerTests.swift`
 - `Tests/TranscriptedCoreTests/StatsDatabaseTests.swift`
+- `Tests/TranscriptedCoreTests/TranscriptMetadataBuilderTests.swift`
 - `Tests/TranscriptedCoreTests/TranscriptionPipelineHelpersTests.swift`
+- `Tests/TranscriptedCoreTests/TranscriptionTaskManagerMetadataTests.swift`
 - `Tests/Integration/AppCoreIntegrationSmoke.swift`
 
-Core coverage is still selective, but it is no longer limited just to the package seam. Speaker reconciliation, transcript metadata, stats, storage-path behavior, and file-permission enforcement all have direct tests.
+Core coverage spans the package seam, audio initialization, speaker reconciliation, transcript metadata, stats, storage-path behavior, file-permission enforcement, failed-transcription persistence, file logging, recording archiving, and task-manager metadata.

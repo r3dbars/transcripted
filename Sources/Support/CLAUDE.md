@@ -43,11 +43,14 @@ bash run-tests.sh
 
 Relevant direct coverage includes:
 
+- `Tests/ClaudeDesktopIntegrationInstallerTests.swift`
 - `Tests/ClipboardRestoringTextPasterTests.swift`
 - `Tests/CustomDictionaryPreferencesTests.swift`
 - `Tests/DictationAutoSendPreferencesTests.swift`
+- `Tests/HotkeyPreferencesTests.swift`
 - `Tests/LaunchAtLoginPreferencesTests.swift`
 - `Tests/MenuBarVisibilityPreferencesTests.swift`
+- `Tests/PhysicalDictationTriggerPreferencesTests.swift`
 - `Tests/TranscriptedConstantsTests.swift`
 - `Tests/TranscriptedPermissionAccessTests.swift`
 - `Tests/TranscriptedStoragePathsTests.swift`
