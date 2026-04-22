@@ -27,8 +27,9 @@ struct TranscriptedSettingsView: View {
     private let actions: TranscriptedSettingsActions
     private let sidebarSections = SettingsSidebarSection.defaultSections
 
-    @State private var dictationShortcutMode = HotkeyPreferences.dictationShortcutMode()
-    @State private var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning()
+    @State private var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+        for: PhysicalDictationTriggerPreferences.handsFreeBinding()
+    )
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
@@ -357,27 +358,10 @@ struct TranscriptedSettingsView: View {
 
             SettingsSection(
                 title: "Keys",
-                detail: "Set one dictation key and one meeting shortcut."
+                detail: "Set push-to-talk, hands-free, and meeting shortcuts."
             ) {
                 HotkeyRecorderContainer()
-                    .frame(height: 76)
-
-                Picker("Dictation mode", selection: Binding(
-                    get: { dictationShortcutMode },
-                    set: { newValue in
-                        dictationShortcutMode = newValue
-                        HotkeyPreferences.setDictationShortcutMode(newValue)
-                    }
-                )) {
-                    ForEach(DictationShortcutMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Text(dictationShortcutMode.summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .frame(height: 108)
 
                 if let dictationTriggerSystemWarning {
                     HStack(alignment: .top, spacing: 8) {
@@ -1082,8 +1066,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private func refreshShortcutState() {
-        dictationShortcutMode = HotkeyPreferences.dictationShortcutMode()
-        dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning()
+        dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+            for: PhysicalDictationTriggerPreferences.handsFreeBinding()
+        )
     }
 
     private func refreshMenuBarVisibility() {

@@ -100,6 +100,10 @@ enum HotkeyPreferences {
         )
     }
 
+    static func hasSavedMeetingBinding(userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.object(forKey: meetingKeyCodeKey) != nil
+    }
+
     static func dictationShortcutMode(userDefaults: UserDefaults = .standard) -> DictationShortcutMode {
         guard
             let rawValue = userDefaults.string(forKey: dictationShortcutModeKey),

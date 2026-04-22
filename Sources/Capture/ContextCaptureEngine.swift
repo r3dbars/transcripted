@@ -107,19 +107,43 @@ private func hotkeyHandler(
     return noErr
 }
 
-private final class PhysicalDictationTriggerDetector {
-    var bindingProvider: (() -> PhysicalDictationTriggerBinding)?
-    var onPress: (() -> Void)?
-    var onRelease: (() -> Void)?
+private enum PhysicalShortcutAction {
+    case dictationPushToTalk
+    case dictationHandsFree
+    case meeting
+}
+
+private enum PhysicalShortcutPhase {
+    case press
+    case release
+}
+
+private struct PhysicalShortcutBinding {
+    let action: PhysicalShortcutAction
+    let binding: PhysicalDictationTriggerBinding
+}
+
+private final class PhysicalShortcutDetector {
+    var bindingProvider: (() -> [PhysicalShortcutBinding])?
+    var onShortcut: ((PhysicalShortcutAction, PhysicalShortcutPhase) -> Void)?
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private var triggerDown = false
-    private var consumedKeyCode: UInt32?
+    private var activePushToTalkKeyCode: UInt32?
+    private var consumedKeyCodes: Set<UInt32> = []
+    private var pendingModifierShortcut: PendingModifierShortcut?
+
+    private struct PendingModifierShortcut {
+        let keyCode: UInt32
+        let action: PhysicalShortcutAction
+        let workItem: DispatchWorkItem
+    }
+
+    private static let modifierChordDelay: TimeInterval = 0.14
 
     private static let callback: CGEventTapCallBack = { _, type, event, userInfo in
         guard let userInfo else { return Unmanaged.passUnretained(event) }
-        let detector = Unmanaged<PhysicalDictationTriggerDetector>
+        let detector = Unmanaged<PhysicalShortcutDetector>
             .fromOpaque(userInfo)
             .takeUnretainedValue()
         return detector.handle(type: type, event: event)
@@ -142,18 +166,16 @@ private final class PhysicalDictationTriggerDetector {
             callback: Self.callback,
             userInfo: userInfo
         ) else {
-            triggerDown = false
-            consumedKeyCode = nil
+            resetState()
             return TranscriptedPermissionAccess.isGranted(.accessibility)
-                ? "Dictation trigger failed to start"
-                : "Dictation trigger needs Accessibility permission"
+                ? "Shortcut trigger failed to start"
+                : "Shortcut trigger needs Accessibility permission"
         }
 
         guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
             CFMachPortInvalidate(tap)
-            triggerDown = false
-            consumedKeyCode = nil
-            return "Dictation trigger failed to start"
+            resetState()
+            return "Shortcut trigger failed to start"
         }
 
         eventTap = tap
@@ -173,8 +195,14 @@ private final class PhysicalDictationTriggerDetector {
         }
         runLoopSource = nil
         eventTap = nil
-        triggerDown = false
-        consumedKeyCode = nil
+        resetState()
+    }
+
+    private func resetState() {
+        pendingModifierShortcut?.workItem.cancel()
+        pendingModifierShortcut = nil
+        activePushToTalkKeyCode = nil
+        consumedKeyCodes.removeAll()
     }
 
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -185,7 +213,7 @@ private final class PhysicalDictationTriggerDetector {
             return Unmanaged.passUnretained(event)
         }
 
-        guard let binding = bindingProvider?() else {
+        guard let shortcutBindings = bindingProvider?(), !shortcutBindings.isEmpty else {
             return Unmanaged.passUnretained(event)
         }
 
@@ -194,54 +222,170 @@ private final class PhysicalDictationTriggerDetector {
 
         switch type {
         case .keyDown:
-            guard PhysicalDictationTriggerPreferences.matchesKeyDown(binding, keyCode: keyCode, modifiers: modifiers) else {
+            let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+            if isRepeat, consumedKeyCodes.contains(keyCode) {
+                return nil
+            }
+
+            guard !isRepeat,
+                  let shortcut = matchingKeyDownShortcut(shortcutBindings, keyCode: keyCode, modifiers: modifiers) else {
                 return Unmanaged.passUnretained(event)
             }
 
-            let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-            if !triggerDown && !isRepeat {
-                triggerDown = true
-                consumedKeyCode = keyCode
-                onPress?()
+            cancelPendingModifierShortcut()
+            consumedKeyCodes.insert(keyCode)
+
+            switch shortcut.action {
+            case .dictationPushToTalk:
+                guard activePushToTalkKeyCode == nil else { return nil }
+                activePushToTalkKeyCode = keyCode
+                onShortcut?(.dictationPushToTalk, .press)
+            case .dictationHandsFree:
+                onShortcut?(.dictationHandsFree, .press)
+            case .meeting:
+                onShortcut?(.meeting, .press)
             }
             return nil
 
         case .keyUp:
-            if consumedKeyCode == keyCode {
-                triggerDown = false
-                consumedKeyCode = nil
-                onRelease?()
+            if activePushToTalkKeyCode == keyCode {
+                activePushToTalkKeyCode = nil
+                consumedKeyCodes.remove(keyCode)
+                onShortcut?(.dictationPushToTalk, .release)
                 return nil
             }
+
+            if consumedKeyCodes.remove(keyCode) != nil {
+                return nil
+            }
+
             return Unmanaged.passUnretained(event)
 
         case .flagsChanged:
-            if binding.keyCode == UInt32(kVK_CapsLock),
-               PhysicalDictationTriggerPreferences.matchesFlagsChangedPress(binding, keyCode: keyCode, modifiers: modifiers) {
-                onPress?()
+            if pendingModifierShortcut?.keyCode == keyCode,
+               let pending = pendingModifierShortcut,
+               matchesRelease(for: pending.action, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers) {
+                cancelPendingModifierShortcut()
                 return nil
             }
 
-            if PhysicalDictationTriggerPreferences.matchesFlagsChangedPress(binding, keyCode: keyCode, modifiers: modifiers) {
-                if !triggerDown {
-                    triggerDown = true
-                    onPress?()
+            if activePushToTalkKeyCode == keyCode,
+               matchesRelease(for: .dictationPushToTalk, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers) {
+                activePushToTalkKeyCode = nil
+                onShortcut?(.dictationPushToTalk, .release)
+                return nil
+            }
+
+            guard let shortcut = matchingFlagsChangedPressShortcut(shortcutBindings, keyCode: keyCode, modifiers: modifiers) else {
+                return Unmanaged.passUnretained(event)
+            }
+
+            switch shortcut.action {
+            case .dictationPushToTalk:
+                guard activePushToTalkKeyCode == nil else { return nil }
+                if hasChordUsingModifier(keyCode, in: shortcutBindings, excluding: shortcut.action) {
+                    schedulePendingModifierShortcut(keyCode: keyCode, action: .dictationPushToTalk)
+                } else {
+                    activePushToTalkKeyCode = keyCode
+                    onShortcut?(.dictationPushToTalk, .press)
                 }
-                return nil
+            case .dictationHandsFree:
+                cancelPendingModifierShortcut()
+                onShortcut?(.dictationHandsFree, .press)
+            case .meeting:
+                cancelPendingModifierShortcut()
+                onShortcut?(.meeting, .press)
             }
-
-            if triggerDown,
-               PhysicalDictationTriggerPreferences.matchesFlagsChangedRelease(binding, keyCode: keyCode, modifiers: modifiers) {
-                triggerDown = false
-                onRelease?()
-                return nil
-            }
-
-            return Unmanaged.passUnretained(event)
+            return nil
 
         default:
             return Unmanaged.passUnretained(event)
         }
+    }
+
+    private func matchingKeyDownShortcut(
+        _ shortcuts: [PhysicalShortcutBinding],
+        keyCode: UInt32,
+        modifiers: UInt32
+    ) -> PhysicalShortcutBinding? {
+        shortcuts.first {
+            PhysicalDictationTriggerPreferences.matchesKeyDown($0.binding, keyCode: keyCode, modifiers: modifiers)
+        }
+    }
+
+    private func matchingFlagsChangedPressShortcut(
+        _ shortcuts: [PhysicalShortcutBinding],
+        keyCode: UInt32,
+        modifiers: UInt32
+    ) -> PhysicalShortcutBinding? {
+        if let exact = shortcuts.first(where: {
+            $0.binding.keyCode == keyCode
+                && PhysicalDictationTriggerPreferences.matchesFlagsChangedPress($0.binding, keyCode: keyCode, modifiers: modifiers)
+        }) {
+            return exact
+        }
+
+        return shortcuts.first {
+            PhysicalDictationTriggerPreferences.matchesFlagsChangedPress($0.binding, keyCode: keyCode, modifiers: modifiers)
+        }
+    }
+
+    private func matchesRelease(
+        for action: PhysicalShortcutAction,
+        in shortcuts: [PhysicalShortcutBinding],
+        keyCode: UInt32,
+        modifiers: UInt32
+    ) -> Bool {
+        guard let shortcut = shortcuts.first(where: { $0.action == action }) else { return false }
+        return PhysicalDictationTriggerPreferences.matchesFlagsChangedRelease(
+            shortcut.binding,
+            keyCode: keyCode,
+            modifiers: modifiers
+        )
+    }
+
+    private func hasChordUsingModifier(
+        _ keyCode: UInt32,
+        in shortcuts: [PhysicalShortcutBinding],
+        excluding action: PhysicalShortcutAction
+    ) -> Bool {
+        guard let modifier = PhysicalDictationTriggerPreferences.primaryModifierMask(for: keyCode) else {
+            return false
+        }
+
+        return shortcuts.contains {
+            $0.action != action
+                && !PhysicalDictationTriggerPreferences.isModifierKey($0.binding.keyCode)
+                && ($0.binding.modifiers & modifier) != 0
+        }
+    }
+
+    private func schedulePendingModifierShortcut(keyCode: UInt32, action: PhysicalShortcutAction) {
+        cancelPendingModifierShortcut()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self,
+                  self.pendingModifierShortcut?.keyCode == keyCode,
+                  self.pendingModifierShortcut?.action == action else {
+                return
+            }
+
+            self.pendingModifierShortcut = nil
+            self.activePushToTalkKeyCode = keyCode
+            self.onShortcut?(action, .press)
+        }
+
+        pendingModifierShortcut = PendingModifierShortcut(
+            keyCode: keyCode,
+            action: action,
+            workItem: workItem
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.modifierChordDelay, execute: workItem)
+    }
+
+    private func cancelPendingModifierShortcut() {
+        pendingModifierShortcut?.workItem.cancel()
+        pendingModifierShortcut = nil
     }
 }
 
@@ -252,13 +396,15 @@ class ContextCaptureEngine: ObservableObject {
     private var meetingHotkeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
     private var hotkeyChangeObserver: NSObjectProtocol?
-    private let physicalDictationTriggerDetector = PhysicalDictationTriggerDetector()
+    private let physicalShortcutDetector = PhysicalShortcutDetector()
     private var carbonHotkeyError: String?
     private var physicalTriggerError: String?
 
     /// Human-readable display strings for current shortcuts (drives MenuBarPanel pills + overlay hints)
     @Published var dictationShortcutDisplay: String = ContextCaptureEngine.currentDictationShortcutDisplay()
-    @Published var meetingShortcutDisplay: String = HotkeyPreferences.displayString(for: HotkeyPreferences.meetingBinding())
+    @Published var meetingShortcutDisplay: String = PhysicalDictationTriggerPreferences.displayString(
+        for: PhysicalDictationTriggerPreferences.meetingBinding()
+    )
 
     /// Non-nil when hotkey registration failed — shown as a dismissible banner in MenuBarPanel
     @Published var hotkeyError: String?
@@ -280,7 +426,7 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     func registerHotkey() {
-        guard eventHandlerRef == nil else {
+        guard hotkeyChangeObserver == nil else {
             EventReporter.shared.capture(level: .warning, engine: "capture", event: "hotkey_already_registered",
                 message: "registerHotkey() called but hotkey already registered — ignoring")
             return
@@ -291,21 +437,8 @@ class ContextCaptureEngine: ObservableObject {
         _sharedSessionController = sessionController
         _sharedMeetingToggle = onMeetingToggle
 
-        // Register for kEventHotKeyPressed (meeting mode)
-        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(
-            GetApplicationEventTarget(),
-            hotkeyHandler,
-            1,
-            &eventType,
-            nil,
-            &eventHandlerRef
-        )
-
-        // Register meeting hotkey from saved preferences (or defaults)
-        registerHotkeysFromPreferences()
-
-        configurePhysicalDictationTriggerDetector()
+        refreshShortcutDisplays()
+        configurePhysicalShortcutDetector()
 
         // Listen for preference changes (from HotkeyRecorderView)
         hotkeyChangeObserver = NotificationCenter.default.addObserver(
@@ -322,56 +455,28 @@ class ContextCaptureEngine: ObservableObject {
     /// Unregisters the current meeting hotkey and re-registers with latest preferences.
     /// Preserves the event handler — only the key+modifier binding changes.
     private func reRegisterHotkeys() {
-        if let ref = meetingHotkeyRef {
-            UnregisterEventHotKey(ref)
-            meetingHotkeyRef = nil
-        }
-        registerHotkeysFromPreferences()
-
-        // Re-evaluate physical dictation trigger detector.
-        physicalDictationTriggerDetector.remove()
-        configurePhysicalDictationTriggerDetector()
+        refreshShortcutDisplays()
+        physicalShortcutDetector.remove()
+        configurePhysicalShortcutDetector()
     }
 
-    private func registerHotkeysFromPreferences() {
-        let meetingBinding = HotkeyPreferences.meetingBinding()
-        var errors: [String] = []
-
-        // Meeting mode — hotkey ID 3 (Carbon hotkey: modifier + key)
-        let meetingHotkeyID = EventHotKeyID(signature: OSType(0x44524654), id: 3)  // 'DRFT'
-        let meetingStatus = RegisterEventHotKey(
-            meetingBinding.keyCode,
-            meetingBinding.modifiers,
-            meetingHotkeyID,
-            GetApplicationEventTarget(),
-            0,
-            &meetingHotkeyRef
-        )
-        if meetingStatus != noErr {
-            meetingHotkeyRef = nil
-            errors.append("Meeting shortcut")
-            EventReporter.shared.capture(level: .error, engine: "capture", event: "hotkey_register_failed",
-                message: "Meeting hotkey registration failed", context: ["os_status": "\(meetingStatus)"])
-        }
-
-        carbonHotkeyError = errors.isEmpty ? nil : "\(errors.joined(separator: " and ")) failed to register"
-        updateHotkeyError()
-
-        // Update display strings.
+    private func refreshShortcutDisplays() {
+        carbonHotkeyError = nil
         dictationShortcutDisplay = Self.currentDictationShortcutDisplay()
-        meetingShortcutDisplay = HotkeyPreferences.displayString(for: meetingBinding)
+        meetingShortcutDisplay = PhysicalDictationTriggerPreferences.displayString(
+            for: PhysicalDictationTriggerPreferences.meetingBinding()
+        )
+        updateHotkeyError()
     }
 
     private static func currentDictationShortcutDisplay() -> String {
-        let trigger = PhysicalDictationTriggerPreferences.displayString(
-            for: PhysicalDictationTriggerPreferences.binding()
+        let pushToTalk = PhysicalDictationTriggerPreferences.displayString(
+            for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
         )
-        switch HotkeyPreferences.dictationShortcutMode() {
-        case .pushToTalk:
-            return "Hold \(trigger)"
-        case .handsFree:
-            return trigger
-        }
+        let handsFree = PhysicalDictationTriggerPreferences.displayString(
+            for: PhysicalDictationTriggerPreferences.handsFreeBinding()
+        )
+        return "\(pushToTalk) / \(handsFree)"
     }
 
     func refreshShortcutStatus() {
@@ -380,7 +485,9 @@ class ContextCaptureEngine: ObservableObject {
             dictationShortcutDisplay = nextDictationDisplay
         }
 
-        let nextMeetingDisplay = HotkeyPreferences.displayString(for: HotkeyPreferences.meetingBinding())
+        let nextMeetingDisplay = PhysicalDictationTriggerPreferences.displayString(
+            for: PhysicalDictationTriggerPreferences.meetingBinding()
+        )
         if meetingShortcutDisplay != nextMeetingDisplay {
             meetingShortcutDisplay = nextMeetingDisplay
         }
@@ -388,32 +495,40 @@ class ContextCaptureEngine: ObservableObject {
         updateHotkeyError()
     }
 
-    private func configurePhysicalDictationTriggerDetector() {
-        physicalDictationTriggerDetector.bindingProvider = {
-            PhysicalDictationTriggerPreferences.binding()
+    private func configurePhysicalShortcutDetector() {
+        physicalShortcutDetector.bindingProvider = {
+            [
+                PhysicalShortcutBinding(
+                    action: .dictationPushToTalk,
+                    binding: PhysicalDictationTriggerPreferences.pushToTalkBinding()
+                ),
+                PhysicalShortcutBinding(
+                    action: .dictationHandsFree,
+                    binding: PhysicalDictationTriggerPreferences.handsFreeBinding()
+                ),
+                PhysicalShortcutBinding(
+                    action: .meeting,
+                    binding: PhysicalDictationTriggerPreferences.meetingBinding()
+                )
+            ]
         }
-        physicalDictationTriggerDetector.onPress = { [weak self] in
+        physicalShortcutDetector.onShortcut = { [weak self] action, phase in
             Task { @MainActor [weak self] in
-                self?.handlePhysicalDictationTriggerPress()
-            }
-        }
-        physicalDictationTriggerDetector.onRelease = { [weak self] in
-            Task { @MainActor [weak self] in
-                self?.handlePhysicalDictationTriggerRelease()
+                self?.handlePhysicalShortcut(action, phase: phase)
             }
         }
 
-        physicalTriggerError = physicalDictationTriggerDetector.install()
+        physicalTriggerError = physicalShortcutDetector.install()
         if let physicalTriggerError {
             EventReporter.shared.capture(
                 level: .warning,
                 engine: "capture",
-                event: "physical_dictation_trigger_failed",
+                event: "physical_shortcut_trigger_failed",
                 message: physicalTriggerError,
                 context: [
-                    "trigger": PhysicalDictationTriggerPreferences.displayString(
-                        for: PhysicalDictationTriggerPreferences.binding()
-                    )
+                    "push_to_talk": PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.pushToTalkBinding()),
+                    "hands_free": PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.handsFreeBinding()),
+                    "meeting": PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.meetingBinding())
                 ]
             )
         }
@@ -424,7 +539,9 @@ class ContextCaptureEngine: ObservableObject {
         let errors = [
             carbonHotkeyError,
             physicalTriggerError,
-            PhysicalDictationTriggerPreferences.functionKeyConflictWarning()
+            PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+                for: PhysicalDictationTriggerPreferences.handsFreeBinding()
+            )
         ].compactMap { $0 }
         let nextError = errors.isEmpty ? nil : errors.joined(separator: " and ")
         if hotkeyError != nextError {
@@ -432,16 +549,31 @@ class ContextCaptureEngine: ObservableObject {
         }
     }
 
-    private func handlePhysicalDictationTriggerPress() {
+    private func handlePhysicalShortcut(_ action: PhysicalShortcutAction, phase: PhysicalShortcutPhase) {
+        switch (action, phase) {
+        case (.dictationPushToTalk, .press):
+            handlePhysicalDictationPushToTalkPress()
+        case (.dictationPushToTalk, .release):
+            handlePhysicalDictationPushToTalkRelease()
+        case (.dictationHandsFree, .press):
+            handlePhysicalDictationHandsFreePress()
+        case (.meeting, .press):
+            handlePhysicalMeetingPress()
+        case (.dictationHandsFree, .release), (.meeting, .release):
+            break
+        }
+    }
+
+    private func handlePhysicalDictationHandsFreePress() {
         guard shouldAcceptHotkeyAction() else {
             DiagnosticsTrail.record(
                 logger: sessionController?.appState?.logger,
                 level: .info,
                 engine: "capture",
                 event: "hotkey_repeat_ignored",
-                message: "Ignored rapid repeat dictation trigger",
+                message: "Ignored rapid repeat hands-free dictation trigger",
                 context: [
-                    "hotkey_id": "physical_dictation_trigger",
+                    "hotkey_id": "dictation_hands_free",
                     "session_state": sessionController?.isDictating == true ? "dictating" : (sessionController?.isInSession == true ? "drafting" : "idle"),
                     "overlay_state": overlayStateName(sessionController?.overlayController?.state)
                 ]
@@ -450,35 +582,50 @@ class ContextCaptureEngine: ObservableObject {
         }
 
         let frontApp = NSWorkspace.shared.frontmostApplication
-        switch HotkeyPreferences.dictationShortcutMode() {
-        case .handsFree:
-            routeDictationToggle(sourceApp: frontApp, trigger: .physicalKey)
-        case .pushToTalk:
-            guard let session = sessionController else { return }
-            DiagnosticsTrail.record(
-                logger: session.appState?.logger,
-                engine: "capture",
-                event: "dictation_push_to_talk_pressed",
-                message: "Dictation push-to-talk trigger pressed",
-                context: [
-                    "trigger": "physical_key",
-                    "source_app_name": frontApp?.localizedName ?? "",
-                    "source_app_bundle_id": frontApp?.bundleIdentifier ?? "",
-                    "session_state": session.isDictating ? "dictating" : (session.isInSession ? "drafting" : "idle"),
-                    "overlay_state": overlayStateName(session.overlayController?.state)
-                ]
-            )
-
-            guard !session.isDictating else { return }
-            if session.isInSession {
-                session.cancelSession()
-            }
-            session.startDictation(sourceApp: frontApp, trigger: .physicalKey)
-        }
+        routeDictationToggle(sourceApp: frontApp, trigger: .physicalKey)
     }
 
-    private func handlePhysicalDictationTriggerRelease() {
-        guard HotkeyPreferences.dictationShortcutMode() == .pushToTalk else { return }
+    private func handlePhysicalDictationPushToTalkPress() {
+        guard shouldAcceptHotkeyAction() else {
+            DiagnosticsTrail.record(
+                logger: sessionController?.appState?.logger,
+                level: .info,
+                engine: "capture",
+                event: "hotkey_repeat_ignored",
+                message: "Ignored rapid repeat push-to-talk dictation trigger",
+                context: [
+                    "hotkey_id": "dictation_push_to_talk",
+                    "session_state": sessionController?.isDictating == true ? "dictating" : (sessionController?.isInSession == true ? "drafting" : "idle"),
+                    "overlay_state": overlayStateName(sessionController?.overlayController?.state)
+                ]
+            )
+            return
+        }
+
+        let frontApp = NSWorkspace.shared.frontmostApplication
+        guard let session = sessionController else { return }
+        DiagnosticsTrail.record(
+            logger: session.appState?.logger,
+            engine: "capture",
+            event: "dictation_push_to_talk_pressed",
+            message: "Dictation push-to-talk trigger pressed",
+            context: [
+                "trigger": "physical_key",
+                "source_app_name": frontApp?.localizedName ?? "",
+                "source_app_bundle_id": frontApp?.bundleIdentifier ?? "",
+                "session_state": session.isDictating ? "dictating" : (session.isInSession ? "drafting" : "idle"),
+                "overlay_state": overlayStateName(session.overlayController?.state)
+            ]
+        )
+
+        guard !session.isDictating else { return }
+        if session.isInSession {
+            session.cancelSession()
+        }
+        session.startDictation(sourceApp: frontApp, trigger: .physicalKey)
+    }
+
+    private func handlePhysicalDictationPushToTalkRelease() {
         guard let session = sessionController else { return }
 
         DiagnosticsTrail.record(
@@ -497,13 +644,28 @@ class ContextCaptureEngine: ObservableObject {
         session.stopDictationAndPaste(trigger: .physicalKey)
     }
 
+    private func handlePhysicalMeetingPress() {
+        guard shouldAcceptHotkeyAction() else {
+            EventReporter.shared.capture(
+                level: .info,
+                engine: "capture",
+                event: "hotkey_repeat_ignored",
+                message: "Ignored rapid repeat meeting trigger",
+                context: ["hotkey_id": "meeting_physical_trigger"]
+            )
+            return
+        }
+
+        onMeetingToggle?()
+    }
+
     deinit {
         if let ref = meetingHotkeyRef { UnregisterEventHotKey(ref) }
         if let ref = eventHandlerRef { RemoveEventHandler(ref) }
         if let observer = hotkeyChangeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
-        physicalDictationTriggerDetector.remove()
+        physicalShortcutDetector.remove()
     }
 
     func unregisterHotkey() {
@@ -519,7 +681,7 @@ class ContextCaptureEngine: ObservableObject {
             NotificationCenter.default.removeObserver(observer)
             hotkeyChangeObserver = nil
         }
-        physicalDictationTriggerDetector.remove()
+        physicalShortcutDetector.remove()
         _sharedSessionController = nil
         _sharedMeetingToggle = nil
     }
