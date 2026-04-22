@@ -1,46 +1,37 @@
 # Connect Your Agent
 
-Transcripted is easiest to use when the connection story stays focused on one main action:
+The setup should feel like this:
 
-1. Copy one smart prompt.
-2. Let your agent use MCP if it is already available.
-3. Fall back to folders only when you need manual setup.
+1. Pick the app you use.
+2. Click one button.
+3. Restart or paste the copied prompt.
 
-## Main Path: Copy One Prompt
+No manual JSON for normal users. No source build for DMG installs.
 
-This is the default path for most people.
+## Best Path: Claude Desktop
 
-- Open `Connect your agent` in the app.
-- Copy the agent prompt.
-- Paste it into your agent.
-- Ask normal questions like:
-  - what did I miss today
-  - summarize my latest meeting
-  - find every time we discussed pricing
-  - pull action items from my latest meeting and dictations
+Claude Desktop is the best full-library experience.
 
-The copied prompt tells the agent to:
+1. Open Transcripted.
+2. Open Settings.
+3. Go to `Agent`.
+4. Click `Install for Claude Desktop`.
+5. Restart Claude Desktop.
 
-- use Transcripted MCP tools first if they are already connected
-- otherwise read the local Transcripted folders directly
-- help you set up the better option if neither path is ready yet
+Transcripted copies the bundled `transcripted-mcp` helper into:
 
-The intended user path is:
+```text
+~/Library/Application Support/Transcripted/mcp/transcripted-mcp
+```
 
-- click `Connect your agent`
-- copy the prompt
-- paste it into your agent
-- let the agent use MCP first or fall back to the saved folders
+Then it safely merges this entry into Claude Desktop's config:
 
-Current local folders:
+```text
+~/Library/Application Support/Claude/claude_desktop_config.json
+```
 
-- meetings: `~/Library/Application Support/Transcripted/captures/meetings`
-- dictations: `~/Library/Application Support/Transcripted/captures/dictations`
-
-## Optional: MCP
-
-Use MCP when your client supports it and you want direct read-only tools instead
-of asking the model to inspect files manually.
+Existing MCP servers are preserved. If the config is invalid JSON,
+Transcripted backs it up before writing a clean config.
 
 Current `transcripted-mcp` capabilities:
 
@@ -54,25 +45,73 @@ Current `transcripted-mcp` capabilities:
 - `who_is`
 - `recap`
 
-### What it gives the user
+## Good Path: Local Coding Agents
 
-- one place to search meetings and dictations together
-- fast recaps over a date range
-- direct access to one meeting or one dictation entry
-- people lookups without hand-rolling folder searches
-- read-only access to local Transcripted data
+Use this for local agents that can read files on the user's Mac.
 
-### Repo Setup
+Examples:
+
+- Claude Code
+- Codex
+- Cursor
+- Windsurf
+- Zed
+- OpenCode
+- OpenClaw
+- Cline
+- Continue
+- VS Code agents
+
+The user copies the local-agent prompt from Transcripted, pastes it into the
+agent, and asks normal questions like:
+
+- what did I miss today
+- summarize my latest meeting
+- find every time we discussed pricing
+- pull action items from my latest meeting and dictations
+
+The copied prompt tells the agent to use Transcripted direct tools when they are
+connected, otherwise read the saved Markdown folders:
+
+```text
+~/Library/Application Support/Transcripted/captures/meetings
+~/Library/Application Support/Transcripted/captures/dictations
+```
+
+## Fallback Only: Web And Cowork
+
+Do not present web chat as a main setup path.
+
+This includes:
+
+- Claude web
+- ChatGPT web
+- Cowork or shared browser sessions
+- mobile chats
+
+These are usually a bad full-library experience because the chat cannot
+reliably see the user's Mac or keep folder access. Use them only for:
+
+- a pasted meeting bundle
+- folders the user explicitly granted in that chat
+- quick support/debugging
+
+The copy should say this plainly: web chats are fallback only.
+
+## Source Build Fallback
+
+This is for contributors working from a checkout. Normal DMG installs should use
+the Claude Desktop button in Transcripted Settings.
 
 ```bash
 cd Tools/TranscriptedMCP
-swift build
+swift build -c release
 ```
 
 Binary path after build:
 
 ```text
-Tools/TranscriptedMCP/.build/debug/transcripted-mcp
+Tools/TranscriptedMCP/.build/release/transcripted-mcp
 ```
 
 Example Claude Desktop config:
@@ -81,7 +120,7 @@ Example Claude Desktop config:
 {
   "mcpServers": {
     "transcripted": {
-      "command": "/absolute/path/to/Tools/TranscriptedMCP/.build/debug/transcripted-mcp"
+      "command": "/absolute/path/to/Tools/TranscriptedMCP/.build/release/transcripted-mcp"
     }
   }
 }

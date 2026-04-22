@@ -95,14 +95,26 @@ This lets the server answer both meeting-specific queries (`who_is`, `read_meeti
 
 ```bash
 cd Tools/TranscriptedMCP
-swift build
+swift build -c release
 swift test
 ```
 
 Binary path after build:
 
 ```text
-.build/debug/transcripted-mcp
+.build/release/transcripted-mcp
+```
+
+App builds also bundle a signed copy at:
+
+```text
+Transcripted.app/Contents/Helpers/transcripted-mcp
+```
+
+The in-app Claude Desktop installer copies that helper into:
+
+```text
+~/Library/Application Support/Transcripted/mcp/transcripted-mcp
 ```
 
 ## Example MCP Config
@@ -131,4 +143,4 @@ Binary path after build:
 - the server auto-creates missing data and index directories
 - the index rebuilds from disk on startup
 - `read_meeting` and `read_dictation` read markdown directly from disk, not from the SQLite index
-- the server binary is separate from the app, updating the app does not update the MCP binary automatically
+- source builds can run the server standalone, but shipped app builds bundle the helper for the one-click Claude Desktop installer

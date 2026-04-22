@@ -37,13 +37,33 @@ enum AgentConnectionGuide {
     }
 
     static var localMCPBinary: URL? {
+        let fileManager = FileManager.default
+
+        if let bundledBinary = ClaudeDesktopIntegrationInstaller.bundledMCPBinaryURL(fileManager: fileManager) {
+            return bundledBinary
+        }
+
+        let installedBinary = ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL
+        if fileManager.isExecutableFile(atPath: installedBinary.path) {
+            return installedBinary
+        }
+
         guard let buildDirectory = localMCPBuildDirectory else { return nil }
-        let binary = buildDirectory
+        let releaseBinary = buildDirectory
+            .appendingPathComponent(".build", isDirectory: true)
+            .appendingPathComponent("release", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+
+        if fileManager.isExecutableFile(atPath: releaseBinary.path) {
+            return releaseBinary
+        }
+
+        let debugBinary = buildDirectory
             .appendingPathComponent(".build", isDirectory: true)
             .appendingPathComponent("debug", isDirectory: true)
             .appendingPathComponent("transcripted-mcp", isDirectory: false)
 
-        return FileManager.default.fileExists(atPath: binary.path) ? binary : nil
+        return fileManager.isExecutableFile(atPath: debugBinary.path) ? debugBinary : nil
     }
 
     static var meetingsFolder: URL {
@@ -103,77 +123,24 @@ enum AgentConnectionGuide {
 
     static func starterPrompt(filename: String?) -> String {
         var prompt = """
-        I use Transcripted on my Mac.
+        I use Transcripted on this Mac.
 
-        Your job is to connect to my Transcripted data using the best available method, then help me search and summarize my meetings and dictations.
+        Read my saved Transcripted Markdown files directly:
 
-        Connection behavior:
-        - Do not ask me to choose a connection mode.
-        - Silently pick the best available route, then continue.
-        - Only stop when you cannot read any Transcripted data. If that happens, give me one smallest next step.
-        - If setup is needed, behave like a friendly setup concierge. Ask one short, natural question at a time.
-        - Prefer plain language like "I found a working path" and "This chat cannot reach your Mac directly" over protocol or debug language.
+        Meetings:
+        - \(meetingsFolder.path)
 
-        Automatic route priority:
-        1. If Transcripted MCP tools are already available in this environment, use them first.
-        2. If Transcripted MCP tools are not available, but this environment can build or configure a local MCP server, try to set up Transcripted MCP using the information below.
-        3. If MCP cannot be used here, fall back to direct file access using the local folders below.
-        4. If neither MCP nor folder access is possible, stop and tell me exactly what is missing, what you tried, and the smallest next step I need to take.
+        Dictations:
+        - \(dictationsFolder.path)
 
-        Automatic environment routing:
-        - Local agents running on this Mac, such as Codex, Claude Code in the terminal, Claude Code in an app, OpenCode, or OpenClaw, can usually read the local folders and bundled skill files. Use MCP when configured; otherwise use folder fallback.
-        - Desktop clients with local stdio MCP support, such as Claude Desktop, can use Transcripted MCP after the MCP config is added and the client is restarted.
-        - Remote or web chats, such as Claude chat in a browser, mobile chat, or any sandbox that cannot read `/Users/...` paths, cannot use local folders, local skill files, or local stdio MCP. Do not ask me to choose a mode. Say that this chat cannot reach my Mac directly, then ask me for the single smallest useful action: upload or paste captures, switch to a local agent, or use a remote connector if one is available.
-        - Cowork or shared-agent environments may be local or remote. First determine whether the execution environment can read local Mac paths, then follow the matching rule above.
+        Use these files as the source of truth.
 
-        Concierge setup style:
-        - Start with "I'll check what I can use now."
-        - If a route works, say "I found a working path" and keep going.
-        - If direct tools are missing but folders work, say "We can use this now. Direct tools can be set up later."
-        - If setup is truly needed, ask one question such as "Which app are you using: Claude Desktop, Claude Code, Codex, or something else?"
-        - After the answer, give the exact next step for that app. Do not list every possible client.
-        - Avoid acronyms unless needed. If you mention MCP, call it "Transcripted direct tools" first.
-
-        \(mcpPromptBlock)
-
-        Folder fallback:
-        - Meetings: \(meetingsFolder.path)
-        - Dictations: \(dictationsFolder.path)
-
-        When using folders:
-        - Read meeting and dictation markdown files directly.
-        - Prefer the newest or most relevant meeting `.md` file when you need one meeting first.
-        - Use exact filenames, dates, and speaker names when relevant.
-        - Do not invent access or claim data you cannot read.
-
-        Working rules:
-        - Prefer MCP over raw file inspection when both are available.
-        - Use meetings and dictations together when the task spans both.
-        - Treat the raw transcript or dictation text as the source of truth.
-        - Keep summaries and answers grounded in source filenames, dates, speakers, and timestamps when available.
-        - Interpret relative dates in my local time zone. When I ask about today, yesterday, or last week, state the exact calendar dates you searched.
-        - Surface uncertainty clearly.
-        - If setup is needed, minimize back-and-forth and propose the next concrete action.
-
-        Bundled starter skill files:
-        \(starterSkillPromptBlock)
-
-        Skill loading rules:
-        - Before offering task options, check whether the manifest and bundled SKILL.md files above are readable.
-        - If the files are readable, say "Bundled skills active" and list Summarize and Search Memory with their versions.
-        - When I ask for Summarize or Search Memory behavior, open the matching SKILL.md before answering and treat it as the canonical behavior.
-        - Use the skill versions above when giving feedback or suggesting improvements.
-        - If you cannot read the skill files, say that clearly and use this fallback:
-          - Summarize: create a cited brief from meetings, dictations, or a date range.
-          - Search Memory: find what was said, when it happened, and where it came from.
-        - If MCP setup requires restarting the agent, say so, then continue with folder fallback for the current session when folders are readable.
-
-        First step:
-        1. Silently determine which environment type you are in: local Mac agent, desktop MCP client, remote/web chat, or unknown cowork/shared context.
-        2. Silently determine which connection mode is available: MCP, MCP setup, folders, uploaded/pasted files, or unavailable.
-        3. Confirm whether the bundled SKILL.md files are readable.
-        4. Briefly tell me the chosen route and active skill versions in natural language. Do not make me choose.
-        5. Then continue with my task.
+        Rules:
+        - Search meetings and dictations together when useful.
+        - Cite filenames, dates, speakers, and timestamps when useful.
+        - For relative dates like today or yesterday, state the exact dates searched.
+        - If you cannot read a folder, tell me which folder failed.
+        - Do not suggest Claude Desktop or MCP unless I ask.
         """
 
         if let filename {
@@ -181,6 +148,22 @@ enum AgentConnectionGuide {
         }
 
         return prompt
+    }
+
+    static var folderAccessPrompt: String {
+        """
+        I use Transcripted on my Mac.
+
+        This is fallback setup for a web chat or Cowork session.
+
+        I may have granted you access to my Transcripted folders in this chat. Use those granted folders first.
+
+        Default folders:
+        - Meetings: \(meetingsFolder.path)
+        - Dictations: \(dictationsFolder.path)
+
+        Read the Markdown files directly. If you cannot access the folders, tell me exactly which folder is missing and ask me to grant it.
+        """
     }
 
     static var starterSkillPromptBlock: String {
@@ -247,29 +230,25 @@ enum AgentConnectionGuide {
 
     static var mcpPromptBlock: String {
         var lines = [
-            "Transcripted MCP setup:",
+            "Transcripted direct tools setup:",
             "- Server name: transcripted",
             "- Transport: local stdio",
+            "- Claude Desktop app flow: open Transcripted Settings > Agent, click Install for Claude Desktop, then restart Claude Desktop.",
+            "- Installed command path after setup: \(ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path)",
+            "- Claude Desktop config path: \(ClaudeDesktopIntegrationInstaller.claudeDesktopConfigURL.path)",
         ]
 
         if let buildDirectory = localMCPBuildDirectory {
+            lines.append("")
+            lines.append("Developer source fallback:")
             lines.append("- Build directory: \(buildDirectory.path)")
-            lines.append("- Build command: cd \(buildDirectory.path) && swift build")
+            lines.append("- Build command: cd \(buildDirectory.path) && swift build -c release")
         }
 
         if let binary = localMCPBinary {
-            lines.append("- Expected binary: \(binary.path)")
-            lines.append("")
-            lines.append("Example MCP config:")
-            lines.append("{")
-            lines.append("  \"mcpServers\": {")
-            lines.append("    \"transcripted\": {")
-            lines.append("      \"command\": \"\(binary.path)\"")
-            lines.append("    }")
-            lines.append("  }")
-            lines.append("}")
+            lines.append("- Current app helper path: \(binary.path)")
         } else {
-            lines.append("- If a local transcripted-mcp binary is installed, add it to your MCP config under mcpServers.transcripted.command.")
+            lines.append("- If the helper is missing, ask me to install or update Transcripted, then use the in-app installer.")
         }
 
         lines.append("")
@@ -288,7 +267,7 @@ enum AgentConnectionGuide {
     }
 
     static var mcpConfigExample: String {
-        let command = localMCPBinary?.path ?? "/path/to/transcripted-mcp"
+        let command = ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path
         return """
         {
           "mcpServers": {
@@ -301,25 +280,16 @@ enum AgentConnectionGuide {
     }
 
     static var mcpSetupText: String {
-        var lines = [
-            "MCP is optional. If your agent supports it, Transcripted can expose direct read-only tools for recent context, search, meetings, dictations, and recaps.",
+        [
+            "Claude Desktop setup:",
+            "1. Open Transcripted Settings.",
+            "2. Go to Agent.",
+            "3. Click Install for Claude Desktop.",
+            "4. Restart Claude Desktop.",
             "",
-            "Install the read-only `transcripted-mcp` server, add it to your MCP config, then restart your client. The server reads the same local Transcripted data automatically.",
-        ]
-
-        if let buildDirectory = localMCPBuildDirectory {
-            lines.append("")
-            lines.append("Local build directory:")
-            lines.append("`\(buildDirectory.path)`")
-        }
-
-        if let binary = localMCPBinary {
-            lines.append("")
-            lines.append("Local binary:")
-            lines.append("`\(binary.path)`")
-        }
-
-        return lines.joined(separator: "\n")
+            "Installed command path after setup:",
+            "`\(ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path)`",
+        ].joined(separator: "\n")
     }
 
     static let folderPathsText = """

@@ -2,6 +2,7 @@
 # Format: <TestFile.swift>:<top-level entry function>
 
 AgentConnectionGuideTests.swift:testAgentConnectionGuide
+ClaudeDesktopIntegrationInstallerTests.swift:testClaudeDesktopIntegrationInstaller
 AnalyticsEventPolicyTests.swift:testAnalyticsEventPolicy
 AnalyticsPayloadSanitizerTests.swift:testAnalyticsPayloadSanitizer
 ClipboardRestoringTextPasterTests.swift:testClipboardRestoringTextPaster
