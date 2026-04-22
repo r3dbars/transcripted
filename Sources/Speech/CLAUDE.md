@@ -48,8 +48,10 @@ Manual checks:
 
 Relevant direct coverage:
 
+- `Tests/DictationInputDeviceSelectionPolicyTests.swift`
 - `Tests/ParakeetModelInitDiagnosticsTests.swift`
 - `Tests/ParakeetPrewarmPolicyTests.swift`
 - `Tests/ParakeetRecoveryStateTests.swift`
 - `Tests/ParakeetShortAudioGateTests.swift`
+- `Tests/ParakeetStartRecordingFailurePolicyTests.swift`
 - `Tests/RecordedAudioTimelineTests.swift`
